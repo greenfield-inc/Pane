@@ -255,6 +255,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockActiveProjectId = mockOptions.activeProjectId === undefined
       ? Number(mockProjects.find((project) => project.active === true)?.id ?? null) || null
       : mockOptions.activeProjectId;
+    let lastProjectUpdate: { projectId: string; updates: JsonObject } | null = null;
     let cloudDisconnectError: string | null = null;
     let configGetCount = 0;
     let nextConfigUpdateError: string | null = null;
@@ -689,6 +690,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       folders: namespace({
         getByProject: () => success([]),
       }),
+      git: namespace({
+        detectBranch: () => success('main'),
+      }),
+      dialog: namespace({
+        openDirectory: () => success('/tmp/pane-worktrees'),
+      }),
       onboarding: namespace({
         detectEnvironment: () => success({}),
         getGitHubAuthCommand: () => success({ command: '', reason: 'ready' }),
@@ -766,6 +773,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
           { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
         ]),
+        update: (projectId: string, updates: JsonObject) => {
+          lastProjectUpdate = { projectId, updates: clone(updates) };
+          mockProjects = mockProjects.map((project) => (
+            String(project.id) === projectId
+              ? { ...project, ...clone(updates), updated_at: new Date().toISOString() }
+              : project
+          ));
+          return success(mockProjects.find((project) => String(project.id) === projectId) ?? null);
+        },
+        detectConfig: () => success(null),
         refreshGitStatus: () => success(),
       }),
       prompts: namespace({
@@ -1186,6 +1203,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getFileDiffCalls() {
           return clone(fileDiffCalls);
+        },
+        getProjectUpdates() {
+          return lastProjectUpdate ? [clone(lastProjectUpdate)] : [];
         },
       },
     });

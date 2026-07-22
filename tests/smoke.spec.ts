@@ -3,7 +3,25 @@ import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
 
 test.beforeEach(async ({ page }) => {
-  await installElectronApiMock(page);
+  await installElectronApiMock(page, {
+    initialProjects: [
+      {
+        id: 1,
+        name: 'Mock Repo',
+        path: '/tmp/mock-repo',
+        system_prompt: null,
+        run_script: null,
+        build_script: null,
+        archive_script: null,
+        active: true,
+        created_at: new Date(0).toISOString(),
+        updated_at: new Date(0).toISOString(),
+        open_ide_command: null,
+        displayOrder: 0,
+        worktree_folder: null,
+      },
+    ],
+  });
 });
 
 async function dismissStartupDialogs(page: Page) {
@@ -129,6 +147,44 @@ test.describe('Smoke Tests', () => {
     await customPathInput.pressSequentially('./venv/*');
 
     await expect(customPathInput).toHaveValue('./venv/*');
+    await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  });
+
+  test('Repository menu opens Project Settings with editable Worktree Folder', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    await dismissStartupDialogs(page);
+
+    const repoActionsButton = page.getByRole('button', { name: 'Repository actions for Mock Repo' });
+    await expect(repoActionsButton).toBeVisible({ timeout: 5000 });
+    await clickDomNode(repoActionsButton);
+
+    await clickDomNode(page.getByRole('menuitem', { name: 'Project Settings' }));
+
+    await expect(page.getByText('Project Settings')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Worktree Folder')).toBeVisible();
+
+    const worktreeFolderInput = page.getByPlaceholder('worktrees');
+    await setInputValue(worktreeFolderInput, '/tmp/pane-worktrees');
+    await clickDomNode(page.getByRole('button', { name: 'Save Changes' }).first());
+
+    const projectUpdates = await page.evaluate(() => {
+      const mock = (window as typeof window & {
+        __paneTestElectronMock?: {
+          getProjectUpdates: () => Array<{ projectId: string; updates: Record<string, unknown> }>;
+        };
+      }).__paneTestElectronMock;
+
+      return mock?.getProjectUpdates() ?? [];
+    });
+
+    expect(projectUpdates).toHaveLength(1);
+    expect(projectUpdates[0]).toMatchObject({
+      projectId: '1',
+      updates: {
+        worktree_folder: '/tmp/pane-worktrees',
+      },
+    });
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
 
