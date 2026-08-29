@@ -14,7 +14,7 @@ export interface TerminalShortcut {
   enabled: boolean;
 }
 
-interface CustomCommand {
+export interface CustomCommand {
   name: string;
   command: string;
 }

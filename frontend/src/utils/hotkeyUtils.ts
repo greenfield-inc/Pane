@@ -47,6 +47,15 @@ export function formatKeyDisplay(keys: string): string {
       case 'arrowup': return '↑';
       case 'arrowdown': return '↓';
       case 'tab': return 'Tab';
+      case 'enter': return isMacPlatform ? '↩' : 'Enter';
+      case 'escape': return 'Esc';
+      case 'backspace': return isMacPlatform ? '⌫' : 'Backspace';
+      case 'delete': return isMacPlatform ? '⌦' : 'Del';
+      case 'space': return 'Space';
+      case 'pageup': return 'PgUp';
+      case 'pagedown': return 'PgDn';
+      case 'home': return 'Home';
+      case 'end': return 'End';
       default: return part.length === 1 ? part.toUpperCase() : part;
     }
   });

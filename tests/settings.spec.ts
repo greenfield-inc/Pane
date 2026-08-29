@@ -276,6 +276,58 @@ test.describe('Settings', () => {
     await expect(page.getByText('Open Command Palette')).toBeVisible();
   });
 
+  test('records, blocks conflicting, and resets global key bindings', async ({ page }) => {
+    await bootSettings(page, {
+      initialConfig: { terminalShortcuts: [{ id: 'snip', label: 'Lint snippet', key: 'l', text: 'pnpm lint', enabled: true }] },
+    });
+    await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
+    const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
+    const claudeRow = map.locator('[data-shortcut-id="add-tool-terminal-claude"]');
+    const apply = map.getByRole('button', { name: 'Apply' });
+    await expect(apply).toBeDisabled();
+
+    // A chord already used by an enabled snippet is an active conflict.
+    await claudeRow.getByRole('button', { name: 'Record shortcut for Add Claude Code' }).click();
+    await page.keyboard.press('Control+Alt+L');
+    await expect(claudeRow.getByRole('alert')).toContainText('is also bound to Lint snippet');
+    await expect(apply).toBeDisabled();
+    await expect(map.getByText('Resolve conflicts to apply.')).toBeVisible();
+
+    // A terminal-reserved chord is refused with live text and recording stays armed.
+    await claudeRow.getByRole('button', { name: 'Record shortcut for Add Claude Code' }).click();
+    await page.keyboard.press('Control+Alt+F');
+    await expect(claudeRow.getByRole('status')).toContainText('Reserved by the terminal');
+    await page.keyboard.press('Control+Alt+Y');
+    await expect(claudeRow.getByRole('alert')).toHaveCount(0);
+    await expect(claudeRow.getByText('Customized')).toBeVisible();
+    await expect(apply).toBeEnabled();
+    await apply.click();
+
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const updates = await page.evaluate(() => (
+      window as typeof window & { __paneTestElectronMock: SettingsMock }
+    ).__paneTestElectronMock.getConfigUpdates());
+    expect(updates).toContainEqual({ keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'mod+alt+y' } });
+
+    await map.getByRole('button', { name: 'Reset all to defaults' }).click();
+    await page.getByRole('dialog', { name: 'Reset all key bindings?' }).getByRole('button', { name: 'Reset all' }).click();
+    await expect(claudeRow.getByText('Customized')).toHaveCount(0);
+  });
+
+  test('shows the effective remapped chord in the shortcut reference', async ({ page }) => {
+    await bootSettings(page, {
+      initialConfig: { keyboardShortcutOverrides: { 'add-tool-terminal-codex': 'mod+alt+y', 'toggle-sidebar': null } },
+    });
+    await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
+    await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Add Codex')).toBeVisible();
+    await expect(dialog.locator('kbd', { hasText: 'Y' })).toHaveCount(1);
+    await expect(dialog.getByText('unassigned')).toHaveCount(1);
+    await expect(dialog.getByText('Send Input / Continue Conversation')).toBeVisible();
+  });
+
   test('guards the shortcut reference when snippet edits are dirty', async ({ page }) => {
     await bootSettings(page);
     await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();

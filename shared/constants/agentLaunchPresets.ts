@@ -1,4 +1,4 @@
-import type { KeyboardShortcutId } from './keyboardShortcuts';
+import { normalizeEnvironmentPlatform, type KeyboardShortcutId } from './keyboardShortcuts';
 
 export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor';
 
@@ -46,9 +46,7 @@ export function agentPresetsForPlatform(platform: string): readonly AgentLaunchP
 }
 
 export function isAgentSupportedOnPlatform(agent: AgentLaunchPresetId, platform: string): boolean {
-  const normalizedPlatform = platform === 'macos'
-    ? 'darwin'
-    : platform === 'windows' ? 'win32' : platform;
+  const normalizedPlatform = normalizeEnvironmentPlatform(platform);
   const preset = AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent);
   return Boolean(preset && (!preset.platforms || preset.platforms.includes(normalizedPlatform)));
 }

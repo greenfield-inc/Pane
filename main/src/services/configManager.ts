@@ -218,14 +218,9 @@ export class ConfigManager extends EventEmitter {
       };
 
       let shouldPersistMigration = normalizedAppearance.migrated;
-      const rawShortcutOverrides: JsonValue | undefined = loadedConfig.keyboardShortcutOverrides;
-      const decodedShortcutOverrides = rawShortcutOverrides === undefined
-        ? undefined
-        : decodeOptionalBoundary(rawShortcutOverrides, boundary.jsonObject);
-      if (decodedShortcutOverrides === undefined) {
+      if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
         delete this.config.keyboardShortcutOverrides;
       }
-      this.logKeyboardShortcutDiagnostics(rawShortcutOverrides);
 
       if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
         this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
@@ -369,10 +364,6 @@ export class ConfigManager extends EventEmitter {
   async updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<AppConfig> {
     return this.enqueueConfigWrite(async () => {
       const updates = update(this.getConfig());
-      const rawShortcutOverrides: JsonValue | undefined = updates.keyboardShortcutOverrides;
-      const decodedShortcutOverrides = rawShortcutOverrides === undefined
-        ? undefined
-        : decodeOptionalBoundary(rawShortcutOverrides, boundary.jsonObject);
       const analytics = updates.analytics !== undefined
         ? { ...defaultAnalyticsConfig(), ...this.config.analytics, ...updates.analytics }
         : this.config.analytics;
@@ -395,16 +386,12 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
-      if ('keyboardShortcutOverrides' in updates &&
-          (!decodedShortcutOverrides || Object.keys(decodedShortcutOverrides).length === 0)) {
+      if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {
         delete next.keyboardShortcutOverrides;
       }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;
-      this.logKeyboardShortcutDiagnostics(
-        'keyboardShortcutOverrides' in updates ? rawShortcutOverrides : this.config.keyboardShortcutOverrides,
-      );
 
       if ('additionalPaths' in updates) {
         clearShellPathCache();
@@ -442,16 +429,25 @@ export class ConfigManager extends EventEmitter {
     }
   }
 
-  private logKeyboardShortcutDiagnostics(rawOverrides: JsonValue | undefined): void {
+  /**
+   * Normalizes the raw override map, logs anything malformed or conflicting
+   * (once per distinct message set), and reports whether the map should stay
+   * in config: any non-empty object is preserved verbatim (unknown ids and
+   * malformed values from hand edits or newer versions are kept for
+   * forward/downgrade tolerance and only ignored at runtime); `{}` and
+   * non-objects are dropped.
+   */
+  private applyKeyboardShortcutOverrides(rawOverrides: JsonValue | undefined, config: AppConfig = this.config): boolean {
     const normalized = normalizeKeyboardShortcutOverrides(rawOverrides);
     const messages = normalized.diagnostics.map(message =>
       `[ConfigManager] keyboardShortcutOverrides: ${message}`
     );
     const conflicts = findChordConflicts(collectActiveBindings({
       overrides: rawOverrides,
-      terminalShortcuts: this.config.terminalShortcuts,
-      customCommands: this.config.customCommands,
-      platform: process.platform,
+      terminalShortcuts: config.terminalShortcuts,
+      customCommands: config.customCommands,
+      // No platform gate: overrides are global and a Windows host can open a
+      // WSL project where platform-limited commands (Cursor) are active.
     }));
     for (const conflict of conflicts) {
       messages.push(
@@ -459,9 +455,12 @@ export class ConfigManager extends EventEmitter {
       );
     }
     const diagnosticKey = messages.join('\n');
-    if (diagnosticKey === this.lastLoggedShortcutDiagnostics) return;
-    this.lastLoggedShortcutDiagnostics = diagnosticKey;
-    for (const message of messages) console.warn(message);
+    if (diagnosticKey !== this.lastLoggedShortcutDiagnostics) {
+      this.lastLoggedShortcutDiagnostics = diagnosticKey;
+      for (const message of messages) console.warn(message);
+    }
+    const parsed = decodeOptionalBoundary(rawOverrides, boundary.jsonObject);
+    return parsed !== undefined && Object.keys(parsed).length > 0;
   }
 
   getGitRepoPath(): string {

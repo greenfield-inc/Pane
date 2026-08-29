@@ -207,6 +207,20 @@ describe('ConfigManager keyboard shortcut overrides', () => {
       .toEqual(raw);
   });
 
+  it('preserves a map whose entries are all unknown or invalid', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const raw = { 'future-command': 'mod+alt+8', 'new-session': 'not-a-chord' };
+    await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ keyboardShortcutOverrides: raw }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ verbose: true });
+    expect(manager.getConfig().keyboardShortcutOverrides).toEqual(raw);
+    expect(JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8')).keyboardShortcutOverrides)
+      .toEqual(raw);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unknown keyboard shortcut id: future-command'));
+    warn.mockRestore();
+  });
+
   it('drops and diagnoses a non-object override map loaded from disk', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({

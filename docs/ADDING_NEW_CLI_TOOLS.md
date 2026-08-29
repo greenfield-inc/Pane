@@ -89,7 +89,9 @@ default chord to `shared/constants/keyboardShortcuts.ts`.
 `agentLaunchPresets.test.ts` and `keyboardShortcutCatalog.test.ts` pin preset,
 catalog, platform, and default-chord parity. Add the brand icon to
 `frontend/src/components/ui/BrandIcons.tsx` (`CLI_BRAND_ICONS`) and a search alias in
-`frontend/src/components/settings/catalog.tsx`.
+`frontend/src/components/settings/catalog.tsx`. Settings → Shortcuts, Help, and the
+conflict engine read the catalog directly, so a new agent's launch command becomes
+remappable (and conflict-checked against every other binding) with no further UI work.
 
 ## 8. Worktree file sync
 

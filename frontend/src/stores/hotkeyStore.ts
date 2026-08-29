@@ -242,10 +242,6 @@ export const useHotkeyStore = create<HotkeyStore>((set, get) => ({
   },
 }));
 
-let previousOverrides = initialConfig?.keyboardShortcutOverrides;
-let previousTerminalShortcuts = initialConfig?.terminalShortcuts;
-let previousCustomCommands = initialConfig?.customCommands;
-
 function rebuildForConfig(): void {
   const config = useConfigStore.getState().config;
   interceptionSets = buildInterceptionSets({
@@ -258,17 +254,8 @@ function rebuildForConfig(): void {
   useHotkeyStore.setState({ hotkeys: rebuilt.next });
 }
 
-useConfigStore.subscribe(state => {
-  const overrides = state.config?.keyboardShortcutOverrides;
-  const terminalShortcuts = state.config?.terminalShortcuts;
-  const customCommands = state.config?.customCommands;
-  if (
-    overrides === previousOverrides
-    && terminalShortcuts === previousTerminalShortcuts
-    && customCommands === previousCustomCommands
-  ) return;
-  previousOverrides = overrides;
-  previousTerminalShortcuts = terminalShortcuts;
-  previousCustomCommands = customCommands;
-  rebuildForConfig();
+// Rebuilding is a cheap pass over ~70 catalog rows, so any config change rebuilds
+// rather than diffing the three inputs by hand.
+useConfigStore.subscribe((state, previous) => {
+  if (state.config !== previous.config) rebuildForConfig();
 });

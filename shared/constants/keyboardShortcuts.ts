@@ -162,6 +162,16 @@ export function getCatalogEntry(id: string): ShortcutCatalogEntry | undefined {
   return catalogById.get(id);
 }
 
+/**
+ * Maps a project environment (`macos` | `windows` | `linux` | `wsl`) or a
+ * Node `process.platform` value onto the platform ids used by `platforms`.
+ */
+export function normalizeEnvironmentPlatform(platform: string): string {
+  if (platform === 'macos') return 'darwin';
+  if (platform === 'windows') return 'win32';
+  return platform;
+}
+
 export function isDynamicShortcutId(id: string): id is `terminal-shortcut-${string}` {
   return id.startsWith('terminal-shortcut-');
 }

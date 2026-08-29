@@ -198,7 +198,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'integrations':
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'shortcuts':
-        return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
+        return <ShortcutsSettings persistence={persistence} platform={platform} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
         return <PrivacySettings persistence={persistence} />;
       case 'advanced':

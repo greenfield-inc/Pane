@@ -80,10 +80,23 @@ function isPaneNavigationShortcut(
   return state.isTuiReleasableChord?.(event) ?? false;
 }
 
+const TERMINAL_RESERVED_EVENT_KEYS = ['f', 'v', 'q', 'p'];
+// mod+k (any Shift/Alt) is the terminal's clear-scrollback branch in TerminalPanel.
+const TERMINAL_RESERVED_CHORD_KEYS = new Set([...TERMINAL_RESERVED_EVENT_KEYS, 'k']);
+
 export function isTerminalReservedChord(event: TerminalKeyLike): boolean {
   if (event.code === 'AltRight') return true;
   return (event.ctrlKey || event.metaKey)
-    && ['f', 'v', 'q', 'p'].includes(event.key.toLowerCase());
+    && TERMINAL_RESERVED_EVENT_KEYS.includes(event.key.toLowerCase());
+}
+
+/**
+ * String twin of `isTerminalReservedChord` for chords a user records: the
+ * terminal owns Ctrl/Cmd + f/v/q/p/k with any Shift/Alt combination.
+ */
+export function isTerminalReservedChordString(chord: string): boolean {
+  const parts = chord.split('+');
+  return parts.includes('mod') && TERMINAL_RESERVED_CHORD_KEYS.has(parts[parts.length - 1]);
 }
 
 export function shouldReleaseToApplication(
