@@ -1,18 +1,17 @@
 import { useEffect } from 'react';
 import { useHotkey } from './useHotkey';
 import { focusedSurfaceScroll, type ScrollDirection } from '../services/focusedSurfaceScroll';
+import type { ScrollSurfaceId } from '../../../shared/constants/keyboardShortcuts';
 
 function useScrollHotkey(
-  id: string,
+  id: ScrollSurfaceId,
   label: string,
-  keys: string,
   direction: ScrollDirection,
   page: boolean,
 ): void {
   useHotkey({
     id,
     label,
-    keys,
     category: 'view',
     action: () => {
       if (page) focusedSurfaceScroll.page(direction);
@@ -25,10 +24,10 @@ function useScrollHotkey(
 }
 
 export function useFocusedSurfaceScrolling(activeSessionId: string | null): void {
-  useScrollHotkey('scroll-focused-surface-up', 'Scroll focused surface up', 'shift+ArrowUp', -1, false);
-  useScrollHotkey('scroll-focused-surface-down', 'Scroll focused surface down', 'shift+ArrowDown', 1, false);
-  useScrollHotkey('page-focused-surface-up', 'Page focused surface up', 'shift+PageUp', -1, true);
-  useScrollHotkey('page-focused-surface-down', 'Page focused surface down', 'shift+PageDown', 1, true);
+  useScrollHotkey('scroll-focused-surface-up', 'Scroll focused surface up', -1, false);
+  useScrollHotkey('scroll-focused-surface-down', 'Scroll focused surface down', 1, false);
+  useScrollHotkey('page-focused-surface-up', 'Page focused surface up', -1, true);
+  useScrollHotkey('page-focused-surface-down', 'Page focused surface down', 1, true);
 
   useEffect(() => {
     focusedSurfaceScroll.setActiveSession(activeSessionId);

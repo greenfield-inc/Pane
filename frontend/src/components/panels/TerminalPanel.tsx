@@ -9,13 +9,19 @@ import type { ImageAddon, IImageAddonOptions } from '@xterm/addon-image';
 import { useSession } from '../../contexts/SessionContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TerminalPanelProps } from '../../types/panelComponents';
-import { isHotkeyEnabledForEvent, useHotkeyStore } from '../../stores/hotkeyStore';
+import {
+  isBoundChordForEvent,
+  isHotkeyEnabledForEvent,
+  isTuiReleasableChordForEvent,
+} from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
 import { getTerminalTheme } from '../../utils/terminalTheme';
 import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
   resolveTerminalKeyHandling,
+  isTerminalReservedChord,
+  shouldReleaseToApplication,
   shouldOpenTerminalSearch,
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
@@ -1057,6 +1063,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             isCliPanel: isCliPanelRef.current,
             isMac: isMac(),
             keyboardShortcutsEnabled: keyboardShortcutsEnabledRef.current,
+            isTuiReleasableChord: isTuiReleasableChordForEvent,
           });
 
           // Shift+Enter sends the same ESC+CR sequence as Alt+Enter for CLI
@@ -1074,73 +1081,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           }
           if (terminalKeyDecision.action === 'pass-through') return true;
 
-          // Ctrl/Cmd+1-9: switch sessions
-          if (ctrlOrMeta && e.key >= '1' && e.key <= '9') return false;
-          // Ctrl+Alt+1-9: switch panel tabs
-          if (ctrlOrMeta && e.altKey && e.key >= '1' && e.key <= '9') return false;
-          // Ctrl/Cmd+Alt+letter: terminal shortcuts — only release if a matching hotkey is registered
-          // Use e.code instead of e.key because macOS Option key modifies e.key to special chars
-          // (e.g. Option+A produces e.key='å' but e.code='KeyA')
-          // Skip AltGr — on Windows/Linux international layouts AltGr sets both ctrlKey+altKey
-          // but is used for character input (e.g. AltGr+Q = '@' on German keyboards)
-          if (ctrlOrMeta && e.altKey && !e.getModifierState('AltGraph') && /^Key[A-Z]$/.test(e.code)) {
-            const pressed = `mod+alt+${e.code.slice(3).toLowerCase()}`;
-            const hotkeys = useHotkeyStore.getState().hotkeys;
-            for (const def of hotkeys.values()) {
-              if (def.keys === pressed) return false;
-            }
-          }
-          // Ctrl/Cmd+Alt+/: open shortcut settings
-          // Check e.code too: macOS Option modifies e.key (e.g. '/' becomes '÷')
-          if (ctrlOrMeta && e.altKey && (e.key === '/' || (!e.getModifierState('AltGraph') && e.code === 'Slash'))) return false;
-          // Ctrl/Cmd+W or Ctrl/Cmd+Q: close active tab
-          if (ctrlOrMeta && (e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'q')) return false;
-          // Ctrl/Cmd+T: open Add Tool dropdown
-          if (ctrlOrMeta && e.key.toLowerCase() === 't') return false;
-          // Ctrl/Cmd+P: prompt history; Ctrl/Cmd+Shift+P: command palette
-          if (ctrlOrMeta && e.key.toLowerCase() === 'p') return false;
-          // Ctrl/Cmd+N: new workspace
-          if (ctrlOrMeta && e.key.toLowerCase() === 'n') return false;
-          // Ctrl/Cmd+Shift+D: toggle diff
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'd') return false;
-          // Ctrl/Cmd+Shift+R: toggle run
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'r') return false;
-          // Git shortcuts - release to DOM for hotkeyStore
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'm') return false;
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'u') return false;
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'l') return false;
-          // Ctrl/Cmd+Shift+N: new project
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'n') return false;
-
-          // Session cycling - Tab
-          if (ctrlOrMeta && e.key === 'Tab') return false;
-          // Session cycling - Ctrl+Up/Down arrows
-          if (ctrlOrMeta && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
-          // Tab cycling - Ctrl+A/D
-          if (ctrlOrMeta && (e.key.toLowerCase() === 'a' || e.key.toLowerCase() === 'd')) return false;
-          // Ctrl/Cmd+B: toggle sidebar
-          if (ctrlOrMeta && e.key.toLowerCase() === 'b') return false;
-          // Ctrl/Cmd+Shift+digit: panel tab switching (use e.code for layout independence)
-          if (ctrlOrMeta && e.shiftKey && /^Digit[1-9]$/.test(e.code)) return false;
-          // Ctrl/Cmd+Alt+digit: add tool shortcuts (skip AltGr — used for @/€ etc. on EU layouts)
-          if (ctrlOrMeta && e.altKey && !e.getModifierState('AltGraph') && /^Digit[1-9]$/.test(e.code)) return false;
-          // Ctrl/Cmd+`: toggle bottom terminal
-          if (ctrlOrMeta && e.key === '`') return false;
-          // Ctrl/Cmd+,: open settings
-          if (ctrlOrMeta && e.key === ',') return false;
-          // Ctrl/Cmd+Shift+E: focus sidebar
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'e') return false;
-
-          // Split tab groups: Mod+\ and Mod+Shift+\ (Ctrl+\ is SIGQUIT - must release!)
-          // ISO/international keyboards report the key as IntlBackslash.
-          // On macOS the app hotkey is Cmd+\, so only release metaKey there
-          // and let Ctrl+\ keep delivering SIGQUIT to the PTY.
-          if ((isMac() ? e.metaKey : e.ctrlKey) && (e.code === 'Backslash' || e.code === 'IntlBackslash')) return false;
-          // Zoom toggle: Mod+Shift+Z
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z') return false;
-          // Directional group focus: Mod+Alt+Arrows (all four directions)
-          if (ctrlOrMeta && e.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return false;
-
           // Detect AltGr+key producing '@' (e.g. German AltGr+Q) — set flag so the
           // interceptor skips activation for this keystroke. AltGr sets both ctrlKey+altKey
           // on Windows/Linux, or e.getModifierState('AltGraph') on some platforms.
@@ -1148,17 +1088,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             skipNextInterceptRef.current = true;
           }
 
-          // Right Alt: let OS/browser handle (e.g. voice transcription, IME)
-          // Use e.code for physical key (e.key may report 'AltGraph' on some layouts)
-          if (e.code === 'AltRight') return false;
-
-          // Ctrl/Cmd+F: terminal search
-          if (ctrlOrMeta && e.key.toLowerCase() === 'f') return false;
-
-          // Ctrl/Cmd+V: stop xterm from sending raw \x16 to PTY
-          // Returning false lets the browser trigger a native paste event instead,
-          // which is handled by our paste event listener on the terminal container
-          if (ctrlOrMeta && e.key.toLowerCase() === 'v') return false;
+          if (isTerminalReservedChord(e)) return false;
+          if (shouldReleaseToApplication(e, {
+            isMac: isMac(),
+            isBound: isBoundChordForEvent(e),
+          })) return false;
 
           return true; // Let terminal handle everything else
         });

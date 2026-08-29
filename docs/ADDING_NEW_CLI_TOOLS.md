@@ -82,10 +82,12 @@ binary.
 
 ## 7. Frontend
 
-`shared/constants/agentLaunchPresets.ts` is the single list behind the toolbar pills,
-Add Tool dropdowns (desktop + remote), and `mod+alt+N` hotkeys. Add one entry
-(`platforms` gates unsupported OSes); `agentLaunchPresets.test.ts` pins the list
-against the RunPane contract. Add the brand icon to
+`shared/constants/agentLaunchPresets.ts` is the single list behind the toolbar pills
+and Add Tool dropdowns (desktop + remote). Add one preset entry with its stable
+`hotkeyId` (`platforms` gates unsupported OSes), then add the matching command and
+default chord to `shared/constants/keyboardShortcuts.ts`.
+`agentLaunchPresets.test.ts` and `keyboardShortcutCatalog.test.ts` pin preset,
+catalog, platform, and default-chord parity. Add the brand icon to
 `frontend/src/components/ui/BrandIcons.tsx` (`CLI_BRAND_ICONS`) and a search alias in
 `frontend/src/components/settings/catalog.tsx`.
 
@@ -107,4 +109,5 @@ guide in a format the CLI actually reads (Cursor: `.cursor/rules/*.mdc`).
 Every step above lands test-first: `agentIdentity.test.ts`, `<tool>Launch.test.ts`,
 `terminalPanelManager.test.ts`, `agentResume.test.ts`, `manifests.test.ts` +
 `agentStatusPipeline.test.ts` (real captured bytes), `runpane.test.ts` (agent matrix +
-doctor), `agentLaunchPresets.test.ts`, `scripts/test-runpane-contract.js`.
+doctor), `agentLaunchPresets.test.ts`, `keyboardShortcutCatalog.test.ts`,
+`scripts/test-runpane-contract.js`.

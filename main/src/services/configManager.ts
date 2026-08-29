@@ -12,7 +12,6 @@ import { randomUUID } from 'crypto';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
@@ -21,6 +20,17 @@ import {
   normalizeAppearance,
   type AppearanceConfig,
 } from '../../../shared/types/appearance';
+import {
+  boundary,
+  decodeBoundary,
+  decodeOptionalBoundary,
+  type JsonValue,
+} from '../../../shared/validation/boundaryDecoder';
+import {
+  collectActiveBindings,
+  findChordConflicts,
+  normalizeKeyboardShortcutOverrides,
+} from '../../../shared/utils/keyboardBindings';
 
 const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
 const LEGACY_POSTHOG_HOST = 'https://us.i.posthog.com';
@@ -40,6 +50,7 @@ export class ConfigManager extends EventEmitter {
   private configDir: string;
   private fileWatcher: FSWatcher | null = null;
   private lastConfigJson: string = '';
+  private lastLoggedShortcutDiagnostics: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
 
   constructor(defaultGitPath?: string) {
@@ -207,6 +218,15 @@ export class ConfigManager extends EventEmitter {
       };
 
       let shouldPersistMigration = normalizedAppearance.migrated;
+      const rawShortcutOverrides: JsonValue | undefined = loadedConfig.keyboardShortcutOverrides;
+      const decodedShortcutOverrides = rawShortcutOverrides === undefined
+        ? undefined
+        : decodeOptionalBoundary(rawShortcutOverrides, boundary.jsonObject);
+      if (decodedShortcutOverrides === undefined) {
+        delete this.config.keyboardShortcutOverrides;
+      }
+      this.logKeyboardShortcutDiagnostics(rawShortcutOverrides);
+
       if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
         this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
         shouldPersistMigration = true;
@@ -349,6 +369,10 @@ export class ConfigManager extends EventEmitter {
   async updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<AppConfig> {
     return this.enqueueConfigWrite(async () => {
       const updates = update(this.getConfig());
+      const rawShortcutOverrides: JsonValue | undefined = updates.keyboardShortcutOverrides;
+      const decodedShortcutOverrides = rawShortcutOverrides === undefined
+        ? undefined
+        : decodeOptionalBoundary(rawShortcutOverrides, boundary.jsonObject);
       const analytics = updates.analytics !== undefined
         ? { ...defaultAnalyticsConfig(), ...this.config.analytics, ...updates.analytics }
         : this.config.analytics;
@@ -371,9 +395,16 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
+      if ('keyboardShortcutOverrides' in updates &&
+          (!decodedShortcutOverrides || Object.keys(decodedShortcutOverrides).length === 0)) {
+        delete next.keyboardShortcutOverrides;
+      }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;
+      this.logKeyboardShortcutDiagnostics(
+        'keyboardShortcutOverrides' in updates ? rawShortcutOverrides : this.config.keyboardShortcutOverrides,
+      );
 
       if ('additionalPaths' in updates) {
         clearShellPathCache();
@@ -409,6 +440,28 @@ export class ConfigManager extends EventEmitter {
     if (isLightTheme(appearance.systemDarkTheme)) {
       throw new AppearanceValidationError('systemDarkTheme must be a dark palette');
     }
+  }
+
+  private logKeyboardShortcutDiagnostics(rawOverrides: JsonValue | undefined): void {
+    const normalized = normalizeKeyboardShortcutOverrides(rawOverrides);
+    const messages = normalized.diagnostics.map(message =>
+      `[ConfigManager] keyboardShortcutOverrides: ${message}`
+    );
+    const conflicts = findChordConflicts(collectActiveBindings({
+      overrides: rawOverrides,
+      terminalShortcuts: this.config.terminalShortcuts,
+      customCommands: this.config.customCommands,
+      platform: process.platform,
+    }));
+    for (const conflict of conflicts) {
+      messages.push(
+        `[ConfigManager] keyboardShortcutOverrides conflict: ${conflict.chord} is bound to ${conflict.ids.join(' and ')}`
+      );
+    }
+    const diagnosticKey = messages.join('\n');
+    if (diagnosticKey === this.lastLoggedShortcutDiagnostics) return;
+    this.lastLoggedShortcutDiagnostics = diagnosticKey;
+    for (const message of messages) console.warn(message);
   }
 
   getGitRepoPath(): string {

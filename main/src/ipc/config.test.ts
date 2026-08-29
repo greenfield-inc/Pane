@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { nativeTheme, type IpcMain } from 'electron';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project } from '../database/models';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
@@ -66,6 +66,8 @@ function createServicesStub(projects: Project[]): AppServices {
   // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
   let config = { agentContext: { managedAgentsMd: true } } as AppConfig;
 
+  const listeners = new Map<string, (config: AppConfig) => void>();
+  const send = vi.fn();
   // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
   return {
     app: {},
@@ -74,6 +76,9 @@ function createServicesStub(projects: Project[]): AppServices {
     },
     gitStatusManager: {},
     configManager: {
+      on: (event: string, listener: (config: AppConfig) => void) => {
+        listeners.set(event, listener);
+      },
       getConfig: () => config,
       reloadFromDisk: async () => config,
       updateConfig: async (updates: UpdateConfigRequest) => {
@@ -84,6 +89,7 @@ function createServicesStub(projects: Project[]): AppServices {
             ? { ...config.agentContext, ...updates.agentContext }
             : config.agentContext,
         };
+        listeners.get('config-updated')?.(config);
         return config;
       },
       getSessionCreationPreferences: () => config.sessionCreationPreferences,
@@ -103,7 +109,7 @@ function createServicesStub(projects: Project[]): AppServices {
     archiveProgressManager: {},
     spotlightManager: {},
     runCommandManager: {},
-    getMainWindow: () => null,
+    getMainWindow: () => ({ webContents: { send } }),
   } as AppServices;
 }
 
@@ -188,5 +194,20 @@ describe('config IPC handlers', () => {
     })).resolves.toMatchObject({ success: true });
     expect(configUpdatedCount).toBe(1);
     expect(nativeTheme.themeSource).toBe('dark');
+  });
+
+  it('relays each config update to the renderer once', async () => {
+    const ipcMain = createIpcMainStub();
+    const services = createServicesStub([]);
+    // SAFETY: The stub implements the handler surface exercised by registerConfigHandlers.
+    registerConfigHandlers(ipcMain as IpcMain, services);
+
+    await ipcMain.handlers.get('config:update')?.({}, { keyboardShortcutsEnabled: false });
+
+    const send = services.getMainWindow?.()?.webContents.send;
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('config:updated', expect.objectContaining({
+      keyboardShortcutsEnabled: false,
+    }));
   });
 });

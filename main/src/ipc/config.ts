@@ -16,6 +16,10 @@ export function registerConfigHandlers(
   { app, configManager, claudeCodeManager, databaseService, getMainWindow, sessionManager }: AppServices,
   commandRegistry?: PaneCommandRegistry,
 ): void {
+  configManager.on('config-updated', (config: AppConfig) => {
+    getMainWindow()?.webContents.send('config:updated', config);
+  });
+
   if (commandRegistry) {
     commandRegistry.register('remote:pwa-affordances', (): RemotePwaAffordances => {
       const config = configManager.getConfig();

@@ -62,6 +62,7 @@ import { Kbd } from './ui/Kbd';
 import type { InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
+import type { CustomCommandId, HotkeyId } from '../../../shared/constants/keyboardShortcuts';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -672,7 +673,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'cycle-tab-prev-a',
     label: 'Previous Tab',
-    keys: 'mod+a',
     category: 'tabs',
     enabled: () => (projectActions()?.tabCount() ?? focusedGroupPanels.length) > 1,
     action: () => cycleTab('prev'),
@@ -682,7 +682,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'cycle-tab-next-d',
     label: 'Next Tab',
-    keys: 'mod+d',
     category: 'tabs',
     enabled: () => (projectActions()?.tabCount() ?? focusedGroupPanels.length) > 1,
     action: () => cycleTab('next'),
@@ -696,15 +695,15 @@ export const SessionView = memo(() => {
     const name = p.type === 'diff' ? 'Review' : p.title;
     return `Switch to ${name}`;
   };
-  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), keys: 'mod+shift+2', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), keys: 'mod+shift+3', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), keys: 'mod+shift+4', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), keys: 'mod+shift+5', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), keys: 'mod+shift+6', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), keys: 'mod+shift+7', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), keys: 'mod+shift+8', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), keys: 'mod+shift+9', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
 
   // --- Add Tool commands (palette-only, no keybindings) ---
   // Only enabled in session view (not project view) to prevent hidden panel mutations
@@ -714,7 +713,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'add-tool-terminal',
     label: 'Add Terminal',
-    keys: 'mod+alt+1',
     category: 'tools',
     enabled: () => isInSessionView,
     action: () => { const bridged = projectActions(); if (bridged) bridged.addTerminal(); else void handlePanelCreate('terminal'); },
@@ -723,7 +721,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'add-tool-explorer',
     label: 'Show Files',
-    keys: 'mod+alt+2',
     category: 'tools',
     enabled: () => isInSessionView,
     action: () => { const bridged = projectActions(); if (bridged) bridged.showInspector('files'); else openInspector('files'); },
@@ -746,7 +743,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'close-active-tab',
     label: 'Close active tab',
-    keys: 'mod+w',
     category: 'tabs',
     enabled: closeTabEnabled,
     action: closeTabAction,
@@ -755,7 +751,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'archive-active-session',
     label: 'Archive Pane',
-    keys: 'mod+shift+w',
     category: 'session',
     enabled: () => !!activeSession && !activeSession.archived,
     action: () => hook.setShowArchiveConfirm(true),
@@ -766,7 +761,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'split-right',
     label: 'Split Right',
-    keys: 'mod+\\',
     category: 'tabs',
     enabled: () => {
       if (!activeSession || !focusedGroup) return false;
@@ -800,7 +794,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'split-down',
     label: 'Split Down',
-    keys: 'mod+shift+\\',
     category: 'tabs',
     enabled: () => {
       if (!activeSession || !focusedGroup) return false;
@@ -833,7 +826,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'focus-group-left',
     label: 'Focus Group Left',
-    keys: 'mod+alt+ArrowLeft',
     category: 'tabs',
     enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
     action: () => {
@@ -846,7 +838,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'focus-group-right',
     label: 'Focus Group Right',
-    keys: 'mod+alt+ArrowRight',
     category: 'tabs',
     enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
     action: () => {
@@ -859,7 +850,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'focus-group-up',
     label: 'Focus Group Up',
-    keys: 'mod+alt+ArrowUp',
     category: 'tabs',
     enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
     action: () => {
@@ -872,7 +862,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'focus-group-down',
     label: 'Focus Group Down',
-    keys: 'mod+alt+ArrowDown',
     category: 'tabs',
     enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
     action: () => {
@@ -887,7 +876,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'zoom-toggle',
     label: 'Toggle Zoom',
-    keys: 'mod+shift+z',
     category: 'tabs',
     enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
     action: () => {
@@ -1259,55 +1247,58 @@ export const SessionView = memo(() => {
     handleDropTab, handleDragStart, handleDragEnd, handleStripDrop, getPanelTabPresentation, emptyStage,
   ]);
 
-  // Dynamic shortcuts for custom commands (mod+shift+5, 6, 7, ...)
+  // Register agent and custom-command actions; their default chords live in the catalog.
   const registerHotkey = useHotkeyStore((s) => s.register);
   const unregisterHotkey = useHotkeyStore((s) => s.unregister);
   const handlePanelCreateRef = useCommittedRef(handlePanelCreate);
   const isInSessionViewRef = useCommittedRef(isInSessionView);
 
   useEffect(() => {
-    const ids: string[] = [];
+    const ids: HotkeyId[] = [];
     for (const preset of agentPresets) {
       ids.push(preset.hotkeyId);
       registerHotkey({
         id: preset.hotkeyId,
         label: `Add ${preset.title}`,
-        keys: preset.hotkey,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
-        action: () => handlePanelCreateRef.current('terminal', {
-          initialCommand: preset.command,
-          title: preset.title,
-        }),
+        action: () => {
+          const options = { initialCommand: preset.command, title: preset.title };
+          const bridged = projectActions();
+          if (bridged) bridged.addTerminalWithOptions(options);
+          else void handlePanelCreateRef.current('terminal', options);
+        },
       });
     }
     return () => { ids.forEach(id => unregisterHotkey(id)); };
-  }, [agentPresets, handlePanelCreateRef, isInSessionViewRef, registerHotkey, unregisterHotkey]);
+  }, [agentPresets, handlePanelCreateRef, isInSessionViewRef, projectActions, registerHotkey, unregisterHotkey]);
 
   useEffect(() => {
     const CUSTOM_CMD_START = 6; // mod+alt+3-5 stay reserved for built-in agents on every platform
     const maxSlots = Math.min(customCommands.length, 10 - CUSTOM_CMD_START);
-    const ids: string[] = [];
+    const ids: CustomCommandId[] = [];
 
     for (let i = 0; i < maxSlots; i++) {
       const cmd = customCommands[i];
-      const id = `add-tool-custom-${i}`;
+      // SAFETY: maxSlots is capped at four, so i is one of the catalog's 0..3 slots.
+      const id = `add-tool-custom-${i}` as CustomCommandId;
       ids.push(id);
       registerHotkey({
         id,
         label: `Add ${cmd.name}`,
-        keys: `mod+alt+${CUSTOM_CMD_START + i}`,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
-        action: () => handlePanelCreateRef.current('terminal', {
-          initialCommand: cmd.command,
-          title: cmd.name,
-        }),
+        action: () => {
+          const options = { initialCommand: cmd.command, title: cmd.name };
+          const bridged = projectActions();
+          if (bridged) bridged.addTerminalWithOptions(options);
+          else void handlePanelCreateRef.current('terminal', options);
+        },
       });
     }
 
     return () => { ids.forEach(id => unregisterHotkey(id)); };
-  }, [customCommands, handlePanelCreateRef, isInSessionViewRef, registerHotkey, unregisterHotkey]);
+  }, [customCommands, handlePanelCreateRef, isInSessionViewRef, projectActions, registerHotkey, unregisterHotkey]);
 
   // Load project data for active session
   useEffect(() => {
@@ -1588,7 +1579,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'toggle-terminal',
     label: 'Toggle Terminal',
-    keys: 'mod+`',
     category: 'view',
     enabled: () => isInSessionView,
     action: toggleTerminalCollapse,
@@ -1598,7 +1588,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'toggle-detail-panel',
     label: 'Toggle Detail Panel',
-    keys: 'mod+shift+b',
     category: 'view',
     enabled: () => isInSessionView && !immersiveMode,
     action: () => { const bridged = projectActions(); if (bridged) bridged.toggleDetail(); else handleToggleDetailPanel(); },

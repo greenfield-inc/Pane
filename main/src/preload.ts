@@ -1012,6 +1012,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('window:appearance-native-updated', wrappedCallback);
       return () => ipcRenderer.removeListener('window:appearance-native-updated', wrappedCallback);
     },
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
+    },
 
     // Process management events
     onZombieProcessesDetected: (callback: (data: { count: number; processes: string[] }) => void) => {

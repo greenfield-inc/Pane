@@ -12,6 +12,7 @@ export interface TerminalKeyHandlingState {
   isCliPanel: boolean;
   isMac: boolean;
   keyboardShortcutsEnabled: boolean;
+  isTuiReleasableChord?: (event: TerminalKeyLike) => boolean;
 }
 
 export interface TerminalKeyLike {
@@ -75,25 +76,24 @@ function isPaneNavigationShortcut(
     && event.altKey
     && digitMatch
     && event.key !== digitMatch[1];
-  if (
-    event.altKey
-    && !isAltGr
-    && !isUnreportedAltGrDigit
-    && !event.shiftKey
-    && (
-      ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
-      || digitMatch
-    )
-  ) {
-    return true;
-  }
+  if (isAltGr || isUnreportedAltGrDigit) return false;
+  return state.isTuiReleasableChord?.(event) ?? false;
+}
 
-  if (!event.altKey && event.key === 'Tab') return true;
-  if (!event.altKey && event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
-  if (!event.altKey && event.shiftKey && event.key.toLowerCase() === 'z') return true;
+export function isTerminalReservedChord(event: TerminalKeyLike): boolean {
+  if (event.code === 'AltRight') return true;
+  return (event.ctrlKey || event.metaKey)
+    && ['f', 'v', 'q', 'p'].includes(event.key.toLowerCase());
+}
 
+export function shouldReleaseToApplication(
+  event: TerminalKeyLike,
+  state: { isMac: boolean; isBound: boolean },
+): boolean {
+  if (event.getModifierState('AltGraph')) return false;
   const isBackslash = event.code === 'Backslash' || event.code === 'IntlBackslash';
-  return !event.altKey && isBackslash;
+  if (isBackslash && (state.isMac ? !event.metaKey : !event.ctrlKey)) return false;
+  return state.isBound;
 }
 
 export function resolveTerminalKeyHandling(

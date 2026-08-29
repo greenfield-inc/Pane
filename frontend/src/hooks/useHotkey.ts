@@ -12,9 +12,8 @@ import { useCommittedRef } from './useCommittedRef';
  *
  * Usage:
  *   useHotkey({
- *     id: 'open-prompt-history',
+ *     id: 'open-command-palette',
  *     label: 'Open Prompt History',
- *     keys: 'mod+p',
  *     category: 'navigation',
  *     action: () => setIsPromptHistoryOpen(true),
  *   });

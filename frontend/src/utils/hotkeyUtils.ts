@@ -10,11 +10,11 @@
  *
  * @module hotkeyUtils
  */
-import type { HotkeyDefinition } from '../stores/hotkeyStore';
+import type { ShortcutCategory } from '../../../shared/constants/keyboardShortcuts';
 import { isMac } from './platformUtils';
 
 /** Canonical display order for hotkey categories */
-export const CATEGORY_ORDER: HotkeyDefinition['category'][] = [
+export const CATEGORY_ORDER: ShortcutCategory[] = [
   'navigation',
   'session',
   'tabs',
@@ -32,7 +32,7 @@ export const CATEGORY_LABELS = {
   tools: 'Add Tool',
   shortcuts: 'Shortcuts',
   debug: 'Debug',
-} satisfies Record<HotkeyDefinition['category'], string>;
+} satisfies Record<ShortcutCategory, string>;
 
 export function formatKeyDisplay(keys: string): string {
   const isMacPlatform = isMac();
