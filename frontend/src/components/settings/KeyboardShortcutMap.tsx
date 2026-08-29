@@ -54,6 +54,9 @@ export function KeyboardShortcutMap({
       return group ? [{ category, rows: group }] : [];
     });
   }, [visible]);
+  const lowerQuery = query.trim().toLowerCase();
+  const visibleReference = REFERENCE_ROWS.filter((reference) =>
+    !lowerQuery || reference.label.toLowerCase().includes(lowerQuery) || reference.chord.toLowerCase().includes(lowerQuery));
   const conflicted = map.conflicts.length > 0;
   const sources = { terminalShortcuts, customCommands };
   const whereToEdit = (id: string) => (
@@ -90,7 +93,7 @@ export function KeyboardShortcutMap({
               <span role="columnheader">State</span>
             </div>
           </div>
-          {grouped.length === 0 && (
+          {grouped.length === 0 && visibleReference.length === 0 && (
             <p className="px-3 py-2 text-xs text-text-tertiary">No shortcuts match “{query}”.</p>
           )}
           {grouped.map(({ category, rows: groupRows }) => (
@@ -153,12 +156,12 @@ export function KeyboardShortcutMap({
               })}
             </div>
           ))}
-          {!query && (
+          {visibleReference.length > 0 && (
             <div role="rowgroup" aria-label="Terminal and native shortcuts">
               <div aria-hidden="true" className="bg-surface-secondary/60 px-3 py-1 text-[11px] font-medium text-text-tertiary">
                 Terminal / native — not remappable
               </div>
-              {REFERENCE_ROWS.map((reference) => (
+              {visibleReference.map((reference) => (
                 <div key={reference.id} role="row" className="grid gap-1 border-t border-border-secondary px-3 py-2 text-text-secondary sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,2.3fr)] sm:items-center sm:gap-2">
                   <span role="cell">{reference.label}</span>
                   <span role="cell"><Kbd size="sm">{formatKeyDisplay(reference.chord)}</Kbd></span>

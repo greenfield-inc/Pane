@@ -93,6 +93,10 @@ test('shows the complete inventory regardless of the current view, with an axe-c
   await map.getByRole('textbox', { name: 'Search shortcuts' }).fill('codex');
   await expect(map.locator('[data-shortcut-id]')).toHaveCount(1);
   await expect(map.locator('[data-shortcut-id="add-tool-terminal-codex"]')).toBeVisible();
+  await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' })).toHaveCount(0);
+  await map.getByRole('textbox', { name: 'Search shortcuts' }).fill('copy selection');
+  await expect(map.locator('[data-shortcut-id]')).toHaveCount(0);
+  await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' }).getByRole('row')).toHaveCount(1);
 });
 
 test('shows the same inventory from a Project view with a WSL project on a Windows host', async ({ page }) => {
