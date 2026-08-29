@@ -81,8 +81,9 @@ function isPaneNavigationShortcut(
 }
 
 const TERMINAL_RESERVED_EVENT_KEYS = ['f', 'v', 'q', 'p'];
-// mod+k (any Shift/Alt) is the terminal's clear-scrollback branch in TerminalPanel.
-const TERMINAL_RESERVED_CHORD_KEYS = new Set([...TERMINAL_RESERVED_EVENT_KEYS, 'k']);
+// mod+k (any Shift/Alt) is the terminal's clear-scrollback branch in TerminalPanel;
+// mod+c / mod+shift+c is terminal copy (terminalClipboard.isTerminalCopyShortcut).
+const TERMINAL_RESERVED_CHORD_KEYS = new Set([...TERMINAL_RESERVED_EVENT_KEYS, 'k', 'c']);
 
 export function isTerminalReservedChord(event: TerminalKeyLike): boolean {
   if (event.code === 'AltRight') return true;
@@ -92,7 +93,7 @@ export function isTerminalReservedChord(event: TerminalKeyLike): boolean {
 
 /**
  * String twin of `isTerminalReservedChord` for chords a user records: the
- * terminal owns Ctrl/Cmd + f/v/q/p/k with any Shift/Alt combination.
+ * terminal owns Ctrl/Cmd + f/v/q/p/k/c with any Shift/Alt combination.
  */
 export function isTerminalReservedChordString(chord: string): boolean {
   const parts = chord.split('+');

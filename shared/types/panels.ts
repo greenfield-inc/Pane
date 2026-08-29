@@ -192,9 +192,10 @@ export interface SetupTasksPanelState {
 export interface BrowserPanelState {
   currentUrl?: string;
   /**
-   * Transient, monotonically increasing token written by the renderer's
-   * navigation helper so a repeated request for the current URL reloads it.
-   * Not persisted (BrowserPanel writes only currentUrl back).
+   * Monotonically increasing token written by the renderer's navigation
+   * helper so a repeated request for the current URL reloads it. It rides
+   * along in the panel state update but carries no meaning across restarts:
+   * BrowserPanel seeds its last-seen nonce from the mounted state.
    */
   navigationNonce?: number;
   isPopup?: boolean;

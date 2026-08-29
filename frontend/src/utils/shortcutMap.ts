@@ -216,14 +216,17 @@ export function labelForId(
   return getCatalogEntry(id)?.label ?? id;
 }
 
-export type RecordableChordResult = { ok: true } | { ok: false; reason: 'reserved-by-terminal' };
+export type RecordableChordResult = { ok: true } | { ok: false; reason: 'reserved-by-terminal' | 'bare-navigation-key' };
 
 /**
  * Whether a user may record this chord. Terminal-reserved chords are refused
- * unless the row's own default is that chord (grandfathered defaults such as
+ * (f/v/q/p/k/c) unless the row's own default is that chord (grandfathered defaults such as
  * `open-command-palette` = mod+shift+p and `git-commit` = mod+shift+k).
  */
 export function isRecordableChord(chord: string, options: { ownDefault: string | null }): RecordableChordResult {
+  // A named key without any modifier (Tab, Enter, Space, arrows, paging, Home/End…)
+  // would hijack focus navigation and text entry app-wide.
+  if (!chord.includes('+')) return { ok: false, reason: 'bare-navigation-key' };
   if (chord !== options.ownDefault && isTerminalReservedChordString(chord)) {
     return { ok: false, reason: 'reserved-by-terminal' };
   }

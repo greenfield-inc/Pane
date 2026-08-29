@@ -110,6 +110,12 @@ describe('helpers', () => {
     expect(isRecordableChord('mod+shift+k', { ownDefault: 'mod+shift+k' })).toEqual({ ok: true });
     expect(isRecordableChord('mod+shift+p', { ownDefault: 'mod+shift+p' })).toEqual({ ok: true });
     expect(isRecordableChord('mod+alt+x', { ownDefault: 'mod+b' })).toEqual({ ok: true });
+    expect(isRecordableChord('mod+c', { ownDefault: 'mod+b' })).toEqual({ ok: false, reason: 'reserved-by-terminal' });
+    expect(isRecordableChord('mod+shift+c', { ownDefault: 'mod+b' })).toEqual({ ok: false, reason: 'reserved-by-terminal' });
+    for (const bare of ['Tab', 'Enter', 'Space', 'ArrowUp', 'PageDown', 'Home', 'F5']) {
+      expect(isRecordableChord(bare, { ownDefault: null })).toEqual({ ok: false, reason: 'bare-navigation-key' });
+    }
+    expect(isRecordableChord('shift+ArrowUp', { ownDefault: 'shift+ArrowUp' })).toEqual({ ok: true });
   });
 
   it('prefers the active project environment over the host platform', () => {

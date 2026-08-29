@@ -31,7 +31,8 @@ const RECORDER_COPY = {
   'bare-printable': 'Shortcuts with a letter, digit, or punctuation key must include Ctrl/⌘',
   'unsupported-key': "That key can't be used",
   'malformed': "That combination can't be used",
-  'reserved-by-terminal': 'Reserved by the terminal (search/paste/clear/flow control)',
+  'reserved-by-terminal': 'Reserved by the terminal (search/paste/copy/clear/flow control)',
+  'bare-navigation-key': 'Add a modifier — that key alone is used for navigation and typing',
 } as const;
 
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift', 'AltGraph', 'CapsLock']);
