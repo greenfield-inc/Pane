@@ -29,6 +29,12 @@ interface KeyboardShortcutMapProps {
   applyBlockedReason?: string | null;
 }
 
+function whereToEdit(id: string): string {
+  if (id.startsWith('terminal-shortcut-')) return ' (edit in Terminal snippets below)';
+  if (id.startsWith('add-tool-custom-')) return ' (custom command; remap it in its own row or in Add Tool › Custom commands)';
+  return '';
+}
+
 const STATE_LABELS = {
   'default': null,
   'customized': 'Customized',
@@ -59,11 +65,6 @@ export function KeyboardShortcutMap({
     !lowerQuery || reference.label.toLowerCase().includes(lowerQuery) || reference.chord.toLowerCase().includes(lowerQuery));
   const conflicted = map.conflicts.length > 0;
   const sources = { terminalShortcuts, customCommands };
-  const whereToEdit = (id: string) => (
-    id.startsWith('terminal-shortcut-') ? ' (edit in Terminal snippets below)'
-      : id.startsWith('add-tool-custom-') ? ' (custom command; remap it in its own row or in Add Tool › Custom commands)'
-        : ''
-  );
 
   const setOverride = (id: string, value: string | null) => onDraftChange({ ...draft, [id]: value });
   const removeOverride = (id: string) => {

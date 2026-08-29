@@ -46,7 +46,9 @@ export function KeyRecorder({
 
   // Latest callbacks for the native listener registered below.
   const callbacksRef = useRef({ defaultChord, onRecord, onUnassign, onReset });
-  callbacksRef.current = { defaultChord, onRecord, onUnassign, onReset };
+  useEffect(() => {
+    callbacksRef.current = { defaultChord, onRecord, onUnassign, onReset };
+  }, [defaultChord, onRecord, onUnassign, onReset]);
 
   useEffect(() => {
     if (!recording) return;

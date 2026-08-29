@@ -100,7 +100,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   // xterm's linkHandler and WebLinksAddon are created once per terminal, so
   // they read the latest router through a ref rather than re-creating xterm.
   const routeUrlRef = useRef(routeUrl);
-  routeUrlRef.current = routeUrl;
+  useEffect(() => { routeUrlRef.current = routeUrl; }, [routeUrl]);
 
   // Track mouse position for selection popover
   const onMouseMove = useCallback((e: React.MouseEvent) => {
@@ -230,9 +230,11 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   }, [hoverHintFor]);
   // Consumed by xterm handlers created once per terminal.
   const showLinkTooltipRef = useRef(showLinkTooltip);
-  showLinkTooltipRef.current = showLinkTooltip;
   const closeTooltipRef = useRef(closeTooltip);
-  closeTooltipRef.current = closeTooltip;
+  useEffect(() => {
+    showLinkTooltipRef.current = showLinkTooltip;
+    closeTooltipRef.current = closeTooltip;
+  }, [showLinkTooltip, closeTooltip]);
 
   const closeFilePopover = useCallback(() => {
     setFilePopover((prev) => ({ ...prev, visible: false }));
