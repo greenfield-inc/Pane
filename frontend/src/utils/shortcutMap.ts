@@ -28,9 +28,9 @@ import type { ProjectEnvironment } from '../../../shared/types/panels';
 import type { CustomCommand, TerminalShortcut } from '../types/config';
 import { isTerminalReservedChordString } from './terminalKeyHandling';
 
-export type ShortcutRowOrigin = 'catalog' | 'snippet';
-export type ShortcutRowState = 'default' | 'customized' | 'unassigned' | 'invalid';
-export type ShortcutAvailability = 'available' | 'unavailable-platform';
+type ShortcutRowOrigin = 'catalog' | 'snippet';
+type ShortcutRowState = 'default' | 'customized' | 'unassigned' | 'invalid';
+type ShortcutAvailability = 'available' | 'unavailable-platform';
 
 export interface ShortcutMapRow {
   id: string;

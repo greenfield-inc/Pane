@@ -19,5 +19,5 @@ export async function previewHtmlFileInBrowser(sessionId: string, filePath: stri
     throw new Error(result.error || 'Failed to resolve HTML preview URL');
   }
 
-  await openUrlInSessionBrowser(sessionId, result.url, { title: filePath.split('/').pop() || 'Browser' });
+  await openUrlInSessionBrowser(sessionId, result.url, { title: filePath.split('/').pop() || 'Browser', retitleExisting: true });
 }

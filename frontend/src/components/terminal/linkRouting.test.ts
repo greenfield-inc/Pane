@@ -39,14 +39,15 @@ describe('classifyLinkGesture', () => {
 
   it('treats an unconsumed macOS Control primary click as external but never a shifted or secondary one', () => {
     expect(classifyLinkGesture(click({ ctrlKey: true }), true)).toBe('external');
-    expect(classifyLinkGesture(click({ ctrlKey: true, button: 2 }), true)).toBe('none');
+    expect(classifyLinkGesture(click({ ctrlKey: true, button: 2 }), true)).toBe('rejected');
     expect(classifyLinkGesture(click({ ctrlKey: true, shiftKey: true }), true)).toBe('none');
   });
 
-  it('excludes Alt and non-primary buttons from every gesture', () => {
-    expect(classifyLinkGesture(click({ metaKey: true, altKey: true }), true)).toBe('none');
-    expect(classifyLinkGesture(click({ ctrlKey: true, shiftKey: true, altKey: true }), false)).toBe('none');
-    expect(classifyLinkGesture(click({ metaKey: true, shiftKey: true, button: 1 }), true)).toBe('none');
+  it('rejects Alt and non-primary buttons outright', () => {
+    expect(classifyLinkGesture(click({ metaKey: true, altKey: true }), true)).toBe('rejected');
+    expect(classifyLinkGesture(click({ ctrlKey: true, shiftKey: true, altKey: true }), false)).toBe('rejected');
+    expect(classifyLinkGesture(click({ metaKey: true, shiftKey: true, button: 1 }), true)).toBe('rejected');
+    expect(classifyLinkGesture(click({ button: 2 }), false)).toBe('rejected');
   });
 });
 
@@ -84,16 +85,48 @@ describe('routeUrlActivation', () => {
     }
   });
 
-  it('rejects URLs the Browser must not load with no sink call', async () => {
+  it('rejects non-HTTP(S) URLs on every gesture-driven sink, including unavailable-surface fallback', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     for (const url of ['file:///tmp/x.html', 'javascript:alert(1)', 'https://user:pw@example.com', 'nope']) {
-      const d = deps();
-      await expect(routeUrlActivation(url, click({ metaKey: true, shiftKey: true }), 'web-links', d)).resolves.toBe('none');
-      expect(d.openInPaneBrowser).not.toHaveBeenCalled();
-      expect(d.openExternal).not.toHaveBeenCalled();
+      for (const provider of PROVIDERS) {
+        for (const [event, available] of [
+          [click({ metaKey: true, shiftKey: true }), true],
+          [click({ metaKey: true, shiftKey: true }), false],
+          [click({ metaKey: true }), true],
+          [click({ ctrlKey: true }), true],
+        ] as const) {
+          const d = deps({ browserAvailable: available });
+          await expect(routeUrlActivation(url, event, provider, d)).resolves.toBe('none');
+          expect(d.openInPaneBrowser).not.toHaveBeenCalled();
+          expect(d.openExternal).not.toHaveBeenCalled();
+        }
+      }
     }
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it('opens nothing for Alt or non-primary activations, even for OSC-8', async () => {
+    for (const provider of PROVIDERS) {
+      const d = deps();
+      await expect(routeUrlActivation('https://a', click({ altKey: true }), provider, d)).resolves.toBe('none');
+      await expect(routeUrlActivation('https://a', click({ button: 1 }), provider, d)).resolves.toBe('none');
+      await expect(routeUrlActivation('https://a', click({ button: 2, metaKey: true }), provider, d)).resolves.toBe('none');
+      expect(d.openExternal).not.toHaveBeenCalled();
+      expect(d.openInPaneBrowser).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps OSC-8 plain click opening its target as-is (pre-existing behavior)', async () => {
+    const d = deps();
+    await expect(routeUrlActivation('mailto:dev@example.com', click(), 'osc8', d)).resolves.toBe('external');
+    expect(d.openExternal).toHaveBeenCalledWith('mailto:dev@example.com');
+  });
+
+  it('passes the canonical href to the external sink', async () => {
+    const d = deps({ isMac: false });
+    await routeUrlActivation('https://example.com', click({ ctrlKey: true }), 'web-links', d);
+    expect(d.openExternal).toHaveBeenCalledWith('https://example.com/');
   });
 
   it('does not open externally after an in-Pane failure', async () => {

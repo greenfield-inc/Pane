@@ -62,6 +62,10 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
   const invalid = shortcuts.some((shortcut) => !shortcut.label.trim() || !shortcut.key || !shortcut.text.trim())
     || duplicateKeys.size > 0
     || snippetConflicts.size > 0;
+  // Conflicts are validated across both drafts, but each Apply persists only its
+  // own section, so neither may save while the other draft is unsaved.
+  const applyOverridesBlockedBySnippets = snippetsDirty;
+  const applySnippetsBlockedByOverrides = overridesDirty;
 
   const update = (index: number, patch: Partial<TerminalShortcut>) => {
     setShortcuts((current) => current.map((shortcut, shortcutIndex) => (
@@ -70,12 +74,12 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
   };
 
   const apply = async () => {
-    if (invalid) return;
+    if (invalid || applySnippetsBlockedByOverrides) return;
     await persistence.saveConfig('terminal-shortcuts', { terminalShortcuts: shortcuts });
   };
 
   const applyOverrides = async () => {
-    if (conflicted) return;
+    if (conflicted || applyOverridesBlockedBySnippets) return;
     await persistence.saveConfig('keyboard-shortcut-map', { keyboardShortcutOverrides: overridesDraft });
   };
 
@@ -122,6 +126,7 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
             customCommands={customCommands}
             onDraftChange={setOverridesDraft}
             onApply={applyOverrides}
+            applyBlockedReason={applyOverridesBlockedBySnippets ? 'Apply or discard the Terminal snippet changes below first.' : null}
           />
         </SettingRow>
         <button
@@ -217,7 +222,12 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
               >
                 Add Shortcut
               </Button>
-              <Button type="button" size="sm" disabled={!snippetsDirty || invalid} onClick={apply}>Apply</Button>
+              <div className="flex items-center gap-2">
+                {applySnippetsBlockedByOverrides && snippetsDirty && (
+                  <span className="text-xs text-text-tertiary">Apply or discard the Key bindings changes above first.</span>
+                )}
+                <Button type="button" size="sm" disabled={!snippetsDirty || invalid || applySnippetsBlockedByOverrides} onClick={apply}>Apply</Button>
+              </div>
             </div>
           </div>
         </SettingRow>

@@ -18,7 +18,8 @@
  * only primary-button activations qualify.
  */
 
-export type LinkGesture = 'pane-browser' | 'external' | 'none';
+/** `rejected` = Alt or a non-primary button: never an activation, not even a plain click. */
+export type LinkGesture = 'pane-browser' | 'external' | 'none' | 'rejected';
 export type LinkDestination = 'pane-browser' | 'external' | 'none';
 export type LinkProvider = 'osc8' | 'web-links' | 'git';
 
@@ -47,7 +48,7 @@ const PLAIN_CLICK_OPENS_EXTERNALLY = {
 } satisfies Record<LinkProvider, boolean>;
 
 export function classifyLinkGesture(event: LinkActivationEventLike, isMac: boolean): LinkGesture {
-  if (event.altKey || (event.button ?? 0) !== 0) return 'none';
+  if (event.altKey || (event.button ?? 0) !== 0) return 'rejected';
   const primary = isMac ? event.metaKey : event.ctrlKey;
   if (primary && event.shiftKey) return 'pane-browser';
   if (primary) return 'external';
@@ -82,18 +83,25 @@ export async function routeUrlActivation(
   deps: LinkRouterDeps,
 ): Promise<LinkDestination> {
   const gesture = classifyLinkGesture(event, deps.isMac);
+  if (gesture === 'rejected') return 'none';
 
-  if (gesture === 'pane-browser') {
-    if (!deps.browserAvailable) {
-      // Known-unavailable surface: external fallback, exactly once.
-      await deps.openExternal(url);
-      return 'external';
-    }
-    const validated = validateBrowserUrl(url);
-    if (!validated) {
-      console.warn('[linkRouting] Rejected URL for Pane Browser:', url);
-      return 'none';
-    }
+  if (gesture === 'none') {
+    // No qualifying gesture: the provider's plain-click policy. OSC-8 keeps
+    // its pre-existing behavior of opening the hyperlink target as-is.
+    if (!PLAIN_CLICK_OPENS_EXTERNALLY[provider]) return 'none';
+    await deps.openExternal(url);
+    return 'external';
+  }
+
+  // Every gesture-driven sink — internal or external — takes only a
+  // validated, credential-free HTTP(S) URL; anything else opens nothing.
+  const validated = validateBrowserUrl(url);
+  if (!validated) {
+    console.warn('[linkRouting] Rejected URL for modified-click routing:', url);
+    return 'none';
+  }
+
+  if (gesture === 'pane-browser' && deps.browserAvailable) {
     // A failure after this point may have partially mutated panel state;
     // report it rather than also opening externally.
     try {
@@ -104,12 +112,10 @@ export async function routeUrlActivation(
     return 'pane-browser';
   }
 
-  if (gesture === 'external' || PLAIN_CLICK_OPENS_EXTERNALLY[provider]) {
-    await deps.openExternal(url);
-    return 'external';
-  }
-
-  return 'none';
+  // Primary, the macOS Control alias, or Primary+Shift on a known-unavailable
+  // surface: external, exactly once.
+  await deps.openExternal(validated);
+  return 'external';
 }
 
 /** Hover text advertising the gestures available for a URL link from the given provider. */

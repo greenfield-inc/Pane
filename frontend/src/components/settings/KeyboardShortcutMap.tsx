@@ -25,6 +25,8 @@ interface KeyboardShortcutMapProps {
   customCommands: readonly CustomCommand[];
   onDraftChange: (next: KeyboardShortcutOverrides) => void;
   onApply: () => void;
+  /** When set, Apply is disabled and this text explains why. */
+  applyBlockedReason?: string | null;
 }
 
 const STATE_LABELS = {
@@ -35,7 +37,7 @@ const STATE_LABELS = {
 } satisfies Record<ShortcutMapRow['state'], string | null>;
 
 export function KeyboardShortcutMap({
-  map, draft, dirty, terminalShortcuts, customCommands, onDraftChange, onApply,
+  map, draft, dirty, terminalShortcuts, customCommands, onDraftChange, onApply, applyBlockedReason = null,
 }: KeyboardShortcutMapProps) {
   const [query, setQuery] = useState('');
   const [confirmResetAll, setConfirmResetAll] = useState(false);
@@ -188,7 +190,10 @@ export function KeyboardShortcutMap({
               <li>Resolve conflicts to apply.</li>
             </ul>
           )}
-          <Button type="button" size="sm" disabled={!dirty || conflicted} onClick={onApply}>Apply</Button>
+          {applyBlockedReason && dirty && (
+            <span className="text-xs text-text-tertiary">{applyBlockedReason}</span>
+          )}
+          <Button type="button" size="sm" disabled={!dirty || conflicted || Boolean(applyBlockedReason)} onClick={onApply}>Apply</Button>
         </div>
       </div>
       <ConfirmDialog
