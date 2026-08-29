@@ -2,11 +2,17 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { LinkProviderConfig } from '../linkProviders/types';
 import { registerAllLinkProviders } from '../linkProviders';
-import { panelApi } from '../../../services/panelApi';
 import { openFileInEditor } from '../../../services/openFileInEditor';
-import { usePanelStore } from '../../../stores/panelStore';
+import { canHostSessionBrowser, openUrlInSessionBrowser } from '../../../services/browserPanelNavigation';
 import { useConfigStore } from '../../../stores/configStore';
-import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
+import { useSession } from '../../../contexts/useSession';
+import { isMac } from '../../../utils/platformUtils';
+import {
+  describeUrlGestures,
+  routeUrlActivation,
+  type LinkActivationEventLike,
+  type LinkProvider,
+} from '../linkRouting';
 
 export interface UseTerminalLinksConfig {
   workingDirectory: string;
@@ -36,14 +42,6 @@ interface SelectionPopoverState {
   text: string;
 }
 
-function getBrowserPanelTitle(url: string): string {
-  try {
-    return new URL(url).host || 'Browser';
-  } catch {
-    return 'Browser';
-  }
-}
-
 export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalLinksConfig) {
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
@@ -71,6 +69,38 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
   const mousePositionRef = useRef({ x: 0, y: 0 });
+  const sessionContext = useSession();
+
+  // A Browser panel can only be hosted by an ordinary worktree Session. Project
+  // (main-repo) terminals, Pane Chat, and terminals without a session context
+  // cannot show one, so Primary+Shift falls back to the external browser there
+  // instead of creating a hidden panel.
+  const browserAvailable = canHostSessionBrowser(sessionContext?.session);
+  const urlHoverHint = describeUrlGestures(isMac(), browserAvailable, 'git');
+  const hoverHintFor = useCallback(
+    (provider: LinkProvider) => describeUrlGestures(isMac(), browserAvailable, provider),
+    [browserAvailable],
+  );
+
+  const routeUrl = useCallback(
+    (url: string, event: LinkActivationEventLike, provider: LinkProvider) => routeUrlActivation(url, event, provider, {
+      isMac: isMac(),
+      browserAvailable,
+      openExternal: async (target) => {
+        try {
+          await window.electronAPI.openExternal(target);
+        } catch (error) {
+          console.error('[useTerminalLinks] Failed to open link externally:', error);
+        }
+      },
+      openInPaneBrowser: async (target) => { await openUrlInSessionBrowser(config.sessionId, target); },
+    }),
+    [browserAvailable, config.sessionId],
+  );
+  // xterm's linkHandler and WebLinksAddon are created once per terminal, so
+  // they read the latest router through a ref rather than re-creating xterm.
+  const routeUrlRef = useRef(routeUrl);
+  routeUrlRef.current = routeUrl;
 
   // Track mouse position for selection popover
   const onMouseMove = useCallback((e: React.MouseEvent) => {
@@ -108,9 +138,10 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       onShowFilePopover: (event, path, line) => {
         setFilePopover({ visible: true, x: event.clientX, y: event.clientY, path, line: line ?? 0 });
       },
-      onOpenUrl: (url) => {
-        window.electronAPI.openExternal(url);
+      onActivateUrl: (url, event) => {
+        void routeUrlRef.current(url, event, 'git');
       },
+      urlHoverHint,
     };
 
     const disposables = registerAllLinkProviders(providerConfig);
@@ -118,7 +149,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposables.forEach((d) => d.dispose());
     };
-  }, [terminal, config.workingDirectory, githubRemoteUrl]);
+  }, [terminal, config.workingDirectory, githubRemoteUrl, urlHoverHint]);
 
   // Listen for selection changes
   useEffect(() => {
@@ -138,11 +169,6 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       disposable.dispose();
     };
   }, [terminal]);
-
-  // Get panel store methods
-  const addPanel = usePanelStore((state) => state.addPanel);
-  const setActivePanelInStore = usePanelStore((state) => state.setActivePanel);
-  const updatePanelState = usePanelStore((state) => state.updatePanelState);
 
   // File popover action handlers
   const handleOpenInEditor = useCallback(async () => {
@@ -192,50 +218,21 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   }, [filePopover, isRemoteMode, config.sessionId]);
 
   const handleOpenInBrowser = useCallback(async (url: string) => {
-    const panels = usePanelStore.getState().getSessionPanels(config.sessionId);
-    const existingPanel = panels.find((candidate) => candidate.type === 'browser');
-
-    let browserPanel: ToolPanel;
-    if (existingPanel) {
-      // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
-      const existingCustomState = (existingPanel.state.customState ?? {}) as BrowserPanelState;
-      browserPanel = {
-        ...existingPanel,
-        state: {
-          ...existingPanel.state,
-          customState: {
-            ...existingCustomState,
-            currentUrl: url,
-          },
-        },
-      };
-      await panelApi.updatePanel(browserPanel.id, { state: browserPanel.state });
-      updatePanelState(browserPanel);
-    } else {
-      browserPanel = await panelApi.createPanel({
-        sessionId: config.sessionId,
-        type: 'browser',
-        title: getBrowserPanelTitle(url),
-        initialState: {
-          customState: {
-            currentUrl: url,
-          },
-        },
-      });
-      addPanel(browserPanel);
-    }
-
-    setActivePanelInStore(config.sessionId, browserPanel.id);
-    await panelApi.setActivePanel(config.sessionId, browserPanel.id);
-
-    window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
-      detail: { url, sessionId: config.sessionId },
-    }));
-  }, [config.sessionId, addPanel, setActivePanelInStore, updatePanelState]);
+    await openUrlInSessionBrowser(config.sessionId, url);
+  }, [config.sessionId]);
 
   const closeTooltip = useCallback(() => {
     setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
+
+  const showLinkTooltip = useCallback((event: MouseEvent, text: string, provider: LinkProvider) => {
+    setTooltip({ visible: true, x: event.clientX, y: event.clientY, text, hint: hoverHintFor(provider) });
+  }, [hoverHintFor]);
+  // Consumed by xterm handlers created once per terminal.
+  const showLinkTooltipRef = useRef(showLinkTooltip);
+  showLinkTooltipRef.current = showLinkTooltip;
+  const closeTooltipRef = useRef(closeTooltip);
+  closeTooltipRef.current = closeTooltip;
 
   const closeFilePopover = useCallback(() => {
     setFilePopover((prev) => ({ ...prev, visible: false }));
@@ -247,6 +244,10 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   return {
     onMouseMove,
+    routeUrlRef,
+    showLinkTooltipRef,
+    closeTooltipRef,
+    browserAvailable,
     tooltip,
     filePopover,
     isRemoteMode,

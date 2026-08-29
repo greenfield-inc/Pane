@@ -646,6 +646,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     handleShowInExplorer,
     closeFilePopover,
     closeSelectionPopover,
+    routeUrlRef,
+    showLinkTooltipRef,
+    closeTooltipRef,
+    browserAvailable,
   } = useTerminalLinks(terminalInstance, {
     workingDirectory: workingDirectory || '',
     sessionId: sessionId || panel.sessionId,
@@ -1000,11 +1004,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           minimumContrastRatio: getMinimumContrastRatio(terminalRuntimeRef.current.highContrast),
           macOptionIsMeta: false,
           linkHandler: {
-            activate: (_event, uri) => {
-              void window.electronAPI.openExternal(uri).catch((error) => {
-                console.error('[TerminalPanel] Failed to open terminal link:', error);
-              });
+            // OSC-8 hyperlinks: plain click keeps opening externally; modified
+            // clicks go through the shared router like every other URL source.
+            activate: (event, uri) => {
+              void routeUrlRef.current(uri, event, 'osc8');
             },
+            hover: (event, uri) => showLinkTooltipRef.current(event, uri, 'osc8'),
+            leave: () => closeTooltipRef.current(),
           },
         });
         setTerminalFontObservation(initialFontFamily);
@@ -1126,12 +1132,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           try {
             const { WebLinksAddon: WebLinksAddonImpl } = await import('@xterm/addon-web-links');
             if (!disposed) {
-              const isMac = navigator.platform.toUpperCase().includes('MAC');
               const webLinksAddon = new WebLinksAddonImpl((event, uri) => {
-                // Only open link if Ctrl (Windows/Linux) or Cmd (Mac) is held
-                if (isMac ? event.metaKey : event.ctrlKey) {
-                  window.electronAPI.openExternal(uri);
-                }
+                // Auto-detected URLs: no plain-click behavior; the router gates on modifiers.
+                void routeUrlRef.current(uri, event, 'web-links');
+              }, {
+                hover: (event, uri) => showLinkTooltipRef.current(event, uri, 'web-links'),
+                leave: () => closeTooltipRef.current(),
               });
               terminal.loadAddon(webLinksAddon);
               webLinksAddonRef.current = webLinksAddon;
@@ -1844,7 +1850,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       
       setIsInitialized(false);
     };
-  }, [panel.id]); // Only depend on panel.id to prevent re-initialization on session switch
+  }, [panel.id, routeUrlRef, showLinkTooltipRef, closeTooltipRef]); // Only depend on panel.id (the refs are stable) to prevent re-initialization on session switch
 
   // Shared activation refresh for both power modes: fires on tab activation and
   // window refocus (activationVisible = panelVisible && windowFocused). Initial,
@@ -2137,6 +2143,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         workingDirectory={workingDirectory}
         sessionId={panel.sessionId}
         isRemoteMode={isRemoteMode}
+        browserAvailable={browserAvailable}
         onOpenInBrowser={handleOpenInBrowser}
         onClose={closeSelectionPopover}
       />
