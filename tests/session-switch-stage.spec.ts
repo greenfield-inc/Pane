@@ -104,6 +104,16 @@ async function callsFor(page: Page, channel: string, sessionId: string): Promise
   }, { channel, sessionId });
 }
 
+async function lifecycleLogs(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock: { getConsoleLogCalls(): { args?: unknown[] }[] };
+    }).__paneTestElectronMock;
+    return mock.getConsoleLogCalls().map((call) => String(call.args?.[0] ?? ''));
+  });
+}
+
 async function boot(page: Page, panelLoadDelayMs = 0): Promise<void> {
   await installEmptyStageRecorder(page);
   await installElectronApiMock(page, {
@@ -238,4 +248,29 @@ test('a selection made when the activation mask lifts survives the delayed backs
 
   const afterBackstop = await xtermEvaluate(panel.locator('.xterm').first(), (terminal) => terminal.getSelection());
   expect(afterBackstop).toEqual(selected);
+});
+
+test('the delayed backstop repaints instead of reset+replay when nothing moved', async ({ page }) => {
+  // The backstop exists to repair a refresh that raced layout or a renderer
+  // that attached after it. When the geometry it would re-render at has not
+  // moved, a reset+replay cannot discover anything new and would drop the
+  // user's selection, so it degrades to a repaint -- which is what lets the
+  // mask lift on the settle instead of waiting the backstop out.
+  await boot(page);
+  await openSession(page, sessionA.name);
+  await expect(page.getByRole('tabpanel', { name: alpha.title }).locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
+
+  await openSession(page, sessionB.name);
+  const panel = page.getByRole('tabpanel', { name: betaSecond.title });
+  await expect(panel.locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
+
+  await expect.poll(
+    () => lifecycleLogs(page).then((lines) => lines.filter(
+      (line) => line.includes(`activation repaint for panel ${betaSecond.id}`),
+    ).length),
+    { timeout: 15_000 },
+  ).toBeGreaterThan(0);
+
+  const lines = await lifecycleLogs(page);
+  expect(lines.filter((line) => line.includes(`Delayed activation refresh for panel ${betaSecond.id}`))).toHaveLength(0);
 });
