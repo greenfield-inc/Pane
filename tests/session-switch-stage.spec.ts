@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import { selectFirstLine, xtermEvaluate } from './terminalXterm';
 
 // Switching panes inside a repo tears down the outgoing session's terminals and
 // mounts the incoming session's, so whatever the stage shows between those two
@@ -212,4 +213,29 @@ test('a failed panel read settles the stage on the launcher instead of leaving i
 
   await openSession(page, sessionB.name);
   await expect(page.getByTestId('empty-stage')).toBeVisible({ timeout: 15_000 });
+});
+
+test('a selection made when the activation mask lifts survives the delayed backstop', async ({ page }) => {
+  // The mask has to outlast REFOCUS_DELAYED_REFRESH_MS, not just the first
+  // paint: that backstop re-runs the full reset+replay, and reset() drops the
+  // selection. Lifting the mask on an early settle exposes a terminal the user
+  // can select in ~270 ms before it is wiped under them.
+  await boot(page);
+  await openSession(page, sessionA.name);
+  await expect(page.getByRole('tabpanel', { name: alpha.title }).locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
+
+  await openSession(page, sessionB.name);
+  const panel = page.getByRole('tabpanel', { name: betaSecond.title });
+  await expect(panel.locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
+  await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0, { timeout: 15_000 });
+
+  await selectFirstLine(panel.locator('.xterm').first());
+  const selected = await xtermEvaluate(panel.locator('.xterm').first(), (terminal) => terminal.getSelection());
+  expect(selected.trim().length).toBeGreaterThan(0);
+
+  // Past the delayed backstop, with margin.
+  await page.waitForTimeout(1200);
+
+  const afterBackstop = await xtermEvaluate(panel.locator('.xterm').first(), (terminal) => terminal.getSelection());
+  expect(afterBackstop).toEqual(selected);
 });
