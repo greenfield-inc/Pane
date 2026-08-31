@@ -225,8 +225,19 @@ export const SessionView = memo(() => {
     }
   }, [setLayoutInStore, setFocusedGroupInStore, debouncedPersist, setActivePanelInStore]);
 
+  // Which session's layout load has settled. The stage renders the "Open"
+  // launcher only for a session whose layout is known to be absent -- never as
+  // a stand-in for one still in flight, which flashed the launcher over the
+  // outgoing terminal on every switch.
+  const [settledLayoutSessionId, setSettledLayoutSessionId] = useState<string | null>(null);
+  const stageSettled = !!activeSession?.id && settledLayoutSessionId === activeSession.id;
+
   // Load panels AND layout when session changes
   useEffect(() => {
+    // A fast A -> B -> A flip can land an older chain after a newer one;
+    // without this the stale response re-publishes its snapshot over the
+    // fresher store state and re-runs the stage's mount.
+    let cancelled = false;
     if (activeSession?.id) {
       const sid = activeSession.id;
       devLog.debug('[SessionView] Loading panels for session:', sid);
@@ -243,8 +254,18 @@ export const SessionView = memo(() => {
         (usePanelStore.getState().panels[sid] || []).map(p => p.id)
       );
 
+      // Panels and layout are independent reads; main writes neither in
+      // between, so they go out together instead of head-to-tail. The stage
+      // stays blank until the layout lands, so this pair is the switch's
+      // visible latency.
+      const layoutRequest = panelApi.getLayout(sid).then(
+        stored => ({ ok: true as const, stored }),
+        err => ({ ok: false as const, err }),
+      );
+
       // Always reload panels from database when switching sessions
       panelApi.loadPanelsForSession(sid).then(async loadedPanels => {
+        if (cancelled) return;
         devLog.debug('[SessionView] Loaded panels:', loadedPanels);
         const sessionState = useSessionStore.getState();
         const loadedSession = sessionState.activeMainRepoSession?.id === sid
@@ -259,7 +280,9 @@ export const SessionView = memo(() => {
         // Preserve the existing startup preference without blocking Review.
         const fallback = pickDefaultPanel(loadedPanels, hasReviewPr);
 
-        const activePanelResult = await panelApi.getActivePanel(sid);
+        // The active panel is already in loadedPanels; panelApi.getActivePanel
+        // would re-run the identical getSessionPanels query to find it.
+        const activePanelResult = loadedPanels.find(panel => panel.state.isActive) ?? null;
         const effectiveActivePanel = activePanelResult ?? fallback;
         const fallbackActiveId = effectiveActivePanel?.id ?? null;
 
@@ -291,7 +314,10 @@ export const SessionView = memo(() => {
 
         let stored: SessionPanelLayout | null = null;
         try {
-          stored = await panelApi.getLayout(sid);
+          const layoutResult = await layoutRequest;
+          if (cancelled) return;
+          if (!layoutResult.ok) throw layoutResult.err;
+          stored = layoutResult.stored;
         } catch (err) {
           console.warn('[SessionView] Failed to load layout, creating default:', err);
         }
@@ -321,11 +347,19 @@ export const SessionView = memo(() => {
           : reconciledLayout;
         setLayoutInStore(sid, layout);
         setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+        setSettledLayoutSessionId(sid);
+      }).catch(err => {
+        // A failed panel read used to fall through to an undefined layout,
+        // which rendered the launcher. Settle explicitly so the stage still
+        // offers a way out instead of staying blank.
+        console.warn('[SessionView] Failed to load panels for session:', sid, err);
+        if (!cancelled) setSettledLayoutSessionId(sid);
       });
     }
 
     // Flush layout on cleanup (session switch or unmount)
     return () => {
+      cancelled = true;
       flushLayoutPersist();
     };
   }, [activeSession?.id, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
@@ -1199,7 +1233,7 @@ export const SessionView = memo(() => {
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
   const emptyStage = useMemo(() => (
-    <div className="flex h-full flex-1 items-center justify-center">
+    <div className="flex h-full flex-1 items-center justify-center" data-testid="empty-stage">
       <div className="w-64">
         <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
         {[
@@ -1854,7 +1888,7 @@ export const SessionView = memo(() => {
               <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
-                  {editorStageElement || emptyStage}
+                  {editorStageElement ?? (stageSettled ? emptyStage : null)}
                 </div>
 
                 {/* Bottom: horizontal detail panel */}
@@ -1935,7 +1969,7 @@ export const SessionView = memo(() => {
               <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
-                  {editorStageElement || emptyStage}
+                  {editorStageElement ?? (stageSettled ? emptyStage : null)}
                 </div>
 
                 {/* Bottom: persistent terminal (collapsible) */}
