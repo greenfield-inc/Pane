@@ -33,6 +33,36 @@ const handleSessionCreated = (newSession: Session) => {
 
 IPC handlers in `useIPCEvents` already call `addSession` / `updateSession` / `deleteSession` on the store. Subscribe with selectors (`useSessionStore(s => s.sessions)`) instead of copying the list into local React state.
 
+### Main Repo Sessions Are Stored Twice
+
+A repository's main repo session lives in **two** places in `sessionStore`: in the
+`sessions` array (which the sidebar renders) and in `activeMainRepoSession` (which
+the project view reads) while it is active. Any writer that touches a session must
+update **both** copies, or one surface renders stale data.
+
+```typescript
+// ❌ BAD: returns early, leaving the sidebar's copy stale
+if (state.activeMainRepoSession?.id === updated.id) {
+  return { ...state, activeMainRepoSession: { ...state.activeMainRepoSession, ...updated } };
+}
+// ...never reached for the main repo session
+return { ...state, sessions: updateInList(state.sessions, updated) };
+
+// ✅ GOOD: both copies move together
+const newActiveMainRepoSession = state.activeMainRepoSession?.id === updated.id
+  ? { ...state.activeMainRepoSession, ...updated }
+  : state.activeMainRepoSession;
+return {
+  ...state,
+  sessions: updateInList(state.sessions, updated),
+  activeMainRepoSession: newActiveMainRepoSession,
+};
+```
+
+`updateSession` and `updateSessionGitStatus` both follow the second shape. Regression
+coverage lives in `tests/sidebar-rename-pane.spec.ts`, which renames an active main
+repo pane and asserts the sidebar label changes.
+
 ### Project Updates
 
 ```typescript
