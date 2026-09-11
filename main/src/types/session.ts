@@ -30,6 +30,8 @@ export interface Session {
   baseCommit?: string;
   baseBranch?: string;
   pr_renamed?: boolean;
+  /** ISO timestamp set by `runpane panes handoff --park`; absent when the pane is active here. */
+  handedOffAt?: string;
   activateOnCreate?: boolean;
   createDefaultTerminalOnCreate?: boolean;
 }

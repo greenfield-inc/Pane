@@ -83,6 +83,8 @@ export interface Session {
   pr_renamed?: boolean;
   is_hidden?: boolean;
   commit_mode?: 'disabled' | 'checkpoint' | 'prompt';
+  /** Set by `runpane panes handoff --park`; cleared by `runpane panes receive` on this runtime. */
+  handed_off_at?: string | null;
 }
 
 export interface SessionOutput {
@@ -140,6 +142,7 @@ export interface UpdateSessionData {
   skip_continue_next?: boolean;
   pr_renamed?: boolean;
   worktree_path?: string;
+  handed_off_at?: string | null;
 }
 
 export interface PromptMarker {

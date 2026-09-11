@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   is_favorite BOOLEAN DEFAULT 0,
   favorite_pinned_at DATETIME,
   is_hidden BOOLEAN DEFAULT 0,
-  worktree_ownership TEXT NOT NULL DEFAULT 'pane'
+  worktree_ownership TEXT NOT NULL DEFAULT 'pane',
+  handed_off_at DATETIME
 );
 
 -- Session outputs table to store terminal output history

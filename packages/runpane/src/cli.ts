@@ -27,6 +27,7 @@ import {
   runPanelsWait,
   runPanesArchive,
   runPanesAdopt,
+  runPanesHandoff,
   runPanesCreate,
   runPanesCost,
   runPanesList,
@@ -183,6 +184,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panes archive') {
     return runPanesArchive(parsed);
+  }
+
+  if (parsed.command === 'panes handoff') {
+    return runPanesHandoff(parsed);
   }
 
   if (parsed.command === 'panes pin') {
