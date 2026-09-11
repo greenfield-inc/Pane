@@ -149,6 +149,7 @@ interface PaneSummary {
   lastActivity?: string;
   archived?: boolean;
   ownership: 'pane' | 'external';
+  handedOffAt?: string;
 }
 
 interface PaneListResult {
@@ -206,6 +207,64 @@ interface PaneArchiveRequest {
   source?: 'user' | 'agent';
   dryRun?: boolean;
 }
+
+interface PaneHandoffRequest {
+  paneId: string;
+  to: string;
+  mode?: 'park' | 'archive';
+  includeDirty?: boolean;
+  force?: boolean;
+  limit?: number;
+  dryRun?: boolean;
+  source?: 'user' | 'agent';
+}
+
+interface PaneHandoffBlockReason {
+  code: 'uncommitted-changes' | 'non-fast-forward' | 'already-handed-off' | 'push-failed' | 'commit-failed';
+  message: string;
+  files?: string[];
+  upstream?: string;
+  remoteHead?: string;
+  gitOutput?: string;
+}
+
+interface PaneHandoffSuccessResult {
+  ok: boolean;
+  generation?: number;
+  paneId: string;
+  branch: string;
+  headSha: string;
+  handoffPath: string;
+  target: string;
+  agent: 'codex' | 'claude' | 'cursor' | 'unknown';
+  pushed: { upstream: string };
+  mode: 'parked' | 'archived';
+  archive?: PaneArchiveResult;
+  receiveCommand: string;
+  warnings?: string[];
+}
+
+interface PaneHandoffBlockedResult {
+  ok: false;
+  generation?: number;
+  paneId: string;
+  blocked: PaneHandoffBlockReason;
+  nextCommand?: string;
+}
+
+interface PaneHandoffDryRunResult {
+  ok: true;
+  paneId: string;
+  dryRun: true;
+  wouldHandoff: boolean;
+  mode: 'park' | 'archive';
+  files: string[];
+  upstream?: string;
+  blocked?: PaneHandoffBlockReason;
+  warnings?: string[];
+}
+
+type PaneHandoffResult = PaneHandoffSuccessResult | PaneHandoffBlockedResult | PaneHandoffDryRunResult;
 
 interface PanePinRequest {
   paneId: string;
@@ -586,6 +645,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   lastActivity: boundary.optional(boundary.string),
   archived: boundary.optional(boundary.boolean),
   ownership: boundary.enumeration('pane', 'external'),
+  handedOffAt: boundary.optional(boundary.string),
 });
 const panelBlockedSchema: BoundarySchema<PanelBlockedState> = boundary.object({
   kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'unknown'),
@@ -808,6 +868,49 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
     worktreeCleanup: boundary.enumeration('completed', 'failed', 'timeout', 'not-applicable'),
     worktreePath: boundary.optional(boundary.string),
     safetyCheck: archiveSafetySchema,
+  }),
+);
+const paneHandoffBlockReasonSchema: BoundarySchema<PaneHandoffBlockReason> = boundary.object({
+  code: boundary.enumeration('uncommitted-changes', 'non-fast-forward', 'already-handed-off', 'push-failed', 'commit-failed'),
+  message: boundary.string,
+  files: boundary.optional(boundary.array(boundary.string)),
+  upstream: boundary.optional(boundary.string),
+  remoteHead: boundary.optional(boundary.string),
+  gitOutput: boundary.optional(boundary.string),
+});
+const paneHandoffResultSchema: BoundarySchema<PaneHandoffResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(false),
+    generation: boundary.optional(boundary.number),
+    paneId: boundary.string,
+    blocked: paneHandoffBlockReasonSchema,
+    nextCommand: boundary.optional(boundary.string),
+  }),
+  boundary.object({
+    ok: boundary.literal(true),
+    paneId: boundary.string,
+    dryRun: boundary.literal(true),
+    wouldHandoff: boundary.boolean,
+    mode: boundary.enumeration('park', 'archive'),
+    files: boundary.array(boundary.string),
+    upstream: boundary.optional(boundary.string),
+    blocked: boundary.optional(paneHandoffBlockReasonSchema),
+    warnings: boundary.optional(boundary.array(boundary.string)),
+  }),
+  boundary.object({
+    ok: boundary.boolean,
+    generation: boundary.optional(boundary.number),
+    paneId: boundary.string,
+    branch: boundary.string,
+    headSha: boundary.string,
+    handoffPath: boundary.string,
+    target: boundary.string,
+    agent: boundary.enumeration('codex', 'claude', 'cursor', 'unknown'),
+    pushed: boundary.object({ upstream: boundary.string }),
+    mode: boundary.enumeration('parked', 'archived'),
+    archive: boundary.optional(paneArchiveResultSchema),
+    receiveCommand: boundary.string,
+    warnings: boundary.optional(boundary.array(boundary.string)),
   }),
 );
 const panePinResultSchema: BoundarySchema<PanePinResult> = boundary.object({
@@ -1357,6 +1460,45 @@ export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+export async function runPanesHandoff(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.paneId) {
+    throw new Error('runpane panes handoff requires --pane.');
+  }
+  if (!parsed.handoffTo) {
+    throw new Error('runpane panes handoff requires --to <local|remote:<label>>.');
+  }
+  if (parsed.park && parsed.archive) {
+    throw new Error('Use either --park or --archive, not both.');
+  }
+
+  const request: PaneHandoffRequest = {
+    paneId: parsed.paneId,
+    to: parsed.handoffTo,
+  };
+  if (parsed.archive) request.mode = 'archive';
+  else if (parsed.park) request.mode = 'park';
+  if (parsed.includeDirty) request.includeDirty = true;
+  if (parsed.force) request.force = true;
+  if (parsed.limit !== undefined) request.limit = parsed.limit;
+  if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
+  if (parsed.dryRun) request.dryRun = true;
+
+  await confirmPaneHandoff(parsed, request);
+
+  const result = await invokeDaemon('runpane:panes:handoff', [request], paneHandoffResultSchema, {
+    paneDir: parsed.paneDir,
+    timeoutMs: 180_000,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    printPaneHandoffResult(result);
+  }
+
+  return result.ok ? 0 : 1;
+}
+
 export async function runPanesPin(parsed: ParsedArgs, pinned: boolean): Promise<number> {
   if (!parsed.paneId) {
     throw new Error(`runpane panes ${pinned ? 'pin' : 'unpin'} requires --pane.`);
@@ -1874,6 +2016,28 @@ async function confirmPaneArchive(parsed: ParsedArgs, request: PaneArchiveReques
   }
 }
 
+async function confirmPaneHandoff(parsed: ParsedArgs, request: PaneHandoffRequest): Promise<void> {
+  if (parsed.dryRun || parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panes handoff mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const action = request.mode === 'archive' ? 'archive' : 'park';
+    const dirty = request.includeDirty ? ', committing any uncommitted work first' : '';
+    const answer = (await rl.question(`Hand off pane ${request.paneId} to ${request.to} and ${action} it${dirty}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function confirmPanePin(parsed: ParsedArgs, request: PanePinRequest): Promise<void> {
   if (parsed.dryRun || parsed.yes) {
     return;
@@ -2071,7 +2235,8 @@ function printPaneListResult(result: PaneListResult): void {
   for (const pane of result.panes) {
     const repo = pane.repoName ? ` ${pane.repoName}` : '';
     const pinned = pane.pinned ? ' pinned' : '';
-    console.log(`${pane.id}\t${pane.name}\t${pane.status}${pinned}\t${pane.panelCount} panels\t${pane.worktreePath}${repo}`);
+    const handedOff = pane.handedOffAt ? ' handed-off' : '';
+    console.log(`${pane.id}\t${pane.name}\t${pane.status}${pinned}${handedOff}\t${pane.panelCount} panels\t${pane.worktreePath}${repo}`);
   }
 }
 
@@ -2139,6 +2304,56 @@ function printPaneArchiveResult(result: PaneArchiveResult): void {
   }
 
   console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}.`);
+}
+
+function printPaneHandoffResult(result: PaneHandoffResult): void {
+  if ('dryRun' in result) {
+    if (result.wouldHandoff) {
+      console.log(`Would hand off pane ${result.paneId} (${result.mode}).`);
+    } else {
+      console.log(`Would refuse to hand off pane ${result.paneId}: ${result.blocked?.message ?? 'blocked'}`);
+    }
+    printHandoffBlockedDetails(result.blocked);
+    printHandoffWarnings(result.warnings);
+    return;
+  }
+
+  if ('blocked' in result) {
+    console.error(`Refused to hand off pane ${result.paneId}: ${result.blocked.message}`);
+    printHandoffBlockedDetails(result.blocked);
+    if (result.nextCommand) {
+      console.error(`Next: ${result.nextCommand}`);
+    }
+    return;
+  }
+
+  const verb = result.mode === 'archived' ? 'Archived' : 'Parked';
+  console.log(`${verb} pane ${result.paneId}: ${result.branch} at ${result.headSha.slice(0, 12)}, HANDOFF.md pushed to ${result.pushed.upstream}.`);
+  if (result.archive && !result.archive.ok) {
+    console.error('Archive did not complete cleanly; inspect the archive field in --json output.');
+  }
+  printHandoffWarnings(result.warnings);
+  console.log(`On the target runtime (${result.target}), run:`);
+  console.log(result.receiveCommand);
+}
+
+function printHandoffBlockedDetails(blocked: PaneHandoffBlockReason | undefined): void {
+  if (!blocked) return;
+  for (const file of blocked.files ?? []) {
+    console.error(`  ${file}`);
+  }
+  if (blocked.upstream && blocked.remoteHead) {
+    console.error(`  ${blocked.upstream} is at ${blocked.remoteHead}`);
+  }
+  if (blocked.gitOutput) {
+    console.error(blocked.gitOutput.trimEnd());
+  }
+}
+
+function printHandoffWarnings(warnings: string[] | undefined): void {
+  for (const warning of warnings ?? []) {
+    console.error(`Warning: ${warning}`);
+  }
 }
 
 function printArchiveCommitEvidence(

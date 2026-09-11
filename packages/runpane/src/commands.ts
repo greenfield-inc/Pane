@@ -58,6 +58,10 @@ export interface ParsedArgs {
   composerStrategy?: string;
   force?: boolean;
   launch?: boolean;
+  handoffTo?: string;
+  park?: boolean;
+  archive?: boolean;
+  includeDirty?: boolean;
   watchAs?: string;
   watchSince?: number;
   watchFrom?: 'now' | 'earliest';
@@ -315,6 +319,18 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.launch = true;
     return;
   }
+  if (flag === '--park') {
+    parsed.park = true;
+    return;
+  }
+  if (flag === '--archive') {
+    parsed.archive = true;
+    return;
+  }
+  if (flag === '--include-dirty') {
+    parsed.includeDirty = true;
+    return;
+  }
   if (flag === '--follow') {
     parsed.follow = true;
     return;
@@ -463,6 +479,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.concurrency = concurrency;
     return;
   }
+  if (flag === '--to') {
+    parsed.handoffTo = value;
+    return;
+  }
   if (flag === '--limit') {
     const limit = Number(value);
     if (!Number.isInteger(limit) || limit <= 0) {
@@ -575,6 +595,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panes create'
     || command === 'panes adopt'
     || command === 'panes archive'
+    || command === 'panes handoff'
     || command === 'panes pin'
     || command === 'panes unpin'
     || command === 'panes rename'

@@ -605,7 +605,8 @@ function SessionRowContent({
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
   const prNumber = gs?.prNumber;
-  const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
+  const isHandedOff = Boolean(session.handedOffAt);
+  const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external' || isHandedOff);
 
   if (rowLayout === 'single') {
     return (
@@ -632,6 +633,7 @@ function SessionRowContent({
             )}
             {prNumber && <span className="text-text-tertiary">#{prNumber}</span>}
             {session.worktreeOwnership === 'external' && <span className="text-text-tertiary">External</span>}
+            {isHandedOff && <span className="text-text-tertiary">Handed off</span>}
           </span>
         )}
       </div>
@@ -666,6 +668,9 @@ function SessionRowContent({
             )}
             {session.worktreeOwnership === 'external' && (
               <span className="text-text-tertiary">External</span>
+            )}
+            {isHandedOff && (
+              <span className="text-text-tertiary">Handed off</span>
             )}
           </span>
         )}

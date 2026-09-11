@@ -342,6 +342,8 @@ export interface RunpanePaneSummary {
   lastActivity?: string;
   archived?: boolean;
   ownership: 'pane' | 'external';
+  /** Present when the pane was parked by `runpane panes handoff`. */
+  handedOffAt?: string;
 }
 
 export interface RunpanePaneListRequest {
@@ -467,6 +469,158 @@ export type RunpanePaneArchiveResult =
   | RunpanePaneArchiveSuccessResult
   | RunpanePaneArchiveBlockedResult
   | RunpanePaneArchiveDryRunResult;
+
+export type RunpanePaneHandoffMode = 'park' | 'archive';
+
+export interface RunpanePaneHandoffRequest {
+  paneId: string;
+  /** `local` or `remote:<profile label>`; recorded in HANDOFF.md and used to phrase the receive command. */
+  to: string;
+  mode?: RunpanePaneHandoffMode;
+  includeDirty?: boolean;
+  force?: boolean;
+  /** Number of sanitized CLI panel lines captured into HANDOFF.md (default 80). */
+  limit?: number;
+  dryRun?: boolean;
+  source?: RunpanePanelCreateSource;
+}
+
+export type RunpanePaneHandoffBlockCode =
+  | 'uncommitted-changes'
+  | 'non-fast-forward'
+  | 'already-handed-off'
+  | 'push-failed'
+  | 'commit-failed';
+
+export interface RunpanePaneHandoffBlockReason {
+  code: RunpanePaneHandoffBlockCode;
+  message: string;
+  files?: string[];
+  upstream?: string;
+  remoteHead?: string;
+  gitOutput?: string;
+}
+
+export interface RunpanePaneHandoffBlockedResult {
+  ok: false;
+  generation?: number;
+  paneId: string;
+  blocked: RunpanePaneHandoffBlockReason;
+  nextCommand?: string;
+}
+
+export interface RunpanePaneHandoffSuccessResult {
+  ok: boolean;
+  generation?: number;
+  paneId: string;
+  branch: string;
+  headSha: string;
+  handoffPath: string;
+  target: string;
+  agent: RunpaneAgentId | 'unknown';
+  pushed: { upstream: string };
+  mode: 'parked' | 'archived';
+  archive?: RunpanePaneArchiveResult;
+  receiveCommand: string;
+  warnings?: string[];
+}
+
+export interface RunpanePaneHandoffDryRunResult {
+  ok: true;
+  paneId: string;
+  dryRun: true;
+  wouldHandoff: boolean;
+  mode: RunpanePaneHandoffMode;
+  files: string[];
+  upstream?: string;
+  blocked?: RunpanePaneHandoffBlockReason;
+  warnings?: string[];
+}
+
+export type RunpanePaneHandoffResult =
+  | RunpanePaneHandoffSuccessResult
+  | RunpanePaneHandoffBlockedResult
+  | RunpanePaneHandoffDryRunResult;
+
+export type RunpanePaneReceivePath = 'resume' | 'adopt-orphan' | 'create';
+
+export interface RunpanePaneReceiveRequest {
+  repo: RunpaneRepoSelector;
+  branch: string;
+  tool: RunpaneToolSpec;
+  name?: string;
+  remote?: string;
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: RunpanePanelCreateSource;
+  readyTimeoutMs?: number;
+  dryRun?: boolean;
+}
+
+export type RunpanePaneReceiveBlockCode =
+  | 'invalid-branch'
+  | 'branch-not-found'
+  | 'missing-handoff-note'
+  | 'branch-in-use'
+  | 'path-in-use'
+  | 'diverged';
+
+export interface RunpanePaneReceiveNote {
+  pane: string;
+  branch: string;
+  head: string;
+  agent: RunpaneAgentId | 'unknown';
+  target: string;
+  handedOffAt: string;
+  pr?: string;
+}
+
+export interface RunpanePaneReceiveBlockReason {
+  code: RunpanePaneReceiveBlockCode;
+  message: string;
+  paneId?: string;
+  name?: string;
+  path?: string;
+  localSha?: string;
+  remoteSha?: string;
+  gitOutput?: string;
+}
+
+export interface RunpanePaneReceiveBlockedResult {
+  ok: false;
+  generation?: number;
+  branch: string;
+  blocked: RunpanePaneReceiveBlockReason;
+  nextCommand?: string;
+}
+
+export interface RunpanePaneReceiveSuccessResult {
+  ok: boolean;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  worktreePath: string;
+  handoffPath: string;
+  path: RunpanePaneReceivePath;
+  note: RunpanePaneReceiveNote;
+  readiness?: RunpanePaneReadiness;
+  initialInput?: RunpaneInitialInputDeliveryResult;
+  nextCommand: string;
+}
+
+export interface RunpanePaneReceiveDryRunResult {
+  ok: true;
+  dryRun: true;
+  branch: string;
+  path: RunpanePaneReceivePath;
+  name: string;
+  note: RunpanePaneReceiveNote;
+}
+
+export type RunpanePaneReceiveResult =
+  | RunpanePaneReceiveSuccessResult
+  | RunpanePaneReceiveBlockedResult
+  | RunpanePaneReceiveDryRunResult;
 
 export interface RunpanePanelSummary {
   id: string;

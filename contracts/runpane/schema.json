@@ -129,11 +129,24 @@
             "includeHeldInputPresence"
           ],
           "properties": {
-            "format": { "enum": ["lines", "json"] },
-            "heartbeatSeconds": { "type": "number" },
-            "idleAfterMs": { "type": "number" },
-            "agentsOnly": { "type": "boolean" },
-            "includeHeldInputPresence": { "type": "boolean" }
+            "format": {
+              "enum": [
+                "lines",
+                "json"
+              ]
+            },
+            "heartbeatSeconds": {
+              "type": "number"
+            },
+            "idleAfterMs": {
+              "type": "number"
+            },
+            "agentsOnly": {
+              "type": "boolean"
+            },
+            "includeHeldInputPresence": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         }
@@ -375,6 +388,7 @@
         "panes create",
         "panes adopt",
         "panes archive",
+        "panes handoff",
         "panes pin",
         "panes unpin",
         "panes rename",
@@ -445,6 +459,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panes archive": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes handoff": {
           "$ref": "#/$defs/helpLines"
         },
         "panes pin": {

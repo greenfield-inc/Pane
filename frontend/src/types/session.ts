@@ -102,6 +102,8 @@ export interface Session {
   gitStatus?: GitStatus;
   baseCommit?: string;
   baseBranch?: string;
+  /** ISO timestamp set by `runpane panes handoff --park`; absent when the pane is active here. */
+  handedOffAt?: string;
   activateOnCreate?: boolean;
   createDefaultTerminalOnCreate?: boolean;
 }
