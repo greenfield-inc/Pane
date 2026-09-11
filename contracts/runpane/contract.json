@@ -3370,14 +3370,24 @@
       "properties": {
         "repo": {
           "oneOf": [
-            { "type": "string" },
+            {
+              "type": "string"
+            },
             {
               "type": "object",
               "properties": {
-                "id": { "type": "number" },
-                "path": { "type": "string" },
-                "name": { "type": "string" },
-                "active": { "const": true }
+                "id": {
+                  "type": "number"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "active": {
+                  "const": true
+                }
               },
               "additionalProperties": false
             }
@@ -3395,67 +3405,161 @@
         "usageTotals": {
           "type": "object",
           "required": [
-            "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens",
-            "totalTokens", "messageCount", "estimatedCostUsd", "costIncomplete", "cacheSavingsUsd"
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheCreationTokens",
+            "totalTokens",
+            "messageCount",
+            "estimatedCostUsd",
+            "costIncomplete",
+            "cacheSavingsUsd"
           ],
           "properties": {
-            "inputTokens": { "type": "number" },
-            "outputTokens": { "type": "number" },
-            "cacheReadTokens": { "type": "number" },
-            "cacheCreationTokens": { "type": "number" },
-            "totalTokens": { "type": "number" },
-            "messageCount": { "type": "number" },
-            "estimatedCostUsd": { "type": "number" },
-            "costIncomplete": { "type": "boolean" },
-            "cacheSavingsUsd": { "type": "number" }
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            },
+            "cacheReadTokens": {
+              "type": "number"
+            },
+            "cacheCreationTokens": {
+              "type": "number"
+            },
+            "totalTokens": {
+              "type": "number"
+            },
+            "messageCount": {
+              "type": "number"
+            },
+            "estimatedCostUsd": {
+              "type": "number"
+            },
+            "costIncomplete": {
+              "type": "boolean"
+            },
+            "cacheSavingsUsd": {
+              "type": "number"
+            }
           },
           "additionalProperties": false
         },
         "usageByModel": {
           "type": "object",
           "required": [
-            "model", "provider", "inputTokens", "outputTokens", "cacheReadTokens",
-            "cacheCreationTokens", "totalTokens", "messageCount", "estimatedCostUsd",
-            "costIncomplete", "cacheSavingsUsd"
+            "model",
+            "provider",
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheCreationTokens",
+            "totalTokens",
+            "messageCount",
+            "estimatedCostUsd",
+            "costIncomplete",
+            "cacheSavingsUsd"
           ],
           "properties": {
-            "model": { "type": "string" },
-            "provider": { "enum": ["claude", "codex"] },
-            "inputTokens": { "type": "number" },
-            "outputTokens": { "type": "number" },
-            "cacheReadTokens": { "type": "number" },
-            "cacheCreationTokens": { "type": "number" },
-            "totalTokens": { "type": "number" },
-            "messageCount": { "type": "number" },
-            "estimatedCostUsd": { "type": "number" },
-            "costIncomplete": { "type": "boolean" },
-            "cacheSavingsUsd": { "type": "number" }
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            },
+            "cacheReadTokens": {
+              "type": "number"
+            },
+            "cacheCreationTokens": {
+              "type": "number"
+            },
+            "totalTokens": {
+              "type": "number"
+            },
+            "messageCount": {
+              "type": "number"
+            },
+            "estimatedCostUsd": {
+              "type": "number"
+            },
+            "costIncomplete": {
+              "type": "boolean"
+            },
+            "cacheSavingsUsd": {
+              "type": "number"
+            }
           },
           "additionalProperties": false
         },
         "paneCostSlice": {
           "type": "object",
           "required": [
-            "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens",
-            "totalTokens", "messageCount", "estimatedCostUsd", "costIncomplete",
-            "cacheSavingsUsd", "uncachedCostUsd", "uncachedInputTokens", "cacheHitRate", "byModel"
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheCreationTokens",
+            "totalTokens",
+            "messageCount",
+            "estimatedCostUsd",
+            "costIncomplete",
+            "cacheSavingsUsd",
+            "uncachedCostUsd",
+            "uncachedInputTokens",
+            "cacheHitRate",
+            "byModel"
           ],
           "properties": {
-            "inputTokens": { "type": "number" },
-            "outputTokens": { "type": "number" },
-            "cacheReadTokens": { "type": "number" },
-            "cacheCreationTokens": { "type": "number" },
-            "totalTokens": { "type": "number" },
-            "messageCount": { "type": "number" },
-            "estimatedCostUsd": { "type": "number" },
-            "costIncomplete": { "type": "boolean" },
-            "cacheSavingsUsd": { "type": "number" },
-            "uncachedCostUsd": { "type": "number" },
-            "uncachedInputTokens": { "type": "number" },
-            "cacheHitRate": { "type": "number" },
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            },
+            "cacheReadTokens": {
+              "type": "number"
+            },
+            "cacheCreationTokens": {
+              "type": "number"
+            },
+            "totalTokens": {
+              "type": "number"
+            },
+            "messageCount": {
+              "type": "number"
+            },
+            "estimatedCostUsd": {
+              "type": "number"
+            },
+            "costIncomplete": {
+              "type": "boolean"
+            },
+            "cacheSavingsUsd": {
+              "type": "number"
+            },
+            "uncachedCostUsd": {
+              "type": "number"
+            },
+            "uncachedInputTokens": {
+              "type": "number"
+            },
+            "cacheHitRate": {
+              "type": "number"
+            },
             "byModel": {
               "type": "array",
-              "items": { "$ref": "#/$defs/usageByModel" }
+              "items": {
+                "$ref": "#/$defs/usageByModel"
+              }
             }
           },
           "additionalProperties": false
@@ -3463,51 +3567,127 @@
         "pane": {
           "type": "object",
           "required": [
-            "paneId", "paneName", "worktreePath", "repoId", "archived", "createdAtMs",
-            "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens",
-            "totalTokens", "messageCount", "estimatedCostUsd", "costIncomplete",
-            "cacheSavingsUsd", "uncachedCostUsd", "uncachedInputTokens", "cacheHitRate", "byModel"
+            "paneId",
+            "paneName",
+            "worktreePath",
+            "repoId",
+            "archived",
+            "createdAtMs",
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheCreationTokens",
+            "totalTokens",
+            "messageCount",
+            "estimatedCostUsd",
+            "costIncomplete",
+            "cacheSavingsUsd",
+            "uncachedCostUsd",
+            "uncachedInputTokens",
+            "cacheHitRate",
+            "byModel"
           ],
           "properties": {
-            "paneId": { "type": "string" },
-            "paneName": { "type": "string" },
-            "worktreePath": { "type": "string" },
-            "repoId": { "type": ["number", "null"] },
-            "archived": { "type": "boolean" },
-            "createdAtMs": { "type": "number" },
-            "inputTokens": { "type": "number" },
-            "outputTokens": { "type": "number" },
-            "cacheReadTokens": { "type": "number" },
-            "cacheCreationTokens": { "type": "number" },
-            "totalTokens": { "type": "number" },
-            "messageCount": { "type": "number" },
-            "estimatedCostUsd": { "type": "number" },
-            "costIncomplete": { "type": "boolean" },
-            "cacheSavingsUsd": { "type": "number" },
-            "uncachedCostUsd": { "type": "number" },
-            "uncachedInputTokens": { "type": "number" },
-            "cacheHitRate": { "type": "number" },
+            "paneId": {
+              "type": "string"
+            },
+            "paneName": {
+              "type": "string"
+            },
+            "worktreePath": {
+              "type": "string"
+            },
+            "repoId": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "archived": {
+              "type": "boolean"
+            },
+            "createdAtMs": {
+              "type": "number"
+            },
+            "inputTokens": {
+              "type": "number"
+            },
+            "outputTokens": {
+              "type": "number"
+            },
+            "cacheReadTokens": {
+              "type": "number"
+            },
+            "cacheCreationTokens": {
+              "type": "number"
+            },
+            "totalTokens": {
+              "type": "number"
+            },
+            "messageCount": {
+              "type": "number"
+            },
+            "estimatedCostUsd": {
+              "type": "number"
+            },
+            "costIncomplete": {
+              "type": "boolean"
+            },
+            "cacheSavingsUsd": {
+              "type": "number"
+            },
+            "uncachedCostUsd": {
+              "type": "number"
+            },
+            "uncachedInputTokens": {
+              "type": "number"
+            },
+            "cacheHitRate": {
+              "type": "number"
+            },
             "byModel": {
               "type": "array",
-              "items": { "$ref": "#/$defs/usageByModel" }
+              "items": {
+                "$ref": "#/$defs/usageByModel"
+              }
             }
           },
           "additionalProperties": false
         }
       },
       "type": "object",
-      "required": ["ok", "fromMs", "toMs", "pricingAsOf", "panes"],
+      "required": [
+        "ok",
+        "fromMs",
+        "toMs",
+        "pricingAsOf",
+        "panes"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "fromMs": { "type": "number" },
-        "toMs": { "type": "number" },
-        "pricingAsOf": { "type": "string" },
+        "ok": {
+          "const": true
+        },
+        "fromMs": {
+          "type": "number"
+        },
+        "toMs": {
+          "type": "number"
+        },
+        "pricingAsOf": {
+          "type": "string"
+        },
         "panes": {
           "type": "array",
-          "items": { "$ref": "#/$defs/pane" }
+          "items": {
+            "$ref": "#/$defs/pane"
+          }
         },
-        "unattributed": { "$ref": "#/$defs/paneCostSlice" },
-        "totals": { "$ref": "#/$defs/usageTotals" }
+        "unattributed": {
+          "$ref": "#/$defs/paneCostSlice"
+        },
+        "totals": {
+          "$ref": "#/$defs/usageTotals"
+        }
       },
       "additionalProperties": false
     },
@@ -3522,8 +3702,12 @@
         "source"
       ],
       "properties": {
-        "gen": { "type": "number" },
-        "at": { "type": "string" },
+        "gen": {
+          "type": "number"
+        },
+        "at": {
+          "type": "string"
+        },
         "kind": {
           "enum": [
             "agent.ready",
@@ -3536,116 +3720,254 @@
             "panel.exited"
           ]
         },
-        "paneId": { "type": "string" },
-        "paneName": { "type": "string" },
-        "repoId": { "type": "number" },
-        "repoName": { "type": "string" },
-        "worktreePath": { "type": "string" },
-        "panelId": { "type": "string" },
-        "agentType": { "type": "string" },
-        "from": { "enum": ["blocked", "working", "idle", "unknown"] },
-        "to": { "enum": ["blocked", "working", "idle", "unknown"] },
-        "source": { "enum": ["agent", "exit", "session"] },
-        "reason": {
-          "oneOf": [
-            { "type": "string" },
-            { "type": "null" }
+        "paneId": {
+          "type": "string"
+        },
+        "paneName": {
+          "type": "string"
+        },
+        "repoId": {
+          "type": "number"
+        },
+        "repoName": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "agentType": {
+          "type": "string"
+        },
+        "from": {
+          "enum": [
+            "blocked",
+            "working",
+            "idle",
+            "unknown"
           ]
         },
-        "settledMs": { "type": "number" },
-        "idleMs": { "type": "number" },
-        "idleCount": { "type": "number" },
-        "heldInput": { "type": "string" },
-        "heldInputPresent": { "type": "boolean" },
-        "exitCode": { "type": "number" },
-        "baseline": { "const": true },
-        "changedWhileAway": { "type": "boolean" }
+        "to": {
+          "enum": [
+            "blocked",
+            "working",
+            "idle",
+            "unknown"
+          ]
+        },
+        "source": {
+          "enum": [
+            "agent",
+            "exit",
+            "session"
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settledMs": {
+          "type": "number"
+        },
+        "idleMs": {
+          "type": "number"
+        },
+        "idleCount": {
+          "type": "number"
+        },
+        "heldInput": {
+          "type": "string"
+        },
+        "heldInputPresent": {
+          "type": "boolean"
+        },
+        "exitCode": {
+          "type": "number"
+        },
+        "baseline": {
+          "const": true
+        },
+        "changedWhileAway": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "workspaceWaitRequest": {
       "type": "object",
       "properties": {
-        "since": { "type": "number" },
-        "as": { "type": "string" },
-        "from": { "enum": ["now", "earliest"] },
-        "timeoutMs": { "type": "number" },
-        "limit": { "type": "number" },
+        "since": {
+          "type": "number"
+        },
+        "as": {
+          "type": "string"
+        },
+        "from": {
+          "enum": [
+            "now",
+            "earliest"
+          ]
+        },
+        "timeoutMs": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        },
         "kinds": {
           "type": "array",
-          "items": { "$ref": "#/jsonSchemas/workspaceEntry/properties/kind" }
+          "items": {
+            "$ref": "#/jsonSchemas/workspaceEntry/properties/kind"
+          }
         },
         "paneIds": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "excludePaneIds": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "repo": {
           "oneOf": [
-            { "type": "string" },
+            {
+              "type": "string"
+            },
             {
               "type": "object",
               "properties": {
-                "id": { "type": "number" },
-                "path": { "type": "string" },
-                "name": { "type": "string" },
-                "active": { "const": true }
+                "id": {
+                  "type": "number"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "active": {
+                  "const": true
+                }
               },
               "additionalProperties": false
             }
           ]
         },
-        "nameContains": { "type": "string" },
-        "agentsOnly": { "type": "boolean" },
-        "ackNow": { "type": "boolean" },
-        "includeHeldInput": { "type": "boolean" },
-        "includeHeldInputPresence": { "type": "boolean" },
-        "idleAfterMs": { "type": "number" },
-        "idleWindowStartMs": { "type": "number" }
+        "nameContains": {
+          "type": "string"
+        },
+        "agentsOnly": {
+          "type": "boolean"
+        },
+        "ackNow": {
+          "type": "boolean"
+        },
+        "includeHeldInput": {
+          "type": "boolean"
+        },
+        "includeHeldInputPresence": {
+          "type": "boolean"
+        },
+        "idleAfterMs": {
+          "type": "number"
+        },
+        "idleWindowStartMs": {
+          "type": "number"
+        }
       },
       "additionalProperties": false
     },
     "workspaceStateResult": {
       "type": "object",
-      "required": ["ok", "epoch", "generation", "entries"],
+      "required": [
+        "ok",
+        "epoch",
+        "generation",
+        "entries"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "epoch": { "type": "string" },
-        "generation": { "type": "number" },
+        "ok": {
+          "const": true
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "number"
+        },
         "entries": {
           "type": "array",
-          "items": { "$ref": "#/jsonSchemas/workspaceEntry" }
+          "items": {
+            "$ref": "#/jsonSchemas/workspaceEntry"
+          }
         }
       },
       "additionalProperties": false
     },
     "workspaceWaitResult": {
       "type": "object",
-      "required": ["ok", "epoch", "generation", "entries", "timedOut", "nextCommand"],
+      "required": [
+        "ok",
+        "epoch",
+        "generation",
+        "entries",
+        "timedOut",
+        "nextCommand"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "epoch": { "type": "string" },
-        "generation": { "type": "number" },
+        "ok": {
+          "const": true
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "number"
+        },
         "entries": {
           "type": "array",
-          "items": { "$ref": "#/jsonSchemas/workspaceEntry" }
+          "items": {
+            "$ref": "#/jsonSchemas/workspaceEntry"
+          }
         },
-        "timedOut": { "type": "boolean" },
-        "dropped": { "type": "number" },
+        "timedOut": {
+          "type": "boolean"
+        },
+        "dropped": {
+          "type": "number"
+        },
         "reset": {
           "type": "object",
-          "required": ["reason"],
+          "required": [
+            "reason"
+          ],
           "properties": {
             "reason": {
-              "enum": ["first-use", "epoch-changed", "cursor-truncated", "unknown-consumer"]
+              "enum": [
+                "first-use",
+                "epoch-changed",
+                "cursor-truncated",
+                "unknown-consumer"
+              ]
             }
           },
           "additionalProperties": false
         },
-        "nextCommand": { "type": "string" }
+        "nextCommand": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -5810,22 +6132,74 @@
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
-          { "name": "--repo", "value": "<selector>", "required": true, "description": "Saved repository selector." },
-          { "name": "--path", "value": "<dir>", "required": true, "description": "Existing git worktree path." },
-          { "name": "--name", "value": "<name>", "required": true, "description": "Pane name." },
-          { "name": "--agent", "value": "<codex|claude|cursor>", "required": true, "description": "Agent whose terminal to create." },
-          { "name": "--resume", "value": "<id>", "required": false, "description": "Persist this agent session id and stage its resume command." },
-          { "name": "--folder", "value": "<name>", "required": false, "description": "Top-level sidebar folder." },
-          { "name": "--launch", "required": false, "description": "Run the resume command immediately." },
-          { "name": "--no-pinned", "required": false, "description": "Do not pin the adopted pane." },
-          { "name": "--dry-run", "required": false, "description": "Validate and preview only." },
-          { "name": "--yes", "required": false, "description": "Skip confirmation." },
-          { "name": "--json", "required": false, "description": "Print machine-readable output." }
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": true,
+            "description": "Saved repository selector."
+          },
+          {
+            "name": "--path",
+            "value": "<dir>",
+            "required": true,
+            "description": "Existing git worktree path."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "Pane name."
+          },
+          {
+            "name": "--agent",
+            "value": "<codex|claude|cursor>",
+            "required": true,
+            "description": "Agent whose terminal to create."
+          },
+          {
+            "name": "--resume",
+            "value": "<id>",
+            "required": false,
+            "description": "Persist this agent session id and stage its resume command."
+          },
+          {
+            "name": "--folder",
+            "value": "<name>",
+            "required": false,
+            "description": "Top-level sidebar folder."
+          },
+          {
+            "name": "--launch",
+            "required": false,
+            "description": "Run the resume command immediately."
+          },
+          {
+            "name": "--no-pinned",
+            "required": false,
+            "description": "Do not pin the adopted pane."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Validate and preview only."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
         ],
         "examples": [
           "runpane panes adopt --repo active --path /path/to/worktree --name imported --agent codex --resume <id> --yes --json"
         ],
-        "jsonSchemas": ["paneCreateResult"],
+        "jsonSchemas": [
+          "paneCreateResult"
+        ],
         "notes": [
           "The resume command is staged without Enter unless --launch is passed.",
           "Pane never removes an externally owned worktree."
