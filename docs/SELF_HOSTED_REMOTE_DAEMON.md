@@ -278,6 +278,54 @@ Recommended checks after connecting:
 6. Check git status and commit/diff flows.
 7. Run an approve-mode command and confirm the permission dialog appears on the client.
 
+## Working Disconnected
+
+When you are about to lose the network (a flight, a train), move a pane's work from the remote host to local Pane, keep working, and hand it back later. Two RunPane commands do this; the note they leave on the branch is the continuity between the two agents. No transcript moves and nothing uncommitted moves without a commit.
+
+Both commands are available in the npm wrapper (`runpane` or `npx --yes runpane@latest`); the Python wrapper does not dispatch them yet.
+
+### 1. Hand off on the runtime that owns the pane
+
+Run this where the pane lives. For a remote host, that means over SSH or in a Pane terminal on the host, against the host's daemon:
+
+```bash
+runpane panes list --json
+runpane panes handoff --pane <pane-id> --to local --yes --json
+```
+
+What it does, in order:
+
+1. Refuses a dirty worktree and lists the files. Add `--include-dirty` to commit everything (including untracked files) as `handoff: work in progress`.
+2. Fetches the upstream and refuses a non-fast-forward, naming the remote head. Pull or rebase first; nothing is committed or pushed on refusal.
+3. Pushes the branch.
+4. Writes `HANDOFF.md` at the worktree root with the pane name, branch, head sha, agent, open PR url, timestamp, and the last 80 lines of the CLI panel output (`--limit` changes the count), then commits and pushes it.
+5. Parks the pane: it stays in the sidebar marked **Handed off**, its agent panel is closed, and `panes list --json` reports `handedOffAt`. Pass `--archive` to archive it instead, with the usual archive safety semantics.
+6. Prints the exact `runpane panes receive` command for the target.
+
+`--to` is a label (`local` or `remote:<Remote Pane profile label>`). It is recorded in the note and shapes the printed command; it does not contact the other runtime. If the label matches none of this runtime's saved profiles, the result carries a warning but still succeeds.
+
+Review before handing off from a shared repository: the note embeds terminal output that is ANSI-stripped but not scrubbed for secrets, and `--include-dirty` stages untracked files.
+
+### 2. Switch runtimes and receive
+
+On your desktop, switch to the target runtime in `Settings > Remote Pane` (choose `Local` to work offline), then run the printed command against that runtime:
+
+```bash
+runpane panes receive --repo <repo> --branch <branch> --agent <codex|claude|cursor> --yes --json
+```
+
+Receive fetches the branch, reads `HANDOFF.md` from the remote ref (and refuses if it is missing), then:
+
+- creates a local tracking branch and a Pane-managed worktree named after the source pane, or
+- reuses a registered worktree on that branch that has no pane, or
+- if this runtime already has a parked pane on that branch, fast-forwards it and clears the handed-off state.
+
+The agent starts with one instruction: read `HANDOFF.md`, confirm the branch and head sha in its first message, continue the work, delete `HANDOFF.md` before opening a pull request, and do not push until asked. The output ends with the pane id and the `HANDOFF.md` path. If the instruction could not be verified as submitted, the pane still exists and the result names the `runpane panels submit` command to send it.
+
+### 3. Hand back
+
+The round trip is the same two commands in the other direction: `panes handoff --to remote:<label>` on local Pane, then switch to the remote profile and `panes receive` there. Because the remote host still has the parked pane, receive resumes it instead of creating a second one. Archiving a parked pane later works exactly as before.
+
 ## Troubleshooting
 
 Start with machine-readable environment diagnostics:

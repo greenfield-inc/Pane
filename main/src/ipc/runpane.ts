@@ -14,13 +14,18 @@ import { databaseService as panelDatabase } from '../services/database';
 import type { PanelBuffers } from '../database/panelBuffers';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
+import { resolveDefaultWorktreeBase } from '../services/worktreeManager';
 import { assessComposerEvidence, isSlashCommandInput } from './runpaneComposerEvidence';
 import {
   DEFAULT_HANDOFF_REPORT_LINES,
   HANDOFF_NOTE_FILENAME,
+  isSafeBranchName,
+  parseHandoffNote,
   parseHandoffTarget,
   receiveCommandFor,
+  receiveInstruction,
   renderHandoffNote,
+  worktreeDirectoryForBranch,
   type HandoffTarget,
 } from './runpaneHandoff';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
@@ -72,6 +77,11 @@ import type {
   RunpanePaneHandoffRequest,
   RunpanePaneHandoffResult,
   RunpanePaneReadiness,
+  RunpanePaneReceiveBlockCode,
+  RunpanePaneReceiveBlockReason,
+  RunpanePaneReceivePath,
+  RunpanePaneReceiveRequest,
+  RunpanePaneReceiveResult,
   RunpanePaneSummary,
   RunpanePanelActivityStatus,
   RunpanePanelBlockedState,
@@ -161,6 +171,7 @@ const RUNPANE_CHANNELS = [
   'runpane:panes:focus',
   'runpane:panes:archive',
   'runpane:panes:handoff',
+  'runpane:panes:receive',
   'runpane:panels:create',
   'runpane:panels:list',
   'runpane:panels:output',
@@ -198,6 +209,7 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:adopt',
   'panes:archive',
   'panes:handoff',
+  'panes:receive',
   'panes:pin',
   'panes:rename',
   'panels:create',
@@ -814,6 +826,16 @@ export function registerRunpaneHandlers(
       {},
       () => handoffPane(services, commandRegistry, parsePaneHandoffRequest(request)),
       result => ({ paneId: result.paneId, ok: result.ok }),
+    );
+  });
+
+  commandRegistry.register('runpane:panes:receive', async (request: PaneCommandValue): Promise<RunpanePaneReceiveResult> => {
+    return withRunpaneAction(
+      services,
+      'panes:receive',
+      {},
+      () => receivePane(services, parsePaneReceiveRequest(request)),
+      result => ({ paneId: 'paneId' in result ? result.paneId : undefined, ok: result.ok }),
     );
   });
 
@@ -3206,6 +3228,252 @@ async function handoffPane(
   databaseService.updateSession(pane.id, { handed_off_at: handedOffAt });
   sessionManager.updateSession(pane.id, { status: 'stopped' });
   return { ok: true, ...common, mode: 'parked' };
+}
+
+async function receivePane(
+  services: AppServices,
+  normalized: RunpanePaneReceiveRequest,
+): Promise<RunpanePaneReceiveResult> {
+  const { sessionManager, databaseService } = services;
+  const branch = normalized.branch;
+  const refuse = (code: RunpanePaneReceiveBlockCode, message: string, extra: Partial<RunpanePaneReceiveBlockReason> = {}): RunpanePaneReceiveResult => ({
+    ok: false,
+    branch,
+    blocked: { code, message, ...extra },
+  });
+
+  if (!isSafeBranchName(branch)) {
+    return refuse('invalid-branch', `"${branch}" is not a plain branch name (letters, digits, ., _, -, / only; no leading -, no ..)`);
+  }
+  const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
+  const ctx = sessionManager.getProjectContextByProjectId(repo.id);
+  if (!ctx) {
+    throw new Error(`Project context is unavailable for ${repo.name}`);
+  }
+  const runner = ctx.commandRunner;
+  const refFormat = await runner.execFile('git', ['check-ref-format', '--branch', branch], repo.path, { okExitCodes: [1], silent: true });
+  if (refFormat.exitCode !== 0) {
+    return refuse('invalid-branch', `git rejects "${branch}" as a branch name`);
+  }
+
+  const remote = normalized.remote ?? 'origin';
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const fetch = await runner.execFile('git', ['fetch', '--no-tags', remote, `+refs/heads/${branch}:${remoteRef}`], repo.path, { okExitCodes: [128], timeout: 60000, silent: true });
+  if (fetch.exitCode !== 0) {
+    return refuse('branch-not-found', `Could not fetch ${branch} from ${remote}`, { gitOutput: fetch.stderr || fetch.stdout });
+  }
+  const remoteShaResult = await runner.execFile('git', ['rev-parse', '--verify', '--quiet', remoteRef], repo.path, { okExitCodes: [1], silent: true });
+  if (remoteShaResult.exitCode !== 0) {
+    return refuse('branch-not-found', `${remote} has no branch named ${branch}`);
+  }
+  const remoteSha = remoteShaResult.stdout.trim();
+  const noteResult = await runner.execFile('git', ['show', `${remoteRef}:${HANDOFF_NOTE_FILENAME}`], repo.path, { okExitCodes: [128], silent: true });
+  if (noteResult.exitCode !== 0) {
+    return refuse('missing-handoff-note', `${remote}/${branch} has no ${HANDOFF_NOTE_FILENAME}; hand the branch off with runpane panes handoff first`);
+  }
+  const note = parseHandoffNote(noteResult.stdout);
+  const name = normalized.name?.trim() || note.pane;
+
+  // Classify: resume this runtime's parked pane, reuse an orphaned worktree, or create.
+  const worktrees = await services.worktreeManager.listWorktrees(repo.path, runner);
+  const onBranch = worktrees.find(entry => entry.branch === branch);
+  const liveSessions = databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).filter(row => !row.archived);
+  let existing: (typeof liveSessions)[number] | undefined;
+  if (onBranch) {
+    try {
+      existing = findSessionByWorktreeIdentity(liveSessions, resolvePathIdentity(onBranch.path, ctx.pathResolver), ctx.pathResolver);
+    } catch {
+      existing = undefined;
+    }
+  }
+  if (existing && !existing.handed_off_at) {
+    return refuse('branch-in-use', `Pane "${existing.name}" (${existing.id}) is already working on ${branch}`, { paneId: existing.id, name: existing.name });
+  }
+  const directory = worktreeDirectoryForBranch(branch);
+  const targetPath = services.worktreeManager.resolveWorktreePath(repo.path, directory, repo.worktree_folder ?? undefined, ctx.pathResolver);
+  const mode: RunpanePaneReceivePath = existing ? 'resume' : onBranch ? 'adopt-orphan' : 'create';
+  if (mode === 'create') {
+    const registered = worktrees.some(entry => pathsHaveSameIdentity(entry.path, targetPath));
+    if (registered || fs.existsSync(ctx.pathResolver.toFileSystem(targetPath))) {
+      return refuse('path-in-use', `Worktree directory ${targetPath} already exists`, { path: targetPath });
+    }
+  }
+  if (normalized.dryRun) {
+    return { ok: true, dryRun: true, branch, path: mode, name, note };
+  }
+
+  const created: ReceiveRollbackState = {};
+  try {
+    let session: Session;
+    if (mode === 'resume' && existing) {
+      const pull = await runner.execFile('git', ['pull', '--ff-only', remote, branch], existing.worktree_path, { okExitCodes: [1, 128], timeout: 60000, silent: true });
+      if (pull.exitCode !== 0) {
+        return refuse('diverged', `Parked pane "${existing.name}" cannot fast-forward to ${remote}/${branch}`, { paneId: existing.id, gitOutput: pull.stderr || pull.stdout });
+      }
+      session = resolvePane(sessionManager, existing.id);
+    } else {
+      let worktreePath = onBranch?.path;
+      if (mode === 'create') {
+        const hasLocal = await runner.execFile('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], repo.path, { okExitCodes: [1], silent: true });
+        if (hasLocal.exitCode === 1) {
+          await runner.execFile('git', ['branch', '--track', branch, remoteRef], repo.path, { silent: true });
+          created.branch = true;
+        } else {
+          const localSha = (await runner.execFile('git', ['rev-parse', branch], repo.path, { silent: true })).stdout.trim();
+          if (localSha !== remoteSha) {
+            return refuse('diverged', `Local branch ${branch} (${localSha}) differs from ${remote}/${branch} (${remoteSha})`, { localSha, remoteSha });
+          }
+        }
+        const createdWorktree = await services.worktreeManager.createWorktree(
+          repo.path,
+          directory,
+          branch,
+          undefined,
+          repo.worktree_folder ?? undefined,
+          ctx.pathResolver,
+          runner,
+        );
+        worktreePath = createdWorktree.worktreePath;
+        created.worktree = directory;
+      }
+      if (!worktreePath) {
+        throw new Error(`No worktree path resolved for ${branch}`);
+      }
+      const base = await resolveDefaultWorktreeBase(repo.path, runner);
+      const mergeBase = await runner.execFile('git', ['merge-base', base, branch], repo.path, { okExitCodes: [1, 128], silent: true });
+      const baseCommit = mergeBase.exitCode === 0 ? mergeBase.stdout.trim() : undefined;
+      session = await sessionManager.createSession(
+        name,
+        worktreePath,
+        '',
+        path.basename(worktreePath),
+        'ignore',
+        repo.id,
+        false,
+        undefined,
+        'none',
+        baseCommit,
+        base,
+        true,
+      );
+      created.sessionId = session.id;
+      sessionManager.updateSession(session.id, { status: 'stopped' });
+      await Promise.all([
+        panelManager.ensureExplorerPanel(session.id),
+        panelManager.ensureDiffPanel(session.id),
+      ]);
+    }
+
+    const tool = resolveToolSpec({ ...normalized.tool, initialInput: receiveInstruction(note) }, ctx.pathResolver.environment);
+    const activate = resolveReceiveActivation(normalized, tool);
+    const { panel, readiness, initialInput } = await createTerminalPanelForSession(services, session, tool, {
+      activate,
+      waitReady: true,
+      readyTimeoutMs: normalized.readyTimeoutMs,
+    });
+
+    if (mode === 'resume') {
+      databaseService.updateSession(session.id, { handed_off_at: null });
+      sessionManager.updateSession(session.id, { status: 'stopped' });
+    } else {
+      const fresh = sessionManager.getSession(session.id);
+      if (!fresh) throw new Error(`Created session ${session.id} was not found after setup`);
+      sessionManager.emitSessionCreated(fresh, {
+        activateOnCreate: activate,
+        createDefaultTerminalOnCreate: false,
+      });
+    }
+
+    const ok = Boolean((!readiness || readiness.ok) && (!initialInput || initialInput.submitted));
+    return {
+      ok,
+      paneId: session.id,
+      panelId: panel.id,
+      worktreePath: session.worktreePath,
+      handoffPath: ctx.pathResolver.join(session.worktreePath, HANDOFF_NOTE_FILENAME),
+      path: mode,
+      note,
+      readiness,
+      initialInput,
+      nextCommand: ok
+        ? panelOutputCommand(panel.id)
+        : initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
+    };
+  } catch (error) {
+    // Reverse-order rollback of everything this call created; the resume path created nothing.
+    if (created.sessionId) {
+      try {
+        await sessionManager.archiveSession(created.sessionId);
+        databaseService.deleteArchivedSessionPermanently(created.sessionId);
+      } catch (rollbackError) {
+        console.error(`[Runpane] Failed to roll back received pane ${created.sessionId}:`, rollbackError);
+      }
+    }
+    if (created.worktree) {
+      try {
+        await services.worktreeManager.removeWorktree(repo.path, created.worktree, repo.worktree_folder ?? undefined, undefined, ctx.pathResolver, runner);
+      } catch (rollbackError) {
+        console.error(`[Runpane] Failed to remove received worktree ${created.worktree}:`, rollbackError);
+      }
+    }
+    if (created.branch) {
+      try {
+        await runner.execFile('git', ['branch', '-D', branch], repo.path, { silent: true });
+      } catch (rollbackError) {
+        console.error(`[Runpane] Failed to delete received branch ${branch}:`, rollbackError);
+      }
+    }
+    throw error;
+  }
+}
+
+/** What a receive call has created so far, so a failure can undo it in reverse order. */
+interface ReceiveRollbackState {
+  branch?: boolean;
+  worktree?: string;
+  sessionId?: string;
+}
+
+function resolveReceiveActivation(request: RunpanePaneReceiveRequest, tool: RunpaneResolvedTool): boolean {
+  if (request.focus === true) return true;
+  if (request.noFocus === true || request.source === 'agent') return false;
+  return !tool.agent;
+}
+
+function parsePaneReceiveRequest(value: PaneCommandValue): RunpanePaneReceiveRequest {
+  if (!isRecord(value)) {
+    throw new Error('Pane receive request must be an object');
+  }
+  const branch = optionalString(value.branch)?.trim();
+  if (!branch) {
+    throw new Error('Pane receive request must include a branch');
+  }
+  if (value.noFocus === true && value.focus === true) {
+    throw new Error('Pane receive request cannot include both noFocus and focus');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Pane receive source must be user or agent');
+  }
+  const readyTimeoutMs = optionalNumber(value.readyTimeoutMs);
+  if (readyTimeoutMs !== undefined && (!Number.isFinite(readyTimeoutMs) || readyTimeoutMs <= 0)) {
+    throw new Error('Pane receive readyTimeoutMs must be a positive number');
+  }
+  const tool = parseRunpaneToolSpec(value.tool, 'Pane receive request');
+  if (tool.initialInput) {
+    throw new Error('Pane receive request sets the initial instruction itself; omit tool.initialInput');
+  }
+  return {
+    repo: parseRepoSelector(value.repo),
+    branch,
+    tool,
+    name: optionalString(value.name),
+    remote: optionalString(value.remote)?.trim() || undefined,
+    noFocus: optionalBoolean(value.noFocus),
+    focus: optionalBoolean(value.focus),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    readyTimeoutMs,
+    dryRun: optionalBoolean(value.dryRun),
+  };
 }
 
 function parsePaneHandoffRequest(value: PaneCommandValue): RunpanePaneHandoffRequest {

@@ -410,6 +410,75 @@ interface PaneHandoffDryRunResult {
 
 type PaneHandoffResult = PaneHandoffSuccessResult | PaneHandoffBlockedResult | PaneHandoffDryRunResult;
 
+interface PaneReceiveRequest {
+  repo: PaneCreateRequest['repo'];
+  branch: string;
+  tool: PaneToolSpec;
+  name?: string;
+  remote?: string;
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: 'user' | 'agent';
+  readyTimeoutMs?: number;
+  dryRun?: boolean;
+}
+
+interface PaneReceiveNote {
+  pane: string;
+  branch: string;
+  head: string;
+  agent: 'codex' | 'claude' | 'cursor' | 'unknown';
+  target: string;
+  handedOffAt: string;
+  pr?: string;
+}
+
+type PaneReceivePath = 'resume' | 'adopt-orphan' | 'create';
+
+interface PaneReceiveBlockReason {
+  code: 'invalid-branch' | 'branch-not-found' | 'missing-handoff-note' | 'branch-in-use' | 'path-in-use' | 'diverged';
+  message: string;
+  paneId?: string;
+  name?: string;
+  path?: string;
+  localSha?: string;
+  remoteSha?: string;
+  gitOutput?: string;
+}
+
+interface PaneReceiveSuccessResult {
+  ok: boolean;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  worktreePath: string;
+  handoffPath: string;
+  path: PaneReceivePath;
+  note: PaneReceiveNote;
+  readiness?: PanelReadiness;
+  initialInput?: InitialInputDeliveryResult;
+  nextCommand: string;
+}
+
+interface PaneReceiveBlockedResult {
+  ok: false;
+  generation?: number;
+  branch: string;
+  blocked: PaneReceiveBlockReason;
+  nextCommand?: string;
+}
+
+interface PaneReceiveDryRunResult {
+  ok: true;
+  dryRun: true;
+  branch: string;
+  path: PaneReceivePath;
+  name: string;
+  note: PaneReceiveNote;
+}
+
+type PaneReceiveResult = PaneReceiveSuccessResult | PaneReceiveBlockedResult | PaneReceiveDryRunResult;
+
 interface PanePinRequest {
   paneId: string;
   pinned: boolean;
@@ -1188,6 +1257,54 @@ const paneHandoffResultSchema: BoundarySchema<PaneHandoffResult> = boundary.unio
     warnings: boundary.optional(boundary.array(boundary.string)),
   }),
 );
+const paneReceiveNoteSchema: BoundarySchema<PaneReceiveNote> = boundary.object({
+  pane: boundary.string,
+  branch: boundary.string,
+  head: boundary.string,
+  agent: boundary.enumeration('codex', 'claude', 'cursor', 'unknown'),
+  target: boundary.string,
+  handedOffAt: boundary.string,
+  pr: boundary.optional(boundary.string),
+});
+const paneReceiveResultSchema: BoundarySchema<PaneReceiveResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(false),
+    generation: boundary.optional(boundary.number),
+    branch: boundary.string,
+    blocked: boundary.object({
+      code: boundary.enumeration('invalid-branch', 'branch-not-found', 'missing-handoff-note', 'branch-in-use', 'path-in-use', 'diverged'),
+      message: boundary.string,
+      paneId: boundary.optional(boundary.string),
+      name: boundary.optional(boundary.string),
+      path: boundary.optional(boundary.string),
+      localSha: boundary.optional(boundary.string),
+      remoteSha: boundary.optional(boundary.string),
+      gitOutput: boundary.optional(boundary.string),
+    }),
+    nextCommand: boundary.optional(boundary.string),
+  }),
+  boundary.object({
+    ok: boundary.literal(true),
+    dryRun: boundary.literal(true),
+    branch: boundary.string,
+    path: boundary.enumeration('resume', 'adopt-orphan', 'create'),
+    name: boundary.string,
+    note: paneReceiveNoteSchema,
+  }),
+  boundary.object({
+    ok: boundary.boolean,
+    generation: boundary.optional(boundary.number),
+    paneId: boundary.string,
+    panelId: boundary.string,
+    worktreePath: boundary.string,
+    handoffPath: boundary.string,
+    path: boundary.enumeration('resume', 'adopt-orphan', 'create'),
+    note: paneReceiveNoteSchema,
+    readiness: boundary.optional(panelReadinessSchema),
+    initialInput: boundary.optional(initialInputSchema),
+    nextCommand: boundary.string,
+  }),
+);
 const panePinResultSchema: BoundarySchema<PanePinResult> = boundary.object({
   ok: boundary.literal(true),
   generation: boundary.optional(boundary.number),
@@ -1921,6 +2038,50 @@ export async function runPanesHandoff(parsed: ParsedArgs): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+export async function runPanesReceive(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.repo) {
+    throw new Error('runpane panes receive requires --repo.');
+  }
+  if (!parsed.branch) {
+    throw new Error('runpane panes receive requires --branch.');
+  }
+  if (parsed.initialInput || parsed.initialInputFile) {
+    throw new Error('runpane panes receive sets the initial instruction itself; do not pass --prompt or --initial-input.');
+  }
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+
+  const tool = await buildToolSpec(parsed, 'panes receive');
+  const request: PaneReceiveRequest = {
+    repo: parsed.repo,
+    branch: parsed.branch,
+    tool,
+  };
+  if (parsed.name) request.name = parsed.name;
+  if (parsed.remote) request.remote = parsed.remote;
+  if (parsed.noFocus) request.noFocus = true;
+  if (parsed.focus) request.focus = true;
+  if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
+  if (parsed.readyTimeoutMs !== undefined) request.readyTimeoutMs = parsed.readyTimeoutMs;
+  if (parsed.dryRun) request.dryRun = true;
+
+  await confirmPaneReceive(parsed, request);
+
+  const result = await invokeDaemon('runpane:panes:receive', [request], paneReceiveResultSchema, {
+    paneDir: parsed.paneDir,
+    timeoutMs: 180_000,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    printPaneReceiveResult(result);
+  }
+
+  return result.ok ? 0 : 1;
+}
+
 export async function runPanesPin(parsed: ParsedArgs, pinned: boolean): Promise<number> {
   if (!parsed.paneId) {
     throw new Error(`runpane panes ${pinned ? 'pin' : 'unpin'} requires --pane.`);
@@ -2487,6 +2648,26 @@ async function confirmPaneHandoff(parsed: ParsedArgs, request: PaneHandoffReques
   }
 }
 
+async function confirmPaneReceive(parsed: ParsedArgs, request: PaneReceiveRequest): Promise<void> {
+  if (parsed.dryRun || parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panes receive mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Receive branch ${request.branch} into a new Pane and start ${'agent' in request.tool ? request.tool.agent : request.tool.command}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function confirmPanePin(parsed: ParsedArgs, request: PanePinRequest): Promise<void> {
   if (parsed.dryRun || parsed.yes) {
     return;
@@ -2805,6 +2986,32 @@ function printPaneHandoffResult(result: PaneHandoffResult): void {
   printHandoffWarnings(result.warnings);
   console.log(`On the target runtime (${result.target}), run:`);
   console.log(result.receiveCommand);
+}
+
+function printPaneReceiveResult(result: PaneReceiveResult): void {
+  if ('dryRun' in result) {
+    console.log(`Would receive ${result.branch} as pane "${result.name}" (${result.path}); note head ${result.note.head.slice(0, 12)} from ${result.note.pane}.`);
+    return;
+  }
+
+  if ('blocked' in result) {
+    console.error(`Refused to receive ${result.branch}: ${result.blocked.message}`);
+    if (result.blocked.gitOutput) console.error(result.blocked.gitOutput.trimEnd());
+    if (result.nextCommand) console.error(`Next: ${result.nextCommand}`);
+    return;
+  }
+
+  const verb = result.path === 'resume' ? 'Resumed' : 'Opened';
+  console.log(`${verb} pane ${result.paneId} on ${result.note.branch} (${result.path}); agent panel ${result.panelId}.`);
+  if (result.readiness && !result.readiness.ok) {
+    console.error(`Agent readiness: ${result.readiness.blocked?.message ?? 'not ready before timeout'}`);
+  }
+  printInitialInputDelivery(result.initialInput);
+  if (!result.ok) {
+    console.error(`Next: ${result.nextCommand}`);
+  }
+  console.log(`Pane: ${result.paneId}`);
+  console.log(`HANDOFF.md: ${result.handoffPath}`);
 }
 
 function printHandoffBlockedDetails(blocked: PaneHandoffBlockReason | undefined): void {
