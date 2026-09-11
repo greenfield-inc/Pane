@@ -308,7 +308,7 @@ Review before handing off from a shared repository: the note embeds terminal out
 
 ### 2. Switch runtimes and receive
 
-On your desktop, switch to the target runtime in `Settings > Remote Pane` (choose `Local` to work offline), then run the printed command against that runtime:
+On your desktop, switch to the target runtime under `Settings > Remote Access > Remote Pane` (the `Use Local Runtime` button switches to local Pane for offline work; `Connect` on a saved profile switches to that host), then run the printed command against that runtime:
 
 ```bash
 runpane panes receive --repo <repo> --branch <branch> --agent <codex|claude|cursor> --yes --json
@@ -324,7 +324,7 @@ The agent starts with one instruction: read `HANDOFF.md`, confirm the branch and
 
 ### 3. Hand back
 
-The round trip is the same two commands in the other direction: `panes handoff --to remote:<label>` on local Pane, then switch to the remote profile and `panes receive` there. Because the remote host still has the parked pane, receive resumes it instead of creating a second one. Archiving a parked pane later works exactly as before.
+The round trip is the same two commands in the other direction: `panes handoff --to remote:<label>` on local Pane, then connect to the remote profile and run `panes receive` there. If you used `--include-dirty` and the push is then refused as non-fast-forward, the `handoff: work in progress` commit stays in the worktree; pull or rebase and rerun. Because the remote host still has the parked pane, receive resumes it instead of creating a second one. Archiving a parked pane later works exactly as before.
 
 ## Troubleshooting
 
