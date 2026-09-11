@@ -59,6 +59,8 @@ export interface ParsedArgs {
   force?: boolean;
   launch?: boolean;
   handoffTo?: string;
+  branch?: string;
+  remote?: string;
   park?: boolean;
   archive?: boolean;
   includeDirty?: boolean;
@@ -483,6 +485,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.handoffTo = value;
     return;
   }
+  if (flag === '--branch') {
+    parsed.branch = value;
+    return;
+  }
+  if (flag === '--remote') {
+    parsed.remote = value;
+    return;
+  }
   if (flag === '--limit') {
     const limit = Number(value);
     if (!Number.isInteger(limit) || limit <= 0) {
@@ -596,6 +606,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panes adopt'
     || command === 'panes archive'
     || command === 'panes handoff'
+    || command === 'panes receive'
     || command === 'panes pin'
     || command === 'panes unpin'
     || command === 'panes rename'

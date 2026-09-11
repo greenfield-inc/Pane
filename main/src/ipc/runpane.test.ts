@@ -21,6 +21,8 @@ import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { registerRunpaneHandlers } from './runpane';
+import { WorktreeManager } from '../services/worktreeManager';
+import { renderHandoffNote } from './runpaneHandoff';
 
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
@@ -3305,6 +3307,309 @@ describe('runpane IPC handlers', () => {
       await expect(registry.invoke('runpane:panes:handoff', [{ paneId: session.id }])).rejects.toThrow(/"to"/u);
       await expect(registry.invoke('runpane:panes:handoff', [{ paneId: session.id, to: 'cloud' }])).rejects.toThrow(/--to/u);
       await expect(registry.invoke('runpane:panes:handoff', [{ paneId: session.id, to: 'local', mode: 'delete' }])).rejects.toThrow(/park or archive/u);
+    });
+  });
+
+  describe('runpane:panes:receive', () => {
+    const handedOffBranch = 'feat/panes-handoff';
+    const sourceHead = { sha: '' };
+
+    function gitOut(args: string[], cwd: string): string {
+      return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+    }
+
+    function configureGitUser(cwd: string): void {
+      execFileSync('git', ['config', 'user.name', 'Pane Test'], { cwd, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.email', 'pane-test@example.invalid'], { cwd, stdio: 'ignore' });
+    }
+
+    /** Project repo with origin, plus a "source runtime" clone that hands off a branch with a note. */
+    function createHandedOffRemote(name: string, options: { withNote?: boolean } = {}) {
+      const repoPath = createTempGitRepo(name);
+      const parent = path.dirname(repoPath);
+      const remotePath = path.join(parent, `${name}-remote.git`);
+      execFileSync('git', ['init', '--bare', remotePath], { stdio: 'ignore' });
+      fs.writeFileSync(path.join(repoPath, 'README.md'), 'hello\n');
+      execFileSync('git', ['add', 'README.md'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['remote', 'add', 'origin', remotePath], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: repoPath, stdio: 'ignore' });
+
+      const sourcePath = path.join(parent, `${name}-source`);
+      execFileSync('git', ['clone', '-q', remotePath, sourcePath], { stdio: 'ignore' });
+      configureGitUser(sourcePath);
+      execFileSync('git', ['checkout', '-q', '-b', handedOffBranch], { cwd: sourcePath, stdio: 'ignore' });
+      fs.writeFileSync(path.join(sourcePath, 'work.txt'), 'handed off work\n');
+      execFileSync('git', ['add', 'work.txt'], { cwd: sourcePath, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'work'], { cwd: sourcePath, stdio: 'ignore' });
+      sourceHead.sha = gitOut(['rev-parse', 'HEAD'], sourcePath);
+      if (options.withNote !== false) {
+        fs.writeFileSync(path.join(sourcePath, 'HANDOFF.md'), renderHandoffNote({
+          pane: 'issue 252 (source)',
+          branch: handedOffBranch,
+          head: sourceHead.sha,
+          agent: 'claude',
+          target: 'local',
+          handedOffAt: '2026-09-11T10:00:00.000Z',
+          report: 'Parser done.\nNext: wire the CLI.',
+        }));
+        execFileSync('git', ['add', 'HANDOFF.md'], { cwd: sourcePath, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'handoff: issue 252 to local'], { cwd: sourcePath, stdio: 'ignore' });
+      }
+      execFileSync('git', ['push', '-q', '-u', 'origin', handedOffBranch], { cwd: sourcePath, stdio: 'ignore' });
+      return { repoPath, remotePath, sourcePath, remoteSha: gitOut(['rev-parse', 'HEAD'], sourcePath) };
+    }
+
+    function readyPanel(sessionId: string) {
+      return {
+        ...terminalPanel,
+        sessionId,
+        state: {
+          isActive: false,
+          customState: { agentType: 'claude', isCliPanel: true, initialInputSentAt: '2026-09-11T10:05:00.000Z' },
+        },
+      };
+    }
+
+    interface ExistingSessionRow {
+      id: string;
+      name: string;
+      worktree_path: string;
+      archived: number;
+      handed_off_at: string | null;
+    }
+
+    interface ReceiveRequestOverrides {
+      branch?: string;
+      name?: string;
+      dryRun?: boolean;
+    }
+
+    function receiveServices(repoPath: string, options: { existingRows?: ExistingSessionRow[]; failCreateSession?: boolean } = {}) {
+      const repoProject = { ...project, path: repoPath };
+      const runner = new CommandRunner(repoProject);
+      const pathResolver = new PathResolver(repoProject);
+      const createdSessions: Session[] = [];
+      const createSession = vi.fn(async (name: string, worktreePath: string) => {
+        if (options.failCreateSession) throw new Error('createSession exploded');
+        const created: Session = { ...session, id: `received-${createdSessions.length + 1}`, name, worktreePath, worktreeOwnership: 'pane' };
+        createdSessions.push(created);
+        return created;
+      });
+      const parkedPane: Session = { ...session, id: 'parked', name: 'issue 252 (parked)', worktreePath: '', handedOffAt: '2026-09-11T09:00:00.000Z' };
+      const updateSessionDb = vi.fn(() => undefined);
+      const base = createServices();
+      // SAFETY: These test doubles provide the exact service members exercised by receive.
+      const services = createServices({
+        databaseService: {
+          ...base.databaseService,
+          getAllProjects: vi.fn(() => [repoProject]),
+          getAllSessionsIncludingArchived: vi.fn(() => options.existingRows ?? []),
+          updateSession: updateSessionDb,
+          deleteArchivedSessionPermanently: vi.fn(() => true),
+        // SAFETY: This fixture implements the database methods used by the handler.
+        } as never,
+        sessionManager: {
+          ...base.sessionManager,
+          getProjectContextByProjectId: vi.fn(() => ({ project: repoProject, pathResolver, commandRunner: runner })),
+          getProjectContext: vi.fn(() => ({ project: repoProject, pathResolver, commandRunner: runner })),
+          createSession,
+          updateSession: vi.fn(() => undefined),
+          getSession: vi.fn((id: string) => {
+            if (id === 'parked') {
+              const row = options.existingRows?.find(entry => entry.id === 'parked');
+              return { ...parkedPane, worktreePath: row?.worktree_path ?? '' };
+            }
+            return createdSessions.find(entry => entry.id === id);
+          }),
+          emitSessionCreated: vi.fn(),
+          archiveSession: vi.fn(async () => undefined),
+        // SAFETY: This fixture implements the session-manager methods used by the handler.
+        } as never,
+        worktreeManager: new WorktreeManager(),
+      });
+      // SAFETY: readyPanel returns the terminal panel fixture shape the handler reads (state.customState, metadata).
+      vi.mocked(panelManager.createPanel).mockImplementation(async (request) => readyPanel(request.sessionId) as ToolPanel);
+      // SAFETY: Same fixture shape as above, looked up by the fixture panel id.
+      vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (panelId === terminalPanel.id ? readyPanel(session.id) as ToolPanel : undefined));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› ready', 'idle', 'claude'));
+      return { services, createSession, updateSessionDb, pathResolver };
+    }
+
+    function receiveRequest(overrides: ReceiveRequestOverrides = {}) {
+      return { repo: 'active', branch: handedOffBranch, tool: { agent: 'claude' }, source: 'agent', readyTimeoutMs: 200, ...overrides };
+    }
+
+    it('refuses branch names that are not plain', async () => {
+      const { repoPath } = createHandedOffRemote('receive-invalid');
+      const { services, createSession } = receiveServices(repoPath);
+      const registry = createRegistry(services);
+
+      for (const branch of ['-x', 'a..b', 'x$(id)']) {
+        const result = await registry.invoke('runpane:panes:receive', [receiveRequest({ branch })]);
+        expect(result).toMatchObject({ ok: false, branch, blocked: { code: 'invalid-branch' } });
+      }
+      expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses a branch without HANDOFF.md and an unknown branch', async () => {
+      const { repoPath } = createHandedOffRemote('receive-no-note', { withNote: false });
+      const { services, createSession } = receiveServices(repoPath);
+      const registry = createRegistry(services);
+
+      expect(await registry.invoke('runpane:panes:receive', [receiveRequest()])).toMatchObject({
+        ok: false,
+        blocked: { code: 'missing-handoff-note' },
+      });
+      expect(await registry.invoke('runpane:panes:receive', [receiveRequest({ branch: 'nope' })])).toMatchObject({
+        ok: false,
+        blocked: { code: 'branch-not-found' },
+      });
+      expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('reports the create path on a dry run without creating anything', async () => {
+      const { repoPath } = createHandedOffRemote('receive-dry');
+      const { services, createSession } = receiveServices(repoPath);
+
+      const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest({ dryRun: true })]);
+
+      expect(result).toMatchObject({
+        ok: true,
+        dryRun: true,
+        branch: handedOffBranch,
+        path: 'create',
+        name: 'issue 252 (source)',
+        note: { head: sourceHead.sha, agent: 'claude', target: 'local' },
+      });
+      expect(createSession).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(repoPath, 'worktrees'))).toBe(false);
+    });
+
+    it('creates a tracked branch and Pane-managed worktree, then starts the agent from the note', async () => {
+      const { repoPath, remoteSha } = createHandedOffRemote('receive-create');
+      const { services, createSession } = receiveServices(repoPath);
+
+      const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest()]);
+
+      const worktreePath = path.join(repoPath, 'worktrees', 'feat-panes-handoff');
+      expect(result).toMatchObject({
+        ok: true,
+        path: 'create',
+        paneId: 'received-1',
+        panelId: terminalPanel.id,
+        worktreePath,
+        handoffPath: path.join(worktreePath, 'HANDOFF.md'),
+        note: { pane: 'issue 252 (source)', head: sourceHead.sha },
+        readiness: { ok: true },
+        initialInput: { submitted: true, strategy: 'argument' },
+      });
+      expect(gitOut(['rev-parse', 'HEAD'], worktreePath)).toBe(remoteSha);
+      expect(gitOut(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], worktreePath)).toBe(`origin/${handedOffBranch}`);
+      expect(fs.readFileSync(path.join(worktreePath, 'HANDOFF.md'), 'utf8')).toContain(`head: ${sourceHead.sha}`);
+      expect(createSession).toHaveBeenCalledWith(
+        'issue 252 (source)', worktreePath, '', 'feat-panes-handoff', 'ignore', project.id, false, undefined, 'none',
+        gitOut(['merge-base', 'origin/main', handedOffBranch], repoPath), 'origin/main', true,
+      );
+      expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'received-1',
+        initialState: expect.objectContaining({
+          agentType: 'claude',
+          initialInputMode: 'argument',
+          initialInput: expect.stringContaining(`git rev-parse HEAD equals ${sourceHead.sha}`),
+        }),
+        activate: false,
+      }));
+      expect(services.sessionManager.emitSessionCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'received-1' }),
+        { activateOnCreate: false, createDefaultTerminalOnCreate: false },
+      );
+      expect(vi.mocked(panelManager.createPanel).mock.calls[0][0].initialState?.initialInput).toContain('Delete HANDOFF.md before opening a pull request');
+    });
+
+    it('resumes this runtime\'s parked pane on the branch instead of creating a second one', async () => {
+      const { repoPath, sourcePath } = createHandedOffRemote('receive-resume');
+      execFileSync('git', ['fetch', '-q', 'origin'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['branch', '--track', handedOffBranch, `origin/${handedOffBranch}`], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(repoPath, 'worktrees', 'feat-panes-handoff');
+      execFileSync('git', ['worktree', 'add', worktreePath, handedOffBranch], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'more work elsewhere'], { cwd: sourcePath, stdio: 'ignore' });
+      execFileSync('git', ['push', '-q'], { cwd: sourcePath, stdio: 'ignore' });
+      const advancedSha = gitOut(['rev-parse', 'HEAD'], sourcePath);
+      const { services, createSession, updateSessionDb } = receiveServices(repoPath, {
+        existingRows: [{ id: 'parked', name: 'issue 252 (parked)', worktree_path: worktreePath, archived: 0, handed_off_at: '2026-09-11T09:00:00.000Z' }],
+      });
+
+      const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest()]);
+
+      expect(result).toMatchObject({ ok: true, path: 'resume', paneId: 'parked', worktreePath });
+      expect(gitOut(['rev-parse', 'HEAD'], worktreePath)).toBe(advancedSha);
+      expect(createSession).not.toHaveBeenCalled();
+      expect(updateSessionDb).toHaveBeenCalledWith('parked', { handed_off_at: null });
+      expect(services.sessionManager.emitSessionCreated).not.toHaveBeenCalled();
+    });
+
+    it('refuses when an active pane already works on the branch', async () => {
+      const { repoPath } = createHandedOffRemote('receive-in-use');
+      execFileSync('git', ['fetch', '-q', 'origin'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['branch', '--track', handedOffBranch, `origin/${handedOffBranch}`], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(repoPath, 'worktrees', 'feat-panes-handoff');
+      execFileSync('git', ['worktree', 'add', worktreePath, handedOffBranch], { cwd: repoPath, stdio: 'ignore' });
+      const { services, createSession } = receiveServices(repoPath, {
+        existingRows: [{ id: 'active-1', name: 'busy', worktree_path: worktreePath, archived: 0, handed_off_at: null }],
+      });
+
+      const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest()]);
+
+      expect(result).toMatchObject({ ok: false, blocked: { code: 'branch-in-use', paneId: 'active-1', name: 'busy' } });
+      expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('adopts a registered worktree on the branch that has no pane', async () => {
+      const { repoPath, remoteSha } = createHandedOffRemote('receive-orphan');
+      execFileSync('git', ['fetch', '-q', 'origin'], { cwd: repoPath, stdio: 'ignore' });
+      execFileSync('git', ['branch', '--track', handedOffBranch, `origin/${handedOffBranch}`], { cwd: repoPath, stdio: 'ignore' });
+      const orphanPath = path.join(repoPath, 'worktrees', 'leftover');
+      execFileSync('git', ['worktree', 'add', orphanPath, handedOffBranch], { cwd: repoPath, stdio: 'ignore' });
+      const { services, createSession } = receiveServices(repoPath);
+
+      const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest({ name: 'renamed' })]);
+
+      // git worktree list reports the canonical path (/private/var on macOS), which is what receive stores.
+      const canonicalOrphanPath = fs.realpathSync.native(orphanPath);
+      expect(result).toMatchObject({ ok: true, path: 'adopt-orphan', worktreePath: canonicalOrphanPath });
+      expect(createSession).toHaveBeenCalledWith('renamed', canonicalOrphanPath, '', 'leftover', 'ignore', project.id, false, undefined, 'none', expect.any(String), 'origin/main', true);
+      expect(gitOut(['rev-parse', 'HEAD'], orphanPath)).toBe(remoteSha);
+    });
+
+    it('refuses when the target directory already exists', async () => {
+      const { repoPath } = createHandedOffRemote('receive-path');
+      const targetPath = path.join(repoPath, 'worktrees', 'feat-panes-handoff');
+      fs.mkdirSync(targetPath, { recursive: true });
+      const { services, createSession } = receiveServices(repoPath);
+
+      const result = await createRegistry(services).invoke('runpane:panes:receive', [receiveRequest()]);
+
+      expect(result).toMatchObject({ ok: false, blocked: { code: 'path-in-use', path: targetPath } });
+      expect(createSession).not.toHaveBeenCalled();
+    });
+
+    it('rolls back the worktree and branch when session creation fails', async () => {
+      const { repoPath } = createHandedOffRemote('receive-rollback');
+      const { services } = receiveServices(repoPath, { failCreateSession: true });
+
+      await expect(createRegistry(services).invoke('runpane:panes:receive', [receiveRequest()])).rejects.toThrow('createSession exploded');
+
+      expect(fs.existsSync(path.join(repoPath, 'worktrees', 'feat-panes-handoff'))).toBe(false);
+      expect(gitOut(['worktree', 'list', '--porcelain'], repoPath)).not.toContain('feat-panes-handoff');
+      expect(() => gitOut(['show-ref', '--verify', '--quiet', `refs/heads/${handedOffBranch}`], repoPath)).toThrow();
+    });
+
+    it('rejects malformed requests', async () => {
+      const registry = createRegistry(createServices());
+      await expect(registry.invoke('runpane:panes:receive', [{ repo: 'active', tool: { agent: 'claude' } }])).rejects.toThrow(/branch/u);
+      await expect(registry.invoke('runpane:panes:receive', [{ repo: 'active', branch: 'x', tool: { agent: 'claude', initialInput: 'hi' } }])).rejects.toThrow(/initialInput/u);
+      await expect(registry.invoke('runpane:panes:receive', [{ repo: 'active', branch: 'x', tool: { agent: 'claude' }, focus: true, noFocus: true }])).rejects.toThrow(/both/u);
     });
   });
 

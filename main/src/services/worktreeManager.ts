@@ -214,6 +214,12 @@ export class WorktreeManager {
     return this.projectsCache.get(cacheKey)!;
   }
 
+  /** Path a Pane-managed worktree named `name` would occupy, without creating anything. */
+  resolveWorktreePath(projectPath: string, name: string, worktreeFolder: string | undefined, pathResolver: PathResolver): string {
+    const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
+    return pathResolver.join(baseDir, name);
+  }
+
   async initializeProject(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, _commandRunner: CommandRunner): Promise<void> {
     const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
     try {
