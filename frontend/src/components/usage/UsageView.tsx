@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Check, Download, Loader2, RefreshCw, Share2 } from 'lucide-react';
+import { BarChart3, CalendarDays, Check, Download, Loader2, RefreshCw, Share2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { API } from '../../utils/api';
 import { useHotkey } from '../../hooks/useHotkey';
+import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { AreaChart } from '../ui/charts/AreaChart';
 import { BarChart } from '../ui/charts/BarChart';
 import { DonutChart } from '../ui/charts/DonutChart';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
 import { LimitBar, LimitStatusBanners, CreditsLine } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
+import { PaneUsageSummary } from './PaneUsageSummary';
+import { UsageDateRangeDialog } from './UsageDateRangeDialog';
+import { localDateString, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
   type UsageByPane,
@@ -150,6 +154,10 @@ export function UsageView() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rangeDays, setRangeDays] = useState<number>(DEFAULT_USAGE_RANGE_DAYS);
+  const [customRange, setCustomRange] = useState<UsageDateRange | null>(null);
+  const [showDateRange, setShowDateRange] = useState(false);
+  const [trimPaneUsage, setTrimPaneUsage] = useState(false);
+  const requestId = useRef(0);
   const [provider, setProvider] = useState<UsageProvider | 'all'>('all');
   const [downloadStatus, setDownloadStatus] = useState<'idle' | 'capturing' | 'done'>('idle');
   const [shareStatus, setShareStatus] = useState<'idle' | 'capturing' | 'done'>('idle');
@@ -162,29 +170,34 @@ export function UsageView() {
   const [hiddenSeries, setHiddenSeries] = useState<string[]>([]);
 
   const load = useCallback(async (mode: 'initial' | 'refresh') => {
+    const id = ++requestId.current;
     if (mode === 'refresh') setRefreshing(true);
+    else setLoading(true);
     try {
       const toMs = Date.now();
       const response = await API.usage.getReport({
-        fromMs: toMs - rangeDays * DAY_MS,
-        toMs,
+        ...(customRange ? usageDateBounds(customRange) : { fromMs: toMs - rangeDays * DAY_MS, toMs }),
         providers: provider === 'all' ? undefined : [provider],
       });
+      if (id !== requestId.current) return;
       if (!response.success || !response.data) {
         throw new Error(response.error || 'Failed to load usage');
       }
       setReport(response.data);
       setError(null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load usage');
+      if (id === requestId.current) setError(err instanceof Error ? err.message : 'Failed to load usage');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (id === requestId.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [rangeDays, provider]);
+  }, [rangeDays, customRange, provider]);
 
   useEffect(() => {
     void load('initial');
+    return () => { requestId.current += 1; };
   }, [load]);
 
   // While the index is still building, keep refreshing so numbers fill in.
@@ -195,17 +208,20 @@ export function UsageView() {
     return () => window.clearInterval(timer);
   }, [scanning, load]);
 
+  const currentLoad = useCommittedRef(load);
   const handleRescan = useCallback(async () => {
     setRefreshing(true);
     try {
       await API.usage.rescan();
-      await load('refresh');
+      await currentLoad.current('refresh');
     } catch {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [currentLoad]);
 
-  const rangeLabel = RANGE_OPTIONS.find(o => o.days === rangeDays)?.label ?? `${rangeDays}d`;
+  const rangeLabel = customRange
+    ? `${customRange.start} to ${customRange.end}`
+    : RANGE_OPTIONS.find(o => o.days === rangeDays)?.label ?? `${rangeDays}d`;
 
   const captureImage = useCallback(async (): Promise<string | null> => {
     if (!contentRef.current) return null;
@@ -224,7 +240,7 @@ export function UsageView() {
   }, []);
 
   const handleDownload = useCallback(async () => {
-    if (downloadStatus !== 'idle') return;
+    if (downloadStatus !== 'idle' || loading || error || !report) return;
     setDownloadStatus('capturing');
     try {
       const data = await captureImage();
@@ -236,10 +252,10 @@ export function UsageView() {
     } catch {
       setDownloadStatus('idle');
     }
-  }, [captureImage, downloadStatus, rangeLabel]);
+  }, [captureImage, downloadStatus, rangeLabel, loading, error, report]);
 
   const handleShare = useCallback(async () => {
-    if (shareStatus !== 'idle') return;
+    if (shareStatus !== 'idle' || loading || error || !report) return;
     setShareStatus('capturing');
     try {
       const data = await captureImage();
@@ -255,7 +271,7 @@ export function UsageView() {
     } catch {
       setShareStatus('idle');
     }
-  }, [captureImage, shareStatus, rangeLabel]);
+  }, [captureImage, shareStatus, rangeLabel, loading, error, report]);
 
   useHotkey({
     id: 'usage-download',
@@ -462,10 +478,10 @@ export function UsageView() {
                 <button
                   key={option.days}
                   type="button"
-                  aria-pressed={rangeDays === option.days}
-                  onClick={() => setRangeDays(option.days)}
+                  aria-pressed={!customRange && rangeDays === option.days}
+                  onClick={() => { setCustomRange(null); setRangeDays(option.days); }}
                   className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
-                    rangeDays === option.days
+                    !customRange && rangeDays === option.days
                       ? 'bg-interactive text-text-on-interactive'
                       : 'text-text-secondary hover:bg-surface-hover'
                   }`}
@@ -475,12 +491,24 @@ export function UsageView() {
               ))}
             </fieldset>
 
+            <button
+              type="button"
+              aria-label="Choose custom date range"
+              aria-pressed={customRange !== null}
+              title="Choose custom date range"
+              onClick={() => setShowDateRange(true)}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] ${customRange ? 'bg-interactive text-text-on-interactive' : 'text-text-secondary hover:bg-surface-hover'}`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+              {customRange ? rangeLabel : 'Custom'}
+            </button>
+
             <span className="h-4 w-px bg-border-primary" aria-hidden="true" />
 
             <button
               type="button"
               onClick={() => { void handleDownload(); }}
-              disabled={downloadStatus === 'capturing' || !report}
+              disabled={downloadStatus === 'capturing' || !report || loading || !!error}
               aria-label="Download usage as image"
               title="Download usage as image"
               className="rounded p-1 transition-colors hover:bg-surface-hover disabled:opacity-50"
@@ -493,7 +521,7 @@ export function UsageView() {
             <button
               type="button"
               onClick={() => { void handleShare(); }}
-              disabled={shareStatus === 'capturing' || !report}
+              disabled={shareStatus === 'capturing' || !report || loading || !!error}
               aria-label="Share usage image"
               title="Share usage image"
               className="rounded p-1 transition-colors hover:bg-surface-hover disabled:opacity-50"
@@ -515,6 +543,17 @@ export function UsageView() {
           </div>
         )}
       </header>
+
+      {showDateRange && (
+        <UsageDateRangeDialog
+          initialRange={customRange ?? {
+            start: localDateString(new Date(Date.now() - rangeDays * DAY_MS)),
+            end: localDateString(new Date()),
+          }}
+          onClose={() => setShowDateRange(false)}
+          onApply={range => { setCustomRange(range); setShowDateRange(false); }}
+        />
+      )}
 
       {activeTab === 'usage' && report?.index.scanning && (
         <div className="flex flex-shrink-0 items-center gap-2 border-b border-border-primary bg-surface-tertiary px-4 py-1 text-[11px] text-text-tertiary">
@@ -550,6 +589,7 @@ export function UsageView() {
           </div>
         ) : report ? (
           <div className="mx-auto flex max-w-6xl flex-col gap-4">
+            <p className="text-xs text-text-tertiary">{customRange ? rangeLabel : `Last ${rangeLabel}`} · {provider === 'all' ? 'All providers' : PROVIDER_OPTIONS.find(option => option.value === provider)?.label}</p>
             {/* Summary — all from logs */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <StatCard
@@ -602,6 +642,8 @@ export function UsageView() {
                 )}
               </div>
             )}
+
+            <PaneUsageSummary byPane={report.byPane} trim={trimPaneUsage} onTrimChange={setTrimPaneUsage} />
 
             <div className="grid gap-4 lg:grid-cols-3">
               {/* Time series */}
