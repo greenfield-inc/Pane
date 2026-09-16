@@ -110,6 +110,24 @@ describe('keyboard shortcut forwarding', () => {
     expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(config), config)).toBe(false);
   });
 
+  it.each([
+    ['scroll-focused-surface-up', 'ArrowUp'],
+    ['scroll-focused-surface-down', 'ArrowDown'],
+    ['page-focused-surface-up', 'PageUp'],
+    ['page-focused-surface-down', 'PageDown'],
+  ])('preserves native browser ownership of the default for %s', (id, key) => {
+    const event = input({ key, code: key, control: false, shift: true });
+    for (const keyboardShortcutOverrides of [{}, { [id]: `shift+${key}` }, { [id]: 'invalid' }]) {
+      const config = { keyboardShortcutOverrides };
+      expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(config), config)).toBe(false);
+    }
+    const config = { keyboardShortcutOverrides: { [id]: 'alt+F6' } };
+    const remapped = input({ key: 'F6', code: 'F6', control: false, alt: true });
+    expect(shouldForwardWebviewInput(remapped, buildWebviewForwardSet(config), config)).toBe(true);
+    expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(config), config)).toBe(false);
+    expect(shouldForwardWebviewInput(remapped, buildWebviewForwardSet({}), {})).toBe(false);
+  });
+
   it('forwards accepted named-key remaps without a primary modifier', () => {
     const config = { keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'alt+F6' } };
     const event = input({ key: 'F6', code: 'F6', control: false, alt: true });

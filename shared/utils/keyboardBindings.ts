@@ -164,12 +164,16 @@ export function collectInterceptionBindings(input: BindingInput): InterceptionBi
   for (const catalogEntry of KEYBOARD_SHORTCUT_CATALOG) {
     const chord = resolveEffectiveChord(catalogEntry.id, overrides, catalogEntry.defaultChord);
     if (!chord) continue;
+    // Unchanged Shift+Arrow/Page defaults belong to native browser selection
+    // and scrolling. Explicit remaps may use named keys without Control/Command.
+    const browserOwnsDefault = !chord.startsWith('mod+')
+      && chord === resolveEffectiveChord(catalogEntry.id, {}, catalogEntry.defaultChord);
     bindings.push({
       id: catalogEntry.id,
       chord,
       releaseFromTerminal: catalogEntry.releaseFromTerminal,
       releaseInTui: catalogEntry.releaseInTui,
-      forwardFromWebview: catalogEntry.forwardFromWebview,
+      forwardFromWebview: catalogEntry.forwardFromWebview && !browserOwnsDefault,
     });
   }
   for (const shortcut of enabledTerminalShortcuts(input.terminalShortcuts)) {
