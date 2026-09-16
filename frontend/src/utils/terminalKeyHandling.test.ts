@@ -1,3 +1,4 @@
+import { chordFromKeyboardEvent } from '../../../shared/utils/keyboardChords';
 import { describe, expect, it } from 'vitest';
 import { KEYBOARD_SHORTCUT_CATALOG } from '../../../shared/constants/keyboardShortcuts';
 import {
@@ -82,6 +83,13 @@ const tui = (overrides: Partial<{
 });
 
 describe('terminal application release', () => {
+  it('releases an exact named-key remap in a TUI without requiring Control or Command', () => {
+    const sets = buildInterceptionSets({ overrides: { 'add-tool-terminal-claude': 'alt+F6' } });
+    const state = tui({ isTuiReleasableChord: event => sets.tuiReleasable.has(chordFromKeyboardEvent(event)) });
+    expect(resolveTerminalKeyHandling(key({ key: 'F6', code: 'F6', altKey: true }), state)).toEqual({ action: 'release-to-app' });
+    expect(resolveTerminalKeyHandling(key({ key: 'F6', code: 'F6' }), state)).toEqual({ action: 'pass-through' });
+  });
+
   it('matches the legacy ordinary-terminal release inventory', () => {
     const sets = buildInterceptionSets({});
     for (const entry of KEYBOARD_SHORTCUT_CATALOG) {

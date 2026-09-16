@@ -82,13 +82,20 @@ test('shows the complete inventory regardless of the current view, with an axe-c
   const map = await openShortcuts(page);
 
   await expect(map.locator('[data-shortcut-id]')).toHaveCount(expectedRowCount);
-  await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' }).getByRole('row')).toHaveCount(REFERENCE_ROW_COUNT);
+  await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' }).getByRole('row')).toHaveCount(REFERENCE_ROW_COUNT + 1);
   await expect(map.locator('[data-shortcut-id="open-settings"]').getByText('Invalid — using default')).toBeVisible();
   // Recorder button and state tag both read "Unassigned".
   await expect(map.locator('[data-shortcut-id="toggle-sidebar"]').getByText('Unassigned', { exact: true })).toHaveCount(2);
   await expect(map.locator('[data-shortcut-id="add-tool-custom-0"]')).toContainText('Add Deploy');
   await expect(map.locator('[data-shortcut-id="terminal-shortcut-snip"]')).toContainText('Lint snippet');
+  await expect(map.locator('table')).toHaveCount(1);
+  await expect(map.locator('thead').getByRole('columnheader')).toHaveCount(5);
   await expectNoAxeViolations(page);
+  await page.getByTestId('settings-content').evaluate(element => {
+    const search = element.querySelector('[aria-label="Search shortcuts"]');
+    if (search) element.scrollTop += search.getBoundingClientRect().top - element.getBoundingClientRect().top - 12;
+  });
+  await page.screenshot({ path: 'tmp/configurable-keybindings/closeout-shortcuts.png' });
 
   await map.getByRole('textbox', { name: 'Search shortcuts' }).fill('codex');
   await expect(map.locator('[data-shortcut-id]')).toHaveCount(1);
@@ -96,7 +103,7 @@ test('shows the complete inventory regardless of the current view, with an axe-c
   await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' })).toHaveCount(0);
   await map.getByRole('textbox', { name: 'Search shortcuts' }).fill('copy selection');
   await expect(map.locator('[data-shortcut-id]')).toHaveCount(0);
-  await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' }).getByRole('row')).toHaveCount(1);
+  await expect(map.getByRole('rowgroup', { name: 'Terminal and native shortcuts' }).getByRole('row')).toHaveCount(2);
 });
 
 test('shows the same inventory from a Project view with a WSL project on a Windows host', async ({ page }) => {
@@ -253,4 +260,39 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
   await expect(help.getByText('Add Codex')).toBeVisible();
   await expect(help.locator('kbd', { hasText: /^Y$/ })).toHaveCount(0);
   await expect(help.getByText('Send Input / Continue Conversation')).toBeVisible();
+});
+
+
+test('remapped continuous scrolling stops when the remapped key is released', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await mock(page, { keyboardShortcutOverrides: { 'scroll-focused-surface-down': 'alt+F6' } });
+  await openShortcuts(page);
+  const content = page.getByTestId('settings-content');
+  await content.focus();
+  const scrollTop = () => content.evaluate(element => element.scrollTop);
+  const before = await scrollTop();
+  await page.keyboard.down('Alt');
+  await page.keyboard.down('F6');
+  await expect.poll(scrollTop).toBeGreaterThan(before + 2);
+  await page.keyboard.up('F6');
+  const released = await scrollTop();
+  await page.waitForTimeout(250);
+  expect(await scrollTop()).toBe(released);
+  await page.keyboard.up('Alt');
+});
+
+
+test('keeps the shortcut table inside the Settings viewport at narrow width', async ({ page }) => {
+  await mock(page);
+  const map = await openShortcuts(page);
+  await page.setViewportSize({ width: 520, height: 800 });
+  await map.getByRole('textbox', { name: 'Search shortcuts' }).fill('claude');
+  const content = page.getByTestId('settings-content');
+  expect(await content.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.getByTestId('settings-content').evaluate(element => {
+    const search = element.querySelector('[aria-label="Search shortcuts"]');
+    if (search) element.scrollTop += search.getBoundingClientRect().top - element.getBoundingClientRect().top - 12;
+  });
+  await expectNoAxeViolations(page);
+  await page.screenshot({ path: 'tmp/configurable-keybindings/closeout-shortcuts-narrow.png' });
 });

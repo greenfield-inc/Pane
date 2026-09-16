@@ -150,7 +150,7 @@ function passesFocusRules(
   return !(
     isInput
     && !pressed.includes('mod')
-    && !(definition.allowInXterm && isXtermHelperTarget(target))
+    && !((definition.allowInXterm || interceptionSets.bound.has(pressed)) && isXtermHelperTarget(target))
   );
 }
 

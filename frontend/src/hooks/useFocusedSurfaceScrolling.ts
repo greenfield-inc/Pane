@@ -46,9 +46,9 @@ export function useFocusedSurfaceScrolling(activeSessionId: string | null): void
       if (event.target instanceof Element) focusedSurfaceScroll.noteInteraction(event.target);
     };
     const stop = () => focusedSurfaceScroll.stop();
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key === 'Shift' || event.key === 'ArrowUp' || event.key === 'ArrowDown') stop();
-    };
+    // A remap may use any supported key or modifier. End the hold on release
+    // rather than tying continuous scrolling to the default Shift+Arrow keys.
+    const handleKeyUp = stop;
     const handleVisibilityChange = () => {
       if (document.hidden) stop();
     };

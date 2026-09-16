@@ -84,37 +84,34 @@ export function KeyboardShortcutMap({
         fullWidth
       />
       <div className="max-h-[28rem] overflow-y-auto rounded-md border border-border-secondary">
-        <div role="table" aria-label="Key bindings" className="min-w-full text-sm">
-          <div role="rowgroup" className="sticky top-0 z-10 bg-surface-primary">
-            <div role="row" className="hidden border-b border-border-secondary px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary sm:grid sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_minmax(0,0.8fr)] sm:gap-2">
-              <span role="columnheader">Command</span>
-              <span role="columnheader">Shortcut</span>
-              <span role="columnheader">Default</span>
-              <span role="columnheader">Scope</span>
-              <span role="columnheader">State</span>
-            </div>
-          </div>
+        <table aria-label="Key bindings" className="w-full min-w-[48rem] text-left text-sm">
+          <thead className="sticky top-0 z-10 bg-surface-primary">
+            <tr className="border-b border-border-secondary text-[11px] uppercase tracking-wide text-text-tertiary">
+              {['Command', 'Shortcut', 'Default', 'Scope', 'State'].map((heading) => (
+                <th key={heading} scope="col" className="px-3 py-1.5 font-medium">{heading}</th>
+              ))}
+            </tr>
+          </thead>
           {grouped.length === 0 && visibleReference.length === 0 && (
-            <p className="px-3 py-2 text-xs text-text-tertiary">No shortcuts match “{query}”.</p>
+            <tbody><tr><td colSpan={5} className="px-3 py-2 text-xs text-text-tertiary">No shortcuts match “{query}”.</td></tr></tbody>
           )}
           {grouped.map(({ category, rows: groupRows }) => (
-            <div key={category} role="rowgroup" aria-label={CATEGORY_LABELS[category]}>
-              <div aria-hidden="true" className="bg-surface-secondary/60 px-3 py-1 text-[11px] font-medium text-text-tertiary">
+            <tbody key={category} aria-label={CATEGORY_LABELS[category]}>
+              <tr><th colSpan={5} scope="colgroup" className="bg-surface-secondary/60 px-3 py-1 text-[11px] font-medium text-text-tertiary">
                 {CATEGORY_LABELS[category]}
-              </div>
+              </th></tr>
               {groupRows.map((row) => {
                 const statusId = `shortcut-status-${row.id}`;
                 const conflictText = row.conflicts.length > 0
                   ? `${row.effectiveChord ? formatKeyDisplay(row.effectiveChord) : 'This key'} is also bound to ${row.conflicts.map((id) => labelForId(id, sources) + whereToEdit(id)).join(', ')}`
                   : '';
                 return (
-                  <div
+                  <tr
                     key={row.id}
-                    role="row"
                     data-shortcut-id={row.id}
-                    className="grid gap-1 border-t border-border-secondary px-3 py-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_minmax(0,0.8fr)] sm:items-center sm:gap-2"
+                    className="border-t border-border-secondary"
                   >
-                    <div role="cell" className="min-w-0 text-text-primary">
+                    <td className="px-3 py-2 min-w-0 text-text-primary">
                       <span>{row.label}</span>
                       {row.origin === 'snippet' && (
                         <span className="ml-1 text-[11px] text-text-tertiary">Snippet — edit in Terminal snippets below</span>
@@ -122,8 +119,8 @@ export function KeyboardShortcutMap({
                       {conflictText && (
                         <p id={statusId} role="alert" className="mt-0.5 text-[11px] text-status-error">{conflictText}</p>
                       )}
-                    </div>
-                    <div role="cell" className="min-w-0">
+                    </td>
+                    <td className="px-3 py-2 min-w-0">
                       {row.editable ? (
                         <KeyRecorder
                           label={row.label}
@@ -140,38 +137,37 @@ export function KeyboardShortcutMap({
                       ) : (
                         <span className="text-xs italic text-text-muted">No key</span>
                       )}
-                    </div>
-                    <div role="cell" className="text-xs text-text-tertiary">
-                      <span className="sm:hidden">Default: </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-text-tertiary">
                       {row.defaultChord ? formatKeyDisplay(row.defaultChord) : '—'}
-                    </div>
-                    <div role="cell" className="text-xs text-text-tertiary">
-                      <span className="sm:hidden">Scope: </span>{SCOPE_LABELS[row.scope]}
-                    </div>
-                    <div role="cell" className="flex flex-wrap gap-1 text-[11px] text-text-tertiary">
+                    </td>
+                    <td className="px-3 py-2 text-xs text-text-tertiary">
+                      {SCOPE_LABELS[row.scope]}
+                    </td>
+                    <td className="px-3 py-2 space-x-1 text-[11px] text-text-tertiary">
                       {STATE_LABELS[row.state] && <StateTag>{STATE_LABELS[row.state]}</StateTag>}
                       {row.availability === 'unavailable-platform' && <StateTag>Unavailable on this platform</StateTag>}
-                    </div>
-                  </div>
+                    </td>
+                  </tr>
                 );
               })}
-            </div>
+            </tbody>
           ))}
           {visibleReference.length > 0 && (
-            <div role="rowgroup" aria-label="Terminal and native shortcuts">
-              <div aria-hidden="true" className="bg-surface-secondary/60 px-3 py-1 text-[11px] font-medium text-text-tertiary">
+            <tbody aria-label="Terminal and native shortcuts">
+              <tr><th colSpan={5} scope="colgroup" className="bg-surface-secondary/60 px-3 py-1 text-[11px] font-medium text-text-tertiary">
                 Terminal / native — not remappable
-              </div>
+              </th></tr>
               {visibleReference.map((reference) => (
-                <div key={reference.id} role="row" className="grid gap-1 border-t border-border-secondary px-3 py-2 text-text-secondary sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,2.3fr)] sm:items-center sm:gap-2">
-                  <span role="cell">{reference.label}</span>
-                  <span role="cell"><Kbd size="sm">{formatKeyDisplay(reference.chord)}</Kbd></span>
-                  <span role="cell" className="text-xs text-text-tertiary">Owned by the terminal or the view</span>
-                </div>
+                <tr key={reference.id} className="border-t border-border-secondary text-text-secondary">
+                  <td className="px-3 py-2">{reference.label}</td>
+                  <td className="px-3 py-2"><Kbd size="sm">{formatKeyDisplay(reference.chord)}</Kbd></td>
+                  <td colSpan={3} className="px-3 py-2 text-xs text-text-tertiary">Owned by the terminal or the view</td>
+                </tr>
               ))}
-            </div>
+            </tbody>
           )}
-        </div>
+        </table>
       </div>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <Button

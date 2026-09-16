@@ -397,8 +397,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'panels:update') {
         // This body runs inside the page (addInitScript), so no imported helpers are available.
-        const updates = args[1] && typeof args[1] === 'object' && !Array.isArray(args[1])
-          ? args[1] as JsonObject : undefined;
+        // SAFETY: The test bridge receives JSON panel updates from panelApi; exclude scalar/array arguments.
+        const updates = args[1] instanceof Object && !Array.isArray(args[1]) ? args[1] as JsonObject : undefined;
         if (key && updates) {
           panelUpdates.push({ panelId: key, updates: clone(updates) });
           const panel = mockPanels.find((candidate) => candidate.id === key);

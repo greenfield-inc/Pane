@@ -44,8 +44,8 @@ export function resolveBrowserNavigation(
 // Module-scoped and monotonic so two concurrent navigations can never share a
 // nonce (a read-modify-write on the store snapshot could).
 let navigationNonceCounter = 0;
-function nextNavigationNonce(): number {
-  navigationNonceCounter += 1;
+function nextNavigationNonce(previous = 0): number {
+  navigationNonceCounter = Math.max(navigationNonceCounter, previous) + 1;
   return navigationNonceCounter;
 }
 
@@ -81,7 +81,7 @@ export async function openUrlInSessionBrowser(
   if (existing) {
     // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
     const existingState = (existing.state.customState ?? {}) as BrowserPanelState;
-    const nextState: BrowserPanelState = { ...existingState, currentUrl: url, navigationNonce: nextNavigationNonce() };
+    const nextState: BrowserPanelState = { ...existingState, currentUrl: url, navigationNonce: nextNavigationNonce(existingState.navigationNonce) };
     const updates: Partial<ToolPanel> = { state: { ...existing.state, customState: nextState } };
     if (options.retitleExisting && options.title) updates.title = options.title;
     browserPanel = { ...existing, ...updates };

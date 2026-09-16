@@ -513,10 +513,19 @@ async function createWindow() {
     // Forward app hotkeys from webview to renderer.
     // Webviews are separate processes — keyboard events inside them never reach
     // the renderer's window listener where the hotkey system lives. Only intercept
-    // the specific Ctrl/Cmd+key combos that Pane actually handles, so that normal
+    // the exact configured chords that Pane handles, so that normal
     // browser shortcuts (Ctrl+F, Ctrl+R, Ctrl+A in inputs, etc.) still work
     // inside embedded browser panels.
     wvContents.on('before-input-event', (event, input) => {
+      // Releases must reach held actions even if bindings changed while held.
+      // Do not preventDefault: the embedded page retains its own keyup events.
+      if (input.type === 'keyUp') {
+        mainWindow?.webContents.send('synthetic-keyup', {
+          key: input.key, code: input.code, ctrlKey: input.control,
+          metaKey: input.meta, shiftKey: input.shift, altKey: input.alt,
+        });
+        return;
+      }
       const config = configManager.getConfig();
       if (!shouldForwardWebviewInput(input, webviewForwardSet, config)) return;
 

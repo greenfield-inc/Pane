@@ -54,6 +54,14 @@ describe('openUrlInSessionBrowser', () => {
     expect(usePanelStore.getState().activePanels.s1).toBe('b1');
   });
 
+  it('advances a persisted nonce after the renderer restarts', async () => {
+    const panel = browserPanel('b1', 's1', 'https://same');
+    panel.state.customState = { currentUrl: 'https://same', navigationNonce: 1000 };
+    usePanelStore.setState({ panels: { s1: [panel] } });
+    await openUrlInSessionBrowser('s1', 'https://same', {}, panelApi);
+    expect(panelApi.updatePanel.mock.calls[0][1].state?.customState).toMatchObject({ navigationNonce: 1001 });
+  });
+
   it('gives two concurrent same-URL requests distinct nonces', async () => {
     usePanelStore.setState({ panels: { s1: [browserPanel('b1', 's1', 'https://same')] } });
     const releases: Array<() => void> = [];

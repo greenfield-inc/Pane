@@ -66,9 +66,8 @@ function isPaneNavigationShortcut(
   event: TerminalKeyLike,
   state: TerminalKeyHandlingState,
 ): boolean {
-  const primaryModifier = state.isMac ? event.metaKey : event.ctrlKey;
-  if (!primaryModifier) return false;
-
+  // Literal Control on macOS must retain terminal signals such as SIGQUIT.
+  if ((event.ctrlKey || event.metaKey) && !(state.isMac ? event.metaKey : event.ctrlKey)) return false;
   const isAltGr = event.getModifierState('AltGraph');
   const digitMatch = event.code.match(/^Digit([1-9])$/);
   const isUnreportedAltGrDigit = !state.isMac

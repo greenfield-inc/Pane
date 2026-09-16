@@ -57,7 +57,7 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
   }), [overridesDraft, shortcuts, customCommands, projectEnvironment, platform]);
   const conflicted = shortcutMap.conflicts.length > 0;
   const snippetConflicts = new Set(
-    shortcutMap.rows.filter((row) => row.origin === 'snippet' && row.conflicts.length > 0).map((row) => row.id),
+    shortcutMap.rows.flatMap((row) => row.origin === 'snippet' && row.conflicts.length > 0 ? [row.id] : []),
   );
   const invalid = shortcuts.some((shortcut) => !shortcut.label.trim() || !shortcut.key || !shortcut.text.trim())
     || duplicateKeys.size > 0
@@ -101,7 +101,7 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
         <SettingRow
           settingId="command-palette-shortcut"
           label="Keep Command Palette shortcut enabled"
-          description="Keep Ctrl/Cmd+Shift+P available when other Pane keyboard shortcuts are disabled."
+          description="Keep the configured Command Palette shortcut available when other Pane keyboard shortcuts are disabled."
           saveState={persistence.saveStates['command-palette-shortcut']}
         >
           <ImmediateToggle

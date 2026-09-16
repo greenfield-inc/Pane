@@ -93,3 +93,27 @@ for (const preset of AGENT_LAUNCH_PRESETS) {
     });
   }
 }
+
+for (const alternateScreen of [false, true]) {
+  test(`Alt+F6 remap launches once with focus in ${alternateScreen ? 'a TUI' : 'a terminal'}`, async ({ page }) => {
+    await installElectronApiMock(page, {
+      platform: 'linux',
+      initialConfig: { keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'alt+F6' } },
+      initialProjects: [project], initialSessions: [worktreeSession],
+      initialPanels: terminalPanels(worktreeSession.id, 'wt'),
+      initialTerminalStates: {
+        'wt-0': { scrollbackBuffer: 'ready\r\n' },
+        'wt-1': { scrollbackBuffer: alternateScreen ? '\x1b[?1049hready\r\n' : 'ready\r\n' },
+      },
+      activeProjectId: project.id,
+    });
+    await openSession(page, worktreeSession.name);
+    await page.locator('.xterm-helper-textarea').last().focus();
+    const before = (await panelCreates(page)).length;
+    await page.keyboard.press('Alt+F6');
+    await expect.poll(async () => (await panelCreates(page)).length).toBe(before + 1);
+    expect((await panelCreates(page)).at(-1)).toMatchObject({
+      title: AGENT_LAUNCH_PRESETS[0].title, state: { customState: { initialCommand: AGENT_LAUNCH_PRESETS[0].command } },
+    });
+  });
+}

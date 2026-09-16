@@ -43,7 +43,7 @@ export function shouldForwardWebviewInput(
   forwardSet: ReadonlySet<string>,
   config: Pick<AppConfig, 'keyboardShortcutsEnabled' | 'commandPaletteShortcutEnabled' | 'keyboardShortcutOverrides'>,
 ): boolean {
-  if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false;
+  if (input.type !== 'keyDown') return false;
   if (!areKeyboardShortcutsEnabled(config)) {
     return shouldForwardCommandPaletteShortcut(config, input);
   }

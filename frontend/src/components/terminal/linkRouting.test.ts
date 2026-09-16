@@ -28,8 +28,8 @@ describe('classifyLinkGesture', () => {
   it('uses Command on macOS and Control elsewhere as the primary modifier', () => {
     expect(classifyLinkGesture(click({ metaKey: true }), true)).toBe('external');
     expect(classifyLinkGesture(click({ ctrlKey: true }), false)).toBe('external');
-    expect(classifyLinkGesture(click({ metaKey: true }), false)).toBe('none');
-    expect(classifyLinkGesture(click({ metaKey: true, shiftKey: true }), false)).toBe('none');
+    expect(classifyLinkGesture(click({ metaKey: true }), false)).toBe('rejected');
+    expect(classifyLinkGesture(click({ metaKey: true, shiftKey: true }), false)).toBe('rejected');
   });
 
   it('gives Primary+Shift precedence', () => {
@@ -40,7 +40,7 @@ describe('classifyLinkGesture', () => {
   it('treats an unconsumed macOS Control primary click as external but never a shifted or secondary one', () => {
     expect(classifyLinkGesture(click({ ctrlKey: true }), true)).toBe('external');
     expect(classifyLinkGesture(click({ ctrlKey: true, button: 2 }), true)).toBe('rejected');
-    expect(classifyLinkGesture(click({ ctrlKey: true, shiftKey: true }), true)).toBe('none');
+    expect(classifyLinkGesture(click({ ctrlKey: true, shiftKey: true }), true)).toBe('rejected');
   });
 
   it('rejects Alt and non-primary buttons outright', () => {
@@ -143,10 +143,10 @@ describe('routeUrlActivation', () => {
     await expect(routeUrlActivation('https://a', click(), 'web-links', d)).resolves.toBe('none');
     await expect(routeUrlActivation('https://a', click(), 'git', d)).resolves.toBe('none');
     await expect(routeUrlActivation('https://a', click(), 'osc8', d)).resolves.toBe('external');
-    // Meta alone on Windows/Linux is inert for gated providers; OSC-8 keeps its plain-click policy.
+    // Meta alone on Windows/Linux is inert for every provider.
     await expect(routeUrlActivation('https://a', click({ metaKey: true }), 'web-links', d)).resolves.toBe('none');
-    await expect(routeUrlActivation('https://a', click({ metaKey: true }), 'osc8', d)).resolves.toBe('external');
-    expect(d.openExternal).toHaveBeenCalledTimes(3);
+    await expect(routeUrlActivation('https://a', click({ metaKey: true }), 'osc8', d)).resolves.toBe('none');
+    expect(d.openExternal).toHaveBeenCalledTimes(2);
   });
 });
 

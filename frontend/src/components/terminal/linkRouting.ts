@@ -18,7 +18,7 @@
  * only primary-button activations qualify.
  */
 
-/** `rejected` = Alt or a non-primary button: never an activation, not even a plain click. */
+/** Unsupported modifiers and non-primary buttons never use the plain-click policy. */
 export type LinkGesture = 'pane-browser' | 'external' | 'none' | 'rejected';
 export type LinkDestination = 'pane-browser' | 'external' | 'none';
 export type LinkProvider = 'osc8' | 'web-links' | 'git';
@@ -54,6 +54,7 @@ export function classifyLinkGesture(event: LinkActivationEventLike, isMac: boole
   if (primary) return 'external';
   // macOS Control-click alias: only when it arrives as a primary-button activation.
   if (isMac && event.ctrlKey && !event.shiftKey) return 'external';
+  if (event.metaKey || event.ctrlKey || event.shiftKey) return 'rejected';
   return 'none';
 }
 

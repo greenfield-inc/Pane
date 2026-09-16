@@ -110,6 +110,17 @@ describe('keyboard shortcut forwarding', () => {
     expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(config), config)).toBe(false);
   });
 
+  it('forwards accepted named-key remaps without a primary modifier', () => {
+    const config = { keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'alt+F6' } };
+    const event = input({ key: 'F6', code: 'F6', control: false, alt: true });
+    expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(config), config)).toBe(true);
+    expect(shouldForwardWebviewInput({ ...event, alt: false }, buildWebviewForwardSet(config), config)).toBe(false);
+    const disabled = { ...config, keyboardShortcutsEnabled: false };
+    expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(disabled), disabled)).toBe(false);
+    const palette = { ...disabled, keyboardShortcutOverrides: { 'open-command-palette': 'alt+F6' } };
+    expect(shouldForwardWebviewInput(event, buildWebviewForwardSet(palette), palette)).toBe(true);
+  });
+
   it('forwards custom slots and enabled snippets mount-independently', () => {
     const config = { terminalShortcuts: [{ id: 'q', key: 'q', enabled: true }] };
     const set = buildWebviewForwardSet(config);
