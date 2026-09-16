@@ -43,6 +43,66 @@ export const nativeTheme = {
   removeListener: vi.fn(),
 };
 
+// Minimal `MessagePortMain` / `MessageChannelMain` stand-ins. Real ports need a
+// live Electron runtime; `PtyHostSupervisor.attachWindow` only exercises
+// start/on/postMessage/close, so a recording stub is enough to assert the
+// port-pair lifecycle.
+
+/** Frames the supervisor and renderer exchange over a ptyHost data port. */
+export interface FakePortFrame {
+  type: string;
+  ptyId?: string;
+  data?: string;
+  bytes?: number;
+  exitCode?: number | null;
+  signal?: number | null;
+}
+
+/** Shape of the `message` event Electron delivers on a `MessagePortMain`. */
+export interface FakePortMessageEvent {
+  data: FakePortFrame;
+}
+
+export type FakePortListener = (event: FakePortMessageEvent) => void;
+
+export class FakeMessagePortMain {
+  started = false;
+  closed = false;
+  readonly posted: FakePortFrame[] = [];
+  readonly listeners = new Map<string, FakePortListener[]>();
+
+  start(): void {
+    this.started = true;
+  }
+
+  on(event: string, listener: FakePortListener): this {
+    const existing = this.listeners.get(event) ?? [];
+    existing.push(listener);
+    this.listeners.set(event, existing);
+    return this;
+  }
+
+  postMessage(message: FakePortFrame): void {
+    this.posted.push(message);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+}
+
+export class MessageChannelMain {
+  /** Every channel built during a test, so specs can inspect the main-side end. */
+  static readonly instances: MessageChannelMain[] = [];
+
+  readonly port1 = new FakeMessagePortMain();
+  readonly port2 = new FakeMessagePortMain();
+
+  constructor() {
+    MessageChannelMain.instances.push(this);
+  }
+}
+
 export const panelManager = {
   emitPanelEvent: vi.fn(),
   getPanel: vi.fn(),

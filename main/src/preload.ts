@@ -161,6 +161,14 @@ type PtyExitCallback = (exitCode: number | null, signal: number | null) => void;
 let ptyHostPort: MessagePort | null = null;
 const ptyExitSubscribers = new Map<string, Set<PtyExitCallback>>();
 
+// Warn once when control/ack frames have no renderer port; terminal bytes use terminal:output.
+let warnedMissingPtyHostPort = false;
+function warnMissingPtyHostPort(context: string): void {
+  if (warnedMissingPtyHostPort) return;
+  warnedMissingPtyHostPort = true;
+  console.error(`[ptyHost] no renderer data port (${context}); PTY control port unavailable`);
+}
+
 ipcRenderer.on('ptyHost-port', (event) => {
   const [port] = event.ports;
   if (!port) {
@@ -1140,11 +1148,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       };
     },
     ack: (ptyId: string, bytes: number): void => {
-      if (!ptyHostPort) return;
+      if (!ptyHostPort) {
+        warnMissingPtyHostPort('ack');
+        return;
+      }
       ptyHostPort.postMessage({ type: 'ack', ptyId, bytes });
     },
     write: (ptyId: string, data: string): void => {
-      if (!ptyHostPort) return;
+      if (!ptyHostPort) {
+        warnMissingPtyHostPort('write');
+        return;
+      }
       ptyHostPort.postMessage({ type: 'write', ptyId, data });
     },
   },

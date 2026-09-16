@@ -792,6 +792,23 @@ async function createWindow() {
     }
   });
 
+  // Hand the renderer its per-window ptyHost data port once the preload
+  // listener is guaranteed to be installed. This MUST be registered before the
+  // awaited load below: `loadURL`/`loadFile` resolve ON `did-finish-load`, so a
+  // listener registered after the await never fires and the renderer never
+  // receives its port. Without the port `electronAPI.ptyHost.onData` is dead,
+  // and because `TerminalPanel.tsx` permanently short-circuits the legacy
+  // `terminal:output` IPC handler as soon as a `ptyId` arrives, every
+  // ptyHost-spawned terminal renders its first frame and then goes silent.
+  // `on`, not `once`: a renderer reload re-runs preload and drops its port
+  // reference, so each load needs a fresh channel (`attachWindow` replaces the
+  // stale pair).
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (ptyHostSupervisor && mainWindow) {
+      ptyHostSupervisor.attachWindow(mainWindow.webContents);
+    }
+  });
+
   if (isDevelopment) {
     const devPort = process.env.VITE_PORT || process.env.PORT || '4521';
     await mainWindow.loadURL(`http://localhost:${devPort}`);

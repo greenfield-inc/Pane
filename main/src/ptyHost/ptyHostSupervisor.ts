@@ -39,7 +39,6 @@ import {
   utilityProcess,
   type MessagePortMain,
   type UtilityProcess,
-  type WebContents,
 } from 'electron';
 
 import {
@@ -211,6 +210,17 @@ export class PtyHandle {
 interface WindowPortPair {
   mainPort: MessagePortMain;
   rendererPort: MessagePortMain;
+}
+
+/**
+ * The slice of Electron's `WebContents` the data-port hand-off actually uses.
+ * Declared structurally so `attachWindow` can be exercised without standing up
+ * a real renderer; `mainWindow.webContents` satisfies it unchanged.
+ */
+export interface PtyHostPortTarget {
+  readonly id: number;
+  postMessage(channel: string, message: null, transfer?: MessagePortMain[]): void;
+  once(event: 'destroyed', listener: () => void): void;
 }
 
 export class PtyHostSupervisor extends EventEmitter {
@@ -586,19 +596,27 @@ export class PtyHostSupervisor extends EventEmitter {
 
   /**
    * Stand up the per-BrowserWindow port pair and deliver the renderer end to
-   * the window. Called from `index.ts` on `did-finish-load`. The port carries
+   * the window. Called from `index.ts` on `did-finish-load`, subscribed before awaited loadURL/loadFile. The port carries
    * ack/write frames from the renderer and exit frames to it; terminal bytes
    * reach `TerminalPanel.tsx` over `terminal:output`.
    *
    * Both ports are retained on `windowPorts` — port GC would otherwise close
    * the channel (plan gotcha line 323).
+   *
+   * Re-entrant per load, not per window: `webContents.id` survives a reload but
+   * the preload closure that holds the renderer end does not, so a reloaded
+   * window has no port even though the old pair is still mapped. Close the
+   * stale pair and hand out a fresh one instead of returning early — keeping
+   * the old entry would leave `electronAPI.ptyHost.onData` permanently dead for
+   * that window.
    */
-  attachWindow(webContents: WebContents): void {
+  attachWindow(webContents: PtyHostPortTarget): void {
     // A reload tears down the preload that held the previous renderer port, so
     // every load needs a fresh channel. Close the stale pair before replacing it.
     const existing = this.windowPorts.get(webContents.id);
     if (existing) {
       existing.mainPort.close();
+      existing.rendererPort.close();
     } else {
       // Clean up on window destroy so the map doesn't retain dead entries.
       webContents.once('destroyed', () => {
