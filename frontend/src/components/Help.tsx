@@ -5,17 +5,21 @@ import type { ShortcutCategory } from '../../../shared/constants/keyboardShortcu
 import { useConfigStore } from '../stores/configStore';
 import { CATEGORY_LABELS, CATEGORY_ORDER, formatKeyDisplay } from '../utils/hotkeyUtils';
 import { rendererPlatform } from '../utils/platformUtils';
+import { selectProfileOverridesRaw } from '../../../shared/utils/keyboardBindings';
+import { normalizeShortcutProfileId } from '../../../shared/constants/keyboardShortcutProfiles';
 import { buildShortcutMap, REFERENCE_ROWS, type ShortcutMapRow } from '../utils/shortcutMap';
 import { Kbd } from './ui/Kbd';
 
 function KeyboardShortcutsSection() {
   const config = useConfigStore((s) => s.config);
+  const profile = normalizeShortcutProfileId(config?.keyboardShortcutProfile);
   const { rows } = useMemo(() => buildShortcutMap({
-    overridesRaw: config?.keyboardShortcutOverrides,
+    overridesRaw: selectProfileOverridesRaw(config ?? undefined, profile),
     terminalShortcuts: config?.terminalShortcuts,
     customCommands: config?.customCommands,
     environment: rendererPlatform(),
-  }), [config?.keyboardShortcutOverrides, config?.terminalShortcuts, config?.customCommands]);
+    profile,
+  }), [config, profile]);
 
   const grouped = useMemo(() => {
     const byCategory = new Map<ShortcutCategory, ShortcutMapRow[]>();

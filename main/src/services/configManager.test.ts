@@ -261,3 +261,83 @@ describe('ConfigManager keyboard shortcut overrides', () => {
     expect(messages[0]).toContain('terminal-shortcut-duplicate');
   });
 });
+
+describe('ConfigManager keyboard shortcut profiles', () => {
+  let directory = '';
+  let previousPaneDir: string | undefined;
+
+  beforeEach(async () => {
+    previousPaneDir = process.env.PANE_DIR;
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-keymap-profiles-'));
+    process.env.PANE_DIR = directory;
+  });
+
+  afterEach(async () => {
+    if (previousPaneDir === undefined) delete process.env.PANE_DIR;
+    else process.env.PANE_DIR = previousPaneDir;
+    await fs.rm(directory, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('seeds the Superset profile only on a fresh install', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().keyboardShortcutProfile).toBe('superset');
+    expect(JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8')).keyboardShortcutProfile)
+      .toBe('superset');
+  });
+
+  it('leaves an existing config without the key on the pane profile and does not rewrite it', async () => {
+    await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ verbose: false }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig()).not.toHaveProperty('keyboardShortcutProfile');
+    expect(JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8')))
+      .not.toHaveProperty('keyboardShortcutProfile');
+  });
+
+  it('round-trips per-profile override maps and preserves unknown profile ids', async () => {
+    const raw = {
+      superset: { 'toggle-sidebar': 'mod+alt+9', 'future-command': 'mod+alt+8' },
+      'future-profile': { 'open-settings': 'mod+alt+7' },
+    };
+    await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({
+      keyboardShortcutProfile: 'superset',
+      keyboardShortcutProfileOverrides: raw,
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ verbose: true });
+    expect(manager.getConfig().keyboardShortcutProfile).toBe('superset');
+    expect(manager.getConfig().keyboardShortcutProfileOverrides).toEqual(raw);
+    expect(JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8')).keyboardShortcutProfileOverrides)
+      .toEqual(raw);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('unknown keyboard shortcut id: future-command'));
+  });
+
+  it('deletes an empty per-profile map wholesale', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ keyboardShortcutProfileOverrides: { superset: { 'open-settings': 'mod+alt+7' } } });
+    expect(manager.getConfig().keyboardShortcutProfileOverrides).toEqual({ superset: { 'open-settings': 'mod+alt+7' } });
+    await manager.updateConfig({ keyboardShortcutProfileOverrides: {} });
+    expect(manager.getConfig()).not.toHaveProperty('keyboardShortcutProfileOverrides');
+    expect(JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8')))
+      .not.toHaveProperty('keyboardShortcutProfileOverrides');
+  });
+
+  it('validates a profile map against that profile\'s defaults', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // mod+t is add-tool-terminal's Superset default on darwin and free on the pane profile.
+    const override = { 'open-settings': process.platform === 'darwin' ? 'mod+t' : 'mod+shift+t' };
+    await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({
+      keyboardShortcutProfile: 'superset',
+      keyboardShortcutProfileOverrides: { superset: override },
+    }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const messages = warn.mock.calls.map(call => call.join(' ')).filter(message => message.includes('conflict'));
+    expect(messages.some(message => message.includes('add-tool-terminal') && message.includes('open-settings'))).toBe(true);
+  });
+});

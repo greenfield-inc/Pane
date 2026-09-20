@@ -169,7 +169,7 @@ test('records with the keyboard only, cancels with Escape without closing Settin
   await expect(row.getByText('Unassigned', { exact: true })).toHaveCount(2);
   await expect(map.getByRole('button', { name: 'Apply' })).toBeEnabled();
   await map.getByRole('button', { name: 'Apply' }).click();
-  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutOverrides: { 'add-tool-terminal-claude': null } });
+  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutProfile: 'pane', keyboardShortcutOverrides: { 'add-tool-terminal-claude': null }, keyboardShortcutProfileOverrides: {} });
 });
 
 test('names both owners for a snippet conflict and a custom-command conflict, then resets', async ({ page }) => {
@@ -203,7 +203,7 @@ test('recording a row default removes the override instead of storing it', async
   await page.keyboard.press('Control+Alt+3');
   await expect(row.getByText('Customized')).toHaveCount(0);
   await map.getByRole('button', { name: 'Apply' }).click();
-  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutOverrides: {} });
+  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutProfile: 'pane', keyboardShortcutOverrides: {}, keyboardShortcutProfileOverrides: {} });
 });
 
 test('a failed Apply keeps the draft, reports the error, and stays retryable', async ({ page }) => {
@@ -220,7 +220,7 @@ test('a failed Apply keeps the draft, reports the error, and stays retryable', a
   await expect(map.getByRole('button', { name: 'Apply' })).toBeEnabled();
   await map.getByRole('button', { name: 'Apply' }).click();
   await expect(map.getByText('Saved', { exact: true })).toBeVisible();
-  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutOverrides: { 'git-pull': 'mod+alt+j' } });
+  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutProfile: 'pane', keyboardShortcutOverrides: { 'git-pull': 'mod+alt+j' }, keyboardShortcutProfileOverrides: {} });
 });
 
 test('Help and the Add Tool menu show the effective chord after a remap and after reset', async ({ page }) => {
@@ -252,7 +252,7 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
   await page.getByRole('dialog', { name: 'Reset all key bindings?' }).getByRole('button', { name: 'Reset all' }).click();
   await map.getByRole('button', { name: 'Apply' }).click();
   await expect(map.getByText('Saved', { exact: true })).toBeVisible();
-  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutOverrides: {} });
+  expect(await configUpdates(page)).toContainEqual({ keyboardShortcutProfile: 'pane', keyboardShortcutOverrides: {}, keyboardShortcutProfileOverrides: {} });
 
   await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
   const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
@@ -295,4 +295,52 @@ test('keeps the shortcut table inside the Settings viewport at narrow width', as
   });
   await expectNoAxeViolations(page);
   await page.screenshot({ path: 'tmp/configurable-keybindings/closeout-shortcuts-narrow.png' });
+});
+
+test('the Superset keymap profile swaps defaults and keeps per-profile customizations', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, get: () => 'Linux x86_64' });
+  });
+  await mock(page, {
+    keyboardShortcutProfile: 'superset',
+    keyboardShortcutOverrides: { 'toggle-sidebar': 'mod+alt+8' },
+    keyboardShortcutProfileOverrides: { superset: { 'toggle-sidebar': 'mod+alt+9' } },
+  });
+  const map = await openShortcuts(page);
+  const profilePicker = page.getByRole('combobox', { name: 'Keymap profile' });
+  await expect(profilePicker).toContainText('Superset');
+
+  // Superset defaults (non-darwin variants) with the superset-profile override applied.
+  const sidebar = map.locator('[data-shortcut-id="toggle-sidebar"]');
+  await expect(sidebar).toContainText('Ctrl+Alt+9');
+  await expect(sidebar.getByText('Customized')).toBeVisible();
+  await expect(map.locator('[data-shortcut-id="add-tool-terminal-claude"]')).toContainText('Ctrl+Alt+C');
+  await expect(map.locator('[data-shortcut-id="add-tool-terminal"]')).toContainText('Ctrl+Shift+T');
+  await expect(map.locator('[data-shortcut-id="open-command-palette"]')).toContainText('Ctrl+Shift+K');
+  // Superset ships pane focus unassigned as its default (recorder shows
+  // Unassigned; the state column stays Default since nothing is overridden).
+  await expect(map.locator('[data-shortcut-id="focus-group-up"]').getByText('Unassigned', { exact: true })).toHaveCount(1);
+
+  // Switching to Pane Classic swaps both the defaults and the override draft.
+  await profilePicker.click();
+  await page.getByRole('option', { name: 'Pane Classic' }).click();
+  await expect(sidebar).toContainText('Ctrl+Alt+8');
+  await expect(map.locator('[data-shortcut-id="add-tool-terminal-claude"]')).toContainText('Ctrl+Alt+3');
+  await expect(map.locator('[data-shortcut-id="open-command-palette"]')).toContainText('Ctrl+Shift+P');
+
+  // Switching back restores the superset customization untouched.
+  await profilePicker.click();
+  await page.getByRole('option', { name: 'Superset' }).click();
+  await expect(sidebar).toContainText('Ctrl+Alt+9');
+
+  // Applying a profile change persists the profile and both override maps.
+  await profilePicker.click();
+  await page.getByRole('option', { name: 'Pane Classic' }).click();
+  await map.getByRole('button', { name: 'Apply' }).click();
+  await expect(map.getByText('Saved', { exact: true })).toBeVisible();
+  expect(await configUpdates(page)).toContainEqual({
+    keyboardShortcutProfile: 'pane',
+    keyboardShortcutOverrides: { 'toggle-sidebar': 'mod+alt+8' },
+    keyboardShortcutProfileOverrides: { superset: { 'toggle-sidebar': 'mod+alt+9' } },
+  });
 });

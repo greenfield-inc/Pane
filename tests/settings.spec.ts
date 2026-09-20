@@ -307,7 +307,7 @@ test.describe('Settings', () => {
     const updates = await page.evaluate(() => (
       window as typeof window & { __paneTestElectronMock: SettingsMock }
     ).__paneTestElectronMock.getConfigUpdates());
-    expect(updates).toContainEqual({ keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'mod+alt+y' } });
+    expect(updates).toContainEqual({ keyboardShortcutProfile: 'pane', keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'mod+alt+y' }, keyboardShortcutProfileOverrides: {} });
 
     await map.getByRole('button', { name: 'Reset all to defaults' }).click();
     await page.getByRole('dialog', { name: 'Reset all key bindings?' }).getByRole('button', { name: 'Reset all' }).click();

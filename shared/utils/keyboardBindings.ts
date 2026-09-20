@@ -4,6 +4,11 @@ import {
   scopesOverlap,
   type ShortcutScope,
 } from '../constants/keyboardShortcuts';
+import {
+  normalizeShortcutProfileId,
+  profileDefaultChord,
+  type KeyboardShortcutProfileId,
+} from '../constants/keyboardShortcutProfiles';
 import { parseChord } from './keyboardChords';
 import {
   BoundaryDecodeError,
@@ -35,7 +40,16 @@ export interface BindingInput {
   overrides?: KeyboardShortcutOverrides | JsonValue;
   terminalShortcuts?: readonly TerminalShortcutBindingInput[] | JsonValue;
   customCommands?: readonly object[] | JsonValue;
+  /** Filters catalog entries by their `platforms` gate; omit for global validation. */
   platform?: string;
+  /** Active shortcut profile; unknown/missing values resolve to `pane`. */
+  profile?: string;
+  /**
+   * Host platform used only to pick a profile chord's darwin/other variant.
+   * Deliberately separate from `platform`, which gates availability and is
+   * omitted for global conflict validation.
+   */
+  hostPlatform?: string;
 }
 
 export interface ActiveBinding {
@@ -144,12 +158,14 @@ function customCommandCount(raw: BindingInput['customCommands']): number {
 export function collectActiveBindings(input: BindingInput): ActiveBinding[] {
   const { overrides } = normalizeKeyboardShortcutOverrides(input.overrides);
   const customCount = customCommandCount(input.customCommands);
+  const profile = normalizeShortcutProfileId(input.profile);
   const bindings: ActiveBinding[] = [];
 
   for (const catalogEntry of KEYBOARD_SHORTCUT_CATALOG) {
     if (catalogEntry.dynamicSlot && Number(catalogEntry.id.slice(-1)) >= customCount) continue;
     if (catalogEntry.platforms && input.platform && !catalogEntry.platforms.includes(input.platform)) continue;
-    const chord = resolveEffectiveChord(catalogEntry.id, overrides, catalogEntry.defaultChord);
+    const defaultChord = profileDefaultChord(catalogEntry.id, catalogEntry.defaultChord, profile, input.hostPlatform);
+    const chord = resolveEffectiveChord(catalogEntry.id, overrides, defaultChord);
     if (chord) bindings.push({ id: catalogEntry.id, chord, scope: catalogEntry.scope });
   }
   for (const shortcut of enabledTerminalShortcuts(input.terminalShortcuts)) {
@@ -160,14 +176,16 @@ export function collectActiveBindings(input: BindingInput): ActiveBinding[] {
 
 export function collectInterceptionBindings(input: BindingInput): InterceptionBinding[] {
   const { overrides } = normalizeKeyboardShortcutOverrides(input.overrides);
+  const profile = normalizeShortcutProfileId(input.profile);
   const bindings: InterceptionBinding[] = [];
   for (const catalogEntry of KEYBOARD_SHORTCUT_CATALOG) {
-    const chord = resolveEffectiveChord(catalogEntry.id, overrides, catalogEntry.defaultChord);
+    const defaultChord = profileDefaultChord(catalogEntry.id, catalogEntry.defaultChord, profile, input.hostPlatform);
+    const chord = resolveEffectiveChord(catalogEntry.id, overrides, defaultChord);
     if (!chord) continue;
     // Unchanged Shift+Arrow/Page defaults belong to native browser selection
     // and scrolling. Explicit remaps may use named keys without Control/Command.
     const browserOwnsDefault = !chord.startsWith('mod+')
-      && chord === resolveEffectiveChord(catalogEntry.id, {}, catalogEntry.defaultChord);
+      && chord === resolveEffectiveChord(catalogEntry.id, {}, defaultChord);
     bindings.push({
       id: catalogEntry.id,
       chord,
@@ -209,6 +227,41 @@ export function findChordConflicts(bindings: readonly ActiveBinding[]): Array<{ 
     if (ids.size > 1) conflicts.push({ chord, ids: [...ids].sort() });
   }
   return conflicts;
+}
+
+/** Profile-aware default chord for a catalog id (catalog default when unknown). */
+export function effectiveDefaultChord(
+  id: string,
+  profile: KeyboardShortcutProfileId,
+  hostPlatform: string | undefined,
+): string | null {
+  return profileDefaultChord(id, getCatalogEntry(id)?.defaultChord ?? null, profile, hostPlatform);
+}
+
+export interface ShortcutProfileConfigLike {
+  keyboardShortcutProfile?: JsonValue;
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides | JsonValue;
+  keyboardShortcutProfileOverrides?: Record<string, KeyboardShortcutOverrides> | JsonValue;
+}
+
+/**
+ * The raw override map belonging to the active profile: the legacy
+ * `keyboardShortcutOverrides` key for the `pane` profile, and the profile's
+ * slot in `keyboardShortcutProfileOverrides` otherwise. Returned verbatim so
+ * unknown ids and malformed values keep round-tripping.
+ */
+export function selectProfileOverridesRaw(
+  config: ShortcutProfileConfigLike | undefined,
+  profile: KeyboardShortcutProfileId,
+): JsonValue | undefined {
+  if (!config) return undefined;
+  if (profile === 'pane') return config.keyboardShortcutOverrides;
+  try {
+    return decodeBoundary(config.keyboardShortcutProfileOverrides, boundary.jsonObject)[profile];
+  } catch (error) {
+    if (!(error instanceof BoundaryDecodeError)) throw error;
+    return undefined;
+  }
 }
 
 export function buildInterceptionSets(input: BindingInput): InterceptionSets {
