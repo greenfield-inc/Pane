@@ -31,6 +31,11 @@ import {
   findChordConflicts,
   normalizeKeyboardShortcutOverrides,
 } from '../../../shared/utils/keyboardBindings';
+import {
+  DEFAULT_PROFILE_FOR_NEW_USERS,
+  KEYBOARD_SHORTCUT_PROFILES,
+  type KeyboardShortcutProfileId,
+} from '../../../shared/constants/keyboardShortcutProfiles';
 
 const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
 const LEGACY_POSTHOG_HOST = 'https://us.i.posthog.com';
@@ -51,6 +56,7 @@ export class ConfigManager extends EventEmitter {
   private fileWatcher: FSWatcher | null = null;
   private lastConfigJson: string = '';
   private lastLoggedShortcutDiagnostics: string = '';
+  private lastLoggedProfileShortcutDiagnostics: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
 
   constructor(defaultGitPath?: string) {
@@ -221,6 +227,9 @@ export class ConfigManager extends EventEmitter {
       if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
         delete this.config.keyboardShortcutOverrides;
       }
+      if (!this.applyKeyboardShortcutProfileOverrides(loadedConfig.keyboardShortcutProfileOverrides)) {
+        delete this.config.keyboardShortcutProfileOverrides;
+      }
 
       if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
         this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
@@ -240,7 +249,9 @@ export class ConfigManager extends EventEmitter {
       }
       const isNotFound = errorCode === 'ENOENT';
       if (isNotFound) {
-        // Config file doesn't exist — create with defaults
+        // Config file doesn't exist — a fresh install starts on the Superset
+        // keymap profile; existing configs without the key stay on 'pane'.
+        this.config.keyboardShortcutProfile = DEFAULT_PROFILE_FOR_NEW_USERS;
         await this.writeConfigToDisk(this.config);
       } else {
         // Config exists but is corrupted — log and keep defaults in memory
@@ -389,6 +400,9 @@ export class ConfigManager extends EventEmitter {
       if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {
         delete next.keyboardShortcutOverrides;
       }
+      if (!this.applyKeyboardShortcutProfileOverrides(next.keyboardShortcutProfileOverrides, next)) {
+        delete next.keyboardShortcutProfileOverrides;
+      }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;
@@ -438,22 +452,9 @@ export class ConfigManager extends EventEmitter {
    * non-objects are dropped.
    */
   private applyKeyboardShortcutOverrides(rawOverrides: JsonValue | undefined, config: AppConfig = this.config): boolean {
-    const normalized = normalizeKeyboardShortcutOverrides(rawOverrides);
-    const messages = normalized.diagnostics.map(message =>
-      `[ConfigManager] keyboardShortcutOverrides: ${message}`
-    );
-    const conflicts = findChordConflicts(collectActiveBindings({
-      overrides: rawOverrides,
-      terminalShortcuts: config.terminalShortcuts,
-      customCommands: config.customCommands,
-      // No platform gate: overrides are global and a Windows host can open a
-      // WSL project where platform-limited commands (Cursor) are active.
-    }));
-    for (const conflict of conflicts) {
-      messages.push(
-        `[ConfigManager] keyboardShortcutOverrides conflict: ${conflict.chord} is bound to ${conflict.ids.join(' and ')}`
-      );
-    }
+    // The legacy flat map belongs to the 'pane' profile; per-profile maps are
+    // validated by applyKeyboardShortcutProfileOverrides.
+    const messages = this.shortcutOverrideDiagnostics('keyboardShortcutOverrides', rawOverrides, 'pane', config);
     const diagnosticKey = messages.join('\n');
     if (diagnosticKey !== this.lastLoggedShortcutDiagnostics) {
       this.lastLoggedShortcutDiagnostics = diagnosticKey;
@@ -461,6 +462,54 @@ export class ConfigManager extends EventEmitter {
     }
     const parsed = decodeOptionalBoundary(rawOverrides, boundary.jsonObject);
     return parsed !== undefined && Object.keys(parsed).length > 0;
+  }
+
+  /**
+   * Same preservation contract as applyKeyboardShortcutOverrides for the
+   * per-profile map: any non-empty object round-trips verbatim (unknown
+   * profile ids included), while known profiles are validated against their
+   * own defaults for logging.
+   */
+  private applyKeyboardShortcutProfileOverrides(raw: JsonValue | undefined, config: AppConfig = this.config): boolean {
+    const parsed = decodeOptionalBoundary(raw, boundary.jsonObject);
+    const messages: string[] = [];
+    for (const profile of KEYBOARD_SHORTCUT_PROFILES) {
+      if (profile.id === 'pane' || parsed?.[profile.id] === undefined) continue;
+      messages.push(...this.shortcutOverrideDiagnostics(
+        `keyboardShortcutProfileOverrides.${profile.id}`, parsed[profile.id], profile.id, config,
+      ));
+    }
+    const diagnosticKey = messages.join('\n');
+    if (diagnosticKey !== this.lastLoggedProfileShortcutDiagnostics) {
+      this.lastLoggedProfileShortcutDiagnostics = diagnosticKey;
+      for (const message of messages) console.warn(message);
+    }
+    return parsed !== undefined && Object.keys(parsed).length > 0;
+  }
+
+  private shortcutOverrideDiagnostics(
+    label: string,
+    rawOverrides: JsonValue | undefined,
+    profile: KeyboardShortcutProfileId,
+    config: AppConfig,
+  ): string[] {
+    const normalized = normalizeKeyboardShortcutOverrides(rawOverrides);
+    const messages = normalized.diagnostics.map(message => `[ConfigManager] ${label}: ${message}`);
+    const conflicts = findChordConflicts(collectActiveBindings({
+      overrides: rawOverrides,
+      terminalShortcuts: config.terminalShortcuts,
+      customCommands: config.customCommands,
+      profile,
+      hostPlatform: process.platform,
+      // No platform gate: overrides are global and a Windows host can open a
+      // WSL project where platform-limited commands (Cursor) are active.
+    }));
+    for (const conflict of conflicts) {
+      messages.push(
+        `[ConfigManager] ${label} conflict: ${conflict.chord} is bound to ${conflict.ids.join(' and ')}`
+      );
+    }
+    return messages;
   }
 
   getGitRepoPath(): string {

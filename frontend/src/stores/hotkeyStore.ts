@@ -7,10 +7,14 @@ import {
 } from '../../../shared/constants/keyboardShortcuts';
 import {
   buildInterceptionSets,
+  effectiveDefaultChord,
   normalizeKeyboardShortcutOverrides,
   resolveEffectiveChord,
+  selectProfileOverridesRaw,
 } from '../../../shared/utils/keyboardBindings';
+import { normalizeShortcutProfileId } from '../../../shared/constants/keyboardShortcutProfiles';
 import { chordFromKeyboardEvent, type KeyboardEventLike } from '../../../shared/utils/keyboardChords';
+import { rendererPlatform } from '../utils/platformUtils';
 import { areKeyboardShortcutsEnabled, isCommandPaletteShortcutEnabled, useConfigStore } from './configStore';
 
 export interface HotkeyDefinition {
@@ -52,25 +56,40 @@ interface RebuiltHotkeyIndex {
 
 let listenerAttached = false;
 let lookupIndex = new Map<string, HotkeyId[]>();
-const initialConfig = useConfigStore.getState().config;
-let interceptionSets = buildInterceptionSets({
-  overrides: initialConfig?.keyboardShortcutOverrides,
-  terminalShortcuts: initialConfig?.terminalShortcuts,
-  customCommands: initialConfig?.customCommands,
-});
+
+function currentProfile() {
+  return normalizeShortcutProfileId(useConfigStore.getState().config?.keyboardShortcutProfile);
+}
 
 function currentOverrides() {
   return normalizeKeyboardShortcutOverrides(
-    useConfigStore.getState().config?.keyboardShortcutOverrides,
+    selectProfileOverridesRaw(useConfigStore.getState().config ?? undefined, currentProfile()),
   ).overrides;
 }
 
+function buildInterceptionSetsFromConfig() {
+  const config = useConfigStore.getState().config;
+  const profile = normalizeShortcutProfileId(config?.keyboardShortcutProfile);
+  return buildInterceptionSets({
+    overrides: selectProfileOverridesRaw(config ?? undefined, profile),
+    terminalShortcuts: config?.terminalShortcuts,
+    customCommands: config?.customCommands,
+    profile,
+    hostPlatform: rendererPlatform(),
+  });
+}
+
+let interceptionSets = buildInterceptionSetsFromConfig();
+
 function rebuildIndex(hotkeys: Map<string, EffectiveHotkeyDefinition>): RebuiltHotkeyIndex {
+  const profile = currentProfile();
   const overrides = currentOverrides();
   const next = new Map<string, EffectiveHotkeyDefinition>();
   const index = new Map<string, HotkeyId[]>();
   for (const [id, definition] of hotkeys) {
-    const catalogDefault = getCatalogEntry(id)?.defaultChord;
+    const catalogDefault = getCatalogEntry(id) === undefined
+      ? undefined
+      : effectiveDefaultChord(id, profile, rendererPlatform());
     const chord = resolveEffectiveChord(
       id,
       overrides,
@@ -121,7 +140,7 @@ export function isBoundChordForEvent(event: KeyboardEventLike): boolean {
   const paletteChord = resolveEffectiveChord(
     'open-command-palette',
     currentOverrides(),
-    getCatalogEntry('open-command-palette')?.defaultChord ?? null,
+    effectiveDefaultChord('open-command-palette', currentProfile(), rendererPlatform()),
   );
   return isCommandPaletteShortcutEnabled(config) && chord === paletteChord;
 }
@@ -243,12 +262,7 @@ export const useHotkeyStore = create<HotkeyStore>((set, get) => ({
 }));
 
 function rebuildForConfig(): void {
-  const config = useConfigStore.getState().config;
-  interceptionSets = buildInterceptionSets({
-    overrides: config?.keyboardShortcutOverrides,
-    terminalShortcuts: config?.terminalShortcuts,
-    customCommands: config?.customCommands,
-  });
+  interceptionSets = buildInterceptionSetsFromConfig();
   const rebuilt = rebuildIndex(useHotkeyStore.getState().hotkeys);
   lookupIndex = rebuilt.index;
   useHotkeyStore.setState({ hotkeys: rebuilt.next });

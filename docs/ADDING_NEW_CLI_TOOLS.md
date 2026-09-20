@@ -92,6 +92,9 @@ catalog, platform, and default-chord parity. Add the brand icon to
 `frontend/src/components/settings/catalog.tsx`. Settings → Shortcuts, Help, and the
 conflict engine read the catalog directly, so a new agent's launch command becomes
 remappable (and conflict-checked against every other binding) with no further UI work.
+If the new entry's default chord collides with a chord the Superset keymap profile
+borrows (`shared/constants/keyboardShortcutProfiles.ts`), give the entry a profile
+chord there too — the profile unit test fails on any collision.
 
 ## 8. Worktree file sync
 

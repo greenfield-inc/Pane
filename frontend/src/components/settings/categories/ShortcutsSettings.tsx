@@ -8,6 +8,12 @@ import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { TerminalShortcut } from '../../../types/config';
 import type { KeyboardShortcutOverrides } from '../../../../../shared/utils/keyboardBindings';
+import {
+  KEYBOARD_SHORTCUT_PROFILES,
+  normalizeShortcutProfileId,
+  type KeyboardShortcutProfileId,
+} from '../../../../../shared/constants/keyboardShortcutProfiles';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
 import { buildShortcutMap, resolveShortcutEnvironment } from '../../../utils/shortcutMap';
 import { useActiveProjectEnvironment } from '../../../hooks/useActiveProjectEnvironment';
@@ -27,16 +33,25 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
   const persistedKey = JSON.stringify(persistedShortcuts);
   const [shortcuts, setShortcuts] = useState<TerminalShortcut[]>(persistedShortcuts);
   const snippetsDirty = JSON.stringify(shortcuts) !== persistedKey;
-  const persistedOverrides = config.keyboardShortcutOverrides ?? {};
-  const persistedOverridesKey = JSON.stringify(persistedOverrides);
-  const [overridesDraft, setOverridesDraft] = useState<KeyboardShortcutOverrides>(persistedOverrides);
-  const overridesDirty = JSON.stringify(overridesDraft) !== persistedOverridesKey;
+  const persistedProfile = normalizeShortcutProfileId(config.keyboardShortcutProfile);
+  const [profileDraft, setProfileDraft] = useState<KeyboardShortcutProfileId>(persistedProfile);
+  const profileDirty = profileDraft !== persistedProfile;
+  // Overrides are drafted per profile so flipping the selector loses nothing.
+  const persistedDrafts = {
+    pane: config.keyboardShortcutOverrides ?? {},
+    superset: config.keyboardShortcutProfileOverrides?.superset ?? {},
+  } satisfies Record<KeyboardShortcutProfileId, KeyboardShortcutOverrides>;
+  const persistedOverridesKey = JSON.stringify(persistedDrafts);
+  const [overridesDrafts, setOverridesDrafts] = useState(persistedDrafts);
+  const overridesDraft = overridesDrafts[profileDraft];
+  const overridesDirty = JSON.stringify(overridesDrafts) !== persistedOverridesKey || profileDirty;
   const dirty = snippetsDirty || overridesDirty;
 
   // SAFETY: App-owned storage writes this value through the matching typed serializer.
   useEffect(() => setShortcuts(JSON.parse(persistedKey) as TerminalShortcut[]), [persistedKey]);
-  // SAFETY: Same app-owned storage; the main process normalizes the override map before saving.
-  useEffect(() => setOverridesDraft(JSON.parse(persistedOverridesKey) as KeyboardShortcutOverrides), [persistedOverridesKey]);
+  // SAFETY: Same app-owned storage; the main process normalizes the override maps before saving.
+  useEffect(() => setOverridesDrafts(JSON.parse(persistedOverridesKey) as Record<KeyboardShortcutProfileId, KeyboardShortcutOverrides>), [persistedOverridesKey]);
+  useEffect(() => setProfileDraft(persistedProfile), [persistedProfile]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
@@ -54,7 +69,12 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
     terminalShortcuts: shortcuts,
     customCommands,
     environment: resolveShortcutEnvironment(projectEnvironment, platform),
-  }), [overridesDraft, shortcuts, customCommands, projectEnvironment, platform]);
+    profile: profileDraft,
+    hostPlatform: platform,
+  }), [overridesDraft, shortcuts, customCommands, projectEnvironment, platform, profileDraft]);
+  // Only the active profile's conflicts gate Apply: an inactive profile's
+  // bindings never dispatch, and switching to it re-runs this validation
+  // visibly before that profile can be applied.
   const conflicted = shortcutMap.conflicts.length > 0;
   const snippetConflicts = new Set(
     shortcutMap.rows.flatMap((row) => row.origin === 'snippet' && row.conflicts.length > 0 ? [row.id] : []),
@@ -80,7 +100,19 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
 
   const applyOverrides = async () => {
     if (conflicted || applyOverridesBlockedBySnippets) return;
-    await persistence.saveConfig('keyboard-shortcut-map', { keyboardShortcutOverrides: overridesDraft });
+    await persistence.saveConfig('keyboard-shortcut-map', {
+      keyboardShortcutProfile: profileDraft,
+      keyboardShortcutOverrides: overridesDrafts.pane,
+      // An empty inner map carries no information; {} lets the main process
+      // delete the whole key instead of persisting empty husks.
+      keyboardShortcutProfileOverrides: Object.keys(overridesDrafts.superset).length > 0
+        ? { superset: overridesDrafts.superset }
+        : {},
+    });
+  };
+
+  const setOverridesDraft = (next: KeyboardShortcutOverrides) => {
+    setOverridesDrafts((current) => ({ ...current, [profileDraft]: next }));
   };
 
   return (
@@ -109,6 +141,24 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
             value={config.commandPaletteShortcutEnabled !== false}
             onSave={(value) => persistence.saveConfig('command-palette-shortcut', { commandPaletteShortcutEnabled: value })}
           />
+        </SettingRow>
+        <SettingRow
+          settingId="keyboard-shortcut-profile"
+          label="Keymap profile"
+          description="The default key bindings underneath your customizations. Superset matches the Superset agent IDE's keymap; Pane Classic is Pane's original set. Applies together with the key bindings below."
+          saveState={persistence.saveStates['keyboard-shortcut-map']}
+        >
+          <Select
+            value={profileDraft}
+            onValueChange={(value) => setProfileDraft(normalizeShortcutProfileId(value))}
+          >
+            <SelectTrigger aria-label="Keymap profile" className="sm:w-56"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {KEYBOARD_SHORTCUT_PROFILES.map((profile) => (
+                <SelectItem key={profile.id} value={profile.id}>{profile.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </SettingRow>
         <SettingRow
           settingId="keyboard-shortcut-map"

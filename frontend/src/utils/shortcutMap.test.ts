@@ -124,3 +124,46 @@ describe('helpers', () => {
     expect(resolveShortcutEnvironment(undefined, 'win32')).toBe('win32');
   });
 });
+
+describe('buildShortcutMap with a keymap profile', () => {
+  const row = (id: string, profile: 'pane' | 'superset', overridesRaw = {}) => {
+    const map = buildShortcutMap({ overridesRaw, environment: 'darwin', profile, hostPlatform: 'darwin' });
+    return map.rows.find((candidate) => candidate.id === id)!;
+  };
+
+  it('shows profile chords as the default with a default state', () => {
+    expect(row('toggle-sidebar', 'superset')).toMatchObject({
+      defaultChord: 'mod+l', effectiveChord: 'mod+l', state: 'default',
+    });
+    expect(row('toggle-sidebar', 'pane')).toMatchObject({
+      defaultChord: 'mod+b', effectiveChord: 'mod+b', state: 'default',
+    });
+    expect(row('focus-group-up', 'superset')).toMatchObject({ defaultChord: null, effectiveChord: null, state: 'default' });
+  });
+
+  it('marks overrides customized relative to the profile default', () => {
+    expect(row('toggle-sidebar', 'superset', { 'toggle-sidebar': 'mod+alt+9' })).toMatchObject({
+      effectiveChord: 'mod+alt+9', state: 'customized',
+    });
+    // The pane default recorded under the superset profile is a customization there.
+    expect(row('toggle-sidebar', 'superset', { 'toggle-sidebar': 'mod+b' })).toMatchObject({
+      effectiveChord: 'mod+b', state: 'customized',
+    });
+  });
+
+  it('validates conflicts against the profile defaults, per host platform', () => {
+    const conflicted = buildShortcutMap({
+      overridesRaw: { 'open-settings': 'mod+t' },
+      environment: 'darwin', profile: 'superset', hostPlatform: 'darwin',
+    });
+    expect(conflicted.conflicts).toEqual([
+      { chord: 'mod+t', ids: ['add-tool-terminal', 'open-settings'] },
+    ]);
+    // On non-darwin hosts the Superset New Terminal chord is mod+shift+t instead.
+    const clean = buildShortcutMap({
+      overridesRaw: { 'open-settings': 'mod+t' },
+      environment: 'linux', profile: 'superset', hostPlatform: 'linux',
+    });
+    expect(clean.conflicts).toEqual([]);
+  });
+});
