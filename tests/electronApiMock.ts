@@ -464,10 +464,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             return Promise.resolve({
               success: false,
               error: 'GitHub CLI is not authenticated.',
-              data: { fallbackUrl: 'https://github.com/dcouple/Pane/issues/new?title=Prefilled' },
+              data: { fallbackUrl: 'https://github.com/greenfield-inc/Pane/issues/new?title=Prefilled' },
             });
           }
-          return success({ issueUrl: 'https://github.com/dcouple/Pane/issues/9001' });
+          return success({ issueUrl: 'https://github.com/greenfield-inc/Pane/issues/9001' });
         },
       }),
       analytics: namespace({

@@ -993,7 +993,7 @@ export const RUNPANE_CONTRACT = {
         "  --report                       Prepare a redacted, inspectable report",
         "  --body-file <path|->           Read report evidence from a file or stdin",
         "  --title <text>                 Report title",
-        "  --yes                          Confirm creating one dcouple/Pane issue",
+        "  --yes                          Confirm creating one greenfield-inc/Pane issue",
         "",
         "Agent discovery:",
         "  runpane doctor --json",
@@ -6217,7 +6217,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--yes",
             "required": false,
-            "description": "Confirm creating exactly one dcouple/Pane issue."
+            "description": "Confirm creating exactly one greenfield-inc/Pane issue."
           }
         ],
         "examples": [

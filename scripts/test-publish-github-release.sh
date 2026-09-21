@@ -24,14 +24,14 @@ fi
 endpoint="${2:?missing endpoint}"
 
 case "${endpoint}" in
-  repos/dcouple/Pane/releases/tags/v9.9.9)
+  repos/greenfield-inc/Pane/releases/tags/v9.9.9)
     echo 'Not Found (HTTP 404): drafts are not available by tag' >&2
     exit 1
     ;;
-  repos/dcouple/Pane/releases/generate-notes)
+  repos/greenfield-inc/Pane/releases/generate-notes)
     printf '%s\n' "${GH_GENERATED_NOTES_JSON}"
     ;;
-  repos/dcouple/Pane/releases/42)
+  repos/greenfield-inc/Pane/releases/42)
     while (($#)); do
       if [[ "$1" == "--input" ]]; then
         cp "$2" "${GH_UPDATE_JSON}"
@@ -61,7 +61,7 @@ run_case() {
     GH_RELEASE_JSON="${release_json}" \
     GH_GENERATED_NOTES_JSON="${generated_notes_json}" \
     GH_UPDATE_JSON="${case_dir}/update.json" \
-    bash "${script}" dcouple/Pane v9.9.9 >/dev/null
+    bash "${script}" greenfield-inc/Pane v9.9.9 >/dev/null
 }
 
 run_case \
@@ -69,7 +69,7 @@ run_case \
   '{"id":42,"draft":true,"body":""}' \
   '{"name":"v9.9.9","body":"## What changed\n\n- Added safe release notes"}'
 
-grep -F 'repos/dcouple/Pane/releases/generate-notes -X POST -f tag_name=v9.9.9' "${temp_dir}/empty-draft/gh.log" >/dev/null
+grep -F 'repos/greenfield-inc/Pane/releases/generate-notes -X POST -f tag_name=v9.9.9' "${temp_dir}/empty-draft/gh.log" >/dev/null
 jq -e '.body == "## What changed\n\n- Added safe release notes" and .draft == false and .make_latest == true' "${temp_dir}/empty-draft/update.json" >/dev/null
 
 run_case \

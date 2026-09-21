@@ -17,7 +17,7 @@ function shellExecOpts<Options extends object>(extra: Options): Options & { env:
   return { ...extra, env: { ...process.env, PATH: getShellPath() } };
 }
 
-const PANE_REPO = 'dcouple/Pane';
+const PANE_REPO = 'greenfield-inc/Pane';
 const PANE_REPO_URL = `https://github.com/${PANE_REPO}.git`;
 const SUPPORT_GITHUB_USER = 'parsakhaz';
 const GITHUB_HOST = 'github.com';
@@ -347,13 +347,13 @@ function followSupportUser(): boolean {
   }
 }
 
-/** Checks that the path is a git repo related to dcouple/Pane (canonical or a fork cloned via `gh repo clone`). */
+/** Checks that the path is a git repo related to Pane (canonical or a fork cloned via `gh repo clone`). */
 function isPaneRepo(repoPath: string): boolean {
   if (!existsSync(join(repoPath, '.git'))) return false;
   try {
     execSync('git rev-parse --is-inside-work-tree', shellExecOpts({ cwd: repoPath, stdio: 'ignore' }));
     const execOpts = shellExecOpts({ cwd: repoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] } satisfies ExecSyncOptionsWithStringEncoding);
-    const canonicalPattern = /[/:]dcouple-inc\/pane(\.git)?$/i;
+    const canonicalPattern = /[/:](?:greenfield-inc|dcouple|dcouple-inc)\/pane(\.git)?$/i;
     // Fork pattern: any GitHub-hosted repo named exactly "Pane" (gh repo clone sets origin to user's fork)
     const forkPattern = /github\.com[/:][\w.-]+\/pane(\.git)?$/i;
 

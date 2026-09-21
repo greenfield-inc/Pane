@@ -18,9 +18,9 @@
 Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
-[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases)
-[![GitHub](https://img.shields.io/badge/GitHub-source-555555?labelColor=333333&color=666666&logo=github&logoColor=white)](https://github.com/dcouple/Pane)
-[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/dcouple/Pane/releases/latest)
+[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases)
+[![GitHub](https://img.shields.io/badge/GitHub-source-555555?labelColor=333333&color=666666&logo=github&logoColor=white)](https://github.com/greenfield-inc/Pane)
+[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases/latest)
 [![Changelog](https://img.shields.io/badge/Changelog-runpane.com-555555?labelColor=333333&color=666666)](https://runpane.com/changelog)
 [![Active Users](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/installs&labelColor=333333)](https://runpane.com)
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
@@ -29,8 +29,8 @@ Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 
 **Made possible by our amazing contributors**
 
-<a href="https://github.com/dcouple/Pane/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=dcouple/Pane" alt="Pane contributors">
+<a href="https://github.com/greenfield-inc/Pane/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=greenfield-inc/Pane" alt="Pane contributors">
 </a>
 
 <sub><a href="./CONTRIBUTING.md">Join them</a> and help make Pane better.</sub>
@@ -312,7 +312,7 @@ irm https://runpane.com/install.ps1 | iex
 
 ### Direct Download
 
-> **[Download the Latest Release](https://github.com/dcouple/Pane/releases/latest)**
+> **[Download the Latest Release](https://github.com/greenfield-inc/Pane/releases/latest)**
 
 | Platform | File |
 |----------|------|
@@ -428,7 +428,7 @@ Pane uses xterm.js, the same terminal engine that powers VS Code's integrated te
 ## Building from Source
 
 ```bash
-git clone https://github.com/dcouple/Pane.git
+git clone https://github.com/greenfield-inc/Pane.git
 cd Pane
 pnpm run setup
 pnpm run electron-dev

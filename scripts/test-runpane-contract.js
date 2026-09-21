@@ -37,7 +37,7 @@ const artifactRelease = {
   tag_name: 'v2.2.8',
   name: 'v2.2.8',
   body: '',
-  html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.2.8',
+  html_url: 'https://github.com/greenfield-inc/Pane/releases/tag/v2.2.8',
   published_at: '2026-01-01T00:00:00Z',
   prerelease: false,
   draft: false,
@@ -76,7 +76,7 @@ const platformEdgeRelease = {
   tag_name: 'v2.2.8',
   name: 'v2.2.8',
   body: '',
-  html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.2.8',
+  html_url: 'https://github.com/greenfield-inc/Pane/releases/tag/v2.2.8',
   published_at: '2026-01-01T00:00:00Z',
   prerelease: false,
   draft: false,
@@ -2352,7 +2352,7 @@ print(json.dumps(prepare_doctor_failure_report(parsed, request["doctor"])))
         fs.appendFileSync(ghLog, `${commandArgs.join('\n')}\n--call--\n`);
         return {
           status: 0,
-          stdout: commandArgs[0] === 'auth' ? '' : 'https://github.com/dcouple/Pane/issues/999\n',
+          stdout: commandArgs[0] === 'auth' ? '' : 'https://github.com/greenfield-inc/Pane/issues/999\n',
           stderr: '',
         };
       };
@@ -2366,7 +2366,7 @@ print(json.dumps(prepare_doctor_failure_report(parsed, request["doctor"])))
         'printf "%s\\n" "$@" >> "$RUNPANE_GH_LOG"',
         'printf "%s\\n" "--call--" >> "$RUNPANE_GH_LOG"',
         '[ "$1" = "auth" ] && exit 0',
-        'printf "%s\\n" "https://github.com/dcouple/Pane/issues/999"',
+        'printf "%s\\n" "https://github.com/greenfield-inc/Pane/issues/999"',
       ].join('\n'), { mode: 0o755 });
     }
 
@@ -2376,7 +2376,7 @@ print(json.dumps(prepare_doctor_failure_report(parsed, request["doctor"])))
     try {
       doctor.fileDoctorFailureReport(first);
       assert.strictEqual(first.filed, true);
-      assert.strictEqual(first.issueUrl, 'https://github.com/dcouple/Pane/issues/999');
+      assert.strictEqual(first.issueUrl, 'https://github.com/greenfield-inc/Pane/issues/999');
       const log = fs.readFileSync(ghLog, 'utf8');
       const calls = log.split(/--call--\r?\n/u).map(call => call.trim().split(/\r?\n/u)).filter(call => call[0]);
       assert.deepStrictEqual(calls[0], ['auth', 'status']);
@@ -2399,7 +2399,7 @@ def fake_run(args, **_kwargs):
         log.write("\\n".join(args[1:]) + "\\n--call--\\n")
     return SimpleNamespace(
         returncode=0,
-        stdout="" if args[1] == "auth" else "https://github.com/dcouple/Pane/issues/999\\n",
+        stdout="" if args[1] == "auth" else "https://github.com/greenfield-inc/Pane/issues/999\\n",
         stderr="",
     )
 
@@ -2416,7 +2416,7 @@ file_doctor_failure_report(prepared)
 print(json.dumps(prepared))
 `, JSON.stringify(pythonPrepared)));
       assert.strictEqual(pythonFiled.filed, true);
-      assert.strictEqual(pythonFiled.issueUrl, 'https://github.com/dcouple/Pane/issues/999');
+      assert.strictEqual(pythonFiled.issueUrl, 'https://github.com/greenfield-inc/Pane/issues/999');
       const pythonLog = fs.readFileSync(ghLog, 'utf8');
       const pythonCalls = pythonLog.split(/--call--\r?\n/u).map(call => call.trim().split(/\r?\n/u)).filter(call => call[0]);
       assert.deepStrictEqual(pythonCalls[0], ['auth', 'status']);

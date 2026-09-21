@@ -29,7 +29,7 @@ describe('FeedbackDialog state', () => {
   it('moves to success after the mocked renderer API returns an issue URL', async () => {
     const submit = vi.fn().mockResolvedValue({
       success: true,
-      data: { issueUrl: 'https://github.com/dcouple/Pane/issues/999' },
+      data: { issueUrl: 'https://github.com/greenfield-inc/Pane/issues/999' },
     });
 
     const action = await executeFeedbackSubmission(request, submit);
@@ -37,12 +37,12 @@ describe('FeedbackDialog state', () => {
     expect(submit).toHaveBeenCalledWith(request);
     expect(action).toEqual({
       type: 'submit-success',
-      issueUrl: 'https://github.com/dcouple/Pane/issues/999',
+      issueUrl: 'https://github.com/greenfield-inc/Pane/issues/999',
     });
   });
 
   it('preserves the form and exposes the browser fallback after failure', async () => {
-    const fallbackUrl = 'https://github.com/dcouple/Pane/issues/new?title=Pasted+title';
+    const fallbackUrl = 'https://github.com/greenfield-inc/Pane/issues/new?title=Pasted+title';
     const action = await executeFeedbackSubmission(request, vi.fn().mockResolvedValue({
       success: false,
       error: 'GitHub CLI is not authenticated.',
@@ -77,7 +77,7 @@ describe('FeedbackDialog state', () => {
     abortController.abort();
     resolveSubmission?.({
       success: true,
-      data: { issueUrl: 'https://github.com/dcouple/Pane/issues/999' },
+      data: { issueUrl: 'https://github.com/greenfield-inc/Pane/issues/999' },
     });
 
     await expect(actionPromise).resolves.toBeUndefined();
@@ -85,7 +85,7 @@ describe('FeedbackDialog state', () => {
 
   it('surfaces resolved failures from the system browser IPC', async () => {
     await expect(openFeedbackUrl(
-      'https://github.com/dcouple/Pane/issues/new',
+      'https://github.com/greenfield-inc/Pane/issues/new',
       vi.fn().mockResolvedValue({ success: false, error: 'Browser launch failed' }),
     )).resolves.toBe('Browser launch failed');
   });

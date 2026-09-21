@@ -6,11 +6,11 @@
   "homepage": "https://runpane.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dcouple/Pane.git",
+    "url": "git+https://github.com/greenfield-inc/Pane.git",
     "directory": "packages/runpane"
   },
   "bugs": {
-    "url": "https://github.com/dcouple/Pane/issues"
+    "url": "https://github.com/greenfield-inc/Pane/issues"
   },
   "bin": {
     "runpane": "dist/cli.js"

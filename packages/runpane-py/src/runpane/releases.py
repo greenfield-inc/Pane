@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 from .platforms import PanePlatform, arch_aliases, default_format, platform_param
 
-GITHUB_API_BASE = "https://api.github.com/repos/dcouple/Pane/releases"
+GITHUB_API_BASE = "https://api.github.com/repos/greenfield-inc/Pane/releases"
 DOWNLOAD_API_BASE = "https://runpane.com/api/download"
 
 
@@ -45,7 +45,7 @@ def resolve_release(
         format=selected_format,
         preferred_download_url=preferred,
         fallback_download_url=artifact["browser_download_url"],
-        checksum_url=f"https://github.com/dcouple/Pane/releases/download/{tag_name}/SHA256SUMS.txt",
+        checksum_url=f"https://github.com/greenfield-inc/Pane/releases/download/{tag_name}/SHA256SUMS.txt",
     )
 
 

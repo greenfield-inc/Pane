@@ -143,7 +143,7 @@ jobs:
       run: |
         VERSION="${RELEASE_TAG#v}"
         mkdir -p assets && cd assets
-        gh release download "v${VERSION}" --repo dcouple/Pane \
+        gh release download "v${VERSION}" --repo "${{ github.repository }}" \
           --pattern '*.exe' --pattern '*.dmg' --pattern '*.zip' \
           --pattern '*.deb' --pattern '*.AppImage'
 
@@ -159,7 +159,7 @@ jobs:
       run: |
         VERSION="${RELEASE_TAG#v}"
         gh release upload "v${VERSION}" SHA256SUMS.txt \
-          --repo dcouple/Pane --clobber
+          --repo "${{ github.repository }}" --clobber
 
   validate-runpane-packages:
     if: github.ref_type == 'tag' || inputs.publish == true

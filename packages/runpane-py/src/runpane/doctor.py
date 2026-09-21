@@ -25,6 +25,12 @@ DOCTOR_DAEMON_TIMEOUT_MS = 5_000
 DOCTOR_RELEASE_TIMEOUT_SECONDS = 5
 REMOTE_LAUNCHER_MARKER = "pane-remote-daemon-launcher-v2"
 REMOTE_DAEMON_UNIT = "pane-remote-daemon.service"
+PANE_REPO = "greenfield-inc/Pane"
+LEGACY_PANE_REPOS = ("dcouple/Pane", "Dcouple-Inc/Pane")
+ISSUE_URL_PATTERN = re.compile(
+    rf"^https://github\.com/(?:{'|'.join((PANE_REPO, *LEGACY_PANE_REPOS))})/issues/\d+$",
+    re.IGNORECASE,
+)
 
 
 def run_doctor(parsed, source: str = "pip") -> int:
@@ -111,7 +117,7 @@ def prepare_doctor_failure_report(parsed, doctor: Dict[str, Any]) -> Dict[str, A
     os.chmod(report_path, 0o600)
     digest = hashlib.sha256(redacted.encode("utf-8")).hexdigest()
     proposed = " ".join([
-        "gh issue create --repo dcouple/Pane",
+        f"gh issue create --repo {PANE_REPO}",
         f"--title {shlex.quote(title)}",
         f"--body-file {shlex.quote(report_path)}",
         "--label bug",
@@ -180,7 +186,7 @@ def read_report_evidence(body_file: str) -> str:
 
 def file_doctor_failure_report(prepared: Dict[str, Any]) -> None:
     title = prepared["title"]
-    prepared["fallbackUrl"] = f"https://github.com/dcouple/Pane/issues/new?title={quote(title)}"
+    prepared["fallbackUrl"] = f"https://github.com/{PANE_REPO}/issues/new?title={quote(title)}"
     try:
         auth = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError) as error:
@@ -189,7 +195,7 @@ def file_doctor_failure_report(prepared: Dict[str, Any]) -> None:
     if auth.returncode != 0:
         prepared.update({"ok": False, "error": auth.stderr.strip() or "gh auth status failed"})
         return
-    base_args = ["gh", "issue", "create", "--repo", "dcouple/Pane", "--title", title, "--body-file", prepared["path"]]
+    base_args = ["gh", "issue", "create", "--repo", PANE_REPO, "--title", title, "--body-file", prepared["path"]]
     try:
         created = subprocess.run([*base_args, "--label", "bug"], capture_output=True, text=True, timeout=30, check=False)
         if created.returncode != 0 and re.search(r"label|could not add", created.stderr, re.IGNORECASE):
@@ -198,7 +204,7 @@ def file_doctor_failure_report(prepared: Dict[str, Any]) -> None:
         prepared.update({"ok": False, "error": str(error)})
         return
     issue_url = next(
-        (value for value in created.stdout.split() if re.fullmatch(r"https://github\.com/dcouple/Pane/issues/\d+", value)),
+        (value for value in created.stdout.split() if ISSUE_URL_PATTERN.fullmatch(value)),
         None,
     )
     if created.returncode != 0 or not issue_url:

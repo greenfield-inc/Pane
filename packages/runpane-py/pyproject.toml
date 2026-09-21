@@ -23,8 +23,8 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://runpane.com"
-Repository = "https://github.com/dcouple/Pane"
-Issues = "https://github.com/dcouple/Pane/issues"
+Repository = "https://github.com/greenfield-inc/Pane"
+Issues = "https://github.com/greenfield-inc/Pane/issues"
 
 [project.scripts]
 runpane = "runpane.cli:main"

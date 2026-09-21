@@ -236,7 +236,7 @@ test('macOS UI uses the sans stack; content surfaces stay monospace', async ({ p
   await page.getByRole('button', { name: 'Feedback', exact: true }).click();
   const feedback = page.getByRole('dialog', { name: 'Send feedback' });
   await expectSans(feedback.getByRole('heading', { name: 'Send feedback' }).last());
-  await expectSans(feedback.getByText('Create a public issue in dcouple/Pane.'));
+  await expectSans(feedback.getByText('Create a public issue in greenfield-inc/Pane.'));
   await feedback.getByRole('button', { name: 'Close modal' }).click();
 
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();

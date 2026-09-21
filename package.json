@@ -238,7 +238,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "dcouple",
+      "owner": "greenfield-inc",
       "repo": "Pane"
     }
   },

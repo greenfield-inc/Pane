@@ -10,8 +10,8 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 
 const execFileAsync = promisify(execFile);
 
-const UPSTREAM_REPO_URL = 'https://github.com/dcouple/skills.git';
-const RAW_BASE_URL = 'https://raw.githubusercontent.com/dcouple/skills/main';
+const UPSTREAM_REPO_URL = 'https://github.com/greenfield-inc/skills.git';
+const RAW_BASE_URL = 'https://raw.githubusercontent.com/greenfield-inc/skills/main';
 const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const INITIAL_SYNC_DELAY_MS = 15 * 1000;
 const MAX_DOWNLOAD_REDIRECTS = 5;

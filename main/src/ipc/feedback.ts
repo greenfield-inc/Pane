@@ -13,7 +13,8 @@ import { getShellPath } from '../utils/shellPath';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
-const PANE_REPO = 'dcouple/Pane';
+const PANE_REPO = 'greenfield-inc/Pane';
+const LEGACY_PANE_REPOS = ['dcouple/Pane', 'Dcouple-Inc/Pane'] as const;
 const GITHUB_HOST = 'github.com';
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 65_536;
@@ -160,7 +161,7 @@ function friendlyCommandError(error: Error, stage: 'auth' | 'create'): string {
     return 'GitHub CLI is not authenticated. Run “gh auth login” and try again.';
   }
   if (/scope|permission|resource not accessible|forbidden/i.test(details)) {
-    return 'GitHub CLI does not have permission to create issues in dcouple/Pane.';
+    return `GitHub CLI does not have permission to create issues in ${PANE_REPO}.`;
   }
   return details || 'GitHub CLI could not create the issue.';
 }
@@ -176,7 +177,11 @@ function issueCreateArgs(title: string, bodyPath: string, labels: readonly strin
 }
 
 function issueUrlFromOutput(stdout: string): string {
-  const url = stdout.trim().split(/\s+/).find(value => /^https:\/\/github\.com\/dcouple\/Pane\/issues\/\d+$/.test(value));
+  const allowedRepositories = [PANE_REPO, ...LEGACY_PANE_REPOS]
+    .map(repository => repository.replace('/', '\\/'))
+    .join('|');
+  const urlPattern = new RegExp(`^https:\\/\\/github\\.com\\/(?:${allowedRepositories})\\/issues\\/\\d+$`, 'i');
+  const url = stdout.trim().split(/\s+/).find(value => urlPattern.test(value));
   if (!url) throw new Error('GitHub CLI created the issue but did not return its URL.');
   return url;
 }

@@ -37,7 +37,7 @@ function mockRawDownloads(failures = new Set<string>()) {
   return vi.spyOn(https, 'get').mockImplementation((url, callback) => {
     const request = mockRequest(new EventEmitter());
     const pathname = new URL(String(url)).pathname;
-    const relativePath = decodeURIComponent(pathname.replace('/dcouple/skills/main/', ''));
+    const relativePath = decodeURIComponent(pathname.replace('/greenfield-inc/skills/main/', ''));
     const response = mockResponse(new EventEmitter());
 
     response.headers = {};

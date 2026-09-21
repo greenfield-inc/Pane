@@ -78,7 +78,7 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
         <SettingRow
           settingId="send-feedback"
           label="Send feedback"
-          description="Report a bug, request a feature, or share general feedback. Pane files a public GitHub issue in dcouple/Pane with your GitHub CLI account."
+          description="Report a bug, request a feature, or share general feedback. Pane files a public GitHub issue in greenfield-inc/Pane with your GitHub CLI account."
         >
           <Button
             type="button"
