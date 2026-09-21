@@ -314,6 +314,32 @@ describe('UsageAggregator.getByPane', () => {
 });
 
 describe('UsageAggregator.getSeries', () => {
+  it.each([
+    ['spring DST', ['2026-03-08T08:00:00Z', '2026-03-09T07:00:00Z', '2026-03-10T07:00:00Z', '2026-03-11T07:00:00Z']],
+    ['fall DST', ['2025-11-02T07:00:00Z', '2025-11-03T08:00:00Z', '2025-11-04T08:00:00Z']],
+    ['fractional offset', ['2026-03-07T18:15:00Z', '2026-03-08T18:15:00Z', '2026-03-09T18:15:00Z']],
+  ])('keeps viewer calendar days intact across %s', (_name, dates) => {
+    const boundaries = dates.map(date => Date.parse(date));
+    const from = boundaries[0];
+    const to = boundaries[boundaries.length - 1] - 1;
+    seed({ timestampMs: from - 1, input: 999 });
+    seed({ timestampMs: to + 1, input: 999 });
+    boundaries.slice(0, -1).forEach((start, i) => {
+      seed({ timestampMs: start, input: 10 });
+      seed({ timestampMs: boundaries[i + 1] - 1, input: 20 });
+      seed({ timestampMs: start, input: 999, provider: 'codex' });
+    });
+    const series = aggregator.getSeries(from, to, 'day', ['claude'], boundaries);
+    expect(series.map(row => row.bucketStartMs)).toEqual(boundaries.slice(0, -1));
+    expect(series.map(row => row.inputTokens)).toEqual(boundaries.slice(0, -1).map(() => 30));
+    expect(series.reduce((sum, row) => sum + row.totalTokens, 0)).toBe(aggregator.getTotals(from, to, ['claude']).totalTokens);
+  });
+
+  it('rejects malformed calendar intervals rather than silently misbucketing', () => {
+    expect(() => aggregator.getSeries(0, 199, 'day', undefined, [0, 100, 100, 200])).toThrow('Invalid usage calendar boundaries');
+    expect(() => aggregator.getSeries(0, 199, 'day', undefined, [1, 200])).toThrow('Invalid usage calendar boundaries');
+  });
+
   it('returns no buckets when there is no data', () => {
     expect(aggregator.getSeries(NOW - DAY_MS, NOW, 'day')).toEqual([]);
   });

@@ -12,7 +12,7 @@ import { LimitBar, LimitStatusBanners, CreditsLine } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
-import { localDateString, usageDateBounds, type UsageDateRange } from './usageDateRange';
+import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
   type UsageByPane,
@@ -546,10 +546,7 @@ export function UsageView() {
 
       {showDateRange && (
         <UsageDateRangeDialog
-          initialRange={customRange ?? {
-            start: localDateString(new Date(Date.now() - rangeDays * DAY_MS)),
-            end: localDateString(new Date()),
-          }}
+          initialRange={customRange ?? presetCalendarRange(rangeDays)}
           onClose={() => setShowDateRange(false)}
           onApply={range => { setCustomRange(range); setShowDateRange(false); }}
         />
@@ -655,7 +652,7 @@ export function UsageView() {
                   labels={seriesLabels}
                   series={visibleAreaSeries}
                   formatValue={formatTokens}
-                  ariaLabel={`Token usage over the last ${rangeDays} days, totalling ${formatTokens(report.totals.totalTokens)} tokens`}
+                  ariaLabel={`Token usage ${customRange ? `from ${rangeLabel}` : `over the last ${rangeDays} days`}, totalling ${formatTokens(report.totals.totalTokens)} tokens`}
                 />
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {areaSeries.map(entry => {

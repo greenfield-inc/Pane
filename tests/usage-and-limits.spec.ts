@@ -358,6 +358,12 @@ test('custom inclusive local dates reach the API, preserve provider filters, and
     };
   });
   await page.getByRole('button', { name: 'Choose custom date range' }).click();
+  const expectedStart = await page.evaluate(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 29);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  });
+  await expect(page.getByLabel('Start date', { exact: true })).toHaveValue(expectedStart);
   await page.getByLabel('Start date', { exact: true }).fill('2026-03-08');
   await page.getByLabel('End date', { exact: true }).fill('2026-03-07');
   await expect(page.getByRole('button', { name: 'Apply range' })).toBeDisabled();
@@ -365,11 +371,12 @@ test('custom inclusive local dates reach the API, preserve provider filters, and
   await capture(page, testInfo, '06-custom-date-range.png');
   await page.getByRole('button', { name: 'Apply range' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('img', { name: /^Token usage from 2026-03-08 to 2026-03-08/ })).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     const request = JSON.parse(sessionStorage.getItem('usage-request') || '{}');
     const start = new Date(2026, 2, 8).getTime();
     const end = new Date(2026, 2, 9).getTime() - 1;
-    return request.fromMs === start && request.toMs === end && end - start + 1 === 23 * 60 * 60 * 1000;
+    return request.fromMs === start && request.toMs === end && request.dayBoundariesMs?.[0] === start && request.dayBoundariesMs?.[1] === end + 1 && end - start + 1 === 23 * 60 * 60 * 1000;
   })).toBe(true);
   await page.getByRole('button', { name: 'Codex', exact: true }).click();
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('usage-request') || '{}').providers)).toEqual(['codex']);

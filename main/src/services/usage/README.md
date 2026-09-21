@@ -52,3 +52,8 @@ panes means no trimming. The UI shows the original and retained sample counts.
 These summaries describe consumption during the selected period, not lifetime
 task costs or completed work. They are derived from the existing report without
 additional database queries. Leaderboard calculations are unchanged.
+
+Custom-date charts use viewer-local midnight boundaries in a single indexed
+range-join query, so day labels and totals remain aligned across daylight-saving
+changes and fractional-hour time zones, including remote-daemon use. Calendar
+defaults contain exactly the preset's number of inclusive dates.
