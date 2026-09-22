@@ -51,6 +51,7 @@
         "src/main.tsx",
         "src/remote/main.tsx",
         "src/**/*.test.{ts,tsx}",
+        "src/test-fixtures/**/*.ts",
         "vite.config.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "vite.config.{ts,js}"],

@@ -5,7 +5,7 @@ import { useConfigStore } from '../stores/configStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { API } from '../utils/api';
-import { Dropdown } from './ui/Dropdown';
+import { Dropdown, DropdownMenuItem } from './ui/Dropdown';
 import { Badge } from './ui/Badge';
 import { Toggle } from './ui/Toggle';
 import { AddProjectDialog } from './AddProjectDialog';
@@ -153,16 +153,14 @@ function OpenProjectCard({
         },
       }))}
       footer={({ close }) => (
-        <button
-          type="button"
+        <DropdownMenuItem
+          label="+ Add Repository"
           onClick={() => {
             close();
             onAddProject();
           }}
           className="w-full rounded-sm px-3 py-2.5 text-left text-sm text-interactive transition-colors hover:bg-surface-hover"
-        >
-          + Add Repository
-        </button>
+        />
       )}
       position="bottom-left"
       width="lg"
