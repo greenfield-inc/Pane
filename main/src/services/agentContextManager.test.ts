@@ -46,6 +46,7 @@ describe('agentContextManager', () => {
     expect(content).toContain('runpane doctor --json');
     expect(content).toContain('runpane agent-context');
     expect(content).toContain('Default to context-safe validation');
+    expect(content).toContain('runpane watch --follow');
     expect(content).toContain('Prefer `runpane panels submit` for normal text plus Enter');
     expect(content).toContain('Set-Location $env:TEMP');
     expect(content).toContain('broken Windows shim');

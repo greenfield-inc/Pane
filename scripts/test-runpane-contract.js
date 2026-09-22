@@ -2205,6 +2205,8 @@ function compareAgentContextParity() {
   assert.ok(managedBlock.includes('Do not hardcode a specific assistant brand'));
   assert.ok(managedBlock.includes('Pane agent or custom tool command the user selected'));
   assert.ok(managedBlock.includes('do not clone/install the repo unless the user asks'));
+  assert.ok(managedBlock.includes('runpane watch --follow'));
+  assert.ok(managedBlock.includes('For ongoing supervision'));
 
   const nodeDottedDetail = JSON.parse(runNode(['agent-context', '--command', 'panes.create', '--json']));
   const pyDottedDetail = JSON.parse(runPython(['agent-context', '--command', 'panes.create', '--json']));
