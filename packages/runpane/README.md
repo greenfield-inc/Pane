@@ -29,7 +29,7 @@ When debugging RunPane from a Pane repository checkout, prefer the built local
 wrapper over `npx --yes runpane@latest` so diagnostics exercise local changes:
 
 ```bash
-PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json
+node packages/runpane/dist/cli.js doctor --json
 ```
 
 `doctor` remains the first diagnostic command before local-control actions. On
