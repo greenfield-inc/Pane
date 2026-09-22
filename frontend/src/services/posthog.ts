@@ -1,4 +1,4 @@
-import posthog from 'posthog-js';
+import posthog from 'posthog-js/dist/module.no-external';
 import type { AnalyticsIdentity } from '../types/config';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
@@ -162,6 +162,9 @@ export function initPostHog(config: PostHogConfig, options: PostHogInitOptions =
   if (needsInit) {
     posthog.init(apiKey, {
       api_host: host,
+      // Keep executable analytics code inside the reviewed, lockfile-pinned bundle.
+      // The no-external entry uses JSON for remote configuration instead of config.js.
+      disable_external_dependency_loading: true,
       // Restrict autocapture to interactive elements only — prevents capturing
       // sensitive text content (code, prompts) from non-interactive UI areas
       autocapture: {

@@ -1,21 +1,28 @@
 import { test, expect } from '@playwright/test';
+import { gunzipSync } from 'node:zlib';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
 
 type CapturedPostHogRequest = {
   url: string;
-  body: string;
+  body: Buffer;
 };
 
 type CapturedPostHogEvent = {
   event?: string;
   properties?: JsonObject;
+  $set?: JsonObject;
 };
+
+type CapturedPostHogPayload = CapturedPostHogEvent[] | (CapturedPostHogEvent & { batch?: CapturedPostHogEvent[] });
 
 function parseCapturedEvents(requests: CapturedPostHogRequest[]): CapturedPostHogEvent[] {
   return requests.flatMap((request) => {
     try {
       const body = parsePostHogBody(request.body);
+      if (Array.isArray(body)) {
+        return body;
+      }
       if (Array.isArray(body.batch)) {
         return body.batch;
       }
@@ -26,20 +33,43 @@ function parseCapturedEvents(requests: CapturedPostHogRequest[]): CapturedPostHo
   });
 }
 
-function parsePostHogBody(bodyText: string): CapturedPostHogEvent & { batch?: CapturedPostHogEvent[] } {
+function parsePostHogBody(body: Buffer): CapturedPostHogPayload {
+  const bodyText = (body[0] === 0x1f && body[1] === 0x8b ? gunzipSync(body) : body).toString('utf8');
   try {
     // SAFETY: captured PostHog requests are decoded into the fixture's constrained event shape.
-    return JSON.parse(bodyText) as CapturedPostHogEvent & { batch?: CapturedPostHogEvent[] };
+    return JSON.parse(bodyText) as CapturedPostHogPayload;
   } catch {
     const data = new URLSearchParams(bodyText).get('data');
     // SAFETY: captured PostHog requests are decoded into the fixture's constrained event shape.
     return data
-      ? JSON.parse(data) as CapturedPostHogEvent & { batch?: CapturedPostHogEvent[] }
+      ? JSON.parse(Buffer.from(data, 'base64').toString('utf8')) as CapturedPostHogPayload
       : {};
   }
 }
 
-test('undecided installs default on and Settings discloses the one-click opt-out', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  // Exercise desktop capture; the SDK drops WebDriver and HeadlessChrome client hints.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    // SAFETY: Chromium exposes these optional structured user-agent client hints.
+    const clientHints = (navigator as Navigator & {
+      userAgentData?: { brands: Array<{ brand: string; version: string }> };
+    }).userAgentData;
+    if (clientHints) {
+      Object.defineProperty(clientHints, 'brands', {
+        value: clientHints.brands.filter((entry) => entry.brand !== 'HeadlessChrome'),
+      });
+      Object.defineProperty(navigator, 'userAgentData', { value: clientHints });
+    }
+  });
+  await page.route('https://fonts.googleapis.com/**', (route) =>
+    route.fulfill({ contentType: 'text/css', body: '' })
+  );
+});
+
+test('bundled analytics preserves identity and opt-out without loading remote code', async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error('Analytics network verification requires a base URL');
+  const appOrigin = new URL(baseURL).origin;
   const identity = {
     distinctId: 'install:install_default_e2e',
     installId: 'install_default_e2e',
@@ -53,16 +83,30 @@ test('undecided installs default on and Settings discloses the one-click opt-out
     previousVersion: null,
   };
   const requests: CapturedPostHogRequest[] = [];
+  const remoteScripts: string[] = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script' && new URL(request.url()).origin !== appOrigin) {
+      remoteScripts.push(request.url());
+    }
+  });
 
   await page.route('http://posthog.test/**', async (route) => {
     requests.push({
       url: route.request().url(),
-      body: route.request().postData() ?? '',
+      body: route.request().postDataBuffer() ?? Buffer.alloc(0),
     });
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: '{}',
+      // Exercise the SDK's JSON configuration path with features that would
+      // otherwise lazy-load executable extensions from the analytics host.
+      body: JSON.stringify({
+        hasFeatureFlags: false,
+        supportedCompression: ['gzip-js'],
+        surveys: true,
+        sessionRecording: { endpoint: '/s/', recorderVersion: 'v2' },
+        autocaptureExceptions: true,
+      }),
     });
   });
 
@@ -89,6 +133,7 @@ test('undecided installs default on and Settings discloses the one-click opt-out
   });
 
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await expect(page.getByRole('button', { name: 'Settings' }).first()).toBeVisible({ timeout: 15000 });
 
   await expect.poll(() => parseCapturedEvents(requests).map((event) => event.event)).toEqual(
     expect.arrayContaining(['analytics_default_enabled', 'app_first_opened'])
@@ -99,6 +144,15 @@ test('undecided installs default on and Settings discloses the one-click opt-out
   await expect(page.getByText('Product analytics are on by default.')).toBeVisible();
   await expect(page.getByRole('switch', { name: 'Allow product analytics' })).toBeChecked();
   await expect.poll(() => parseCapturedEvents(requests).map((event) => event.event)).toContain('analytics_settings_disclosure_viewed');
+
+  await expect.poll(() => parseCapturedEvents(requests).map((event) => event.event)).toEqual(
+    expect.arrayContaining(['$identify', '$autocapture'])
+  );
+  const identified = parseCapturedEvents(requests).find((event) => event.event === '$identify');
+  expect(identified?.properties?.distinct_id).toBe(identity.distinctId);
+  expect(identified?.$set).toMatchObject({ install_id: identity.installId });
+  expect(requests.some((request) => new URL(request.url).pathname === '/array/phc_test/config')).toBe(true);
+  expect(remoteScripts).toEqual([]);
 
   await page.getByRole('switch', { name: 'Allow product analytics' }).click();
 
@@ -133,6 +187,7 @@ test('undecided installs default on and Settings discloses the one-click opt-out
     web_attribution_present: true,
     is_first_launch: true,
   });
+  expect(remoteScripts).toEqual([]);
 });
 
 test('an explicit existing opt-out stays disabled and receives no default-on events', async ({ page }) => {
@@ -152,7 +207,7 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
   await page.route('http://posthog.test/**', async (route) => {
     requests.push({
       url: route.request().url(),
-      body: route.request().postData() ?? '',
+      body: route.request().postDataBuffer() ?? Buffer.alloc(0),
     });
     await route.fulfill({
       status: 200,
@@ -184,8 +239,11 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
 
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-  await page.waitForTimeout(250);
-  expect(parseCapturedEvents(requests).map((event) => event.event)).not.toEqual(
-    expect.arrayContaining(['analytics_default_enabled', 'app_opened'])
-  );
+  await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByRole('button', { name: 'Privacy', exact: true }).click();
+  await expect(page.getByRole('switch', { name: 'Allow product analytics' })).not.toBeChecked();
+  const eventNames = parseCapturedEvents(requests).map((event) => event.event);
+  for (const eventName of ['analytics_default_enabled', 'app_opened', '$identify', '$autocapture']) {
+    expect(eventNames).not.toContain(eventName);
+  }
 });

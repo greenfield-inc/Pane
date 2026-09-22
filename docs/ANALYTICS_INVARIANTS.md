@@ -5,6 +5,16 @@ uses default-on product analytics for new and previously undecided installs.
 Privacy Settings clearly discloses that default and provides the opt-out.
 Explicit choices from older versions must never be overwritten.
 
+## Bundled Executable Code
+
+Import the SDK through `posthog-js/dist/module.no-external` and keep
+`disable_external_dependency_loading` enabled. This is PostHog's
+[supported entry point for Electron](https://posthog.com/docs/libraries/js):
+analytics requests and JSON configuration remain available, while executable
+configuration, session replay, surveys, and other remote extensions cannot load.
+All executable dependencies must come from the reviewed, lockfile-pinned build.
+Do not add a second import from the default SDK entry point.
+
 ## Identity Comes First
 
 Resolve analytics identity in the main process before the renderer captures any
@@ -143,4 +153,6 @@ or add coverage in:
 - `main/src/services/analyticsIdentity.test.ts`
 - `tests/analytics-consent.spec.ts`
 
-The Playwright test should verify both event order and payload shape.
+The Playwright test should verify both event order and payload shape, including
+SDK identity and interaction events, and reject external script requests even
+when remote configuration enables extensions.
