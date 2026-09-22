@@ -25,9 +25,9 @@ function interceptorInput(data: string): InterceptorInput {
   const key = Number(virtualKey);
   const char = Number(unicode);
   const modifiers = Number(controlState);
-  // Modifier transitions and key releases are not text or menu actions.
+  // Modifier/lock transitions and key releases are not text or menu actions.
   if (keyDown === '0') return { data: null, key, released: true };
-  if ([16, 17, 18, 91, 92].includes(key)) return { data: null };
+  if ([16, 17, 18, 20, 91, 92, 144, 145].includes(key)) return { data: null };
   if (key === 8 && char === 8) return { data: '\x7f', key };
   if (char > 0 && char <= 0x10ffff) {
     const text = String.fromCodePoint(char);

@@ -48,12 +48,14 @@ describe('TerminalInterceptor keyboard protocols', () => {
     expect(onFlush).not.toHaveBeenCalled();
   });
 
-  it('ignores Win32 releases and modifier keys while filtering, and flushes only text on Escape', () => {
+  it('ignores Win32 releases, modifier and lock keys while filtering, and flushes only text on Escape', () => {
     const { interceptor, onFlush } = setup();
     interceptor.handleInput('\x1b[50;3;64;1;16;1_');
     expect(interceptor.handleInput('\x1b[50;3;64;0;16;1_').consumed).toBe(true);
     expect(interceptor.handleInput('\x1b[16;42;0;0;0;1_').consumed).toBe(false);
     expect(interceptor.handleInput('\x1b[16;42;0;1;16;1_').consumed).toBe(false);
+    expect(interceptor.handleInput('\x1b[20;58;0;1;128;1_').consumed).toBe(false);
+    expect(interceptor.handleInput('\x1b[20;58;0;0;128;1_').consumed).toBe(false);
     interceptor.handleInput('\x1b[70;33;102;1;0;1_');
     expect(interceptor.getState().buffer).toBe('f');
     interceptor.handleInput('\x1b[27;1;27;1;0;1_');
