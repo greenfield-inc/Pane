@@ -169,9 +169,10 @@ test.describe('Smoke Tests', () => {
     await clickDomNode(page.getByRole('button', { name: 'Save Changes' }).first());
 
     const projectUpdates = await page.evaluate(() => {
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
       const mock = (window as typeof window & {
         __paneTestElectronMock?: {
-          getProjectUpdates: () => Array<{ projectId: string; updates: Record<string, unknown> }>;
+          getProjectUpdates: () => Array<{ projectId: string; updates: JsonObject }>;
         };
       }).__paneTestElectronMock;
 
