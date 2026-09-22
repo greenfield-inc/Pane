@@ -81,6 +81,9 @@ jobs:
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend test
 
+    - name: Build packaged frontend and editor workers
+      run: pnpm build:frontend
+
     - name: Install Playwright browser dependencies
       run: pnpm exec playwright install --with-deps chromium
 
@@ -96,6 +99,9 @@ jobs:
 
     - name: Verify sandboxed Electron preload
       run: pnpm build:main && xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
+
+    - name: Verify packaged editor offline in Electron
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.packaged.config.ts
 
     - name: Run maintained functional smoke tests
       run: xvfb-run -a pnpm test:ci:minimal

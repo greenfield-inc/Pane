@@ -4,7 +4,7 @@
  * tab. The tree that opens files lives in the Files inspector (FileEditor).
  */
 import { useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
-import Editor from '@monaco-editor/react';
+import Editor from './monacoRuntime';
 import type * as monaco from 'monaco-editor';
 import { MonacoErrorBoundary } from '../../MonacoErrorBoundary';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
@@ -45,6 +45,7 @@ export function FileEditorView({
   const [state, dispatch] = useReducer(fileEditorReducer, initialFileEditorState);
   const { selectedFile, fileContent, originalContent, loading, error, gitStatus, binaryBlobUrl, viewMode } = state;
   const selectedFilePathRef = useCommittedRef(selectedFile?.path ?? null);
+  const requestedFilePathRef = useCommittedRef(filePath);
   const onStateChangeRef = useCommittedRef(onStateChange);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -120,17 +121,12 @@ export function FileEditorView({
       }
       onFileChange?.(file.path, false);
       onStateChange?.({ filePath: file.path, isDirty: false });
-
-      // A reload of the tab's own file (same path) restores its saved position.
-      if (loaded.kind === 'text' && editorRef.current && initialState?.filePath === file.path) {
-        restoreEditorPosition(editorRef.current, initialState);
-      }
     } catch (err) {
       if (seq === loadSeqRef.current) {
         dispatch({ type: 'load-failed', message: err instanceof Error ? err.message : 'Failed to load file' });
       }
     }
-  }, [sessionId, onFileChange, onStateChange, initialState]);
+  }, [sessionId, onFileChange, onStateChange]);
 
   // Git badge: on load, and again when git or the file system moves underneath
   useEffect(() => {
@@ -147,8 +143,20 @@ export function FileEditorView({
 
   const handleEditorMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
     editorRef.current = editor;
-    positionTrackerRef.current = trackEditorPosition(editor, (next) => onStateChangeRef.current?.(next));
-    restoreEditorPosition(editor, initialState);
+    if (initialState?.filePath === selectedFile?.path) {
+      restoreEditorPosition(editor, initialState);
+    }
+    const tracker = trackEditorPosition(editor, (next) => {
+      if (requestedFilePathRef.current === selectedFile?.path) onStateChangeRef.current?.(next);
+    });
+    positionTrackerRef.current = tracker;
+    editor.onDidDispose(() => {
+      tracker.dispose();
+      if (editorRef.current === editor) {
+        editorRef.current = null;
+        positionTrackerRef.current = null;
+      }
+    });
   };
 
   // Auto-save functionality
@@ -253,17 +261,6 @@ export function FileEditorView({
     return () => window.removeEventListener('editor-panel:reveal', handleReveal);
   }, [filePath]);
 
-  // Dispose the Monaco model when the file changes or the tab unmounts
-  useEffect(() => {
-    return () => {
-      try {
-        editorRef.current?.getModel()?.dispose();
-      } catch (cleanupError) {
-        console.warn('[FileEditorView] Error during Monaco cleanup:', cleanupError);
-      }
-    };
-  }, [selectedFile?.path]);
-
   if (!selectedFile) {
     return (
       <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
@@ -309,8 +306,11 @@ export function FileEditorView({
         ) : isBinaryPreview && (binaryBlobUrl || !error) ? (
           <BinaryFilePreview kind={isImageFile ? 'image' : 'pdf'} blobUrl={binaryBlobUrl} fileName={fileName} />
         ) : (
-          <MonacoErrorBoundary>
+          <MonacoErrorBoundary key={JSON.stringify([sessionId, selectedFile.path])}>
             <Editor
+              // The wrapper owns one model for this session/file and disposes
+              // it on unmount. The tab reducer retains edits during recovery.
+              saveViewState={false}
               theme={isDarkMode ? 'vs-dark' : 'light'}
               value={fileContent}
               onChange={handleEditorChange}

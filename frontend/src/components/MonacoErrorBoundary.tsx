@@ -1,64 +1,27 @@
-import React, { Component, ReactNode } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ErrorBoundary } from 'react-error-boundary';
 
-interface MonacoErrorBoundaryProps {
-  children: ReactNode;
-  onReset?: () => void;
-}
+export function MonacoErrorBoundary({ children }: { children: ReactNode }) {
+  const [retried, setRetried] = useState(false);
 
-interface MonacoErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-  errorCount: number;
-}
-
-export class MonacoErrorBoundary extends Component<MonacoErrorBoundaryProps, MonacoErrorBoundaryState> {
-  constructor(props: MonacoErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null, errorCount: 0 };
-  }
-
-  static getDerivedStateFromError(error: Error): Partial<MonacoErrorBoundaryState> {
-    // Check if this is the Monaco editor error we're trying to handle
-    if (error.message?.includes('getFullModelRange') || 
-        error.message?.includes('TextModel') ||
-        error.message?.includes('disposed') ||
-        error.message?.includes('DiffEditorWidget')) {
-      console.warn('Monaco editor error caught, will recover:', error.message);
-      return { hasError: true, error };
-    }
-    // Re-throw other errors
-    throw error;
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.warn('Monaco editor error details:', { error, errorInfo });
-    this.setState(prev => ({ errorCount: prev.errorCount + 1 }));
-    
-    // Auto-recover after a short delay
-    setTimeout(() => {
-      this.resetError();
-    }, 100);
-  }
-
-  resetError = () => {
-    this.setState({ hasError: false, error: null });
-    this.props.onReset?.();
-  };
-
-  render() {
-    if (this.state.hasError) {
-      // Show a brief loading state while auto-recovering
-      return (
-        <div className="flex items-center justify-center h-full p-8">
-          <div className="flex items-center gap-2 text-text-tertiary">
-            <RefreshCw className="w-5 h-5 animate-spin" />
-            <span>Reloading editor...</span>
-          </div>
+  return (
+    <ErrorBoundary
+      onError={(error, errorInfo) => console.warn('Monaco editor error details:', { error, errorInfo })}
+      onReset={() => setRetried(true)}
+      fallbackRender={({ resetErrorBoundary }) => (
+        <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 p-8 text-text-secondary">
+          <p>The editor could not be displayed. Your edits are still held in this tab.</p>
+          {retried ? (
+            <p>Retry failed. Switch to another file or reopen the tab to try again.</p>
+          ) : (
+            <button type="button" className="rounded border border-border-primary px-3 py-2" onClick={resetErrorBoundary}>
+              Retry editor
+            </button>
+          )}
         </div>
-      );
-    }
-
-    return this.props.children;
-  }
+      )}
+    >
+      {children}
+    </ErrorBoundary>
+  );
 }
