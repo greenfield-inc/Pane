@@ -525,20 +525,20 @@
   /* Interactive surface tokens */
   --color-surface-interactive: var(--gh-800);
   --color-surface-interactive-hover: var(--gh-700);
-  --color-interactive-surface: rgba(var(--color-interactive-rgb), 0.15);
-  --color-interactive-surface-hover: rgba(var(--color-interactive-rgb), 0.25);
+  --color-interactive-surface: rgb(var(--color-interactive-rgb) / 0.15);
+  --color-interactive-surface-hover: rgb(var(--color-interactive-rgb) / 0.25);
 
   /* Interactive border tokens */
   --color-border-interactive-subtle: rgba(255, 255, 255, 0.05);
   --color-border-interactive: rgba(255, 255, 255, 0.08);
-  --color-interactive-border: rgba(var(--color-interactive-rgb), 0.5);
-  --color-interactive-border-hover: rgba(var(--color-interactive-rgb), 0.7);
+  --color-interactive-border: rgb(var(--color-interactive-rgb) / 0.5);
+  --color-interactive-border-hover: rgb(var(--color-interactive-rgb) / 0.7);
 
   /* Interactive text tokens */
   --color-text-interactive-muted: rgb(114 122 133);  /* #727a85 — 4.7:1 on bg-primary (AA) */
 
   /* Focus ring variations */
-  --color-focus-ring-subtle: rgba(var(--color-interactive-rgb), 0.4);
+  --color-focus-ring-subtle: rgb(var(--color-interactive-rgb) / 0.4);
 
   /* Semantic Tokens - Status */
   --color-status-success: rgb(63 185 80);        /* GitHub #3fb950 */
@@ -594,8 +594,8 @@
   --color-surface-navigation: var(--gh-black);
   --color-surface-navigation-hover: var(--gh-800);
   --color-surface-navigation-active: var(--gh-700);
-  --color-surface-navigation-selected: rgba(var(--color-interactive-rgb), 0.15);
-  --color-surface-navigation-selected-hover: rgba(var(--color-interactive-rgb), 0.2);
+  --color-surface-navigation-selected: rgb(var(--color-interactive-rgb) / 0.15);
+  --color-surface-navigation-selected-hover: rgb(var(--color-interactive-rgb) / 0.2);
 
   --color-text-navigation-primary: rgb(200 208 217);
   --color-text-navigation-secondary: rgb(125 133 144);
@@ -697,7 +697,7 @@
   --color-interactive-border: var(--blue-500);      /* 3.7:1 — passes 3:1 UI threshold */
   --color-interactive-border-hover: var(--blue-600);
   --color-text-interactive-muted: var(--gray-500);
-  --color-focus-ring-subtle: rgba(var(--color-interactive-rgb), 0.4);
+  --color-focus-ring-subtle: rgb(var(--color-interactive-rgb) / 0.4);
 
   /* Context-Aware Text Tokens - Light Mode */
   --color-text-on-primary: rgb(31 35 40);

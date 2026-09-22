@@ -6,7 +6,7 @@ export type Theme =
   | 'haar' | 'abyss' | 'understory' | 'colorblind-safe' | 'low-fatigue'
   | 'high-legibility';
 
-/** Kept in sync with the pre-React bootstrap in frontend/index.html by themeClasses.test.ts. */
+/** Canonical map, also inlined into the pre-React bootstrap by the Vite HTML transform. */
 export const THEME_CLASSES = {
   light: ['light'],
   'light-rounded': ['light', 'light-rounded'],

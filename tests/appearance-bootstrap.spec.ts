@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import { readTerminalTheme } from './terminalXterm';
-import type { AppearanceConfig } from '../shared/types/appearance';
+import { THEME_CLASSES, type AppearanceConfig } from '../shared/types/appearance';
 
 type AppearanceMock = {
   getBackgroundColorWrites: () => Array<{ theme: string; color: string }>;
@@ -15,8 +15,35 @@ const readBootstrapThemeClasses = (page: import('@playwright/test').Page) => pag
   return (window as typeof window & { __paneBootstrapThemeClasses?: string[] }).__paneBootstrapThemeClasses;
 });
 
+test('every canonical theme is applied before the React entry point can load', async ({ page }) => {
+  test.setTimeout(60_000); // One navigation per supported theme, also under the minimal CI config.
+  // No renderer can repair missing bootstrap classes in this test.
+  await page.route('**/*', (route) => route.request().resourceType() === 'script' ? route.abort() : route.continue());
+  await page.addInitScript(() => {
+    const fixedTheme = new URL(location.href).searchParams.get('bootstrap-theme');
+    localStorage.setItem('pane.appearance.v1', JSON.stringify({
+      v: 1, appearanceMode: 'fixed', theme: fixedTheme,
+      systemLightTheme: 'light-rounded', systemDarkTheme: 'dark',
+    }));
+  });
+  for (const [theme, classes] of Object.entries(THEME_CLASSES)) {
+    await page.goto(`/?bootstrap-theme=${theme}`, { waitUntil: 'domcontentloaded' });
+    expect(await readBootstrapThemeClasses(page)).toEqual(classes);
+    expect(await page.locator('html').evaluate((element) => [...element.classList])).toEqual(classes);
+    expect(await page.locator('body').evaluate((element) => [...element.classList])).toEqual(classes);
+    await expect(page.locator('html')).toHaveCSS('color-scheme', classes[0]);
+  }
+});
+
 test('first paint resolves the authoritative snapshot against the synchronous system preference', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
+  await page.addInitScript(() => {
+    localStorage.setItem('pane.appearance.v1', JSON.stringify({
+      v: 1, appearanceMode: 'fixed', theme: 'folio',
+      systemLightTheme: 'folio', systemDarkTheme: 'walnut',
+    }));
+    localStorage.setItem('theme', 'light');
+  });
   await installElectronApiMock(page, {
     initialConfig: {
       appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'folio', systemDarkTheme: 'abyss',
@@ -69,7 +96,8 @@ test('legacy theme is fixed and an invalid legacy value falls back to defaults',
   await invalidContext.close();
 });
 
-test('System follows live changes and refreshes native window colors while Fixed is immune', async ({ page }) => {
+test('System refreshes native window colors without a Google Fonts connection', async ({ page }) => {
+  await page.route('https://fonts.googleapis.com/**', (route) => route.abort());
   await page.emulateMedia({ colorScheme: 'light' });
   await installElectronApiMock(page, {
     windowControlsOverlayEnabled: true,
@@ -78,6 +106,7 @@ test('System follows live changes and refreshes native window colors while Fixed
     },
   });
   await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('html')).toHaveClass(/folio/);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -107,6 +136,7 @@ test('fulfilled background-colour failures are logged without interrupting Syste
     },
   });
   await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('html')).toHaveClass(/folio/);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -139,6 +169,7 @@ test('Fixed appearance ignores live system preference changes', async ({ page })
     },
   });
   await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('html')).toHaveClass(/walnut/);
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('html')).toHaveClass(/walnut/);
@@ -169,7 +200,22 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
       id: 1, session_id: session.id, execution_sequence: 1, after_commit_hash: '2222222', commit_message: 'Change example',
       timestamp: now, stats_additions: 1, stats_deletions: 1, stats_files_changed: 1, author: 'Pane', comparison_branch: 'origin/main', history_source: 'branch',
     }],
-    initialCombinedDiff: { diff, stats: { additions: 1, deletions: 1, filesChanged: 1 }, changedFiles: ['example.ts'] },
+    diffManifests: {
+      session: {
+        scope: { kind: 'session' },
+        files: [{ path: 'example.ts', kind: 'modified', additions: 1, deletions: 1, isBinary: false }],
+        resolvedBase: { kind: 'comparison-base', ref: 'origin/main', hash: '1111111' },
+        resolvedTarget: { kind: 'working-tree' },
+        stats: { additions: 1, deletions: 1, filesChanged: 1 },
+      },
+    },
+    fileDiffs: {
+      'session:example.ts': {
+        file: { path: 'example.ts', kind: 'modified', additions: 1, deletions: 1, isBinary: false },
+        patch: diff,
+        status: 'changed',
+      },
+    },
     initialTerminalStates: { 'appearance-terminal': { scrollbackBuffer: 'ready\r\n' } },
   });
   await page.goto('/');
@@ -186,7 +232,7 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
   const terminalBackground = () => readTerminalTheme(terminalSurface).then((theme) => theme.background ?? '');
   await expect.poll(terminalBackground).not.toBe('');
   const lightBackground = await terminalBackground();
-  await page.getByRole('button', { name: /^Open diff for example\.ts$/ }).click();
+  await page.getByRole('treeitem', { name: /^Open diff for example\.ts,/ }).click();
   await expect(page.getByText('example.ts', { exact: true }).last()).toBeVisible();
   const lightDiffColor = await page.getByText('export const value = 2;', { exact: false }).last().evaluate((element) => getComputedStyle(element).color);
 

@@ -52,23 +52,37 @@ The script helps ensure Pane complies with open source license requirements by:
 
 ## check-theme-contrast.mjs
 
-Contrast and colour-vision-deficiency gate for Pane themes. Parses
-`frontend/src/styles/tokens/colors.css`, composes each theme's tokens the way
-`ThemeProvider` composes classes, and measures WCAG 2.x contrast for text,
-UI (3:1) and terminal ANSI pairs. Simulates protanopia, deuteranopia and
-tritanopia (Machado 2009 matrices) for the status, diff and ANSI palettes.
+Contrast and colour-vision-deficiency gate for Pane themes. Chromium loads
+`frontend/src/styles/tokens/colors.css` and resolves the real cascade, variables,
+and colours with computed styles. One engine measures WCAG 2.x contrast for
+text, UI and terminal ANSI pairs, and simulates protanopia, deuteranopia and
+tritanopia (Machado 2009) for status, diff and ANSI palettes. It runs without
+starting Pane, Vite, or any network requests.
 
 ```bash
-pnpm theme:contrast                    # gate every theme in GATED_THEMES (the 15 batch themes)
-pnpm theme:contrast -- --all --verbose # report every theme (report only, always exit 0)
+pnpm exec playwright install chromium # once locally; CI already installs Chromium
+pnpm theme:contrast                    # enforce the complete contrast contract
+pnpm theme:contrast -- --themes folio,colorblind-safe
+pnpm theme:contrast -- --all --verbose # report every theme without failing thresholds
 pnpm theme:contrast -- --markdown --cvd
 ```
 
-Only the themes in `GATED_THEMES` fail the exit code; every other theme is
-report-only so existing debt does not block CI. Each gated theme carries the
-profile its family was designed to (`body` / `ui` / `terminal` / `status`
-minimums; `strictUi` adds the hairline pairs — 1px input border, scrollbar
-thumb, subtle focus ring — that only the accessibility family commits to;
-`cvd` gates the colour-vision simulation). Add a theme to `THEME_CLASSES` (and
-to `GATED_THEMES` when it should be enforced) when adding one to
-`themeContextValue.ts`.
+All themes enforce AA muted text and AAA muted text in high-contrast mode.
+The fifteen themes in `GATED_THEMES` also enforce their designed text, UI,
+terminal and status profiles, including high-contrast variants. `strictUi`
+adds the accessibility family's hairline pairs; `cvd` enforces CVD separation.
+Folio, Newsprint and Walnut additionally check every editorial text surface,
+button state and terminal/editor background equality, and require explicit
+overrides for the base theme tokens. Other pairs remain informational for the
+original twelve themes. `--all` reports all thresholds without failing them;
+missing Chromium, invalid themes and other execution errors still fail.
+
+Add themes to the canonical `THEME_CLASSES` in `shared/types/appearance.ts` and
+add their full profile to `GATED_THEMES`. Vite also embeds that canonical map
+and the default appearance directly into the synchronous HTML bootstrap in
+dev and production; no second map or runtime fetch is needed. CI runs the
+contrast gate and the appearance bootstrap browser journeys.
+
+Typography uses locally installed fonts and the existing system monospace
+fallbacks. The renderer stylesheet must not import runtime font CDNs: a failed
+nested stylesheet request can reject Vite's CSS preload and prevent startup.

@@ -1,66 +1,17 @@
 #!/usr/bin/env node
 /**
- * Theme contrast + color-vision-deficiency (CVD) gate for Pane themes.
- *
- * Reads frontend/src/styles/tokens/colors.css, resolves each theme's semantic
- * tokens (following the same class composition ThemeProvider applies), and
- * measures WCAG 2.x contrast for the text/UI/terminal pairs listed below.
- *
- *   node scripts/check-theme-contrast.mjs                 # gate every theme in GATED_THEMES
- *   node scripts/check-theme-contrast.mjs --themes dusk    # report any theme(s)
- *   node scripts/check-theme-contrast.mjs --all            # report every theme (report only, exit 0)
- *   node scripts/check-theme-contrast.mjs --markdown       # PR-ready tables
- *   node scripts/check-theme-contrast.mjs --cvd            # add CVD simulation tables
- *   node scripts/check-theme-contrast.mjs --verbose        # print passing rows too
- *
- * Exit code is 1 when a gated theme fails a threshold. Themes not listed in
- * GATED_THEMES (the twelve original themes) are report-only so existing debt
- * does not block CI. Each gated theme carries its own profile — see
- * GATED_THEMES: `strictUi` additionally gates the hairline pairs (1px input
- * border, scrollbar thumb, the subtle focus ring) and the "on-dark" link text
- * on the page background, which only the accessibility family commits to.
- *
- * CVD simulation uses the Machado, Oliveira & Fernandes (2009) severity-1.0
- * matrices applied in linear sRGB — the same matrices as the SVG filters used
- * for the simulated screenshots in tests/theme-screenshots.spec.ts.
+ * One browser-computed contrast gate for every theme's muted family, the full
+ * editorial matrix, and the batch themes' text/UI/terminal/CVD profiles.
+ * Chromium resolves the real CSS cascade and var() expressions; the remaining
+ * code measures WCAG contrast, CVD separation, and prints CLI/PR reports.
  */
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { chromium } from 'playwright';
+import { THEME_CLASSES } from '../shared/types/appearance.ts';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const COLORS_CSS = path.join(here, '..', 'frontend', 'src', 'styles', 'tokens', 'colors.css');
-
-// Mirrors THEME_CLASSES in frontend/src/contexts/ThemeProvider.tsx.
-const THEME_CLASSES = {
-  'light': ['light'],
-  'light-rounded': ['light', 'light-rounded'],
-  'dark': ['dark'],
-  'oled': ['dark', 'oled'],
-  'dusk': ['dark', 'dusk'],
-  'dusk-oled': ['dark', 'dusk', 'dusk-oled'],
-  'forge': ['dark', 'forge'],
-  'ember': ['dark', 'ember'],
-  'aurora': ['dark', 'aurora'],
-  'night-owl': ['dark', 'night-owl'],
-  'night-owl-oled': ['dark', 'night-owl', 'night-owl-oled'],
-  'terracotta': ['dark', 'terracotta'],
-  'synthwave': ['dark', 'synthwave'],
-  'acid': ['dark', 'acid'],
-  'tokyo-rain': ['dark', 'tokyo-rain'],
-  'folio': ['light', 'folio'],
-  'newsprint': ['light', 'newsprint'],
-  'walnut': ['dark', 'walnut'],
-  'amber-crt': ['dark', 'amber-crt'],
-  'teletype': ['light', 'teletype'],
-  'dot-matrix': ['dark', 'dot-matrix'],
-  'haar': ['light', 'haar'],
-  'abyss': ['dark', 'abyss'],
-  'understory': ['dark', 'understory'],
-  'colorblind-safe': ['dark', 'colorblind-safe'],
-  'low-fatigue': ['dark', 'low-fatigue'],
-  'high-legibility': ['light', 'high-legibility'],
-};
+const COLORS_CSS = new URL('../frontend/src/styles/tokens/colors.css', import.meta.url);
+const EDITORIAL_THEMES = ['folio', 'newsprint', 'walnut'];
+const MUTED_FAMILY = ['--color-text-muted', '--color-text-interactive-muted', '--color-text-navigation-muted', '--color-text-navigation-section'];
 
 // Themes that must pass, each with the bar its family was designed to.
 //   body      minimum for text pairs (4.5 = AA; high-legibility promises AAA)
@@ -96,60 +47,44 @@ const GATED_THEMES = {
   'high-legibility': { body: 7, ui: 3, terminal: 4.5, strictUi: true },
 };
 
-// ---------- CSS parsing ----------
-
-function parseBlocks(rawCss) {
-  const css = rawCss.replace(/\/\*[\s\S]*?\*\//g, '');
-  const blocks = new Map(); // selector -> Map(var, value) (later blocks with the same selector are merged)
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  let match;
-  while ((match = re.exec(css)) !== null) {
-    const selector = match[1].trim();
-    const body = match[2];
-    const vars = blocks.get(selector) ?? new Map();
-    for (const decl of body.split(';')) {
-      const idx = decl.indexOf(':');
-      if (idx === -1) continue;
-      const name = decl.slice(0, idx).trim();
-      if (!name.startsWith('--')) continue;
-      const value = decl.slice(idx + 1).trim();
-      vars.set(name, value);
+// The browser owns CSS parsing, specificity, source order, variable resolution,
+// and color syntax. No app/server/network access is needed for this measurement.
+async function readThemeStyles(page, theme) {
+  return page.evaluate(({ classes, theme }) => {
+    const root = document.documentElement;
+    const probe = document.createElement('span');
+    root.append(probe);
+    const snapshots = [];
+    for (const highContrast of [false, true]) {
+      root.className = [...classes, ...(highContrast ? ['high-contrast'] : [])].join(' ');
+      const styles = getComputedStyle(root);
+      const tokens = [];
+      for (const name of styles) {
+        if (!name.startsWith('--color-') || name.endsWith('-rgb')) continue;
+        if (!CSS.supports('color', styles.getPropertyValue(name))) throw new Error(`Invalid color token ${name}`);
+        probe.style.color = `var(${name})`;
+        tokens.push([name, getComputedStyle(probe).color]);
+      }
+      snapshots.push(tokens);
     }
-    blocks.set(selector, vars);
-  }
-  return blocks;
-}
-
-function tokensFor(blocks, theme, highContrast = false) {
-  const classes = THEME_CLASSES[theme];
-  if (!classes) throw new Error(`Unknown theme "${theme}"`);
-  const merged = new Map(blocks.get(':root') ?? []);
-  const apply = (selector) => {
-    for (const [name, value] of blocks.get(selector) ?? []) merged.set(name, value);
-  };
-  for (const cls of classes) apply(`:root.${cls}`);
-  if (highContrast) for (const cls of classes) apply(`:root.high-contrast.${cls}`);
-  return merged;
+    probe.remove();
+    // Full editorial themes promise explicit overrides. Use CSSOM declarations
+    // for that contract; inherited values alone cannot demonstrate ownership.
+    const declared = (selector) => [...document.styleSheets].flatMap((sheet) =>
+      [...sheet.cssRules].flatMap((rule) =>
+        rule instanceof CSSStyleRule && rule.selectorText.split(',').map((part) => part.trim()).includes(selector)
+          ? [...rule.style].filter((name) => name.startsWith('--')) : []));
+    const expected = new Set([...declared(':root.light'), ...declared(':root.terracotta')]);
+    const own = new Set(declared(`:root.${theme}`));
+    return { snapshots, missing: [...expected].filter((name) => !own.has(name)) };
+  }, { classes: THEME_CLASSES[theme], theme });
 }
 
 // ---------- color math ----------
 
 function parseColor(raw) {
   const value = raw.trim();
-  let m = value.match(/^#([0-9a-f]{3,8})$/i);
-  if (m) {
-    const hex = m[1];
-    if (hex.length === 3 || hex.length === 4) {
-      const [r, g, b, a] = hex.split('').map((c) => parseInt(c + c, 16));
-      return { r, g, b, a: hex.length === 4 ? a / 255 : 1 };
-    }
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
-    return { r, g, b, a };
-  }
-  m = value.match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+%?))?\s*\)$/i);
+  const m = value.match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+%?))?\s*\)$/i);
   if (m) {
     let a = 1;
     if (m[4] !== undefined) a = m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
@@ -159,21 +94,8 @@ function parseColor(raw) {
   return null;
 }
 
-function resolve(tokens, name, seen = new Set()) {
-  const raw = tokens.get(name);
-  if (raw === undefined) return undefined;
-  if (seen.has(name)) return undefined;
-  seen.add(name);
-  // rgba(var(--x-rgb), 0.5) → expand the triplet
-  const value = raw.replace(/var\((--[\w-]+)\)/g, (_, ref) => {
-    const inner = resolve(tokens, ref, new Set(seen));
-    return inner === undefined ? _ : inner;
-  });
-  return value;
-}
-
 function color(tokens, name) {
-  const value = resolve(tokens, name);
+  const value = tokens.get(name);
   return value === undefined ? null : parseColor(value);
 }
 
@@ -335,7 +257,7 @@ function measure(tokens, fgName, bgName) {
   return { fg, bg, ratio: contrast(fg, bg) };
 }
 
-function runTheme(theme, blocks, opts) {
+function runTheme(theme, styles, opts) {
   const gate = GATED_THEMES[theme] ?? null;
   const bodyMin = gate?.body ?? 4.5;
   const uiMin = gate?.ui ?? 3;
@@ -347,9 +269,9 @@ function runTheme(theme, blocks, opts) {
   const results = [];
   const variants = [['', false], [' + high-contrast', true]];
   for (const [suffix, hc] of variants) {
-    const tokens = tokensFor(blocks, theme, hc);
+    const tokens = new Map(styles.snapshots[hc ? 1 : 0]);
     const push = (kind, fgName, bgName, min, tag) => {
-      const info = tag === 'strict' && !strictUi;
+      const info = (tag === 'strict' && !strictUi) || (!gate && tag !== 'global');
       const m = measure(tokens, fgName, bgName);
       if (!m) {
         results.push({ variant: suffix, kind, fg: fgName, bg: bgName, ratio: null, min, pass: info, missing: true, info });
@@ -360,11 +282,23 @@ function runTheme(theme, blocks, opts) {
     };
     for (const [fg, bg, tag] of TEXT_ON_SURFACES) push('text', fg, bg, tag === 'status' ? statusMin : bodyMin, tag);
     for (const [fg, bg, tag] of UI_ON_SURFACES) push('ui', fg, bg, uiMin, tag);
-    if (hc) {
-      // The High contrast toggle promises AAA (7:1) for the muted family (PR #362).
-      for (const fg of ['--color-text-muted', '--color-text-interactive-muted', '--color-text-navigation-muted', '--color-text-navigation-section']) {
-        push('text-aaa', fg, '--color-bg-primary', Math.max(7, bodyMin));
+    // This baseline applies to all 27 themes, including the original twelve.
+    for (const fg of MUTED_FAMILY) {
+      push(hc ? 'text-aaa' : 'text-aa', fg, '--color-bg-primary', hc ? 7 : 4.5, 'global');
+    }
+    if (!hc && EDITORIAL_THEMES.includes(theme)) {
+      // Preserve the broader surface/button matrix previously gated by Vitest.
+      for (const bg of ['bg-primary', 'bg-secondary', 'bg-tertiary', 'bg-hover', 'bg-active', 'bg-chrome', 'bg-editor', 'surface-primary', 'surface-secondary', 'surface-tertiary', 'card-bg', 'card-nested-bg', 'modal-bg', 'input-bg', 'surface-navigation', 'surface-navigation-hover']) {
+        for (const fg of ['primary', 'secondary', 'tertiary', 'muted']) push('text', `--color-text-${fg}`, `--color-${bg}`, 4.5);
       }
+      for (const bg of ['surface-navigation', 'surface-navigation-hover', 'surface-navigation-active']) {
+        for (const fg of ['primary', 'secondary', 'muted', 'selected', 'section']) push('text', `--color-text-navigation-${fg}`, `--color-${bg}`, 4.5);
+      }
+      for (const bg of ['bg-primary', 'bg-editor', 'bg-chrome', 'surface-primary']) {
+        for (const fg of ['interactive-text', 'text-interactive-on-dark']) push('text', `--color-${fg}`, `--color-${bg}`, 4.5);
+        for (const fg of ['status-neutral', 'interactive-primary', 'focus-ring', 'border-focus', 'status-success', 'status-warning', 'status-error', 'status-info']) push('ui', `--color-${fg}`, `--color-${bg}`, 3);
+      }
+      for (const bg of ['interactive-hover', 'interactive-active']) push('text', '--color-text-on-interactive', `--color-${bg}`, 4.5);
     }
     for (const fg of TERMINAL_FG) push('terminal', fg, '--color-terminal-bg', terminalMin);
     if (!hc) {
@@ -375,8 +309,16 @@ function runTheme(theme, blocks, opts) {
   }
 
   let cvd = null;
-  if (opts.cvd || gate?.cvd) cvd = runCvd(tokensFor(blocks, theme, false));
-  return { theme, gate, bodyMin, uiMin, terminalMin, statusMin, results, cvd };
+  if (opts.cvd || gate?.cvd) cvd = runCvd(new Map(styles.snapshots[0]));
+  const contractErrors = [];
+  if (EDITORIAL_THEMES.includes(theme)) {
+    if (styles.missing.length) contractErrors.push(`Missing own token overrides: ${styles.missing.join(', ')}`);
+    const tokens = new Map(styles.snapshots[0]);
+    if (tokens.get('--color-terminal-bg') !== tokens.get('--color-bg-editor')) {
+      contractErrors.push('Terminal background must match the editor surface');
+    }
+  }
+  return { theme, gate, bodyMin, uiMin, terminalMin, statusMin, results, cvd, contractErrors };
 }
 
 // Semantic pairs that must stay distinguishable for every CVD type.
@@ -424,7 +366,7 @@ function printText(report, showAll) {
   const { theme, gate, results, cvd } = report;
   const failures = results.filter((r) => !r.pass);
   const statusNote = gate && report.statusMin !== report.bodyMin ? `, status ≥ ${report.statusMin}:1` : '';
-  console.log(`\n== ${theme}${gate ? ` (gated: text ≥ ${report.bodyMin}:1, UI ≥ ${report.uiMin}:1, terminal ≥ ${report.terminalMin}:1${statusNote}${gate.strictUi ? ', hairlines gated' : ''})` : ' (report only)'} ==`);
+  console.log(`\n== ${theme}${gate ? ` (gated: text ≥ ${report.bodyMin}:1, UI ≥ ${report.uiMin}:1, terminal ≥ ${report.terminalMin}:1${statusNote}${gate.strictUi ? ', hairlines gated' : ''})` : ' (muted family gated; other pairs report only)'} ==`);
   for (const r of results) {
     if (!showAll && r.pass && !r.below) continue;
     const status = r.missing ? (r.info ? 'n/a ' : 'MISSING') : r.info ? (r.below ? 'low ' : 'ok  ') : r.pass ? 'ok  ' : 'FAIL';
@@ -433,6 +375,7 @@ function printText(report, showAll) {
   }
   const gated = results.filter((r) => !r.info);
   console.log(`  ${gated.length - failures.length}/${gated.length} checks pass`);
+  for (const error of report.contractErrors) console.log(`  FAIL ${error}`);
   if (cvd) {
     console.log('  CVD simulation (Machado 2009, severity 1.0) — worst pair ΔE (CIE76), min contrast on bg:');
     const cvdGated = Boolean(gate?.cvd);
@@ -487,6 +430,7 @@ function printMarkdown(report) {
   const hc = results.filter((r) => r.variant !== '');
   const hcPassing = hc.filter((r) => r.pass).length;
   console.log(`\n${passing}/${total} token pairs pass at this theme's thresholds; ${hcPassing}/${hc.length} with High contrast on.`);
+  for (const error of report.contractErrors) console.log(`\n❌ ${error}`);
   if (cvd) {
     console.log(`\n#### ${theme} — CVD simulation (Machado 2009, severity 1.0; worst pairwise ΔE, CIE76)\n`);
     console.log('| Set | Normal | Protanopia | Deuteranopia | Tritanopia |');
@@ -513,12 +457,11 @@ const markdown = flag('--markdown');
 const cvd = flag('--cvd');
 
 const css = readFileSync(COLORS_CSS, 'utf8');
-const blocks = parseBlocks(css);
 const themes = flag('--all')
   ? Object.keys(THEME_CLASSES)
   : themesArg
     ? themesArg.split(',').map((t) => t.trim()).filter(Boolean)
-    : Object.keys(GATED_THEMES);
+    : Object.keys(THEME_CLASSES);
 const unknown = themes.filter((t) => !THEME_CLASSES[t]);
 if (unknown.length) {
   console.error(`Unknown theme(s): ${unknown.join(', ')}. Known: ${Object.keys(THEME_CLASSES).join(', ')}`);
@@ -527,16 +470,24 @@ if (unknown.length) {
 
 let failed = false;
 const reportOnly = flag('--all');
-for (const theme of themes) {
-  const report = runTheme(theme, blocks, { cvd });
-  if (markdown) printMarkdown(report);
-  else printText(report, showAll);
-  if (report.gate && !reportOnly) {
-    if (report.results.some((r) => !r.pass)) failed = true;
-    if (report.gate.cvd && report.cvd?.some((r) => !r.pass)) failed = true;
+const browser = await chromium.launch();
+try {
+  const page = await browser.newPage();
+  await page.setContent('<!doctype html><html><head></head><body></body></html>');
+  await page.addStyleTag({ content: css });
+  for (const theme of themes) {
+    const report = runTheme(theme, await readThemeStyles(page, theme), { cvd });
+    if (markdown) printMarkdown(report);
+    else printText(report, showAll);
+    if (!reportOnly) {
+      if (report.results.some((r) => !r.pass) || report.contractErrors.length) failed = true;
+      if (report.gate?.cvd && report.cvd?.some((r) => !r.pass)) failed = true;
+    }
   }
+} finally {
+  await browser.close();
 }
 if (failed) {
   console.error('\nTheme contrast gate FAILED.');
-  process.exit(1);
+  process.exitCode = 1;
 }

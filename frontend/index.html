@@ -9,37 +9,9 @@
     <link rel="preload" href="/fonts/SymbolsNerdFontMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
     <title>Pane</title>
     <script>
-      const themeClasses = {
-        'light': ['light'],
-        'light-rounded': ['light', 'light-rounded'],
-        'dark': ['dark'],
-        'oled': ['dark', 'oled'],
-        'dusk': ['dark', 'dusk'],
-        'dusk-oled': ['dark', 'dusk', 'dusk-oled'],
-        'forge': ['dark', 'forge'],
-        'ember': ['dark', 'ember'],
-        'aurora': ['dark', 'aurora'],
-        'night-owl': ['dark', 'night-owl'],
-        'night-owl-oled': ['dark', 'night-owl', 'night-owl-oled'],
-        'terracotta': ['dark', 'terracotta'],
-        'synthwave': ['dark', 'synthwave'],
-        'acid': ['dark', 'acid'],
-        'tokyo-rain': ['dark', 'tokyo-rain'],
-        'folio': ['light', 'folio'],
-        'newsprint': ['light', 'newsprint'],
-        'walnut': ['dark', 'walnut'],
-        'amber-crt': ['dark', 'amber-crt'],
-        'teletype': ['light', 'teletype'],
-        'dot-matrix': ['dark', 'dot-matrix'],
-        'haar': ['light', 'haar'],
-        'abyss': ['dark', 'abyss'],
-        'understory': ['dark', 'understory'],
-        'colorblind-safe': ['dark', 'colorblind-safe'],
-        'low-fatigue': ['dark', 'low-fatigue'],
-        'high-legibility': ['light', 'high-legibility'],
-      };
+      const themeClasses = __PANE_THEME_CLASSES__;
       try {
-        const defaults = { appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'light-rounded', systemDarkTheme: 'dark' };
+        const defaults = __PANE_DEFAULT_APPEARANCE__;
         const snapshot = window.electronAPI?.appearanceSnapshot;
         let cached;
         try {
