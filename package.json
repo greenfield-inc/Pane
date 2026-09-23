@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.106",
+  "version": "2.4.115",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -238,7 +238,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "dcouple",
+      "owner": "greenfield-inc",
       "repo": "Pane"
     }
   },

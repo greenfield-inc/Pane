@@ -18,7 +18,7 @@ describe('VersionChecker', () => {
       tag_name: 'v2.4.62',
       name: null,
       body: null,
-      html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.4.62',
+      html_url: 'https://github.com/greenfield-inc/Pane/releases/tag/v2.4.62',
       published_at: '2026-08-18T00:00:00Z',
       prerelease: false,
       draft: false,

@@ -27,6 +27,7 @@ export interface ParsedArgs {
   paneDir?: string;
   repo?: string;
   paneId?: string;
+  sessionId?: string;
   panelId?: string;
   repoPath?: string;
   folder?: string;
@@ -97,7 +98,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'workspace']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace']);
 
 const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.map((flag) => flag.name));
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
@@ -387,6 +388,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     }
     return;
   }
+  if (flag === '--session') {
+    parsed.sessionId = value;
+    return;
+  }
   if (flag === '--exclude-pane') {
     (parsed.watchExcludePaneIds ??= []).push(value);
     return;
@@ -610,6 +615,14 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panes pin'
     || command === 'panes unpin'
     || command === 'panes rename'
+    || command === 'sessions list'
+    || command === 'sessions create'
+    || command === 'sessions get'
+    || command === 'sessions update'
+    || command === 'sessions set-agent'
+    || command === 'sessions associate'
+    || command === 'sessions detach'
+    || command === 'sessions overview'
     || command === 'panels create'
     || command === 'panels list'
     || command === 'panels output'

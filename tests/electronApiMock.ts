@@ -265,6 +265,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockActiveProjectId = mockOptions.activeProjectId === undefined
       ? Number(mockProjects.find((project) => project.active === true)?.id ?? null) || null
       : mockOptions.activeProjectId;
+    let lastProjectUpdate: { projectId: string; updates: JsonObject } | null = null;
     let cloudDisconnectError: string | null = null;
     let configGetCount = 0;
     let nextConfigUpdateError: string | null = null;
@@ -346,6 +347,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onGitStatusUpdated') {
           return (callback: MockEventCallback) => subscribe('git-status-updated', callback);
         }
+        if (prop === 'onGitStatusUpdatedBatch') {
+          return (callback: MockEventCallback) => subscribe('git-status-updated-batch', callback);
+        }
         if (prop === 'onTerminalOutput') {
           return (callback: MockEventCallback) => subscribe('terminal-output', callback);
         }
@@ -361,11 +365,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onSessionUpdated') {
           return (callback: MockEventCallback) => subscribe('session:updated', callback);
         }
+        if (prop === 'onSessionDeleted') {
+          return (callback: MockEventCallback) => subscribe('session:deleted', callback);
+        }
         if (prop === 'onSessionCreationFailed') {
           return (callback: MockEventCallback) => subscribe('session:creation-failed', callback);
         }
         if (prop === 'onPanelCreated') {
           return (callback: MockEventCallback) => subscribe('panel:created', callback);
+        }
+        if (prop === 'onPanelUpdated') {
+          return (callback: MockEventCallback) => subscribe('panel:updated', callback);
         }
         if (prop === 'onPanelDeleted') {
           return (callback: MockEventCallback) => subscribe('panel:deleted', callback);
@@ -469,10 +479,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             return Promise.resolve({
               success: false,
               error: 'GitHub CLI is not authenticated.',
-              data: { fallbackUrl: 'https://github.com/dcouple/Pane/issues/new?title=Prefilled' },
+              data: { fallbackUrl: 'https://github.com/greenfield-inc/Pane/issues/new?title=Prefilled' },
             });
           }
-          return success({ issueUrl: 'https://github.com/dcouple/Pane/issues/9001' });
+          return success({ issueUrl: 'https://github.com/greenfield-inc/Pane/issues/9001' });
         },
       }),
       analytics: namespace({
@@ -694,6 +704,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       folders: namespace({
         getByProject: () => success([]),
       }),
+      git: namespace({
+        detectBranch: () => success('main'),
+      }),
+      dialog: namespace({
+        openDirectory: () => success('/tmp/pane-worktrees'),
+      }),
       onboarding: namespace({
         detectEnvironment: () => success({}),
         getGitHubAuthCommand: () => success({ command: '', reason: 'ready' }),
@@ -792,6 +808,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
           { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
         ]),
+        update: (projectId: string, updates: JsonObject) => {
+          lastProjectUpdate = { projectId, updates: clone(updates) };
+          mockProjects = mockProjects.map((project) => (
+            String(project.id) === projectId
+              ? { ...project, ...clone(updates), updated_at: new Date().toISOString() }
+              : project
+          ));
+          return success(mockProjects.find((project) => String(project.id) === projectId) ?? null);
+        },
+        detectConfig: () => success(null),
         refreshGitStatus: () => success(),
       }),
       prompts: namespace({
@@ -1180,11 +1206,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitGitStatusUpdated(sessionId: string, gitStatus: JsonObject) {
           emit('git-status-updated', { sessionId, gitStatus: clone(gitStatus) });
         },
+        emitGitStatusUpdatedBatch(updates: Array<{ sessionId: string; status: JsonObject }>) {
+          emit('git-status-updated-batch', clone(updates));
+        },
         emitTerminalOutput(sessionId: string, data: string) {
           emit('terminal-output', { sessionId, type: 'stdout', data });
         },
         emitSessionUpdated(session: JsonObject) {
           emit('session:updated', clone(session));
+        },
+        emitSessionDeleted(sessionId: string) {
+          emit('session:deleted', { id: sessionId });
+        },
+        emitPanelUpdated(panel: JsonObject) {
+          emit('panel:updated', clone(panel));
+        },
+        emitPanelDeleted(panelId: string, sessionId: string) {
+          emit('panel:deleted', { panelId, sessionId });
         },
         getSessionsReadCount() {
           return sessionsGetCount;
@@ -1200,6 +1238,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getFileDiffCalls() {
           return clone(fileDiffCalls);
+        },
+        getProjectUpdates() {
+          return lastProjectUpdate ? [clone(lastProjectUpdate)] : [];
         },
       },
     });

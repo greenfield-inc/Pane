@@ -284,7 +284,7 @@ test('Review stays local until a newly discovered pull request is explicitly ope
   await expect(diffSummary.getByText('-3', { exact: true })).toBeVisible();
 
   // Files in Changes open as center diff tabs (preview on single-click), not inline.
-  const reviewFile = page.getByRole('treeitem', {
+  const reviewFile = page.getByRole('option', {
     name: 'Open diff for src/review.ts, Modified, +8 −3',
     exact: true,
   });
@@ -352,7 +352,7 @@ test('Review stays local when the worktree already has a pull request', async ({
 
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open PR', exact: true })).toBeEnabled();
-  await expect(page.getByRole('treeitem', {
+  await expect(page.getByRole('option', {
     name: 'Open diff for src/review.ts, Modified, +8 −3',
     exact: true,
   })).toBeVisible();
@@ -373,7 +373,7 @@ test('Legacy GitHub review preference stays local and opens the PR in Browser', 
   const inspector = page.locator('.pane-detail-panel-vertical');
   const openPullRequest = page.getByRole('button', { name: 'Open PR', exact: true });
 
-  await expect(page.getByRole('treeitem', {
+  await expect(page.getByRole('option', {
     name: 'Open diff for src/review.ts, Modified, +8 −3',
     exact: true,
   })).toBeVisible();

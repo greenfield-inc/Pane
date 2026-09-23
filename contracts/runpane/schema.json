@@ -133,15 +133,36 @@
             "includeHeldInputPresence"
           ],
           "properties": {
-            "format": { "enum": ["lines", "json"] },
-            "heartbeatSeconds": { "type": "number" },
-            "idleAfterMs": { "type": "number" },
-            "settleMs": { "type": "number" },
-            "blockedSettleMs": { "type": "number" },
-            "minIntervalMs": { "type": "number" },
-            "idleBackoff": { "type": "boolean" },
-            "agentsOnly": { "type": "boolean" },
-            "includeHeldInputPresence": { "type": "boolean" }
+            "format": {
+              "enum": [
+                "lines",
+                "json"
+              ]
+            },
+            "heartbeatSeconds": {
+              "type": "number"
+            },
+            "idleAfterMs": {
+              "type": "number"
+            },
+            "settleMs": {
+              "type": "number"
+            },
+            "blockedSettleMs": {
+              "type": "number"
+            },
+            "minIntervalMs": {
+              "type": "number"
+            },
+            "idleBackoff": {
+              "type": "boolean"
+            },
+            "agentsOnly": {
+              "type": "boolean"
+            },
+            "includeHeldInputPresence": {
+              "type": "boolean"
+            }
           },
           "additionalProperties": false
         }
@@ -395,7 +416,16 @@
         "panels submit",
         "panels submit-composer",
         "panels wait",
-        "agent-context"
+        "agent-context",
+        "sessions",
+        "sessions list",
+        "sessions create",
+        "sessions get",
+        "sessions update",
+        "sessions set-agent",
+        "sessions associate",
+        "sessions detach",
+        "sessions overview"
       ],
       "properties": {
         "default": {
@@ -492,6 +522,33 @@
           "$ref": "#/$defs/helpLines"
         },
         "agent-context": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions get": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions set-agent": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions associate": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions detach": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions overview": {
           "$ref": "#/$defs/helpLines"
         }
       },

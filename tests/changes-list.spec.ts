@@ -5,11 +5,11 @@ import { installElectronApiMock } from './electronApiMock';
 import { expectNoAxeViolations } from './axeTest';
 
 const timestamp = new Date(0).toISOString();
-const project = { id: 812, name: 'Tree fixture', path: '/tmp/tree-fixture', active: true, created_at: timestamp, updated_at: timestamp };
+const project = { id: 812, name: 'List fixture', path: '/tmp/list-fixture', active: true, created_at: timestamp, updated_at: timestamp };
 const session = {
-  id: 'tree-session',
-  name: 'Changes tree',
-  worktreePath: '/tmp/tree-fixture/worktree',
+  id: 'list-session',
+  name: 'Changed files list',
+  worktreePath: '/tmp/list-fixture/worktree',
   status: 'stopped',
   createdAt: timestamp,
   lastActivity: timestamp,
@@ -79,7 +79,7 @@ const execution = (id: number, hash: string, message: string): JsonObject => ({
   stats_files_changed: 1,
 });
 
-interface OpenTreeOptions {
+interface OpenChangesOptions {
   executions?: JsonObject[];
   manifests?: Record<string, DiffManifest>;
   manifestDelays?: Record<string, number>;
@@ -88,10 +88,10 @@ interface OpenTreeOptions {
   sessions?: JsonObject[];
   panels?: JsonObject[];
   gitCommands?: JsonObject;
-  waitForTree?: boolean;
+  waitForList?: boolean;
 }
 
-async function openTree(page: Page, options: OpenTreeOptions = {}): Promise<void> {
+async function openChanges(page: Page, options: OpenChangesOptions = {}): Promise<void> {
   await installElectronApiMock(page, {
     initialProjects: [project],
     initialSessions: options.sessions ?? [session],
@@ -108,8 +108,14 @@ async function openTree(page: Page, options: OpenTreeOptions = {}): Promise<void
   await page.goto('/');
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
-  if (options.waitForTree !== false) await expect(page.getByRole('tree', { name: 'Changed files' })).toBeVisible();
+  if (options.waitForList !== false) await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();
 }
+
+/** The Details tab's history graph is the only remaining way to hand a commit scope to this panel. */
+const viewCommit = (page: Page, sessionId: string, commitHash: string) => page.evaluate(
+  detail => window.dispatchEvent(new CustomEvent('diff:view-commit', { detail })),
+  { sessionId, commitHash },
+);
 
 interface DiffMockController {
   getDiffManifestCalls(): Array<{ sessionId: string; scope: DiffScope }>;
@@ -127,11 +133,24 @@ const fileDiffCalls = (page: Page) => page.evaluate(() => {
   return mockWindow.__paneTestElectronMock.getFileDiffCalls();
 });
 
-test('hierarchy and tree-only controls remain accessible', async ({ page }) => {
-  await openTree(page);
-  await expect(page.getByRole('treeitem', { name: 'Open diff for README.md' })).toBeVisible();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for src/components/Alpha.tsx' })).toBeVisible();
-  await expect(page.getByRole('treeitem', { name: /Open diff for src\/components\/Alpha.tsx, Modified, \+2 −1/ })).toBeVisible();
+test('the flat list orders every file by path and keeps each basename whole', async ({ page }) => {
+  await openChanges(page);
+  const rows = page.getByRole('listbox', { name: 'Changed files' }).getByRole('option');
+  await expect(rows).toHaveCount(6);
+  // Sorted by full path, with no folder rows in between.
+  expect(await rows.evaluateAll(elements => elements.map(element => element.getAttribute('aria-label')))).toEqual([
+    'Open diff for assets/image.bin, Modified, additions unavailable deletions unavailable',
+    'Open diff for README.md, Added, +4 −0',
+    'Open diff for src/components/Alpha.tsx, Modified, +2 −1',
+    'Open diff for src/components/Beta.tsx, Renamed from src/legacy/Beta.tsx, +0 −0',
+    'Open diff for src/deleted.ts, Deleted, +0 −1',
+    'Open diff for src/renamed-edit.ts, Renamed from src/old-edit.ts, +1 −1',
+  ]);
+  const alpha = page.getByRole('option', { name: /Open diff for src\/components\/Alpha\.tsx/ });
+  await expect(alpha.locator('.pane-changes-list-dir')).toHaveText('src/components/');
+  await expect(alpha.locator('.pane-changes-list-name')).toHaveText('Alpha.tsx');
+  // Root-level files carry no directory prefix at all.
+  await expect(page.getByRole('option', { name: /Open diff for README\.md/ }).locator('.pane-changes-list-dir')).toHaveText('');
   await expect(page.getByText(/stage|unstage|list view|tree view/i)).toHaveCount(0);
   await expectNoAxeViolations(page, { include: '.combined-diff-view' });
 });
@@ -143,38 +162,35 @@ test('keyboard navigation pins the exact expected row for every key branch', asy
     changed('root.ts'),
     changed('zeta.ts'),
   ]);
-  await openTree(page, { manifests: { session: keyboardManifest } });
-  const tree = page.getByRole('tree', { name: 'Changed files' });
-  const active = () => page.locator('.pane-changes-tree-row.is-active');
+  await openChanges(page, { manifests: { session: keyboardManifest } });
+  const list = page.getByRole('listbox', { name: 'Changed files' });
+  const active = () => page.locator('.pane-changes-list-row.is-active');
 
-  await tree.focus();
-  await tree.press('Home');
-  await expect(active()).toHaveAttribute('aria-label', 'alpha');
-  await tree.press('ArrowRight');
+  await list.focus();
+  await list.press('Home');
   await expect(active()).toHaveAttribute('aria-label', /Open diff for alpha\/one.ts/);
-  await tree.press('ArrowDown');
+  await list.press('ArrowDown');
   await expect(active()).toHaveAttribute('aria-label', /Open diff for alpha\/two.ts/);
-  await tree.press('ArrowUp');
+  await list.press('ArrowUp');
   await expect(active()).toHaveAttribute('aria-label', /Open diff for alpha\/one.ts/);
-  await tree.press('ArrowLeft');
-  await expect(active()).toHaveAttribute('aria-label', 'alpha');
-  await tree.press('ArrowLeft');
-  await expect(active()).toHaveAttribute('aria-expanded', 'false');
-  await tree.press('ArrowRight');
-  await expect(active()).toHaveAttribute('aria-expanded', 'true');
-  await tree.press('ArrowRight');
+  await list.press('ArrowUp');
   await expect(active()).toHaveAttribute('aria-label', /Open diff for alpha\/one.ts/);
-  await tree.press('End');
+  await list.press('End');
   await expect(active()).toHaveAttribute('aria-label', /Open diff for zeta.ts/);
-  await tree.press('Home');
-  await expect(active()).toHaveAttribute('aria-label', 'alpha');
-  await tree.press('r');
+  await list.press('ArrowDown');
+  await expect(active()).toHaveAttribute('aria-label', /Open diff for zeta.ts/);
+  await list.press('Home');
+  await expect(active()).toHaveAttribute('aria-label', /Open diff for alpha\/one.ts/);
+  // Type-ahead matches the basename, not the directory prefix.
+  await list.press('r');
   await expect(active()).toHaveAttribute('aria-label', /Open diff for root.ts/);
+  await list.press('Enter');
+  await expect(page.getByRole('tab', { name: 'root.ts (All changes)' })).toHaveAttribute('aria-selected', 'true');
 });
 
 test('does not fetch file content before activation and opens every special tab state', async ({ page }) => {
   const renamedPatch = 'diff --git a/src/old-edit.ts b/src/renamed-edit.ts\n--- a/src/old-edit.ts\n+++ b/src/renamed-edit.ts\n@@ -1 +1 @@\n-before\n+after rename\n';
-  await openTree(page, {
+  await openChanges(page, {
     fileDiffs: {
       'session:src/renamed-edit.ts': { file: manifest.files[2], patch: renamedPatch, status: 'changed' },
       'session:src/deleted.ts': { file: manifest.files[3], patch: 'diff --git a/src/deleted.ts b/src/deleted.ts\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted\n', status: 'changed' },
@@ -185,17 +201,17 @@ test('does not fetch file content before activation and opens every special tab 
 
   expect(await fileDiffCalls(page)).toHaveLength(0);
 
-  await page.getByRole('treeitem', { name: 'Open diff for src/renamed-edit.ts' }).click();
+  await page.getByRole('option', { name: 'Open diff for src/renamed-edit.ts' }).click();
   await expect(page.getByRole('tab', { name: 'renamed-edit.ts (All changes)' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('after rename', { exact: true })).toBeVisible();
 
-  await page.getByRole('treeitem', { name: 'Open diff for src/deleted.ts' }).click();
+  await page.getByRole('option', { name: 'Open diff for src/deleted.ts' }).click();
   await expect(page.getByRole('button', { name: 'Open src/deleted.ts in Editor' })).toHaveCount(0);
 
-  await page.getByRole('treeitem', { name: 'Open diff for assets/image.bin' }).click();
+  await page.getByRole('option', { name: 'Open diff for assets/image.bin' }).click();
   await expect(page.getByText('Binary file', { exact: true })).toBeVisible();
 
-  await page.getByRole('treeitem', { name: 'Open diff for src/components/Beta.tsx' }).click();
+  await page.getByRole('option', { name: 'Open diff for src/components/Beta.tsx' }).click();
   await expect(page.getByText('Renamed from src/legacy/Beta.tsx → src/components/Beta.tsx, no content changes', { exact: true })).toBeVisible();
 });
 
@@ -206,7 +222,7 @@ test('new file keys show loading and late file responses cannot replace the acti
     changed('race/b.ts', { kind: 'renamed', previousPath: 'race/b-old.ts', additions: 0, deletions: 0 }),
   ]);
   const renameResult = (index: number): FileDiffResult => ({ file: raceManifest.files[index], patch: 'rename metadata only', status: 'changed' });
-  await openTree(page, {
+  await openChanges(page, {
     manifests: { session: raceManifest },
     fileDiffs: {
       'session:race/seed.ts': renameResult(0),
@@ -216,13 +232,13 @@ test('new file keys show loading and late file responses cannot replace the acti
     fileDelays: { 'session:race/a.ts': 160 },
   });
 
-  await page.getByRole('treeitem', { name: 'Open diff for race/seed.ts' }).click();
+  await page.getByRole('option', { name: 'Open diff for race/seed.ts' }).click();
   await expect(page.getByText('Renamed from race/seed-old.ts → race/seed.ts, no content changes', { exact: true })).toBeVisible();
-  await page.getByRole('treeitem', { name: 'Open diff for race/a.ts' }).click();
-  await expect(page.getByText('race/a.ts', { exact: true })).toBeVisible();
+  await page.getByRole('option', { name: 'Open diff for race/a.ts' }).click();
+  await expect(page.getByRole('tab', { name: 'a.ts (All changes)' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Loading diff…', { exact: true })).toBeVisible();
   await expect(page.getByText('Renamed from race/seed-old.ts → race/seed.ts, no content changes', { exact: true })).toHaveCount(0);
-  await page.getByRole('treeitem', { name: 'Open diff for race/b.ts' }).click();
+  await page.getByRole('option', { name: 'Open diff for race/b.ts' }).click();
   await expect(page.getByText('Renamed from race/b-old.ts → race/b.ts, no content changes', { exact: true })).toBeVisible();
   await page.waitForTimeout(190);
   await expect(page.getByText('Renamed from race/b-old.ts → race/b.ts, no content changes', { exact: true })).toBeVisible();
@@ -235,32 +251,30 @@ test('cache ownership settles loading and refresh invalidates only mutable scope
   const commitA = createManifest({ kind: 'commit', hash: hashA }, [changed('commit-a.ts')]);
   const commitB = createManifest({ kind: 'commit', hash: hashB }, [changed('commit-b.ts')]);
   const workingTree = createManifest({ kind: 'working-tree' }, [changed('uncommitted-cache.ts')]);
-  const workingRange = createManifest({ kind: 'working-tree-range', baseHash: hashA }, [changed('range-working.ts')]);
   const executions = [
     execution(0, 'UNCOMMITTED', 'Uncommitted changes'),
     execution(1, hashB, 'Commit B'),
     execution(2, hashA, 'Commit A'),
   ];
-  await openTree(page, {
+  await openChanges(page, {
     executions,
     manifests: {
       session: manifest,
       'working-tree': workingTree,
       [`commit:${hashA}`]: commitA,
       [`commit:${hashB}`]: commitB,
-      [`working-range:${hashA}`]: workingRange,
     },
     manifestDelays: { [`commit:${hashB}`]: 150 },
   });
   const review = page.locator('.combined-diff-view');
   const refresh = review.getByTitle('Refresh');
 
-  await page.getByRole('button', { name: 'Select Commit A' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for commit-a.ts' })).toBeVisible();
-  await page.getByRole('button', { name: 'Select Commit B' }).click();
+  await viewCommit(page, session.id, hashA);
+  await expect(page.getByRole('option', { name: 'Open diff for commit-a.ts' })).toBeVisible();
+  await viewCommit(page, session.id, hashB);
   await page.waitForTimeout(20);
-  await page.getByRole('button', { name: 'Select Commit A' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for commit-a.ts' })).toBeVisible();
+  await viewCommit(page, session.id, hashA);
+  await expect(page.getByRole('option', { name: 'Open diff for commit-a.ts' })).toBeVisible();
   await expect(refresh).toBeEnabled();
   await expect(refresh.locator('svg')).not.toHaveClass(/animate-spin/);
 
@@ -268,77 +282,59 @@ test('cache ownership settles loading and refresh invalidates only mutable scope
   await page.waitForTimeout(30);
   expect((await manifestCalls(page)).filter(call => call.scope.kind === 'commit' && call.scope.hash === hashA)).toHaveLength(1);
 
-  await page.getByRole('button', { name: 'Select uncommitted changes' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for uncommitted-cache.ts' })).toBeVisible();
+  await viewCommit(page, session.id, 'index');
+  await expect(page.getByRole('option', { name: 'Open diff for uncommitted-cache.ts' })).toBeVisible();
   const sessionCallsBeforeRefresh = (await manifestCalls(page)).filter(call => call.scope.kind === 'session').length;
   const workingTreeCallsBeforeRefresh = (await manifestCalls(page)).filter(call => call.scope.kind === 'working-tree').length;
   await refresh.click();
   await expect.poll(async () => (await manifestCalls(page)).filter(call => call.scope.kind === 'working-tree').length).toBe(workingTreeCallsBeforeRefresh + 1);
   await page.getByRole('button', { name: 'All changes' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for README.md' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Open diff for README.md' })).toBeVisible();
   await expect.poll(async () => (await manifestCalls(page)).filter(call => call.scope.kind === 'session').length).toBe(sessionCallsBeforeRefresh + 1);
 
-  await page.getByRole('button', { name: 'Select Commit A' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for commit-a.ts' })).toBeVisible();
+  await viewCommit(page, session.id, hashA);
+  await expect(page.getByRole('option', { name: 'Open diff for commit-a.ts' })).toBeVisible();
   expect((await manifestCalls(page)).filter(call => call.scope.kind === 'commit' && call.scope.hash === hashA)).toHaveLength(1);
-  await page.getByRole('button', { name: 'Select uncommitted changes' }).click({ modifiers: ['Shift'] });
-  await expect(page.getByRole('treeitem', { name: 'Open diff for range-working.ts' })).toBeVisible();
-  const rangeCallsBeforeRefresh = (await manifestCalls(page)).filter(call => call.scope.kind === 'working-tree-range').length;
-  await refresh.click();
-  await expect.poll(async () => (await manifestCalls(page)).filter(call => call.scope.kind === 'working-tree-range').length).toBe(rangeCallsBeforeRefresh + 1);
 });
 
-test('selection scopes and diff:view-commit handoff preserve legacy journeys', async ({ page }) => {
+test('the diff:view-commit handoff scopes the list and All changes returns to the session diff', async ({ page }) => {
   const newerHash = 'abcdef0123456789abcdef0123456789abcdef01';
-  const olderHash = '1234567890abcdef1234567890abcdef12345678';
   const workingTree = createManifest({ kind: 'working-tree' }, [changed('uncommitted-only.ts')]);
-  const commitRange = createManifest({ kind: 'commit-range', olderHash, newerHash }, [changed('commit-range.ts')]);
-  const workingRange = createManifest({ kind: 'working-tree-range', baseHash: olderHash }, [changed('working-range.ts')]);
   const shortCommit = createManifest({ kind: 'commit', hash: newerHash.slice(0, 7) }, [changed('handoff-commit.ts')]);
-  await openTree(page, {
+  await openChanges(page, {
     executions: [
       execution(0, 'UNCOMMITTED', 'Uncommitted changes'),
       execution(1, newerHash, 'Newer commit'),
-      execution(2, olderHash, 'Older commit'),
     ],
     manifests: {
       session: manifest,
       'working-tree': workingTree,
-      [`range:${olderHash}:${newerHash}`]: commitRange,
-      [`working-range:${olderHash}`]: workingRange,
       [`commit:${newerHash.slice(0, 7)}`]: shortCommit,
     },
   });
 
-  await page.getByRole('button', { name: 'Select uncommitted changes' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for uncommitted-only.ts' })).toBeVisible();
+  // The session scope is the default, so there is nothing to escape from yet.
+  await expect(page.getByRole('button', { name: 'All changes' })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Select Older commit' }).click();
-  await page.getByRole('button', { name: 'Select Newer commit' }).click({ modifiers: ['Shift'] });
-  await expect(page.getByRole('treeitem', { name: 'Open diff for commit-range.ts' })).toBeVisible();
+  await viewCommit(page, session.id, newerHash.slice(0, 7));
+  await expect(page.getByRole('option', { name: 'Open diff for handoff-commit.ts' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Revert this commit' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Select Older commit' }).click();
-  await page.getByRole('button', { name: 'Select uncommitted changes' }).click({ modifiers: ['Shift'] });
-  await expect(page.getByRole('treeitem', { name: 'Open diff for working-range.ts' })).toBeVisible();
+  await viewCommit(page, session.id, 'index');
+  await expect(page.getByRole('option', { name: 'Open diff for uncommitted-only.ts' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Revert this commit' })).toHaveCount(0);
 
-  await page.evaluate(({ sessionId, commitHash }) => window.dispatchEvent(new CustomEvent('diff:view-commit', { detail: { sessionId, commitHash } })), {
-    sessionId: session.id,
-    commitHash: newerHash.slice(0, 7),
-  });
-  await expect(page.getByRole('treeitem', { name: 'Open diff for handoff-commit.ts' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Select Newer commit' })).toHaveAttribute('aria-pressed', 'true');
-
-  await page.evaluate(sessionId => window.dispatchEvent(new CustomEvent('diff:view-commit', { detail: { sessionId, commitHash: 'index' } })), session.id);
-  await expect(page.getByRole('treeitem', { name: 'Open diff for uncommitted-only.ts' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Select uncommitted changes' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'All changes' }).click();
+  await expect(page.getByRole('option', { name: 'Open diff for README.md' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'All changes' })).toHaveCount(0);
 });
 
 test('switching sessions cannot show rows from the previous session', async ({ page }) => {
-  const secondSession = { ...session, id: 'second-session', name: 'Second changes', worktreePath: '/tmp/tree-fixture/second', displayOrder: 1 };
+  const secondSession = { ...session, id: 'second-session', name: 'Second changes', worktreePath: '/tmp/list-fixture/second', displayOrder: 1 };
   const oldHash = '9999999999999999999999999999999999999999';
   const oldCommit = createManifest({ kind: 'commit', hash: oldHash }, [changed('first-commit-only.ts')]);
   const secondManifest = createManifest({ kind: 'session' }, [changed('second-only.ts')]);
-  await openTree(page, {
+  await openChanges(page, {
     sessions: [session, secondSession],
     panels: [...panels, ...panelsFor(secondSession)],
     executions: [execution(1, oldHash, 'First session commit')],
@@ -348,21 +344,37 @@ test('switching sessions cannot show rows from the previous session', async ({ p
       [`${secondSession.id}:session`]: secondManifest,
     },
   });
-  await expect(page.getByRole('treeitem', { name: 'Open diff for README.md' })).toBeVisible();
-  await page.getByRole('button', { name: 'Select First session commit' }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for first-commit-only.ts' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Open diff for README.md' })).toBeVisible();
+  await viewCommit(page, session.id, oldHash);
+  await expect(page.getByRole('option', { name: 'Open diff for first-commit-only.ts' })).toBeVisible();
 
   await page.getByRole('button', { name: secondSession.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for second-only.ts' })).toBeVisible();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for README.md' })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'Open diff for second-only.ts' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Open diff for README.md' })).toHaveCount(0);
   expect((await manifestCalls(page)).filter(call => call.sessionId === secondSession.id && call.scope.kind === 'commit')).toHaveLength(0);
+});
+
+test('the inspector opens on the Changes tab by default', async ({ page }) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialExecutions: [],
+    diffManifests: { session: manifest },
+    initialUiState: { expandedProjects: [project.id] },
+    activeProjectId: project.id,
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Changes', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();
 });
 
 test('inspector width matrix keeps basename and status visible without horizontal overflow', async ({ page }) => {
   // AC8 is about the inspector rail's width, not the window's: the window stays
   // regular and the persisted rail width varies from its minimum to wide.
-  await openTree(page);
+  await openChanges(page);
   for (const width of [240, 360, 580, 700]) {
     // The unloading page persists its own width, so the preference must be
     // written after unload and before boot: an init script, re-registered per
@@ -371,10 +383,10 @@ test('inspector width matrix keeps basename and status visible without horizonta
     await page.reload();
     await page.getByRole('button', { name: session.name, exact: true }).click();
     await page.getByRole('tab', { name: 'Changes', exact: true }).click();
-    const row = page.getByRole('treeitem', { name: 'Open diff for assets/image.bin' });
+    const row = page.getByRole('option', { name: 'Open diff for assets/image.bin' });
     await row.scrollIntoViewIfNeeded();
-    await expect(row.locator('.pane-changes-tree-label')).toHaveText('image.bin');
-    await expect(row.locator('.pane-changes-tree-status')).toBeVisible();
+    await expect(row.locator('.pane-changes-list-name')).toHaveText('image.bin');
+    await expect(row.locator('.pane-changes-list-status')).toBeVisible();
     const hostBox = await page.locator('.pane-inspector-host:visible').boundingBox();
     // The rail honors the preference up to the app's own cap (window minus the
     // center's reserve), so wide requests may land below the asked width.
@@ -400,12 +412,12 @@ for (const scenario of [
   test(`main-repo ${scenario.name} copy remains available`, async ({ page }) => {
     const mainSession = { ...session, isMainRepo: true };
     const emptyManifest = createManifest({ kind: 'session' }, []);
-    await openTree(page, {
+    await openChanges(page, {
       sessions: [mainSession],
       panels: panelsFor(mainSession),
       manifests: { session: emptyManifest },
       gitCommands: scenario.gitCommands,
-      waitForTree: false,
+      waitForList: false,
     });
 
     await expect(page.getByText(scenario.header, { exact: true })).toBeVisible();
@@ -416,77 +428,40 @@ for (const scenario of [
 test('a late commit manifest cannot replace a restored All changes scope', async ({ page }) => {
   const hash = 'fedcba9876543210fedcba9876543210fedcba98';
   const commitManifest = createManifest({ kind: 'commit', hash }, [changed('commit-only.ts')]);
-  await openTree(page, {
+  await openChanges(page, {
     executions: [execution(1, hash, 'Commit scope')],
     manifests: { session: manifest, [`commit:${hash}`]: commitManifest },
     manifestDelays: { [`commit:${hash}`]: 120 },
   });
-  await page.getByRole('button', { name: 'Select Commit scope' }).click();
+  await viewCommit(page, session.id, hash);
   await page.waitForTimeout(20);
   await page.getByRole('button', { name: 'All changes' }).click();
   await page.waitForTimeout(150);
-  await expect(page.getByRole('treeitem', { name: 'Open diff for README.md' })).toBeVisible();
-  await expect(page.getByRole('treeitem', { name: 'Open diff for commit-only.ts' })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'Open diff for README.md' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Open diff for commit-only.ts' })).toHaveCount(0);
 });
 
-test('active file selection is scope-gated, a manual collapse sticks, and refocus reveals', async ({ page }) => {
+test('active file selection is scope-gated', async ({ page }) => {
   const hashA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const commitA = createManifest({ kind: 'commit', hash: hashA }, [changed('src/components/Alpha.tsx')]);
-  await openTree(page, {
+  await openChanges(page, {
     executions: [execution(1, hashA, 'Commit A')],
     manifests: { session: manifest, [`commit:${hashA}`]: commitA },
     fileDiffs: {
       'session:src/components/Alpha.tsx': { file: manifest.files[0], patch: 'diff --git a/src/components/Alpha.tsx b/src/components/Alpha.tsx\n--- a/src/components/Alpha.tsx\n+++ b/src/components/Alpha.tsx\n@@ -1 +1 @@\n-alpha\n+alpha session\n', status: 'changed' },
     },
   });
-  const alpha = page.getByRole('treeitem', { name: 'Open diff for src/components/Alpha.tsx' });
-  const components = page.getByRole('treeitem', { name: 'components', exact: true });
+  const alpha = page.getByRole('option', { name: 'Open diff for src/components/Alpha.tsx' });
 
   await alpha.click();
   await expect(page.getByRole('tab', { name: 'Alpha.tsx (All changes)' })).toHaveAttribute('aria-selected', 'true');
   await expect(alpha).toHaveAttribute('aria-selected', 'true');
 
-  await components.click();
-  await expect(components).toHaveAttribute('aria-expanded', 'false');
-  await expect(alpha).toHaveCount(0);
-
-  await page.getByRole('tab', { name: 'Alpha.tsx (All changes)' }).focus();
-  await page.getByRole('tree', { name: 'Changed files' }).focus();
-  await expect(components).toHaveAttribute('aria-expanded', 'true');
-  await expect(alpha).toHaveAttribute('aria-selected', 'true');
-
-  await components.click();
-  await expect(alpha).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Select Commit A' }).click();
+  // The same path under a different scope is a different diff, so it reads as unselected.
+  await viewCommit(page, session.id, hashA);
   await expect(alpha).toBeVisible();
   await expect(alpha).toHaveAttribute('aria-selected', 'false');
 
   await page.getByRole('button', { name: 'All changes', exact: true }).click();
-  await expect(components).toHaveAttribute('aria-expanded', 'true');
   await expect(alpha).toHaveAttribute('aria-selected', 'true');
-});
-
-test('a wide persisted commits pane cannot squeeze the tree out of a side-by-side split', async ({ page }) => {
-  await page.addInitScript(() => {
-    localStorage.setItem('diff-panel-sidebar-width', '600');
-    localStorage.setItem('pane-detail-panel-width:v2', JSON.stringify({ version: 2, preferredPx: 700 }));
-  });
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await openTree(page);
-  const split = page.locator('.pane-review-split');
-  const list = page.locator('.pane-review-list');
-  const splitBox = await split.boundingBox();
-  const listBox = await list.boundingBox();
-  const stacked = await split.evaluate(element => getComputedStyle(element).flexDirection === 'column');
-  expect(stacked).toBe(false);
-  expect(splitBox && listBox && listBox.width).toBeLessThanOrEqual((splitBox?.width ?? 0) - 239);
-  const treeBox = await page.getByRole('tree', { name: 'Changed files' }).boundingBox();
-  expect(treeBox && treeBox.width).toBeGreaterThanOrEqual(200);
-  // The panel fills the inspector rail instead of sizing to its content.
-  const hostBox = await page.locator('.pane-inspector-host:visible').boundingBox();
-  const viewBox = await page.locator('.combined-diff-view').boundingBox();
-  expect(hostBox && viewBox && viewBox.width).toBeGreaterThanOrEqual((hostBox?.width ?? 0) - 8);
-  await expect(page.getByRole('treeitem', { name: 'Open diff for README.md' })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

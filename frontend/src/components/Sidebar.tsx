@@ -30,6 +30,8 @@ import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
 import { DiscordIcon } from './DiscordIcon';
+import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -206,11 +208,17 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToUsage = useNavigationStore((state) => state.navigateToUsage);
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
+  const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
+  const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
   const setSidebarNavigationScope = useNavigationStore((state) => state.setSidebarNavigationScope);
   const agentStatusByPanel = usePanelStore((state) => state.agentStatus);
   const agentPanelSessions = usePanelStore((state) => state.agentStatusSession);
   const unviewedBySession = usePanelStore((state) => state.unviewedCompletedActivity);
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
+
+  useEffect(() => {
+    void loadOrchestrationSessions();
+  }, [loadOrchestrationSessions]);
 
   const handleRefreshGitStatus = async () => {
     try {
@@ -413,23 +421,27 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </button>
             </Tooltip>
 
-            <Tooltip content="Pane Chat" side="right">
-              <button
-                type="button"
-                data-testid="compact-pane-chat"
-                data-compact-rail-item
-                onClick={() => {
-                  setSidebarNavigationScope('repositories');
-                  void setActiveSession(null);
-                  navigateToPaneChat();
-                }}
-                aria-label="Pane Chat"
-                className={`${COMPACT_RAIL_BUTTON} ${activeView === 'pane-chat' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
-              >
-                <MessageSquare className="h-4 w-4" />
-                <AgentStatusDot status={paneChatStatus} size="sm" className="absolute right-0 top-0" />
-              </button>
-            </Tooltip>
+            {orchestrationAvailability === 'ready' || orchestrationAvailability === 'loading' || orchestrationAvailability === 'error' ? (
+              <OrchestrationSessionNav compact />
+            ) : (
+              <Tooltip content="Pane Chat" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-pane-chat"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    void setActiveSession(null);
+                    navigateToPaneChat();
+                  }}
+                  aria-label="Pane Chat"
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'pane-chat' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  <AgentStatusDot status={paneChatStatus} size="sm" className="absolute right-0 top-0" />
+                </button>
+              </Tooltip>
+            )}
 
             <Tooltip content="Usage & Limits" side="right">
               <button

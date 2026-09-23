@@ -7,6 +7,12 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# A new push to a PR cancels that PR's in-flight run. Every other event gets
+# its own group, so no main commit ever loses its run.
+concurrency:
+  group: code-quality-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   changes:
     name: Detect changed areas
@@ -44,30 +50,28 @@ jobs:
             - '.github/workflows/quality.yml'
 
   quality-checks:
-    name: Quality Checks + Smoke
+    name: Quality Checks
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v6
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '22.18.0'
-        cache: 'pnpm'
-
+    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
+    # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --ignore-scripts
 
-    - name: Run type checking
-      run: pnpm typecheck
+    # Type checking and lint run in the background beside the tests; their
+    # Finish steps print the output and fail the job on errors.
+    - name: Start type checking
+      run: scripts/ci-background.sh start typecheck pnpm typecheck
 
-    - name: Run consolidated lint harness
-      run: pnpm lint
+    - name: Start consolidated lint harness
+      run: scripts/ci-background.sh start lint pnpm lint
 
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
@@ -81,8 +85,35 @@ jobs:
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend test
 
-    - name: Install Playwright browser dependencies
-      run: pnpm exec playwright install --with-deps chromium
+    - name: Finish type checking
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait typecheck
+
+    - name: Finish consolidated lint harness
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait lint
+
+  # Runs beside quality-checks so the Electron smoke path does not wait on
+  # typecheck, lint, and unit tests.
+  functional-smoke:
+    name: Functional Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install
+
+    # The browser download and apt packages overlap the build steps below.
+    # apt upgrades libraries Electron loads, so the wait step comes before
+    # Electron first starts.
+    - name: Start Playwright browser dependencies install
+      run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
 
     - name: Rebuild native modules for Electron smoke tests
       run: pnpm run electron:rebuild
@@ -94,8 +125,14 @@ jobs:
         sudo chown root "${electron_dir}/chrome-sandbox"
         sudo chmod 4755 "${electron_dir}/chrome-sandbox"
 
+    - name: Build main process
+      run: pnpm build:main
+
+    - name: Finish Playwright browser dependencies install
+      run: scripts/ci-background.sh wait playwright
+
     - name: Verify sandboxed Electron preload
-      run: pnpm build:main && xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
+      run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     - name: Run maintained functional smoke tests
       run: xvfb-run -a pnpm test:ci:minimal
@@ -126,14 +163,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v6
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
       with:
         node-version: ${{ matrix.node-version }}
-        cache: 'pnpm'
 
     - name: Setup Python
       uses: actions/setup-python@v6
@@ -168,26 +201,44 @@ jobs:
         os: [macos-latest, windows-2022]
 
     steps:
+    # The default Windows TEMP is on the runner's slow C: drive; the database
+    # tests write SQLite files there. D: (RUNNER_TEMP) is several times faster.
+    - name: Keep temp files on the workspace drive
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+    # Without this, Defender is still scanning the freshly installed packages
+    # when the tests start, and it holds test worktrees open (EBUSY on cleanup).
+    - name: Exclude temp files and workspace from Defender scanning
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: Add-MpPreference -ExclusionPath $env:RUNNER_TEMP, $env:GITHUB_WORKSPACE
+
     - name: Checkout code
       uses: actions/checkout@v7
 
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v6
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '22.18.0'
-        cache: 'pnpm'
-
+    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
+    # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --ignore-scripts
 
-    - name: Run main process type checking
-      run: pnpm --filter main typecheck
+    - name: Start main process type checking
+      shell: bash
+      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
 
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
       run: pnpm --filter main test
+
+    - name: Finish main process type checking
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait typecheck

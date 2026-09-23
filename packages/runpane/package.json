@@ -1,16 +1,16 @@
 {
   "name": "runpane",
-  "version": "2.4.106",
+  "version": "2.4.115",
   "description": "Thin npm installer and remote setup CLI for Pane",
   "license": "AGPL-3.0",
   "homepage": "https://runpane.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dcouple/Pane.git",
+    "url": "git+https://github.com/greenfield-inc/Pane.git",
     "directory": "packages/runpane"
   },
   "bugs": {
-    "url": "https://github.com/dcouple/Pane/issues"
+    "url": "https://github.com/greenfield-inc/Pane/issues"
   },
   "bin": {
     "runpane": "dist/cli.js"

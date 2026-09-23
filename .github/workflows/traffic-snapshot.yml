@@ -38,7 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
         run: |
-          REPO="dcouple/Pane"
+          REPO="${{ github.repository }}"
           PH_KEY="phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1"
           PH_URL="https://us.i.posthog.com/capture/"
 

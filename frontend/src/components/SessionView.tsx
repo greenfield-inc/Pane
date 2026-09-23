@@ -611,7 +611,7 @@ export const SessionView = memo(() => {
   }, [detailVisible]);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = localStorage.getItem('pane-inspector-tab');
-    return stored === 'files' || stored === 'changes' ? stored : 'details';
+    return stored === 'files' || stored === 'details' ? stored : 'changes';
   });
   useEffect(() => {
     localStorage.setItem('pane-inspector-tab', inspectorTab);

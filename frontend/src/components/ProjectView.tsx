@@ -80,7 +80,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   });
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = localStorage.getItem('pane-project-inspector-tab');
-    return stored === 'files' || stored === 'changes' ? stored : 'details';
+    return stored === 'files' || stored === 'details' ? stored : 'changes';
   });
   useEffect(() => {
     localStorage.setItem('pane-project-inspector-tab', inspectorTab);

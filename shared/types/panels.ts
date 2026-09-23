@@ -60,6 +60,8 @@ export interface TerminalPanelState {
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
   agentType?: 'claude' | 'codex' | 'cursor'; // CLI agent type for panel-local resume behavior
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
+  /** Stable orchestration identity for resumed Session terminals. */
+  orchestrationSessionId?: string;
 
   // CLI tool init state
   isCliPanel?: boolean;              // True if this terminal runs a CLI tool (claude/codex)

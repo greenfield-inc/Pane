@@ -38,6 +38,14 @@ from .local_control import (
     run_panes_rename,
     run_repos_add,
     run_repos_list,
+    run_sessions_associate,
+    run_sessions_create,
+    run_sessions_detach,
+    run_sessions_get,
+    run_sessions_list,
+    run_sessions_overview,
+    run_sessions_set_agent,
+    run_sessions_update,
     run_watch,
     run_workspace_state,
 )
@@ -65,6 +73,7 @@ FORMATS = set(RUNPANE_CONTRACT["enums"]["artifactFormats"])
 CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
+COMMAND_GROUP_HELP_TOPICS.add("sessions")
 
 REMOTE_VALUE_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteValue"]}
 REMOTE_BOOLEAN_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteBoolean"]}
@@ -98,6 +107,7 @@ class ParsedArgs:
     pane_dir: Optional[str] = None
     repo: Optional[str] = None
     pane_id: Optional[str] = None
+    session_id: Optional[str] = None
     panel_id: Optional[str] = None
     repo_path: Optional[str] = None
     name: Optional[str] = None
@@ -208,6 +218,22 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_repos_list(parsed)
     if parsed.command == "repos add":
         return run_repos_add(parsed)
+    if parsed.command == "sessions list":
+        return run_sessions_list(parsed)
+    if parsed.command == "sessions create":
+        return run_sessions_create(parsed)
+    if parsed.command == "sessions get":
+        return run_sessions_get(parsed)
+    if parsed.command == "sessions update":
+        return run_sessions_update(parsed)
+    if parsed.command == "sessions set-agent":
+        return run_sessions_set_agent(parsed)
+    if parsed.command == "sessions associate":
+        return run_sessions_associate(parsed)
+    if parsed.command == "sessions detach":
+        return run_sessions_detach(parsed)
+    if parsed.command == "sessions overview":
+        return run_sessions_overview(parsed)
     if parsed.command == "panes list":
         return run_panes_list(parsed)
     if parsed.command == "panes cost":
@@ -594,6 +620,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         else:
             parsed.pane_id = value
         return
+    if flag == "--session":
+        parsed.session_id = value
+        return
     if flag == "--exclude-pane":
         parsed.watch_exclude_pane_ids.append(value)
         return
@@ -761,6 +790,14 @@ def is_runpane_local_command(command: str) -> bool:
         "daemon repair",
         "repos list",
         "repos add",
+        "sessions list",
+        "sessions create",
+        "sessions get",
+        "sessions update",
+        "sessions set-agent",
+        "sessions associate",
+        "sessions detach",
+        "sessions overview",
         "workspace state",
         "watch",
         "panes list",

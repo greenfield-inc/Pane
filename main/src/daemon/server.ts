@@ -19,6 +19,7 @@ const DAEMON_EVENT_PREFIXES = [
   'panel:',
   'project:',
   'resource-monitor:',
+  'orchestration-sessions:',
   'session:',
   'sessions:',
   'terminal:',

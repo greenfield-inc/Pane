@@ -15,6 +15,7 @@ import type { GitStatus } from './types/session';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { PaneEventArgument } from './core/eventSink';
+import type { AgentState } from '../../shared/types/agentStatus';
 
 function isArchivedSessionOutputValidation(validation: { error?: string; sessionId?: string }): boolean {
   return Boolean(
@@ -41,8 +42,21 @@ export function setupEventListeners(services: AppServices): void {
     gitStatusManager,
     worktreeManager,
     archiveProgressManager,
-    analyticsManager
+    analyticsManager,
+    orchestrationSessionManager,
   } = services;
+
+  orchestrationSessionManager?.on('changed', (change: { sessionId: string; kind: string; selectionChanged?: boolean }) => {
+    sendRendererEvent('orchestration-sessions:changed', change);
+  });
+  orchestrationSessionManager?.on('overview-updated', (change: { panelId: string; state: string }) => {
+    sendRendererEvent('orchestration-sessions:overview-updated', change);
+  });
+  terminalPanelManager.on('agent-status', (change: { panelId: string; state: AgentState }) => {
+    void orchestrationSessionManager?.notifyLiveActivity(change.panelId, change.state).catch(error => {
+      console.error('[Sessions] Failed to persist live activity:', error);
+    });
+  });
 
   async function appendSessionSummary(sessionId: string, failed: boolean): Promise<void> {
     try {

@@ -25,6 +25,12 @@ import type {
 import type { ToolPanel } from '../../shared/types/panels';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
+import type {
+  OrchestrationAssociationInput,
+  OrchestrationSessionCreateInput,
+  OrchestrationSessionSelector,
+  OrchestrationSessionUpdateInput,
+} from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
 import type { CloudVmState } from '../../shared/types/cloud';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
@@ -413,6 +419,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
   },
 
+  orchestrationSessions: {
+    list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
+    select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
+    create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input),
+    get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector),
+    update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
+    setAgent: (selector: OrchestrationSessionSelector, agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
+    associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
+    detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
+    overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),
+  },
+
   // Token usage, cost and rate-limit reporting
   usage: {
     getReport: (request?: { fromMs?: number; toMs?: number; bucket?: 'hour' | 'day' }): Promise<IPCResponse> => invokeIpc('usage:get-report', request),
@@ -798,6 +816,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, info: { sessionId: string; hasNewOutput: boolean }) => callback(info);
       ipcRenderer.on('session:output-available', wrappedCallback);
       return () => ipcRenderer.removeListener('session:output-available', wrappedCallback);
+    },
+    onOrchestrationSessionsChanged: (callback: (change: { sessionId: string; kind: string; selectionChanged?: boolean }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, change: { sessionId: string; kind: string; selectionChanged?: boolean }) => callback(change);
+      ipcRenderer.on('orchestration-sessions:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('orchestration-sessions:changed', wrappedCallback);
+    },
+    onOrchestrationSessionsOverviewUpdated: (callback: (change: { panelId: string; sessionId?: string; state: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, change: { panelId: string; sessionId?: string; state: string }) => callback(change);
+      ipcRenderer.on('orchestration-sessions:overview-updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('orchestration-sessions:overview-updated', wrappedCallback);
     },
     
     // Project events

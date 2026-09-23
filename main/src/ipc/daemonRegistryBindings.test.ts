@@ -8,6 +8,7 @@ import { registerConfigHandlers } from './config';
 import { registerGitHandlers } from './git';
 import { registerPanelHandlers } from './panels';
 import { registerPaneChatHandlers } from './paneChat';
+import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerPermissionHandlers } from './permissions';
 import { registerProjectHandlers } from './project';
 import { registerPromptHandlers } from './prompt';
@@ -59,6 +60,17 @@ const PROMPT_CHANNELS = [
 const PANE_CHAT_CHANNELS = [
   'pane-chat:get-or-create',
   'pane-chat:set-agent',
+] as const;
+const ORCHESTRATION_SESSION_CHANNELS = [
+  'orchestration-sessions:list',
+  'orchestration-sessions:select',
+  'orchestration-sessions:create',
+  'orchestration-sessions:get',
+  'orchestration-sessions:update',
+  'orchestration-sessions:set-agent',
+  'orchestration-sessions:associate',
+  'orchestration-sessions:detach',
+  'orchestration-sessions:overview',
 ] as const;
 
 const PERMISSION_CHANNELS = [
@@ -379,6 +391,16 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...PANE_CHAT_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...PANE_CHAT_CHANNELS].sort());
+  });
+
+  it('binds daemon-owned orchestration Session channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    registerOrchestrationSessionHandlers(ipcMain, createServicesStub(), registry);
+
+    expect(registry.listChannels()).toEqual([...ORCHESTRATION_SESSION_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...ORCHESTRATION_SESSION_CHANNELS].sort());
   });
 
   it('binds daemon-owned permission channels through the shared registry', () => {

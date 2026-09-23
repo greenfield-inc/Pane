@@ -7,7 +7,7 @@ import { panelApi } from '../services/panelApi';
 import { API } from '../utils/api';
 import { devLog } from '../utils/console';
 import type { Session, SessionOutput, GitStatus } from '../types/session';
-import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 
 interface SessionEventData {
   sessionId: string;
@@ -278,7 +278,7 @@ export function useIPCEvents() {
     unsubscribeFunctions.push(unsubscribeSessionOutput);
 
     const unsubscribeTerminalOutput = window.electronAPI.events.onTerminalOutput((output) => {
-      if (output.sessionId === PANE_CHAT_SESSION_ID) {
+      if (isOrchestrationInternalSessionId(output.sessionId)) {
         return;
       }
 
@@ -304,6 +304,16 @@ export function useIPCEvents() {
       }));
     });
     unsubscribeFunctions.push(unsubscribeOutputAvailable);
+
+    const unsubscribeOrchestrationChanged = window.electronAPI.events.onOrchestrationSessionsChanged?.((change) => {
+      window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: change }));
+    });
+    if (unsubscribeOrchestrationChanged) unsubscribeFunctions.push(unsubscribeOrchestrationChanged);
+
+    const unsubscribeOrchestrationOverview = window.electronAPI.events.onOrchestrationSessionsOverviewUpdated?.((change) => {
+      window.dispatchEvent(new CustomEvent('orchestration-sessions-overview-updated', { detail: change }));
+    });
+    if (unsubscribeOrchestrationOverview) unsubscribeFunctions.push(unsubscribeOrchestrationOverview);
     
     // Listen for zombie process detection
     const unsubscribeZombieProcesses = window.electronAPI.events.onZombieProcessesDetected((data: { sessionId?: string | null; pids?: number[]; message: string }) => {

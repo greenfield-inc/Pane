@@ -16,6 +16,19 @@ node --expose-gc scripts/benchmark-session-output.js
 See [the session output audit](../docs/SESSION_OUTPUT_PERFORMANCE.md) for
 results, regression checks, and measurement limits.
 
+## ci-background.sh
+
+Lets a GitHub Actions job run a command in the background while later steps
+continue. A `start` step launches the command; a later `wait` step prints its
+output and fails the job if the command failed. `.github/workflows/quality.yml`
+uses it to run type checking, lint, and the Playwright install beside other
+steps.
+
+```bash
+scripts/ci-background.sh start typecheck pnpm typecheck
+scripts/ci-background.sh wait typecheck
+```
+
 ## generate-notices.js
 
 Generates a NOTICES file containing all third-party licenses for dependencies included in the Pane distribution.

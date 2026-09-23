@@ -92,7 +92,17 @@ import type {
   RunpaneWorkspaceStateResult,
   RunpaneWorkspaceWaitRequest,
   RunpaneWorkspaceWaitResult,
+  RunpaneSessionListResult,
+  RunpaneSessionResult,
+  RunpaneSessionOverviewResult,
+  RunpaneSessionSelector,
 } from '../../../shared/types/runpaneOrchestration';
+import type {
+  OrchestrationAssociationInput,
+  OrchestrationSessionCreateInput,
+  OrchestrationSessionUpdateInput,
+} from '../../../shared/types/orchestrationSession';
+import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getAppDirectory } from '../utils/appDirectory';
 import { collectRemoteDaemonExecutableHealth } from '../daemon/remoteDaemonExecutableHealth';
 import {
@@ -117,6 +127,14 @@ const RUNPANE_CHANNELS = [
   'runpane:doctor',
   'runpane:repos:list',
   'runpane:repos:add',
+  'runpane:sessions:list',
+  'runpane:sessions:create',
+  'runpane:sessions:get',
+  'runpane:sessions:update',
+  'runpane:sessions:set-agent',
+  'runpane:sessions:associate',
+  'runpane:sessions:detach',
+  'runpane:sessions:overview',
   'runpane:panes:list',
   'runpane:panes:cost',
   'runpane:panes:create',
@@ -164,7 +182,57 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panels:input',
   'panels:submit',
   'panels:submit-composer',
+  'sessions:create',
+  'sessions:update',
+  'sessions:set-agent',
+  'sessions:associate',
+  'sessions:detach',
 ]);
+
+const orchestrationSelectorSchema = boundary.object({
+  sessionId: boundary.optional(boundary.nonEmptyString),
+  name: boundary.optional(boundary.nonEmptyString),
+});
+const orchestrationLinkSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  url: boundary.nonEmptyString,
+  kind: boundary.optional(boundary.enumeration('evidence', 'output', 'ticket', 'pull-request', 'other')),
+  provenance: boundary.optional(boundary.string),
+  addedAt: boundary.nonEmptyString,
+});
+const orchestrationSessionCreateSchema = boundary.object({
+  name: boundary.nonEmptyString,
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  goal: boundary.optional(boundary.string),
+  context: boundary.optional(boundary.string),
+  decisions: boundary.optional(boundary.array(boundary.string)),
+  blockers: boundary.optional(boundary.array(boundary.string)),
+  nextAction: boundary.optional(boundary.string),
+  evidence: boundary.optional(boundary.array(orchestrationLinkSchema)),
+  outputs: boundary.optional(boundary.array(orchestrationLinkSchema)),
+});
+const orchestrationSessionUpdateSchema = boundary.object({
+  name: boundary.optional(boundary.string),
+  archived: boundary.optional(boundary.boolean),
+  isPinned: boundary.optional(boundary.boolean),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  goal: boundary.optional(boundary.string),
+  context: boundary.optional(boundary.string),
+  decisions: boundary.optional(boundary.array(boundary.string)),
+  blockers: boundary.optional(boundary.array(boundary.string)),
+  nextAction: boundary.optional(boundary.string),
+  evidence: boundary.optional(boundary.array(orchestrationLinkSchema)),
+  outputs: boundary.optional(boundary.array(orchestrationLinkSchema)),
+  report: boundary.optional(boundary.nullable(boundary.object({
+    summary: boundary.nonEmptyString,
+    status: boundary.enumeration('reported', 'verified'),
+    evidence: boundary.array(orchestrationLinkSchema),
+    reportedAt: boundary.nonEmptyString,
+    provenance: boundary.nonEmptyString,
+  }))),
+  expectedRevision: boundary.optional(boundary.number),
+  source: boundary.optional(boundary.enumeration('user', 'agent')),
+});
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -299,6 +367,75 @@ export function registerRunpaneHandlers(
         repo: projectToRepoSummary(project, 0),
       };
     }, result => ({ repoId: result.repo?.id, resultCount: result.created ? 1 : 0 }));
+  });
+
+  commandRegistry.register('runpane:sessions:list', async (): Promise<RunpaneSessionListResult> => {
+    return withRunpaneAction(services, 'sessions:list', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const result = await manager.list();
+      return { ok: true, ...result };
+    }, result => ({ resultCount: result.sessions.length }));
+  });
+
+  commandRegistry.register('runpane:sessions:create', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
+    return withRunpaneAction(services, 'sessions:create', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const input = parseOrchestrationSessionCreateRequest(request);
+      const view = await manager.create(input);
+      return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
+    }, result => ({ resultCount: 1, panelId: result.panelId }));
+  });
+
+  commandRegistry.register('runpane:sessions:get', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
+    return withRunpaneAction(services, 'sessions:get', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const session = await manager.get(parseOrchestrationSessionSelector(request));
+      return { ok: true, session };
+    }, result => ({ resultCount: 1 }));
+  });
+
+  commandRegistry.register('runpane:sessions:update', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
+    return withRunpaneAction(services, 'sessions:update', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const normalized = parseOrchestrationSessionUpdateRequest(request);
+      const session = await manager.update(normalized.selector, normalized.input);
+      return { ok: true, session };
+    }, result => ({ resultCount: 1 }));
+  });
+
+  commandRegistry.register('runpane:sessions:set-agent', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
+    return withRunpaneAction(services, 'sessions:set-agent', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const normalized = parseOrchestrationSessionAgentRequest(request);
+      const view = await manager.setAgent(normalized.selector, normalized.agent);
+      return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
+    }, result => ({ resultCount: 1, panelId: result.panelId }));
+  });
+
+  commandRegistry.register('runpane:sessions:associate', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
+    return withRunpaneAction(services, 'sessions:associate', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const normalized = parseOrchestrationSessionAssociationRequest(request);
+      const session = await manager.associate(normalized.selector, normalized.association);
+      return { ok: true, session };
+    }, result => ({ resultCount: 1 }));
+  });
+
+  commandRegistry.register('runpane:sessions:detach', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
+    return withRunpaneAction(services, 'sessions:detach', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const normalized = parseOrchestrationSessionDetachRequest(request);
+      const session = await manager.detach(normalized.selector, normalized.paneId);
+      return { ok: true, session };
+    }, result => ({ resultCount: 1 }));
+  });
+
+  commandRegistry.register('runpane:sessions:overview', async (request: PaneCommandValue): Promise<RunpaneSessionOverviewResult> => {
+    return withRunpaneAction(services, 'sessions:overview', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const overview = await manager.overview(parseOrchestrationSessionSelector(request));
+      return { ok: true, ...overview };
+    }, result => ({ resultCount: result.panes.length }));
   });
 
   commandRegistry.register('runpane:panes:list', async (request: PaneCommandValue = {}): Promise<RunpanePaneListResult> => {
@@ -2197,6 +2334,72 @@ function parsePaneListRequest(value: PaneCommandValue): RunpanePaneListRequest {
   return {
     repo: parseRepoSelector(value.repo),
   };
+}
+
+function requireOrchestrationSessionManager(services: AppServices) {
+  if (!services.orchestrationSessionManager) throw new Error('Sessions manager is not initialized');
+  return services.orchestrationSessionManager;
+}
+
+function parseOrchestrationSessionSelector(value: PaneCommandValue): RunpaneSessionSelector {
+  const selector = decodeBoundary(value, orchestrationSelectorSchema);
+  if (!selector.sessionId && !selector.name) throw new Error('Named Session id or name is required');
+  return selector;
+}
+
+function parseOrchestrationSessionCreateRequest(value: PaneCommandValue): OrchestrationSessionCreateInput {
+  return decodeBoundary(value, orchestrationSessionCreateSchema);
+}
+
+interface OrchestrationSessionUpdateRequest {
+  selector: RunpaneSessionSelector;
+  input: OrchestrationSessionUpdateInput;
+}
+
+function parseOrchestrationSessionUpdateRequest(value: PaneCommandValue): OrchestrationSessionUpdateRequest {
+  if (!isRecord(value)) throw new Error('Session update request must be an object');
+  const selector = parseOrchestrationSessionSelector(value.selector);
+  const input = decodeBoundary(value.input, orchestrationSessionUpdateSchema);
+  return { selector, input };
+}
+
+interface OrchestrationSessionAgentRequest {
+  selector: RunpaneSessionSelector;
+  agent: PaneChatAgent;
+}
+
+function parseOrchestrationSessionAgentRequest(value: PaneCommandValue): OrchestrationSessionAgentRequest {
+  if (!isRecord(value)) throw new Error('Session agent request must be an object');
+  const selector = parseOrchestrationSessionSelector(value.selector);
+  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor'));
+  return { selector, agent };
+}
+
+interface OrchestrationSessionAssociationRequest {
+  selector: RunpaneSessionSelector;
+  association: OrchestrationAssociationInput;
+}
+
+function parseOrchestrationSessionAssociationRequest(value: PaneCommandValue): OrchestrationSessionAssociationRequest {
+  if (!isRecord(value)) throw new Error('Session association request must be an object');
+  const selector = parseOrchestrationSessionSelector(value.selector);
+  const association = decodeBoundary(value.association, boundary.object({
+    paneId: boundary.nonEmptyString,
+    panelIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
+  }));
+  return { selector, association };
+}
+
+interface OrchestrationSessionDetachRequest {
+  selector: RunpaneSessionSelector;
+  paneId?: string;
+}
+
+function parseOrchestrationSessionDetachRequest(value: PaneCommandValue): OrchestrationSessionDetachRequest {
+  if (!isRecord(value)) throw new Error('Session detach request must be an object');
+  const selector = parseOrchestrationSessionSelector(value.selector);
+  const paneId = value.paneId === undefined ? undefined : decodeBoundary(value.paneId, boundary.nonEmptyString);
+  return { selector, paneId };
 }
 
 function parsePaneCostRequest(value: PaneCommandValue): RunpanePaneCostRequest {

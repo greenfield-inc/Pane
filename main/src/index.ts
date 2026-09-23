@@ -422,6 +422,17 @@ async function createWindow() {
   // Each panel can register multiple event listeners
   mainWindow.webContents.setMaxListeners(100);
 
+  // Hand the renderer its per-window ptyHost data port on every load. This must
+  // be registered before loadURL/loadFile below: those promises resolve on
+  // did-finish-load, so a listener added after them never fires and terminals
+  // silently drop all output once they switch to the port. `on` (not `once`)
+  // re-attaches after renderer reloads, which replace the preload's port.
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (ptyHostSupervisor && mainWindow && !mainWindow.isDestroyed()) {
+      ptyHostSupervisor.attachWindow(mainWindow.webContents);
+    }
+  });
+
   // Security hook: strip preload and enforce sandbox on any webview tags
   mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, _params) => {
     delete webPreferences.preload;
@@ -991,15 +1002,6 @@ async function createWindow() {
     // actually focuses the window; that is what restarts git/resource work.
     const focused = mainWindow?.isFocused() ?? false;
     mainWindow?.webContents.send('window:focus-changed', focused);
-  });
-
-  // Hand the renderer its per-window ptyHost data port once the preload
-  // listener is guaranteed to be installed. Chunk C: the port is a
-  // passthrough; Chunk D switches `TerminalPanel.tsx` to subscribe on it.
-  mainWindow.webContents.once('did-finish-load', () => {
-    if (ptyHostSupervisor && mainWindow) {
-      ptyHostSupervisor.attachWindow(mainWindow.webContents);
-    }
   });
 }
 

@@ -121,3 +121,4 @@ docs/research/
 
 # Draft posts (local only)
 docs/posts/
+.agent-farm/generated/

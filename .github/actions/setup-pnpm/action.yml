@@ -1,0 +1,22 @@
+name: Set up Node.js and pnpm
+description: Installs Node.js and activates the pnpm version pinned in package.json through corepack.
+# No pnpm store cache: on GitHub-hosted runners, restoring the store takes as
+# long as downloading the packages it holds.
+inputs:
+  node-version:
+    description: Node.js version to install
+    default: '22.18.0'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # The first pnpm call downloads pnpm. Older corepack (Node 20.0) can
+    # skip the requested command on that call under pwsh, so make it here.
+    - name: Enable pnpm
+      shell: bash
+      run: |
+        corepack enable pnpm
+        pnpm --version

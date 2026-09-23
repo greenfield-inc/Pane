@@ -95,7 +95,7 @@ export function FeedbackDialog({ isOpen, onClose }: FeedbackDialogProps) {
       <ModalHeader
         title="Send feedback"
         icon={<MessageSquareText className="h-5 w-5" />}
-        description={<span className="text-text-primary">Create a public issue in dcouple/Pane.</span>}
+        description={<span className="text-text-primary">Create a public issue in greenfield-inc/Pane.</span>}
         onClose={onClose}
       />
 

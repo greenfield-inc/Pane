@@ -4,6 +4,10 @@ name: React Doctor
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    # The scan covers only changed files under frontend/.
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/react-doctor.yml'
 
 permissions:
   contents: read

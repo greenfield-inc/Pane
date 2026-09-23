@@ -19,19 +19,6 @@ export interface ExecutionDiff {
   history_limit_reached?: boolean;
 }
 
-export interface ExecutionListProps {
-  sessionId: string;
-  executions: ExecutionDiff[];
-  selection: { kind: 'all' } | { kind: 'ids'; ids: number[] };
-  onSelectAll: () => void;
-  onSelectionChange: (selectedIds: number[]) => void;
-  onCommit?: () => void;
-  onRevert?: (commitHash: string) => void;
-  onRestore?: () => void;
-  historyLimitReached?: boolean;
-  historyLimit?: number;
-}
-
 export interface CombinedDiffViewProps {
   sessionId: string;
   isGitOperationRunning?: boolean;

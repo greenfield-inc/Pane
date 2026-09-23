@@ -361,6 +361,26 @@
       "auto",
       "--yes",
       "--json"
+    ],
+    [
+      "sessions",
+      "list",
+      "--json"
+    ],
+    [
+      "sessions",
+      "get",
+      "--session",
+      "demo",
+      "--json"
+    ],
+    [
+      "sessions",
+      "update",
+      "--session",
+      "demo",
+      "--from-json",
+      "-"
     ]
   ],
   "help": {

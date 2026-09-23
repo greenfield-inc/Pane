@@ -20,6 +20,7 @@ export class TerminalStateEmulator {
   private finalScreenText = '';
   private currentTitle = '';
   private currentProgress = '';
+  private win32InputMode = false;
 
   constructor(cols: number, rows: number) {
     this.terminal = new Terminal({
@@ -35,6 +36,22 @@ export class TerminalStateEmulator {
     // those drifts from what the user is actually looking at.
     this.terminal.loadAddon(new Unicode11Addon());
     this.terminal.unicode.activeVersion = '11';
+    // The headless 6.0 model/serializer does not know DECSET 9001. Retain it
+    // explicitly so a renderer reset or remount does not lose ConPTY's request.
+    for (const [final, enabled] of [['h', true], ['l', false]] as const) {
+      this.terminal.parser.registerCsiHandler({ prefix: '?', final }, (params) => {
+        if (params.includes(9001)) this.win32InputMode = enabled;
+        return false;
+      });
+    }
+    this.terminal.parser.registerEscHandler({ final: 'c' }, () => {
+      this.win32InputMode = false;
+      return false;
+    });
+    this.terminal.parser.registerCsiHandler({ intermediates: '!', final: 'p' }, () => {
+      this.win32InputMode = false;
+      return false;
+    });
     // Capture OSC window/icon title (OSC 0 / OSC 2) — agents encode live status
     // (spinner, "Action Required") into it, which the status detector reads.
     this.terminal.onTitleChange((title) => {
@@ -89,7 +106,7 @@ export class TerminalStateEmulator {
       ? this.finalSerializedBuffer
       : this.serializeAddon.serialize({
           scrollback: includeScrollback ? HEADLESS_SCROLLBACK_LINES : 0,
-        });
+        }) + (this.win32InputMode ? '\x1b[?9001h' : '');
   }
 
   /** Return plain text for the currently visible viewport. */

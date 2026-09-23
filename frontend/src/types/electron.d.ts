@@ -36,6 +36,16 @@ import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type {
+  OrchestrationAssociationInput,
+  OrchestrationSessionCreateInput,
+  OrchestrationSessionListResult,
+  OrchestrationSessionOverview,
+  OrchestrationSessionRecord,
+  OrchestrationSessionSelector,
+  OrchestrationSessionUpdateInput,
+  OrchestrationSessionView,
+} from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type { CreateSessionRequest } from './session';
@@ -130,6 +140,18 @@ interface ElectronAPI {
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;
     setAgent: (agent: PaneChatAgent) => Promise<IPCResponse<PaneChatState<Session>>>;
+  };
+
+  orchestrationSessions: {
+    list: () => Promise<IPCResponse<OrchestrationSessionListResult>>;
+    select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult>>;
+    create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
+    get: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
+    update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
+    setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
+    associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
+    detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;
+    overview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOverview>>;
   };
 
   // Token usage, cost and rate-limit reporting
@@ -389,6 +411,8 @@ interface ElectronAPI {
     onSessionLog: (callback: (data: { sessionId: string; entry: LogEntry }) => void) => () => void;
     onSessionLogsCleared: (callback: (data: { sessionId: string }) => void) => () => void;
     onSessionOutputAvailable: (callback: (info: { sessionId: string; hasNewOutput: boolean }) => void) => () => void;
+    onOrchestrationSessionsChanged?: (callback: (change: { sessionId: string; kind: string; selectionChanged?: boolean }) => void) => () => void;
+    onOrchestrationSessionsOverviewUpdated?: (callback: (change: { panelId: string; sessionId?: string; state: string }) => void) => () => void;
     onGitStatusUpdated: (callback: (data: { sessionId: string; gitStatus: GitStatus }) => void) => () => void;
     onGitStatusLoading: (callback: (data: { sessionId: string }) => void) => () => void;
     onGitStatusLoadingBatch?: (callback: (sessionIds: string[]) => void) => () => void;

@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, Pin, Monitor, MessageSquare, BarChart3 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, Pin, Monitor, MessageSquare, BarChart3, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
+import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import { StatusAccentBar } from './ui/StatusAccentBar';
@@ -19,6 +20,11 @@ import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
+import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import {
+  isArchivedOrchestrationSession,
+  useOrchestrationSessionStore,
+} from '../stores/orchestrationSessionStore';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
 import {
   createProjectById,
@@ -66,6 +72,8 @@ export function ProjectSessionList({
 }: ProjectSessionListProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [createForProject, setCreateForProject] = useState<Project | null>(null);
+  const [settingsProject, setSettingsProject] = useState<Project | null>(null);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [sidebarPaneRowLayout, setSidebarPaneRowLayout] = useState<SidebarPaneRowLayout>('single');
   const knownSessionIdsRef = useRef<Set<string> | null>(null);
 
@@ -87,6 +95,8 @@ export function ProjectSessionList({
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
+  const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
+  const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const navigateToUsage = useNavigationStore(s => s.navigateToUsage);
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
@@ -183,33 +193,50 @@ export function ProjectSessionList({
     persistExpandedProjects(expandedProjectIds);
   };
 
-  const handleSessionClick = (sessionId: string, scope: SidebarNavigationScope = 'repositories') => {
+  const handleSessionClick = useCallback((sessionId: string, scope: SidebarNavigationScope = 'repositories') => {
     setSidebarNavigationScope(scope);
     setActiveSession(sessionId);
     navigateToSessions();
-  };
+  }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
   const handleNewSession = (project: Project) => {
     setCreateForProject(project);
     setShowCreateDialog(true);
   };
 
+  const handleOpenProjectSettings = (project: Project) => {
+    setSettingsProject(project);
+    setShowProjectSettings(true);
+  };
+
+  const handleProjectUpdated = () => {
+    onProjectsRefresh();
+    window.dispatchEvent(new Event('project-changed'));
+  };
+
+  const handleProjectSettingsDeleted = () => {
+    setShowProjectSettings(false);
+    setSettingsProject(null);
+    onProjectsRefresh();
+    window.dispatchEvent(new Event('project-changed'));
+  };
+
   // Session operations
-  const handleArchiveSession = async (sessionId: string) => {
+  const handleArchiveSession = useCallback(async (sessionId: string) => {
     try {
       await API.sessions.delete(sessionId);
     } catch (e) {
       console.error('Failed to archive session:', e);
     }
-  };
+  }, []);
 
-  const handleTogglePinnedSession = async (sessionId: string) => {
+  const handleTogglePinnedSession = useCallback(async (sessionId: string) => {
     try {
       await API.sessions.toggleFavorite(sessionId);
     } catch (e) {
       console.error('Failed to toggle pinned session:', e);
     }
-  };
+  }, []);
 
   // Project operations
   const handleDeleteProject = async (projectId: number) => {
@@ -286,6 +313,63 @@ export function ProjectSessionList({
     return map;
   }, [projects, expandedProjects, sessionsByProject]);
 
+  const paneById = useMemo(
+    () => new Map(sessions.map(session => [session.id, session])),
+    [sessions],
+  );
+
+  const availablePaneIds = useMemo(
+    () => new Set(sessions.filter(session => !session.archived && !session.isHidden).map(session => session.id)),
+    [sessions],
+  );
+
+  const handleManagedPaneClick = useCallback(async (paneId: string, parentSessionId: string) => {
+    try {
+      // Keep the parent Session selected so the top-level Sessions shortcut
+      // returns to the conversation that owns the focused Pane.
+      await selectOrchestrationSession({ sessionId: parentSessionId });
+    } catch {
+      // The Pane remains navigable if the orchestration selection cannot refresh.
+    }
+    handleSessionClick(paneId, 'repositories');
+  }, [handleSessionClick, selectOrchestrationSession]);
+
+  const renderManagedPane = useCallback((paneId: string, parentSessionId: string) => {
+    const pane = paneById.get(paneId);
+    if (!pane || pane.archived || pane.isHidden) return null;
+
+    return (
+      <SessionRow
+        key={`orchestration-${parentSessionId}-${pane.id}`}
+        session={pane}
+        isActive={pane.id === activeSessionId}
+        globalIndex={globalSessionIndex.get(pane.id) ?? -1}
+        onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
+        onArchive={() => void handleArchiveSession(pane.id)}
+        onTogglePinned={() => void handleTogglePinnedSession(pane.id)}
+        rowLayout={sidebarPaneRowLayout}
+      />
+    );
+  }, [activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout]);
+
+  const pinnedPaneRows = pinnedSessions.length > 0 ? (
+    <div className="mt-0.5">
+      {pinnedSessions.map(({ session, label }) => (
+        <SessionRow
+          key={`pinned-${session.id}`}
+          session={session}
+          isActive={session.id === activeSessionId}
+          globalIndex={-1}
+          displayName={label}
+          onClick={() => handleSessionClick(session.id, 'pinned')}
+          onArchive={() => handleArchiveSession(session.id)}
+          onTogglePinned={() => handleTogglePinnedSession(session.id)}
+          rowLayout={sidebarPaneRowLayout}
+        />
+      ))}
+    </div>
+  ) : null;
+
   return (
     <>
       <div className="flex flex-col py-1.5">
@@ -303,27 +387,29 @@ export function ProjectSessionList({
           <span>Home</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setSidebarNavigationScope('repositories');
-            setActiveSession(null);
-            navigateToPaneChat();
-          }}
-          className={cn(
-            SIDEBAR_ROW_BASE,
-            SIDEBAR_ROW_GAP,
-            SIDEBAR_ROW_PADDING,
-            'h-8 text-[13px] hover:bg-surface-hover hover:text-text-primary',
-            activeView === 'pane-chat'
-              ? 'bg-surface-hover text-text-primary'
-              : 'text-text-secondary',
-          )}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>Pane Chat</span>
-          <AgentStatusDot status={paneChatStatus} size="sm" className="ml-auto" />
-        </button>
+        {orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle' ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSidebarNavigationScope('repositories');
+              setActiveSession(null);
+              navigateToPaneChat();
+            }}
+            className={cn(
+              SIDEBAR_ROW_BASE,
+              SIDEBAR_ROW_GAP,
+              SIDEBAR_ROW_PADDING,
+              'h-8 text-[13px] hover:bg-surface-hover hover:text-text-primary',
+              activeView === 'pane-chat'
+                ? 'bg-surface-hover text-text-primary'
+                : 'text-text-secondary',
+            )}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Pane Chat</span>
+            <AgentStatusDot status={paneChatStatus} size="sm" className="ml-auto" />
+          </button>
+        ) : null}
 
         <button
           type="button"
@@ -361,43 +447,13 @@ export function ProjectSessionList({
 
         <div className="mx-2 my-2 border-t border-border-primary" aria-hidden="true" />
 
-        {pinnedSessions.length > 0 && (
-          <>
-            <div className={SIDEBAR_SECTION_ROW}>
-              <button
-                type="button"
-                onClick={() => onPinnedSectionExpandedChange(!pinnedSectionExpanded)}
-                className={SIDEBAR_SECTION_TOGGLE}
-              >
-                <span className={SIDEBAR_SECTION_LABEL}>Pinned</span>
-                <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
-                  {pinnedSectionExpanded ? (
-                    <ChevronDown className="h-3.5 w-3.5 text-current" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 text-current" />
-                  )}
-                </span>
-              </button>
-            </div>
-            {pinnedSectionExpanded && (
-              <div className="mt-0.5">
-                {pinnedSessions.map(({ session, label }) => (
-                  <SessionRow
-                    key={`pinned-${session.id}`}
-                    session={session}
-                    isActive={session.id === activeSessionId}
-                    globalIndex={-1}
-                    displayName={label}
-                    onClick={() => handleSessionClick(session.id, 'pinned')}
-                    onArchive={() => handleArchiveSession(session.id)}
-                    onTogglePinned={() => handleTogglePinnedSession(session.id)}
-                    rowLayout={sidebarPaneRowLayout}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
+        <OrchestrationSessionNav
+          availablePaneIds={availablePaneIds}
+          renderPane={renderManagedPane}
+          pinnedPaneRows={pinnedPaneRows}
+          pinnedSectionExpanded={pinnedSectionExpanded}
+          onPinnedSectionExpandedChange={onPinnedSectionExpandedChange}
+        />
 
         <div className={SIDEBAR_SECTION_ROW}>
           <button
@@ -437,6 +493,12 @@ export function ProjectSessionList({
               label: 'Open session on main',
               icon: GitBranch,
               onClick: () => navigateToProject(project.id),
+            },
+            {
+              id: 'project-settings',
+              label: 'Project Settings',
+              icon: Settings,
+              onClick: () => handleOpenProjectSettings(project),
             },
             {
               id: 'delete',
@@ -572,6 +634,19 @@ export function ProjectSessionList({
         isOpen={showAddProjectDialog}
         onClose={() => setShowAddProjectDialog(false)}
       />
+
+      {settingsProject && (
+        <ProjectSettings
+          project={settingsProject}
+          isOpen={showProjectSettings}
+          onClose={() => {
+            setShowProjectSettings(false);
+            setSettingsProject(null);
+          }}
+          onUpdate={handleProjectUpdated}
+          onDelete={handleProjectSettingsDeleted}
+        />
+      )}
     </>
   );
 }
@@ -839,14 +914,28 @@ export function ArchivedSessions() {
   const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<number>>(new Set());
   const [isLoadingArchived, setIsLoadingArchived] = useState(false);
   const [hasLoadedArchived, setHasLoadedArchived] = useState(false);
+  const [orchestrationRestoreError, setOrchestrationRestoreError] = useState<string | null>(null);
 
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
-  const archivedSessionCount = useMemo(
+  const orchestrationSessions = useOrchestrationSessionStore(s => s.sessions);
+  const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
+  const refreshOrchestrationSessions = useOrchestrationSessionStore(s => s.refresh);
+  const updateOrchestrationSession = useOrchestrationSessionStore(s => s.update);
+  const archivedOrchestrationSessions = useMemo(
+    () => orchestrationSessions
+      .filter(session => isArchivedOrchestrationSession(session))
+      .slice()
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [orchestrationSessions],
+  );
+  const archivedPaneCount = useMemo(
     () => archivedProjects.reduce((sum, project) => sum + project.sessions.length, 0),
     [archivedProjects],
   );
+  const archivedSessionCount = archivedPaneCount + archivedOrchestrationSessions.length;
+  const hasLoadedAnyArchived = hasLoadedArchived || orchestrationAvailability === 'ready';
 
   const loadArchivedSessions = useCallback(async () => {
     try {
@@ -869,8 +958,11 @@ export function ArchivedSessions() {
     if (next && !hasLoadedArchived) {
       void loadArchivedSessions();
     }
+    if (next && orchestrationAvailability !== 'unavailable') {
+      void refreshOrchestrationSessions();
+    }
     setShowArchived(next);
-  }, [hasLoadedArchived, loadArchivedSessions, showArchived]);
+  }, [hasLoadedArchived, loadArchivedSessions, orchestrationAvailability, refreshOrchestrationSessions, showArchived]);
 
   const toggleArchivedProject = (id: number) => {
     setExpandedArchivedProjects(prev => {
@@ -887,6 +979,22 @@ export function ArchivedSessions() {
       loadArchivedSessions();
     } catch (e) {
       console.error('Failed to restore session:', e);
+    }
+  };
+
+  const handleRestoreOrchestrationSession = async (sessionId: string) => {
+    setOrchestrationRestoreError(null);
+    try {
+      await updateOrchestrationSession(
+        { sessionId },
+        { archived: false },
+      );
+      // Keep the current chat selected when a historical Session is restored.
+      await refreshOrchestrationSessions();
+    } catch (cause) {
+      setOrchestrationRestoreError(
+        cause instanceof Error ? cause.message : 'Failed to restore Session',
+      );
     }
   };
 
@@ -914,10 +1022,10 @@ export function ArchivedSessions() {
   };
 
   const handlePermanentDeleteAllArchived = async () => {
-    if (archivedSessionCount === 0) return;
+    if (archivedPaneCount === 0) return;
 
     const confirmed = window.confirm(
-      `Permanently delete all ${archivedSessionCount} archived panes?\n\nThis removes them from Pane history and cannot be undone.`,
+      `Permanently delete all ${archivedPaneCount} archived panes?\n\nThis removes them from Pane history and cannot be undone.`,
     );
     if (!confirmed) return;
 
@@ -963,7 +1071,7 @@ export function ArchivedSessions() {
           <Archive className="w-3 h-3 flex-shrink-0" />
           <span>Archived</span>
         </button>
-        {hasLoadedArchived && archivedSessionCount > 0 && (
+        {hasLoadedAnyArchived && archivedPaneCount > 0 && (
           <button
             type="button"
             onClick={handlePermanentDeleteAllArchived}
@@ -974,12 +1082,15 @@ export function ArchivedSessions() {
             <Trash2 className="w-3 h-3" />
           </button>
         )}
-        {hasLoadedArchived && archivedSessionCount > 0 && (
+        {hasLoadedAnyArchived && archivedSessionCount > 0 && (
           <span className="w-8 pr-3 text-right text-[10px] text-text-muted font-normal tabular-nums">
             {archivedSessionCount}
           </span>
         )}
       </div>
+      {orchestrationRestoreError && (
+        <p role="alert" className="mx-4 py-1 text-xs text-status-error">{orchestrationRestoreError}</p>
+      )}
 
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
@@ -989,72 +1100,100 @@ export function ArchivedSessions() {
                 <div key={i} className="h-7 bg-surface-tertiary rounded" />
               ))}
             </div>
-          ) : archivedProjects.length === 0 ? (
+          ) : archivedProjects.length === 0 && archivedOrchestrationSessions.length === 0 ? (
             <div className="px-5 py-3 text-xs text-text-tertiary">
               No archived panes
             </div>
           ) : (
-            archivedProjects.map(project => {
-              const isExpanded = expandedArchivedProjects.has(project.id);
-              return (
-                <div key={`archived-${project.id}`}>
-                  <button
-                    type="button"
-                    onClick={() => toggleArchivedProject(project.id)}
-                    aria-expanded={isExpanded}
-                    aria-controls={`archived-project-${project.id}`}
-                    className="w-full flex items-center gap-2 pl-5 pr-4 py-1.5 text-xs text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="w-3 h-3 flex-shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 flex-shrink-0" />
-                    )}
-                    <span className="truncate">{project.name}</span>
-                    <span className="ml-auto text-text-muted text-[10px]">{project.sessions.length}</span>
-                  </button>
-                  {isExpanded && <div id={`archived-project-${project.id}`}>{project.sessions.map(session => (
+            <>
+              {archivedOrchestrationSessions.length > 0 && (
+                <div data-testid="archived-orchestration-sessions" className="pb-1">
+                  <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Archived Sessions</p>
+                  {archivedOrchestrationSessions.map(session => (
                     <div
-                      key={session.id}
-                      className="group/archived relative flex items-center gap-1 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
+                      key={`archived-orchestration-${session.id}`}
+                      data-testid={`archived-orchestration-session-${session.id}`}
+                      className="group/archived relative flex items-center gap-2 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
                     >
+                      <Archive className="h-3 w-3 flex-shrink-0 text-text-muted" />
+                      <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">
+                        {session.name || 'Untitled'}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => handleSessionClick(session.id)}
-                        aria-label={`Open archived pane ${session.name || 'Untitled'}`}
-                        className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
-                      />
-                      <div className="relative z-10 pointer-events-none flex-1 text-left min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Archive className="w-3 h-3 flex-shrink-0 text-text-muted" />
-                          <span className="text-xs text-text-tertiary truncate">
-                            {session.name || 'Untitled'}
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleRestoreSession(session.id); }}
-                        className="relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-success hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
-                        title={`Restore ${session.name || 'Untitled'}`}
-                        aria-label={`Restore ${session.name || 'Untitled'}`}
+                        onClick={() => void handleRestoreOrchestrationSession(session.id)}
+                        className="relative z-10 flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-status-success transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                        title={`Restore Session ${session.name || 'Untitled'}`}
+                        aria-label={`Restore Session ${session.name || 'Untitled'}`}
                       >
-                        <ArchiveRestore className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handlePermanentDeleteSession(session); }}
-                        className="relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
-                        title={`Permanently delete ${session.name || 'Untitled'}`}
-                        aria-label={`Permanently delete ${session.name || 'Untitled'}`}
-                      >
-                        <Trash2 className="w-3 h-3" />
+                        <ArchiveRestore className="h-3 w-3" />
                       </button>
                     </div>
-                  ))}</div>}
+                  ))}
                 </div>
-              );
-            })
+              )}
+              {archivedProjects.map(project => {
+                const isExpanded = expandedArchivedProjects.has(project.id);
+                return (
+                  <div key={`archived-${project.id}`}>
+                    <button
+                      type="button"
+                      onClick={() => toggleArchivedProject(project.id)}
+                      aria-expanded={isExpanded}
+                      aria-controls={`archived-project-${project.id}`}
+                      className="w-full flex items-center gap-2 pl-5 pr-4 py-1.5 text-xs text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="w-3 h-3 flex-shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-3 h-3 flex-shrink-0" />
+                      )}
+                      <span className="truncate">{project.name}</span>
+                      <span className="ml-auto text-text-muted text-[10px]">{project.sessions.length}</span>
+                    </button>
+                    {isExpanded && <div id={`archived-project-${project.id}`}>{project.sessions.map(session => (
+                      <div
+                        key={session.id}
+                        className="group/archived relative flex items-center gap-1 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleSessionClick(session.id)}
+                          aria-label={`Open archived pane ${session.name || 'Untitled'}`}
+                          className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+                        />
+                        <div className="relative z-10 pointer-events-none flex-1 text-left min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Archive className="w-3 h-3 flex-shrink-0 text-text-muted" />
+                            <span className="text-xs text-text-tertiary truncate">
+                              {session.name || 'Untitled'}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleRestoreSession(session.id); }}
+                          className="relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-success hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                          title={`Restore ${session.name || 'Untitled'}`}
+                          aria-label={`Restore ${session.name || 'Untitled'}`}
+                        >
+                          <ArchiveRestore className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handlePermanentDeleteSession(session); }}
+                          className="relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                          title={`Permanently delete ${session.name || 'Untitled'}`}
+                          aria-label={`Permanently delete ${session.name || 'Untitled'}`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}</div>}
+                  </div>
+                );
+              })}
+            </>
           )}
         </div>
       )}

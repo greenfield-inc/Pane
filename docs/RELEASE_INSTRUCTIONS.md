@@ -123,10 +123,10 @@ GitHub Actions provides `GITHUB_TOKEN` automatically.
 The npm and PyPI packages should publish through trusted publishing:
 
 - npm: configure a trusted publisher for package `runpane` on npmjs.com with
-  repository `dcouple/Pane`, workflow filename `build.yml`, and `npm publish`
+  repository `greenfield-inc/Pane`, workflow filename `build.yml`, and `npm publish`
   permission. The workflow installs npm `11.5.1` or newer for OIDC support.
 - PyPI: configure a trusted publisher for project `runpane` with repository
-  `dcouple/Pane`, workflow filename `build.yml`, and GitHub environment `pypi`.
+  `greenfield-inc/Pane`, workflow filename `build.yml`, and GitHub environment `pypi`.
 
 Fallback token publishing is allowed only for first package reservation or
 manual recovery. Use `NPM_TOKEN` or `PYPI_API_TOKEN` as local environment

@@ -22,6 +22,12 @@ const DOCTOR_DAEMON_TIMEOUT_MS = 5_000;
 const DOCTOR_RELEASE_TIMEOUT_MS = 5_000;
 const REMOTE_LAUNCHER_MARKER = 'pane-remote-daemon-launcher-v2';
 const REMOTE_DAEMON_UNIT = 'pane-remote-daemon.service';
+const PANE_REPO = 'greenfield-inc/Pane';
+const LEGACY_PANE_REPOS = ['dcouple/Pane', 'Dcouple-Inc/Pane'] as const;
+const ISSUE_URL_PATTERN = new RegExp(
+  `^https://github\\.com/(?:${[PANE_REPO, ...LEGACY_PANE_REPOS].join('|')})/issues/\\d+$`,
+  'i',
+);
 
 type ProcessImageStatus = 'current' | 'replaced' | 'deleted' | 'unknown';
 type RestartStatus = 'ready' | 'broken' | 'unknown';
@@ -317,7 +323,7 @@ export function prepareDoctorFailureReport(parsed: ParsedArgs, doctor: DoctorRep
   fs.chmodSync(reportPath, 0o600);
   const sha256 = createHash('sha256').update(redacted.text).digest('hex');
   const proposedCommand = [
-    'gh issue create --repo dcouple/Pane',
+    `gh issue create --repo ${PANE_REPO}`,
     `--title ${shellQuote(title)}`,
     `--body-file ${shellQuote(reportPath)}`,
     '--label bug',
@@ -383,7 +389,7 @@ function readReportEvidence(bodyFile: string): string {
 
 export function fileDoctorFailureReport(prepared: PreparedDoctorReport): void {
   const { title } = prepared;
-  const fallbackUrl = `https://github.com/dcouple/Pane/issues/new?title=${encodeURIComponent(title)}`;
+  const fallbackUrl = `https://github.com/${PANE_REPO}/issues/new?title=${encodeURIComponent(title)}`;
   prepared.fallbackUrl = fallbackUrl;
   const auth = childProcess.spawnSync('gh', ['auth', 'status'], { encoding: 'utf8', timeout: 10_000 });
   if (auth.error || auth.status !== 0) {
@@ -391,12 +397,12 @@ export function fileDoctorFailureReport(prepared: PreparedDoctorReport): void {
     prepared.error = auth.error?.message || auth.stderr?.trim() || 'gh auth status failed';
     return;
   }
-  const baseArgs = ['issue', 'create', '--repo', 'dcouple/Pane', '--title', title, '--body-file', prepared.path];
+  const baseArgs = ['issue', 'create', '--repo', PANE_REPO, '--title', title, '--body-file', prepared.path];
   let created = childProcess.spawnSync('gh', [...baseArgs, '--label', 'bug'], { encoding: 'utf8', timeout: 30_000 });
   if (created.status !== 0 && !created.error && /label|could not add/iu.test(created.stderr ?? '')) {
     created = childProcess.spawnSync('gh', baseArgs, { encoding: 'utf8', timeout: 30_000 });
   }
-  const issueUrl = created.stdout?.trim().split(/\s+/u).find(value => /^https:\/\/github\.com\/dcouple\/Pane\/issues\/\d+$/u.test(value));
+  const issueUrl = created.stdout?.trim().split(/\s+/u).find(value => ISSUE_URL_PATTERN.test(value));
   if (created.error || created.status !== 0 || !issueUrl) {
     prepared.ok = false;
     prepared.error = created.error?.message || created.stderr?.trim() || 'gh issue create did not return an issue URL';

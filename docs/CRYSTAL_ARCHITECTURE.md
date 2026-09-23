@@ -1,8 +1,10 @@
 # Pane Architecture Documentation
 
+The filename is historical (the product was once called Crystal). There is no Express HTTP API; the renderer talks to the main process over Electron IPC, and RunPane talks to the same process over the local daemon socket.
+
 ## Overview
 
-Pane is an Electron desktop application that manages multiple Claude Code instances using git worktrees. This document visualizes the architecture using Mermaid diagrams.
+Pane is an Electron desktop application that manages multiple agent CLI processes (Claude Code, Codex, Cursor, and custom tools) in git worktrees. This document visualizes the architecture using Mermaid diagrams.
 
 ## High-Level Architecture
 
@@ -17,7 +19,7 @@ graph TB
         
         subgraph "Main Process"
             IPC[IPC Handlers]
-            API[Express API Server]
+            Daemon[RunPane Daemon]
             DB[(SQLite Database)]
             Queue[Bull Task Queue]
             Sessions[Session Manager]
@@ -28,33 +30,33 @@ graph TB
         Store <--> IPC
         Terminal <--> IPC
         
-        IPC <--> API
+        IPC <--> Daemon
         IPC <--> Sessions
         IPC <--> Git
         
-        API <--> DB
-        API <--> Queue
+        Daemon <--> DB
+        Daemon <--> Queue
         Sessions <--> DB
         Git <--> DB
     end
     
     subgraph "External Processes"
-        Claude1[Claude Code Instance 1]
-        Claude2[Claude Code Instance 2]
-        Claude3[Claude Code Instance N]
+        Agent1[Agent CLI 1]
+        Agent2[Agent CLI 2]
+        Agent3[Agent CLI N]
         
         Worktree1[Git Worktree 1]
         Worktree2[Git Worktree 2]
         Worktree3[Git Worktree N]
     end
     
-    Sessions --> Claude1
-    Sessions --> Claude2
-    Sessions --> Claude3
+    Sessions --> Agent1
+    Sessions --> Agent2
+    Sessions --> Agent3
     
-    Claude1 --> Worktree1
-    Claude2 --> Worktree2
-    Claude3 --> Worktree3
+    Agent1 --> Worktree1
+    Agent2 --> Worktree2
+    Agent3 --> Worktree3
 ```
 
 ## Component Flow
@@ -72,12 +74,12 @@ flowchart LR
     
     SessionHandler --> DB[(Database)]
     GitHandler --> Git[Git Commands]
-    ConfigHandler --> Store[Electron Store]
+    ConfigHandler --> Store[Config Manager]
     
-    SessionHandler --> Claude[Claude Process]
-    Claude --> Output[Terminal Output]
-    Output --> WS[WebSocket/IPC]
-    WS --> UI
+    SessionHandler --> Agent[Agent Process]
+    Agent --> Output[Terminal Output]
+    Output --> Stream[IPC Stream]
+    Stream --> UI
 ```
 
 ## Database Schema
@@ -155,7 +157,7 @@ erDiagram
 stateDiagram-v2
     [*] --> Created: User creates session
     Created --> Initializing: Start worktree setup
-    Initializing --> Running: Claude Code started
+    Initializing --> Running: Agent CLI started
     Running --> Waiting: Needs user input
     Waiting --> Running: User provides input
     Running --> Completed: Task finished
@@ -176,20 +178,20 @@ sequenceDiagram
     participant IPC as IPC Handler
     participant Main as Main Process
     participant DB as Database
-    participant Claude as Claude Process
+    participant Agent as Agent Process
     
     UI->>IPC: Create Session Request
     IPC->>Main: Validate & Process
     Main->>DB: Store Session Data
     Main->>Main: Create Git Worktree
-    Main->>Claude: Spawn Claude Process
-    Claude-->>Main: Process Started
+    Main->>Agent: Spawn Agent Process
+    Agent-->>Main: Process Started
     Main->>DB: Update Session Status
     Main-->>IPC: Session Created
     IPC-->>UI: Update UI
     
     loop Real-time Output
-        Claude->>Main: Output Data
+        Agent->>Main: Output Data
         Main->>DB: Store Output
         Main->>IPC: Stream Output
         IPC->>UI: Display in Terminal
@@ -227,7 +229,7 @@ graph TD
 
 ```mermaid
 flowchart TD
-    Claude[Claude Process] --> Raw[Raw Output]
+    Agent[Agent Process] --> Raw[Raw Output]
     Raw --> Parse{Parse Output}
     
     Parse -->|JSON Message| Format[Format for Display]
@@ -241,7 +243,7 @@ flowchart TD
     Transform --> Display[Display in Terminal]
     
     subgraph "Real-time Updates"
-        Raw --> Stream[WebSocket Stream]
+        Raw --> Stream[IPC Stream]
         Stream --> LiveDisplay[Live Terminal Update]
     end
 ```
@@ -280,14 +282,14 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Request[API Request] --> Queue{Task Queue}
+    Request[IPC Request] --> Queue{Task Queue}
     
     Queue --> Job1[Session Creation Job]
     Queue --> Job2[Git Operation Job]
     Queue --> Job3[Cleanup Job]
     
     Job1 --> Process1[Create Worktree]
-    Process1 --> Start1[Start Claude]
+    Process1 --> Start1[Start Agent]
     Start1 --> Update1[Update Database]
     
     Job2 --> Process2[Execute Git Command]
@@ -320,7 +322,7 @@ graph TD
         SessionIPC --> SessionManager[SessionManager]
         
         SessionManager --> DB[Database]
-        SessionManager --> ClaudeManager[ClaudeManager]
+        SessionManager --> AgentManager[Terminal / Agent Managers]
         
         GitManager --> DB
         
@@ -361,9 +363,9 @@ flowchart TB
             W2[Worktree 2]
             W3[Worktree N]
             
-            C1[Claude 1]
-            C2[Claude 2]
-            C3[Claude N]
+            C1[Agent 1]
+            C2[Agent 2]
+            C3[Agent N]
         end
     end
     
@@ -417,7 +419,7 @@ flowchart LR
     Queries[DB Queries] --> Index
     
     Changes[Data Changes] --> Targeted
-    Output[Claude Output] --> Stream
+    Output[Agent Output] --> Stream
 ```
 
 This comprehensive set of Mermaid diagrams illustrates the various aspects of Pane's architecture, from high-level component relationships to detailed data flows and module dependencies.

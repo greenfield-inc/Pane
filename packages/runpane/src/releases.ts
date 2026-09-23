@@ -4,7 +4,7 @@ import type { ArtifactFormat } from './commands';
 import type { BoundarySchema } from './boundaryDecoder';
 import { archAliases, defaultFormat, platformParam, type PanePlatform } from './platform';
 
-const GITHUB_API_BASE = 'https://api.github.com/repos/dcouple/Pane/releases';
+const GITHUB_API_BASE = 'https://api.github.com/repos/greenfield-inc/Pane/releases';
 const DOWNLOAD_API_BASE = 'https://runpane.com/api/download';
 
 interface GitHubReleaseAsset {
@@ -68,7 +68,7 @@ export async function resolveRelease(options: ResolveReleaseOptions): Promise<Re
     format,
     preferredDownloadUrl,
     fallbackDownloadUrl: artifact.browser_download_url,
-    checksumUrl: `https://github.com/dcouple/Pane/releases/download/${release.tag_name}/SHA256SUMS.txt`
+    checksumUrl: `https://github.com/greenfield-inc/Pane/releases/download/${release.tag_name}/SHA256SUMS.txt`
   };
 }
 

@@ -15,6 +15,7 @@ import type { Session, SessionUpdate, SessionOutput } from '../types/session';
 import type { DatabaseService } from '../database/database';
 import type { Session as DbSession, CreateSessionData, UpdateSessionData, ConversationMessage, PromptMarker, ExecutionDiff, CreateExecutionDiffData, Project } from '../database/models';
 import { getShellPath } from '../utils/shellPath';
+import { inheritedProcessEnv } from '../utils/inheritedProcessEnv';
 import { TerminalSessionManager } from './terminalSessionManager';
 import type { ToolPanelState, ResumableSession } from '../../../shared/types/panels';
 import { formatForDisplay } from '../utils/timestampUtils';
@@ -1246,7 +1247,7 @@ export class SessionManager extends EventEmitter {
       stdio: 'pipe',
       detached: true, // Create a new process group
       env: {
-        ...process.env,
+        ...inheritedProcessEnv(),
         PATH: shellPath
       }
     });

@@ -1,0 +1,33 @@
+name: pane
+telemetry:
+  enabled: true
+  capture_content: false
+instructions: |
+  Use gh for GitHub tasks.
+
+  Artifacts use the Grain CLI (`grain`, formerly Morph) through the `grain`
+  connection below. Grain is this project's standing artifact destination:
+  organization YA8g3DZBN8j8x0l8Oq7Gb (DCouple), folder "Development Artifacts/DCouple/Pane".
+  Pass the organization and folder explicitly to discovery and creation tools.
+
+  Treat docs=grain as the default for every bundle. tmp/greenfield/ is only the
+  local working copy; a bundle that exists only there is not delivered.
+  Publish bundles to one private Grain artifact per task unless told otherwise.
+  Use multi-file checkout/push, preserve relative paths and bundle.json's published
+  identity, and include evidence/telemetry/. Verify uploads; report failures.
+
+  Export only this work's sessions (descendants are included):
+    agent-farm telemetry export --bundle <dir> --session current
+  Set AGENT_FARM_ARTIFACT_BUNDLE=<absolute-dir> before launching workers.
+  After they exit, the parent exports with --require-finished and republishes
+  the same artifact. A running session is only a snapshot; local export is not upload.
+  Conversation capture/export requires explicit permission.
+
+connections:
+  grain:
+    description: |
+      Grain CLI MCP server (formerly Morph). Manage DCouple artifacts in organization
+      YA8g3DZBN8j8x0l8Oq7Gb; pass it explicitly to discovery and creation tools.
+    type: mcp
+    command: grain
+    args: [mcp]

@@ -255,4 +255,4 @@ run('git push origin HEAD:main', { stdio: 'inherit' });
 run(`git push origin ${tagName}`, { stdio: 'inherit' });
 
 console.log(`\nRelease v${cleanVersion} triggered!`);
-console.log('Watch progress at: https://github.com/dcouple/Pane/actions');
+console.log('Watch progress at: https://github.com/greenfield-inc/Pane/actions');

@@ -1,6 +1,7 @@
 import { basename } from 'path';
 import type { Database } from 'better-sqlite3-multiple-ciphers';
 import {
+  MAX_USAGE_DAY_BUCKETS,
   type UsageBucket,
   type UsageByPane,
   type UsageByPaneReport,
@@ -312,21 +313,38 @@ export class UsageAggregator {
     fromMs: number,
     toMs: number,
     bucket: 'hour' | 'day',
-    providers?: UsageProvider[]
+    providers?: UsageProvider[],
+    dayBoundariesMs?: number[]
   ): UsageBucket[] {
     const bucketMs = bucket === 'hour' ? HOUR_MS : DAY_MS;
     const { clause, params } = this.providerFilter(providers);
 
+    if (dayBoundariesMs && (
+      dayBoundariesMs.length < 2 || dayBoundariesMs.length > MAX_USAGE_DAY_BUCKETS + 1
+      || dayBoundariesMs[0] !== fromMs || dayBoundariesMs[dayBoundariesMs.length - 1] !== toMs + 1
+      || dayBoundariesMs.some((value, index) => !Number.isSafeInteger(value)
+        || (index > 0 && value <= dayBoundariesMs[index - 1]))
+    )) throw new Error('Invalid usage calendar boundaries');
+
+    // Calendar intervals come from the viewer, which may be in a different
+    // timezone from the daemon. Range joins preserve DST and fractional offsets.
+    const calendarCte = dayBoundariesMs ? `WITH calendar AS (
+      SELECT value AS start_ms, LEAD(value) OVER (ORDER BY key) AS end_ms
+      FROM json_each(?)
+    )` : '';
+    const source = dayBoundariesMs
+      ? 'calendar JOIN usage_events ON timestamp_ms >= start_ms AND timestamp_ms < end_ms'
+      : 'usage_events';
+    const bucketStart = dayBoundariesMs ? 'start_ms' : `(timestamp_ms / ${bucketMs}) * ${bucketMs}`;
     // SAFETY: The fixed projection aliases every column required by BucketRow.
     const rows = this.db.prepare(`
-      SELECT
-        (timestamp_ms / ${bucketMs}) * ${bucketMs} AS bucket_start_ms,
-        ${AGGREGATE_COLUMNS}
-      FROM usage_events
+      ${calendarCte}
+      SELECT ${bucketStart} AS bucket_start_ms, ${AGGREGATE_COLUMNS}
+      FROM ${source}
       WHERE timestamp_ms >= ? AND timestamp_ms <= ? ${clause}
       GROUP BY bucket_start_ms, model, provider
       ORDER BY bucket_start_ms ASC
-    `).all(fromMs, toMs, ...params) as BucketRow[];
+    `).all(...(dayBoundariesMs ? [JSON.stringify(dayBoundariesMs)] : []), fromMs, toMs, ...params) as BucketRow[];
 
     const byBucket = new Map<number, TokenRow[]>();
     for (const row of rows) {

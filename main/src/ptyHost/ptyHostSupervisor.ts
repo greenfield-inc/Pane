@@ -602,9 +602,17 @@ export class PtyHostSupervisor extends EventEmitter {
    * the channel (plan gotcha line 323).
    */
   attachWindow(webContents: WebContents): void {
-    // Guard: ignore if we've already attached this window.
-    if (this.windowPorts.has(webContents.id)) {
-      return;
+    // A reload tears down the preload that held the previous renderer port, so
+    // every load needs a fresh channel. Close the stale pair before replacing it.
+    const existing = this.windowPorts.get(webContents.id);
+    if (existing) {
+      existing.mainPort.close();
+    } else {
+      // Clean up on window destroy so the map doesn't retain dead entries.
+      webContents.once('destroyed', () => {
+        this.windowPorts.get(webContents.id)?.mainPort.close();
+        this.windowPorts.delete(webContents.id);
+      });
     }
 
     const { port1: mainPort, port2: rendererPort } = new MessageChannelMain();
@@ -624,12 +632,6 @@ export class PtyHostSupervisor extends EventEmitter {
     // Hand the renderer end to the window. The preload listener for
     // 'ptyHost-port' takes `event.ports[0]` and stores it.
     webContents.postMessage('ptyHost-port', null, [rendererPort]);
-
-    // Clean up on window destroy so the map doesn't retain dead entries.
-    // Both ports become unreferenced and GC closes the channel.
-    webContents.once('destroyed', () => {
-      this.windowPorts.delete(webContents.id);
-    });
 
     console.log(`[ptyHost] attached window webContentsId=${webContents.id}`);
   }

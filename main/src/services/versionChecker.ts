@@ -45,7 +45,7 @@ export class VersionChecker {
       const currentVersion = app.getVersion();
 
       // Fetch latest release from GitHub API
-      const response = await fetch('https://api.github.com/repos/dcouple/Pane/releases/latest');
+      const response = await fetch('https://api.github.com/repos/greenfield-inc/Pane/releases/latest');
       
       if (!response.ok) {
         throw new Error(`GitHub API returned ${response.status}: ${response.statusText}`);

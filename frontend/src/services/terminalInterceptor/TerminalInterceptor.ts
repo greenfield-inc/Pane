@@ -9,6 +9,40 @@ interface TerminalInterceptorOptions {
   onFlush: (data: string) => void;
 }
 
+interface InterceptorInput {
+  data: string | null;
+  key?: number;
+  released?: boolean;
+}
+
+/** Decode only the interceptor's view; callers still forward the original data. */
+function interceptorInput(data: string): InterceptorInput {
+  if (!data.startsWith('\x1b[')) return { data };
+  // Win32 input mode: CSI Vk;Sc;Uc;Kd;Cs;Rc _. xterm emits one record per event.
+  const record = /^\[(\d+);\d+;(\d+);([01]);(\d+);\d+_$/.exec(data.slice(1));
+  if (!record) return { data };
+  const [, virtualKey, unicode, keyDown, controlState] = record;
+  const key = Number(virtualKey);
+  const char = Number(unicode);
+  const modifiers = Number(controlState);
+  // Modifier/lock transitions and key releases are not text or menu actions.
+  if (keyDown === '0') return { data: null, key, released: true };
+  if ([16, 17, 18, 20, 91, 92, 144, 145].includes(key)) return { data: null };
+  if (key === 8 && char === 8) return { data: '\x7f', key };
+  if (char > 0 && char <= 0x10ffff) {
+    const text = String.fromCodePoint(char);
+    // Keep Alt+printable distinct from printable text; Ctrl+Alt may be AltGr.
+    return { data: (modifiers & 3) && !(modifiers & 12) ? `\x1b${text}` : text, key };
+  }
+  const arrow = new Map([[37, 'D'], [38, 'A'], [39, 'C'], [40, 'B']]).get(key);
+  if (arrow) {
+    const modifier = 1 + ((modifiers & 16) ? 1 : 0)
+      + ((modifiers & 3) ? 2 : 0) + ((modifiers & 12) ? 4 : 0);
+    return { data: `\x1b[${modifier === 1 ? '' : `1;${modifier}`}${arrow}`, key };
+  }
+  return { data, key };
+}
+
 export class TerminalInterceptor {
   private handlers: Map<string, InterceptHandler> = new Map();
   private active: boolean = false;
@@ -16,6 +50,7 @@ export class TerminalInterceptor {
   private activeTrigger: string | null = null;
   private buffer: string = ''; // printable chars only (trigger + filter text) — flushed on cancel
   private filterBuffer: string = ''; // just the filter text (after trigger)
+  private consumedWin32Keys = new Set<number>();
 
   private readonly _onStateChange: (state: InterceptorState) => void;
   private readonly _onFlush: (data: string) => void;
@@ -29,7 +64,21 @@ export class TerminalInterceptor {
     this.handlers.set(trigger, handler);
   }
 
-  handleInput(data: string): InterceptResult {
+  handleInput(rawData: string): InterceptResult {
+    const { data, key, released } = interceptorInput(rawData);
+    if (released && key !== undefined) {
+      return { consumed: this.consumedWin32Keys.delete(key) };
+    }
+    if (data === null) return { consumed: false };
+    const result = this.handleTextInput(data);
+    if (key !== undefined) {
+      if (result.consumed) this.consumedWin32Keys.add(key);
+      else this.consumedWin32Keys.delete(key);
+    }
+    return result;
+  }
+
+  private handleTextInput(data: string): InterceptResult {
     if (!this.active) {
       const handler = this.handlers.get(data);
       if (handler === undefined) {
@@ -147,5 +196,6 @@ export class TerminalInterceptor {
       this.deactivate();
     }
     this.handlers.clear();
+    this.consumedWin32Keys.clear();
   }
 }

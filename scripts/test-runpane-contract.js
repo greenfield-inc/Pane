@@ -37,7 +37,7 @@ const artifactRelease = {
   tag_name: 'v2.2.8',
   name: 'v2.2.8',
   body: '',
-  html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.2.8',
+  html_url: 'https://github.com/greenfield-inc/Pane/releases/tag/v2.2.8',
   published_at: '2026-01-01T00:00:00Z',
   prerelease: false,
   draft: false,
@@ -76,7 +76,7 @@ const platformEdgeRelease = {
   tag_name: 'v2.2.8',
   name: 'v2.2.8',
   body: '',
-  html_url: 'https://github.com/dcouple/Pane/releases/tag/v2.2.8',
+  html_url: 'https://github.com/greenfield-inc/Pane/releases/tag/v2.2.8',
   published_at: '2026-01-01T00:00:00Z',
   prerelease: false,
   draft: false,
@@ -240,6 +240,13 @@ function watchResult(generation) {
   };
 }
 
+function isExpectedClientDisconnect(error, socket) {
+  if (error === null || error === undefined) return false;
+  if (error.code === 'EPIPE' && error.syscall === 'write') return true;
+  if (error.code === 'ECONNRESET' && error.syscall === 'read') return true;
+  return error.code === 'ERR_STREAM_DESTROYED' && socket.destroyed;
+}
+
 async function withFakeDaemon(paneDir, onRequest, action) {
   const { getPaneDaemonEndpoint } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const endpoint = getPaneDaemonEndpoint(paneDir);
@@ -247,8 +254,22 @@ async function withFakeDaemon(paneDir, onRequest, action) {
     fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
     fs.rmSync(endpoint.path, { force: true });
   }
+  const pendingResponseTimers = new Map();
+  const unexpectedSocketErrors = [];
+  const rememberSocketError = (error, socket) => {
+    if (isExpectedClientDisconnect(error, socket)) return;
+    unexpectedSocketErrors.push(error);
+  };
+  const clearResponseTimers = (socket) => {
+    const timers = pendingResponseTimers.get(socket);
+    if (!timers) return;
+    for (const timer of timers) clearTimeout(timer);
+    pendingResponseTimers.delete(socket);
+  };
   const server = net.createServer((socket) => {
     let buffer = '';
+    socket.on('error', (error) => rememberSocketError(error, socket));
+    socket.once('close', () => clearResponseTimers(socket));
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       while (buffer.includes('\n')) {
@@ -263,11 +284,19 @@ async function withFakeDaemon(paneDir, onRequest, action) {
           socket.destroy();
           continue;
         }
-        setTimeout(() => {
+        const timer = setTimeout(() => {
+          const timers = pendingResponseTimers.get(socket);
+          timers?.delete(timer);
+          if (timers?.size === 0) pendingResponseTimers.delete(socket);
           if (!socket.destroyed) {
-            socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result: response.result })}\n`);
+            socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result: response.result })}\n`, (error) => {
+              if (error) rememberSocketError(error, socket);
+            });
           }
         }, response.delayMs || 0);
+        const timers = pendingResponseTimers.get(socket) ?? new Set();
+        timers.add(timer);
+        pendingResponseTimers.set(socket, timers);
       }
     });
   });
@@ -275,15 +304,28 @@ async function withFakeDaemon(paneDir, onRequest, action) {
     server.once('error', reject);
     server.listen(endpoint.path, resolve);
   });
+  let actionResult;
+  let actionError;
+  let actionFailed = false;
   try {
-    return await action();
+    actionResult = await action();
+  } catch (error) {
+    actionFailed = true;
+    actionError = error;
   } finally {
+    for (const timers of pendingResponseTimers.values()) {
+      for (const timer of timers) clearTimeout(timer);
+    }
+    pendingResponseTimers.clear();
     await new Promise((resolve) => server.close(resolve));
     if (endpoint.transport === 'unix') {
       fs.rmSync(endpoint.path, { force: true });
       fs.rmSync(path.dirname(endpoint.path), { recursive: true, force: true });
     }
   }
+  if (actionFailed) throw actionError;
+  if (unexpectedSocketErrors.length > 0) throw unexpectedSocketErrors[0];
+  return actionResult;
 }
 
 function runWatchCli(runtime, args, paneDir, until, timeoutMs = 8_000) {
@@ -2163,6 +2205,8 @@ function compareAgentContextParity() {
   assert.ok(managedBlock.includes('Do not hardcode a specific assistant brand'));
   assert.ok(managedBlock.includes('Pane agent or custom tool command the user selected'));
   assert.ok(managedBlock.includes('do not clone/install the repo unless the user asks'));
+  assert.ok(managedBlock.includes('runpane watch --follow'));
+  assert.ok(managedBlock.includes('For ongoing supervision'));
 
   const nodeDottedDetail = JSON.parse(runNode(['agent-context', '--command', 'panes.create', '--json']));
   const pyDottedDetail = JSON.parse(runPython(['agent-context', '--command', 'panes.create', '--json']));
@@ -2310,7 +2354,7 @@ print(json.dumps(prepare_doctor_failure_report(parsed, request["doctor"])))
         fs.appendFileSync(ghLog, `${commandArgs.join('\n')}\n--call--\n`);
         return {
           status: 0,
-          stdout: commandArgs[0] === 'auth' ? '' : 'https://github.com/dcouple/Pane/issues/999\n',
+          stdout: commandArgs[0] === 'auth' ? '' : 'https://github.com/greenfield-inc/Pane/issues/999\n',
           stderr: '',
         };
       };
@@ -2324,7 +2368,7 @@ print(json.dumps(prepare_doctor_failure_report(parsed, request["doctor"])))
         'printf "%s\\n" "$@" >> "$RUNPANE_GH_LOG"',
         'printf "%s\\n" "--call--" >> "$RUNPANE_GH_LOG"',
         '[ "$1" = "auth" ] && exit 0',
-        'printf "%s\\n" "https://github.com/dcouple/Pane/issues/999"',
+        'printf "%s\\n" "https://github.com/greenfield-inc/Pane/issues/999"',
       ].join('\n'), { mode: 0o755 });
     }
 
@@ -2334,7 +2378,7 @@ print(json.dumps(prepare_doctor_failure_report(parsed, request["doctor"])))
     try {
       doctor.fileDoctorFailureReport(first);
       assert.strictEqual(first.filed, true);
-      assert.strictEqual(first.issueUrl, 'https://github.com/dcouple/Pane/issues/999');
+      assert.strictEqual(first.issueUrl, 'https://github.com/greenfield-inc/Pane/issues/999');
       const log = fs.readFileSync(ghLog, 'utf8');
       const calls = log.split(/--call--\r?\n/u).map(call => call.trim().split(/\r?\n/u)).filter(call => call[0]);
       assert.deepStrictEqual(calls[0], ['auth', 'status']);
@@ -2357,7 +2401,7 @@ def fake_run(args, **_kwargs):
         log.write("\\n".join(args[1:]) + "\\n--call--\\n")
     return SimpleNamespace(
         returncode=0,
-        stdout="" if args[1] == "auth" else "https://github.com/dcouple/Pane/issues/999\\n",
+        stdout="" if args[1] == "auth" else "https://github.com/greenfield-inc/Pane/issues/999\\n",
         stderr="",
     )
 
@@ -2374,7 +2418,7 @@ file_doctor_failure_report(prepared)
 print(json.dumps(prepared))
 `, JSON.stringify(pythonPrepared)));
       assert.strictEqual(pythonFiled.filed, true);
-      assert.strictEqual(pythonFiled.issueUrl, 'https://github.com/dcouple/Pane/issues/999');
+      assert.strictEqual(pythonFiled.issueUrl, 'https://github.com/greenfield-inc/Pane/issues/999');
       const pythonLog = fs.readFileSync(ghLog, 'utf8');
       const pythonCalls = pythonLog.split(/--call--\r?\n/u).map(call => call.trim().split(/\r?\n/u)).filter(call => call[0]);
       assert.deepStrictEqual(pythonCalls[0], ['auth', 'status']);

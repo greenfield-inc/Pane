@@ -155,7 +155,7 @@ export class UsageManager {
 
     return {
       totals: this.aggregator.getTotals(fromMs, toMs, providers),
-      series: this.aggregator.getSeries(fromMs, toMs, bucket, providers),
+      series: this.aggregator.getSeries(fromMs, toMs, bucket, providers, request?.dayBoundariesMs),
       byModel: this.aggregator.getByModel(fromMs, toMs, providers),
       byProject: this.aggregator.getByProject(fromMs, toMs, providers),
       byPane: this.aggregator.getByPane(fromMs, toMs, providers),

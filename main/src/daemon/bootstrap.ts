@@ -20,6 +20,7 @@ import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
 import { PaneChatManager } from '../services/paneChatManager';
+import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { PaneDaemonServer } from './server';
@@ -204,6 +205,19 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   await paneChatManager.getOrCreate().catch(error => {
     logger.warn('[PaneChat] Failed to ensure startup Pane Chat session', error instanceof Error ? error : undefined);
   });
+  const orchestrationSessionManager = new OrchestrationSessionManager(
+    configManager,
+    sessionManager,
+    skillCacheManager,
+    paneChatManager,
+    gitStatusManager,
+  );
+  await orchestrationSessionManager.initialize().catch(error => {
+    // Keep the rest of Pane available when a previously-written Session store
+    // cannot be read. Session APIs retry and return the exact failure instead
+    // of silently replacing the user's metadata.
+    logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
+  });
   const taskQueue = new TaskQueue({
     sessionManager,
     worktreeManager,
@@ -279,6 +293,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     versionChecker,
     skillCacheManager,
     paneChatManager,
+    orchestrationSessionManager,
     taskQueue,
     getMainWindow: options.getMainWindow,
     logger,

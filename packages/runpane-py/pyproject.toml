@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "runpane"
-version = "2.4.106"
+version = "2.4.115"
 description = "Thin PyPI installer and remote setup CLI for Pane"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -23,8 +23,8 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://runpane.com"
-Repository = "https://github.com/dcouple/Pane"
-Issues = "https://github.com/dcouple/Pane/issues"
+Repository = "https://github.com/greenfield-inc/Pane"
+Issues = "https://github.com/greenfield-inc/Pane/issues"
 
 [project.scripts]
 runpane = "runpane.cli:main"

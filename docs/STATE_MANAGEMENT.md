@@ -6,6 +6,8 @@
 
 Pane uses a combination of Zustand stores, IPC events, and targeted updates to manage application state efficiently. The application prioritizes specific, targeted updates over global refreshes to improve performance and user experience.
 
+Session and project lists live in Zustand (`frontend/src/stores/sessionStore.ts` and related stores). Do not keep a parallel `projectsWithSessions` array in a tree component; `DraggableProjectTreeView` was removed.
+
 ## Key Principles
 
 1. **Targeted Updates**: Always update only the specific data that changed
@@ -20,24 +22,16 @@ Pane uses a combination of Zustand stores, IPC events, and targeted updates to m
 ```typescript
 // ❌ BAD: Global refresh
 const handleSessionCreated = () => {
-  loadProjectsWithSessions(); // Reloads everything
+  void loadSessions(); // Reloads everything
 };
 
-// ✅ GOOD: Targeted update
+// ✅ GOOD: Targeted store update
 const handleSessionCreated = (newSession: Session) => {
-  setProjectsWithSessions(prevProjects => {
-    return prevProjects.map(project => {
-      if (project.id === newSession.projectId) {
-        return {
-          ...project,
-          sessions: [...project.sessions, newSession]
-        };
-      }
-      return project;
-    });
-  });
+  useSessionStore.getState().addSession(newSession);
 };
 ```
+
+IPC handlers in `useIPCEvents` already call `addSession` / `updateSession` / `deleteSession` on the store. Subscribe with selectors (`useSessionStore(s => s.sessions)`) instead of copying the list into local React state.
 
 ### Project Updates
 
@@ -78,20 +72,15 @@ The application uses IPC events to synchronize state between the main process an
 
 ## Implementation Examples
 
-### DraggableProjectTreeView.tsx
+### ProjectSessionList.tsx
 
-- Uses targeted updates for session creation, update, and deletion
-- Only reloads all data on initial mount or when critical errors occur
-- Maintains local state synchronized with backend through IPC events
-
-### ProjectSelector.tsx
-
-- Updates project list locally when projects are deleted
-- Falls back to refresh only when necessary (e.g., complex updates)
+- Reads sessions from Zustand `sessionStore`
+- IPC events patch the store; the tree re-renders from selectors
+- Avoids a local `projectsWithSessions` array that new-references on every status tick
 
 ## Best Practices
 
-1. **Use State Setters with Callbacks**: Always use the callback form of setState to ensure you're working with the latest state
+1. **Use Store Actions**: Call `useSessionStore.getState().addSession(...)` (or the matching action) from IPC handlers so every subscriber sees one update
 2. **Merge Updates**: When updating objects, spread existing properties to preserve data
 3. **Handle Edge Cases**: Always check if the item exists before updating
 4. **Log State Changes**: Add console logs for debugging state updates in development

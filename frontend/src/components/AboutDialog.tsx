@@ -224,7 +224,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
           {/* Links - minimal style */}
           <div className="flex items-center justify-center gap-4 text-xs text-text-tertiary">
             <a
-              href="https://github.com/dcouple/Pane"
+              href="https://github.com/greenfield-inc/Pane"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 hover:text-text-secondary transition-colors"

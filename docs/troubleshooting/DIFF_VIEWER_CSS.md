@@ -14,9 +14,9 @@ If the diff viewer content is cut off and scrollbars don't appear:
 ## The Solution That Works
 
 ```tsx
-// In CombinedDiffView.tsx - the panel is a flex column and ChangesTree owns scrolling.
+// In CombinedDiffView.tsx - the panel is a flex column and ChangesList owns scrolling.
 <div className="diff-panel flex min-w-0 flex-1 flex-col overflow-hidden">
-  <ChangesTree manifest={manifest} {...treeProps} />
+  <ChangesList rows={rows} {...listProps} />
 </div>
 ```
 
@@ -32,7 +32,7 @@ If the diff viewer content is cut off and scrollbars don't appear:
 The issue is typically caused by parent containers having `overflow-hidden` which prevents child scrollbars from appearing. Check these files:
 
 - `SessionView.tsx` - Look for `overflow-hidden` classes
-- `CombinedDiffView.tsx` - Check the manifest/tree host and its flex containers
+- `CombinedDiffView.tsx` - Check the manifest/list host and its flex containers
 - `App.tsx` - Sometimes the issue starts at the app root level
 
 The react-diff-viewer-continued library uses emotion/styled-components internally, which makes CSS overrides unreliable. The best approach is to ensure proper overflow handling in parent containers and keep the diff viewer wrapper simple.

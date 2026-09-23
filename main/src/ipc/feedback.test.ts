@@ -40,7 +40,7 @@ describe('feedback IPC', () => {
       if (args[0] === 'issue') {
         const bodyPath = args[args.indexOf('--body-file') + 1];
         bodyFromFile = await readFile(bodyPath, 'utf8');
-        return { stdout: 'https://github.com/dcouple/Pane/issues/999\n', stderr: '' };
+        return { stdout: 'https://github.com/greenfield-inc/Pane/issues/999\n', stderr: '' };
       }
       return { stdout: '', stderr: '' };
     });
@@ -49,7 +49,7 @@ describe('feedback IPC', () => {
 
     expect(result).toEqual({
       success: true,
-      data: { issueUrl: 'https://github.com/dcouple/Pane/issues/999' },
+      data: { issueUrl: 'https://github.com/greenfield-inc/Pane/issues/999' },
     });
     expect(bodyFromFile).toContain(request.body);
     expect(bodyFromFile).toContain('## App details');
@@ -93,7 +93,7 @@ describe('feedback IPC', () => {
       if (args[0] === 'issue') {
         expect(args).toContain('bug');
         expect(args).not.toContain('feedback');
-        return { stdout: 'https://github.com/dcouple/Pane/issues/1000', stderr: '' };
+        return { stdout: 'https://github.com/greenfield-inc/Pane/issues/1000', stderr: '' };
       }
       return { stdout: '', stderr: '' };
     });
@@ -111,7 +111,7 @@ describe('feedback IPC', () => {
         throw commandError('could not add label: feedback', { stderr: 'label not found' });
       }
       expect(args).not.toContain('--label');
-      return { stdout: 'https://github.com/dcouple/Pane/issues/1001', stderr: '' };
+      return { stdout: 'https://github.com/greenfield-inc/Pane/issues/1001', stderr: '' };
     });
 
     const result = await submitFeedbackIssue(request, runtime, runner);
@@ -122,9 +122,43 @@ describe('feedback IPC', () => {
 
   it('builds a stable prefilled GitHub URL', () => {
     const url = new URL(buildFeedbackFallbackUrl('A title', 'A body', 'enhancement'));
-    expect(url.origin + url.pathname).toBe('https://github.com/dcouple/Pane/issues/new');
+    expect(url.origin + url.pathname).toBe('https://github.com/greenfield-inc/Pane/issues/new');
     expect(url.searchParams.get('title')).toBe('A title');
     expect(url.searchParams.get('body')).toBe('A body');
     expect(url.searchParams.get('labels')).toBe('enhancement');
+  });
+
+  it.each([
+    'https://github.com/dcouple/Pane/issues/1002',
+    'https://github.com/Dcouple-Inc/Pane/issues/1003',
+  ])('accepts intentional legacy issue URLs returned by gh: %s', async (issueUrl) => {
+    const runner = vi.fn<FeedbackCommandRunner>(async (_command, args) => {
+      if (args[0] === 'issue') return { stdout: `${issueUrl}\n`, stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+
+    await expect(submitFeedbackIssue(request, runtime, runner)).resolves.toEqual({
+      success: true,
+      data: { issueUrl },
+    });
+  });
+
+  it.each([
+    'https://evil.example/greenfield-inc/Pane/issues/1004',
+    'https://github.com/greenfield-inc/Other/issues/1005',
+    'https://github.com/greenfield-inc/Pane/issues/1006?redirect=https://evil.example',
+  ])('rejects unsafe issue URLs returned by gh: %s', async (issueUrl) => {
+    const runner = vi.fn<FeedbackCommandRunner>(async (_command, args) => {
+      if (args[0] === 'issue') return { stdout: `${issueUrl}\n`, stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+
+    const result = await submitFeedbackIssue(request, runtime, runner);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain('did not return its URL');
+      expect(new URL(result.data.fallbackUrl).hostname).toBe('github.com');
+    }
   });
 });

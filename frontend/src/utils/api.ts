@@ -4,6 +4,16 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type {
+  OrchestrationAssociationInput,
+  OrchestrationSessionCreateInput,
+  OrchestrationSessionListResult,
+  OrchestrationSessionOverview,
+  OrchestrationSessionRecord,
+  OrchestrationSessionSelector,
+  OrchestrationSessionUpdateInput,
+  OrchestrationSessionView,
+} from '../../../shared/types/orchestrationSession';
 import type { UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type {
@@ -65,6 +75,45 @@ export class API {
     async setAgent(agent: PaneChatAgent): Promise<IPCResponse<PaneChatState<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.paneChat.setAgent(agent);
+    },
+  };
+
+  static orchestrationSessions = {
+    async list(): Promise<IPCResponse<OrchestrationSessionListResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.list();
+    },
+    async select(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionListResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.select(selector);
+    },
+    async create(input: OrchestrationSessionCreateInput): Promise<IPCResponse<OrchestrationSessionView<Session>>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.create(input);
+    },
+    async get(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionView<Session>>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.get(selector);
+    },
+    async update(selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse<OrchestrationSessionRecord>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.update(selector, input);
+    },
+    async setAgent(selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse<OrchestrationSessionView<Session>>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.setAgent(selector, agent);
+    },
+    async associate(selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse<OrchestrationSessionRecord>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.associate(selector, association);
+    },
+    async detach(selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse<OrchestrationSessionRecord>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.detach(selector, paneId);
+    },
+    async overview(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionOverview>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.overview(selector);
     },
   };
 

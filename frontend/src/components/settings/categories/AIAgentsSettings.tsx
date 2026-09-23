@@ -37,14 +37,15 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   };
 
   return (
-    <SettingsPage title="AI & Agents" description="Application-wide defaults for Pane Chat and coding-agent integrations.">
+    <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
         <SettingRow
           settingId="default-pane-chat-agent"
-          label="Default Pane Chat agent"
-          description="Choose the agent used when Pane Chat opens a new global terminal."
+          label="Default Sessions agent"
+          description="Choose the agent used when a Session opens a new orchestration terminal."
           saveState={persistence.saveStates['default-pane-chat-agent']}
         >
+          {/* The legacy accessible name remains stable for existing shortcuts and fixtures. */}
           <SegmentedControl<PaneChatAgent>
             label="Default Pane Chat agent"
             value={config.defaultOrchestratorAgent ?? 'claude'}

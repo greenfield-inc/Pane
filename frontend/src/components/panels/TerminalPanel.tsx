@@ -991,7 +991,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Without it that addon throws on load and the terminal silently
           // falls back to Unicode 6 cell widths.
           allowProposedApi: true,
-          vtExtensions: { kittyKeyboard: kittyKeyboardEnabledRef.current },
+          // Honor ConPTY's CSI ? 9001 h request. In particular, Windows programs
+          // launched through WSL need key records, not literal VT characters.
+          vtExtensions: {
+            kittyKeyboard: kittyKeyboardEnabledRef.current,
+            win32InputMode: true,
+          },
           scrollOnUserInput: true,
           scrollSensitivity: 1,
           altClickMovesCursor: true,

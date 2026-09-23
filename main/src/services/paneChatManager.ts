@@ -114,13 +114,15 @@ export class PaneChatManager {
     const existingPanel = panelManager.getPanel(panelId);
     if (existingPanel) {
       const existingAgent = this.resolvePanelAgent(existingPanel) ?? agent;
-      const needsRepair = existingAgent !== agent || this.needsLaunchStateRepair(existingPanel, existingAgent);
-      if (needsRepair && terminalPanelManager.isTerminalInitialized(existingPanel.id)) {
+      const isInitialized = terminalPanelManager.isTerminalInitialized(existingPanel.id);
+      const needsAgentSwitch = existingAgent !== agent;
+      const needsRepair = needsAgentSwitch || (!isInitialized && this.needsLaunchStateRepair(existingPanel, existingAgent));
+      if (needsAgentSwitch && isInitialized) {
         await terminalPanelManager.destroyTerminal(existingPanel.id);
       }
 
-      if (!terminalPanelManager.isTerminalInitialized(existingPanel.id) || needsRepair) {
-        await this.updatePanelLaunchState(existingPanel, agent, guidePath);
+      if (!isInitialized || needsRepair) {
+        await this.updatePanelLaunchState(existingPanel, agent, guidePath, isInitialized && !needsAgentSwitch);
       }
       return panelManager.getPanel(panelId) ?? existingPanel;
     }
@@ -137,33 +139,22 @@ export class PaneChatManager {
     });
   }
 
-  private async updatePanelLaunchState(panel: ToolPanel, agent: PaneChatAgent, guidePath: string): Promise<void> {
+  private async updatePanelLaunchState(panel: ToolPanel, agent: PaneChatAgent, guidePath: string, wasInitialized: boolean): Promise<void> {
     // SAFETY: Pane Chat owns this terminal panel and writes its custom state exclusively as TerminalPanelState.
     const previousCustomState = panel.state.customState as TerminalPanelState | undefined;
-    const shouldRefreshBootstrap = this.needsBootstrapRefresh(previousCustomState);
-    const shouldResetClaudeLaunch = agent === 'claude' && (
-      shouldRefreshBootstrap ||
-      !isValidUuid(previousCustomState?.agentSessionId) ||
-      (previousCustomState?.hasClaudeSessionId === true && !previousCustomState.initialInputSentAt)
-    );
-    const shouldResetLaunchState = shouldRefreshBootstrap || shouldResetClaudeLaunch;
+    const shouldResetClaudeLaunch = agent === 'claude' && !isValidUuid(previousCustomState?.agentSessionId) && !wasInitialized;
+    // Bootstrap metadata may change after an app upgrade. An initialized panel
+    // already owns a live conversation, so refreshing the launch metadata must
+    // never clear its durable scrollback, serialized buffer, or captured agent id.
     const nextCustomState: TerminalPanelState = {
       ...previousCustomState,
       ...this.buildTerminalState(agent, guidePath, previousCustomState, shouldResetClaudeLaunch),
-      initialInputSentAt: undefined,
-      initialInputError: undefined,
+      initialInputSentAt: wasInitialized ? previousCustomState?.initialInputSentAt : undefined,
+      initialInputError: wasInitialized ? previousCustomState?.initialInputError : undefined,
     };
 
-    if (shouldResetClaudeLaunch) {
+    if (shouldResetClaudeLaunch && !wasInitialized) {
       nextCustomState.hasClaudeSessionId = undefined;
-    }
-
-    if (shouldResetLaunchState) {
-      nextCustomState.wasInterrupted = undefined;
-      nextCustomState.scrollbackBuffer = '';
-      nextCustomState.alternateScreenBuffer = '';
-      nextCustomState.serializedBuffer = undefined;
-      nextCustomState.isInitialized = false;
     }
 
     const nextState = {

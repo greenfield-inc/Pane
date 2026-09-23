@@ -150,6 +150,21 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
   };
 }
 
+describe('TerminalPanelManager keyboard input', () => {
+  it.each([
+    '\x1b[1;3A', '\x1b[1;2D', '\x1b[1;2A', '\x1b[17~',
+    '\x1b[38;72;0;1;258;1_', '\x1b[37;75;0;1;272;1_',
+    '\x1b[38;72;0;1;272;1_', '\x1b[117;64;0;1;0;1_',
+  ])('writes each complete input message exactly once: %j', (data) => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal();
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+    manager.writeToTerminal(terminal.panelId, data);
+    expect(terminal.pty.write.mock.calls).toEqual([[data]]);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+});
+
 describe('TerminalPanelManager terminal resize', () => {
   afterEach(() => {
     vi.mocked(panelManager.getPanel).mockReset();

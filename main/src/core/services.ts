@@ -14,6 +14,7 @@ import type { Logger } from '../utils/logger';
 import type { ArchiveProgressManager } from '../services/archiveProgressManager';
 import type { SkillCacheManager } from '../services/skillCacheManager';
 import type { PaneChatManager } from '../services/paneChatManager';
+import type { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 
 /**
  * Daemon-neutral service graph. Electron-only dependencies are intentionally
@@ -36,4 +37,5 @@ export interface CoreServices {
   archiveProgressManager?: ArchiveProgressManager;
   skillCacheManager?: SkillCacheManager;
   paneChatManager?: PaneChatManager;
+  orchestrationSessionManager?: OrchestrationSessionManager;
 }

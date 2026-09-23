@@ -10,6 +10,7 @@ import * as os from 'os';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { getGitAttributionEnv } from '../utils/attribution';
+import { inheritedProcessEnv } from '../utils/inheritedProcessEnv';
 
 /**
  * IPty-compatible shim over a ptyHost `PtyHandle`.
@@ -154,7 +155,7 @@ export class RunCommandManager extends EventEmitter {
             const isLinux = process.platform === 'linux';
             const shellPath = isLinux ? (process.env.PATH || '') : getShellPath();
             const env = {
-              ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+              ...inheritedProcessEnv(),
               ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
               WORKTREE_PATH: worktreePath,
               PATH: shellPath

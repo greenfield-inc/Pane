@@ -392,6 +392,91 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelWaitResult"
       ]
+    },
+    {
+      "name": "sessions list",
+      "summary": "List durable named orchestration Sessions.",
+      "usage": [
+        "runpane sessions list [--json] [--pane-dir <path>]"
+      ],
+      "jsonSchemas": [
+        "sessionListResult"
+      ]
+    },
+    {
+      "name": "sessions create",
+      "summary": "Create a durable named orchestration Session and its hidden terminal owner.",
+      "usage": [
+        "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "sessionResult"
+      ]
+    },
+    {
+      "name": "sessions get",
+      "summary": "Read one durable named orchestration Session.",
+      "usage": [
+        "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]"
+      ],
+      "jsonSchemas": [
+        "sessionResult"
+      ]
+    },
+    {
+      "name": "sessions update",
+      "summary": "Update a Session overview from structured JSON.",
+      "usage": [
+        "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "sessionResult"
+      ]
+    },
+    {
+      "name": "sessions set-agent",
+      "summary": "Switch the durable terminal agent for a named Session.",
+      "usage": [
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "sessionResult"
+      ]
+    },
+    {
+      "name": "sessions associate",
+      "summary": "Associate a user-visible Pane with a named Session.",
+      "usage": [
+        "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "sessionResult"
+      ]
+    },
+    {
+      "name": "sessions detach",
+      "summary": "Detach a Pane from a named Session.",
+      "usage": [
+        "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "sessionResult"
+      ]
+    },
+    {
+      "name": "sessions overview",
+      "summary": "Read a live status, activity, git, and pull request overview for a named Session.",
+      "usage": [
+        "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]"
+      ],
+      "jsonSchemas": [
+        "sessionOverviewResult"
+      ]
     }
   ],
   "flags": {
@@ -565,7 +650,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--from-json",
         "value": "<path|->",
-        "description": "Read a full panes.create request JSON payload from a file or stdin."
+        "description": "Read a structured JSON request payload from a file or stdin."
       },
       {
         "name": "--timeout-ms",
@@ -686,6 +771,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--body-file",
         "value": "<path|->",
         "description": "Read diagnostic report evidence from a file or stdin."
+      },
+      {
+        "name": "--session",
+        "value": "<id|name>",
+        "description": "Named orchestration Session id or exact name."
       }
     ],
     "localBoolean": [
@@ -779,6 +869,14 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane sessions list [--json] [--pane-dir <path>]",
+        "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+        "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
+        "  runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+        "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+        "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
+        "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "  runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -895,7 +993,7 @@ export const RUNPANE_CONTRACT = {
         "  --report                       Prepare a redacted, inspectable report",
         "  --body-file <path|->           Read report evidence from a file or stdin",
         "  --title <text>                 Report title",
-        "  --yes                          Confirm creating one dcouple/Pane issue",
+        "  --yes                          Confirm creating one greenfield-inc/Pane issue",
         "",
         "Agent discovery:",
         "  runpane doctor --json",
@@ -1284,6 +1382,100 @@ export const RUNPANE_CONTRACT = {
         "  --strategy <strategy>         Defaults to auto; Codex sends Ctrl+Enter and other panels send Enter.",
         "  --yes                         Skip confirmation prompts.",
         "  --json                        Print JSON output."
+      ],
+      "sessions list": [
+        "Usage:",
+        "runpane sessions list [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions create": [
+        "Usage:",
+        "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions get": [
+        "Usage:",
+        "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions update": [
+        "Usage:",
+        "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions set-agent": [
+        "Usage:",
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions associate": [
+        "Usage:",
+        "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions detach": [
+        "Usage:",
+        "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions overview": [
+        "Usage:",
+        "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions": [
+        "Usage:",
+        "  runpane sessions <list|create|get|update|set-agent|associate|detach|overview> [options]",
+        "",
+        "Use a named Session to keep context, activity, and evidence attached to one orchestration thread."
       ]
     },
     "pip": {
@@ -1795,6 +1987,100 @@ export const RUNPANE_CONTRACT = {
         "  --strategy <strategy>         Defaults to auto; Codex sends Ctrl+Enter and other panels send Enter.",
         "  --yes                         Skip confirmation prompts.",
         "  --json                        Print JSON output."
+      ],
+      "sessions list": [
+        "Usage:",
+        "python -m runpane sessions list [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions create": [
+        "Usage:",
+        "python -m runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions get": [
+        "Usage:",
+        "python -m runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions update": [
+        "Usage:",
+        "python -m runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions set-agent": [
+        "Usage:",
+        "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions associate": [
+        "Usage:",
+        "python -m runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions detach": [
+        "Usage:",
+        "python -m runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions overview": [
+        "Usage:",
+        "python -m runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --session <id|name>         Named Session id or exact name.",
+        "  --from-json <path|->         Read structured JSON from a file or stdin.",
+        "  --pane <pane-id>             User-visible Pane to associate or detach.",
+        "  --agent <codex|claude|cursor>  Agent terminal to use.",
+        "  --json                       Print JSON output."
+      ],
+      "sessions": [
+        "Usage:",
+        "  runpane sessions <list|create|get|update|set-agent|associate|detach|overview> [options]",
+        "",
+        "Use a named Session to keep context, activity, and evidence attached to one orchestration thread."
       ]
     }
   },
@@ -1878,6 +2164,14 @@ export const RUNPANE_CONTRACT = {
       "runpane watch --self-test",
       "runpane watch --follow",
       "runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
+      "runpane sessions list [--json] [--pane-dir <path>]",
+      "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+      "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
+      "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+      "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
+      "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
+      "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
       "runpane help",
       "runpane <command> --help"
     ],
@@ -1907,7 +2201,15 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
-      "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). The recommended orchestrator invocation is `runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence."
+      "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). The recommended orchestrator invocation is `runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence.",
+      "`sessions list` list durable named orchestration Sessions.",
+      "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
+      "`sessions get` read one durable named orchestration Session.",
+      "`sessions update` update a Session overview from structured JSON.",
+      "`sessions set-agent` switch the durable terminal agent for a named Session.",
+      "`sessions associate` associate a user-visible Pane with a named Session.",
+      "`sessions detach` detach a Pane from a named Session.",
+      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
     "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22, for example `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.",
@@ -2289,6 +2591,26 @@ export const RUNPANE_CONTRACT = {
         "auto",
         "--yes",
         "--json"
+      ],
+      [
+        "sessions",
+        "list",
+        "--json"
+      ],
+      [
+        "sessions",
+        "get",
+        "--session",
+        "demo",
+        "--json"
+      ],
+      [
+        "sessions",
+        "update",
+        "--session",
+        "demo",
+        "--from-json",
+        "-"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -5366,6 +5688,82 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "sessionListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "sessions"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "selectedSessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "session"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "session": {
+          "type": "object"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "internalSessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionOverviewResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "session",
+        "status",
+        "panes",
+        "activity",
+        "refreshedAt"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "session": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string"
+        },
+        "panes": {
+          "type": "array"
+        },
+        "activity": {
+          "type": "array"
+        },
+        "refreshedAt": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -5375,7 +5773,7 @@ export const RUNPANE_CONTRACT = {
       "rules": [
         "Start with `runpane doctor --json` to understand wrapper, platform, daemon reachability, and the next safe commands before mutating Pane state.",
         "In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22, for example `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`.",
-        "Happy path for any user request to use Pane/RunPane: run `runpane doctor --json`, read `runpane agent-context --json`, resolve or add the saved base repo, create the requested visible Pane with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` (the new Pane is pinned by default; add `--no-pinned` for a throwaway Pane, or use `--tool-command <command>` instead of `--agent <agent>`), then validate with `panels wait` or `panels screen`.",
+        "Happy path for any user request to use Pane/RunPane: run `runpane doctor --json`, read `runpane agent-context --json`, resolve or add the saved base repo, create the requested visible Pane with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` (the new Pane is pinned by default; add `--no-pinned` for a throwaway Pane, or use `--tool-command <command>` instead of `--agent <agent>`), then validate with `panels wait` or `panels screen`. For long-lived supervision, use `runpane watch --follow` instead of polling wait or screen.",
         "Treat Pane as the user's visible cockpit for watching/co-driving work. Do not create Panes or panels for private delegation unless the user asked for visible Pane orchestration or the result should appear in the Pane app.",
         "Register the saved base repository once with `repos add`; do not register a pre-created worktree as a separate repo unless the user explicitly asks.",
         "Use `panes create` for separate visible Panes (Pane sessions) for feature/PR work. Pane creates and owns the worktree/branch for each new Pane.",
@@ -5390,10 +5788,10 @@ export const RUNPANE_CONTRACT = {
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane agents doctor --agent <codex|claude|cursor> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
         "Use `runpane panes create --wait-ready` to create Panes and validate initial terminal readiness in one call.",
-        "Use `runpane panels screen` for compact current state, including Codex composer state. Use `panels wait` for readiness/text checks and `panels submit` to send and submit a new turn. Use `panels submit-composer --strategy auto` only for a composer that was filled separately.",
+        "Use `runpane panels screen` for compact current state, including Codex composer state. Use `panels wait` for create-time readiness or text checks. Use `runpane watch --follow` to block on workspace transitions (READY, BLOCKED, IDLE, STUCK, EXIT) without polling. Use `panels submit` to send and submit a new turn. Use `panels submit-composer --strategy auto` only for a composer that was filled separately.",
         "Use `runpane panels input` only when exact bytes are required, such as Ctrl-C or handcrafted terminal input.",
         "Pane terminals draw inline images: sixel, iTerm2 inline images, and the kitty graphics protocol. Tools that need kitty graphics, such as terminal-browser and terminal-doom, run inside a Pane panel; `runpane doctor --json` reports the exact list under `terminal.graphicsProtocols`.",
-        "After creating Panes or sending terminal input, validate with `panels wait` or bounded `panels screen` before reporting success."
+        "After creating Panes or sending terminal input, validate with `panels wait` or bounded `panels screen` before reporting success. For ongoing supervision, `runpane watch --follow` is the canonical monitor."
       ],
       "detailCommand": "runpane agent-context --command <command> [--json]",
       "tools": [
@@ -5819,7 +6217,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--yes",
             "required": false,
-            "description": "Confirm creating exactly one dcouple/Pane issue."
+            "description": "Confirm creating exactly one greenfield-inc/Pane issue."
           }
         ],
         "examples": [
@@ -7153,6 +7551,126 @@ export const RUNPANE_CONTRACT = {
           "Journal loss is surfaced through reset and dropped metadata.",
           "The daemon treats omitted idleAfterMs as disabled so older clients never receive agent.idle unexpectedly."
         ]
+      },
+      "sessions list": {
+        "name": "sessions list",
+        "summary": "List durable named orchestration Sessions.",
+        "details": "List durable named orchestration Sessions.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [],
+        "examples": [
+          "runpane sessions list [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionListResult"
+        ],
+        "notes": []
+      },
+      "sessions create": {
+        "name": "sessions create",
+        "summary": "Create a durable named orchestration Session and its hidden terminal owner.",
+        "details": "Create a durable named orchestration Session and its hidden terminal owner.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [],
+        "examples": [
+          "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": []
+      },
+      "sessions get": {
+        "name": "sessions get",
+        "summary": "Read one durable named orchestration Session.",
+        "details": "Read one durable named orchestration Session.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [],
+        "examples": [
+          "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": []
+      },
+      "sessions update": {
+        "name": "sessions update",
+        "summary": "Update a Session overview from structured JSON.",
+        "details": "Update a Session overview from structured JSON.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [],
+        "examples": [
+          "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": []
+      },
+      "sessions set-agent": {
+        "name": "sessions set-agent",
+        "summary": "Switch the durable terminal agent for a named Session.",
+        "details": "Switch the durable terminal agent for a named Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [],
+        "examples": [
+          "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": []
+      },
+      "sessions associate": {
+        "name": "sessions associate",
+        "summary": "Associate a user-visible Pane with a named Session.",
+        "details": "Associate a user-visible Pane with a named Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [],
+        "examples": [
+          "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": []
+      },
+      "sessions detach": {
+        "name": "sessions detach",
+        "summary": "Detach a Pane from a named Session.",
+        "details": "Detach a Pane from a named Session.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [],
+        "examples": [
+          "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": []
+      },
+      "sessions overview": {
+        "name": "sessions overview",
+        "summary": "Read a live status, activity, git, and pull request overview for a named Session.",
+        "details": "Read a live status, activity, git, and pull request overview for a named Session.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [],
+        "examples": [
+          "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionOverviewResult"
+        ],
+        "notes": []
       }
     },
     "managedBlock": [
@@ -7164,7 +7682,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "Pane mental model: a repository is the saved base repo; a Pane is a user-visible feature/PR workspace (Pane session) that normally maps to one Pane-managed git worktree and branch; a panel/tab is a terminal inside one Pane and shares that Pane's worktree; an agent is the CLI process running in a panel.",
       "",
-      "Default happy path when the user asks you to use Pane or RunPane: run `runpane doctor --json`; read `runpane agent-context --json`; resolve the saved base repository with `runpane repos list --json` or add it once with `runpane repos add --path <repo> --yes --json`; create one visible Pane (Pane session) for the requested feature/PR with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` or the equivalent `--tool-command <command>` form; then validate with `runpane panels wait` or `runpane panels screen` before reporting progress.",
+      "Default happy path when the user asks you to use Pane or RunPane: run `runpane doctor --json`; read `runpane agent-context --json`; resolve the saved base repository with `runpane repos list --json` or add it once with `runpane repos add --path <repo> --yes --json`; create one visible Pane (Pane session) for the requested feature/PR with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` or the equivalent `--tool-command <command>` form; then validate with `runpane panels wait` or `runpane panels screen` before reporting progress. For long-lived supervision, use `runpane watch --follow` instead of polling wait or screen.",
       "",
       "Use Pane when the user wants visible Panes or co-drivable parallel feature/PR workspaces. Do not use Pane as your default private delegation mechanism; for private background decomposition, use your normal subagent/worktree workflow.",
       "",
@@ -7184,9 +7702,9 @@ export const RUNPANE_CONTRACT = {
       "",
       "In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`.",
       "",
-      "Use `runpane agent-context --json` for full Pane CLI context. Use `runpane agent-context --command \"panels wait\" --json` or another command name for detailed schema only when needed.",
+      "Use `runpane agent-context --json` for full Pane CLI context. Use `runpane agent-context --command \"watch\" --json` or another command name for detailed schema only when needed.",
       "",
-      "Default to context-safe validation: after creating Panes or sending terminal input, run `runpane panels wait` or `runpane panels screen` before reporting success. Prefer `runpane panels submit` for normal text plus Enter; use `runpane panels input` only for exact bytes such as Ctrl-C or escape sequences.",
+      "Default to context-safe validation: after creating Panes or sending terminal input, run `runpane panels wait` or `runpane panels screen` before reporting success. For ongoing supervision, `runpane watch --follow` is the canonical monitor; do not poll wait or screen. Prefer `runpane panels submit` for normal text plus Enter; use `runpane panels input` only for exact bytes such as Ctrl-C or escape sequences.",
       "",
       "Pane terminals draw inline images: sixel, iTerm2 inline images, and the kitty graphics protocol. Tools that need kitty graphics, such as [terminal-browser](https://github.com/zenbu-labs/terminal-browser) and [terminal-doom](https://github.com/dcouple/terminal-doom), run inside a Pane panel. `runpane doctor --json` reports the protocol list under `terminal.graphicsProtocols`.",
       "",
@@ -7201,6 +7719,7 @@ export const RUNPANE_CONTRACT = {
       "- `runpane panels list --pane <pane-id> --json`",
       "- `runpane panels screen --panel <panel-id> --limit 80 --json`",
       "- `runpane panels wait --panel <panel-id> --for ready --timeout-ms 30000 --json`",
+      "- `runpane watch --follow --json`",
       "- `runpane panels submit --panel <panel-id> --text \"<answer>\" --yes --json`",
       "- `runpane panels input --panel <panel-id> --input-file <path|-> --yes --json`",
       "",

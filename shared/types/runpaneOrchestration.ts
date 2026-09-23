@@ -4,8 +4,34 @@ import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
 import type { AgentState } from './agentStatus';
 import type { UsageByPane, UsagePaneCostSlice, UsageTotals } from './usage';
+import type {
+  OrchestrationSessionOverview,
+  OrchestrationSessionRecord,
+} from './orchestrationSession';
 
 export type RunpaneAgentId = RunpaneAgent;
+
+export interface RunpaneSessionSelector {
+  sessionId?: string;
+  name?: string;
+}
+
+export interface RunpaneSessionListResult {
+  ok: true;
+  sessions: OrchestrationSessionRecord[];
+  selectedSessionId?: string;
+}
+
+export interface RunpaneSessionResult {
+  ok: true;
+  session: OrchestrationSessionRecord;
+  panelId?: string;
+  internalSessionId?: string;
+}
+
+export interface RunpaneSessionOverviewResult extends OrchestrationSessionOverview {
+  ok: true;
+}
 
 export type RunpaneWorkspaceEntryKind =
   | 'agent.ready'

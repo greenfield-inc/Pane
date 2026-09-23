@@ -1,4 +1,5 @@
 import * as pty from '@lydell/node-pty';
+import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
 import { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
@@ -13,6 +14,7 @@ import { ShellDetector } from '../utils/shellDetector';
 import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
+import { inheritedProcessEnv } from '../utils/inheritedProcessEnv';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -241,7 +243,7 @@ interface CliLaunchResolution {
   isCliCommand: boolean;
 }
 
-export class TerminalPanelManager {
+export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
   private serializedBuffers = new Map<string, string>();
   private readonly visibleViewersByPanel = new Map<string, Map<string, number>>();
@@ -256,6 +258,11 @@ export class TerminalPanelManager {
   private readonly agentStatusMonitor = new AgentStatusMonitor();
   private agentStatusPollTimer: ReturnType<typeof setInterval> | null = null;
   private agentStatusPolling = false;
+
+  constructor() {
+    super();
+    this.setMaxListeners(100);
+  }
 
   private quoteCommandArgument(value: string): string {
     return `"${value.replace(/([\\"$`])/g, '\\$1')}"`;
@@ -923,6 +930,7 @@ export class TerminalPanelManager {
      * PANE_* var) silently disappear inside WSL terminals.
      */
     const isWSL = !!wslContext && process.platform === 'win32';
+    const panelCustomState = terminalCustomState(panel.state);
     const wslEnvVars: Record<string, string> = isWSL
       ? {
           WSLENV: buildWSLENV([
@@ -931,6 +939,7 @@ export class TerminalPanelManager {
             'PANE_PORT',
             'PANE_SESSION_ID',
             'PANE_PANEL_ID',
+            'PANE_ORCHESTRATION_SESSION_ID',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
           ]),
@@ -941,17 +950,10 @@ export class TerminalPanelManager {
     const spawnCols = initialDimensions?.cols || 80;
     const spawnRows = initialDimensions?.rows || 30;
 
-    // `process.env` is `NodeJS.ProcessEnv` which allows `undefined` values; the
-    // ptyHost RPC DTO requires `Record<string, string>`. Drop undefined keys so
-    // both the legacy `pty.spawn` path and the ptyHost path see the same shape.
-    const baseEnv: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined) {
-        baseEnv[key] = value;
-      }
-    }
-    const spawnEnv = {
-      ...baseEnv,
+    // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
+    // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
+    const baseSpawnEnv = {
+      ...inheritedProcessEnv(),
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: enhancedPath,
       TERM: 'xterm-256color',
@@ -964,6 +966,9 @@ export class TerminalPanelManager {
       PANE_WORKSPACE_PATH: cwd,
       ...wslEnvVars,
     } satisfies Record<string, string>;
+    const spawnEnv = panelCustomState.orchestrationSessionId
+      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId }
+      : baseSpawnEnv;
 
     // Read the setting once per spawn so we don't scatter config reads.
     // `getPtyHostRuntime()` returns null when the setting is off or when
@@ -1696,6 +1701,7 @@ export class TerminalPanelManager {
       reason,
     };
     this.sendRendererEvent('panel:agentStatus', payload);
+    this.emit('agent-status', payload);
     this.emitActivityStatus(terminal, state);
   }
 
