@@ -235,8 +235,16 @@ jobs:
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
+    # Pull requests run the OS-sensitive subset here (the full suite runs on
+    # Linux in Quality Checks); pushes to main and manual runs get everything.
     - name: Run main process unit tests
-      run: pnpm --filter main test
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = pull_request ]; then
+          pnpm --filter main exec vitest run --config vitest.cross-os.config.ts
+        else
+          pnpm --filter main test
+        fi
 
     - name: Finish main process type checking
       if: ${{ !cancelled() }}
