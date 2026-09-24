@@ -30,6 +30,7 @@ import {
   decodeOptionalBoundary,
   type JsonObject,
 } from "../../../shared/validation/boundaryDecoder";
+import { JOURNEYS, type Journey, type JourneyTimingSummary } from "../../../shared/types/journeyTimings";
 import { PanelBufferStore, splitPanelBufferState, type PanelBuffers } from "./panelBuffers";
 import { ensureUsageRollup } from "../services/usage/usageRollup";
 import {
@@ -111,6 +112,7 @@ function parsePanelJson<T extends ToolPanelState | ToolPanelMetadata>(serialized
   return JSON.parse(serialized) as T;
 }
 
+const JOURNEY_TIMING_SAMPLES = 200;
 const DEBUG_DB_PANEL_STATE = process.env.PANE_DEBUG_DB_PANEL_STATE === "1";
 interface PanelStateLogSummary {
   readonly serializedLength: number;
@@ -1529,6 +1531,23 @@ export class DatabaseService {
         .run();
       console.log("[Database] Added app_version column to app_opens table");
     }
+
+    // Local-only timings for core journeys (app launch, create/switch pane, send prompt)
+    this.db
+      .prepare(
+        `
+      CREATE TABLE IF NOT EXISTS journey_timings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        journey TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+      )
+      .run();
+    this.db
+      .prepare("CREATE INDEX IF NOT EXISTS idx_journey_timings_journey ON journey_timings(journey, id)")
+      .run();
 
     // Remove model column from sessions table if it exists (moved to panel level)
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
@@ -4459,6 +4478,44 @@ export class DatabaseService {
     `,
       )
       .run();
+  }
+
+  // Journey timing operations: each journey keeps its most recent samples only.
+  recordJourneyTiming(journey: Journey, durationMs: number): void {
+    this.db
+      .prepare("INSERT INTO journey_timings (journey, duration_ms) VALUES (?, ?)")
+      .run(journey, Math.round(durationMs));
+    this.db
+      .prepare(
+        `
+      DELETE FROM journey_timings
+      WHERE journey = ? AND id <= (
+        SELECT id FROM journey_timings WHERE journey = ? ORDER BY id DESC LIMIT 1 OFFSET ?
+      )
+    `,
+      )
+      .run(journey, journey, JOURNEY_TIMING_SAMPLES);
+  }
+
+  getJourneyTimingSummary(): JourneyTimingSummary[] {
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    const rows = this.db
+      .prepare("SELECT journey, duration_ms FROM journey_timings ORDER BY duration_ms")
+      .all() as Array<{ journey: string; duration_ms: number }>;
+    const byJourney = new Map<string, number[]>();
+    for (const row of rows) {
+      const durations = byJourney.get(row.journey) ?? [];
+      durations.push(row.duration_ms);
+      byJourney.set(row.journey, durations);
+    }
+    // Nearest-rank percentiles over durations already sorted ascending.
+    const percentile = (sorted: number[], q: number) => sorted[Math.ceil(q * sorted.length) - 1];
+    return JOURNEYS.flatMap((journey) => {
+      const sorted = byJourney.get(journey);
+      return sorted
+        ? [{ journey, count: sorted.length, p50Ms: percentile(sorted, 0.5), p75Ms: percentile(sorted, 0.75) }]
+        : [];
+    });
   }
 
   // User preferences operations

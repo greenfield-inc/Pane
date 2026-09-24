@@ -59,6 +59,7 @@ export type SettingsSettingId =
   | 'analytics'
   | 'verbose-logging'
   | 'developer-mode'
+  | 'journey-timings'
   | 'pty-host'
   | 'additional-paths';
 

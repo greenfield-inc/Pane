@@ -39,6 +39,7 @@ import { InterceptorToast } from '../terminal/InterceptorToast';
 import { usePanelStore } from '../../stores/panelStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
+import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import '@xterm/xterm/css/xterm.css';
 
 interface DropdownPosition {
@@ -368,9 +369,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       setOverlayVisible(true);
       return;
     }
-    const lingerTimer = setTimeout(() => setOverlayVisible(false), TERMINAL_OVERLAY_LINGER_MS);
+    const lingerTimer = setTimeout(() => {
+      setOverlayVisible(false);
+      markPaneTerminalShown(panel.sessionId);
+    }, TERMINAL_OVERLAY_LINGER_MS);
     return () => clearTimeout(lingerTimer);
-  }, [overlayActive]);
+  }, [overlayActive, panel.sessionId]);
 
   // Listen for cliReady event (only for CLI panels that aren't already ready)
   useEffect(() => {
@@ -1551,6 +1555,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             const outputLength = output.length;
             terminal.write(output, () => {
               if (disposed) return;
+              markPanelOutput(panel.id);
               // Ack AFTER xterm has rendered the data — proper backpressure
               pendingAckBytes += outputLength;
               if (pendingAckBytes >= ACK_BATCH_SIZE) {
@@ -1729,6 +1734,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
           // Handle terminal input — route through interceptor first
           const inputDisposable = terminal.onData((data) => {
+            if (data === '\r' && isCliPanelRef.current) startSendPrompt(panel.id);
             // Skip interception for AltGr-produced @ (e.g. German keyboard)
             if (skipNextInterceptRef.current) {
               skipNextInterceptRef.current = false;
@@ -1958,6 +1964,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         }
         await waitForNextPaint();
         if (cancelled) return;
+        // Masked activations report from the overlay linger timer when the mask lifts.
+        if (!fullRefresh && !hotActivation) markPaneTerminalShown(panel.sessionId);
 
         if (autoFocus && (fullRefresh || hotActivation)) {
           xtermRef.current?.focus();
@@ -1999,7 +2007,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
       setIsRefreshing(false);
     };
-  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog]);
+  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, panel.sessionId, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog]);
 
   useEffect(() => {
     const terminal = xtermRef.current;

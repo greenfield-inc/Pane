@@ -18,6 +18,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectView } from './ProjectView';
 import { UsageView } from './usage/UsageView';
 import { API } from '../utils/api';
+import { markPaneViewShown } from '../utils/journeyTimings';
 import { useObservedContentBox } from '../hooks/useObservedContentBox';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
@@ -406,6 +407,10 @@ export const SessionView = memo(() => {
     () => panels[activeSession?.id || ''] || [],
     [panels, activeSession?.id]
   );
+  const activeSessionPanelsLoaded = Boolean(activeSession && panels[activeSession.id]);
+  useEffect(() => {
+    if (activeSession?.id && activeSessionPanelsLoaded) markPaneViewShown(activeSession.id);
+  }, [activeSession?.id, activeSessionPanelsLoaded]);
 
   // Bottom terminal panel (first terminal panel in session)
   const defaultTerminalPanel = useMemo(
