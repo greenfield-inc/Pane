@@ -2051,7 +2051,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       onMouseMove={onMouseMove}
       onKeyDown={handleTerminalKeyDown}
     >
-      <div ref={terminalRef} className="h-full w-full" data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
+      {/* ph-no-capture keeps xterm out of session recordings: its WebGL canvas
+          never replays, and replaying scrollback rewrites the scrollbar
+          slider's style thousands of times, which the recorder would serialize. */}
+      <div ref={terminalRef} className="ph-no-capture h-full w-full" data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
 
       {/* Terminal search overlay */}
       <TerminalSearchOverlay
