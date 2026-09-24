@@ -48,7 +48,10 @@ interface DropdownPosition {
 
 // Hold the loading overlay at least this long past ready so the terminal
 // underneath finishes painting before it is revealed.
-const TERMINAL_OVERLAY_LINGER_MS = 150;
+// Ceiling for the post-activation settle wait. This was a flat 150 ms linger
+// "so the terminal underneath has finished painting"; the mask now waits for
+// that to actually be true and only falls back to the ceiling.
+const TERMINAL_OVERLAY_LINGER_CEILING_MS = 150;
 
 const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
 
@@ -97,7 +100,11 @@ const DEFAULT_TERMINAL_FONT_FAMILY = 'Geist Mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 14;
 const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
-const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
+// Ceiling for the same wait on the activation path. a69c8b5 raised this from 0
+// to a flat 200 ms because reflow could continue past the first paint; the mask
+// now waits for the grid and container to stop moving and uses this only as an
+// upper bound when they never settle.
+const TERMINAL_ACTIVATION_MASK_CEILING_MS = 200;
 const TERMINAL_VISIBILITY_REFRESH_MS = 60_000;
 const SNAPSHOT_MIN_INTERVAL_MS = 10_000;
 const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-layout (Allotment minSize is 120)
@@ -159,6 +166,58 @@ function waitForNextPaint(): Promise<void> {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => resolve());
     });
+  });
+}
+
+/** Identity of the rendered geometry: what the activation refresh depends on. */
+function readGeometry(container: HTMLElement | null, terminal: Terminal | null): string | null {
+  if (!container || !terminal) return null;
+  return `${container.clientWidth}x${terminal.cols}x${terminal.rows}`;
+}
+
+/**
+ * Resolves once the rendered geometry has stopped moving: two consecutive
+ * frames agreeing on the container width and the terminal's grid. This is the
+ * condition the old fixed mask delays were standing in for -- lifting the mask
+ * mid-reflow is what a69c8b5 was papering over. Resolves early on the ceiling
+ * so a container that never settles cannot strand the mask, and on cancel so a
+ * torn-down activation stops sampling.
+ */
+function waitForGeometrySettled(
+  container: HTMLElement | null,
+  terminal: Terminal | null,
+  ceilingMs: number,
+  isCancelled: () => boolean,
+): Promise<void> {
+  if (!container || !terminal) return Promise.resolve();
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(ceiling);
+      resolve();
+    };
+    // The ceiling is a real timer, not a frame budget: frames stop entirely
+    // behind a hidden window or a throttled rAF, and a frame-counted ceiling
+    // would strand the mask up rather than lifting it.
+    const ceiling = setTimeout(finish, ceilingMs);
+    let previous: string | null = null;
+    const sample = () => {
+      if (settled) return;
+      if (isCancelled()) {
+        finish();
+        return;
+      }
+      const current = `${container.clientWidth}x${terminal.cols}x${terminal.rows}`;
+      if (current === previous) {
+        finish();
+        return;
+      }
+      previous = current;
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
   });
 }
 
@@ -359,8 +418,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   }, [terminalState?.isCliReady, isCliReady]);
 
   // Loading-skeleton visibility: show immediately when any loading state is
-  // active, hide only after a short linger so the terminal underneath has
-  // finished painting before the mask lifts.
+  // active, hide once the terminal underneath has actually settled rather than
+  // after a flat linger.
   const overlayActive = !isInitialized || isRefreshing || (isCliPanel && !isCliReady);
   const [overlayVisible, setOverlayVisible] = useState(true);
   useEffect(() => {
@@ -368,8 +427,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       setOverlayVisible(true);
       return;
     }
-    const lingerTimer = setTimeout(() => setOverlayVisible(false), TERMINAL_OVERLAY_LINGER_MS);
-    return () => clearTimeout(lingerTimer);
+    let cancelled = false;
+    void waitForGeometrySettled(
+      terminalRef.current,
+      xtermRef.current,
+      TERMINAL_OVERLAY_LINGER_CEILING_MS,
+      () => cancelled,
+    ).then(() => {
+      if (!cancelled) setOverlayVisible(false);
+    });
+    return () => { cancelled = true; };
   }, [overlayActive]);
 
   // Listen for cliReady event (only for CLI panels that aren't already ready)
@@ -703,13 +770,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // Refresh. Eligible same-session hot
   // activations use reconcileMountedTerminal instead and never enter this
   // function.
-  const handleRefreshTerminal = useCallback(async () => {
+  // Reports whether the reset+replay actually ran: it bails on a mid-layout
+  // container, and the delayed backstop is the path that populates the buffer
+  // when it does. A caller that skips the backstop has to know the difference.
+  const handleRefreshTerminal = useCallback(async (): Promise<boolean> => {
     const terminal = xtermRef.current;
-    if (!terminal) return;
+    if (!terminal) return false;
     // Entry guard: never reset+replay into a tiny/unsettled container (width only,
     // matching resizePtyToFit: height-constrained panes are legitimate layouts)
     const rect = terminalRef.current?.getBoundingClientRect();
-    if (!rect || rect.width < MIN_VIABLE_RECT_PX) return;
+    if (!rect || rect.width < MIN_VIABLE_RECT_PX) return false;
     try {
       const scrollSnapshot = (() => {
         const buffer = terminal.buffer.active;
@@ -748,7 +818,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           terminal.refresh(0, terminal.rows - 1);
         }
         restoreScrollPosition();
-        return;
+        return true;
       }
 
       terminal.reset();
@@ -769,12 +839,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               void finishRefresh().then(resolve, reject);
             });
           });
-          return;
+          return true;
         }
       }
       await finishRefresh();
+      return true;
     } catch (e) {
       console.warn('[TerminalPanel] Failed to refresh terminal:', e);
+      return false;
     }
   }, [panel.id, resizePtyToFit]);
 
@@ -783,7 +855,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     try {
       await handleRefreshTerminal();
       await waitForNextPaint();
-      await new Promise(resolve => setTimeout(resolve, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS));
+      await waitForGeometrySettled(
+        terminalRef.current,
+        xtermRef.current,
+        TERMINAL_ACTIVATION_MASK_CEILING_MS,
+        () => false,
+      );
     } finally {
       setIsRefreshing(false);
     }
@@ -1909,24 +1986,48 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     // Both full and hot panel activations stay behind the existing opaque mask.
     if (fullRefresh || hotActivation) setIsRefreshing(true);
 
-    let lastWidth = 0;
+    // -1 marks "not measured yet" so a first measurement that is already
+    // viable is not mistaken for a width that changed.
+    let lastWidth = -1;
     let retries = 0;
     const MAX_RETRIES = 10;
 
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryFrame: number | null = null;
     let delayedRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-    let hideOverlayTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Lift the mask once the grid has stopped moving instead of after a fixed
+    // delay; the ceiling keeps a never-settling container from stranding it.
+    const settleThenLiftMask = () => waitForGeometrySettled(
+      terminalRef.current,
+      xtermRef.current,
+      TERMINAL_ACTIVATION_MASK_CEILING_MS,
+      () => cancelled,
+    ).then(() => {
+      if (!cancelled) setIsRefreshing(false);
+    });
 
     const fitAndRefresh = () => {
       if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
 
       const containerWidth = terminalRef.current.clientWidth;
-      // If width is still changing or below viable threshold, the reflow isn't done — retry
-      if ((containerWidth < MIN_VIABLE_RECT_PX || containerWidth !== lastWidth) && retries < MAX_RETRIES) {
+      const viable = containerWidth >= MIN_VIABLE_RECT_PX;
+      // Two consecutive agreeing measurements still gate the replay (#233 --
+      // replaying into a mid-layout container corrupts the grid). What changed
+      // is the cost of collecting them: a viable first measurement is confirmed
+      // on the next frame rather than paying a fixed 50 ms tick to learn the
+      // same thing. A non-viable or genuinely changing width is mid-layout and
+      // keeps the slower tick, which is what that delay was for.
+      if ((!viable || containerWidth !== lastWidth) && retries < MAX_RETRIES) {
+        const confirmingFirstViableWidth = viable && lastWidth === -1;
         lastWidth = containerWidth;
         retries++;
-        retryTimer = setTimeout(fitAndRefresh, 50);
+        if (confirmingFirstViableWidth) {
+          retryFrame = requestAnimationFrame(fitAndRefresh);
+        } else {
+          retryTimer = setTimeout(fitAndRefresh, 50);
+        }
         return;
       }
 
@@ -1945,11 +2046,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         const depth = fullRefresh ? 'full' : hotActivation ? 'hot' : 'light';
         forwardToMainLog('info', `[TerminalPanel] Activation depth for panel ${panel.id}: ${depth}`);
 
+        let firstRefreshLanded = true;
         if (fullRefresh) {
           // Consume the flag only when the full refresh actually executes, so a
           // bail or an activate-then-blur cancellation leaves it armed.
           needsFullActivationRefreshRef.current = false;
-          await handleRefreshTerminal();
+          firstRefreshLanded = await handleRefreshTerminal();
           hotActivationEligibleRef.current = !useBatterySaverTerminalVisibility;
         } else if (hotActivation) {
           await reconcileMountedTerminal();
@@ -1959,33 +2061,60 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         await waitForNextPaint();
         if (cancelled) return;
 
+        // Geometry the refresh above actually rendered at. The backstop exists
+        // for the case where that geometry was wrong -- a refresh that raced
+        // layout, or a renderer that attached after it. If it has not moved by
+        // the time the backstop runs, re-running the depth cannot discover
+        // anything new, and for a full refresh it would reset+replay a correct
+        // screen and drop the user's selection with it.
+        const geometryAtRefresh = readGeometry(terminalRef.current, xtermRef.current);
+
         if (autoFocus && (fullRefresh || hotActivation)) {
           xtermRef.current?.focus();
         }
 
         delayedRefreshTimer = setTimeout(() => {
           void (async () => {
-            if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
-            forwardToMainLog('info', `[TerminalPanel] Delayed activation refresh for panel ${panel.id}`);
-            if (fullRefresh) await handleRefreshTerminal();
-            else if (hotActivation) await reconcileMountedTerminal();
-            else repaintTerminal();
-            if (!hotActivation) return;
-            await waitForNextPaint();
-            if (cancelled) return;
-            hideOverlayTimer = setTimeout(() => {
-              if (!cancelled) setIsRefreshing(false);
-            }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
+            try {
+              if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
+              const geometryNow = readGeometry(terminalRef.current, xtermRef.current);
+              const geometryMoved = geometryNow !== geometryAtRefresh;
+              // A background repair must not destroy what the user is doing.
+              // reset+replay drops the selection, and with the mask lifted the
+              // user can be mid-selection by the time this runs. A live
+              // selection also means they can already read the screen, so the
+              // repair has nothing urgent to fix; a later activation or the
+              // ResizeObserver repeats it once the selection is gone.
+              const hasSelection = !!xtermRef.current.getSelection();
+              if (firstRefreshLanded && (!geometryMoved || hasSelection)) {
+                // Repaint only. Still covers the WebGL attach race this
+                // backstop was declared after, without touching the buffer.
+                forwardToMainLog('info', `[TerminalPanel] Delayed activation repaint for panel ${panel.id} (moved=${geometryMoved} selection=${hasSelection})`);
+                const terminal = xtermRef.current;
+                if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+                return;
+              }
+              forwardToMainLog('info', `[TerminalPanel] Delayed activation refresh for panel ${panel.id}`);
+              if (fullRefresh) await handleRefreshTerminal();
+              else if (hotActivation) await reconcileMountedTerminal();
+              else repaintTerminal();
+              if (!fullRefresh && !hotActivation) return;
+              await waitForNextPaint();
+            } finally {
+              // Runs even when the backstop bails on a torn-down ref, so a
+              // bail cannot strand the mask up.
+              if (fullRefresh || hotActivation) void settleThenLiftMask();
+            }
           })();
         }, REFOCUS_DELAYED_REFRESH_MS);
 
-        if (fullRefresh) {
-          // Full refresh keeps the historical mask timing. Hot activation keeps
-          // the mask through its delayed fit/reconcile/refresh backstop above.
-          hideOverlayTimer = setTimeout(() => {
-            if (!cancelled) setIsRefreshing(false);
-          }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
-        }
+        // The backstop only reset+replays when it has something to repair -- a
+        // first refresh that bailed, or geometry that moved since. Otherwise it
+        // is a repaint, so the mask no longer has to outlast it and lifts as
+        // soon as the grid settles.
+        if (fullRefresh) void settleThenLiftMask();
+
+
       });
     };
 
@@ -1994,9 +2123,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => {
       cancelled = true;
       cancelAnimationFrame(animationFrame);
+      if (retryFrame !== null) cancelAnimationFrame(retryFrame);
       if (retryTimer) clearTimeout(retryTimer);
       if (delayedRefreshTimer) clearTimeout(delayedRefreshTimer);
-      if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
       setIsRefreshing(false);
     };
   }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog]);

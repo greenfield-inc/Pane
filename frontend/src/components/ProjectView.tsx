@@ -105,7 +105,9 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         // live in the inspector, not the stage).
         const fallback = loadedPanels.find(p => p.type !== 'diff' && p.type !== 'explorer');
 
-        const activePanel = await panelApi.getActivePanel(mainRepoSessionId);
+        // Already in loadedPanels; panelApi.getActivePanel would re-run the
+        // identical getSessionPanels query to find it.
+        const activePanel = loadedPanels.find(panel => panel.state.isActive) ?? null;
         if (activePanel) {
           setActivePanelInStore(mainRepoSessionId, activePanel.id);
         } else if (fallback) {

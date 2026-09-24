@@ -72,6 +72,14 @@ type ElectronApiMockOptions = {
   paneChatAgentChangeDelayMs?: number;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
+  /**
+   * Latency for the two reads a session switch waits on
+   * (panels.getSessionPanels and panels:get-layout), so a spec can observe the
+   * stage while the switch is still in flight.
+   */
+  panelLoadDelayMs?: number;
+  /** Forces panels.getSessionPanels to fail for the named sessions. */
+  panelLoadErrorBySessionId?: Record<string, string>;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -87,6 +95,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     function success<Value>(data?: Value) {
       return Promise.resolve({ success: true, data: data ?? null });
     }
+    const failure = (error: string) => Promise.resolve({ success: false as const, error });
     const unsubscribe = () => undefined;
     const listeners = new Map<string, Set<MockEventCallback>>();
     const pendingPermissions: PanePermissionRequest[] = [];
@@ -273,7 +282,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const preferenceWrites: Array<{ key: string; value: string }> = [];
     const sessionDeleteCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
-    const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[] }>>();
+    const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[]; at: number }>>();
     let sessionsGetCount = 0;
 
     Object.defineProperty(window, '__paneTestPerf', {
@@ -379,15 +388,27 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
     });
 
-    const invoke = (channel: string, ...args: unknown[]) => {
+    // `at` lets a spec prove two reads overlapped rather than ran head-to-tail.
+    const recordCall = (channel: string, args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
-      calls.push({ channel, args });
+      calls.push({ channel, args, at: Date.now() });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+    };
+
+    const invoke = (channel: string, ...args: unknown[]) => {
+      recordCall(channel, args);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
       const value = args[1] === undefined ? undefined : String(args[1]);
       if (channel === 'panels:get-layout') {
+        const layoutDelay = mockOptions.panelLoadDelayMs ?? 0;
+        if (layoutDelay > 0) {
+          return new Promise((resolve) => setTimeout(
+            () => resolve(success(clone(mockOptions.initialLayout ?? null))),
+            layoutDelay,
+          ));
+        }
         return success(clone(mockOptions.initialLayout ?? null));
       }
       if (channel === 'panels:shouldAutoCreate') {
@@ -725,9 +746,18 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       panels: namespace({
-        getSessionPanels: (sessionId: string) => success(
-          clone(mockPanels.filter((panel) => panel.sessionId === sessionId)),
-        ),
+        getSessionPanels: (sessionId: string) => {
+          recordCall('panels:getSessionPanels', [sessionId]);
+          const forcedError = mockOptions.panelLoadErrorBySessionId?.[sessionId];
+          const payload = () => (forcedError
+            ? failure(forcedError)
+            : success(clone(mockPanels.filter((panel) => panel.sessionId === sessionId))));
+          const panelDelay = mockOptions.panelLoadDelayMs ?? 0;
+          if (panelDelay > 0) {
+            return new Promise((resolve) => setTimeout(() => resolve(payload()), panelDelay));
+          }
+          return payload();
+        },
         createPanel: (sessionId: string, type: string, title: string, initialState?: JsonObject) => {
           const now = new Date().toISOString();
           const panel = {
