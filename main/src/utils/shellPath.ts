@@ -214,38 +214,9 @@ export function getShellPath(): string {
     const currentPath = process.env.PATH || '';
     console.log(`[ShellPath] Current process PATH has ${currentPath.split(pathSep).length} entries`);
     
-    // Also include npm global bin directories
     const additionalPaths: string[] = [];
     const isLinux = process.platform === 'linux';
-    
-    // Skip npm/yarn checks on Linux for better performance (they're usually in PATH already)
-    if (!isLinux) {
-      console.log(`[ShellPath] Checking for npm/yarn global paths (non-Linux)...`);
-      // Try to get npm global bin directory
-      try {
-        const npmBin = execSync('npm bin -g', { 
-          encoding: 'utf8',
-          timeout: 2000,
-          stdio: ['pipe', 'pipe', 'ignore']
-        }).trim();
-        if (npmBin) additionalPaths.push(npmBin);
-      } catch {
-        // Ignore npm bin errors
-      }
-      
-      // Try to get yarn global bin directory
-      try {
-        const yarnBin = execSync('yarn global bin', { 
-          encoding: 'utf8',
-          timeout: 2000,
-          stdio: ['pipe', 'pipe', 'ignore']
-        }).trim();
-        if (yarnBin) additionalPaths.push(yarnBin);
-      } catch {
-        // Ignore yarn bin errors
-      }
-    }
-    
+
     if (isWindows) {
       // Windows-specific paths
       additionalPaths.push(
