@@ -70,6 +70,32 @@ export function findGroupContainingPanel(root: PanelLayoutNode, panelId: string)
   return null;
 }
 
+/** Activate a panel and focus its containing group without changing the tree structure. */
+export function activatePanelInLayout(
+  layout: SessionPanelLayout,
+  panelId: string,
+): SessionPanelLayout {
+  const group = findGroupContainingPanel(layout.root, panelId);
+  if (!group) return layout;
+  const groupId = group.id;
+
+  function activate(node: PanelLayoutNode): PanelLayoutNode {
+    if (node.type === 'group') {
+      return node.id === groupId ? { ...node, activePanelId: panelId } : node;
+    }
+    return { ...node, children: node.children.map(activate) };
+  }
+
+  return {
+    ...layout,
+    root: activate(layout.root),
+    focusedGroupId: groupId,
+    zoomedGroupId: layout.zoomedGroupId && layout.zoomedGroupId !== groupId
+      ? null
+      : layout.zoomedGroupId,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------

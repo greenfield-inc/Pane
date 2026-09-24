@@ -1,0 +1,5 @@
+# Saving and filing a brief
+
+- Save the brief as `index.html` in the work's bundle, following the `page` skill's bundle reference: local by default, published to another destination when the person or their workspace asks for one. If a bundle already exists for this work, update it. Never start a second one.
+- The tracker issue belongs to [create-ticket](../../create-ticket/SKILL.md): link the brief from it. When that skill isn't running, create or update the issue as follows: a readable, action-oriented title, the problem and success sections in the body, and a link to the brief when it is published somewhere the reader can reach. When the brief is only local, put the whole brief in the issue body. Use available tracker tools, with authenticated `gh` as the fallback. Send bodies as files or structured data. Apply only the assignees, labels, and milestones the person asked for.
+- Read back what you saved: content, links, who can see it. Report the status of each artifact separately, including anything that failed to save.

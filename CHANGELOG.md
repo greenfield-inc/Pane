@@ -24,6 +24,9 @@ All notable changes to Pane will be documented in this file.
 
 ### Fixed
 - Agent terminals remain in working tabs after deleting the default shell and switching panes. Closing the dock also repairs tab selection when another shell takes its place.
+- Pane Chat has its skills again. Pane synced its agents' skills from the skills repository, which moved them on 2026-08-13; every sync since then failed, and new installs had none. Pane now ships 37 skills: Agent Farm's current raw-profile skills and their helpers, general-purpose primitives such as `verify-app`, `options`, `brief`, and `orchestrate-sessions`, and three Pane-specific ones (`pane-orchestrator`, `runpane`, `pane-work`). It also installs four helper subagents (explorer, cold-reader, qa-and-verify, reviewer) for Claude and Codex Sessions. The skill sync is removed, and Pane deletes its old sync folders.
+- `runpane panels submit` now submits prompts to Claude panes instead of leaving them in the composer. Pane waits for Claude's composer, types the prompt, and presses Enter separately once the text shows, so a pane created with `--wait-ready` and submitted to right away starts the turn. `verifiedSubmitted` is true only when Claude's composer is seen empty afterwards.
+- `runpane panels screen` reports `composer.hasUndeliveredText` for Claude panes. It used to read false for every Claude pane, even with a prompt sitting in the composer. Claude's dim placeholder suggestion does not count.
 - `runpane watch` no longer reports STUCK for the grey prompt suggestion Claude Code shows in an empty composer. STUCK now means real unsubmitted composer text.
 
 ## [1.1.123] - 2026-04-25

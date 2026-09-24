@@ -1,4 +1,5 @@
 import http from 'http';
+import zlib from 'zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry } from './commandRegistry';
@@ -12,6 +13,7 @@ interface ConfigManagerStub {
 }
 
 interface TestEventStream {
+  contentEncoding: string | undefined;
   close(): void;
   nextEvent(timeoutMs?: number): Promise<{ event: string | null; data: string[] }>;
 }
@@ -181,8 +183,10 @@ async function openEventStream(
       const queuedEvents: Array<{ event: string | null; data: string[] }> = [];
       const waiters: Array<(event: { event: string | null; data: string[] }) => void> = [];
       let buffer = '';
+      const contentEncoding = response.headers['content-encoding'];
+      const body = contentEncoding === 'gzip' ? response.pipe(zlib.createGunzip()) : response;
 
-      response.on('data', (chunk) => {
+      body.on('data', (chunk) => {
         buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
 
         let boundaryIndex = buffer.indexOf('\n\n');
@@ -205,6 +209,7 @@ async function openEventStream(
       });
 
       resolve({
+        contentEncoding,
         close() {
           request.destroy();
         },
@@ -579,6 +584,66 @@ describe('PaneRemoteHttpApiServer', () => {
 
     stream.close();
     await waitFor(() => server.getConnectedClients().length === 0);
+  });
+
+  it('gzips the event stream for clients that accept it and still delivers each event immediately', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    const plainStream = await openEventStream(server, 'secret-token');
+    expect(plainStream.contentEncoding).toBeUndefined();
+    plainStream.close();
+
+    const stream = await openEventStream(server, 'secret-token', { 'Accept-Encoding': 'gzip, deflate, br' });
+    expect(stream.contentEncoding).toBe('gzip');
+    expect((await stream.nextEvent()).event).toBe('ready');
+    expect((await stream.nextEvent()).event).toBe('heartbeat');
+
+    server.getEventSink().send('terminal:output', { sessionId: 'session-1', panelId: 'panel-1', output: 'hello\r\n' });
+    const daemonEvent = await stream.nextEvent();
+    expect(JSON.parse(daemonEvent.data.join('\n'))).toMatchObject({
+      channel: 'terminal:output',
+      args: [{ sessionId: 'session-1', panelId: 'panel-1', output: 'hello\r\n' }],
+    });
+    stream.close();
+  });
+
+  it('gzips large invoke results only for clients that accept gzip', async () => {
+    const registry = new PaneCommandRegistry();
+    const sessions = Array.from({ length: 50 }, (_, index) => ({ id: `session-${index}`, name: `Pane ${index}` }));
+    registry.register('sessions:get-all', async () => sessions);
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    if (!address) throw new Error('Remote HTTP API server is not listening');
+
+    const invoke = (headers: Record<string, string>) => new Promise<http.IncomingMessage & { raw: Buffer }>((resolve, reject) => {
+      const request = http.request({
+        host: address.host,
+        port: address.port,
+        path: '/invoke',
+        method: 'POST',
+        headers: { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json', ...headers },
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => resolve(Object.assign(response, { raw: Buffer.concat(chunks) })));
+      });
+      activeRequests.add(request);
+      request.once('error', reject);
+      request.end(JSON.stringify({ channel: 'sessions:get-all', args: [] }));
+    });
+
+    const plain = await invoke({});
+    expect(plain.headers['content-encoding']).toBeUndefined();
+    expect(JSON.parse(plain.raw.toString('utf8'))).toEqual({ ok: true, result: sessions });
+
+    const compressed = await invoke({ 'Accept-Encoding': 'gzip, deflate, br' });
+    expect(compressed.headers['content-encoding']).toBe('gzip');
+    expect(compressed.raw.length).toBeLessThan(plain.raw.length);
+    expect(JSON.parse(zlib.gunzipSync(compressed.raw).toString('utf8'))).toEqual({ ok: true, result: sessions });
   });
 
   it('accepts browser SSE auth metadata from query params', async () => {

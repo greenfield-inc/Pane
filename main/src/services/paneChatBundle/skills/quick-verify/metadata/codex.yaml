@@ -1,0 +1,6 @@
+interface:
+  display_name: Quick verify
+  short_description: Screenshot, fix, and reshoot while you work
+  default_prompt: Use $quick-verify to check this change on the local dev server before moving on.
+policy:
+  allow_implicit_invocation: true

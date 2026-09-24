@@ -19,13 +19,13 @@ interface GitStatusManagerPrivates {
     branchName: string,
     projectPath: string,
     commandRunner: CommandRunner
-  ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }>;
+  ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prIsDraft?: boolean; prBody?: string }>;
   enrichWithPrData(sessionId: string): Promise<void>;
   updateCache(sessionId: string, status: GitStatus): GitStatus;
   schedulePrEnrichment(sessionId: string, immediate?: boolean): void;
   cache: Record<string, { status: GitStatus; lastChecked: number }>;
   initialLoadQueue: string[];
-  prCache: Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>;
+  prCache: Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prIsDraft?: boolean; prBody?: string; fetchedAt: number }>;
   activeSessionId: string | null;
 }
 
@@ -414,6 +414,7 @@ describe('GitStatusManager', () => {
           prUrl: 'https://github.com/example/repo/pull/12',
           prTitle: 'Ready review',
           prState: 'OPEN',
+          prIsDraft: true,
           prBody: 'Body',
         },
         lastChecked: Date.now(),
@@ -433,6 +434,7 @@ describe('GitStatusManager', () => {
         prUrl: 'https://github.com/example/repo/pull/12',
         prTitle: 'Ready review',
         prState: 'OPEN',
+        prIsDraft: true,
         prBody: 'Body',
       });
       expect(mockDatabaseService.saveSessionGitStatusCache).toHaveBeenLastCalledWith(
@@ -470,6 +472,7 @@ describe('GitStatusManager', () => {
           url: 'https://github.com/example/repo/pull/12',
           title: 'Ready review',
           state: 'OPEN',
+          isDraft: true,
           body: 'Body',
         }]),
       });
@@ -480,6 +483,7 @@ describe('GitStatusManager', () => {
         prUrl: 'https://github.com/example/repo/pull/12',
         prTitle: 'Ready review',
         prState: 'OPEN',
+        prIsDraft: true,
         prBody: 'Body',
         fetchedAt: Date.now() - 20_001,
       });
@@ -487,7 +491,13 @@ describe('GitStatusManager', () => {
       const result = await privates.fetchPrForSession('feature-branch', mockProject.path, commandRunner);
 
       expect(commandRunner.execAsync).toHaveBeenCalledTimes(1);
+      expect(commandRunner.execAsync).toHaveBeenCalledWith(
+        expect.stringContaining('isDraft'),
+        mockProject.path,
+        { timeout: 5000 }
+      );
       expect(result.prNumber).toBe(12);
+      expect(result.prIsDraft).toBe(true);
     });
 
     it('invalidates active-session PR misses when the app regains focus', async () => {
@@ -524,6 +534,7 @@ describe('GitStatusManager', () => {
           url: 'https://github.com/example/repo/pull/12',
           title: 'Ready review',
           state: 'OPEN',
+          isDraft: true,
           body: 'Body',
         }]),
       });
@@ -546,6 +557,7 @@ describe('GitStatusManager', () => {
       expect(projectGithubCommand.mock.calls[0][0]).not.toContain('not-the-branch');
       expect(status.prNumber).toBe(12);
       expect(status.prUrl).toBe('https://github.com/example/repo/pull/12');
+      expect(status.prIsDraft).toBe(true);
     });
 
     it('clears cached PR fields on a confirmed PR miss', async () => {
@@ -558,6 +570,7 @@ describe('GitStatusManager', () => {
           prUrl: 'https://github.com/example/repo/pull/12',
           prTitle: 'Ready review',
           prState: 'OPEN',
+          prIsDraft: true,
           prBody: 'Body',
         },
         lastChecked: Date.now(),
@@ -575,6 +588,7 @@ describe('GitStatusManager', () => {
       expect(status.prUrl).toBeUndefined();
       expect(status.prTitle).toBeUndefined();
       expect(status.prState).toBeUndefined();
+      expect(status.prIsDraft).toBeUndefined();
       expect(status.prBody).toBeUndefined();
       expect(status.ahead).toBe(1);
       expect(mockDatabaseService.saveSessionGitStatusCache).toHaveBeenLastCalledWith(
@@ -593,6 +607,7 @@ describe('GitStatusManager', () => {
         prUrl: 'https://github.com/example/repo/pull/12',
         prTitle: 'Ready review',
         prState: 'OPEN',
+        prIsDraft: true,
         prBody: 'Body',
       };
       privates.cache['test-session'] = {

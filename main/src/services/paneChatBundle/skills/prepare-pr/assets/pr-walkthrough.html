@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>{{TITLE}}</title>
+<style>
+:root{--bg:#f7f6f2;--paper:#fff;--ink:#252a29;--muted:#616c68;--line:#d9ded8;--accent:#17664e;--wash:#edf3ee}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 system-ui,sans-serif}a{color:var(--accent);text-underline-offset:3px}a:focus-visible,button:focus-visible{outline:3px solid #c59530;outline-offset:3px}.skip{position:absolute;left:-10000px}.skip:focus{left:20px;top:10px;background:var(--paper);z-index:20}header,.layout,footer{max-width:1240px;margin:auto;padding:40px 48px}.eyebrow{font-size:12px;letter-spacing:.12em;color:var(--muted)}h1{font:500 clamp(40px,6vw,74px)/1.07 Georgia,serif;letter-spacing:-.03em;margin:25px 0}.intro{max-width:760px;font-size:20px;color:var(--muted)}.actions{display:flex;gap:22px;align-items:center;flex-wrap:wrap;margin:28px 0}.primary{background:var(--accent);color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none}.commit{font-size:13px;color:var(--muted)}.layout{display:grid;grid-template-columns:220px minmax(0,800px);gap:50px;padding-top:0}nav{position:sticky;top:24px;align-self:start;font-size:13px;max-height:calc(100vh - 48px);overflow-y:auto}nav ul{list-style:none;padding:0}nav a{display:block;padding:6px 0;text-decoration:none;color:var(--muted)}main{min-width:0}h2{font:500 31px/1.25 Georgia,serif;margin:48px 0 22px;padding-top:24px;border-top:1px solid var(--line)}main>h2:first-child{margin-top:0}h3{margin:30px 0 12px}p{margin:0 0 20px}li{margin:8px 0}code{font-size:.87em;background:var(--wash);padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}pre{overflow-x:auto;background:var(--wash);padding:16px;font-size:13px;line-height:1.55}.table-wrap{overflow-x:auto;margin:24px 0;border:1px solid var(--line);border-radius:8px}table{width:100%;border-collapse:collapse;background:var(--paper);font-size:14px}th,td{padding:12px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{background:var(--wash)}tr:last-child td{border-bottom:0}.diagram,.evidence-card{padding:20px;border:1px solid var(--line);border-radius:10px;background:var(--paper);margin:24px 0;overflow-x:auto}img,video,svg{max-width:100%;height:auto}figcaption{font-size:13px;color:var(--muted);margin-top:12px}button{font:inherit;padding:5px 12px;background:var(--paper);color:var(--accent);border:1px solid var(--line);border-radius:6px;cursor:pointer}.expand{display:block;margin:12px 0}details{font-size:13px;color:var(--muted)}summary{cursor:pointer}footer{border-top:1px solid var(--line);font-size:13px;color:var(--muted)}dialog{width:min(1250px,95vw);max-height:94vh;padding:20px;border:1px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink)}dialog::backdrop{background:#14221ddd}#diagram-detail{overflow:auto;margin-top:15px}#diagram-detail img,#diagram-detail svg{max-width:none;min-width:800px;height:auto}.dialog-bar{display:flex;justify-content:space-between;gap:20px}.evidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}@media(prefers-color-scheme:dark){:root{--bg:#141c19;--paper:#1b2520;--ink:#e7ede8;--muted:#a6b5ab;--line:#35433a;--accent:#9dd7ad;--wash:#25342b}.primary{background:var(--accent);color:#10271a}}@media(max-width:900px){header,.layout,footer{padding:28px 24px}.layout{display:block}nav{position:static;max-height:none;margin-bottom:30px}nav ul{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.evidence-grid{grid-template-columns:1fr}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{nav,.actions,.expand,dialog{display:none}.layout{display:block}body{background:#fff;color:#222}}
+</style>
+</head>
+<body>
+<a class="skip" href="#walkthrough">Skip to walkthrough</a>
+<header><div class="eyebrow">PULL REQUEST WALKTHROUGH</div><h1>{{TITLE}}</h1><p class="intro">{{INTRO}}</p><div class="actions"><a class="primary" href="{{PR_URL}}">Open pull request ↗</a><a href="pr-body.md" download>Download final PR body</a></div><p class="commit">Source commit: <code>{{SOURCE_SHA}}</code></p></header>
+<div class="layout"><nav aria-label="Walkthrough sections"><strong>In this walkthrough</strong><ul id="sections"></ul></nav><main id="walkthrough">{{BODY_HTML}}<section id="supporting-artifacts"><h2>Supporting artifacts</h2>{{EVIDENCE_HTML}}</section></main></div>
+<footer>Visual companion to the <a href="{{PR_URL}}">final pull request</a>. Checks and QA retain their original tested commits and limitations.</footer>
+<dialog id="diagram-dialog" aria-labelledby="diagram-title"><div class="dialog-bar"><strong id="diagram-title">Diagram detail</strong><button id="close-dialog" type="button">Close ✕</button></div><div id="diagram-detail"></div></dialog>
+<script>
+const sections=document.getElementById('sections');
+for(const [index,heading] of [...document.querySelectorAll('main h2')].entries()){
+ if(!heading.id)heading.id='section-'+(index+1);
+ const item=document.createElement('li'),link=document.createElement('a');link.href='#'+heading.id;link.textContent=heading.textContent;item.append(link);sections.append(item);
+}
+for(const table of document.querySelectorAll('main table')){const wrapper=document.createElement('div');wrapper.className='table-wrap';table.before(wrapper);wrapper.append(table);}
+const modal=document.getElementById('diagram-dialog');
+for(const figure of document.querySelectorAll('figure.diagram')){
+ const visual=figure.querySelector('svg,img');if(!visual)continue;
+ const button=document.createElement('button');button.className='expand';button.type='button';button.textContent='Expand diagram';figure.append(button);
+ button.addEventListener('click',()=>{document.getElementById('diagram-detail').replaceChildren(visual.cloneNode(true));modal.showModal();});
+}
+document.getElementById('close-dialog').addEventListener('click',()=>modal.close());
+modal.addEventListener('click',event=>{if(event.target===modal)modal.close();});
+</script>
+</body></html>

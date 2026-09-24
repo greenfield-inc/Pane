@@ -1,0 +1,7 @@
+interface:
+  display_name: "Create Ticket"
+  short_description: "Preserve intent and outcomes in tickets and Grain"
+  default_prompt: "Use $create-ticket to capture the current what, why, and outcomes as tickets, Grain briefs, or both, grouped for delegation."
+
+policy:
+  allow_implicit_invocation: true

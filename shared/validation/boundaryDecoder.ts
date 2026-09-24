@@ -95,6 +95,8 @@ function decodeJsonValue(current: BoundaryCursor): JsonValue {
     const source = current.value as ObjectValue;
     const decoded: { [key: string]: JsonValue } = {};
     for (const [key, value] of Object.entries(source)) {
+      // Match JSON.stringify: an undefined property is an absent key, not an invalid value.
+      if (value === undefined) continue;
       decoded[key] = decodeJsonValue(current.child(key, value));
     }
     return decoded;

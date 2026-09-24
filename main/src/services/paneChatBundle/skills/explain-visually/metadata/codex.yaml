@@ -1,0 +1,7 @@
+interface:
+  display_name: "Explain Visually"
+  short_description: "First-principles visual companions for explanations"
+  default_prompt: "Use $explain-visually to help me understand this topic with a clear visual companion."
+
+policy:
+  allow_implicit_invocation: true

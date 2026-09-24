@@ -4,7 +4,7 @@ import path from 'path';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
-import { PathResolver, ProjectEnvironment } from '../utils/pathResolver';
+import { PathResolver, ProjectEnvironment, expandUserRepoPath } from '../utils/pathResolver';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { escapeShellArg } from '../utils/shellEscape';
 import { panelManager } from '../services/panelManager';
@@ -49,6 +49,9 @@ import type {
   RunpanePanePinResult,
   RunpanePaneRenameRequest,
   RunpanePaneRenameResult,
+  RunpanePaneFocusRequest,
+  RunpanePaneFocusRequestedEvent,
+  RunpanePaneFocusResult,
   RunpanePaneCreateFailureItem,
   RunpanePaneCreateItem,
   RunpanePaneCreateRequest,
@@ -141,6 +144,7 @@ const RUNPANE_CHANNELS = [
   'runpane:panes:adopt',
   'runpane:panes:pin',
   'runpane:panes:rename',
+  'runpane:panes:focus',
   'runpane:panes:archive',
   'runpane:panels:create',
   'runpane:panels:list',
@@ -164,6 +168,8 @@ const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
 const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
 const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
 const CODEX_SUBMIT_STAGE_DELAY_MS = 500;
+const CLAUDE_INPUT_WAIT_TIMEOUT_MS = 15_000;
+const CLAUDE_UI_QUIET_MS = 3_000;
 const MAX_CREATE_SUBMIT_ATTEMPTS = 3;
 const CREATE_SUBMIT_CONFIRMATION_DELAY_MS = 400;
 const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
@@ -574,6 +580,52 @@ export function registerRunpaneHandlers(
     }, result => ({ paneId: result.pane.paneId }));
   });
 
+  commandRegistry.register('runpane:panes:focus', async (request: PaneCommandValue): Promise<RunpanePaneFocusResult> => {
+    return withRunpaneAction(services, 'panes:focus', {}, async () => {
+      const normalized = parsePaneFocusRequest(request);
+      const pane = resolvePane(sessionManager, normalized.paneId);
+
+      if (pane.archived) {
+        throw new Error(`Pane ${normalized.paneId} is archived and cannot be focused`);
+      }
+
+      if (normalized.panelId) {
+        const panel = resolvePanel(normalized.panelId);
+        if (panel.sessionId !== pane.id) {
+          throw new Error(`Panel ${normalized.panelId} does not belong to Pane ${pane.id}`);
+        }
+      }
+
+      const window = services.getMainWindow();
+      if (!window) {
+        throw new Error('Pane window is not available to focus');
+      }
+
+      if (normalized.panelId) {
+        await panelManager.setActivePanel(pane.id, normalized.panelId);
+      }
+
+      if (window.isMinimized()) {
+        window.restore();
+      }
+      window.show();
+      window.focus();
+
+      const focusEvent: RunpanePaneFocusRequestedEvent = {
+        paneId: pane.id,
+        panelId: normalized.panelId,
+      };
+      window.webContents.send('pane:focus-requested', focusEvent);
+
+      return {
+        ok: true,
+        paneId: pane.id,
+        panelId: normalized.panelId,
+        focused: true,
+      };
+    }, result => ({ paneId: result.paneId, ok: result.ok }));
+  });
+
   commandRegistry.register('runpane:panes:create', async (request: PaneCommandValue): Promise<RunpanePaneCreateResult> => {
     return withRunpaneAction(services, 'panes:create', {}, async () => {
       const normalized = parsePaneCreateRequest(request);
@@ -867,11 +919,11 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:output', async (request: PaneCommandValue): Promise<RunpanePanelOutputResult> => {
-    return withRunpaneAction(services, 'panels:output', {}, () => {
+    return withRunpaneAction(services, 'panels:output', {}, async () => {
       const normalized = parsePanelOutputRequest(request);
       const panel = resolvePanel(normalized.panelId);
       const limit = normalized.limit ?? DEFAULT_PANEL_OUTPUT_LIMIT;
-      const scrollbackResult = panel.type === 'terminal' ? panelScrollbackOutput(panel, limit) : null;
+      const scrollbackResult = panel.type === 'terminal' ? await panelScrollbackOutput(panel, limit) : null;
 
       if (scrollbackResult) {
         return {
@@ -965,17 +1017,36 @@ export function registerRunpaneHandlers(
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
 
-      const beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+      let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
       const stagedInput = stripSubmitEnter(normalized.input);
-      if (
-        stagedInput.length > 0 &&
-        beforeScreen.state.agentType === 'codex' &&
-        beforeScreen.state.activityStatus === 'idle' &&
-        beforeScreen.state.isCliReady === true &&
-        beforeScreen.composer.isPresent
-      ) {
+      const { agentType, activityStatus, isCliReady } = beforeScreen.state;
+      // Claude reads text and Enter arriving in one read as a paste and keeps
+      // the Enter as a newline. Terminal readiness can precede Claude drawing
+      // its UI or reading input, so wait while it is still drawing for its
+      // composer, then for the staged text to show, before sending Enter alone.
+      // Claude draws its UI on the alternate screen, so a quiet alternate
+      // screen without a composer is a menu or picker and gets the plain
+      // write. Startup can pause for seconds before the first frame.
+      if (stagedInput.length > 0 && agentType === 'claude' && !beforeScreen.composer.isPresent) {
+        beforeScreen = await waitForPanelScreen(
+          panel,
+          screen => screen.composer.isPresent ||
+            (screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)),
+        );
+      }
+      const stagesComposer = beforeScreen.composer.isPresent && (agentType === 'claude' ||
+        (agentType === 'codex' && activityStatus === 'idle' && isCliReady === true));
+      if (stagedInput.length > 0 && stagesComposer) {
+        const outputGenerationBeforeStage = terminalPanelManager.getOutputGeneration(panel.id);
         terminalPanelManager.writeToTerminal(panel.id, stagedInput);
-        await sleep(CODEX_SUBMIT_STAGE_DELAY_MS);
+        if (agentType === 'claude') {
+          await waitForPanelScreen(
+            panel,
+            screen => screen.composer.hasUndeliveredText && panelHasFreshOutputSince(panel.id, outputGenerationBeforeStage),
+          );
+        } else {
+          await sleep(CODEX_SUBMIT_STAGE_DELAY_MS);
+        }
         const submission = await submitComposerForPanel(panel, 'auto');
         return {
           ok: submission.ok,
@@ -1583,6 +1654,11 @@ function panelHasFreshOutputSince(panelId: string, generation: number): boolean 
   return terminalPanelManager.getOutputGeneration(panelId) > generation;
 }
 
+function panelHasOutputWithin(panelId: string, windowMs: number): boolean {
+  const lastOutputAt = terminalPanelManager.getLastOutputAt(panelId);
+  return lastOutputAt !== undefined && Date.now() - Date.parse(lastOutputAt) < windowMs;
+}
+
 async function createPaneItem(
   services: AppServices,
   repo: Project,
@@ -1718,7 +1794,10 @@ async function buildPanelScreenResult(panel: ToolPanel, limit: number): Promise<
   const persisted = liveSnapshot ? null : panelDatabase.getPanelBuffers(panel.id);
   const { source, rawText } = selectPanelScreenText(liveSnapshot, customState, persisted);
   const bounded = boundSanitizedLines(rawText, limit);
-  const composer = detectPanelComposer(bounded.text, state.agentType);
+  const composerText = state.agentType === 'claude' && liveSnapshot
+    ? terminalPanelManager.getInputScreenText(panel.id) ?? bounded.text
+    : bounded.text;
+  const composer = detectPanelComposer(composerText, state.agentType);
 
   return {
     ok: true,
@@ -1739,6 +1818,9 @@ function detectPanelComposer(
   text: string,
   agentType: RunpaneAgentId | undefined,
 ): RunpanePanelScreenResult['composer'] {
+  if (agentType === 'claude') {
+    return detectClaudeComposer(text);
+  }
   if (agentType !== 'codex') {
     return { isPresent: false, hasUndeliveredText: false };
   }
@@ -1761,6 +1843,25 @@ function detectPanelComposer(
     isPresent: hasPastedContent,
     hasUndeliveredText: hasPastedContent,
   };
+}
+
+// Claude draws its composer as a `❯` line boxed between two horizontal rules;
+// held input is anything between the prompt marker and the closing rule.
+function detectClaudeComposer(text: string): RunpanePanelScreenResult['composer'] {
+  const lines = text.split(/\r?\n/u).map(line => line.trim());
+  const isRule = (line: string | undefined) => line !== undefined && /^─{3,}$/u.test(line);
+  for (let index = lines.length - 1; index > 0; index -= 1) {
+    const match = lines[index].match(/^❯(?:\s+(.*))?$/u);
+    if (!match || !isRule(lines[index - 1])) continue;
+
+    const closingRule = lines.findIndex((line, lineIndex) => lineIndex > index && isRule(line));
+    const held = [match[1] ?? '', ...lines.slice(index + 1, closingRule < 0 ? undefined : closingRule)];
+    return {
+      isPresent: true,
+      hasUndeliveredText: held.some(line => line.length > 0),
+    };
+  }
+  return { isPresent: false, hasUndeliveredText: false };
 }
 
 interface PanelScreenText {
@@ -2036,6 +2137,19 @@ async function submitComposerForPanel(
   };
 }
 
+async function waitForPanelScreen(
+  panel: ToolPanel,
+  isReady: (screen: RunpanePanelScreenResult) => boolean,
+): Promise<RunpanePanelScreenResult> {
+  const startedAt = Date.now();
+  let screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  while (!isReady(screen) && Date.now() - startedAt < CLAUDE_INPUT_WAIT_TIMEOUT_MS) {
+    await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
+    screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  }
+  return screen;
+}
+
 async function verifyComposerSubmitted(
   panel: ToolPanel,
   beforeScreen: RunpanePanelScreenResult,
@@ -2052,11 +2166,24 @@ async function verifyComposerSubmitted(
   }
   const stagedText = composerEvidenceText(beforeScreen.text);
   let latestScreen = beforeScreen;
+  let previousPollShowedEmptyComposer = false;
   const startedAt = Date.now();
 
   while (Date.now() - startedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
     await sleep(DEFAULT_COMPOSER_VERIFY_INTERVAL_MS);
     latestScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+
+    // Claude always draws its composer box, and repaints (at startup, say)
+    // briefly show neither the box nor the prompt; only a steady empty box
+    // proves the prompt was taken.
+    if (beforeScreen.state.agentType === 'claude') {
+      const showsEmptyComposer = latestScreen.composer.isPresent && !latestScreen.composer.hasUndeliveredText;
+      if (beforeHadComposerPrompt && showsEmptyComposer && previousPollShowedEmptyComposer) {
+        return { ok: true, verifiedSubmitted: true, verification: 'observed' };
+      }
+      previousPollShowedEmptyComposer = showsEmptyComposer;
+      continue;
+    }
 
     const verdict = assessComposerEvidence({
       beforeText: beforeScreen.text,
@@ -2277,35 +2404,21 @@ function outputToText(output: SessionOutput): string {
   }
 }
 
-function panelScrollbackOutput(panel: ToolPanel, limit: number): { text: string; hasMore: boolean; timestamp: string } | null {
-  const rawScrollback = getPanelScrollback(panel);
-  if (!rawScrollback) {
-    return null;
-  }
-
-  const stripped = sanitizeTerminalOutput(rawScrollback);
-  if (!stripped) {
-    return null;
-  }
-
-  const allLines = stripped.split('\n');
-  const hasMore = allLines.length > limit;
-  const text = allLines.slice(-limit).join('\n');
+async function panelScrollbackOutput(panel: ToolPanel, limit: number): Promise<{ text: string; hasMore: boolean; timestamp: string } | null> {
   const timestamp = toIsoString(panel.metadata.lastActiveAt) ?? new Date().toISOString();
 
-  return { text, hasMore, timestamp };
-}
-
-function getPanelScrollback(panel: ToolPanel): string | null {
-  const liveScrollback = terminalPanelManager.getTerminalScrollback(panel.id);
-  if (liveScrollback !== null) {
-    return liveScrollback;
+  // Ask for one extra rendered line so hasMore reflects emulator truncation.
+  let text = await terminalPanelManager.getCleanTerminalScrollback(panel.id, limit + 1);
+  if (text === null) {
+    const persistedScrollback = panelDatabase.getPanelBuffers(panel.id)?.scrollback;
+    if (!persistedScrollback) return null;
+    text = sanitizeTerminalOutput(persistedScrollback);
   }
+  if (!text) return null;
 
-  const persisted = panelDatabase.getPanelBuffers(panel.id)?.scrollback;
-  if (persisted) return persisted;
-
-  return null;
+  const allLines = text.split('\n');
+  const hasMore = allLines.length > limit;
+  return { text: allLines.slice(-limit).join('\n'), hasMore, timestamp };
 }
 
 function panelOutputCommand(panelId: string): string {
@@ -2877,7 +2990,7 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
     throw new Error('Repo add request must include a path');
   }
 
-  const repoPath = path.resolve(requestedPath);
+  const repoPath = expandUserRepoPath(requestedPath);
   const providedName = optionalString(value.name)?.trim();
   const defaultName = path.basename(repoPath) || repoPath;
 
@@ -3132,6 +3245,27 @@ function parsePaneRenameRequest(value: PaneCommandValue): RunpanePaneRenameReque
   };
 }
 
+function parsePaneFocusRequest(value: PaneCommandValue): RunpanePaneFocusRequest {
+  if (!isRecord(value)) {
+    throw new Error('Pane focus request must be an object');
+  }
+
+  const paneId = optionalString(value.paneId)?.trim();
+  if (!paneId) {
+    throw new Error('Pane focus request must include a paneId');
+  }
+  const panelId = optionalString(value.panelId)?.trim();
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Pane focus source must be user or agent');
+  }
+
+  return {
+    paneId,
+    panelId: panelId || undefined,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+  };
+}
+
 function resolvePanel(panelId: string): ToolPanel {
   const panel = panelManager.getPanel(panelId);
   if (!panel) {
@@ -3163,20 +3297,21 @@ function parsePaneCreateItem(value: PaneCommandValue, index: number): RunpanePan
 }
 
 function validateRepositoryPath(repoPath: string): void {
+  const resolvedPath = expandUserRepoPath(repoPath);
   let stat: fs.Stats;
   try {
-    stat = fs.statSync(repoPath);
+    stat = fs.statSync(resolvedPath);
   } catch {
-    throw new Error(`Repo path does not exist: ${repoPath}`);
+    throw new Error(`Repo path does not exist: ${resolvedPath}`);
   }
 
   if (!stat.isDirectory()) {
-    throw new Error(`Repo path must be a directory: ${repoPath}`);
+    throw new Error(`Repo path must be a directory: ${resolvedPath}`);
   }
 
   try {
     const output = execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
-      cwd: repoPath,
+      cwd: resolvedPath,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -3185,7 +3320,7 @@ function validateRepositoryPath(repoPath: string): void {
       throw new Error('not inside work tree');
     }
   } catch {
-    throw new Error(`Repo path must be an existing git repository: ${repoPath}`);
+    throw new Error(`Repo path must be an existing git repository: ${resolvedPath}`);
   }
 }
 

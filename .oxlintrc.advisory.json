@@ -19,7 +19,8 @@
     "**/dist/**",
     "**/node_modules/**",
     "dist-electron/**",
-    "tools/oxlint/anti-slop/**"
+    "tools/oxlint/anti-slop/**",
+    "main/src/services/paneChatBundle/**"
   ],
   "rules": {}
 }

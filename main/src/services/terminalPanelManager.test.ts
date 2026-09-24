@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
-import { TerminalStateEmulator } from './terminalStateEmulator';
+import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
+import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
 import { TerminalPanelManager } from './terminalPanelManager';
@@ -27,7 +28,7 @@ type TerminalUnderTest = {
   sessionId: string;
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
-  screenEmulator?: TerminalStateEmulator;
+  screenEmulator?: RemoteTerminalEmulator;
   commandHistory: string[];
   currentCommand: string;
   lastActivity: Date;
@@ -450,9 +451,9 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('returns emulated live screen and restore state for daemon and renderer reads', async () => {
     const manager = testAccess<SnapshotAccess>(new TerminalPanelManager());
-    const screenEmulator = new TerminalStateEmulator(40, 5);
+    const screenEmulator = inProcessEmulatorHost().createEmulator(40, 5);
     screenEmulator.write('\x1b[?1049h\x1b[Hagent screen');
-    await screenEmulator.waitForIdle();
+    await screenEmulator.refresh();
     const terminal = createTerminal({
       scrollbackBuffer: 'scrollback',
       alternateScreenBuffer: 'screen',
@@ -509,7 +510,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('serves normal-buffer restore content from the rendered emulator, not the raw append log', async () => {
     const manager = testAccess<SnapshotAccess>(new TerminalPanelManager());
-    const screenEmulator = new TerminalStateEmulator(40, 5);
+    const screenEmulator = inProcessEmulatorHost().createEmulator(40, 5);
     const frame = 'PR #363 state unchanged';
     // Live stream: the frame prints once, then forced-redraw repaints re-emit it
     // after cursor-home — the traffic that duplicated rows when the raw log was
@@ -519,7 +520,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
     screenEmulator.write(initial);
     screenEmulator.write(repaint);
     screenEmulator.write(repaint);
-    await screenEmulator.waitForIdle();
     const terminal = createTerminal({
       scrollbackBuffer: initial + repaint + repaint,
       screenEmulator,
@@ -909,6 +909,34 @@ describe('TerminalPanelManager hidden output delivery', () => {
         wasInterrupted: undefined,
       },
     });
+  });
+
+  it('keeps Codex launch options when resuming an interrupted panel', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const initialCommand = `codex --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"'`;
+
+    const result = manager.resolveCliLaunchCommand('panel-1', initialCommand, {
+      agentType: 'codex',
+      wasInterrupted: true,
+      agentSessionId: 'thread-1',
+    });
+
+    expect(result).toMatchObject({
+      commandToRun: `codex resume --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' thread-1`,
+      isCliCommand: true,
+    });
+  });
+
+  it('drops other Codex options, such as a prompt, when resuming', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo "fix the bug"', {
+      agentType: 'codex',
+      wasInterrupted: true,
+      agentSessionId: 'thread-1',
+    });
+
+    expect(result).toMatchObject({ commandToRun: 'codex resume --yolo thread-1' });
   });
 
   it('keeps Enter as the default initial input submit strategy', async () => {

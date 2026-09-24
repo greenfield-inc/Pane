@@ -36,8 +36,6 @@ import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
 
 import { CommandPalette } from './components/CommandPalette';
-import { CloudOverlay } from './components/CloudOverlay';
-import { CloudWidget } from './components/CloudWidget';
 import { Settings } from './components/Settings';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
@@ -792,8 +790,6 @@ function App() {
           />
         </div>
         <SessionView />
-        <CloudOverlay />
-        <CloudWidget />
         <Settings
           isOpen={isSettingsOpen}
           onClose={closeSettings}

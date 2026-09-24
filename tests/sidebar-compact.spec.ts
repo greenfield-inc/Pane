@@ -309,6 +309,38 @@ test.describe('compact sidebar', () => {
     await expect(tooltip).toBeHidden({ timeout: 5_000 });
   });
 
+  test('marks draft pull requests with the draft PR icon', async ({ page }) => {
+    await installElectronApiMock(page, {
+      initialConfig: { theme: 'night-owl' },
+      initialProjects: projects,
+      initialSessions: [
+        session('draft', 'Draft work', 1, {
+          gitStatus: { state: 'ahead', ahead: 1, prNumber: 501, prState: 'OPEN', prIsDraft: true },
+        }),
+        session('ready', 'Ready work', 1, {
+          gitStatus: { state: 'ahead', ahead: 1, prNumber: 502, prState: 'OPEN', prIsDraft: false },
+        }),
+      ],
+      initialUiState: {
+        expandedProjects: [1],
+        pinnedSectionExpanded: true,
+        repositoriesSectionExpanded: true,
+      },
+    });
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    // The icon renders beside the row's button, so scope to the innermost row container.
+    const row = (name: string) => page.locator('div')
+      .filter({ has: page.getByRole('button', { name, exact: true }) })
+      .last();
+    const draftRow = row('Draft work');
+    const readyRow = row('Ready work');
+    await expect(draftRow.locator('svg.lucide-git-pull-request-draft')).toHaveCount(1);
+    await expect(readyRow.locator('svg.lucide-git-pull-request-draft')).toHaveCount(0);
+    await expect(readyRow.locator('svg.lucide-git-pull-request')).toHaveCount(1);
+  });
+
   test('mirrors an expanded pinned section and collapsed repositories section', async ({ page }) => {
     await installElectronApiMock(page, {
       initialConfig: { theme: 'night-owl' },

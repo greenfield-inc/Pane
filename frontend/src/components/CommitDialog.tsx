@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GitCommit } from 'lucide-react';
+import { composeCommitMessage, isCommitSubmitShortcut } from '../../../shared/utils/commitMessage';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
+import { Input } from './ui/Input';
 import { Textarea } from './ui/Textarea';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../stores/configStore';
 
@@ -19,23 +21,24 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
   onCommit,
   fileCount
 }) => {
-  const [commitMessage, setCommitMessage] = useState('');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [isCommitting, setIsCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const keyboardShortcutsEnabled = useConfigStore((state) => areKeyboardShortcutsEnabled(state.config));
 
   // Set default message
   useEffect(() => {
     if (isOpen) {
-      const defaultMessage = `Update ${fileCount} file${fileCount > 1 ? 's' : ''}`;
-      setCommitMessage(defaultMessage);
+      setTitle(`Update ${fileCount} file${fileCount > 1 ? 's' : ''}`);
+      setDescription('');
       setError(null);
       // Focus and select all text after a short delay
       const focusTimer = window.setTimeout(() => {
-        if (textareaRef.current) {
-          textareaRef.current.focus();
-          textareaRef.current.select();
+        if (titleRef.current) {
+          titleRef.current.focus();
+          titleRef.current.select();
         }
       }, 100);
 
@@ -44,8 +47,8 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
   }, [isOpen, fileCount]);
 
   const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) {
-      setError('Please enter a commit message');
+    if (!title.trim()) {
+      setError('Please enter a title');
       return;
     }
 
@@ -53,23 +56,23 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
     setError(null);
 
     try {
-      await onCommit(commitMessage);
+      await onCommit(composeCommitMessage(title, description));
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to commit changes');
     } finally {
       setIsCommitting(false);
     }
-  }, [commitMessage, onCommit, onClose]);
+  }, [description, onCommit, onClose, title]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (keyboardShortcutsEnabled && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (isCommitSubmitShortcut(e, keyboardShortcutsEnabled, !isCommitting && !!title.trim())) {
       e.preventDefault();
-      handleCommit();
+      void handleCommit();
     } else if (e.key === 'Escape') {
       onClose();
     }
-  }, [handleCommit, keyboardShortcutsEnabled, onClose]);
+  }, [handleCommit, isCommitting, keyboardShortcutsEnabled, onClose, title]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="md">
@@ -84,15 +87,30 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
           Committing {fileCount} file{fileCount > 1 ? 's' : ''} with changes
         </p>
         
-        <Textarea
-          ref={textareaRef}
-          value={commitMessage}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCommitMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Enter commit message..."
-          rows={4}
-          error={error}
-        />
+        <div className="space-y-4">
+          <Input
+            ref={titleRef}
+            label="Title"
+            value={title}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              setTitle(e.target.value);
+              if (error) setError(null);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="Enter commit title..."
+            error={error ?? undefined}
+            fullWidth
+          />
+          <Textarea
+            label="Description (optional)"
+            value={description}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Add more details..."
+            rows={4}
+            fullWidth
+          />
+        </div>
         
         <p className="mt-2 text-xs text-text-tertiary">
           Press {formatKeyDisplay('mod+enter')} to commit
@@ -109,7 +127,7 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
         </Button>
         <Button
           onClick={handleCommit}
-          disabled={isCommitting || !commitMessage.trim()}
+          disabled={isCommitting || !title.trim()}
           variant="primary"
           loading={isCommitting}
           loadingText="Committing..."

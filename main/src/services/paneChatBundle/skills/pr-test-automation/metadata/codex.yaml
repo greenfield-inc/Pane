@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Test Automation"
+  short_description: "Automate first-pass PR manual QA."
+  default_prompt: "Use $pr-test-automation to validate this PR as much as possible before manual human testing."

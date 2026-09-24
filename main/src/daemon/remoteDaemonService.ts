@@ -333,9 +333,22 @@ async function installSystemdUserService(
     installed: enable.ok,
     started,
     message: started
-      ? restart ? 'Repaired and restarted the user systemd service.' : 'Installed and started a user systemd service.'
+      ? `${restart ? 'Repaired and restarted the user systemd service.' : 'Installed and started a user systemd service.'}${enableLinger(context)}`
       : `Wrote ${servicePath}, but systemctl failed: ${firstNonEmpty(restartResult.stderr, restartResult.stdout, 'unknown error')}`,
   };
+}
+
+// A user service stops with the user's last login session unless lingering is on,
+// which on a cloud VM means as soon as the SSH connection closes. Polkit usually
+// denies this to SSH users, so fall back to sudo -n, which cloud images allow
+// without a password and which fails fast instead of prompting everywhere else.
+function enableLinger(context: ServiceContext): string {
+  const args = ['enable-linger', '--no-ask-password', os.userInfo().username];
+  const enabled = context.commandExists('loginctl') && (
+    context.runCommand('loginctl', args).ok
+    || (context.commandExists('sudo') && context.runCommand('sudo', ['-n', 'loginctl', ...args]).ok)
+  );
+  return enabled ? '' : ' It will stop when you log out until you run: sudo loginctl enable-linger "$USER"';
 }
 
 async function installLaunchAgent(paneDir: string, context: ServiceContext): Promise<RemoteHostSetupServiceResult> {

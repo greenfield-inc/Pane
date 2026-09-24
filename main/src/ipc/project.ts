@@ -7,8 +7,9 @@ import type { CreateProjectRequest, UpdateProjectRequest } from '../../../fronte
 import { scriptExecutionTracker } from '../services/scriptExecutionTracker';
 import { panelManager } from '../services/panelManager';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
-import { PathResolver } from '../utils/pathResolver';
+import { PathResolver, expandUserRepoPath } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
+import { detectProjectBranch } from '../utils/detectProjectBranch';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
@@ -114,9 +115,11 @@ export function registerProjectHandlers(
     try {
       console.log('[Main] Creating project:', projectData);
 
+      const requestedPath = expandUserRepoPath(projectData.path);
+
       // Parse WSL path if applicable
-      const wslInfo = parseWSLPath(projectData.path);
-      let actualPath = projectData.path;
+      const wslInfo = parseWSLPath(requestedPath);
+      let actualPath = requestedPath;
       let wslEnabled = false;
       let wslDistribution: string | null = null;
       let isGitRepo = false;
@@ -462,21 +465,10 @@ export function registerProjectHandlers(
     }
   });
 
-  commandRegistry.register('projects:detect-branch', async (path: string) => {
-    try {
-      const wslInfo = parseWSLPath(path);
-      const tempProject = {
-        path: wslInfo ? wslInfo.linuxPath : path,
-        wsl_enabled: !!wslInfo,
-        wsl_distribution: wslInfo?.distro ?? null
-      };
-      const commandRunner = new CommandRunner(tempProject);
-      const branch = await worktreeManager.getProjectMainBranch(tempProject.path, commandRunner);
-      return { success: true, data: branch };
-    } catch (error) {
-      console.log('[Main] Could not detect branch:', error);
-      return { success: true, data: 'main' }; // Return default if detection fails
-    }
+  commandRegistry.register('projects:detect-branch', async (repoPath: string) => {
+    return detectProjectBranch(repoPath, (projectPath, commandRunner) => (
+      worktreeManager.getProjectMainBranch(projectPath, commandRunner)
+    ));
   });
 
   commandRegistry.register('projects:list-branches', async (projectId: string) => {

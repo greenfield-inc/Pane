@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { decodeRemoteConnectionCode } from '../../../frontend/src/remote/runtime/remoteProfile';
 import {
   RemoteDaemonBrowserClient,
-  parseSseEvents,
 } from '../../../frontend/src/remote/runtime/remoteDaemonBrowserClient';
 import { RemoteRuntimeAdapter } from '../../../frontend/src/remote/runtime/remoteRuntimeAdapter';
 import type { PaneRemoteConnectionImportPayload } from '../../../shared/types/remoteDaemon';
@@ -55,32 +54,6 @@ describe('Remote PWA browser runtime', () => {
     }))).toThrow(/transport/);
   });
 
-  it('parses ready, heartbeat, and daemon-event SSE frames', () => {
-    const { events, rest } = parseSseEvents([
-      'event: ready',
-      'data: {"timestamp":"2026-05-19T00:00:00.000Z"}',
-      '',
-      'event: heartbeat',
-      'data: {"timestamp":"2026-05-19T00:00:01.000Z"}',
-      '',
-      'event: daemon-event',
-      'data: {"type":"terminal:output","payload":{"panelId":"panel-1","data":"ok"},"timestamp":"2026-05-19T00:00:02.000Z"}',
-      '',
-      'event: partial',
-      'data: pending',
-    ].join('\n'));
-
-    expect(rest).toBe('event: partial\ndata: pending');
-    expect(events).toEqual([
-      { event: 'ready', data: '{"timestamp":"2026-05-19T00:00:00.000Z"}' },
-      { event: 'heartbeat', data: '{"timestamp":"2026-05-19T00:00:01.000Z"}' },
-      {
-        event: 'daemon-event',
-        data: '{"type":"terminal:output","payload":{"panelId":"panel-1","data":"ok"},"timestamp":"2026-05-19T00:00:02.000Z"}',
-      },
-    ]);
-  });
-
   it('sends invoke requests without preflight-only auth headers', async () => {
     installBrowserGlobals();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
@@ -118,6 +91,121 @@ describe('Remote PWA browser runtime', () => {
         clientLabel: 'Pane PWA on TestOS',
       }),
     });
+  });
+
+  it.each(['terminal:input', 'sessions:create', 'panels:create', 'sessions:get-or-create-main-repo', 'new:command'])(
+    'does not replay %s after the host applies it and its response is lost',
+    async (channel) => {
+      installBrowserGlobals();
+      const applied: unknown[] = [];
+      const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        applied.push(readInvokeBody(init));
+        throw new TypeError('Response connection lost');
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(createClient().invoke(channel, ['panel-1', 'echo once\r'])).rejects.toThrow(
+        /may have completed.+Check the current state/,
+      );
+      expect(applied).toMatchObject([{ channel, args: ['panel-1', 'echo once\r'] }]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([408, 425, 429, 500, 503])('does not replay a mutation after HTTP %s', async (status) => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: false }), { status }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createClient().invoke('sessions:create')).rejects.toThrow(/may have completed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay a mutation when its successful response cannot be decoded', async () => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async () => new Response('truncated JSON', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createClient().invoke('terminal:input', ['panel-1', 'x'])).rejects.toThrow(/may have completed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains bounded retries for explicitly safe reads after network and HTTP failures', async () => {
+    vi.useFakeTimers();
+    try {
+      installBrowserGlobals();
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new TypeError('Network unavailable'))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false }), { status: 503 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: [] }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = createClient().invoke('sessions:get-all-with-projects');
+      await vi.runAllTimersAsync();
+      await expect(result).resolves.toEqual([]);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      fetchMock.mockReset().mockRejectedValue(new TypeError('Still unavailable'));
+      const failed = createClient().invoke('panels:list').catch((cause: unknown) => cause);
+      await vi.runAllTimersAsync();
+      expect(await failed).toMatchObject({ message: 'Still unavailable' });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops a pending read retry when disconnected', async () => {
+    vi.useFakeTimers();
+    try {
+      installBrowserGlobals();
+      installMockEventSource();
+      const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+        if (String(url).endsWith('/invoke')) throw new TypeError('Network unavailable');
+        return new Response('{}', { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const client = createClient();
+      await client.connect();
+      const result = client.invoke('panels:list').catch((cause: unknown) => cause);
+      await vi.advanceTimersByTimeAsync(0);
+      client.disconnect();
+      await vi.runAllTimersAsync();
+
+      expect(await result).toMatchObject({ name: 'AbortError' });
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/invoke'))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forwards fallback SSE events with split CRLF and UTF-8 bytes', async () => {
+    installBrowserGlobals();
+    vi.stubGlobal('EventSource', undefined);
+    const encoded = new TextEncoder().encode(
+      'event: daemon-event\r\ndata: {"channel":"terminal:output","args":[{"panelId":"panel-1","data":"🙂"}],"timestamp":"2026-05-19T00:00:02.000Z"}\r\n\r\n',
+    );
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of encoded) controller.enqueue(Uint8Array.of(byte));
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => (
+      String(url).endsWith('/health')
+        ? new Response('{}', { status: 200 })
+        : new Response(stream, { status: 200 })
+    )));
+    const client = createClient();
+    const received = new Promise<unknown>((resolve) => client.onEvent(resolve));
+    try {
+      await client.connect();
+      await expect(received).resolves.toMatchObject({
+        type: 'daemon-event',
+        payload: { channel: 'terminal:output', args: [{ panelId: 'panel-1', data: '🙂' }] },
+      });
+    } finally {
+      client.disconnect();
+    }
   });
 
   it('opens the event stream with browser auth metadata in query params', async () => {
@@ -306,6 +394,15 @@ describe('Remote PWA browser runtime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([401, 403])('does not retry an HTTP %s auth rejection with a non-JSON body', async (status) => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async () => new Response('Forbidden', { status }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createClient().invoke('panels:list')).rejects.toThrow(/connection code is not accepted/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a Safari Tailscale hint when health checks fail before HTTP', async () => {
     vi.useFakeTimers();
     try {
@@ -450,6 +547,16 @@ describe('Remote PWA browser runtime', () => {
     });
   });
 });
+
+function createClient(): RemoteDaemonBrowserClient {
+  return new RemoteDaemonBrowserClient({
+    id: 'profile-1',
+    baseUrl: 'https://host.example.test',
+    label: 'Remote Host',
+    token: 'secret-token',
+    transport: 'http+sse',
+  });
+}
 
 function createConnectionCode(
   overrides: Partial<Omit<PaneRemoteConnectionImportPayload, 'transport'>> & { transport?: string } = {},

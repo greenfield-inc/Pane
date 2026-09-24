@@ -217,6 +217,16 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribeSessionUpdated);
 
+    const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(({ paneId, panelId }) => {
+      devLog.debug('[useIPCEvents] Pane focus requested:', { paneId, panelId });
+      void useSessionStore.getState().setActiveSession(paneId).then(() => {
+        if (panelId) {
+          usePanelStore.getState().setActivePanel(paneId, panelId);
+        }
+      });
+    });
+    unsubscribeFunctions.push(unsubscribePaneFocusRequested);
+
     const unsubscribeSessionDeleted = window.electronAPI.events.onSessionDeleted((sessionData) => {
       devLog.debug('[useIPCEvents] Session deleted:', sessionData);
       const sessionId = sessionData.id;

@@ -10,7 +10,7 @@
     "headless": "npm run build && electron dist/main/src/daemon/headless.js",
     "bundle:mcp": "node build-mcp-bridge.js",
     "bundle:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --target=node24 --external:electron --sourcemap --outfile=dist/main/src/preload.js && node ../scripts/verify-sandboxed-preload.js",
-    "copy:assets": "mkdirp dist/main/src/database/migrations dist/main/assets && shx cp src/database/*.sql dist/main/src/database/ && shx cp src/database/migrations/*.sql dist/main/src/database/migrations/ && shx cp assets/icon.png dist/main/assets/",
+    "copy:assets": "mkdirp dist/main/src/database/migrations dist/main/assets dist/main/src/services && shx cp src/database/*.sql dist/main/src/database/ && shx cp src/database/migrations/*.sql dist/main/src/database/migrations/ && shx cp assets/icon.png dist/main/assets/ && shx cp -r src/services/paneChatBundle dist/main/src/services/",
     "lint": "pnpm --dir .. run lint:ox:main && pnpm run lint:eslint",
     "lint:eslint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",

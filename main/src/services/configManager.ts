@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
-import { normalizeCloudVmConfig } from '../../../shared/types/cloud';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
@@ -195,9 +194,6 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: normalizePaneChatAgent(
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
-        cloud: loadedConfig.cloud !== undefined
-          ? normalizeCloudVmConfig(loadedConfig.cloud)
-          : this.config.cloud,
         remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
         // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)
         // from "field absent in config file" (→ use defaults)
@@ -363,9 +359,6 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
           ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
           : this.config.defaultOrchestratorAgent,
-        cloud: 'cloud' in updates
-          ? (updates.cloud === undefined ? undefined : normalizeCloudVmConfig(updates.cloud))
-          : this.config.cloud,
         remoteDaemon: 'remoteDaemon' in updates
           ? normalizeRemoteDaemonConfig(updates.remoteDaemon)
           : this.config.remoteDaemon,

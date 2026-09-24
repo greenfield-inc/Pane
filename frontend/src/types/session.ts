@@ -131,6 +131,7 @@ export interface GitStatus {
   prUrl?: string;
   prTitle?: string;
   prState?: string; // 'OPEN' | 'MERGED' | 'CLOSED'
+  prIsDraft?: boolean;
   prBody?: string;
 }
 

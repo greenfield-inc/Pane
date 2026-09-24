@@ -307,6 +307,26 @@ describe('setupRemoteHost', () => {
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
+  it('pairs with an in-memory config whose optional fields are unset', async () => {
+    const writeConfig = vi.fn(async (_config: Parameters<NonNullable<SetupRemoteHostOptions['writeConfig']>>[0]) => {});
+
+    const result = await setupRemoteHost({
+      preferTunnel: 'ssh',
+      installService: false,
+      existingConfig: {
+        verbose: true,
+        anthropicApiKey: undefined,
+        analytics: { enabled: true, githubEmail: undefined },
+      },
+      writeConfig,
+    });
+
+    expect(result.wroteConfig).toBe(true);
+    const written = writeConfig.mock.calls[0][0];
+    expect(written).toMatchObject({ verbose: true, analytics: { enabled: true } });
+    expect(written.remoteDaemon).toBeDefined();
+  });
+
   it('selects the next available loopback port when requested', async () => {
     const server = net.createServer();
     await new Promise<void>((resolve, reject) => {

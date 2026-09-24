@@ -17,19 +17,31 @@ interface AddProjectDialogProps {
 export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
   const [newProject, setNewProject] = useState<CreateProjectRequest>({ name: '', path: '', buildScript: '', runScript: '' });
   const [detectedBranch, setDetectedBranch] = useState<string | null>(null);
+  const [branchDetectionFailed, setBranchDetectionFailed] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
 
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
 
   const detectCurrentBranch = async (path: string) => {
-    if (!path) { setDetectedBranch(null); return; }
+    if (!path) {
+      setDetectedBranch(null);
+      setBranchDetectionFailed(false);
+      return;
+    }
+    setDetectedBranch(null);
+    setBranchDetectionFailed(false);
     try {
       const response = await API.projects.detectBranch(path);
       if (response.success && response.data) {
         setDetectedBranch(response.data);
+        setBranchDetectionFailed(false);
+      } else {
+        setDetectedBranch(null);
+        setBranchDetectionFailed(true);
       }
     } catch {
       setDetectedBranch(null);
+      setBranchDetectionFailed(true);
     }
   };
 
@@ -68,6 +80,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
   const resetAndClose = () => {
     setNewProject({ name: '', path: '', buildScript: '', runScript: '' });
     setDetectedBranch(null);
+    setBranchDetectionFailed(false);
     setShowValidationErrors(false);
     onClose();
   };
@@ -102,7 +115,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
 
           <FieldWithTooltip
             label="Repository Path"
-            tooltip="The absolute path to a git repository on your machine"
+            tooltip="Path to a git repository. ~ and relative paths are expanded to an absolute path."
           >
             <div className="space-y-2">
               <EnhancedInput
@@ -146,8 +159,8 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
               <Card variant="bordered" padding="md">
                 <div className="flex items-center gap-2 text-sm text-text-secondary">
                   <GitBranch className="w-4 h-4" />
-                  <span className="font-mono">
-                    {detectedBranch || 'Detecting...'}
+                  <span className={`font-mono ${branchDetectionFailed ? 'text-status-error' : ''}`}>
+                    {detectedBranch ?? (branchDetectionFailed ? 'Could not detect a git branch' : 'Detecting...')}
                   </span>
                 </div>
               </Card>

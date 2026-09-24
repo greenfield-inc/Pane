@@ -125,6 +125,9 @@ export function migratePanelBuffers(
     return { ...skipped, durationMs: Date.now() - startedAt };
   }
 
+  // WAL mode: fold pending commits into the main file so the size and the
+  // file-level backup copy are complete.
+  db.pragma('wal_checkpoint(TRUNCATE)');
   const fileBytesBefore = fileSize(dbPath);
   const backupPath = writeBackup(dbPath);
   console.log(
@@ -179,6 +182,8 @@ export function migratePanelBuffers(
   migrate();
 
   db.exec('VACUUM');
+  // VACUUM's rewrite lands in the WAL; checkpoint so the main file shrinks now.
+  db.pragma('wal_checkpoint(TRUNCATE)');
 
   return {
     migrated: true,

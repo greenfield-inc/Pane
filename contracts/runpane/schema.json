@@ -407,6 +407,7 @@
         "panes pin",
         "panes unpin",
         "panes rename",
+        "panes focus",
         "panels",
         "panels create",
         "panels list",
@@ -492,6 +493,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panes rename": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes focus": {
           "$ref": "#/$defs/helpLines"
         },
         "panels": {

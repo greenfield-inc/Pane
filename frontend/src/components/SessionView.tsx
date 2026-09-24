@@ -49,6 +49,7 @@ import {
   findGroupInDirection,
   updateSizes,
   findGroupContainingPanel,
+  activatePanelInLayout,
   subsetInsertIndex,
   mergeAllGroups,
   type DropZone,
@@ -304,7 +305,10 @@ export const SessionView = memo(() => {
             sortedLive.map(p => p.id),
             fallbackActiveId,
           );
-          const { layout } = reconcileLayout(base, liveIdsNow);
+          const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow);
+          const layout = fallbackActiveId
+            ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
+            : reconciledLayout;
           setLayoutInStore(sid, layout);
           setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
         } catch (err) {
@@ -555,23 +559,9 @@ export const SessionView = memo(() => {
       const currentLayout = usePanelStore.getState().layouts[sid];
       if (!currentLayout) return;
 
-      // Update the group's activePanelId
-      function setGroupActive(node: SessionPanelLayout['root']): SessionPanelLayout['root'] {
-        if (node.type === 'group' && node.id === groupId) {
-          return { ...node, activePanelId: panel.id };
-        }
-        if (node.type === 'split') {
-          return { ...node, children: node.children.map(setGroupActive) };
-        }
-        return node;
-      }
-      const next: SessionPanelLayout = {
-        ...currentLayout,
-        root: setGroupActive(currentLayout.root),
-        focusedGroupId: groupId,
-      };
+      const next = activatePanelInLayout(currentLayout, panel.id);
       applyLayout(sid, next);
-      setFocusedGroupInStore(sid, groupId);
+      setFocusedGroupInStore(sid, next.focusedGroupId ?? groupId);
       addToHistory(sid, panel.id);
     },
     [activeSession, applyLayout, setFocusedGroupInStore, addToHistory]
@@ -1937,7 +1927,6 @@ export const SessionView = memo(() => {
         dialogType={hook.dialogType}
         gitCommands={hook.gitCommands}
         commitMessage={hook.commitMessage}
-        setCommitMessage={hook.setCommitMessage}
         shouldSquash={hook.shouldSquash}
         setShouldSquash={hook.setShouldSquash}
         onConfirm={(message) => {

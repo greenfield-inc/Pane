@@ -49,6 +49,17 @@ describe('TerminalStateEmulator', () => {
     emulator.dispose();
   });
 
+  it('can blank dim cells, which TUIs use for placeholder suggestions', async () => {
+    const emulator = new TerminalStateEmulator(40, 5);
+
+    emulator.write('❯ \x1b[2mTry "fix the tests"\x1b[22m\r\ntyped \x1b[2mhint\x1b[22m kept');
+    await emulator.waitForIdle();
+
+    expect(emulator.getScreenText()).toBe('❯ Try "fix the tests"\ntyped hint kept');
+    expect(emulator.getScreenText({ omitDim: true })).toBe('❯\ntyped      kept');
+    emulator.dispose();
+  });
+
   it('restores the normal screen after leaving the alternate buffer', async () => {
     const emulator = new TerminalStateEmulator(20, 5);
 
@@ -120,6 +131,64 @@ describe('TerminalStateEmulator', () => {
     emulator.dispose();
     // Preserved after dispose, like screen text.
     expect(emulator.getOscTitle()).toBe('✳ Ready');
+  });
+
+  it('renders in-place cursor-motion repaints as clean scrollback text', async () => {
+    const emulator = new TerminalStateEmulator(20, 5);
+
+    // A spinner that repaints its status line in place via cursor-column moves
+    // (not carriage returns). The raw append log of these bytes, once ANSI is
+    // stripped, collapses into overlapping garbage ("Workingorking•rking...").
+    // The emulator applies the motions in place, so the rendered line is clean.
+    emulator.write('Working');
+    emulator.write('\x1b[7D\x1b[KWorking.');
+    emulator.write('\x1b[8D\x1b[KWorking..');
+    emulator.write('\x1b[9D\x1b[KWorking...');
+    await emulator.waitForIdle();
+
+    const text = emulator.getScrollbackText();
+    expect(text).toBe('Working...');
+    expect(text).not.toContain('orking•');
+    emulator.dispose();
+  });
+
+  it('limits scrollback text to the last N rendered lines', async () => {
+    const emulator = new TerminalStateEmulator(40, 3);
+    for (let i = 1; i <= 10; i++) {
+      emulator.write(`line-${String(i).padStart(2, '0')}\r\n`);
+    }
+    await emulator.waitForIdle();
+
+    const lastThree = emulator.getScrollbackText(3);
+    expect(lastThree).toBe('line-08\nline-09\nline-10');
+
+    const all = emulator.getScrollbackText();
+    expect(all).toContain('line-01');
+    expect(all).toContain('line-10');
+    emulator.dispose();
+  });
+
+  it('preserves bounded scrollback reads after disposal', async () => {
+    const emulator = new TerminalStateEmulator(40, 3);
+    for (let i = 1; i <= 10; i++) {
+      emulator.write(`line-${String(i).padStart(2, '0')}\r\n`);
+    }
+    await emulator.waitForIdle();
+
+    emulator.dispose();
+
+    expect(emulator.getScrollbackText(2)).toBe('line-09\nline-10');
+    expect(emulator.getScrollbackText()).toContain('line-01');
+  });
+
+  it('rejects invalid scrollback line limits', () => {
+    const emulator = new TerminalStateEmulator(40, 3);
+
+    expect(() => emulator.getScrollbackText(-1)).toThrow(RangeError);
+    expect(() => emulator.getScrollbackText(1.5)).toThrow(RangeError);
+    expect(() => emulator.getScrollbackText(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+
+    emulator.dispose();
   });
 
   it('captures OSC title set via the OSC 0 form', async () => {

@@ -1,8 +1,10 @@
-import React from 'react';
-import { GitCommands } from '../../types/session';
+import React, { useCallback, useEffect, useState } from 'react';
+import { composeCommitMessage, isCommitSubmitShortcut, splitCommitMessage } from '../../../../shared/utils/commitMessage';
+import type { GitCommands } from '../../types/session';
+import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../ui/Modal';
 import { Button } from '../ui/Button';
-import { Checkbox, Textarea } from '../ui/Input';
+import { Checkbox, Input, Textarea } from '../ui/Input';
 import { Card } from '../ui/Card';
 
 interface CommitMessageDialogProps {
@@ -10,8 +12,7 @@ interface CommitMessageDialogProps {
   onClose: () => void;
   dialogType: 'squash' | 'rebase' | 'commit';
   gitCommands: GitCommands | null;
-  commitMessage: string;
-  setCommitMessage: (message: string) => void;
+  commitMessage?: string;
   shouldSquash: boolean;
   setShouldSquash: (should: boolean) => void;
   onConfirm: (message: string) => void;
@@ -25,8 +26,7 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
   onClose,
   dialogType,
   gitCommands,
-  commitMessage,
-  setCommitMessage,
+  commitMessage = '',
   shouldSquash,
   setShouldSquash,
   onConfirm,
@@ -34,7 +34,30 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
   isMerging,
   isMergingAndArchiving,
 }) => {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const isProcessing = isMerging || isMergingAndArchiving;
+  const isMessageDisabled = dialogType === 'squash' && !shouldSquash;
+  const isMessageRequired = dialogType === 'commit' || shouldSquash;
+  const composedMessage = composeCommitMessage(title, description);
+  const keyboardShortcutsEnabled = useConfigStore((state) => areKeyboardShortcutsEnabled(state.config));
+  const canConfirm = !isProcessing && (!isMessageRequired || !!title.trim());
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isCommitSubmitShortcut(event, keyboardShortcutsEnabled, canConfirm)) {
+      event.preventDefault();
+      onConfirm(composedMessage);
+    }
+  }, [canConfirm, composedMessage, keyboardShortcutsEnabled, onConfirm]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const parts = splitCommitMessage(commitMessage);
+    setTitle(parts.title);
+    setDescription(parts.description);
+  }, [commitMessage, isOpen]);
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl">
       <ModalHeader
@@ -46,7 +69,7 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
       />
       
       <ModalBody>
-          <div className="space-y-4">
+          <div className="space-y-4" onKeyDown={handleKeyDown}>
             {dialogType === 'squash' && (
               <Card variant="bordered" padding="md" className="bg-surface-secondary">
                 <div className="flex items-center space-x-3">
@@ -64,22 +87,25 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
               </Card>
             )}
             
+            <Input
+              label="Title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              disabled={isMessageDisabled}
+              placeholder={isMessageDisabled ? "Not needed when preserving commits" : "Enter commit title..."}
+              fullWidth
+            />
+
             <Textarea
-              label="Commit Message"
-              value={commitMessage}
-              onChange={(e) => setCommitMessage(e.target.value)}
-              rows={8}
-              disabled={dialogType === 'squash' && !shouldSquash}
-              placeholder={
-                dialogType === 'commit'
-                  ? "Enter commit message..."
-                  : dialogType === 'squash'
-                    ? (shouldSquash ? "Enter commit message..." : "Not needed when preserving commits")
-                    : "Enter commit message..."
-              }
+              label="Description (optional)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={6}
+              disabled={isMessageDisabled}
+              placeholder={isMessageDisabled ? "Not needed when preserving commits" : "Add more details..."}
               helperText={
                 dialogType === 'commit'
-                  ? 'All changes will be staged and committed with this message.'
+                  ? 'All changes will be staged and committed.'
                   : dialogType === 'squash'
                     ? (shouldSquash
                         ? `This message will be used for the merge commit.`
@@ -119,8 +145,8 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
         </Button>
         {dialogType === 'squash' && onMergeAndArchive && (
           <Button
-            onClick={() => onMergeAndArchive(commitMessage)}
-            disabled={(shouldSquash && !commitMessage.trim()) || isProcessing}
+            onClick={() => onMergeAndArchive(composedMessage)}
+            disabled={!canConfirm}
             loading={isMergingAndArchiving}
             variant="secondary"
           >
@@ -128,8 +154,8 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
           </Button>
         )}
         <Button
-          onClick={() => onConfirm(commitMessage)}
-          disabled={(!commitMessage.trim() && (dialogType === 'commit' || shouldSquash)) || isProcessing}
+          onClick={() => onConfirm(composedMessage)}
+          disabled={!canConfirm}
           loading={isMerging}
         >
           {isMerging

@@ -34,7 +34,6 @@ export interface PtyHostRuntime {
   pause(ptyId: string): Promise<void>;
   resume(ptyId: string): Promise<void>;
   getHandle(ptyId: string): PtyHandleLike | undefined;
-  postDataToRenderers(ptyId: string, data: string): void;
 }
 
 /**

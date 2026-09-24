@@ -703,7 +703,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     ];
     const prompt = lines.filter(Boolean).join('\n').slice(0, MAX_ORCHESTRATION_TEXT_LENGTH);
     return {
-      initialCommand: RUNPANE_CONTRACT.agentTemplates[record.agent].command,
+      initialCommand: this.skillCacheManager?.launchCommand(record.agent) ?? RUNPANE_CONTRACT.agentTemplates[record.agent].command,
       initialInput: prompt,
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',

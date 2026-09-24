@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.115",
+  "version": "2.4.125",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -26,6 +26,9 @@
     "overrides": {
       "prebuild-install>node-abi": "^4.33.0",
       "d3-sankey>d3-array": "^3.2.0"
+    },
+    "patchedDependencies": {
+      "@xterm/addon-webgl@0.20.0-beta.298": "patches/@xterm__addon-webgl@0.20.0-beta.298.patch"
     }
   },
   "scripts": {

@@ -538,4 +538,23 @@ describe('daemon registry IPC bindings', () => {
     expect(ipcMain.boundChannels.sort()).toEqual([...GIT_CHANNELS].sort());
     expect(registry.has('git:clone-repo')).toBe(true);
   });
+
+  it('rejects commit messages without a title at the git IPC boundary', async () => {
+    const registry = new PaneCommandRegistry();
+    registerGitHandlers(createIpcMainStub(), createServicesStub(), registry);
+    registerFileHandlers(createIpcMainStub(), createServicesStub(), registry);
+
+    await expect(registry.invoke(
+      'sessions:git-stage-and-commit',
+      ['session-1', '  \n\nDescription only'],
+    )).resolves.toEqual({ success: false, error: 'Commit title is required' });
+    await expect(registry.invoke(
+      'sessions:squash-and-rebase-to-main',
+      ['session-1', ''],
+    )).resolves.toEqual({ success: false, error: 'Commit title is required' });
+    await expect(registry.invoke(
+      'git:commit',
+      [{ sessionId: 'session-1', message: '\n\nDescription only' }],
+    )).resolves.toEqual({ success: false, error: 'Commit title is required' });
+  });
 });

@@ -31,6 +31,7 @@ import {
   type JsonObject,
 } from "../../../shared/validation/boundaryDecoder";
 import { PanelBufferStore, splitPanelBufferState, type PanelBuffers } from "./panelBuffers";
+import { ensureUsageRollup } from "../services/usage/usageRollup";
 import {
   migratePanelBuffers,
   unwrapStringWrappedPanelState,
@@ -235,6 +236,20 @@ export class DatabaseService {
 
     this.dbPath = dbPath;
     this.db = new Database(dbPath);
+    // WAL lets reads run during a write and commits append to the -wal file
+    // instead of syncing the main file. NORMAL is WAL's recommended pairing:
+    // an app crash loses nothing, and a power loss can drop only the last
+    // commits without corrupting the file. The size limit shrinks the -wal
+    // file back after a big write such as a retention sweep. All are no-ops
+    // on :memory:.
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
+    this.db.pragma(`journal_size_limit = ${64 * 1024 * 1024}`);
+    // Reads the main file through a memory map instead of copying pages in,
+    // which speeds up the usage reports and terminal buffer loads. Writes
+    // still go through the WAL. scripts/benchmark-db.js measures this and
+    // the pragmas left at their defaults.
+    this.db.pragma(`mmap_size = ${256 * 1024 * 1024}`);
     this.panelBuffers = new PanelBufferStore(this.db);
   }
 
@@ -2517,6 +2532,8 @@ export class DatabaseService {
       `);
       console.log("[Database] Added credit and limit-state columns to usage_rate_limits table");
     }
+
+    ensureUsageRollup(this.db);
 
     // Keep this ownership migration after legacy table-rebuild migrations above,
     // since those intentionally reconstruct sessions from an older column set.

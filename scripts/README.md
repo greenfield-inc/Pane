@@ -16,6 +16,57 @@ node --expose-gc scripts/benchmark-session-output.js
 See [the session output audit](../docs/SESSION_OUTPUT_PERFORMANCE.md) for
 results, regression checks, and measurement limits.
 
+## benchmark-terminal-emulation.js
+
+Streams full-screen agent-style frames into 8 headless terminal models at
+60 fps and reports how busy that keeps the calling thread: event-loop busy
+percent and heartbeat lateness (event-loop delay). `inline` parses on the
+calling thread, `worker` uses the terminal emulator thread, and `none` drops
+the output to show the harness's own floor.
+
+```bash
+pnpm build:main
+ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/benchmark-terminal-emulation.js
+```
+
+`PANES` and `SECONDS` override the defaults (8 and 10).
+
+## benchmark-webgl-atlas.js
+
+Opens one xterm with the WebGL renderer and prints GPU and renderer memory,
+frame rate, the longest frame gap, and glyph atlas merges and full resets once
+a second, then a summary. `WORKLOAD=shimmer` (default) repaints every cell in a
+24-bit color it has not used before, the worst case of an agent's animated
+gradient; `WORKLOAD=normal` scrolls colored log lines under a cycling
+"Thinking…" gradient. On macOS memory comes from `footprint`, which counts the
+graphics memory that Electron's own metrics leave out.
+
+```bash
+node_modules/.bin/electron scripts/benchmark-webgl-atlas.js
+```
+
+`DURATION` sets the run length in seconds (default 90). `ATLAS_CAP` swaps the
+patched 4096 px page cap for another size. `WEBGL_ADDON` points at another
+`addon-webgl.js` build, for example an unpatched copy from
+`npm pack @xterm/addon-webgl@<version>`. `RECORD=<file>.webm` saves a video of
+the terminal canvas plus the atlas reset times, to check frames for flashing
+glyphs.
+
+## benchmark-git-worktree-config.mjs
+
+Builds a 100,000-file repository with a Pane-style worktree, edits a file, and
+times the git commands behind Pane's status refresh, Diff tab, and a plain
+`git status`. It runs with default git config, with the config
+Pane writes (`feature.manyFiles`, plus `core.fsmonitor` where Git has the
+built-in daemon), and with that config plus `GIT_OPTIONAL_LOCKS=0`, then
+prints the median of each.
+
+```bash
+node scripts/benchmark-git-worktree-config.mjs
+```
+
+`FILES` and `RUNS` override the defaults (100000 and 10).
+
 ## ci-background.sh
 
 Lets a GitHub Actions job run a command in the background while later steps

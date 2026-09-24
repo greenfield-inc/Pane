@@ -1,86 +1,17 @@
 import { StringDecoder } from 'string_decoder';
+import { PaneSseParser as TextSseParser, type ParsedSseEvent } from '../../../../shared/sseParser';
 
-export interface ParsedSseEvent {
-  event: string;
-  data: string;
-}
-
+/** Node transport adapter: preserve UTF-8 characters across byte chunks. */
 export class PaneSseParser {
-  private buffer = '';
+  private readonly parser = new TextSseParser();
   private decoder = new StringDecoder('utf8');
-  private pendingCarriageReturn = false;
 
   push(chunk: Buffer | string): ParsedSseEvent[] {
-    let decodedChunk = Buffer.isBuffer(chunk) ? this.decoder.write(chunk) : chunk;
-    if (this.pendingCarriageReturn) {
-      decodedChunk = `\r${decodedChunk}`;
-      this.pendingCarriageReturn = false;
-    }
-
-    if (decodedChunk.endsWith('\r')) {
-      decodedChunk = decodedChunk.slice(0, -1);
-      this.pendingCarriageReturn = true;
-    }
-
-    this.buffer += decodedChunk.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-    const events: ParsedSseEvent[] = [];
-    let boundaryIndex = this.buffer.indexOf('\n\n');
-    while (boundaryIndex !== -1) {
-      const rawEvent = this.buffer.slice(0, boundaryIndex);
-      this.buffer = this.buffer.slice(boundaryIndex + 2);
-
-      const parsedEvent = parseSseEvent(rawEvent);
-      if (parsedEvent) {
-        events.push(parsedEvent);
-      }
-
-      boundaryIndex = this.buffer.indexOf('\n\n');
-    }
-
-    return events;
+    return this.parser.push(Buffer.isBuffer(chunk) ? this.decoder.write(chunk) : chunk);
   }
 
   reset(): void {
-    this.buffer = '';
+    this.parser.reset();
     this.decoder = new StringDecoder('utf8');
-    this.pendingCarriageReturn = false;
   }
-}
-
-function parseSseEvent(rawEvent: string): ParsedSseEvent | null {
-  const lines = rawEvent.split('\n');
-  let eventName = 'message';
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.length === 0 || line.startsWith(':')) {
-      continue;
-    }
-
-    const separatorIndex = line.indexOf(':');
-    const field = separatorIndex === -1 ? line : line.slice(0, separatorIndex);
-    let value = separatorIndex === -1 ? '' : line.slice(separatorIndex + 1);
-    if (value.startsWith(' ')) {
-      value = value.slice(1);
-    }
-
-    if (field === 'event') {
-      eventName = value || 'message';
-      continue;
-    }
-
-    if (field === 'data') {
-      dataLines.push(value);
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  return {
-    event: eventName,
-    data: dataLines.join('\n'),
-  };
 }

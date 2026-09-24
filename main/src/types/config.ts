@@ -1,4 +1,3 @@
-import type { CloudVmConfig } from '../../../shared/types/cloud';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -148,8 +147,6 @@ export interface AppConfig {
   preferredShell?: 'auto' | 'gitbash' | 'powershell' | 'pwsh' | 'cmd';
   // Terminal rendering/power behavior
   terminalPowerMode?: TerminalPowerMode;
-  // Cloud VM settings
-  cloud?: CloudVmConfig;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
   terminalFontFamily?: string;
@@ -229,8 +226,6 @@ export interface UpdateConfigRequest {
   preferredShell?: 'auto' | 'gitbash' | 'powershell' | 'pwsh' | 'cmd';
   // Terminal rendering/power behavior
   terminalPowerMode?: TerminalPowerMode;
-  // Cloud VM settings
-  cloud?: CloudVmConfig;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
   terminalFontFamily?: string;

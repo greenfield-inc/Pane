@@ -199,8 +199,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
   const versionChecker = new VersionChecker(configManager, logger);
-  const skillCacheManager = new SkillCacheManager(logger);
-  await skillCacheManager.start();
+  const skillCacheManager = new SkillCacheManager();
+  await skillCacheManager.start().catch(error => {
+    logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
+  });
   const paneChatManager = new PaneChatManager(configManager, sessionManager, skillCacheManager);
   await paneChatManager.getOrCreate().catch(error => {
     logger.warn('[PaneChat] Failed to ensure startup Pane Chat session', error instanceof Error ? error : undefined);
@@ -403,7 +405,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       if (paneDaemonServer) {
         await paneDaemonServer.stop();
       }
-      skillCacheManager.stop();
       versionChecker.stopPeriodicCheck();
       logger.close();
     },

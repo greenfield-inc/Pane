@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { UsageManager } from './usageManager';
 import { databaseService } from '../database';
 import { UsageRepository } from './usageRepository';
+import { ensureUsageRollup } from './usageRollup';
 import { scanJsonlFile } from './jsonlScanner';
 import type { UsageProvider } from '../../../../shared/types/usage';
 
@@ -120,6 +121,7 @@ beforeEach(async () => {
       source_path TEXT NOT NULL
     );
   `);
+  ensureUsageRollup(db);
   repository = new UsageRepository(db);
   manager = createManager();
 });

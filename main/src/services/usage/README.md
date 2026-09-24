@@ -30,6 +30,16 @@ Do not reproduce descriptor exhaustion against a user's real transcript trees.
 For resource measurements, generate a disposable tree, constrain only child
 processes, and delete only fixtures created by that run.
 
+## Report queries
+
+Reports read whole hours from `usage_hourly`, a per hour, provider, model and
+cwd rollup of `usage_events` that triggers keep in step with every insert and
+delete. Only the partial hours at each end of a range, and hours a custom-date
+boundary falls inside, are read from raw events, so results match a scan of
+every event. Pane attribution resolves each rollup row once; a row whose
+events straddle a pane's creation or archive time rereads those events.
+`usageAggregator.rollup.test.ts` holds every report to the per-event queries.
+
 ## Dashboard ranges and per-pane summaries
 
 Usage & limits supports rolling 24h/7d/30d/90d presets and custom inclusive

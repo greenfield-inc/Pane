@@ -428,6 +428,24 @@ export interface RunpanePaneRenameResult {
   pane: RunpanePaneSummary;
 }
 
+export interface RunpanePaneFocusRequest {
+  paneId: string;
+  panelId?: string;
+  source?: RunpanePanelCreateSource;
+}
+
+export interface RunpanePaneFocusResult {
+  ok: true;
+  paneId: string;
+  panelId?: string;
+  focused: true;
+}
+
+export type RunpanePaneFocusRequestedEvent = Pick<
+  RunpanePaneFocusRequest,
+  'paneId' | 'panelId'
+>;
+
 export interface RunpanePaneArchiveRequest {
   paneId: string;
   force?: boolean;

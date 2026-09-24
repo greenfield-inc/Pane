@@ -305,6 +305,18 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "panes focus",
+      "summary": "Raise the Pane window and select a Pane (and optionally one of its panels) on explicit user request.",
+      "usage": [
+        "runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "paneFocusRequest",
+        "paneFocusResult"
+      ]
+    },
+    {
       "name": "panels create",
       "summary": "Create a terminal-backed tool panel inside an existing Pane session.",
       "usage": [
@@ -1224,6 +1236,20 @@ export const RUNPANE_CONTRACT = {
         "  --dry-run                      Validate and preview without renaming the pane",
         "  --yes                          Skip confirmation for mutating commands"
       ],
+      "panes focus": [
+        "Usage:",
+        "  runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json]",
+        "",
+        "Raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Steals window focus, so run it only on an explicit user request to open, focus, or show a Pane, never proactively.",
+        "",
+        "Options:",
+        "  --pane <pane-id>               Pane/session id to focus",
+        "  --panel <panel-id>             Optional panel/tab id inside the Pane to select",
+        "  --source <user|agent>          Mutation source; does not change focus behavior",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "  --yes                          Skip confirmation for mutating commands"
+      ],
       "panels": [
         "Terminal-backed panel commands.",
         "",
@@ -1829,6 +1855,20 @@ export const RUNPANE_CONTRACT = {
         "  --dry-run",
         "  --yes"
       ],
+      "panes focus": [
+        "Usage:",
+        "  runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json]",
+        "",
+        "Raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Steals window focus, so run it only on an explicit user request to open, focus, or show a Pane, never proactively.",
+        "",
+        "Options:",
+        "  --pane <pane-id>",
+        "  --panel <panel-id>",
+        "  --source <user|agent>",
+        "  --pane-dir <path>",
+        "  --json",
+        "  --yes"
+      ],
       "panels": [
         "Terminal-backed panel commands.",
         "",
@@ -2195,6 +2235,7 @@ export const RUNPANE_CONTRACT = {
       "For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. Add `--dry-run` to inspect the same evidence without archiving. Successful archives wait for worktree removal and report `worktreeCleanup`.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
+      "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels list` lists tool panels inside one Pane session.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
@@ -2464,6 +2505,18 @@ export const RUNPANE_CONTRACT = {
         "session-1",
         "--name",
         "issue-393",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "focus",
+        "--pane",
+        "session-1",
+        "--panel",
+        "panel-1",
+        "--source",
+        "user",
         "--yes",
         "--json"
       ],
@@ -4475,6 +4528,50 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "paneFocusRequest": {
+      "type": "object",
+      "required": [
+        "paneId"
+      ],
+      "properties": {
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "paneFocusResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "focused"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "focused": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
     "paneArchiveResult": {
       "oneOf": [
         {
@@ -5779,7 +5876,7 @@ export const RUNPANE_CONTRACT = {
         "Use `panes create` for separate visible Panes (Pane sessions) for feature/PR work. Pane creates and owns the worktree/branch for each new Pane.",
         "Use `panels create` for reviewer/helper/clean-context tabs that should stay inside an existing Pane and share that Pane's worktree.",
         "For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
-        "Skill routing: when the user says `discussion`, `plan`, `simple-plan`, `create-plan`, or `implement`, or asks for those behaviors, treat three references as peer context: Pane's local skill cache under `<PANE_DIR>/skills/`, the Pane Chat orchestrator handoff at `<PANE_DIR>/skills/pane-chat/runpane-orchestrator.md` when present, and the workflow map at https://github.com/dcouple/skills/raw/main/docs/readme-workflow-map.png. For where the local cache and Pane Chat bootstrap live in Pane, reference https://github.com/dcouple/Pane/pull/291. Use GitHub reads against https://github.com/dcouple/skills/tree/main/parsa only to inspect or refresh referenced skill files; do not clone or install it unless the user asks.",
+        "Skill routing: Pane's skills live in `<PANE_DIR>/skills/pane-chat/skills/`, and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`; read the skill that matches the request, such as `discussion`, `create-ticket`, `tdd`, `prepare-pr`, or `review`.",
         "When an agent creates Panes or panels, pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved; `panes create` pins the new Pane into the UI's favorite/pin set by default, so no follow-up `panes pin` call is needed and `--no-pinned` is the opt-out for throwaway Panes.",
         "Use `runpane agent-context --json` for the full agent-facing CLI context, or `runpane agent-context --command <command> --json` for one detailed command definition.",
         "For `agent-context --command`, use canonical spaced names like `panes create`; copied forms like `panes.create` or `runpane panes create` are accepted too.",
@@ -5788,7 +5885,7 @@ export const RUNPANE_CONTRACT = {
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane agents doctor --agent <codex|claude|cursor> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
         "Use `runpane panes create --wait-ready` to create Panes and validate initial terminal readiness in one call.",
-        "Use `runpane panels screen` for compact current state, including Codex composer state. Use `panels wait` for create-time readiness or text checks. Use `runpane watch --follow` to block on workspace transitions (READY, BLOCKED, IDLE, STUCK, EXIT) without polling. Use `panels submit` to send and submit a new turn. Use `panels submit-composer --strategy auto` only for a composer that was filled separately.",
+        "Use `runpane panels screen` for compact current state, including Claude and Codex composer state. Use `panels wait` for create-time readiness or text checks. Use `runpane watch --follow` to block on workspace transitions (READY, BLOCKED, IDLE, STUCK, EXIT) without polling. Use `panels submit` to send and submit a new turn. Use `panels submit-composer --strategy auto` only for a composer that was filled separately.",
         "Use `runpane panels input` only when exact bytes are required, such as Ctrl-C or handcrafted terminal input.",
         "Pane terminals draw inline images: sixel, iTerm2 inline images, and the kitty graphics protocol. Tools that need kitty graphics, such as terminal-browser and terminal-doom, run inside a Pane panel; `runpane doctor --json` reports the exact list under `terminal.graphicsProtocols`.",
         "After creating Panes or sending terminal input, validate with `panels wait` or bounded `panels screen` before reporting success. For ongoing supervision, `runpane watch --follow` is the canonical monitor."
@@ -5923,6 +6020,17 @@ export const RUNPANE_CONTRACT = {
             "--name <new-name>",
             "--yes",
             "--dry-run",
+            "--json"
+          ]
+        },
+        {
+          "name": "panes focus",
+          "summary": "Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.",
+          "arguments": [
+            "--pane <pane-id>",
+            "--panel <panel-id>",
+            "--source <user|agent>",
+            "--yes",
             "--json"
           ]
         },
@@ -6874,6 +6982,56 @@ export const RUNPANE_CONTRACT = {
           "The JSON result includes the updated pane summary so callers do not need a second panes list request."
         ]
       },
+      "panes focus": {
+        "name": "panes focus",
+        "summary": "Raise the Pane window and select a Pane (and optionally one of its panels).",
+        "details": "Brings the Pane desktop window to the foreground and selects the requested Pane exactly like clicking it in the sidebar; when --panel is given it also selects that panel/tab inside the Pane. This steals window focus, so it must only be run on an explicit user request to open, focus, or show a Pane, never proactively. Focusing does not change the Pane's worktree, branch, panels, or pinned state.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane/session id to focus. Must be an active (non-archived) Pane."
+          },
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": false,
+            "description": "Optional panel/tab id inside the Pane to select; must belong to the focused Pane."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source; does not change focus behavior."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands; required in non-interactive contexts because focusing steals window focus."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panes focus --pane <pane-id> --source user --yes --json",
+          "runpane panes focus --pane <pane-id> --panel <panel-id> --source user --yes --json"
+        ],
+        "jsonSchemas": [
+          "paneFocusRequest",
+          "paneFocusResult"
+        ],
+        "notes": [
+          "Run this only when the user explicitly asks to open, focus, show, or switch to a Pane; never focus a Pane proactively because it steals the user's window focus.",
+          "Archived Panes cannot be focused; the command fails clearly instead of falling back to focusing another Pane.",
+          "If --panel does not belong to the focused Pane, the command fails clearly rather than selecting a different panel."
+        ]
+      },
       "panels list": {
         "name": "panels list",
         "summary": "List tool panels inside a Pane session.",
@@ -7094,14 +7252,14 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Use this before `panels output` when an agent only needs the latest visible/current state.",
-          "The composer object reports whether a Codex composer is present and whether it holds undelivered text.",
+          "The composer object reports whether a Claude or Codex composer is present and whether it holds undelivered text. Claude's dim placeholder suggestion does not count as undelivered text.",
           "If hasMore is true and context is missing, rerun with a larger --limit or use `panels output`."
         ]
       },
       "panels submit": {
         "name": "panels submit",
         "summary": "Send and submit text to a terminal panel, including idle agent composers.",
-        "details": "Use this for ordinary interactive submissions. For an idle Codex composer, Pane stages the text, waits for Codex paste handling, sends the Codex submit sequence, and verifies that the turn started when visible evidence is available. Other terminals receive a normalized CR Enter. Exact byte workflows remain on `panels input`.",
+        "details": "Use this for ordinary interactive submissions. For Claude, Pane waits for the composer to appear and show the staged text, then sends Enter on its own and verifies that the composer cleared; Claude keeps an Enter that arrives together with the text as a newline. For an idle Codex composer, Pane stages the text, waits for Codex paste handling, sends the Codex submit sequence, and verifies that the turn started when visible evidence is available. Other terminals receive a normalized CR Enter. Exact byte workflows remain on `panels input`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -7150,7 +7308,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "The response includes sequenceName, verifiedSubmitted, and nextCommand. If ok is false, inspect blocked and do not assume the turn started.",
-          "Do not follow `panels submit` with `panels submit-composer`; idle Codex composer submission is handled atomically.",
+          "Do not follow `panels submit` with `panels submit-composer`; Claude and idle Codex composer submission is handled atomically.",
           "Use `panels input` for Ctrl-C, escape sequences, or any workflow requiring exact bytes."
         ]
       },
@@ -7692,10 +7850,9 @@ export const RUNPANE_CONTRACT = {
       "",
       "Typical workflow: register the saved base repository once; create one Pane (Pane session) per feature/PR; use panels/tabs inside that Pane for helper or reviewer agents that should share the worktree; archive the Pane after the PR is done to remove it from active Panes and clean up its managed worktree when applicable.",
       "",
-      "Skill routing reference: when the user says `discussion`, `plan`, `simple-plan`, `create-plan`, or `implement`, or asks for the behavior those words imply, treat three references as peer context: Pane's local skill cache under `<PANE_DIR>/skills/`, the Pane Chat orchestrator handoff at `<PANE_DIR>/skills/pane-chat/runpane-orchestrator.md` when present, and the [workflow map](https://github.com/dcouple/skills/raw/main/docs/readme-workflow-map.png).",
-      "Use those peer references together to choose the phase: discuss/investigate until the work is clear enough to delegate, then ticket/plan/implement/review/PR-test/teach-back as appropriate. The orchestrator and workflow map may point to different skills; reconcile them with the user's request instead of hardcoding a skill list or treating one reference as subordinate.",
-      "For the Pane implementation source of truth for where the skill cache, cached workflow assets, and Pane Chat bootstrap live, reference [PR #291](https://github.com/dcouple/Pane/pull/291): `main/src/services/skillCacheManager.ts` owns `<PANE_DIR>/skills/`, `.sources/dcouple-skills`, and `pane-chat/runpane-orchestrator.md`; `main/src/services/paneChatManager.ts` owns the tiny bootstrap prompt that tells the selected Pane Chat agent to read that guide.",
-      "Use GitHub reads against the [Parsa skills folder](https://github.com/dcouple/skills/tree/main/parsa) only to inspect or refresh referenced skill files; do not clone/install the repo unless the user asks.",
+      "Skill routing reference: Pane installs its skills in `<PANE_DIR>/skills/pane-chat/skills/` (also in `<PANE_DIR>/.claude/skills/` and `<PANE_DIR>/.codex/skills/`), and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`. When the user asks to discuss, plan, implement, review, or test, read the matching skill there, for example `discussion`, `options`, `brief`, `create-ticket`, `tdd`, `quick-verify`, `prepare-pr`, `review`, or `verify-app`.",
+      "Choose the phase from the request: discuss or investigate until the work is clear enough to delegate, then ticket, implement, review, verify, and open the PR as appropriate. Reconcile the skills with the user's request instead of treating any one list as fixed.",
+      "For the Pane implementation source of truth: `main/src/services/skillCacheManager.ts` installs the bundle from `main/src/services/paneChatBundle/` into `<PANE_DIR>/skills/pane-chat/` and generates `pane-orchestrator`; `main/src/services/paneChatManager.ts` owns the tiny bootstrap prompt that tells the selected Pane Chat agent to read it.",
       "Do not hardcode a specific assistant brand in workflow guidance. Use the Pane agent or custom tool command the user selected, and use `runpane agents doctor --agent <agent> --repo <selector> --json` only when checking a built-in agent template.",
       "",
       "Start with `runpane doctor --json` before taking Pane actions. Use it to understand wrapper/runtime details, daemon reachability, and the next safe commands.",

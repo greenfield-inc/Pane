@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, Pin, Monitor, MessageSquare, BarChart3, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, BarChart3, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -680,13 +680,14 @@ function SessionRowContent({
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
   const prNumber = gs?.prNumber;
+  const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
 
   if (rowLayout === 'single') {
     return (
       <div className="flex min-w-0 w-full items-center gap-1.5">
         {prNumber ? (
-          <GitPullRequest className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+          <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         ) : (
           <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         )}
@@ -716,7 +717,7 @@ function SessionRowContent({
   return (
     <div className="flex min-w-0 w-full items-start gap-1.5">
       {prNumber ? (
-        <GitPullRequest className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       ) : (
         <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}

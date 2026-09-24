@@ -238,6 +238,18 @@
       "--json"
     ],
     [
+      "panes",
+      "focus",
+      "--pane",
+      "session-1",
+      "--panel",
+      "panel-1",
+      "--source",
+      "user",
+      "--yes",
+      "--json"
+    ],
+    [
       "panels",
       "list",
       "--pane",

@@ -166,6 +166,8 @@ For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is repor
 
 `runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.
 
+`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
+
 `runpane panels list` lists tool panels inside one Pane session.
 
 `runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.
@@ -233,6 +235,7 @@ Brief tools:
 - `panes pin`: Declaratively pin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes unpin`: Declaratively unpin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
+- `panes focus`: Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.
 - `panels create`: Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
@@ -264,10 +267,9 @@ Use `runpane panes create` for separate visible Panes (Pane sessions) for featur
 
 Typical workflow: register the saved base repository once; create one Pane (Pane session) per feature/PR; use panels/tabs inside that Pane for helper or reviewer agents that should share the worktree; archive the Pane after the PR is done to remove it from active Panes and clean up its managed worktree when applicable.
 
-Skill routing reference: when the user says `discussion`, `plan`, `simple-plan`, `create-plan`, or `implement`, or asks for the behavior those words imply, treat three references as peer context: Pane's local skill cache under `<PANE_DIR>/skills/`, the Pane Chat orchestrator handoff at `<PANE_DIR>/skills/pane-chat/runpane-orchestrator.md` when present, and the [workflow map](https://github.com/dcouple/skills/raw/main/docs/readme-workflow-map.png).
-Use those peer references together to choose the phase: discuss/investigate until the work is clear enough to delegate, then ticket/plan/implement/review/PR-test/teach-back as appropriate. The orchestrator and workflow map may point to different skills; reconcile them with the user's request instead of hardcoding a skill list or treating one reference as subordinate.
-For the Pane implementation source of truth for where the skill cache, cached workflow assets, and Pane Chat bootstrap live, reference [PR #291](https://github.com/dcouple/Pane/pull/291): `main/src/services/skillCacheManager.ts` owns `<PANE_DIR>/skills/`, `.sources/dcouple-skills`, and `pane-chat/runpane-orchestrator.md`; `main/src/services/paneChatManager.ts` owns the tiny bootstrap prompt that tells the selected Pane Chat agent to read that guide.
-Use GitHub reads against the [Parsa skills folder](https://github.com/dcouple/skills/tree/main/parsa) only to inspect or refresh referenced skill files; do not clone/install the repo unless the user asks.
+Skill routing reference: Pane installs its skills in `<PANE_DIR>/skills/pane-chat/skills/` (also in `<PANE_DIR>/.claude/skills/` and `<PANE_DIR>/.codex/skills/`), and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`. When the user asks to discuss, plan, implement, review, or test, read the matching skill there, for example `discussion`, `options`, `brief`, `create-ticket`, `tdd`, `quick-verify`, `prepare-pr`, `review`, or `verify-app`.
+Choose the phase from the request: discuss or investigate until the work is clear enough to delegate, then ticket, implement, review, verify, and open the PR as appropriate. Reconcile the skills with the user's request instead of treating any one list as fixed.
+For the Pane implementation source of truth: `main/src/services/skillCacheManager.ts` installs the bundle from `main/src/services/paneChatBundle/` into `<PANE_DIR>/skills/pane-chat/` and generates `pane-orchestrator`; `main/src/services/paneChatManager.ts` owns the tiny bootstrap prompt that tells the selected Pane Chat agent to read it.
 Do not hardcode a specific assistant brand in workflow guidance. Use the Pane agent or custom tool command the user selected, and use `runpane agents doctor --agent <agent> --repo <selector> --json` only when checking a built-in agent template.
 
 Start with `runpane doctor --json` before taking Pane actions. Use it to understand wrapper/runtime details, daemon reachability, and the next safe commands.

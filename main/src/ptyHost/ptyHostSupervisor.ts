@@ -4,21 +4,18 @@
  * Owns:
  * - the `UtilityProcess` handle and its lifecycle (start, exit, backoff restart)
  * - the main-side end of the RPC `MessageChannelMain` to `ptyHostMain.ts`
- * - a per-BrowserWindow `MessageChannelMain` pair for direct renderer data flow
- *   (delivered to the renderer via `webContents.postMessage('ptyHost-port', ...)`)
+ * - a per-BrowserWindow `MessageChannelMain` pair for renderer ack/write and
+ *   exit frames (delivered via `webContents.postMessage('ptyHost-port', ...)`)
  * - live `PtyHandle` shims keyed by `ptyId`, used by the managers as an
  *   `IPty`-compatible surface
  *
- * Chunk C scope:
+ * Responsibilities:
  * - wire the RPC channel and fan data events to `PtyHandle`s (for SQLite /
- *   sync-block strip / alt-screen detection in main)
- * - stand up the per-window renderer port as a passthrough: the supervisor
- *   creates the channel, retains both ends, and posts one to the renderer
+ *   sync-block strip / alt-screen detection in main). Main then sends the
+ *   filtered bytes to the renderer over `terminal:output`, never this port.
+ * - stand up the per-window renderer port: the supervisor creates the
+ *   channel, retains both ends, and posts one to the renderer
  * - heartbeat + restart with manager-state-preserving respawn + exponential backoff
- *
- * Out of scope for Chunk C: true two-port tee from ptyHost to (main + renderer).
- * Chunk D/E/F will extend `ptyHostMain.ts` with an `attach-renderer` port so
- * bytes can flow directly to the renderer without traversing main.
  *
  * Wire constraints enforced here (see plan gotchas lines 320-340, 734-743):
  * - Every `MessagePortMain` is stored as a class field; closure locals would
@@ -588,15 +585,10 @@ export class PtyHostSupervisor extends EventEmitter {
   }
 
   /**
-   * Stand up the per-BrowserWindow data port pair and deliver the renderer
-   * end to the window. Called from `index.ts` on `did-finish-load`.
-   *
-   * Chunk C scope: the renderer port is a passthrough. Bytes still flow from
-   * ptyHost → supervisor → `PtyHandle.emitData` and from there to main-side
-   * code (SQLite, sync-block strip). `TerminalPanel.tsx` continues to receive
-   * bytes via the existing `terminal:output` IPC path. Chunk D switches the
-   * renderer to subscribe on this port, and future work may extend ptyHost to
-   * tee bytes directly to the renderer end.
+   * Stand up the per-BrowserWindow port pair and deliver the renderer end to
+   * the window. Called from `index.ts` on `did-finish-load`. The port carries
+   * ack/write frames from the renderer and exit frames to it; terminal bytes
+   * reach `TerminalPanel.tsx` over `terminal:output`.
    *
    * Both ports are retained on `windowPorts` — port GC would otherwise close
    * the channel (plan gotcha line 323).
@@ -618,8 +610,8 @@ export class PtyHostSupervisor extends EventEmitter {
     const { port1: mainPort, port2: rendererPort } = new MessageChannelMain();
     this.windowPorts.set(webContents.id, { mainPort, rendererPort });
 
-    // Start the main-side end before listening. This end will carry ack/write
-    // frames from the renderer in Chunk D.
+    // Start the main-side end before listening. This end carries ack/write
+    // frames from the renderer.
     mainPort.start();
     mainPort.on('message', (event: Electron.MessageEvent) => {
       try {
@@ -672,15 +664,16 @@ export class PtyHostSupervisor extends EventEmitter {
   }
 
   /**
-   * Post `frame` to every attached renderer's data port. Preload routes the
-   * frame to subscribers registered via `electronAPI.ptyHost.onData` /
-   * `onExit` by `ptyId`; windows that never registered a subscriber for
-   * `frame.ptyId` drop the frame on the floor.
+   * Post `frame` to every attached renderer's port. Preload routes the
+   * frame to subscribers registered via `electronAPI.ptyHost.onExit` by
+   * `ptyId`; windows that never registered a subscriber for `frame.ptyId`
+   * drop the frame on the floor.
    *
-   * Kept narrow: only `data` and `exit` frames flow this way. Heartbeat and
-   * RPC-response frames stay on the main-side RPC port.
+   * Kept narrow: only `exit` frames flow this way. Terminal bytes reach the
+   * renderer over `terminal:output`; heartbeat and RPC-response frames stay
+   * on the main-side RPC port.
    */
-  private broadcastToRenderers(frame: PtyHostEvent): void {
+  private broadcastToRenderers(frame: Extract<PtyHostEvent, { type: 'exit' }>): void {
     for (const { mainPort } of this.windowPorts.values()) {
       try {
         mainPort.postMessage(frame);
@@ -689,20 +682,6 @@ export class PtyHostSupervisor extends EventEmitter {
         console.warn('[ptyHost] failed to post renderer frame', err);
       }
     }
-  }
-
-  /**
-   * Post a FILTERED `data` frame to every attached renderer's data port.
-   * Called by main-side managers (e.g. `terminalPanelManager.flushOutputBuffer`)
-   * AFTER running `filterSyncBlockClears` and alt-screen detection on the raw
-   * bytes. This is the hand-off for flag-on renderer subscriptions via
-   * `electronAPI.ptyHost.onData(ptyId, cb)`.
-   *
-   * Kept separate from `broadcastToRenderers` so the intent is explicit:
-   * supervisor never auto-broadcasts raw data bytes.
-   */
-  postDataToRenderers(ptyId: string, data: string): void {
-    this.broadcastToRenderers({ type: 'data', ptyId, data });
   }
 
   /**

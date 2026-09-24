@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { ConfigManager } from './configManager';
 import type { PaneChatManager } from './paneChatManager';
 import type { SessionManager } from './sessionManager';
@@ -160,6 +161,7 @@ function createFixture(
   });
   const skillCacheManager = serviceStub<SkillCacheManager>({
     ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'),
+    launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command),
   });
   const store = createStore();
   if (initialData) store.write(initialData);
@@ -295,7 +297,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       first.configManager,
       first.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md') }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('legacy migration must run once'); }) }),
       undefined,
       secondStore,
@@ -434,7 +436,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       fixture.configManager,
       fixture.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md') }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('rerun migration must not create Pane Chat state'); }) }),
       undefined,
       fixture.store,
@@ -482,7 +484,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       fixture.configManager,
       fixture.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md') }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('restart must preserve migrated ownership'); }) }),
       undefined,
       fixture.store,

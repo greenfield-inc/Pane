@@ -34,6 +34,7 @@ export function RemoteTerminalPanel({
     containerRef,
     statusText,
     focusTerminal,
+    sendInput,
     resetTerminal,
     scrollLines,
     scrollToBottom,
@@ -71,11 +72,9 @@ export function RemoteTerminalPanel({
         onGetDeepgramToken={() => adapter.getDeepgramStreamingToken()}
         onFinalizeStreamingAudio={(request) => adapter.finalizeStreamingVoice(request)}
         onSendInput={(data) => {
-          void adapter.sendTerminalInput(panel.id, data)
-            .then(() => {
-              window.requestAnimationFrame(focusTerminal);
-            })
-            .catch(() => {});
+          void sendInput(data).then(() => {
+            window.requestAnimationFrame(focusTerminal);
+          });
         }}
       />
     </div>

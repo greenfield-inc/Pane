@@ -51,7 +51,6 @@ export type SettingsSettingId =
   | 'remote-advanced-host'
   | 'remote-paired-connection'
   | 'remote-existing-profile'
-  | 'cloud-workspace'
   | 'voice-transcription'
   | 'keyboard-shortcuts'
   | 'command-palette-shortcut'

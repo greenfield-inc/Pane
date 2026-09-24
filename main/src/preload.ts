@@ -32,9 +32,9 @@ import type {
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
-import type { CloudVmState } from '../../shared/types/cloud';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
+import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -135,7 +135,7 @@ interface UpdaterInfo {
 // Increase max listeners for ipcRenderer to prevent warnings when many components listen to events
 ipcRenderer.setMaxListeners(50);
 
-// ptyHost data port wiring.
+// ptyHost renderer port wiring.
 //
 // Main posts `webContents.postMessage('ptyHost-port', null, [rendererPort])`
 // after `did-finish-load`. The renderer end is a DOM-style `MessagePort` —
@@ -143,33 +143,18 @@ ipcRenderer.setMaxListeners(50);
 // directly, so we keep it in this preload-scoped closure and expose a typed
 // function surface on `window.electronAPI.ptyHost` below.
 //
-// Chunk C: ptyHost does not yet tee bytes to this port; the RPC path on the
-// main side continues to deliver bytes via the existing `terminal:output`
-// channel. Subscribers are still wired so Chunk D can flip the byte path over
-// without further preload changes.
-type PtyHostDataFrame = { type: 'data'; ptyId: string; data: string };
-type PtyHostExitFrame = {
-  type: 'exit';
-  ptyId: string;
-  exitCode: number | null;
-  signal: number | null;
-};
-type PtyHostInboundFrame = PtyHostDataFrame | PtyHostExitFrame;
-const ptyHostInboundSchema = boundary.union(
-  boundary.object({ type: boundary.literal('data'), ptyId: boundary.string, data: boundary.string }),
-  boundary.object({
-    type: boundary.literal('exit'),
-    ptyId: boundary.string,
-    exitCode: boundary.nullable(boundary.number),
-    signal: boundary.nullable(boundary.number),
-  }),
-);
+// Terminal bytes do not use this port: they reach the renderer once, over the
+// `terminal:output` channel, for ptyHost and legacy PTYs alike.
+const ptyHostInboundSchema = boundary.object({
+  type: boundary.literal('exit'),
+  ptyId: boundary.string,
+  exitCode: boundary.nullable(boundary.number),
+  signal: boundary.nullable(boundary.number),
+});
 
-type PtyDataCallback = (data: string) => void;
 type PtyExitCallback = (exitCode: number | null, signal: number | null) => void;
 
 let ptyHostPort: MessagePort | null = null;
-const ptyDataSubscribers = new Map<string, Set<PtyDataCallback>>();
 const ptyExitSubscribers = new Map<string, Set<PtyExitCallback>>();
 
 ipcRenderer.on('ptyHost-port', (event) => {
@@ -181,37 +166,21 @@ ipcRenderer.on('ptyHost-port', (event) => {
   // Renderer-world MessagePort is DOM-style: use .start() + .onmessage.
   port.start();
   port.onmessage = (e: MessageEvent) => {
-    let frame: PtyHostInboundFrame;
+    let frame;
     try {
       frame = decodeBoundary(e.data, ptyHostInboundSchema);
     } catch {
       return;
     }
-    if (frame.type === 'data') {
-      const subs = ptyDataSubscribers.get(frame.ptyId);
-      if (subs) {
-        for (const cb of subs) {
-          try {
-            cb(frame.data);
-          } catch (err) {
-            console.error('[ptyHost] data subscriber threw', err);
-          }
+    const subs = ptyExitSubscribers.get(frame.ptyId);
+    if (subs) {
+      for (const cb of subs) {
+        try {
+          cb(frame.exitCode, frame.signal);
+        } catch (err) {
+          console.error('[ptyHost] exit subscriber threw', err);
         }
       }
-      return;
-    }
-    if (frame.type === 'exit') {
-      const subs = ptyExitSubscribers.get(frame.ptyId);
-      if (subs) {
-        for (const cb of subs) {
-          try {
-            cb(frame.exitCode, frame.signal);
-          } catch (err) {
-            console.error('[ptyHost] exit subscriber threw', err);
-          }
-        }
-      }
-      return;
     }
   };
   ptyHostPort = port;
@@ -777,6 +746,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('session:updated', wrappedCallback);
       return () => ipcRenderer.removeListener('session:updated', wrappedCallback);
     },
+    onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);
+      ipcRenderer.on('pane:focus-requested', wrappedCallback);
+      return () => ipcRenderer.removeListener('pane:focus-requested', wrappedCallback);
+    },
     onSessionDeleted: (callback: (session: Pick<Session, 'id'>) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, session: Pick<Session, 'id'>) => callback(session);
       ipcRenderer.on('session:deleted', wrappedCallback);
@@ -918,9 +892,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Fired once per terminal spawn when the `usePtyHost` setting is on and
     // the ptyHost supervisor is live. Carries the host-allocated `ptyId` so
-    // `TerminalPanel.tsx` can subscribe to `electronAPI.ptyHost.onData(ptyId, ...)`
-    // instead of the legacy `terminal:output` channel. Fires again on auto-reattach
-    // after a supervisor restart so the renderer re-subscribes to the new ptyId.
+    // `TerminalPanel.tsx` can ack flow-control bytes over the ptyHost port.
+    // Fires again on auto-reattach after a supervisor restart with the new ptyId.
     onTerminalPtyReady: (callback: (data: { sessionId: string; panelId: string; ptyId: string }) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { sessionId: string; panelId: string; ptyId: string }) => callback(data);
       ipcRenderer.on('terminal:ptyReady', wrappedCallback);
@@ -1096,24 +1069,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: (projectId: number): Promise<IPCResponse> => invokeIpc('spotlight:get-status', projectId),
   },
 
-  // Cloud VM management
-  cloud: {
-    getState: (): Promise<IPCResponse> => invokeIpc('cloud:get-state'),
-    startVm: (): Promise<IPCResponse> => invokeIpc('cloud:start-vm'),
-    stopVm: (): Promise<IPCResponse> => invokeIpc('cloud:stop-vm'),
-    startTunnel: (): Promise<IPCResponse> => invokeIpc('cloud:start-tunnel'),
-    stopTunnel: (): Promise<IPCResponse> => invokeIpc('cloud:stop-tunnel'),
-    connectWorkspace: (): Promise<IPCResponse> => invokeIpc('cloud:connect-workspace'),
-    disconnectWorkspace: (): Promise<IPCResponse> => invokeIpc('cloud:disconnect-workspace'),
-    startPolling: (): Promise<IPCResponse> => invokeIpc('cloud:start-polling'),
-    stopPolling: (): Promise<IPCResponse> => invokeIpc('cloud:stop-polling'),
-    onStateChanged: (callback: (state: CloudVmState) => void): (() => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent, state: CloudVmState) => callback(state);
-      ipcRenderer.on('cloud:state-changed', wrappedCallback);
-      return () => ipcRenderer.removeListener('cloud:state-changed', wrappedCallback);
-    },
-  },
-
   // Resource monitor
   resourceMonitor: {
     getSnapshot: (): Promise<IPCResponse> => invokeIpc('resource-monitor:get-snapshot'),
@@ -1135,29 +1090,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ptyHost: typed wrapper over the per-window MessagePort. The raw port is
   // kept in preload scope; only these functions cross the contextBridge.
   //
-  // `onData` / `onExit` return an unsubscribe function matching the existing
-  // event-subscription convention elsewhere on `electronAPI.events`. Chunks
-  // D/E switch `TerminalPanel.tsx` over to these.
+  // `onExit` returns an unsubscribe function matching the existing
+  // event-subscription convention elsewhere on `electronAPI.events`.
   //
-  // `write` / `ack` post frames back over the port; Chunk D wires these in
-  // main-side via `PtyHostSupervisor.onRendererMessage` when they land.
+  // `write` / `ack` post frames back over the port; main handles them in
+  // `PtyHostSupervisor.onRendererMessage`.
   ptyHost: {
-    onData: (ptyId: string, cb: PtyDataCallback): (() => void) => {
-      let set = ptyDataSubscribers.get(ptyId);
-      if (!set) {
-        set = new Set();
-        ptyDataSubscribers.set(ptyId, set);
-      }
-      set.add(cb);
-      return () => {
-        const current = ptyDataSubscribers.get(ptyId);
-        if (!current) return;
-        current.delete(cb);
-        if (current.size === 0) {
-          ptyDataSubscribers.delete(ptyId);
-        }
-      };
-    },
     onExit: (ptyId: string, cb: PtyExitCallback): (() => void) => {
       let set = ptyExitSubscribers.get(ptyId);
       if (!set) {

@@ -198,19 +198,18 @@ Use it for the work that spans panes:
 Add this repo, create three worktree panes for the next features, start Codex in each one, and keep a separate review tab ready for every PR.
 ```
 
-Pane Chat keeps the human discussion at the orchestrator level, distills that into concrete briefs when needed, then delegates authorized lifecycle stages to Claude, Codex, or Cursor panels through RunPane. The active agent's cached `runpane-orchestrator` is the canonical source for the software-work lifecycle, authorization ledger, review-feedback interrupts, current-head evidence rules, and `ready_to_merge` predicate. Pane's generated layer stays focused on the local Pane runtime, skill cache paths, pane/panel/worktree mechanics, and preserving the user's focus.
+Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, or Cursor agents in Panes through RunPane.
 
-The prompt stays small because Pane writes local project-level skills into the Pane data directory:
+The prompt stays small because Pane ships its skills and writes them into the Pane data directory on every start:
 
-- `.codex/skills/pane-orchestrator/SKILL.md`
-- `.claude/skills/pane-orchestrator/SKILL.md`
-- `.cursor/rules/pane-orchestrator.mdc`
-- `skills/pane-chat/runpane-orchestrator.md`
-- `skills/pane-chat/runtime-context.md`
+- `skills/pane-chat/pane-orchestrator/SKILL.md`: the Pane Chat entry point (also in `.claude/skills/`, `.codex/skills/`, and as `.cursor/rules/pane-orchestrator.mdc`)
+- `skills/pane-chat/runtime-context.md`: how to reach this Pane install
+- `skills/pane-chat/skills/`: the bundled skills, also installed in `.claude/skills/` and `.codex/skills/`
+- `.claude/agents/` and `.codex/agents/`: helper subagents (explorer, cold-reader, qa-and-verify, reviewer)
 
-Pane also caches the important workflow skills from the Pane skills repository, including discussion, plan/simple-plan, implement, implementation-reviewer, PR test automation, prepare-pr, `gh-address-comments`, investigate, and commit. The generated orchestrator skill tells Pane Chat to load the workflow map and local skill cache before it coordinates work, while deferring lifecycle policy to the cached active-agent `runpane-orchestrator` so Pane does not maintain a second, drifting copy of the workflow.
+The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and three Pane-specific skills: `pane-orchestrator`, `runpane`, and `pane-work`. Nothing is downloaded at runtime.
 
-The top-right toggle switches Pane Chat between Claude, Codex, and Cursor and persists the default orchestrator agent in Pane settings. All three share the same Pane-specific orchestration contract, then follow their own cached downstream skills where the agent skill surfaces differ.
+The top-right toggle switches Pane Chat between Claude, Codex, and Cursor and persists the default orchestrator agent in Pane settings. All three use the same Pane-specific contract and the same bundled skills.
 
 ---
 

@@ -194,7 +194,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'remote-access':
         return remoteSubview
           ? <RemoteAccessWorkflows subview={remoteSubview} controller={remote} onBack={() => requestTransition(() => setRemoteSubview(undefined))} {...sharedDirtyProps} />
-          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} closeSettings={onClose} />;
+          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} />;
       case 'integrations':
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'shortcuts':

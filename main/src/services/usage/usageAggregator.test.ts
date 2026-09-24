@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { UsageAggregator, resolveReportRange } from './usageAggregator';
+import { ensureUsageRollup } from './usageRollup';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -32,6 +33,7 @@ function createDb() {
       updated_at TEXT NOT NULL
     );
   `);
+  ensureUsageRollup(db);
   return db;
 }
 

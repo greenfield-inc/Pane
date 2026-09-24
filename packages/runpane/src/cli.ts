@@ -32,6 +32,7 @@ import {
   runPanesList,
   runPanesPin,
   runPanesRename,
+  runPanesFocus,
   runSessionsAssociate,
   runSessionsCreate,
   runSessionsDetach,
@@ -194,6 +195,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panes rename') {
     return runPanesRename(parsed);
+  }
+
+  if (parsed.command === 'panes focus') {
+    return runPanesFocus(parsed);
   }
 
   if (parsed.command === 'panels list') {

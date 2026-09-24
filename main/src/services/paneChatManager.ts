@@ -174,7 +174,7 @@ export class PaneChatManager {
     const agentSessionId = this.resolveAgentSessionId(agent, previousState, forceNewAgentSession);
 
     const panelState: TerminalPanelState = {
-      initialCommand: RUNPANE_CONTRACT.agentTemplates[agent].command,
+      initialCommand: this.skillCacheManager?.launchCommand(agent) ?? RUNPANE_CONTRACT.agentTemplates[agent].command,
       initialInput: this.buildInitialInput(agent, guidePath),
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',

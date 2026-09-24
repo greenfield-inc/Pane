@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { PathResolver } from '../utils/pathResolver';
 import type { CommandRunner } from '../utils/commandRunner';
 import { escapeShellArg } from '../utils/shellEscape';
+import { forceRemoveWorktree } from './gitPerformanceConfig';
 
 interface ReserveWorktree {
   reserveName: string;
@@ -204,11 +205,7 @@ class WorktreePoolManager {
     commandRunner: CommandRunner
   ): Promise<void> {
     try {
-      await commandRunner.execAsync(
-        `git worktree remove --force ${escapeShellArg(reserve.reservePath)}`,
-        projectPath,
-        { timeout: 30000 }
-      );
+      await forceRemoveWorktree(reserve.reservePath, projectPath, commandRunner, { timeout: 30000 });
     } catch (error) {
       console.warn(`[WorktreePool] Failed to remove reserve worktree ${reserve.reservePath}:`, error);
     }
@@ -263,11 +260,7 @@ class WorktreePoolManager {
     for (const wtPath of orphanPaths) {
       console.log(`[WorktreePool] Removing orphaned reserve worktree: ${wtPath}`);
       try {
-        await commandRunner.execAsync(
-          `git worktree remove --force ${escapeShellArg(wtPath)}`,
-          projectPath,
-          { timeout: 30000 }
-        );
+        await forceRemoveWorktree(wtPath, projectPath, commandRunner, { timeout: 30000 });
       } catch (error) {
         console.warn(`[WorktreePool] Failed to remove orphaned worktree ${wtPath}:`, error);
       }

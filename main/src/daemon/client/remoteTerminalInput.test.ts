@@ -155,9 +155,12 @@ describe.each([
     ]);
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     reply(requests[0], 503);
+    const message = _name === 'browser'
+      ? 'The remote action may have completed, but its result could not be confirmed. Check the current state before trying again. (Input failed)'
+      : 'Input failed';
     expect(await completed).toEqual([
-      { status: 'rejected', reason: new Error('Input failed') },
-      { status: 'rejected', reason: new Error('Input failed') },
+      { status: 'rejected', reason: new Error(message) },
+      { status: 'rejected', reason: new Error(message) },
     ]);
     expect(requests).toHaveLength(1);
   });

@@ -379,6 +379,19 @@ interface PaneRenameResult {
   pane: PaneSummary;
 }
 
+interface PaneFocusRequest {
+  paneId: string;
+  panelId?: string;
+  source?: 'user' | 'agent';
+}
+
+interface PaneFocusResult {
+  ok: true;
+  paneId: string;
+  panelId?: string;
+  focused: true;
+}
+
 interface PaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -1085,6 +1098,12 @@ const paneRenameResultSchema: BoundarySchema<PaneRenameResult> = boundary.object
   generation: boundary.optional(boundary.number),
   dryRun: boundary.optional(boundary.literal(true)),
   pane: paneSummarySchema,
+});
+const paneFocusResultSchema: BoundarySchema<PaneFocusResult> = boundary.object({
+  ok: boundary.literal(true),
+  paneId: boundary.string,
+  panelId: boundary.optional(boundary.string),
+  focused: boundary.literal(true),
 });
 const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
@@ -1814,6 +1833,33 @@ export async function runPanesRename(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+export async function runPanesFocus(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.paneId) {
+    throw new Error('runpane panes focus requires --pane.');
+  }
+
+  const request: PaneFocusRequest = {
+    paneId: parsed.paneId,
+    panelId: parsed.panelId || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+  };
+
+  await confirmPaneFocus(parsed, request);
+
+  const result = await invokeDaemon('runpane:panes:focus', [request], paneFocusResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const panelSuffix = result.panelId ? ` (panel ${result.panelId})` : '';
+    console.log(`Focused ${result.paneId}${panelSuffix}`);
+  }
+
+  return 0;
+}
+
 export async function runPanelsList(parsed: ParsedArgs): Promise<number> {
   if (!parsed.paneId) {
     throw new Error('runpane panels list requires --pane.');
@@ -2310,6 +2356,27 @@ async function confirmPaneRename(parsed: ParsedArgs, request: PaneRenameRequest)
   const rl = createInterface({ input, output });
   try {
     const answer = (await rl.question(`Rename pane ${request.paneId} to ${request.name}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmPaneFocus(parsed: ParsedArgs, request: PaneFocusRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panes focus steals window focus and mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const panelSuffix = request.panelId ? ` (panel ${request.panelId})` : '';
+    const answer = (await rl.question(`Focus pane ${request.paneId}${panelSuffix}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }

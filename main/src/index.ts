@@ -97,7 +97,6 @@ import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
-import { getCloudVmManager } from './ipc/cloud';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
 import * as fs from 'fs';
@@ -1500,15 +1499,6 @@ if (launchRemoteSetup) {
 
     // Phase 4: Host/runtime cleanup
     console.log('[Main] Shutting down daemon host services...');
-
-    // Kill IAP tunnel if running
-    const cloudManager = getCloudVmManager();
-    if (cloudManager) {
-      console.log('[Main] Stopping cloud IAP tunnel...');
-      cloudManager.stopTunnel();
-      cloudManager.stopPolling();
-      console.log('[Main] Cloud tunnel stopped');
-    }
 
     if (paneDaemonHost) {
       await paneDaemonHost.shutdown();

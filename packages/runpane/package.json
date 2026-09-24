@@ -1,6 +1,6 @@
 {
   "name": "runpane",
-  "version": "2.4.115",
+  "version": "2.4.125",
   "description": "Thin npm installer and remote setup CLI for Pane",
   "license": "AGPL-3.0",
   "homepage": "https://runpane.com",

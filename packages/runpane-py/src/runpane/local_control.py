@@ -453,6 +453,31 @@ def run_panes_rename(parsed: Any) -> int:
     return 0
 
 
+def run_panes_focus(parsed: Any) -> int:
+    if not parsed.pane_id:
+        raise ValueError("runpane panes focus requires --pane.")
+
+    request = {
+        "paneId": parsed.pane_id,
+        **optional_value("panelId", parsed.panel_id),
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+    }
+    confirm_pane_focus(parsed, request)
+    result = invoke_daemon(
+        "runpane:panes:focus",
+        [request],
+        pane_dir=parsed.pane_dir,
+    )
+
+    if parsed.json:
+        print_json(result)
+    else:
+        panel_suffix = f" (panel {result.get('panelId')})" if result.get("panelId") else ""
+        print(f"Focused {result.get('paneId')}{panel_suffix}")
+
+    return 0
+
+
 def run_panels_list(parsed: Any) -> int:
     if not parsed.pane_id:
         raise ValueError("runpane panels list requires --pane.")
@@ -832,6 +857,18 @@ def confirm_pane_rename(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("runpane panes rename mutates Pane state. Rerun with --yes in non-interactive shells.")
 
     answer = input(f"Rename pane {request.get('paneId')} to {request.get('name')}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def confirm_pane_focus(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panes focus steals window focus and mutates Pane state. Rerun with --yes in non-interactive shells.")
+
+    panel_suffix = f" (panel {request.get('panelId')})" if request.get("panelId") else ""
+    answer = input(f"Focus pane {request.get('paneId')}{panel_suffix}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

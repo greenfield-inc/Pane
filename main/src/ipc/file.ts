@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { glob } from 'glob';
+import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { Session } from '../types/session';
@@ -430,13 +431,13 @@ export function registerFileHandlers(
   // Commit changes in a session's worktree
   commandRegistry.register('git:commit', async (request: { sessionId: string; message: string }) => {
     try {
+      if (!hasCommitMessageTitle(request.message)) {
+        throw new Error('Commit title is required');
+      }
+
       const session = sessionManager.getSession(request.sessionId);
       if (!session) {
         throw new Error(`Session not found: ${request.sessionId}`);
-      }
-
-      if (!request.message || !request.message.trim()) {
-        throw new Error('Commit message is required');
       }
 
       const ctx = sessionManager.getProjectContext(request.sessionId);

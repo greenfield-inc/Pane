@@ -20,7 +20,6 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [showSetTrackingDialog, setShowSetTrackingDialog] = useState(false);
   const [showCommitDialog, setShowCommitDialog] = useState(false);
-  const [commitMessage, setCommitMessage] = useState('');
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
 
   const refreshStashState = useCallback(async () => {
@@ -108,9 +107,7 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
     void runOperation(
       (activeSessionId) => API.sessions.gitStageAndCommit(activeSessionId, message),
       'Failed to commit changes',
-    ).then((success) => {
-      if (success) setCommitMessage('');
-    });
+    );
   }, [runOperation]);
 
   const handleOpenSetTracking = useCallback(async () => {
@@ -230,7 +227,6 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
   return {
     actions,
     actionsBusy,
-    commitMessage,
     currentUpstream,
     error,
     gitCommands,
@@ -241,7 +237,6 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
     isRemoteMode,
     isRunning,
     remoteBranches,
-    setCommitMessage,
     setShowCommitDialog,
     setShowSetTrackingDialog,
     showCommitDialog,

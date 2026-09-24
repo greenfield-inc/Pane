@@ -18,6 +18,7 @@ const githubPrListSchema = boundary.array(boundary.object({
   url: boundary.optional(boundary.string),
   title: boundary.optional(boundary.string),
   state: boundary.optional(boundary.string),
+  isDraft: boundary.optional(boundary.boolean),
   body: boundary.optional(boundary.string),
 }));
 
@@ -33,6 +34,7 @@ type PrData = {
   prUrl?: string;
   prTitle?: string;
   prState?: string;
+  prIsDraft?: boolean;
   prBody?: string;
 };
 
@@ -40,7 +42,7 @@ type PrLookupResult =
   | { ok: true; pr?: PrData }
   | { ok: false };
 
-const PR_FIELDS = ['prNumber', 'prUrl', 'prTitle', 'prState', 'prBody'] as const;
+const PR_FIELDS = ['prNumber', 'prUrl', 'prTitle', 'prState', 'prIsDraft', 'prBody'] as const;
 
 interface GitStatusManagerDependencies {
   fastCheckWorkingDirectory: typeof fastCheckWorkingDirectory;
@@ -87,7 +89,7 @@ export class GitStatusManager extends EventEmitter {
   private isWindowVisible = true;
 
   // PR data cache
-  private prCache = new Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string; fetchedAt: number }>();
+  private prCache = new Map<string, { prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prIsDraft?: boolean; prBody?: string; fetchedAt: number }>();
   private readonly PR_HIT_CACHE_TTL = 2.5 * 60 * 1000;
   private readonly PR_MISS_CACHE_TTL = 20 * 1000;
   private readonly PR_ENRICHMENT_JITTER_MS = 10_000;
@@ -595,7 +597,7 @@ export class GitStatusManager extends EventEmitter {
     branchName: string,
     projectPath: string,
     commandRunner: CommandRunner
-  ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prBody?: string }> {
+  ): Promise<{ prNumber?: number; prUrl?: string; prTitle?: string; prState?: string; prIsDraft?: boolean; prBody?: string }> {
     const result = await this.fetchPrForSessionResult(branchName, projectPath, commandRunner);
     return result.ok && result.pr ? result.pr : {};
   }
@@ -612,14 +614,14 @@ export class GitStatusManager extends EventEmitter {
       return {
         ok: true,
         pr: cached.prNumber !== undefined
-          ? { prNumber: cached.prNumber, prUrl: cached.prUrl, prTitle: cached.prTitle, prState: cached.prState, prBody: cached.prBody }
+          ? { prNumber: cached.prNumber, prUrl: cached.prUrl, prTitle: cached.prTitle, prState: cached.prState, prIsDraft: cached.prIsDraft, prBody: cached.prBody }
           : undefined,
       };
     }
 
     try {
       const result = await commandRunner.execAsync(
-        `gh pr list --head ${escapeShellArg(branchName)} --state all --json number,url,title,state,body --limit 1`,
+        `gh pr list --head ${escapeShellArg(branchName)} --state all --json number,url,title,state,isDraft,body --limit 1`,
         projectPath,
         { timeout: 5000 }
       );
@@ -630,6 +632,7 @@ export class GitStatusManager extends EventEmitter {
         prUrl: pr?.url,
         prTitle: pr?.title,
         prState: pr?.state,
+        prIsDraft: pr?.isDraft,
         prBody: pr?.body,
         fetchedAt: Date.now()
       };
@@ -637,7 +640,7 @@ export class GitStatusManager extends EventEmitter {
       return {
         ok: true,
         pr: entry.prNumber !== undefined
-          ? { prNumber: entry.prNumber, prUrl: entry.prUrl, prTitle: entry.prTitle, prState: entry.prState, prBody: entry.prBody }
+          ? { prNumber: entry.prNumber, prUrl: entry.prUrl, prTitle: entry.prTitle, prState: entry.prState, prIsDraft: entry.prIsDraft, prBody: entry.prBody }
           : undefined,
       };
     } catch {
@@ -729,6 +732,7 @@ export class GitStatusManager extends EventEmitter {
       if (currentStatus && (
         currentStatus.prNumber !== prData.prNumber ||
         currentStatus.prState !== prData.prState ||
+        currentStatus.prIsDraft !== prData.prIsDraft ||
         currentStatus.prTitle !== prData.prTitle ||
         currentStatus.prBody !== prData.prBody
       )) {
@@ -738,6 +742,7 @@ export class GitStatusManager extends EventEmitter {
           prUrl: prData.prUrl,
           prTitle: prData.prTitle,
           prState: prData.prState,
+          prIsDraft: prData.prIsDraft,
           prBody: prData.prBody
         };
         const lastChecked = this.cache[sessionId].lastChecked;
@@ -1083,6 +1088,7 @@ export class GitStatusManager extends EventEmitter {
       prUrl: previousStatus.prUrl,
       prTitle: previousStatus.prTitle,
       prState: previousStatus.prState,
+      prIsDraft: previousStatus.prIsDraft,
       prBody: previousStatus.prBody,
     };
   }

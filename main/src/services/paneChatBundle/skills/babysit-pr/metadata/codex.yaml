@@ -1,0 +1,6 @@
+interface:
+  display_name: Babysit PR
+  short_description: Watch a PR's CI and review bots until it is ready
+  default_prompt: Use $babysit-pr to watch this pull request until checks and review bots are green.
+policy:
+  allow_implicit_invocation: true

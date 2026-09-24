@@ -12,6 +12,7 @@ import {
   type UsageTotals,
 } from '../../../../shared/types/usage';
 import { estimateCostUsd } from './modelPricing';
+import { ROLLUP_BUCKET_MS } from './usageRollup';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -30,8 +31,26 @@ interface BucketRow extends TokenRow {
   bucket_start_ms: number;
 }
 
-interface PaneTokenRow extends TokenRow {
-  pane_id: string | null;
+interface SourceRow extends TokenRow {
+  timestamp_ms: number;
+  /** Earliest and latest event time the row may hold. */
+  first_ms: number;
+  last_ms: number;
+  cwd: string;
+}
+
+interface UsageSource {
+  sql: string;
+  params: Array<number | string>;
+}
+
+/** When a pane owned its worktree path, in the terms the attribution rule uses. */
+interface PaneLifetime {
+  id: string;
+  createdMs: number | null;
+  active: boolean;
+  /** Last millisecond an archived pane still owns its path. */
+  endMs: number | null;
 }
 
 interface PaneRow {
@@ -129,6 +148,23 @@ function foldPaneSlice(rows: TokenRow[]) {
   };
 }
 
+function ownsPathAt(lifetime: PaneLifetime, timestampMs: number): boolean {
+  return lifetime.createdMs !== null && timestampMs >= lifetime.createdMs
+    && (lifetime.active || (lifetime.endMs !== null && timestampMs <= lifetime.endMs));
+}
+
+/** The newest pane that owned the path at this time, or null. */
+function paneAt(lifetimes: PaneLifetime[], timestampMs: number): string | null {
+  return lifetimes.find(lifetime => ownsPathAt(lifetime, timestampMs))?.id ?? null;
+}
+
+/** Whether any pane gains or loses the path strictly inside (startMs, endMs). */
+function ownershipChangesWithin(lifetimes: PaneLifetime[], startMs: number, endMs: number): boolean {
+  const inside = (ms: number | null) => ms !== null && ms > startMs && ms < endMs;
+  return lifetimes.some(lifetime => inside(lifetime.createdMs)
+    || (!lifetime.active && inside(lifetime.endMs === null ? null : lifetime.endMs + 1)));
+}
+
 const AGGREGATE_COLUMNS = `
   model,
   provider,
@@ -136,7 +172,7 @@ const AGGREGATE_COLUMNS = `
   SUM(output_tokens)         AS output_tokens,
   SUM(cache_read_tokens)     AS cache_read_tokens,
   SUM(cache_creation_tokens) AS cache_creation_tokens,
-  COUNT(*)                   AS message_count
+  SUM(message_count)         AS message_count
 `;
 
 export class UsageAggregator {
@@ -147,15 +183,14 @@ export class UsageAggregator {
    * model id shared across providers stays distinguishable.
    */
   getByModel(fromMs: number, toMs: number, providers?: UsageProvider[]): UsageByModel[] {
-    const { clause, params } = this.providerFilter(providers);
+    const source = this.source(fromMs, toMs, providers);
     // SAFETY: The fixed projection aliases every column required by TokenRow.
     const rows = this.db.prepare(`
       SELECT ${AGGREGATE_COLUMNS}
-      FROM usage_events
-      WHERE timestamp_ms >= ? AND timestamp_ms <= ? ${clause}
+      FROM (${source.sql})
       GROUP BY model, provider
       ORDER BY SUM(input_tokens + output_tokens) DESC
-    `).all(fromMs, toMs, ...params) as TokenRow[];
+    `).all(...source.params) as TokenRow[];
 
     return rows.map(row => ({
       model: row.model,
@@ -173,14 +208,13 @@ export class UsageAggregator {
    * rather than dropped, so the parts still sum to the whole.
    */
   getByProject(fromMs: number, toMs: number, providers?: UsageProvider[]): UsageByProject[] {
-    const { clause, params } = this.providerFilter(providers);
+    const source = this.source(fromMs, toMs, providers);
     // SAFETY: The fixed projection aliases every TokenRow field plus cwd.
     const rows = this.db.prepare(`
       SELECT cwd, ${AGGREGATE_COLUMNS}
-      FROM usage_events
-      WHERE timestamp_ms >= ? AND timestamp_ms <= ? ${clause}
+      FROM (${source.sql})
       GROUP BY cwd, model, provider
-    `).all(fromMs, toMs, ...params) as Array<TokenRow & { cwd: string | null }>;
+    `).all(...source.params) as Array<TokenRow & { cwd: string }>;
 
     const byPath = new Map<string, TokenRow[]>();
     for (const row of rows) {
@@ -200,46 +234,78 @@ export class UsageAggregator {
   }
 
   getByPane(fromMs: number, toMs: number, providers?: UsageProvider[]): UsageByPaneReport {
-    const { clause, params } = this.providerFilter(providers);
-    // SAFETY: The projection aliases the pane id and every TokenRow field.
-    const rows = this.db.prepare(`
-      SELECT pane_id, ${AGGREGATE_COLUMNS}
-      FROM (
-        SELECT
-          e.model,
-          e.provider,
-          e.input_tokens,
-          e.output_tokens,
-          e.cache_read_tokens,
-          e.cache_creation_tokens,
-          (
-            SELECT s.id
-            FROM sessions s
-            WHERE s.worktree_path = e.cwd
-              AND e.timestamp_ms >= CAST(strftime('%s', s.created_at) AS INTEGER) * 1000
-              AND (
-                s.archived IS NULL OR s.archived = 0
-                OR e.timestamp_ms <= CAST(strftime('%s', s.updated_at) AS INTEGER) * 1000 + 999
-              )
-            ORDER BY CAST(strftime('%s', s.created_at) AS INTEGER) DESC, s.id
-            LIMIT 1
-          ) AS pane_id
-        FROM usage_events e
-        WHERE e.timestamp_ms >= ? AND e.timestamp_ms <= ? ${clause}
-      )
-      GROUP BY pane_id, model, provider
-    `).all(fromMs, toMs, ...params) as PaneTokenRow[];
+    const source = this.source(fromMs, toMs, providers);
+    // SAFETY: The source projection is represented by SourceRow.
+    const sourceRows = this.db.prepare(source.sql).all(...source.params) as SourceRow[];
+
+    // An event belongs to the newest pane whose lifetime holds it at the
+    // event's worktree path. Ownership of a path only changes at a pane's
+    // creation or archive time, so a rolled-up row resolves at once unless one
+    // of those falls between its first and last event. Those rare rows reread
+    // their events.
+    const lifetimes = this.paneLifetimes();
+    const sums = new Map<string, TokenRow & { paneId: string | null }>();
+    const add = (paneId: string | null, row: TokenRow) => {
+      const key = `${paneId ?? ''}\0${row.model}\0${row.provider}`;
+      const sum = sums.get(key);
+      if (!sum) {
+        sums.set(key, {
+          paneId,
+          model: row.model,
+          provider: row.provider,
+          input_tokens: row.input_tokens,
+          output_tokens: row.output_tokens,
+          cache_read_tokens: row.cache_read_tokens,
+          cache_creation_tokens: row.cache_creation_tokens,
+          message_count: row.message_count,
+        });
+        return;
+      }
+      sum.input_tokens += row.input_tokens;
+      sum.output_tokens += row.output_tokens;
+      sum.cache_read_tokens += row.cache_read_tokens;
+      sum.cache_creation_tokens += row.cache_creation_tokens;
+      sum.message_count += row.message_count;
+    };
+
+    const splitRows: Array<[number, string, string, string]> = [];
+    for (const row of sourceRows) {
+      const paths = row.cwd ? lifetimes.get(row.cwd) : undefined;
+      if (paths && ownershipChangesWithin(paths, row.first_ms, row.last_ms + 1)) {
+        splitRows.push([row.timestamp_ms, row.cwd, row.model, row.provider]);
+        continue;
+      }
+      add(paths ? paneAt(paths, row.first_ms) : null, row);
+    }
+
+    if (splitRows.length > 0) {
+      // SAFETY: The fixed projection aliases every SourceRow field used below.
+      const eventRows = this.db.prepare(`
+        SELECT timestamp_ms, cwd, usage_events.model, usage_events.provider, input_tokens,
+          output_tokens, cache_read_tokens, cache_creation_tokens, 1 AS message_count
+        FROM json_each(?) AS split
+        JOIN usage_events
+          ON timestamp_ms >= split.value ->> 0
+          AND timestamp_ms < (split.value ->> 0) + ${ROLLUP_BUCKET_MS}
+          AND cwd = split.value ->> 1
+          AND usage_events.model = split.value ->> 2
+          AND usage_events.provider = split.value ->> 3
+      `).all(JSON.stringify(splitRows)) as SourceRow[];
+      for (const row of eventRows) add(paneAt(lifetimes.get(row.cwd) ?? [], row.timestamp_ms), row);
+    }
+
+    const rows = [...sums.values()];
 
     const rowsByPane = new Map<string, TokenRow[]>();
     const unattributedRows: TokenRow[] = [];
     for (const row of rows) {
-      if (row.pane_id === null) {
+      if (row.paneId === null) {
         unattributedRows.push(row);
         continue;
       }
-      const paneRows = rowsByPane.get(row.pane_id);
+      const paneRows = rowsByPane.get(row.paneId);
       if (paneRows) paneRows.push(row);
-      else rowsByPane.set(row.pane_id, [row]);
+      else rowsByPane.set(row.paneId, [row]);
     }
 
     // SAFETY: The fixed roster projection is represented by PaneRow.
@@ -293,14 +359,13 @@ export class UsageAggregator {
   }
 
   getTotals(fromMs: number, toMs: number, providers?: UsageProvider[]): UsageTotals {
-    const { clause, params } = this.providerFilter(providers);
+    const source = this.source(fromMs, toMs, providers);
     // SAFETY: The fixed projection aliases every column required by TokenRow.
     const rows = this.db.prepare(`
       SELECT ${AGGREGATE_COLUMNS}
-      FROM usage_events
-      WHERE timestamp_ms >= ? AND timestamp_ms <= ? ${clause}
+      FROM (${source.sql})
       GROUP BY model, provider
-    `).all(fromMs, toMs, ...params) as TokenRow[];
+    `).all(...source.params) as TokenRow[];
 
     return foldTotals(rows);
   }
@@ -317,7 +382,6 @@ export class UsageAggregator {
     dayBoundariesMs?: number[]
   ): UsageBucket[] {
     const bucketMs = bucket === 'hour' ? HOUR_MS : DAY_MS;
-    const { clause, params } = this.providerFilter(providers);
 
     if (dayBoundariesMs && (
       dayBoundariesMs.length < 2 || dayBoundariesMs.length > MAX_USAGE_DAY_BUCKETS + 1
@@ -332,19 +396,20 @@ export class UsageAggregator {
       SELECT value AS start_ms, LEAD(value) OVER (ORDER BY key) AS end_ms
       FROM json_each(?)
     )` : '';
-    const source = dayBoundariesMs
-      ? 'calendar JOIN usage_events ON timestamp_ms >= start_ms AND timestamp_ms < end_ms'
-      : 'usage_events';
+    // Day boundaries split the rolled-up hours they fall inside.
+    const source = this.source(fromMs, toMs, providers, dayBoundariesMs);
+    const from = dayBoundariesMs
+      ? `calendar JOIN (${source.sql}) ON timestamp_ms >= start_ms AND timestamp_ms < end_ms`
+      : `(${source.sql})`;
     const bucketStart = dayBoundariesMs ? 'start_ms' : `(timestamp_ms / ${bucketMs}) * ${bucketMs}`;
     // SAFETY: The fixed projection aliases every column required by BucketRow.
     const rows = this.db.prepare(`
       ${calendarCte}
       SELECT ${bucketStart} AS bucket_start_ms, ${AGGREGATE_COLUMNS}
-      FROM ${source}
-      WHERE timestamp_ms >= ? AND timestamp_ms <= ? ${clause}
+      FROM ${from}
       GROUP BY bucket_start_ms, model, provider
       ORDER BY bucket_start_ms ASC
-    `).all(...(dayBoundariesMs ? [JSON.stringify(dayBoundariesMs)] : []), fromMs, toMs, ...params) as BucketRow[];
+    `).all(...(dayBoundariesMs ? [JSON.stringify(dayBoundariesMs)] : []), ...source.params) as BucketRow[];
 
     const byBucket = new Map<number, TokenRow[]>();
     for (const row of rows) {
@@ -356,6 +421,71 @@ export class UsageAggregator {
     return [...byBucket.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([bucketStartMs, bucketRows]) => ({ bucketStartMs, ...foldTotals(bucketRows) }));
+  }
+
+  /**
+   * Every event in [fromMs, toMs] that passes the provider filter, with the
+   * columns of SourceRow. Whole hours come from usage_hourly with the hour
+   * start as their timestamp. Raw events cover the partial hours
+   * at each end of the range and any hour a split point falls inside, so a
+   * caller grouping on a boundary there still sees exact timestamps.
+   */
+  private source(fromMs: number, toMs: number, providers?: UsageProvider[], splitPointsMs: number[] = []): UsageSource {
+    const { clause, params } = this.providerFilter(providers);
+    let wholeFrom = Math.ceil(fromMs / ROLLUP_BUCKET_MS) * ROLLUP_BUCKET_MS;
+    let wholeTo = Math.floor((toMs + 1) / ROLLUP_BUCKET_MS) * ROLLUP_BUCKET_MS;
+    // A range inside a single hour has no whole hours; read it all raw.
+    if (wholeFrom >= wholeTo) wholeFrom = wholeTo = toMs + 1;
+    const splitHours = [...new Set(splitPointsMs
+      .filter(point => point % ROLLUP_BUCKET_MS !== 0)
+      .map(point => Math.floor(point / ROLLUP_BUCKET_MS) * ROLLUP_BUCKET_MS)
+      .filter(hour => hour >= wholeFrom && hour < wholeTo))];
+    // Half-open [start, end) windows read from raw events.
+    const rawWindows = [
+      [fromMs, wholeFrom],
+      [wholeTo, toMs + 1],
+      ...splitHours.map(hour => [hour, hour + ROLLUP_BUCKET_MS]),
+    ].filter(([start, end]) => start < end);
+    return {
+      sql: `
+        SELECT hour_ms AS timestamp_ms, first_ms, last_ms, cwd, model, provider, input_tokens,
+          output_tokens, cache_read_tokens, cache_creation_tokens, message_count
+        FROM usage_hourly
+        WHERE hour_ms >= ? AND hour_ms < ?
+          AND hour_ms NOT IN (SELECT value FROM json_each(?)) ${clause}
+        UNION ALL
+        SELECT timestamp_ms, timestamp_ms, timestamp_ms, COALESCE(cwd, ''), model, provider,
+          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, 1
+        FROM json_each(?) AS raw_window
+        JOIN usage_events
+          ON timestamp_ms >= raw_window.value ->> 0 AND timestamp_ms < raw_window.value ->> 1
+        WHERE 1 = 1 ${clause}
+      `,
+      params: [wholeFrom, wholeTo, JSON.stringify(splitHours), ...params, JSON.stringify(rawWindows), ...params],
+    };
+  }
+
+  /** Pane lifetimes by worktree path, newest first, as the attribution rule orders them. */
+  private paneLifetimes(): Map<string, PaneLifetime[]> {
+    // SAFETY: The fixed projection aliases every field read below.
+    const rows = this.db.prepare(`
+      SELECT
+        id,
+        worktree_path,
+        CAST(strftime('%s', created_at) AS INTEGER) * 1000 AS created_ms,
+        archived IS NULL OR archived = 0 AS active,
+        CAST(strftime('%s', updated_at) AS INTEGER) * 1000 + 999 AS end_ms
+      FROM sessions
+      ORDER BY created_ms DESC, id
+    `).all() as Array<{ id: string; worktree_path: string; created_ms: number | null; active: number; end_ms: number | null }>;
+    const byPath = new Map<string, PaneLifetime[]>();
+    for (const row of rows) {
+      const lifetime = { id: row.id, createdMs: row.created_ms, active: row.active === 1, endMs: row.end_ms };
+      const existing = byPath.get(row.worktree_path);
+      if (existing) existing.push(lifetime);
+      else byPath.set(row.worktree_path, [lifetime]);
+    }
+    return byPath;
   }
 
   private providerFilter(providers?: UsageProvider[]): ProviderFilter {

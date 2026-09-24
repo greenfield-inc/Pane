@@ -18,6 +18,7 @@ import {
   allPanelIds,
   findGroup,
   findGroupContainingPanel,
+  activatePanelInLayout,
   createSingleGroupLayout,
   addPanelToGroup,
   normalize,
@@ -97,6 +98,36 @@ describe('tree queries', () => {
     expect(findGroup(tree, 'nope')).toBeNull();
     expect(findGroupContainingPanel(tree, 'c')?.id).toBe('g2');
     expect(findGroupContainingPanel(tree, 'nope')).toBeNull();
+  });
+});
+
+describe('activatePanelInLayout', () => {
+  it('activates the requested panel and focuses its split group', () => {
+    const layout = layoutOf(split('s1', 'row', [
+      group('g1', ['a', 'b'], 'a'),
+      group('g2', ['c', 'd'], 'c'),
+    ]), { focusedGroupId: 'g1' });
+
+    const result = activatePanelInLayout(layout, 'd');
+
+    expect(findGroup(result.root, 'g1')?.activePanelId).toBe('a');
+    expect(findGroup(result.root, 'g2')?.activePanelId).toBe('d');
+    expect(result.focusedGroupId).toBe('g2');
+  });
+
+  it('exits zoom when activating a panel in another group', () => {
+    const layout = layoutOf(split('s1', 'row', [
+      group('g1', ['a']),
+      group('g2', ['b']),
+    ]), { focusedGroupId: 'g1', zoomedGroupId: 'g1' });
+
+    expect(activatePanelInLayout(layout, 'b').zoomedGroupId).toBeNull();
+  });
+
+  it('returns the same layout when the panel is not present', () => {
+    const layout = layoutOf(group('g1', ['a']));
+
+    expect(activatePanelInLayout(layout, 'missing')).toBe(layout);
   });
 });
 

@@ -130,6 +130,58 @@ describe('remote daemon service launchers', () => {
     expect(createCall?.[1].join(' ')).not.toContain(`"${executable}" --daemon-headless`);
   });
 
+  async function linuxServiceDependencies(runCommand: (command: string, args: string[]) => { ok: boolean; stdout: string; stderr: string }) {
+    const root = await makeTempDir('pane-systemd-');
+    const executable = path.join(root, 'pane');
+    await fs.writeFile(executable, '#!/usr/bin/env sh\nexit 0\n', { mode: 0o755 });
+    return {
+      paneDir: path.join(root, '.pane_remote'),
+      dependencies: {
+        platform: 'linux' as const,
+        homeDir: root,
+        executablePath: executable,
+        executableCandidates: [executable],
+        sourceRoot: null,
+        commandExists: () => true,
+        runCommand,
+      },
+    };
+  }
+
+  it('keeps the systemd user service running after logout by enabling lingering', async () => {
+    const runCommand = vi.fn((_command: string, _args: string[]) => ({ ok: true, stdout: '', stderr: '' }));
+    const { paneDir, dependencies } = await linuxServiceDependencies(runCommand);
+
+    const result = await installRemoteDaemonService(paneDir, dependencies);
+
+    expect(result).toMatchObject({ strategy: 'systemd-user', installed: true, started: true });
+    expect(runCommand).toHaveBeenCalledWith('loginctl', ['enable-linger', '--no-ask-password', os.userInfo().username]);
+  });
+
+  it('enables lingering through passwordless sudo when the user may not enable it directly', async () => {
+    const runCommand = vi.fn((command: string, _args: string[]) => command === 'loginctl'
+      ? { ok: false, stdout: '', stderr: 'Could not enable linger: Access denied' }
+      : { ok: true, stdout: '', stderr: '' });
+    const { paneDir, dependencies } = await linuxServiceDependencies(runCommand);
+
+    const result = await installRemoteDaemonService(paneDir, dependencies);
+
+    expect(runCommand).toHaveBeenCalledWith('sudo', ['-n', 'loginctl', 'enable-linger', '--no-ask-password', os.userInfo().username]);
+    expect(result.message).toBe('Installed and started a user systemd service.');
+  });
+
+  it('explains how to enable lingering when neither the user nor passwordless sudo can', async () => {
+    const runCommand = vi.fn((command: string, _args: string[]) => command === 'loginctl' || command === 'sudo'
+      ? { ok: false, stdout: '', stderr: 'Access denied' }
+      : { ok: true, stdout: '', stderr: '' });
+    const { paneDir, dependencies } = await linuxServiceDependencies(runCommand);
+
+    const result = await installRemoteDaemonService(paneDir, dependencies);
+
+    expect(result).toMatchObject({ strategy: 'systemd-user', installed: true, started: true });
+    expect(result.message).toContain('sudo loginctl enable-linger "$USER"');
+  });
+
   it('repairs the v2.4.30 launcher idempotently without touching config', async () => {
     const root = await makeTempDir('pane-repair-');
     const paneDir = path.join(root, '.pane_remote');

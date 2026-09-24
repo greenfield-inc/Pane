@@ -19,12 +19,11 @@ section rather than from a duplicate top navigation shortcut.
 
 The Session owns discussion, read-only code exploration and investigation,
 clarification, and ticket creation or revision. After a ticket is ready and
-the user explicitly authorizes implementation, the Session delegates
-`astra-ticket` through RunPane in an appropriate existing Pane or tab, or
-creates one when needed. The delegated skill owns its model, planning,
-implementation, pull request, review, QA, and CI requirements. The Session
-keeps its selected agent, profile, and tool configuration; selecting a Session
-agent does not replace the delegated workflow's model requirements.
+the user explicitly authorizes implementation, the Session dispatches an
+implementation session through RunPane in an appropriate existing Pane or
+tab, or creates one when needed. It chooses the agent and the skills that fit
+the work and names those skills by absolute path. The Session keeps its own
+selected agent, profile, and tool configuration.
 
 ## Session sidebar and archive
 
@@ -195,26 +194,16 @@ capture a fresh output baseline before interpreting notifications. Return
 blocked and decision findings to the Session conversation. Terminal idle or
 exit remains activity evidence only.
 
-## Skill cache contract
+## Skill contract
 
-`main/src/services/skillCacheManager.ts` owns the cached upstream skills below
-`<PANE_DIR>/skills/dcouple`, the source checkout at
-`<PANE_DIR>/skills/.sources/dcouple-skills`, and the generated Pane Chat
-assets at `<PANE_DIR>/skills/pane-chat/`. When Git synchronization is
-unavailable, raw downloads provide the same required files.
+`main/src/services/skillCacheManager.ts` installs the skills that ship in
+`main/src/services/paneChatBundle/` once per run: into
+`<PANE_DIR>/skills/pane-chat/skills/` and into the `.claude/skills/` and
+`.codex/skills/` folders of the data directory. It also generates the
+`pane-orchestrator` entry skill, the runtime context, and the helper subagents
+in `.claude/agents/` and `.codex/agents/`. A manifest records what it
+installed, so later installs replace only those entries.
 
-The Session route depends on the cached `create-ticket`, `astra-ticket`,
-`cold-read`, `explain-visually`, `pane-work-recap`, and
-`pane-work-prioritizer` skills, plus `create-ticket`'s intent-handoff and
-Socrates references, its agent definition, the Pane work-question guide, and
-the existing review and QA support files. Clone and fallback paths must keep
-these files available before the generated guide is written.
-
-Every clone, pull, fallback download, and startup guide refresh reapplies the
-Pane Sessions adapter to cached `runpane-orchestrator` files. The adapter
-removes the upstream implementation lane and lifecycle block, preserves the
-control-plane, inspection, configuration, dispatch, monitoring, feedback, and
-evidence guidance, and states that every authorized implementation enters
-`astra-ticket` after Session discussion and ticket work. It does not copy or
-substitute the `astra-ticket` pipeline. Generated guides, project skills, and
-cached guidance therefore share one route even after a later upstream refresh.
+The Session route depends on `pane-orchestrator`, `runpane`,
+`orchestrate-sessions`, `create-ticket`, and `pane-work`. Agents dispatched to
+other repositories get skills by absolute path from the Session's prompt.
