@@ -202,6 +202,7 @@ test.describe('compact sidebar', () => {
     const regularPane = page.getByTestId('compact-repository-pane-regular');
     await regularPane.click({ button: 'right' });
     let menu = page.getByRole('menu', { name: 'Pane actions for Regular work' });
+    expect((await menu.boundingBox())?.width).toBeLessThanOrEqual(230);
     await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Pin');
     await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
     await menu.getByRole('menuitem', { name: 'Archive' }).click();

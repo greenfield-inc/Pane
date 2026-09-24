@@ -106,6 +106,9 @@ Click a Session name to open its chat. The left chevron always appears and
 expands or collapses associated Panes without switching conversations. Empty
 Sessions start collapsed and show “No child sessions” when expanded. Child
 Pane rows are indented beneath the Session and keep ordinary Pane actions.
+Single-line Pane rows show the title and status indicator without change counts
+or PR numbers. The optional two-row layout shows those details below the title.
+Session and Pane context menus use compact widths.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
 Panes and activity. Files browses the Session workspace. Changes summarizes

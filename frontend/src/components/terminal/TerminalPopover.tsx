@@ -101,7 +101,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   return createPortal(
     <div
       ref={ref}
-      className={cn('fixed z-[10001] w-max min-w-[180px] max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated py-1', className)}
+      className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated py-1', className)}
       style={{ left: position.left, top: position.top }}
     >
       {children}
