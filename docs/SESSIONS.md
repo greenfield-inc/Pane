@@ -17,13 +17,82 @@ The Sessions section below the divider can be collapsed from its header; the
 `+` remains available while it is collapsed. Sessions are opened from this
 section rather than from a duplicate top navigation shortcut.
 
-The Session owns discussion, read-only code exploration and investigation,
-clarification, and ticket creation or revision. After a ticket is ready and
-the user explicitly authorizes implementation, the Session dispatches an
-implementation session through RunPane in an appropriate existing Pane or
-tab, or creates one when needed. It chooses the agent and the skills that fit
-the work and names those skills by absolute path. The Session keeps its own
-selected agent, profile, and tool configuration.
+A Session is a persistent coordination conversation with its own scratch
+workspace. Its default profile supports discussion, investigation, decisions,
+and delegation when authorized work benefits from it. No particular skill,
+ticket system, model, or Agent Farm installation is required. Users can select
+skills and workflows without Pane imposing an implementation pipeline.
+
+## Upgrading from Pane Chat
+
+Existing Pane Chat opens under Sessions automatically, keeping its name and all
+agent conversations together. Switching agents resumes that agent's existing
+panel and history in the same stable private Session workspace. Opening the
+Session does not submit a prompt or authorize new work.
+
+Earlier development versions split old agent histories into supplemental
+Sessions. Untouched imports with only generated workspace files and no competing
+conversation are reunited with the original Session. Imports with files, settings changes, or
+additional conversations remain separate to preserve that work. Those retained
+Sessions receive independent internal owners while keeping their names, folders,
+panel IDs, saved histories, and settings. Interrupted ownership moves resume on
+startup; no transcript or workspace files are deleted by this migration.
+
+## Launch configuration and profile
+
+Sessions use the same built-in launch presets and saved custom commands as
+ordinary project/worktree panels, including custom arguments. The application
+default seeds new Sessions. Creating a Session remembers its launch command and
+arguments for the next creation; cancelling leaves that default unchanged.
+Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
+and behavior profile. Changing defaults does not overwrite existing Sessions.
+Launch changes take effect on the next explicit restart.
+Use **Edit behavior…** during creation or in Session settings to open the
+separate profile editor. **Back** discards the draft; **Save behavior** applies it
+to the form, which is persisted when you create the Session or save settings.
+
+The command, behavior profile, and saved task context have separate purposes.
+A command selects how the agent runs; a profile describes how it should behave;
+saved goals, decisions, and next actions help it respond to later user input.
+Custom commands (including Agent Farm wrappers) retain their arguments. Pane
+only adds native flags through compatible built-in adapters unless you explicitly
+configure custom command resume. Wrappers keep control of instruction discovery;
+Pane does not infer native flags from a wrapper name. A user command
+that explicitly starts work remains the user's choice.
+
+Each Session owns a stable folder at `<PANE_DIR>/sessions/<session-id>/` for
+notes, plans, attachments, generated instructions, and artifacts. Renaming,
+reopening, and archiving retain this folder. These folders are not Git
+worktrees or security sandboxes and do not expire with OS temporary files.
+Project implementation belongs in an appropriate Pane/worktree.
+
+## Resuming custom launchers
+
+Use **Enable custom command resume** in Session launch settings or a saved custom
+command's editor. This is an explicit contract, independent of executable names.
+Choose a session ID source and provide first-launch and resume templates:
+
+- **Claude:** Pane allocates a UUID and resumes it only when its transcript exists.
+- **Codex / Cursor:** Pane captures the native resume ID from terminal output.
+- **Pane allocates an ID:** for other CLIs that accept a caller-provided ID.
+- **CLI reports its ID:** the CLI or wrapper prints a standalone newline-terminated
+  `PANE_AGENT_SESSION_ID=your-session-id` line. IDs may contain letters, digits,
+  periods, underscores, colons, and hyphens (up to 256 characters).
+
+`{command}` expands to the saved command; `{sessionId}` expands to the quoted ID.
+Leave the ID placeholder unquoted. For a launcher that forwards native arguments
+through `--`, Claude templates could be `{command} -- --session-id {sessionId}`
+and `{command} -- --resume {sessionId}`. Codex could use `{command}` initially
+and `{command} -- resume {sessionId}` on resume. These are user configuration
+examples, not automatic wrapper detection. Other CLIs can use other syntax.
+
+The configuration and ID persist with the panel. Without a captured ID, Pane
+uses the first-launch template instead of guessing a latest conversation. Saved
+custom commands copy their resume settings into new panels; changing the saved
+shortcut does not change existing panels. Session settings support changing or
+disabling the contract for that Session's next launch. No prompt is submitted just
+to resume. Old conversations whose IDs were never saved cannot be recovered
+automatically; use an explicit resume command if you know their ID.
 
 ## Session sidebar and archive
 
@@ -31,9 +100,18 @@ Pinned is the first sidebar category and can contain both Session chats and
 Panes. Right-click a Session to pin or unpin it. The pin preference survives
 restarts; an archived Session stays out of Pinned until it is restored.
 
-Click a Session row to open its chat and expand or collapse its associated
-Panes. Child Pane rows are indented beyond the Session chat icon and keep the
-ordinary Pane actions.
+Only the selected sidebar location is highlighted: opening a child Pane does not also highlight its repository row, and opening an orchestrator chat clears Pane-row selection.
+
+Click a Session name to open its chat. The left chevron always appears and
+expands or collapses associated Panes without switching conversations. Empty
+Sessions start collapsed and show “No child sessions” when expanded. Child
+Pane rows are indented beneath the Session and keep ordinary Pane actions.
+
+The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
+Panes and activity. Files browses the Session workspace. Changes summarizes
+linked worktrees and opens a Pane for detailed review. The upper-right sidebar
+button shows or hides the selected tab. The title strip can be dragged between
+controls; its drag area leaves both sidebar toggle buttons clickable.
 
 Right-click a Session to archive it. Archiving hides the chat from the active
 Sessions list while retaining its identity, conversation history, and Pane
@@ -49,20 +127,31 @@ replace an unrelated selection.
 
 ## Session startup
 
-Session setup is quiet. After routine context and liveness checks, a new
-Session greets the user with a short invitation such as `Ready when you are.
-What would you like to work on?`; a resumed Session briefly surfaces its saved
-next step. Routine diagnostics, machine details, watcher output, and
-workspace-wide Pane inventory stay internal unless the user asks or a relevant
-failure needs attention. If one human action blocks progress, the Session
-surfaces that single action clearly.
+Creating, opening, restoring, restarting, or switching the agent in a Session
+does not submit a bootstrap message. The terminal waits for user input with
+its role, profile, and Pane capability instructions available. There is no
+automatic greeting, diagnostic sweep, watcher setup, or continuation of a
+saved next action. Reopening an already-running Session reconnects without
+interrupting work the user has already authorized.
 
-Unattended resilience is offered only when the user requests unattended work
-or delegated work makes the choice relevant. The offer states its effect,
-including keep-awake and automatic resume behavior. An explicit yes or no is
-remembered for the Session; silence and unrelated prompts are not consent. A
-new explicit no revokes resilience, while an enabled choice persists across
-ordinary resumes and unrelated prompts.
+Pane may prepare instruction files and terminal infrastructure at startup;
+that preparation does not require an agent turn. Unattended work and watchers
+are separate, explicitly authorized activities.
+
+## Shared tools and authority
+
+Session orchestrators and regular agent panels share RunPane's coordination
+capabilities. Use `runpane doctor --json` and `runpane agent-context --json`
+when the task requires those capabilities, and discover individual schemas
+with `runpane agent-context --command "<command>" --json`.
+
+An associated worker completes its assignment and reports results or blockers
+to its owning Session. Reporting is participation. Creating workers, assigning
+work, redirecting agents, or changing ownership requires a user request or an
+explicitly delegated task with that authority. Existing authorization persists
+within its scope. An independent Pane works locally unless coordination is
+requested. Tool availability does not authorize unrelated work or automatic
+sharing of other conversations.
 
 ## Pane association before delegation
 
@@ -81,7 +170,7 @@ association. A Pane already managed by another Session is a conflict: do not
 detach, reassign, or create a duplicate Pane. Prefer creating a Pane without
 an implementation prompt, associating and verifying it, then submitting the
 prompt. Keep a Pane attached through idle and completion; do not detach on
-completion. Archive behavior remains a separate #654 follow-up.
+completion. Archiving preserves the association.
 
 Before mutating, use `runpane agent-context --command 'sessions associate'
 --json` to confirm the wrapper supports the command. If an older global CLI
@@ -134,13 +223,14 @@ overview after associations or updates.
 
 ## Resume and refresh persisted context
 
-Read `PANE_ORCHESTRATION_SESSION_ID` from the current environment whenever a
-Session conversation starts or resumes. Pane exports this stable identity for
+When responding to a user task that needs Session state, read
+`PANE_ORCHESTRATION_SESSION_ID` from the current environment. Pane exports this stable identity for
 Session panels, including agent resume paths that do not receive the original
 bootstrap input. Do not infer the Session from a terminal panel ID or from
 conversation text.
 
-When the variable is present, reload the saved record and then reconcile live
+When the variable is present and the task requires it, reload the saved record
+and then reconcile live
 Pane, tab, branch, and evidence state:
 
 ```text
@@ -149,8 +239,9 @@ runpane sessions overview --session "$PANE_ORCHESTRATION_SESSION_ID" --json
 ```
 
 Run `get` to recover persisted intent and associations, and run `overview`
-after a resume or mutation. If the variable is missing, use `runpane sessions
-list --json` to resolve a Session explicitly; never guess an identity. If the
+when continuing a task after a resume or after a mutation. For workers, this variable does not identify a parent Session. Use `runpane
+sessions list --json` and Pane associations to resolve ownership; never infer
+it from the selected UI Session. Refresh associations before coordinating work. If the
 stable ID cannot be resolved, report the error before taking Session-specific
 actions.
 
@@ -162,11 +253,9 @@ agent. The imported legacy Pane Chat record retains its legacy internal IDs,
 resume IDs, and terminal buffers. New Session records must not reuse those
 identities.
 
-When legacy Pane Chat contains history for more than one agent, each existing
-agent history is imported as its own named Session. The imported rows retain
-the original hidden Session, fixed panel, buffers, and resume ID; generated
-unused panel slots keep those owners distinct across agent switches and
-restarts.
+Legacy Pane Chat keeps its agent histories together in one Session. Previously
+split imports are reunited only when untouched; retained independent imports
+receive separate hidden owners so their workspace tools cannot cross Sessions.
 
 The overview joins persisted intent with fresh Pane, tab, branch, worktree,
 agent, and available Git or pull request evidence. Working, idle, stopped,
@@ -177,7 +266,8 @@ stale.
 
 ## Session watcher
 
-Use one durable, named watcher per Session, scoped to every associated Pane:
+When monitoring is authorized, use one durable, named watcher per Session,
+scoped to its associated Panes. Do not start it merely because a Session opens:
 
 ```text
 runpane watch --as session-<session-id> --follow --pane <pane-id> \
@@ -204,6 +294,85 @@ exit remains activity evidence only.
 in `.claude/agents/` and `.codex/agents/`. A manifest records what it
 installed, so later installs replace only those entries.
 
-The Session route depends on `pane-orchestrator`, `runpane`,
-`orchestrate-sessions`, `create-ticket`, and `pane-work`. Agents dispatched to
-other repositories get skills by absolute path from the Session's prompt.
+Bundled workflow skills are available to Sessions and can be selected according
+to the user's task. The installed manifest lets Pane refresh its own skill files
+without replacing unrelated user skills.
+
+`shared/types/sessionProfile.ts` defines the generic default profile and shared
+capability context. Generated guides and agent instruction files use this
+contract. The legacy shared Cursor rule is not always applied; Session-specific
+instructions belong to the Session's working directory. User-selected profiles
+and workflows determine behavior after the user supplies a task.
+
+The sidebar’s **Archived** list separates **Sessions** from **Worktrees**.
+Each section stays visible when empty; worktrees are grouped by repository.
+Opening the list refreshes both collections.
+
+## Terminal and Files
+
+Each Session has a collapsible **Terminal** dock and a **Files** button beside
+its agent tabs. The shell and file browser use the Session's workspace folder.
+Selecting a file opens an editor tab alongside the agent conversation. Panels
+are saved with the Session and reused when you reopen the tools; switching
+Sessions keeps their shells and files separate.
+
+## Experimental progress view
+
+Enabled by default in **Settings → Advanced → Session progress view (Experimental)**.
+When an agent writes `progress.html` in its Session folder, Pane opens a resizable
+split beside the conversation, initially dividing the main area equally, and
+refreshes it during work. The icon-only Progress button independently hides or shows the
+brief. Files stays in its own resizable right sidebar, controlled by the top-bar
+sidebar toggle; both views can be open together. Session Settings and Progress
+sit as icon buttons on the right side of the top tab bar, with tooltips.
+The agent badge does not appear in the Session toolbar. Documents support self-contained HTML,
+inline CSS/SVG and data images, without scripts, navigation or network requests.
+
+Generated Session instructions ask the agent to update progress after meaningful
+changes and before yielding, and to check `.pane-progress.json` before each update.
+Disabling the setting hides the view, stops refreshes and removes the maintenance
+instruction; existing HTML remains. Running agents may retain prior instructions
+until their next normal context reload. Opening a Session never submits a prompt
+or starts work just to create a progress page.
+
+New worktrees launched from a Session default to unpinned. First association also
+clears a worktree's previous pin so it appears as a Session child. You can pin it
+manually afterward; repeated association does not undo that choice. Independent
+worktree defaults and existing historical pins are unchanged.
+
+### Generated instructions and Git
+
+Session instructions and progress pages live under `<PANE_DIR>/sessions/<id>/`,
+outside the project. Pane refuses to generate Session files when that directory
+is inside a Git worktree, including through a symlink. Do not configure PANE_DIR
+inside a repository.
+
+Pane no longer publishes instructions into project AGENTS.md or CLAUDE.md.
+Repository activation and agent launch remove only paired `pane-agent-context`
+blocks left by older versions, preserving user text and imports. Existing empty
+files are retained. This cleanup does not rewrite commits or unstage files: review
+already-staged changes normally. Ordinary agents can retrieve command guidance
+with `runpane agent-context --json`; Sessions load their private instructions.
+
+### Move an existing chat to a Session
+
+Right-click a worktree and choose **Move chat to Session…**, then choose the chat
+if it has multiple agent tabs. You can also use **Move chat to Session** in the top
+bar of a selected Claude or Codex chat. Then enter a unique Session name, and choose **Move chat**. The agent must be idle
+and have a saved conversation ID. Pane stops the old terminal before transferring
+the existing panel and resumes the same conversation from a private Session
+folder. No initial prompt is submitted. The original worktree becomes a child;
+its branch, files, and uncommitted changes remain in place. Other tabs stay there.
+
+Cursor and custom launch wrappers are not yet supported for promotion. Missing
+history, conflicting ownership, and active work are rejected before transfer.
+A durable Session record allows reopening to complete an interrupted transfer
+without copying the conversation. Terminal, Files, and experimental progress
+capabilities are the same as for a newly created Session.
+
+Promotion defaults to the worktree's current name. Rename an existing Session
+with **Rename Session…** in its right-click menu, or from its overview. Renaming
+keeps the same Session ID, conversation, private folder, and child associations.
+
+Worktree rows also offer **Rename worktree…**. This changes their displayed Pane
+name; it leaves the Git branch, directory path, files, and conversations in place.

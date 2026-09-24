@@ -19,7 +19,7 @@ test('add-tool popover supports keyboard navigation and dismissal', async ({ pag
     platform: 'darwin', initialProjects: [project], initialSessions: [session], initialPanels: [panel], activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
   const trigger = page.getByRole('button', { name: 'Add tool', exact: true });
@@ -46,11 +46,148 @@ test('Explorer in the add-tool menu creates a missing panel and opens the Files 
     initialPanels: [panel], activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Explorer', exact: false }).click();
 
   await expect(page.getByRole('tab', { name: 'Files', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('agent presets create JSON-valid terminal state without a resume profile', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session],
+    initialPanels: [panel], activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+  await page.getByRole('button', { name: 'Add tool', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Claude Code/ }).click();
+
+  await expect.poll(() => page.evaluate(async () => {
+    const result = await window.electronAPI.panels.getSessionPanels('tab-popover-session');
+    const created = result.data?.find(entry => entry.title === 'Claude Code');
+    if (!created) return null;
+    return {
+      command: created.state.customState?.initialCommand,
+      hasResumeKey: Object.hasOwn(created.state.customState ?? {}, 'customResume'),
+    };
+  })).toEqual({ command: 'claude --dangerously-skip-permissions', hasResumeKey: false });
+});
+
+test('custom profiles keep their names and commands when renamed and launched', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session],
+    initialPanels: [panel], activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+  const trigger = page.getByRole('button', { name: 'Add tool', exact: true });
+  await trigger.click();
+  await page.getByRole('menuitem', { name: 'Add custom command…' }).click();
+  const name = page.getByRole('textbox', { name: 'Name (optional)' });
+  await expect(name).toBeFocused();
+  await name.fill('Planner');
+  await name.press('Tab');
+  const command = page.getByRole('textbox', { name: 'Command to run' });
+  await expect(command).toBeFocused();
+  await command.fill('agent-farm run planner');
+  await page.getByRole('checkbox', { name: 'Enable custom command resume' }).check();
+  await page.getByRole('textbox', { name: 'Resume template', exact: true }).fill('{command} -- --resume {sessionId}');
+  await command.press('Enter');
+  await expect(page.getByRole('menu')).toBeHidden();
+  await expect.poll(() => page.evaluate(async () => {
+    const result = await window.electronAPI.panels.getSessionPanels('tab-popover-session');
+    return result.data?.map(entry => entry.title);
+  })).toContain('Planner');
+
+  await trigger.click();
+  await page.getByRole('button', { name: 'Rename Planner shortcut' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Reviewer');
+  await expect(command).toHaveValue('agent-farm run planner');
+  await expect(page.getByRole('checkbox', { name: 'Enable custom command resume' })).toBeChecked();
+  await expect(page.getByRole('textbox', { name: 'Resume template', exact: true })).toHaveValue('{command} -- --resume {sessionId}');
+  await page.getByRole('button', { name: 'Save name', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: /^Reviewer/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /^Planner/ })).toHaveCount(0);
+  const path = testInfo.outputPath('named-custom-profile.png');
+  await page.screenshot({ path });
+  await testInfo.attach('named-custom-profile.png', { path, contentType: 'image/png' });
+  await page.getByRole('menuitem', { name: /^Reviewer/ }).click();
+  await expect.poll(() => page.evaluate(async () => {
+    const result = await window.electronAPI.panels.getSessionPanels('tab-popover-session');
+    return result.data?.map(entry => entry.title);
+  })).toEqual(['Terminal', 'Planner', 'Reviewer']);
+  expect(await page.evaluate(async () => {
+    const result = await window.electronAPI.panels.getSessionPanels('tab-popover-session');
+    return result.data?.filter(entry => entry.title !== 'Terminal').map(entry => entry.state.customState?.customResume);
+  })).toEqual(Array(2).fill({ mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} -- --resume {sessionId}' }));
+
+  await trigger.click();
+  await page.getByRole('button', { name: 'Rename Reviewer shortcut' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Discarded');
+  await page.getByRole('textbox', { name: 'Name', exact: true }).press('Escape');
+  await expect(page.getByRole('menuitem', { name: /^Reviewer/ })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Add custom command…' }).click();
+  await command.fill('npm run dev');
+  await page.getByRole('button', { name: 'Save & launch' }).click();
+  await trigger.click();
+  await expect(page.getByRole('menuitem', { name: /^npm run dev/ })).toBeVisible();
+});
+
+test('chat promotion sends the selected chat and preserves it when the move is rejected', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session],
+    initialPanels: [{ ...panel, title: 'Codex chat', state: { ...panel.state, customState: { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'saved-chat' } } }], activeProjectId: project.id,
+  });
+  await page.addInitScript(() => {
+    const original = window.electronAPI.invoke.bind(window.electronAPI);
+    window.electronAPI.invoke = async (channel: string, ...args: unknown[]) => {
+      if (channel === 'orchestration-sessions:promote') {
+        sessionStorage.setItem('promotion-request', JSON.stringify(args[0]));
+        return { success: false, error: 'Wait for the agent to finish before moving this chat' };
+      }
+      return original(channel, ...args);
+    };
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Move chat to Session', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move chat to Session…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move chat to Session' });
+  await expect(dialog.getByRole('textbox', { name: 'Session name' })).toHaveValue('Tool menu');
+  await dialog.getByRole('textbox', { name: 'Session name' }).fill('Feature planning');
+  await dialog.getByRole('button', { name: 'Move chat', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Wait for the agent');
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('promotion-request')!))).toEqual({ panelId: panel.id, name: 'Feature planning' });
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('button', { name: 'Move chat to Session', exact: true })).toBeVisible();
+  expect(await page.evaluate(async () => (await window.electronAPI.panels.getSessionPanels('tab-popover-session')).data?.map(item => item.id))).toContain(panel.id);
+});
+
+
+test('worktree right-click rename defaults to the current name and keeps the worktree', async ({ page }) => {
+  await installElectronApiMock(page, { platform: 'darwin', initialProjects: [project], initialSessions: [session], initialPanels: [panel], activeProjectId: project.id });
+  await page.addInitScript(() => {
+    window.electronAPI.sessions.rename = async (id: string, name: string) => {
+      sessionStorage.setItem('rename-worktree', JSON.stringify({ id, name }));
+      return { success: true };
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename worktree…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Rename worktree', exact: true });
+  await expect(dialog.getByRole('textbox', { name: 'Worktree name' })).toHaveValue('Tool menu');
+  await dialog.getByRole('textbox', { name: 'Worktree name' }).fill('Renamed worktree');
+  await dialog.getByRole('button', { name: 'Save name', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Renamed worktree', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('rename-worktree')!))).toEqual({ id: session.id, name: 'Renamed worktree' });
 });

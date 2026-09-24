@@ -173,7 +173,7 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
     initialTerminalStates: { 'appearance-terminal': { scrollbackBuffer: 'ready\r\n' } },
   });
   await page.goto('/');
-  const expandRepo = page.getByRole('button', { name: /^Expand repository appearance-runtime$/ });
+  const expandRepo = page.getByRole('button', { name: /^Expand project appearance-runtime$/ });
   await expect(expandRepo).toBeVisible();
   await expandRepo.click();
   await page.getByRole('button', { name: session.name, exact: true }).click();

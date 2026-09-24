@@ -10,14 +10,6 @@ import {
 
 const tempDirs: string[] = [];
 
-function enabledConfig() {
-  return { agentContext: { managedAgentsMd: true } };
-}
-
-function disabledConfig() {
-  return { agentContext: { managedAgentsMd: false } };
-}
-
 async function createTempProject(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-agent-context-'));
   tempDirs.push(dir);
@@ -34,97 +26,41 @@ describe('agentContextManager', () => {
     }
   });
 
-  it('creates AGENTS.md with a managed Pane block by default', async () => {
+  it('does not create project instruction files', async () => {
     const projectPath = await createTempProject();
-
-    const result = await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
-
-    expect(result.changed).toBe(true);
-    expect(result.filePath).toBe(path.join(projectPath, 'AGENTS.md'));
-    const content = await fs.readFile(path.join(projectPath, 'AGENTS.md'), 'utf8');
-    expect(content).toContain(PANE_AGENT_CONTEXT_START);
-    expect(content).toContain('runpane doctor --json');
-    expect(content).toContain('runpane agent-context');
-    expect(content).toContain('Default to context-safe validation');
-    expect(content).toContain('runpane watch --follow');
-    expect(content).toContain('Prefer `runpane panels submit` for normal text plus Enter');
-    expect(content).toContain('Set-Location $env:TEMP');
-    expect(content).toContain('broken Windows shim');
-    expect(content).toContain(PANE_AGENT_CONTEXT_END);
+    await ensureProjectAgentContext({ path: projectPath });
+    expect(await fs.readdir(projectPath)).toEqual([]);
   });
 
-  it('updates an existing agents.md variant while preserving user content', async () => {
+  it('removes only paired Pane blocks, preserving user instructions and imports', async () => {
     const projectPath = await createTempProject();
-    const agentsPath = path.join(projectPath, 'agents.md');
-    await fs.writeFile(agentsPath, '# Repo Rules\n\nKeep this line.\n', 'utf8');
-
-    const first = await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
-    const second = await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
-
-    expect(first.changed).toBe(true);
-    expect(first.filePath).toBe(agentsPath);
-    expect(second.changed).toBe(false);
-    const content = await fs.readFile(agentsPath, 'utf8');
-    expect(content).toContain('# Repo Rules');
-    expect(content).toContain('Keep this line.');
-    expect(content.match(/pane-agent-context:start/g)).toHaveLength(1);
+    const block = `${PANE_AGENT_CONTEXT_START}\nOld generated content\n${PANE_AGENT_CONTEXT_END}\n`;
+    for (const name of ['agents.md', 'CLAUDE.md']) {
+      await fs.writeFile(path.join(projectPath, name), `User preface.\n${block}User footer.\n@my-rules.md\n`);
+    }
+    await ensureProjectAgentContext({ path: projectPath });
+    await ensureProjectAgentContext({ path: projectPath });
+    for (const name of ['agents.md', 'CLAUDE.md']) {
+      expect(await fs.readFile(path.join(projectPath, name), 'utf8')).toBe('User preface.\nUser footer.\n@my-rules.md\n');
+    }
   });
 
-  it('replaces only the managed block on subsequent writes', async () => {
+  it('leaves user files and incomplete markers unchanged', async () => {
     const projectPath = await createTempProject();
-    const agentsPath = path.join(projectPath, 'AGENTS.md');
-    await fs.writeFile(agentsPath, [
-      '# User Top',
-      '',
-      PANE_AGENT_CONTEXT_START,
-      'old managed content',
-      PANE_AGENT_CONTEXT_END,
-      '',
-      '# User Bottom',
-      ''
-    ].join('\n'), 'utf8');
-
-    await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
-
-    const content = await fs.readFile(agentsPath, 'utf8');
-    expect(content).toContain('# User Top');
-    expect(content).toContain('# User Bottom');
-    expect(content).not.toContain('old managed content');
-    expect(content.match(/pane-agent-context:start/g)).toHaveLength(1);
+    const content = `User instructions\n${PANE_AGENT_CONTEXT_START}\nUnpaired marker`;
+    await fs.writeFile(path.join(projectPath, 'AGENTS.md'), content);
+    await fs.writeFile(path.join(projectPath, 'CLAUDE.md'), '@AGENTS.md\nUser import');
+    expect((await ensureProjectAgentContext({ path: projectPath })).changed).toBe(false);
+    expect(await fs.readFile(path.join(projectPath, 'AGENTS.md'), 'utf8')).toBe(content);
+    expect(await fs.readFile(path.join(projectPath, 'CLAUDE.md'), 'utf8')).toBe('@AGENTS.md\nUser import');
   });
 
-  it('removes the Pane-owned block when managed AGENTS is disabled', async () => {
+  it('retains a file that contained only a generated block', async () => {
     const projectPath = await createTempProject();
-    const agentsPath = path.join(projectPath, 'AGENTS.md');
-    await fs.writeFile(agentsPath, [
-      '# User Top',
-      '',
-      PANE_AGENT_CONTEXT_START,
-      'old managed content',
-      PANE_AGENT_CONTEXT_END,
-      '',
-      '# User Bottom',
-      ''
-    ].join('\n'), 'utf8');
-
-    const result = await ensureProjectAgentContext({ path: projectPath }, disabledConfig());
-
-    expect(result).toMatchObject({ changed: true, removed: true, filePath: agentsPath });
-    const content = await fs.readFile(agentsPath, 'utf8');
-    expect(content).toContain('# User Top');
-    expect(content).toContain('# User Bottom');
-    expect(content).not.toContain(PANE_AGENT_CONTEXT_START);
-  });
-
-  it('keeps an otherwise empty AGENTS.md file when disabling', async () => {
-    const projectPath = await createTempProject();
-    const agentsPath = path.join(projectPath, 'AGENTS.md');
-
-    await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
-    await ensureProjectAgentContext({ path: projectPath }, disabledConfig());
-
-    await expect(fs.access(agentsPath)).resolves.toBeUndefined();
-    await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe('');
+    const file = path.join(projectPath, 'AGENTS.md');
+    await fs.writeFile(file, `${PANE_AGENT_CONTEXT_START}\nGenerated\n${PANE_AGENT_CONTEXT_END}\n`);
+    await ensureProjectAgentContext({ path: projectPath });
+    expect(await fs.readFile(file, 'utf8')).toBe('');
   });
 
   it('does not follow symlinked AGENTS.md files', async () => {
@@ -140,7 +76,7 @@ describe('agentContextManager', () => {
       return;
     }
 
-    const result = await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
+    const result = await ensureProjectAgentContext({ path: projectPath });
 
     expect(result).toMatchObject({ changed: false, skipped: 'unsafe-file' });
     await expect(fs.readFile(targetPath, 'utf8')).resolves.toBe('outside file\n');

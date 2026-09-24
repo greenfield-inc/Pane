@@ -1,5 +1,5 @@
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Terminal, GitBranch, FileCode, FileDiff, FileText, BarChart3, PanelRight, FolderTree, TerminalSquare, Play, Globe } from 'lucide-react';
+import { Plus, X, Terminal, GitBranch, FileCode, FileDiff, FileText, BarChart3, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
@@ -16,6 +16,8 @@ import { Kbd } from '../ui/Kbd';
 import { CLI_BRAND_ICONS, getCliBrandIcon } from '../ui/brandIconRegistry';
 import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
+import { PromoteChatButton } from './PromoteChatButton';
+import { CustomCommandForm } from './CustomCommandForm';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
@@ -136,8 +138,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const trailingSlot = useTitleBarSlotStore((state) => state.trailingSlot);
   // Rename state moved to PanelTabStrip
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const [customCommand, setCustomCommand] = useState('');
-  const customInputRef = useRef<HTMLInputElement>(null);
+  const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null);
   const [focusedDropdownIndex, setFocusedDropdownIndex] = useState(-1);
   const dropdownItemsRef = useRef<(HTMLButtonElement | HTMLInputElement | null)[]>([]);
 
@@ -182,13 +183,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     return () => { cancelled = true; };
   }, [session?.id, resolveKey]);
 
-  const saveCustomCommand = useCallback(async (name: string, command: string) => {
-    const existing = config?.customCommands ?? [];
-    await updateConfig({
-      customCommands: [...existing, { name, command }]
-    }).catch(() => {});
-  }, [config, updateConfig]);
-
   const deleteCustomCommand = useCallback(async (index: number) => {
     const existing = config?.customCommands ?? [];
     await updateConfig({
@@ -220,6 +214,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         zIndex: 10000,
         width,
         maxWidth: `calc(100vw - ${ADD_TOOL_MENU_VIEWPORT_MARGIN * 2}px)`,
+        maxHeight: Math.max(0, window.innerHeight - rect.bottom - 4 - ADD_TOOL_MENU_VIEWPORT_MARGIN),
+        overflowY: 'auto',
         // Pinned under the button's left edge, so that corner is where the menu
         // should look like it grew from.
         transformOrigin: 'top left',
@@ -249,7 +245,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     onPanelCreate(type, options);
     setShowDropdown(false);
     setShowCustomInput(false);
-    setCustomCommand('');
+    setEditingCustomIndex(null);
   }, [onPanelCreate]);
   
   // Rename handlers moved to PanelTabStrip
@@ -267,7 +263,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       ) {
         setShowDropdown(false);
         setShowCustomInput(false);
-        setCustomCommand('');
+        setEditingCustomIndex(null);
       }
     };
 
@@ -291,19 +287,14 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     if (!showDropdown) externalAnchorRef.current = null;
   }, [showDropdown]);
 
-  // Auto-focus custom command input when shown
-  useEffect(() => {
-    if (showCustomInput && customInputRef.current) {
-      customInputRef.current.focus();
-    }
-  }, [showCustomInput]);
-
   // Reset focus index when dropdown closes, focus first item when opens
   useEffect(() => {
     if (showDropdown) {
       setFocusedDropdownIndex(0);
     } else {
       setFocusedDropdownIndex(-1);
+      setShowCustomInput(false);
+      setEditingCustomIndex(null);
       dropdownItemsRef.current = [];
     }
   }, [showDropdown]);
@@ -450,6 +441,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+          {activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
           {/* Run Dev Server button */}
           {session && (
             <Tooltip content={
@@ -523,10 +515,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   return (
     <>
-    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", barCollapsed && "hidden")}>
+    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls")}>
       {/* Flex container */}
       <div
-        className="relative flex items-center min-h-[var(--panel-tab-height)] pr-2"
+        className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2")}
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
@@ -551,7 +543,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             here (working tabs live in the group strips); shortcut hints are
             disabled then because the strip shows a subset and the 1-9 indexes
             would lie. */}
-        <PanelTabStrip
+        {!barCollapsed && <PanelTabStrip
           idNamespace="top"
           panels={primaryGroupPanels ?? sortedPanels}
           activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
@@ -566,7 +558,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           isTabDragging={isTabDragging}
           draggedPanelId={draggedPanelId}
           getPanelTabPresentation={getPanelTabPresentation}
-        />
+        />}
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>
@@ -690,8 +682,9 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   <Tooltip
                     content={(
                       <span className="block max-w-[min(32rem,calc(100vw-1rem))] whitespace-normal break-words">
+                        <span className="block font-medium">{cmd.name}</span>
                         <span className="block">{cmd.command}</span>
-                        <span className="mt-1 block text-xs text-text-tertiary">Delete or Backspace to remove</span>
+                        <span className="mt-1 block text-xs text-text-tertiary">F2 to rename · Delete or Backspace to remove</span>
                       </span>
                     )}
                     side="bottom"
@@ -703,10 +696,17 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       className={cn(menuItemClass, 'min-w-0 flex-1')}
                       onClick={() => handleAddPanel('terminal', {
                         initialCommand: cmd.command,
+                        customResume: cmd.resume,
                         title: cmd.name
                       })}
                       onKeyDown={(e) => {
-                        if (e.key === 'Delete' || e.key === 'Backspace') {
+                        if (e.key === 'F2') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setEditingCustomIndex(index);
+                          setShowCustomInput(true);
+                        }
+                        if (!showCustomInput && (e.key === 'Delete' || e.key === 'Backspace')) {
                           e.preventDefault();
                           e.stopPropagation();
                           deleteCustomCommand(index);
@@ -720,7 +720,20 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   </Tooltip>
                   <button
                     type="button"
+                    className="p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary flex-shrink-0"
+                    onClick={() => {
+                      setEditingCustomIndex(index);
+                      setShowCustomInput(true);
+                    }}
+                    aria-label={`Rename ${cmd.name} shortcut`}
+                    title="Rename profile"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
                     className="p-1 mr-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary flex-shrink-0"
+                    disabled={showCustomInput}
                     onClick={() => deleteCustomCommand(index)}
                     aria-label={`Remove ${cmd.name} shortcut`}
                   >
@@ -731,42 +744,35 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {/* Add Custom Command input */}
               {availablePanelTypes.includes('terminal') && (
                 showCustomInput ? (
-                  <div className="px-3 py-2 border-b border-border-primary">
-                    <label className="text-xs text-text-tertiary mb-1 block">Command to run:</label>
-                    <input
-                      ref={(el) => { customInputRef.current = el; dropdownItemsRef.current[refIndex++] = el; }}
-                      type="text"
-                      className="w-full px-2 py-1.5 text-sm bg-surface-secondary border border-border-primary rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus"
-                      placeholder="e.g. aider, npm run dev, bash"
-                      value={customCommand}
-                      onChange={(e) => setCustomCommand(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && customCommand.trim()) {
-                          const command = customCommand.trim();
-                          const name = command.split(/\s+/).slice(0, 3).join(' ');
-                          saveCustomCommand(name, command);
-                          handleAddPanel('terminal', {
-                            initialCommand: command,
-                            title: name
-                          });
-                          setCustomCommand('');
-                          setShowCustomInput(false);
-                        }
-                        if (e.key === 'Escape') {
-                          setShowCustomInput(false);
-                          setCustomCommand('');
-                        }
-                        // Let arrow keys propagate for dropdown navigation
-                      }}
-                    />
-                  </div>
+                  <CustomCommandForm
+                    key={editingCustomIndex ?? 'new'}
+                    existing={editingCustomIndex === null ? undefined : customCommands[editingCustomIndex]}
+                    onCancel={() => {
+                      setShowCustomInput(false);
+                      setEditingCustomIndex(null);
+                    }}
+                    onSave={async (name, command, resume) => {
+                      const existing = config?.customCommands ?? [];
+                      await updateConfig({
+                        customCommands: editingCustomIndex === null
+                          ? [...existing, { name, command, resume }]
+                          : existing.map((entry, index) => index === editingCustomIndex ? { ...entry, name, resume } : entry),
+                      });
+                      if (editingCustomIndex === null) {
+                        handleAddPanel('terminal', { initialCommand: command, title: name, customResume: resume });
+                      } else {
+                        setShowCustomInput(false);
+                        setEditingCustomIndex(null);
+                      }
+                    }}
+                  />
                 ) : (
                   <button
                     type="button"
                     ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
                     role="menuitem"
                     className={menuItemClass}
-                    onClick={() => setShowCustomInput(true)}
+                    onClick={() => { setEditingCustomIndex(null); setShowCustomInput(true); }}
                   >
                     <Plus className="w-3.5 h-3.5 flex-shrink-0" />
                     <span className="truncate">Add custom command…</span>

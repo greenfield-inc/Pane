@@ -13,7 +13,6 @@ import { detectProjectBranch } from '../utils/detectProjectBranch';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
-import type { ConfigManager } from '../services/configManager';
 import type { Project } from '../database/models';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { createRequire } from 'node:module';
@@ -214,7 +213,7 @@ export function registerProjectHandlers(
       console.log('[Main] Project created successfully:', project);
 
       if (project) {
-        await updateProjectAgentContextBestEffort(project, configManager, 'project create');
+        await updateProjectAgentContextBestEffort(project, 'project create');
       }
 
       // Track project creation
@@ -281,7 +280,7 @@ export function registerProjectHandlers(
           await worktreeManager.initializeProject(project.path, undefined, ctx.pathResolver, ctx.commandRunner);
         }
 
-        await updateProjectAgentContextBestEffort(project, configManager, 'project activate');
+        await updateProjectAgentContextBestEffort(project, 'project activate');
 
         // Track project switch
         if (analyticsManager) {
@@ -760,11 +759,10 @@ export function registerProjectHandlers(
 
 async function updateProjectAgentContextBestEffort(
   project: Project,
-  configManager: ConfigManager,
   source: string,
 ): Promise<void> {
   try {
-    await ensureProjectAgentContext(project, configManager.getConfig());
+    await ensureProjectAgentContext(project);
   } catch (error) {
     console.warn(`[Main] Failed to update Pane agent context during ${source}:`, error);
   }

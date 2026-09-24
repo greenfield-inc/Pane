@@ -281,6 +281,16 @@ function needsBuild(root) {
     return true;
   }
 
+  // TypeScript watch does not copy assets. Rebuild when a runtime icon changes
+  // so a fresh dev launch never falls back to an old or missing Dock image.
+  for (const icon of ['icon.png', 'icon-macos.png']) {
+    const source = path.join(root, 'main', 'assets', icon);
+    const built = path.join(distPath, 'main', 'assets', icon);
+    if (!fs.existsSync(built) || fs.statSync(source).mtimeMs > fs.statSync(built).mtimeMs) {
+      return true;
+    }
+  }
+
   // Get most recent source file modification time
   const srcMtime = getMostRecentMtime(srcPath);
   const distMtime = getMostRecentMtime(distPath);

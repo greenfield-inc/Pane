@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
@@ -13,6 +14,7 @@ export interface TerminalShortcut {
 }
 
 interface CustomCommand {
+  resume?: CustomCommandResume | null;
   name: string;
   command: string;
 }
@@ -135,6 +137,10 @@ export interface AppConfig {
   analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  experimentalSessionProgress?: boolean;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -193,6 +199,10 @@ export interface UpdateConfigRequest {
   usePtyHost?: boolean;
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
+  experimentalSessionProgress?: boolean;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   terminalShortcuts?: TerminalShortcut[];
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;

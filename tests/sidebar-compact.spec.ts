@@ -76,7 +76,7 @@ test.describe('compact sidebar', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     const pinnedToggle = page.getByRole('button', { name: 'Pinned', exact: true });
-    const repositoriesToggle = page.getByRole('button', { name: 'Repositories', exact: true });
+    const repositoriesToggle = page.getByRole('button', { name: 'Projects', exact: true });
     await expect(pinnedToggle).toBeVisible();
     await expect(repositoriesToggle).toBeVisible();
     await expect(page.getByText('Alpha', { exact: true })).toBeVisible();
@@ -145,10 +145,22 @@ test.describe('compact sidebar', () => {
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
+    const repositoryButton = page.getByRole('button', { name: /project Alpha/ });
+    await repositoryButton.click();
+    await expect(repositoryButton).toHaveCSS('outline-style', 'none');
+    await expect(repositoryButton).toHaveCSS('box-shadow', 'none');
+    await repositoryButton.click();
+
     const fullSidebarPane = page.getByRole('button', { name: 'Regular work', exact: true });
     await fullSidebarPane.click();
     await expect(fullSidebarPane).toHaveAttribute('aria-current', 'page');
     await expect(fullSidebarPane.locator('..')).toHaveClass(/bg-surface-selected/);
+    await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
+    await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
+    await page.keyboard.press('Tab');
+    await fullSidebarPane.focus();
+    await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
+    await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
     await fullSidebarPane.evaluate(element => element.blur());
     await page.mouse.move(640, 360);
     await page.screenshot({
@@ -191,7 +203,7 @@ test.describe('compact sidebar', () => {
     await regularPane.click({ button: 'right' });
     let menu = page.getByRole('menu', { name: 'Pane actions for Regular work' });
     await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Pin');
-    await expect(menu.getByRole('menuitem').nth(1)).toHaveText('Archive');
+    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
     await menu.getByRole('menuitem', { name: 'Archive' }).click();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -209,7 +221,7 @@ test.describe('compact sidebar', () => {
     await pinnedPane.click({ button: 'right' });
     menu = page.getByRole('menu', { name: 'Pane actions for Pinned work' });
     await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Unpin');
-    await expect(menu.getByRole('menuitem').nth(1)).toHaveText('Archive');
+    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
     await menu.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -360,7 +372,7 @@ test.describe('compact sidebar', () => {
     });
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('button', { name: 'Repositories', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Projects', exact: true })).toBeVisible();
     await expect(page.getByText('Alpha', { exact: true })).toHaveCount(0);
     await collapseSidebar(page);
 

@@ -125,6 +125,15 @@ const usageReport = {
   series: [],
   byModel: [],
   byProject: [],
+  byPane: {
+    panes: [],
+    unattributed: {
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      totalTokens: 0, messageCount: 0, estimatedCostUsd: 0, costIncomplete: false,
+      cacheSavingsUsd: 0, uncachedCostUsd: 0, uncachedInputTokens: 0,
+      cacheHitRate: 0, byModel: [],
+    },
+  },
   rateLimits: [{
     provider: 'codex',
     limitId: 'codex',
@@ -160,10 +169,8 @@ async function openSettings(page: Page, options: Parameters<typeof installElectr
   const settingsButton = page.getByRole('button', { name: 'Settings' }).first();
   await expect(settingsButton).toBeVisible();
   await settingsButton.click();
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
 }
-
-const SETTINGS_CATEGORY_COUNT_WITHOUT_USAGE = 11;
 
 async function capture(page: Page, testInfo: TestInfo, filename: string): Promise<void> {
   const path = testInfo.outputPath(filename);
@@ -171,7 +178,7 @@ async function capture(page: Page, testInfo: TestInfo, filename: string): Promis
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
-test('Settings shows the Usage tab when Codex limits exist in transcripts', async ({ page }, testInfo) => {
+test('Settings includes the full Usage & Limits dashboard', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1_600, height: 900 });
   await openSettings(page, {
     initialProjects: [project],
@@ -183,26 +190,24 @@ test('Settings shows the Usage tab when Codex limits exist in transcripts', asyn
   });
 
   const navigation = page.getByRole('navigation', { name: 'Settings categories' });
-  const usageTab = navigation.getByRole('button', { name: 'Usage', exact: true });
+  const usageTab = navigation.getByRole('button', { name: 'Usage & Limits', exact: true });
   await expect(usageTab).toBeVisible();
-  await expect(navigation.getByRole('button')).toHaveCount(SETTINGS_CATEGORY_COUNT_WITHOUT_USAGE + 1);
+  await expect(navigation.getByRole('button')).toHaveCount(12);
 
   await usageTab.click();
-  await expect(page.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
-  const widget = page.getByRole('region', { name: 'Codex usage' });
-  await expect(widget).toBeVisible();
-  await expect(widget.getByText('· pro_lite', { exact: true })).toBeVisible();
-  await expect(widget.getByText('58% left', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Provider limits' })).toBeVisible();
+  await expect(page.getByText('58% left', { exact: true })).toBeVisible();
   await capture(page, testInfo, 'codex-usage-settings.png');
 
   await page.setViewportSize({ width: 640, height: 760 });
   await expect(navigation).toBeHidden();
   await page.getByRole('combobox', { name: 'Settings category' }).click();
-  await expect(page.getByRole('option', { name: 'Usage', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Usage & Limits', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
 });
 
-test('Settings hides the Usage tab when no Codex limits exist', async ({ page }) => {
+test('Settings keeps Usage & Limits available without Codex limits', async ({ page }) => {
   await page.setViewportSize({ width: 1_600, height: 900 });
   await openSettings(page, {
     initialProjects: [project],
@@ -213,19 +218,19 @@ test('Settings hides the Usage tab when no Codex limits exist', async ({ page })
 
   const navigation = page.getByRole('navigation', { name: 'Settings categories' });
   await expect(navigation.getByRole('button', { name: 'AI & Agents', exact: true })).toBeVisible();
-  await expect(navigation.getByRole('button')).toHaveCount(SETTINGS_CATEGORY_COUNT_WITHOUT_USAGE);
-  await expect(navigation.getByRole('button', { name: 'Usage', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Codex usage' })).toHaveCount(0);
+  await expect(navigation.getByRole('button')).toHaveCount(12);
+  await navigation.getByRole('button', { name: 'Usage & Limits', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
 
   await page.setViewportSize({ width: 640, height: 760 });
   await expect(navigation).toBeHidden();
   await page.getByRole('combobox', { name: 'Settings category' }).click();
   await expect(page.getByRole('option', { name: 'AI & Agents', exact: true })).toBeVisible();
-  await expect(page.getByRole('option', { name: 'Usage', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'Usage & Limits', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
 });
 
-test('Settings Usage tab shows limits from transcript-parsed data', async ({ page }) => {
+test('Settings Usage & Limits shows transcript-parsed limits', async ({ page }) => {
   await page.setViewportSize({ width: 1_600, height: 900 });
   await openSettings(page, {
     initialProjects: [project],
@@ -236,45 +241,10 @@ test('Settings Usage tab shows limits from transcript-parsed data', async ({ pag
     activeProjectId: project.id,
   });
   await page.getByRole('navigation', { name: 'Settings categories' })
-    .getByRole('button', { name: 'Usage', exact: true }).click();
+    .getByRole('button', { name: 'Usage & Limits', exact: true }).click();
 
-  const widget = page.getByRole('region', { name: 'Codex usage' });
-  await expect(widget.getByText('58% left', { exact: true })).toBeVisible();
-  await expect(widget.getByRole('button', { name: 'Refresh usage', exact: true })).toBeVisible();
-});
-
-test('Settings manual refresh waits for transcript indexing before reloading quota', async ({ page }) => {
-  await openSettings(page, {
-    initialProjects: [project], initialSessions: [session], initialPanels: panels,
-    initialUsageReport: usageReport, activeProjectId: project.id,
-  });
-  await page.getByRole('navigation', { name: 'Settings categories' })
-    .getByRole('button', { name: 'Usage', exact: true }).click();
-  const widget = page.getByRole('region', { name: 'Codex usage' });
-  await expect(widget.getByText('58% left', { exact: true })).toBeVisible();
-  await page.evaluate(() => {
-    const usage = window.electronAPI.usage;
-    const rescan = usage.rescan;
-    const getReport = usage.getReport;
-    let indexed = false;
-    usage.rescan = async () => {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      indexed = true;
-      return rescan();
-    };
-    usage.getReport = async (...args) => {
-      if (!indexed) throw new Error('Report requested before indexing completed');
-      const response = await getReport(...args);
-      if (response.data) response.data.rateLimits[0].usedPercent = 80;
-      return response;
-    };
-  });
-  const refresh = widget.getByRole('button', { name: 'Refresh usage', exact: true });
-  await refresh.click();
-  await expect(refresh).toBeDisabled();
-  await expect(widget.getByText('20% left', { exact: true })).toBeVisible();
-  await expect(refresh).toBeEnabled();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText('58% left', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rescan transcripts' })).toBeVisible();
 });
 
 test('main-repository branch detection never renders the previous repository branch', async ({ page }) => {
@@ -291,7 +261,7 @@ test('main-repository branch detection never renders the previous repository bra
     mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
   const showDetails = page.getByRole('button', { name: 'Show details', exact: true });
@@ -299,7 +269,7 @@ test('main-repository branch detection never renders the previous repository bra
   const detailPanel = page.locator('.pane-detail-panel-vertical');
   await expect(detailPanel.getByText('main-a', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: `Repository actions for ${secondProject.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${secondProject.name}`, exact: true }).click();
   const renderedPreviousBranch = await page.evaluate(async () => {
     const openMainButton = Array.from(document.querySelectorAll('button')).find(
       button => button.textContent?.trim() === 'Open session on main',
@@ -333,7 +303,7 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
     mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
   const showDetails = page.getByRole('button', { name: 'Show details', exact: true });
@@ -359,10 +329,10 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
     });
   });
 
-  await page.getByRole('button', { name: `Repository actions for ${secondProject.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${secondProject.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   await page.waitForTimeout(50);
-  await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   await page.waitForTimeout(700);
 
@@ -392,7 +362,7 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
     mainRepoSessionErrorByProjectId: { [project.id]: 'Main repository session lookup failed' },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
 
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });

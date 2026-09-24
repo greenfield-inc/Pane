@@ -205,7 +205,7 @@ test.describe('animation evidence', () => {
       'The sidebar overflow menu opening from its trigger',
       async () => {},
       async (page) => {
-        await page.getByRole('button', { name: 'Sidebar menu' }).click();
+        await page.getByRole('button', { name: 'Home menu' }).click();
         await expect(page.getByRole('menu')).toBeVisible();
       },
       (page) => boxOf(page, '[role="menu"]', 52),
@@ -218,7 +218,7 @@ test.describe('animation evidence', () => {
       'menu-row-highlight',
       'Running the pointer down the menu rows',
       async (page) => {
-        await page.getByRole('button', { name: 'Sidebar menu' }).click();
+        await page.getByRole('button', { name: 'Home menu' }).click();
         await expect(page.getByRole('menu')).toBeVisible();
       },
       async (page) => {
@@ -276,45 +276,4 @@ test.describe('animation evidence', () => {
     );
   });
 
-  test('title-bar-pill', async ({ browser }) => {
-    await capture(
-      browser,
-      'title-bar-pill',
-      'A pull-request pill arriving in the title bar',
-      async (page) => {
-        await page.getByRole('button', { name: sessions[0].name, exact: true }).click();
-        await expect(page.getByTestId('window-title-bar-label')).toBeVisible();
-      },
-      async (page) => {
-        await page.evaluate((update) => (
-          // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
-          window as typeof window & {
-            __paneTestElectronMock: {
-              emitGitStatusUpdated: (sessionId: string, gitStatus: typeof update.gitStatus) => void;
-            };
-          }
-        ).__paneTestElectronMock.emitGitStatusUpdated(update.id, update.gitStatus),
-        {
-          id: sessions[0].id,
-          gitStatus: {
-            state: 'ahead',
-            ahead: 3,
-            isReadyToMerge: true,
-            prNumber: 481,
-            prState: 'OPEN',
-            prTitle: 'Animations that make Pane feel fast',
-          },
-        });
-        await expect(page.getByTestId('window-title-bar-pills')).toBeVisible();
-      },
-      // The strip runs the full window width; frame the name and the pills that
-      // land beside it rather than 1280px of empty drag region.
-      async (page) => {
-        const label = await page.getByTestId('window-title-bar-label').boundingBox();
-        return label
-          ? frameRegion({ x: label.x, y: 0, width: label.width + 210, height: 38 }, 12)
-          : FULL_VIEWPORT;
-      },
-    );
-  });
 });

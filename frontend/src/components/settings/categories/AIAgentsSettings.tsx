@@ -1,13 +1,16 @@
+import type { CustomCommandResume } from '../../../../../shared/types/customCommandResume';
 import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
-import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
+import { SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
 import type { PaneChatAgent } from '../../../../../shared/types/paneChat';
+import { SessionLaunchFields } from '../../SessionLaunchFields';
+import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
 
 const PANE_CHAT_AGENT_LABELS = {
@@ -25,7 +28,16 @@ interface AIAgentsSettingsProps {
 export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSettingsProps) {
   const config = persistence.config!;
   const [claudePath, setClaudePath] = useState(config.claudeExecutablePath ?? '');
-  const dirty = claudePath !== (config.claudeExecutablePath ?? '');
+  const [sessionResume, setSessionResume] = useState<CustomCommandResume | null>(config.defaultSessionResume ?? null);
+  const [sessionCommand, setSessionCommand] = useState(config.defaultSessionCommand ?? '');
+  const [sessionProfile, setSessionProfile] = useState(config.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
+  const claudeDirty = claudePath !== (config.claudeExecutablePath ?? '');
+  const sessionDirty = JSON.stringify(sessionResume) !== JSON.stringify(config.defaultSessionResume ?? null) || sessionCommand !== (config.defaultSessionCommand ?? '') || sessionProfile !== (config.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
+  const dirty = claudeDirty || sessionDirty;
+
+  useEffect(() => setSessionResume(config.defaultSessionResume ?? null), [config.defaultSessionResume]);
+  useEffect(() => setSessionCommand(config.defaultSessionCommand ?? ''), [config.defaultSessionCommand]);
+  useEffect(() => setSessionProfile(config.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE), [config.defaultSessionProfile]);
 
   useEffect(() => setClaudePath(config.claudeExecutablePath ?? ''), [config.claudeExecutablePath]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
@@ -33,7 +45,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
 
   const applyClaudePath = async () => {
     const saved = await persistence.saveConfig('claude-executable', { claudeExecutablePath: claudePath.trim() });
-    if (saved) onDirtyChange(false);
+    if (saved) onDirtyChange(sessionDirty);
   };
 
   return (
@@ -53,17 +65,22 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             onChange={(value) => void persistence.saveConfig('default-pane-chat-agent', { defaultOrchestratorAgent: value })}
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Session defaults">
         <SettingRow
-          settingId="agent-context"
-          label="Publish Pane instructions to AGENTS.md"
-          description="Adds a managed block to active repositories so coding agents can discover RunPane commands."
-          saveState={persistence.saveStates['agent-context']}
+          settingId="session-defaults"
+          label="Launch command and behavior"
+          description="Used for new Sessions. Existing Sessions keep their saved settings."
+          saveState={persistence.saveStates['session-defaults']}
+          align="start"
         >
-          <ImmediateToggle
-            label="Publish Pane instructions to AGENTS.md"
-            value={config.agentContext?.managedAgentsMd !== false}
-            onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
-          />
+          <div className="w-full space-y-3 sm:max-w-xl">
+            <SessionLaunchFields resume={sessionResume} onResumeChange={setSessionResume} command={sessionCommand} profile={sessionProfile} customCommands={config.customCommands} onCommandChange={setSessionCommand} onProfileChange={setSessionProfile} />
+            <div className="flex justify-end">
+              <Button type="button" size="sm" disabled={!sessionDirty} onClick={() => void persistence.saveConfig('session-defaults', { defaultSessionCommand: sessionCommand, defaultSessionResume: sessionResume, defaultSessionProfile: sessionProfile })}>Apply Session defaults</Button>
+            </div>
+          </div>
         </SettingRow>
       </SettingsSection>
 
@@ -103,7 +120,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
               </Button>
             </div>
             <div className="flex justify-end">
-              <Button type="button" size="sm" disabled={!dirty} onClick={applyClaudePath}>Apply</Button>
+              <Button type="button" size="sm" disabled={!claudeDirty} onClick={applyClaudePath}>Apply</Button>
             </div>
           </div>
         </SettingRow>

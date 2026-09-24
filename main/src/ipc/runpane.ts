@@ -209,6 +209,8 @@ const orchestrationLinkSchema = boundary.object({
 const orchestrationSessionCreateSchema = boundary.object({
   name: boundary.nonEmptyString,
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   decisions: boundary.optional(boundary.array(boundary.string)),
@@ -222,6 +224,8 @@ const orchestrationSessionUpdateSchema = boundary.object({
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   decisions: boundary.optional(boundary.array(boundary.string)),
@@ -245,7 +249,7 @@ export function registerRunpaneHandlers(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
 ): void {
-  const { databaseService, sessionManager, taskQueue, configManager } = services;
+  const { databaseService, sessionManager, taskQueue } = services;
   const workspaceJournal = services.workspaceJournal ?? createWorkspaceJournal(services);
   const workspaceStateReader = services.workspaceStateReader ?? new WorkspaceStateReader(
     sessionManager,
@@ -362,7 +366,7 @@ export function registerRunpaneHandlers(
       );
 
       try {
-        await ensureProjectAgentContext(project, configManager.getConfig());
+        await ensureProjectAgentContext(project);
       } catch (error) {
         console.warn('[Runpane] Failed to update Pane agent context after repo add:', error);
       }

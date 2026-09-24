@@ -2172,9 +2172,9 @@ function compareAgentContextParity() {
   assert.ok(managedBlock.includes('Typical workflow: register the saved base repository once'));
   assert.ok(managedBlock.includes('one Pane (Pane session) per feature/PR'));
   assert.ok(managedBlock.includes('clean up its managed worktree when applicable'));
-  assert.ok(managedBlock.includes('created by [runpane.com](https://runpane.com)'));
+  assert.ok(managedBlock.includes('provided by [runpane.com](https://runpane.com)'));
   assert.ok(managedBlock.includes('[Pane repository](https://github.com/dcouple/Pane)'));
-  assert.ok(managedBlock.includes('Do not delete or overwrite this block'));
+  assert.ok(managedBlock.includes('Do not copy generated instructions into project AGENTS.md or CLAUDE.md files.'));
   assert.ok(managedBlock.includes('Default happy path when the user asks you to use Pane or RunPane'));
   assert.ok(managedBlock.includes('resolve the saved base repository'));
   assert.ok(managedBlock.includes('runpane panes create --repo <repo> --name <name> --agent <agent> --prompt'));
@@ -2473,6 +2473,46 @@ async function checkAgentTemplateParity() {
   });
 }
 
+async function checkSessionChildPinDefaults() {
+  const daemonClient = require(path.join(rootDir, 'packages/runpane/dist/daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages/runpane/dist/commands.js'));
+  const { runPanesCreate } = require(path.join(rootDir, 'packages/runpane/dist/localControl.js'));
+  const oldInvoke = daemonClient.invokeDaemon;
+  const oldLog = console.log;
+  const oldSession = process.env.PANE_ORCHESTRATION_SESSION_ID;
+  const pins = [];
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-child-pins-'));
+  const batch = path.join(directory, 'batch.json');
+  fs.writeFileSync(batch, JSON.stringify({ repo: 'active', panes: [{ name: 'child', tool: { agent: 'codex' } }] }));
+  try {
+    process.env.PANE_ORCHESTRATION_SESSION_ID = 'session-test';
+    daemonClient.invokeDaemon = async (_channel, args) => {
+      pins.push(args[0].panes[0].pinned);
+      return { ok: true, repo: {}, items: [] };
+    };
+    console.log = () => {};
+    for (const extra of [[], ['--pinned'], ['--no-pinned']]) {
+      await runPanesCreate(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--name', 'child', '--agent', 'codex', '--yes', '--json', ...extra]));
+    }
+    await runPanesCreate(parseRunpaneArgs(['panes', 'create', '--from-json', batch, '--yes', '--json']));
+    assert.deepStrictEqual(pins, [false, true, false, false]);
+    const pythonPins = runPythonSnippet(`
+import json
+from runpane.cli import parse_args
+from runpane.local_control import build_pane_create_request
+base = ["panes", "create", "--repo", "active", "--name", "child", "--agent", "codex"]
+print(json.dumps([build_pane_create_request(parse_args(base + extra))["panes"][0]["pinned"] for extra in [[], ["--pinned"], ["--no-pinned"]]]))
+`);
+    assert.deepStrictEqual(JSON.parse(pythonPins), [false, true, false]);
+  } finally {
+    daemonClient.invokeDaemon = oldInvoke;
+    console.log = oldLog;
+    if (oldSession === undefined) delete process.env.PANE_ORCHESTRATION_SESSION_ID;
+    else process.env.PANE_ORCHESTRATION_SESSION_ID = oldSession;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
@@ -2498,6 +2538,7 @@ async function runChecks() {
   await checkFromJsonAcceptsBom();
   await checkPaneArchiveDryRunParity();
   await checkPanePinParity();
+  await checkSessionChildPinDefaults();
   await checkPanesCostParity();
   await checkPaneRenameParity();
   await checkAgentTemplateParity();

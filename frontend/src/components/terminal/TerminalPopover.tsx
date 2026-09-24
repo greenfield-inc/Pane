@@ -19,6 +19,7 @@ export interface TerminalPopoverProps {
   y: number;
   onClose: () => void;
   children: React.ReactNode;
+  className?: string;
 }
 
 export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
@@ -27,6 +28,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   y,
   onClose,
   children,
+  className,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -99,7 +101,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[10001] w-max min-w-[180px] max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated py-1"
+      className={cn('fixed z-[10001] w-max min-w-[180px] max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated py-1', className)}
       style={{ left: position.left, top: position.top }}
     >
       {children}

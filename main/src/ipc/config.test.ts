@@ -7,7 +7,6 @@ import type { Project } from '../database/models';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
 import {
-  ensureProjectAgentContext,
   PANE_AGENT_CONTEXT_START,
 } from '../services/agentContextManager';
 import { registerConfigHandlers } from './config';
@@ -124,8 +123,9 @@ describe('config IPC handlers', () => {
     const inactiveAgentsPath = path.join(inactiveProject.path, 'AGENTS.md');
 
     await fs.writeFile(activeAgentsPath, '# Repo Rules\n\nKeep this line.\n', 'utf8');
-    await ensureProjectAgentContext(activeProject, { agentContext: { managedAgentsMd: true } });
-    await ensureProjectAgentContext(inactiveProject, { agentContext: { managedAgentsMd: true } });
+    const block = `${PANE_AGENT_CONTEXT_START}\nOld generated text\n<!-- pane-agent-context:end -->\n`;
+    await fs.appendFile(activeAgentsPath, block);
+    await fs.writeFile(inactiveAgentsPath, block);
 
     const ipcMain = createIpcMainStub();
     registerConfigHandlers(

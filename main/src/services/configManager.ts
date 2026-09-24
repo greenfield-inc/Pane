@@ -1,3 +1,4 @@
+import { validateCustomCommandResume } from '../../../shared/types/customCommandResume';
 import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
@@ -49,6 +50,7 @@ export class ConfigManager extends EventEmitter {
       gitRepoPath: defaultGitPath || '',
       usePtyHost: process.platform === 'win32',
       verbose: false,
+      experimentalSessionProgress: true,
       anthropicApiKey: undefined,
       falApiKey: undefined,
       openRouterApiKey: undefined,
@@ -90,7 +92,7 @@ export class ConfigManager extends EventEmitter {
       },
       analytics: defaultAnalyticsConfig(),
       agentContext: {
-        managedAgentsMd: true
+        managedAgentsMd: false
       },
       remoteDaemon: createDefaultRemoteDaemonConfig(),
       keyboardShortcutsEnabled: true,
@@ -339,6 +341,10 @@ export class ConfigManager extends EventEmitter {
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
+    if (updates.defaultSessionResume) validateCustomCommandResume(updates.defaultSessionResume);
+    for (const command of updates.customCommands ?? []) {
+      if (command.resume) validateCustomCommandResume(command.resume);
+    }
     return this.updateConfigWith(() => updates);
   }
 
@@ -364,6 +370,9 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
+      if ('experimentalSessionProgress' in updates) {
+        decodeBoundary(updates.experimentalSessionProgress, boundary.boolean);
+      }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;

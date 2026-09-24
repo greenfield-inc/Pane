@@ -314,3 +314,17 @@ export function resolveAgentTypeFromCommand(
   const basename = executable?.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
   return basename ? AGENT_EXECUTABLES[basename] : undefined;
 }
+
+/** Inspect positional command tokens, never words inside option values. */
+export function hasCodexSubcommand(command: string): boolean {
+  const tokens = tokenizeShellCommand(command, process.platform);
+  if (!tokens) return true; // Unknown shell syntax must remain untouched.
+  const operands = new Set(['-c', '--config', '-m', '--model', '-p', '--profile', '-C', '--cd', '-s', '--sandbox', '-a', '--ask-for-approval', '-i', '--image', '--remote', '--remote-auth-token-env', '--enable', '--disable', '--add-dir']);
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (operands.has(token)) { i += 1; continue; }
+    if (token.startsWith('-')) continue;
+    return true; // Any positional input is user-owned, including explicit prompts.
+  }
+  return false;
+}

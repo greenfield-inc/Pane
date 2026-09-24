@@ -158,7 +158,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.
 
-`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected.
+`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin; manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected.
 
 For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.
 
@@ -253,7 +253,7 @@ Managed AGENTS.md block body:
 
 The developer is using Pane for this repository. Pane can manage saved repositories and create user-visible Panes with terminal-backed tools for planning, discussion, implementation, and review work.
 
-This managed guidance was created by [runpane.com](https://runpane.com) for the [Pane repository](https://github.com/dcouple/Pane). Do not delete or overwrite this block; the developer uses it for their workflow and it should remain committed to the main repository unless they explicitly ask to remove it.
+This guidance is provided by [runpane.com](https://runpane.com) for the [Pane repository](https://github.com/dcouple/Pane). Generated Session instructions belong in Pane’s private data directory, outside project worktrees. Do not copy generated instructions into project AGENTS.md or CLAUDE.md files.
 
 Pane mental model: a repository is the saved base repo; a Pane is a user-visible feature/PR workspace (Pane session) that normally maps to one Pane-managed git worktree and branch; a panel/tab is a terminal inside one Pane and shares that Pane's worktree; an agent is the CLI process running in a panel.
 
@@ -298,6 +298,12 @@ Common commands:
 - `runpane panels input --panel <panel-id> --input-file <path|-> --yes --json`
 
 WSL note: if `runpane doctor --json` cannot find `/tmp/pane-daemon.../daemon.sock` or `runpane` resolves to a broken Windows shim, Pane may be running on Windows. Try `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`, then create Panes through the same PowerShell form using the saved WSL repo name or id. Use `runpane agents doctor --agent <agent> --repo <selector> --json` to diagnose the repo environment Pane will actually use.
+
+All agent panels have the same RunPane coordination tools. Capability does not grant management authority: a worker completes its assigned task and reports progress or blockers to its owning Session; creating workers, assigning or redirecting work, and changing ownership require a user request or explicit delegation of that authority. Independent Panes work locally unless coordination is requested.
+
+PANE_SESSION_ID and PANE_PANEL_ID identify this Pane and panel. PANE_ORCHESTRATION_SESSION_ID identifies an orchestrator Session, not a worker parent. Workers resolve their owning Session from sessions list associations; do not infer ownership from UI selection. Retrieve other conversations only when relevant. Preserve association conflicts and verify mutations.
+
+Opening or restoring a Session does not authorize an agent turn, greeting, diagnostics, watchers, or resuming a saved next action. Session instructions load from its own managed directory; follow the selected profile and user skills when responding to a task. No particular ticket or implementation workflow is required by Pane.
 ```
 
 ## Wrapper Flags

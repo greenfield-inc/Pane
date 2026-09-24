@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BarChart3, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -96,7 +96,6 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
 );
 
 export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
-  const useCompactFooterActions = width < 260;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -206,7 +205,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToProject = useNavigationStore((state) => state.navigateToProject);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
-  const navigateToUsage = useNavigationStore((state) => state.navigateToUsage);
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
@@ -304,6 +302,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
   const sidebarMenuItems = [
         {
+          id: 'home',
+          label: 'Home',
+          icon: Home,
+          onClick: () => {
+            setSidebarNavigationScope('repositories');
+            void setActiveSession(null);
+            navigateToSessions();
+          }
+        },
+        {
           id: 'help',
           label: 'Help',
           icon: HelpCircleIcon,
@@ -331,6 +339,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           id: 'remote',
           label: 'Remote',
           description: remoteFooterStatus.title,
+          descriptionInTooltip: true,
           icon: Monitor,
           showDot: true,
           dotColor: remoteFooterStatus.dotClassName,
@@ -356,15 +365,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         },
         {
           id: 'about',
-          label: version ? `About Pane · v${version}` : 'About Pane',
-          description: [worktreeName, gitCommit].filter(Boolean).join(' · ') || undefined,
+          label: 'About Pane',
+          description: [version ? `v${version}` : undefined, worktreeName, gitCommit].filter(Boolean).join(' · ') || undefined,
+          descriptionInTooltip: true,
           icon: Info,
           onClick: onAboutClick
         }
   ] satisfies DropdownItem[];
 
-  // Title-strip controls (portalled into the window title bar when it has a
-  // slot; rendered inline by each layout otherwise).
+  // The sidebar toggle stays beside the window controls; the menu lives in
+  // the sidebar footer so tabs can use the title strip.
   const headerControls = (
     <>
       {onToggleCollapse && (
@@ -378,19 +388,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           />
         </Tooltip>
       )}
-      <Dropdown
-        trigger={
-          <IconButton
-            type="button"
-            aria-label="Sidebar menu"
-            size="sm"
-            icon={<MoreHorizontal className="w-4 h-4" />}
-          />
-        }
-        items={sidebarMenuItems}
-        position="bottom-left"
-        width="sm"
-      />
     </>
   );
 
@@ -399,10 +396,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       <>
         <div
           data-testid="sidebar"
-          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-primary text-text-primary h-full flex flex-col flex-shrink-0"
+          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
           {titleBarControlsSlot && createPortal(headerControls, titleBarControlsSlot)}
+          {titleBarControlsSlot && <div className="h-[38px] flex-shrink-0" />}
 
           <div className="flex shrink-0 flex-col items-center gap-1 border-b border-border-primary py-2">
             <Tooltip content="Home" side="right">
@@ -442,22 +440,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
-
-            <Tooltip content="Usage & Limits" side="right">
-              <button
-                type="button"
-                data-testid="compact-usage"
-                data-compact-rail-item
-                onClick={() => {
-                  setSidebarNavigationScope('repositories');
-                  navigateToUsage();
-                }}
-                aria-label="Usage and Limits"
-                className={`${COMPACT_RAIL_BUTTON} ${activeView === 'usage' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
-              >
-                <BarChart3 className="h-4 w-4" />
-              </button>
-            </Tooltip>
 
             {showRemoteDesktopLink && (
               <Tooltip content={REMOTE_DESKTOP_TOOLTIP} side="right">
@@ -529,14 +511,14 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </div>
             )}
 
-            <div role="group" aria-label="Repositories" className="flex w-full shrink-0 flex-col items-center gap-0.5">
-              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} repositories`} side="right">
+            <div role="group" aria-label="Projects" className="flex w-full shrink-0 flex-col items-center gap-0.5">
+              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`} side="right">
                 <button
                   type="button"
                   data-testid="compact-repositories-toggle"
                   data-compact-rail-item
                   onClick={() => handleRepositoriesSectionExpandedChange(!sidebarSectionExpansion.repositories)}
-                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} repositories`}
+                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`}
                   aria-expanded={sidebarSectionExpansion.repositories}
                   className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
                 >
@@ -649,22 +631,22 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 <SettingsIcon className="h-4 w-4" />
               </button>
             </Tooltip>
+            <Dropdown
+              trigger={
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  aria-label="Sidebar menu"
+                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              }
+              items={sidebarMenuItems}
+              position="top-right"
+              width="sm"
+            />
             {!titleBarControlsSlot && (<>
-              <Dropdown
-                trigger={
-                  <button
-                    type="button"
-                    data-compact-rail-item
-                    aria-label="Sidebar menu"
-                    className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                }
-                items={sidebarMenuItems}
-                position="top-right"
-                width="sm"
-              />
               <Tooltip content={hotkeyDisplay('toggle-sidebar') ? <Kbd>{hotkeyDisplay('toggle-sidebar')}</Kbd> : undefined} side="right">
                 <button
                   type="button"
@@ -703,7 +685,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     <>
       <div
         data-testid="sidebar"
-        className="pane-sidebar-shell bg-surface-primary text-text-primary h-full flex flex-col relative flex-shrink-0"
+        className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: `${width}px` }}
       >
         {/* Resize handle */}
@@ -719,10 +701,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         {titleBarControlsSlot
           ? createPortal(headerControls, titleBarControlsSlot)
           : (
-            <div className="flex h-8 items-center justify-end gap-0.5 border-b border-border-primary px-1.5">
+            <div className="flex h-8 items-center justify-end gap-0.5 px-1.5">
               {headerControls}
             </div>
           )}
+        {titleBarControlsSlot && (
+          <div className="flex h-[38px] flex-shrink-0">
+            <div className="w-[136px] flex-shrink-0" />
+            <div className="pane-drag-area min-w-0 flex-1" />
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => addRepositoryRef.current?.()}
+          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary"
+        >
+          <Plus className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>New project</span>
+        </button>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
           <ProjectSessionList
@@ -746,34 +743,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <ArchivedSessions />
         </div>
 
-        {/* Primary creation plus quiet utility actions. */}
-        <div className="flex h-12 flex-shrink-0 items-center gap-1 border-t border-border-primary pl-2 pr-2">
-          <button
-            type="button"
-            onClick={() => addRepositoryRef.current?.()}
-            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            <Plus className="h-4 w-4 flex-shrink-0" />
-            <span className="truncate">Add repository</span>
-          </button>
-          <button
-            type="button"
-            onClick={onFeedbackClick}
-            aria-label="Feedback"
-            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            {!useCompactFooterActions && <span>Feedback</span>}
-          </button>
-          <button
-            type="button"
-            onClick={onDiscordClick}
-            aria-label="Discord"
-            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
-          >
-            <DiscordIcon className="h-3.5 w-3.5" />
-            {!useCompactFooterActions && <span>Discord</span>}
-          </button>
+        {/* Home opens the footer menu, with navigation and account actions together. */}
+        <div className="flex h-12 flex-shrink-0 items-center gap-1 px-2">
+          <Dropdown
+            trigger={
+              <button
+                type="button"
+                aria-label="Home menu"
+                className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary"
+              >
+                <Home className="h-3.5 w-3.5 shrink-0" />
+                <span className="flex-1 text-left">Home</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+              </button>
+            }
+            items={sidebarMenuItems}
+            position="top-left"
+            width="sm"
+            className="min-w-0 flex-1"
+          />
           <IconButton
             aria-label="Settings"
             onClick={onSettingsClick}

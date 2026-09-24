@@ -1,5 +1,6 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ChevronDown, ChevronRight, MessageSquare, Pin, PinOff, Plus, RefreshCw, Terminal } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useConfigStore } from '../stores/configStore';
@@ -19,6 +20,9 @@ import { Tooltip } from './ui/Tooltip';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
+import { SessionLaunchFields } from './SessionLaunchFields';
+import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
+import type { AppConfig } from '../types/config';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -107,7 +111,7 @@ export function OrchestrationSessionNav({
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const [showCreate, setShowCreate] = useState(false);
-  const [collapsedSessionIds, setCollapsedSessionIds] = useState<Set<string>>(new Set());
+  const [sessionExpansionOverrides, setSessionExpansionOverrides] = useState<Map<string, boolean>>(new Map());
   const [sectionExpanded, setSectionExpanded] = useState(true);
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
@@ -115,10 +119,10 @@ export function OrchestrationSessionNav({
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
 
-  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string) => {
+  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => {
     await load();
     const name = requestedName?.trim() || nextSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ name, agent });
+    await create({ name, agent, launchCommand, profile, customResume });
     setShowCreate(false);
     setActiveSession(null);
     navigateToPaneChat();
@@ -152,11 +156,10 @@ export function OrchestrationSessionNav({
     }
   }, [navigateToPaneChat, select, setActiveSession]);
 
-  const toggleSessionExpanded = useCallback((sessionId: string) => {
-    setCollapsedSessionIds(current => {
-      const next = new Set(current);
-      if (next.has(sessionId)) next.delete(sessionId);
-      else next.add(sessionId);
+  const toggleSessionExpanded = useCallback((sessionId: string, expanded: boolean) => {
+    setSessionExpansionOverrides(current => {
+      const next = new Map(current);
+      next.set(sessionId, !expanded);
       return next;
     });
   }, []);
@@ -225,7 +228,7 @@ export function OrchestrationSessionNav({
         .map((association, index) => renderPane(association.paneId, session.id, index))
         .filter((row): row is ReactNode => row !== null && row !== undefined)
       : [];
-    const expanded = !collapsedSessionIds.has(session.id);
+    const expanded = sessionExpansionOverrides.get(session.id) ?? paneRows.length > 0;
     const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
     const label = session.name || 'Pane Chat';
     const rowId = isLegacy
@@ -236,36 +239,33 @@ export function OrchestrationSessionNav({
     return (
       <div key={`${placement}-${session.id}`} className="group/orchestration-session">
         <div className={cn(
-          'flex h-8 w-full items-center text-[13px] transition-colors',
+          'mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           activeView === 'pane-chat' && session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
+          <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
+            aria-expanded={expanded} aria-controls={panesId}
+            onClick={() => toggleSessionExpanded(session.id, expanded)}
+            className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
           <button
             type="button"
             data-testid={rowId}
             aria-label={isLegacy ? label : `Open Session ${session.name}`}
-            aria-expanded={paneRows.length > 0 ? expanded : undefined}
-            aria-controls={paneRows.length > 0 ? panesId : undefined}
-            onClick={() => {
-              if (paneRows.length > 0) toggleSessionExpanded(session.id);
-              void openSession(session.id);
-            }}
+            onClick={() => void openSession(session.id)}
             onContextMenu={event => handleSessionContextMenu(event, session)}
             onKeyDown={event => handleSessionKeyDown(event, session)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded px-3 py-1 text-left focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
           >
-            <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
-            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             {paneRows.length > 0 && <span className="pr-1 text-[10px] tabular-nums text-text-muted">{paneRows.length}</span>}
           </button>
         </div>
-        {paneRows.length > 0 && (
-          <div
-            id={panesId}
-            className={cn('ml-8 border-l border-border-primary', !expanded && 'hidden')}
-          >
-            {paneRows}
-          </div>
-        )}
+        <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>
+          {paneRows.length > 0 ? paneRows : (
+            <p className="py-1 pl-2 text-[11px] text-text-tertiary">No child sessions</p>
+          )}
+        </div>
       </div>
     );
   };
@@ -341,14 +341,14 @@ export function OrchestrationSessionNav({
   return (
     <>
       {hasPinnedContent && (
-        <div className="mt-1" role="group" aria-label="Pinned">
-          <div data-testid="orchestration-pinned-section-header" className="group/section flex items-center justify-between gap-2 pl-3.5 pr-2 py-0.5">
+        <div className="mt-3" role="group" aria-label="Pinned">
+          <div data-testid="orchestration-pinned-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
             <button
               type="button"
               aria-expanded={isPinnedSectionExpanded}
               aria-controls="orchestration-pinned-list"
               onClick={() => setPinnedSectionExpanded(!isPinnedSectionExpanded)}
-              className="min-w-0 flex-1 flex items-center justify-between gap-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wide leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
+              className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
             >
               <span className="truncate">Pinned</span>
               <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
@@ -361,21 +361,21 @@ export function OrchestrationSessionNav({
             </button>
           </div>
           {isPinnedSectionExpanded && (
-            <div id="orchestration-pinned-list" className="mt-0.5">
+            <div id="orchestration-pinned-list">
               {pinnedSessions.map(session => renderSessionRow(session, 'pinned'))}
               {pinnedPaneRows}
             </div>
           )}
         </div>
       )}
-      {sessionsVisible && <div className="mt-1" role="group" aria-label="Sessions">
-        <div data-testid="sessions-section-header" className="group/section flex items-center justify-between gap-2 pl-3.5 pr-2 py-0.5">
+      {sessionsVisible && <div className="mt-3" role="group" aria-label="Sessions">
+        <div data-testid="sessions-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
           <button
             type="button"
             aria-expanded={sectionExpanded}
             aria-controls="orchestration-sessions-list"
             onClick={() => setSectionExpanded(current => !current)}
-            className="min-w-0 flex-1 flex items-center justify-between gap-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wide leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
+            className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
           >
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate">Sessions</span>
@@ -446,7 +446,11 @@ interface SessionContextMenuProps {
 }
 
 function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextMenuProps) {
-  return (
+  const [renaming, setRenaming] = useState<SessionContextMenuState | null>(null);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (<>
     <TerminalPopover
       visible={menu !== null}
       x={menu?.x ?? 0}
@@ -460,6 +464,12 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
             {menu?.isPinned ? 'Unpin Session' : 'Pin Session'}
           </span>
         </PopoverButton>
+        <PopoverButton role="menuitem" onClick={() => {
+          if (!menu) return;
+          setRenaming(menu); setName(menu.sessionName); setError(null); onClose();
+        }}>
+          <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename Session…</span>
+        </PopoverButton>
         <PopoverButton role="menuitem" variant="danger" onClick={onArchive}>
           <span className="flex items-center gap-2">
             <Archive className="h-4 w-4" />
@@ -468,18 +478,43 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
         </PopoverButton>
       </div>
     </TerminalPopover>
-  );
+    <Modal isOpen={renaming !== null} onClose={() => { if (!busy) setRenaming(null); }} ariaLabel="Rename Session">
+      <form onSubmit={event => {
+        event.preventDefault();
+        if (!renaming || busy || !name.trim()) return;
+        setBusy(true); setError(null);
+        void useOrchestrationSessionStore.getState().update({ sessionId: renaming.sessionId }, { name: name.trim() })
+          .then(() => setRenaming(null))
+          .catch(failure => setError(failure instanceof Error ? failure.message : 'Could not rename Session'))
+          .finally(() => setBusy(false));
+      }}>
+        <ModalHeader title="Rename Session" />
+        <ModalBody>
+          <Input label="Session name" autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} fullWidth />
+          {error && <p role="alert" className="mt-2 text-sm text-status-error">{error}</p>}
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => setRenaming(null)}>Cancel</Button>
+          <Button type="submit" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save name'}</Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  </>);
 }
 
 interface CreateOrchestrationSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (agent: PaneChatAgent, name?: string) => Promise<void>;
+  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => Promise<void>;
 }
 
 function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateOrchestrationSessionDialogProps) {
   const [agent, setAgent] = useState<PaneChatAgent>(DEFAULT_PANE_CHAT_AGENT);
   const [name, setName] = useState('');
+  const [launchCommand, setLaunchCommand] = useState('');
+  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(null);
+  const [profile, setProfile] = useState(DEFAULT_SESSION_PROFILE);
+  const userEditedLaunch = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
@@ -490,13 +525,22 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   useEffect(() => {
     if (!isOpen) return;
     userSelectedAgent.current = false;
+    userEditedLaunch.current = false;
     const savedConfig = useConfigStore.getState().config;
     setAgent(supportedSessionAgent(savedConfig?.defaultOrchestratorAgent));
     setName('');
+    setLaunchCommand(savedConfig?.defaultSessionCommand ?? '');
+    setCustomResume(savedConfig?.defaultSessionResume ?? null);
+    setProfile(savedConfig?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
     setError(null);
     if (!savedConfig) {
       void fetchConfig().then(nextConfig => {
         if (!userSelectedAgent.current) setAgent(supportedSessionAgent(nextConfig.defaultOrchestratorAgent));
+        if (!userEditedLaunch.current) {
+          setLaunchCommand(nextConfig.defaultSessionCommand ?? '');
+          setCustomResume(nextConfig.defaultSessionResume ?? null);
+          setProfile(nextConfig.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
+        }
       }).catch(() => undefined);
     }
   }, [fetchConfig, isOpen]);
@@ -506,10 +550,12 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
     setIsSubmitting(true);
     setError(null);
     try {
-      if (config?.defaultOrchestratorAgent !== agent) {
-        await updateConfig({ defaultOrchestratorAgent: agent });
-      }
-      await onCreate(agent, name.trim() || undefined);
+      const defaults: Partial<AppConfig> = {};
+      if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
+      if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
+      if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
+      if (Object.keys(defaults).length > 0) await updateConfig(defaults);
+      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to create Session');
     } finally {
@@ -518,10 +564,10 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="sm" ariaLabel="Create Session">
-      <form onSubmit={submit}>
+    <Modal isOpen={isOpen} onClose={onClose} size="md" ariaLabel="Create Session">
+      <form onSubmit={submit} className="flex min-h-0 flex-col">
         <ModalHeader title="Create Session" />
-        <ModalBody>
+        <ModalBody className="min-h-0 space-y-4">
           <Input label="Name your chat (optional)" value={name} onChange={event => setName(event.target.value)} placeholder="New chat" autoFocus fullWidth />
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
@@ -559,9 +605,21 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
               })}
             </div>
           </fieldset>
+          <details className="space-y-3">
+            <summary className="cursor-pointer text-sm font-medium text-text-secondary">Launch command and behavior</summary>
+            <SessionLaunchFields
+              resume={customResume}
+              onResumeChange={value => { userEditedLaunch.current = true; setCustomResume(value); }}
+              command={launchCommand}
+              profile={profile}
+              customCommands={config?.customCommands}
+              onCommandChange={value => { userEditedLaunch.current = true; setLaunchCommand(value); }}
+              onProfileChange={value => { userEditedLaunch.current = true; setProfile(value); }}
+            />
+          </details>
           {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
         </ModalBody>
-        <ModalFooter>
+        <ModalFooter className="shrink-0">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={isSubmitting} loadingText="Creating…">Create Session</Button>
         </ModalFooter>

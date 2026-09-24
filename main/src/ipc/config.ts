@@ -78,7 +78,7 @@ export function registerConfigHandlers(
 
         for (const project of projects) {
           try {
-            await ensureProjectAgentContext(project, nextConfig);
+            await ensureProjectAgentContext(project);
           } catch (error) {
             console.warn('[Config] Failed to update Pane agent context after setting change:', error);
           }

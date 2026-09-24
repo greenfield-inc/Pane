@@ -1,5 +1,7 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pencil, RefreshCw, Terminal, X } from 'lucide-react';
+import { Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -11,10 +13,16 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import { SessionProvider } from '../contexts/SessionContext';
 import { PanelContainer } from './panels/PanelContainer';
+import { SessionWorkspacePanels } from './SessionWorkspacePanels';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
+import { SessionLaunchFields } from './SessionLaunchFields';
+import { useConfigStore } from '../stores/configStore';
+import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
 import { LiveRegion } from './ui/LiveRegion';
+import { Tooltip } from './ui/Tooltip';
 import {
   isArchivedOrchestrationSession,
   useOrchestrationSessionStore,
@@ -85,7 +93,7 @@ export function PaneChatView() {
         ? current.sessions.find(session => session.id === sessionId)
         : undefined;
       if (sessionId && (!requestedSession || isArchivedOrchestrationSession(requestedSession))) {
-        throw new Error('This Session is archived. Restore it from Archived Sessions to reopen it.');
+        throw new Error('This Session is archived. Restore it from Archived in the sidebar to reopen it.');
       }
       const targetId = sessionId
         ?? current.selectedSessionId
@@ -315,7 +323,8 @@ interface NamedSessionWorkspaceProps {
 function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpdate, onRetry }: NamedSessionWorkspaceProps) {
   const [overview, setOverview] = useState<OrchestrationSessionOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
-  const [showOverview, setShowOverview] = useState(false);
+  const sessionTabsSlot = useTitleBarSlotStore(state => state.sessionTabsSlot);
+  const [showSettings, setShowSettings] = useState(false);
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
   const isMounted = useRef(false);
@@ -426,10 +435,25 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
     };
   }, [scheduleOverviewRefresh, view.session.id]);
 
+  const sessionControls = (
+    <Tooltip content="Session settings" side="bottom">
+      <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
+        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
+        <Settings className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </Tooltip>
+  );
+
   return (
     <div className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
       <LiveRegion>{statusAnnouncement}</LiveRegion>
-      <div className="flex min-h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5">
+      {sessionTabsSlot && (
+        <div className="flex h-[38px] flex-shrink-0 bg-bg-chrome">
+          <div className="pane-drag-area min-w-0 flex-1" />
+          <div className="w-12 flex-shrink-0" />
+        </div>
+      )}
+      <div className={sessionTabsSlot ? "sr-only" : "flex min-h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5"}>
         <div className="flex min-w-0 items-center gap-2">
           <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
           <div className="min-w-0">
@@ -437,21 +461,14 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
           </div>
           {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => setShowOverview(value => !value)} aria-expanded={showOverview}>
-            {showOverview ? 'Hide overview' : 'Show overview'}
-          </Button>
-          <PaneChatAgentBadge agent={view.agent} />
-        </div>
       </div>
+      {sessionTabsSlot && error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
+      {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={onOverviewUpdate} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <PanelContainer key={view.panel.id} panel={view.panel} isActive={true} autoFocus={true} />
-          </div>
-        </SessionProvider>
-        {showOverview && (
-          <SessionOverviewPanel
+          <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
+            orchestrationSessionId={view.session.id} toolbarActions={sessionControls}
+            overviewContent={<SessionOverviewPanel
             record={view.session}
             overview={overview}
             error={overviewError}
@@ -462,10 +479,60 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
               return record;
             }}
             onRetry={onRetry}
-          />
-        )}
+          />}
+            changesContent={<SessionChangesPanel overview={overview} error={overviewError} onRetry={onRetry} />} />
+        </SessionProvider>
       </div>
     </div>
+  );
+}
+
+function SessionSettingsDialog({ record, onClose, onSave }: {
+  record: OrchestrationSessionRecord;
+  onClose: () => void;
+  onSave: (input: OrchestrationSessionUpdateInput) => Promise<OrchestrationSessionRecord>;
+}) {
+  const config = useConfigStore(state => state.config);
+  const fetchConfig = useConfigStore(state => state.fetchConfig);
+  const [command, setCommand] = useState(record.launchCommand ?? '');
+  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(record.customResume ?? null);
+  const [profile, setProfile] = useState(record.profile ?? DEFAULT_SESSION_PROFILE);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!config) void fetchConfig().catch(() => undefined);
+  }, [config, fetchConfig]);
+
+  const save = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave({ launchCommand: command, profile, customResume });
+      onClose();
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : 'Failed to save Session settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} size="md" ariaLabel="Session settings">
+      <form onSubmit={save} className="flex min-h-0 flex-col">
+        <ModalHeader title="Session settings" />
+        <ModalBody className="min-h-0 space-y-4">
+          <p className="text-sm text-text-secondary">Saved changes apply the next time this Session terminal starts. Saving keeps the current conversation running.</p>
+          <SessionLaunchFields resume={customResume} onResumeChange={setCustomResume} command={command} profile={profile} customCommands={config?.customCommands} onCommandChange={setCommand} onProfileChange={setProfile} />
+          {saveError && <p role="alert" className="text-sm text-status-error">{saveError}</p>}
+        </ModalBody>
+        <ModalFooter className="shrink-0">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={saving} loadingText="Saving…">Save for next launch</Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   );
 }
 
@@ -505,7 +572,7 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
   };
 
   return (
-    <aside className="flex w-[min(360px,38vw)] min-w-[280px] flex-shrink-0 flex-col overflow-y-auto border-l border-border-primary bg-surface-primary" aria-label="Session overview">
+    <div className="flex h-full min-w-0 flex-col overflow-y-auto bg-surface-primary">
       <div className="flex items-center justify-between gap-2 border-b border-border-primary px-3 py-2">
         <div>
           <h2 className="truncate text-sm font-semibold text-text-primary">{record.name}</h2>
@@ -547,7 +614,45 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
           </div>
         </div>
       </div>
-    </aside>
+    </div>
+  );
+}
+
+function SessionChangesPanel({ overview, error, onRetry }: {
+  overview: OrchestrationSessionOverview | null;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const setActiveSession = useSessionStore(state => state.setActiveSession);
+  const navigateToSessions = useNavigationStore(state => state.navigateToSessions);
+  const panes = overview?.panes ?? [];
+
+  return (
+    <div className="space-y-2 p-3 text-[12px] text-text-secondary">
+      {error && <div role="alert" className="space-y-1"><p className="text-status-error">{error}</p><button type="button" className="underline" onClick={onRetry}>Retry</button></div>}
+      {!overview && !error && <p className="text-text-muted">Loading linked worktrees…</p>}
+      {overview && panes.length === 0 && <p className="text-text-muted">No linked worktrees.</p>}
+      {panes.map(pane => (
+        <div key={pane.paneId} className="rounded-md bg-surface-secondary px-2 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate font-medium text-text-primary">{pane.name}</span>
+            {!pane.missing && <button type="button" className="shrink-0 text-interactive hover:underline"
+              onClick={() => { setActiveSession(pane.paneId); navigateToSessions(); }}>Open Pane</button>}
+          </div>
+          <p className="mt-1 text-[11px] text-text-tertiary">
+            {pane.missing ? 'Worktree unavailable' : pane.git?.hasUncommittedChanges || pane.git?.hasUntrackedFiles ? 'Uncommitted changes' : 'No uncommitted changes'}
+            {pane.branch ? ` · ${pane.branch}` : ''}
+          </p>
+          {pane.git && (pane.git.ahead || pane.git.behind) ? (
+            <p className="mt-1 text-[11px] text-text-tertiary">
+              {pane.git.ahead ? `${pane.git.ahead} ahead` : ''}
+              {pane.git.ahead && pane.git.behind ? ' · ' : ''}
+              {pane.git.behind ? `${pane.git.behind} behind` : ''}
+            </p>
+          ) : null}
+        </div>
+      ))}
+    </div>
   );
 }
 

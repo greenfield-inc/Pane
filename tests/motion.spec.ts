@@ -87,23 +87,24 @@ test.describe('motion', () => {
     expect(panel?.transition).toBe('0s');
   });
 
-  test('the sidebar menu hangs from the left edge of its trigger', async ({ page }) => {
+  test('the footer Home menu opens above its trigger', async ({ page }) => {
     await openDesktop(page);
 
-    await page.getByRole('button', { name: 'Sidebar menu' }).click();
+    await page.getByRole('button', { name: 'Home menu' }).click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
 
-    // The trigger sits beside the window controls at the left edge of the
-    // strip, so the menu is anchored by its left edge and stays on screen.
-    const { origin, left } = await menu.evaluate((element: HTMLElement) => ({
+    const { origin, left, bottom, triggerTop } = await menu.evaluate((element: HTMLElement) => ({
       origin: getComputedStyle(element).transformOrigin,
       left: element.getBoundingClientRect().left,
+      bottom: element.getBoundingClientRect().bottom,
+      triggerTop: document.querySelector<HTMLButtonElement>('[aria-label="Home menu"]')?.getBoundingClientRect().top ?? 0,
     }));
     const [originX, originY] = origin.split(' ').map(Number.parseFloat);
-    expect(originY).toBe(0);
+    expect(originY).toBeGreaterThan(0);
     expect(originX).toBe(0);
     expect(left).toBeGreaterThanOrEqual(8);
+    expect(bottom).toBeLessThanOrEqual(triggerTop);
   });
 
   test('buttons do not scale or ease under the pointer', async ({ page }) => {
@@ -141,7 +142,7 @@ test.describe('motion', () => {
     );
     expect(reveal).toBe('0s');
 
-    await page.getByRole('button', { name: 'Sidebar menu' }).click();
+    await page.getByRole('button', { name: 'Home menu' }).click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     expect(await menu.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');

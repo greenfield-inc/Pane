@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
 
 /**
@@ -62,6 +63,14 @@ export interface TerminalPanelState {
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
+  /** Session-owned working directory, also used by legacy shared terminal owners. */
+  orchestrationWorkspace?: string;
+  /** Applied when the terminal next starts, not while its agent is running. */
+  orchestrationProfile?: string;
+  /** Wrapper/custom commands own their flags and resume behavior. */
+  preserveLaunchCommand?: boolean;
+  customResume?: CustomCommandResume | null;
+  customResumeStarted?: boolean;
 
   // CLI tool init state
   isCliPanel?: boolean;              // True if this terminal runs a CLI tool (claude/codex)

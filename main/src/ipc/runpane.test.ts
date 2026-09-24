@@ -1077,7 +1077,7 @@ describe('runpane IPC handlers', () => {
       },
     });
     expect(services.databaseService.createProject).toHaveBeenCalledTimes(1);
-    expect(fs.readFileSync(path.join(repoPath, 'AGENTS.md'), 'utf8')).toContain('runpane agent-context');
+    expect(fs.existsSync(path.join(repoPath, 'AGENTS.md'))).toBe(false);
   });
 
   it('rejects repo add for a non-git directory', async () => {

@@ -30,7 +30,7 @@ import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionProvider } from '../contexts/SessionContext';
-import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, SessionPanelLayout, PanelGroupNode } from '../../../shared/types/panels';
+import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, SessionPanelLayout, PanelGroupNode, type TerminalPanelState } from '../../../shared/types/panels';
 import { PanelCreateOptions, type PanelTabPresentationResolver } from '../types/panelComponents';
 import {
   createSingleGroupLayout,
@@ -962,11 +962,11 @@ export const SessionView = memo(() => {
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
       let initialState = options?.initialState;
       if (type === 'terminal' && options?.initialCommand) {
-        initialState = {
-          customState: {
-            initialCommand: options.initialCommand
-          }
+        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = {
+          initialCommand: options.initialCommand,
         };
+        if (options.customResume !== undefined) customState.customResume = options.customResume;
+        initialState = { customState };
       }
 
       // Captured BEFORE the create: if the session has no terminal yet, the
@@ -1199,7 +1199,7 @@ export const SessionView = memo(() => {
             label: cmd.name,
             icon: getCliBrandIcon(cmd.command, 'h-3.5 w-3.5') || <TerminalSquare className="h-3.5 w-3.5" />,
             hotkeyId: `add-tool-custom-${index}`,
-            onClick: () => handlePanelCreate('terminal', { initialCommand: cmd.command, title: cmd.name }),
+            onClick: () => handlePanelCreate('terminal', { initialCommand: cmd.command, title: cmd.name, customResume: cmd.resume }),
           })),
         ].map(item => (
           <button
@@ -1292,6 +1292,7 @@ export const SessionView = memo(() => {
         action: () => handlePanelCreateRef.current('terminal', {
           initialCommand: cmd.command,
           title: cmd.name,
+          customResume: cmd.resume,
         }),
       });
     }

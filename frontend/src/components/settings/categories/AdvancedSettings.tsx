@@ -32,6 +32,14 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
 
   return (
     <SettingsPage title="Advanced" description="Application diagnostics, terminal backend isolation, and process environment.">
+      <SettingsSection title="Experimental">
+        <SettingRow settingId="session-progress" label="Session progress view (Experimental)"
+          description="Show an agent-maintained HTML progress page beside each Session. Turning this off stops the view and removes the maintenance instruction. Running agents may need their next context reload."
+          saveState={persistence.saveStates['session-progress']}>
+          <ImmediateToggle label="Session progress view (Experimental)" value={config.experimentalSessionProgress !== false}
+            onSave={value => persistence.saveConfig('session-progress', { experimentalSessionProgress: value })} />
+        </SettingRow>
+      </SettingsSection>
       <SettingsSection title="Diagnostics">
         <SettingRow
           settingId="verbose-logging"

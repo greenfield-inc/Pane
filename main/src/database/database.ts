@@ -4721,6 +4721,17 @@ export class DatabaseService {
     return this.panelBuffers.get(panelId);
   }
 
+  /** Preserve panel identity and buffers while atomically transferring its owner. */
+  movePanel(panelId: string, sourceId: string, targetId: string): void {
+    this.transaction(() => {
+      const result = this.db.prepare('UPDATE tool_panels SET session_id = ? WHERE id = ? AND session_id = ?')
+        .run(targetId, panelId, sourceId);
+      if (result.changes !== 1) throw new Error('Chat ownership changed; refresh and try again');
+      this.db.prepare('UPDATE sessions SET active_panel_id = NULL WHERE id = ? AND active_panel_id = ?').run(sourceId, panelId);
+      this.db.prepare('UPDATE sessions SET active_panel_id = ? WHERE id = ?').run(panelId, targetId);
+    });
+  }
+
   deletePanel(panelId: string): void {
     this.transaction(() => {
       this.db.prepare("DELETE FROM tool_panels WHERE id = ?").run(panelId);
