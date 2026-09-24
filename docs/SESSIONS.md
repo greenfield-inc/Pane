@@ -102,7 +102,9 @@ restarts; an archived Session stays out of Pinned until it is restored.
 
 Click a Session row to open its chat and expand or collapse its associated
 Panes. Child Pane rows are indented beyond the Session chat icon and keep the
-ordinary Pane actions.
+ordinary Pane actions. Single-line Pane rows omit change counts and PR numbers;
+the optional two-row layout shows those details below the title. Session and Pane
+context menus use compact widths.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
 Panes and activity. Files browses the Session workspace. Changes summarizes
