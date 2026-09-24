@@ -288,15 +288,14 @@ export function useIPCEvents() {
     unsubscribeFunctions.push(unsubscribeSessionOutput);
 
     const unsubscribeTerminalOutput = window.electronAPI.events.onTerminalOutput((output) => {
-      if (isOrchestrationInternalSessionId(output.sessionId)) {
+      // Panel output belongs to its TerminalPanel, which writes it to xterm.
+      // Copying it here re-rendered the session view on every 32 ms flush.
+      if ('panelId' in output || isOrchestrationInternalSessionId(output.sessionId)) {
         return;
       }
 
       devLog.debug(`[useIPCEvents] Received terminal output for ${output.sessionId}`);
-      const terminalOutput = 'output' in output
-        ? { sessionId: output.sessionId, type: 'stdout' as const, data: output.output }
-        : output;
-      useSessionStore.getState().addTerminalOutput(terminalOutput);
+      useSessionStore.getState().addTerminalOutput(output);
     });
     unsubscribeFunctions.push(unsubscribeTerminalOutput);
     
