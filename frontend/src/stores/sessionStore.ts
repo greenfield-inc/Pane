@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import type { Session, SessionOutput, GitStatus, ClaudeJsonMessage } from '../types/session';
 import { API } from '../utils/api';
+import { startSwitchPane } from '../utils/journeyTimings';
 import { normalizeSession, normalizeSessionOutput, normalizeSessions } from '../utils/sessionNormalization';
 
 interface CreateSessionRequest {
@@ -180,6 +181,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     
     // Emit session-switched event for cleanup
     if (get().activeSessionId !== sessionId) {
+      startSwitchPane(sessionId);
       window.dispatchEvent(new CustomEvent('session-switched', { detail: { sessionId } }));
       
       // Notify backend about active session change for smart git status polling

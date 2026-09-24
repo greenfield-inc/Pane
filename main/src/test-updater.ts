@@ -1,6 +1,6 @@
-import { autoUpdater } from 'electron-updater';
+import type { AppUpdater } from 'electron-updater';
 
-export function setupTestUpdater() {
+export function setupTestUpdater(autoUpdater: AppUpdater) {
   // Point to local server for testing
   autoUpdater.setFeedURL({
     provider: 'generic',

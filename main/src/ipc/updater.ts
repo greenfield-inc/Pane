@@ -1,6 +1,6 @@
 import { clipboard, IpcMain } from 'electron';
-import { autoUpdater } from 'electron-updater';
 import type { AppServices } from './types';
+import { getAutoUpdater } from '../autoUpdater';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
@@ -142,7 +142,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Check for updates using autoUpdater
-      const result = await autoUpdater.checkForUpdatesAndNotify();
+      const result = await getAutoUpdater().checkForUpdatesAndNotify();
 
       return { success: true, message: 'Checking for updates...', data: result };
     } catch (error) {
@@ -158,7 +158,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Start downloading the update
-      const result = await autoUpdater.downloadUpdate();
+      const result = await getAutoUpdater().downloadUpdate();
 
       return { success: true, message: 'Downloading update...', data: result };
     } catch (error) {
@@ -205,7 +205,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Quit and install the update
-      autoUpdater.quitAndInstall(false, true);
+      getAutoUpdater().quitAndInstall(false, true);
 
       return { success: true, message: 'Installing update...' };
     } catch (error) {

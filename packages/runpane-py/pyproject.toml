@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "runpane"
-version = "2.4.125"
+version = "2.4.127"
 description = "Thin PyPI installer and remote setup CLI for Pane"
 readme = "README.md"
 requires-python = ">=3.8"

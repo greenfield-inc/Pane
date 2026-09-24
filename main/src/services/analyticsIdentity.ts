@@ -1,8 +1,9 @@
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import * as crypto from 'crypto';
 import * as fsSync from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { promisify } from 'util';
 import { getShellPath } from '../utils/shellPath';
 import type { AnalyticsIdentity } from '../types/config';
 
@@ -10,23 +11,24 @@ function commandEnv(): NodeJS.ProcessEnv {
   return { ...process.env, PATH: getShellPath() };
 }
 
-function runCommand(command: string, args: string[]): string | undefined {
+const execFileAsync = promisify(execFile);
+
+async function runCommand(command: string, args: string[]): Promise<string | undefined> {
   try {
-    const output = execFileSync(command, args, {
+    const { stdout } = await execFileAsync(command, args, {
       cwd: os.homedir(),
       encoding: 'utf8',
       env: commandEnv(),
-      stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5000,
     });
-    return output.trim() || undefined;
+    return stdout.trim() || undefined;
   } catch {
     return undefined;
   }
 }
 
 export interface AnalyticsIdentityDependencies {
-  runCommand(command: string, args: string[]): string | undefined;
+  runCommand(command: string, args: string[]): Promise<string | undefined>;
 }
 
 const defaultAnalyticsIdentityDependencies: AnalyticsIdentityDependencies = { runCommand };
@@ -35,15 +37,19 @@ function sha256(value: string): string {
   return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
 }
 
-export function resolveAnalyticsIdentity(
+export async function resolveAnalyticsIdentity(
   existingDistinctId?: string,
   installId?: string,
   dependencies: AnalyticsIdentityDependencies = defaultAnalyticsIdentityDependencies,
-): AnalyticsIdentity {
-  const githubUsername = dependencies.runCommand('gh', ['api', 'user', '--jq', '.login']);
-  const githubEmail = dependencies.runCommand('gh', ['api', 'user', '--jq', '.email // empty']);
-  const gitEmail = dependencies.runCommand('git', ['config', '--global', 'user.email']);
-  const gitUserName = dependencies.runCommand('git', ['config', '--global', 'user.name']);
+): Promise<AnalyticsIdentity> {
+  // Runs on every launch: async and in parallel so the main process keeps
+  // answering the renderer while gh waits on the network.
+  const [githubUsername, githubEmail, gitEmail, gitUserName] = await Promise.all([
+    dependencies.runCommand('gh', ['api', 'user', '--jq', '.login']),
+    dependencies.runCommand('gh', ['api', 'user', '--jq', '.email // empty']),
+    dependencies.runCommand('git', ['config', '--global', 'user.email']),
+    dependencies.runCommand('git', ['config', '--global', 'user.name']),
+  ]);
   const email = githubEmail || gitEmail;
   const gitEmailHash = email ? sha256(email) : undefined;
 

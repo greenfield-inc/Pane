@@ -2,8 +2,9 @@ import { clipboard, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { mkdir } from 'fs/promises';
-import { execFile, execSync, spawn, type ExecSyncOptionsWithStringEncoding } from 'child_process';
+import { exec, execFile, execSync, spawn, type ExecSyncOptionsWithStringEncoding } from 'child_process';
 import { randomUUID } from 'crypto';
+import { promisify } from 'util';
 import * as pty from '@lydell/node-pty';
 import type { AppServices } from './types';
 import { getAppDirectory } from '../utils/appDirectory';
@@ -15,6 +16,16 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 /** Returns exec options that include the user's full shell PATH (Homebrew, nvm, etc.). */
 function shellExecOpts<Options extends object>(extra: Options): Options & { env: NodeJS.ProcessEnv } {
   return { ...extra, env: { ...process.env, PATH: getShellPath() } };
+}
+
+const execAsync = promisify(exec);
+
+/**
+ * Runs a probe without blocking the main process: the renderer checks the
+ * environment on launch, and gh may wait on the network.
+ */
+async function runProbe(command: string, timeout?: number): Promise<string> {
+  return (await execAsync(command, shellExecOpts({ encoding: 'utf-8', timeout }))).stdout;
 }
 
 const PANE_REPO = 'greenfield-inc/Pane';
@@ -62,7 +73,7 @@ interface GitHubAuthPtySession {
 
 const githubAuthPtySessions = new Map<string, GitHubAuthPtySession>();
 
-function detectEnvironment(): EnvironmentInfo {
+async function detectEnvironment(): Promise<EnvironmentInfo> {
   const result: EnvironmentInfo = {
     gitInstalled: false,
     ghInstalled: false,
@@ -77,7 +88,7 @@ function detectEnvironment(): EnvironmentInfo {
 
   // Check git (use shell-aware PATH so packaged apps find Homebrew/nvm binaries)
   try {
-    execSync('git --version', shellExecOpts({ stdio: 'ignore' }));
+    await runProbe('git --version');
     result.gitInstalled = true;
   } catch {
     return result;
@@ -85,7 +96,7 @@ function detectEnvironment(): EnvironmentInfo {
 
   // Check gh CLI
   try {
-    execSync('gh --version', shellExecOpts({ stdio: 'ignore' }));
+    await runProbe('gh --version');
     result.ghInstalled = true;
   } catch {
     result.ghAuthCommand = undefined;
@@ -95,10 +106,7 @@ function detectEnvironment(): EnvironmentInfo {
   // Check gh authentication
   let authStatusOutput = '';
   try {
-    authStatusOutput = execSync(
-      `gh auth status -h ${GITHUB_HOST}`,
-      shellExecOpts({ encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] } satisfies ExecSyncOptionsWithStringEncoding)
-    );
+    authStatusOutput = await runProbe(`gh auth status -h ${GITHUB_HOST}`);
     result.ghAuthenticated = true;
   } catch {
     // gh installed but not authenticated
@@ -106,7 +114,7 @@ function detectEnvironment(): EnvironmentInfo {
     return result;
   }
 
-  result.ghScopes = getGitHubCliScopes(authStatusOutput);
+  result.ghScopes = await getGitHubCliScopes(authStatusOutput);
   result.missingGhScopes = getMissingGitHubScopes(result.ghScopes);
   result.ghReady = result.missingGhScopes.length === 0;
   result.ghAuthCommand = result.ghReady ? undefined : GH_REFRESH_COMMAND;
@@ -114,7 +122,8 @@ function detectEnvironment(): EnvironmentInfo {
   return result;
 }
 
-function getGitHubAuthCommand(env: EnvironmentInfo = detectEnvironment()): GitHubAuthCommandResult {
+async function getGitHubAuthCommand(): Promise<GitHubAuthCommandResult> {
+  const env = await detectEnvironment();
   if (!env.ghInstalled) {
     return { command: '', reason: 'install-gh' };
   }
@@ -148,12 +157,9 @@ function getMissingGitHubScopes(scopes: string[]): string[] {
   return REQUIRED_GITHUB_SCOPES.filter(scope => !granted.has(scope.toLowerCase()));
 }
 
-function getGitHubCliScopes(authStatusOutput: string): string[] {
+async function getGitHubCliScopes(authStatusOutput: string): Promise<string[]> {
   try {
-    const apiOutput = execSync(
-      `gh api -i /user --silent --hostname ${GITHUB_HOST}`,
-      shellExecOpts({ encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000 } satisfies ExecSyncOptionsWithStringEncoding)
-    );
+    const apiOutput = await runProbe(`gh api -i /user --silent --hostname ${GITHUB_HOST}`, 15000);
     const scopes = parseScopesFromHeaders(apiOutput);
     if (scopes.length > 0) return scopes;
   } catch {
@@ -381,7 +387,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
   // Detect git/gh environment
   ipcMain.handle('onboarding:detect-environment', async () => {
     try {
-      const env = detectEnvironment();
+      const env = await detectEnvironment();
       return { success: true, data: env };
     } catch (error) {
       console.error('[Onboarding] Failed to detect environment:', error);
@@ -391,7 +397,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
 
   ipcMain.handle('onboarding:get-github-auth-command', async () => {
     try {
-      return { success: true, data: getGitHubAuthCommand() };
+      return { success: true, data: await getGitHubAuthCommand() };
     } catch (error) {
       console.error('[Onboarding] Failed to build GitHub auth command:', error);
       return { success: false, error: 'Failed to build GitHub auth command' };
@@ -400,7 +406,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
 
   ipcMain.handle('onboarding:open-github-auth-terminal', async () => {
     try {
-      const commandResult = getGitHubAuthCommand();
+      const commandResult = await getGitHubAuthCommand();
 
       if (!commandResult.command) {
         const error = commandResult.reason === 'install-gh'
@@ -427,7 +433,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
 
   ipcMain.handle('onboarding:start-github-auth-pty', async (event: IpcMainInvokeEvent, cols?: number, rows?: number) => {
     try {
-      const commandResult = getGitHubAuthCommand();
+      const commandResult = await getGitHubAuthCommand();
       const args = getGitHubAuthSpawnArgs(commandResult.reason);
 
       if (!commandResult.command || args.length === 0) {
@@ -537,7 +543,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
           };
         }
 
-        const env = detectEnvironment();
+        const env = await detectEnvironment();
 
         if (!env.gitInstalled) {
           return { success: false, error: 'Git is not installed' };

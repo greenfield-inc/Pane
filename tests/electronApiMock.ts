@@ -257,6 +257,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
     const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[] }>>();
     let sessionsGetCount = 0;
+    let terminalAckedBytes = 0;
 
     Object.defineProperty(window, '__paneTestPerf', {
       configurable: true,
@@ -366,6 +367,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       calls.push({ channel, args });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+      if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
       const value = args[1] === undefined ? undefined : String(args[1]);
@@ -1107,6 +1109,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitTerminalOutput(sessionId: string, data: string) {
           emit('terminal-output', { sessionId, type: 'stdout', data });
+        },
+        emitPanelTerminalOutput(sessionId: string, panelId: string, output: string) {
+          emit('terminal-output', { sessionId, panelId, output });
+        },
+        getTerminalAckedBytes() {
+          return terminalAckedBytes;
         },
         emitSessionUpdated(session: JsonObject) {
           emit('session:updated', clone(session));

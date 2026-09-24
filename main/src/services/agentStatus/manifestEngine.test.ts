@@ -100,6 +100,15 @@ describe('detectAgentState', () => {
     expect(result.matchedRuleId).toBe('high');
   });
 
+  it('resolves equal-priority matches to the earlier rule', () => {
+    const m = manifest([
+      rule({ id: 'low', priority: 100, state: 'idle', contains: ['proceed'] }),
+      rule({ id: 'first', priority: 500, state: 'blocked', contains: ['proceed'] }),
+      rule({ id: 'second', priority: 500, state: 'working', contains: ['proceed'] }),
+    ]);
+    expect(detectAgentState(m, input('do you want to proceed')).matchedRuleId).toBe('first');
+  });
+
   it('sets visibleBlocker only when the matched blocked rule declares it', () => {
     const m = manifest([
       rule({ id: 'blk', state: 'blocked', visibleBlocker: true, contains: ['proceed?'] }),

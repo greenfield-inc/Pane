@@ -1090,3 +1090,34 @@ describe('TerminalPanelManager destroyAllTerminals', () => {
     warn.mockRestore();
   });
 });
+
+type AgentStatusAccess = {
+  terminals: Map<string, TerminalUnderTest>;
+  registerAgentStatusPanel(terminal: TerminalUnderTest): void;
+  pollAgentStatus(): void;
+  destroyTerminal(panelId: string): void;
+};
+
+describe('TerminalPanelManager agent status poll', () => {
+  it('re-derives status when the screen changes and holds it while the screen is unchanged', async () => {
+    const manager = testAccess<AgentStatusAccess>(new TerminalPanelManager());
+    const screenEmulator = inProcessEmulatorHost().createEmulator(60, 10);
+    const terminal = createTerminal({ agentType: 'claude', screenEmulator });
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
+
+    screenEmulator.write('\x1b]2;⠹ Claude\x07Thinking...');
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+    expect(manager.getAgentStatus(terminal.panelId)).toBe('working');
+
+    screenEmulator.write('\x1b]2;\x07\x1b[2J\x1b[HBash command\r\n  rm -rf build\r\n\r\nDo you want to proceed?\r\n');
+    screenEmulator.write('❯ 1. Yes\r\n  2. No, tell Claude what to do differently (esc)\r\n');
+    await screenEmulator.refresh();
+    manager.pollAgentStatus();
+    manager.pollAgentStatus();
+    expect(manager.getAgentStatus(terminal.panelId)).toBe('blocked');
+
+    manager.destroyTerminal(terminal.panelId);
+  });
+});

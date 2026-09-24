@@ -1,6 +1,16 @@
 import { app, BrowserWindow } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import { createRequire } from 'node:module';
+import type { AppUpdater } from 'electron-updater';
 import { setupTestUpdater } from './test-updater';
+
+const loadUpdaterDependency = createRequire(__filename);
+
+// electron-updater loads ~140 modules and nothing needs it before the window
+// is up, so it is required on first use rather than at launch.
+export function getAutoUpdater(): AppUpdater {
+  const { autoUpdater }: typeof import('electron-updater') = loadUpdaterDependency('electron-updater');
+  return autoUpdater;
+}
 
 export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
   // Only setup auto-updater for packaged apps (not development)
@@ -9,9 +19,11 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     return;
   }
 
+  const autoUpdater = getAutoUpdater();
+
   // TEST MODE: Use local server for testing
   if (process.env.TEST_UPDATES === 'true') {
-    setupTestUpdater();
+    setupTestUpdater(autoUpdater);
     console.log('[AutoUpdater] Using test update server at:', process.env.UPDATE_SERVER_URL || 'http://localhost:8080');
   } else {
     // Configure electron-updater for production

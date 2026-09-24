@@ -1,5 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
+import { createRequire } from 'node:module';
 import { ConfigManager } from './configManager';
+
+const loadNameDependency = createRequire(__filename);
 
 export class WorktreeNameGenerator {
   private anthropic: Anthropic | null = null;
@@ -18,6 +21,8 @@ export class WorktreeNameGenerator {
   private initializeAnthropic(): void {
     const apiKey = this.configManager.getAnthropicApiKey();
     if (apiKey) {
+      // Loaded only with a key: the SDK is ~45 modules every launch would pay for.
+      const { Anthropic }: typeof import('@anthropic-ai/sdk') = loadNameDependency('@anthropic-ai/sdk');
       this.anthropic = new Anthropic({
         apiKey: apiKey
       });
