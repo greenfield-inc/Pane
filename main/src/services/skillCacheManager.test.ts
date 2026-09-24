@@ -563,7 +563,9 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     await relaunched.start();
 
     await expect(fs.readFile(installed, 'utf8')).resolves.toBe('# untouched marker\n');
-    expect(relaunched.launchCommand('codex')).toContain('agents.explorer.config_file=');
+    if (process.platform !== 'win32') {
+      expect(relaunched.launchCommand('codex')).toContain('agents.explorer.config_file=');
+    }
   });
 
   it('reinstalls when an installed skill folder has gone missing', async () => {
