@@ -1058,7 +1058,7 @@ async function initializeServices() {
           ? analyticsLaunchContext.previousVersion
           : databaseService.getLastAppVersion();
       const isFirstLaunch = analyticsLaunchContext.isFirstLaunch ?? previousVersion === null;
-      const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId(), installId);
+      const identity = await resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId(), installId);
       const webDistinctId = readWebAttribution(getAppDirectory());
       if (webDistinctId) {
         identity.webDistinctId = webDistinctId;
