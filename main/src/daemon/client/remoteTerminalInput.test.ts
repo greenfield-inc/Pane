@@ -96,15 +96,18 @@ describe.each([
     ]);
   });
 
-  it('preserves Unicode, paste boundaries, and control keys in the queued byte stream', async () => {
+  it('preserves Unicode, paste boundaries, and control keys, ending a write at a bare Escape', async () => {
     const { client, requests } = await setup();
-    const keys = ['a', 'é🙂', '\x1b[200~pasted\ntext\x1b[201~', '\x7f', '\x1b[D', '\t', '\x03', '\r'];
+    const keys = ['a', 'é🙂', '\x1b[200~pasted\ntext\x1b[201~', '\x7f', '\x1b', '\x1b[D', '\t', '\x03', '\r'];
     const completed = Promise.allSettled(keys.map(key => client.invoke('terminal:input', ['panel-1', key])));
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     reply(requests[0]);
     await vi.waitFor(() => expect(requests).toHaveLength(2));
-    expect(requests[1].args[1]).toBe(keys.slice(1).join(''));
+    expect(requests[1].args[1]).toBe(keys.slice(1, 5).join(''));
     reply(requests[1]);
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2].args[1]).toBe(keys.slice(5).join(''));
+    reply(requests[2]);
     expect((await completed).every(result => result.status === 'fulfilled')).toBe(true);
   });
 

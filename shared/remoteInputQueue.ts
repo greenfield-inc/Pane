@@ -18,6 +18,9 @@ interface PanelInputQueue<Result> {
 // Bound merged requests without splitting a paste or terminal escape sequence.
 const MAX_BATCH_CHARACTERS = 64 * 1024;
 const INPUT_TIMEOUT_MS = 10_000;
+// A bare ESC must end its write. Terminal apps that parse by read boundary, such
+// as Codex and Claude Code, treat ESC followed by a key in one read as Alt+key.
+const ESCAPE = '\x1b';
 const inputSchema = boundary.object({ panelId: boundary.nonEmptyString, data: boundary.string });
 
 /** Serializes remote input per terminal, batching only while a request is in flight. */
@@ -43,7 +46,12 @@ export class RemoteInputQueue<Result> {
     }
     const result = new Promise<Result>((resolve, reject) => {
       const last = queue.pending[queue.pending.length - 1];
-      if (last && last.channel === channel && last.data.length + data.length <= MAX_BATCH_CHARACTERS) {
+      if (
+        last
+        && last.channel === channel
+        && !last.data.endsWith(ESCAPE)
+        && last.data.length + data.length <= MAX_BATCH_CHARACTERS
+      ) {
         last.data += data;
         last.waiters.push({ resolve, reject });
       } else {

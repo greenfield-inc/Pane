@@ -43,6 +43,24 @@ describe('RemoteInputQueue lifecycle', () => {
     expect(send.mock.calls[0][2]?.aborted).toBe(true);
   });
 
+  it('ends a combined batch at a bare Escape so the next key is not read as Alt+key', async () => {
+    const finish: Array<() => void> = [];
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal) =>
+      new Promise<void>(resolve => finish.push(resolve)));
+    const queue = new RemoteInputQueue(send);
+    // Typed text, then Esc, more text, then Esc, Esc, Up while the first key is in flight.
+    const completed = Promise.all(['a', 'b', '\x1b', 'c', '\x1b', '\x1b', '\x1b[A'].map(key =>
+      queue.invoke('terminal:input', ['panel', key])));
+    const expected = ['a', 'b\x1b', 'c\x1b', '\x1b', '\x1b[A'];
+    for (const [index, data] of expected.entries()) {
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(index + 1));
+      expect(send.mock.calls[index][1]).toEqual(['panel', data]);
+      finish[index]();
+    }
+    await completed;
+    expect(send).toHaveBeenCalledTimes(expected.length);
+  });
+
   it('bounds combined batches without splitting individual input events', async () => {
     const finish: Array<() => void> = [];
     const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal) =>
