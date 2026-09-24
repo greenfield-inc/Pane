@@ -131,10 +131,15 @@ test.describe('Settings', () => {
       initialTerminalStates: { [panel.id]: { scrollbackBuffer: 'ready\r\n' } },
       activeProjectId: project.id,
     });
+    // The default terminal font ships with the app: it must load with no network.
+    await page.route(url => !['localhost', '127.0.0.1'].includes(url.hostname), route => route.abort());
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.getByRole('button', { name: /^Expand repository Terminal font fixture$/ }).click();
     await page.getByRole('button', { name: session.name, exact: true }).click();
     await expect(page.locator('.xterm-screen')).toHaveCount(1, { timeout: 15_000 });
+    await expect.poll(() => page.evaluate(() => [...document.fonts].some(
+      font => font.family.replace(/["']/g, '') === 'Geist Mono' && font.status === 'loaded',
+    ))).toBe(true);
 
     const host = page.locator('[data-terminal-font]').first();
     await expect(host).toHaveAttribute('data-terminal-font', '"Geist Mono", "Symbols Nerd Font Mono", monospace');

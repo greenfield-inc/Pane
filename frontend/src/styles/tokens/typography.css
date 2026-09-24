@@ -1,6 +1,13 @@
 /* Typography Design Tokens for Pane */
 
-@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100;200;300;400;500;600;700;800;900&display=block');
+/* Geist Mono (variable, v1.7.2) — SIL Open Font License 1.1 (Vercel). See fonts/GeistMono-LICENSE.txt */
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
 
 /*
  * Symbols Nerd Font Mono — SIL Open Font License 1.1 (Ryan L McIntyre / Nerd Fonts)
