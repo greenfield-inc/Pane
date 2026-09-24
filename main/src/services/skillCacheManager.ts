@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
@@ -253,10 +254,17 @@ export class SkillCacheManager {
    * Replaces what Pane installed last time with the bundle. The project skill
    * and agent folders can hold the user's own entries, so only names Pane
    * installed (recorded in the manifest) or older versions synced are removed.
+   * Skipped when the bundle is unchanged since the last install and its folders
+   * are still there: rewriting every file three times held up each launch.
    */
   private async install(): Promise<void> {
     const manifestPath = path.join(this.paneChatRoot, 'installed.json');
     const previous = await readInstalledManifest(manifestPath);
+    const bundleHash = await hashDirectory(PANE_CHAT_BUNDLE_ROOT);
+    const subagents = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
+    this.codexSubagentArgs = this.codexSubagentArgsFor(subagents);
+    if (previous.bundleHash === bundleHash && await this.isInstalled(previous)) return;
+
     const legacyCache = path.join(this.skillsRoot, 'dcouple', 'parsa');
     const legacySynced = {
       claude: await listEntries(path.join(legacyCache, '.claude', 'skills')),
@@ -265,7 +273,6 @@ export class SkillCacheManager {
     // Read the bundle before deleting anything, so a missing bundle fails
     // without removing what is installed.
     const bundledSkills = (await fs.readdir(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills'))).sort();
-    const subagents = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
     const skills = [...bundledSkills, 'pane-orchestrator'];
 
     await fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true });
@@ -284,11 +291,24 @@ export class SkillCacheManager {
     }
     const agents = await this.installSubagents(subagents, previous.agents);
 
-    await this.writeTextFile(manifestPath, `${JSON.stringify({ skills, agents }, null, 2)}\n`);
+    await this.writeTextFile(manifestPath, `${JSON.stringify({ skills, agents, bundleHash }, null, 2)}\n`);
     // Older versions synced skills into these folders and wrote these files.
     await fs.rm(path.join(this.skillsRoot, 'dcouple'), { recursive: true, force: true });
     await fs.rm(path.join(this.skillsRoot, '.sources'), { recursive: true, force: true });
     await fs.rm(path.join(this.paneChatRoot, 'work-questions.md'), { force: true });
+  }
+
+  private async isInstalled(manifest: InstalledManifest): Promise<boolean> {
+    const bundledSkills = manifest.skills.filter(name => name !== 'pane-orchestrator');
+    const paths = [
+      ...bundledSkills.flatMap(name => [this.paneChatSkillsRoot, this.claudeProjectSkillsRoot, this.codexProjectSkillsRoot]
+        .map(root => path.join(root, name))),
+      ...manifest.agents.flatMap(name => [
+        path.join(this.claudeProjectAgentsRoot, `${name}.md`),
+        path.join(this.codexProjectAgentsRoot, `${name}.toml`),
+      ]),
+    ];
+    return (await Promise.all(paths.map(exists))).every(Boolean);
   }
 
   private async writePaneChatGuide(): Promise<void> {
@@ -325,7 +345,6 @@ export class SkillCacheManager {
    * bundle's agents/ folder. Each one follows one bundled skill.
    */
   private async installSubagents(definitions: SubagentDefinition[], previouslyInstalled: string[]): Promise<string[]> {
-    const codexArgs: string[] = [];
     for (const name of new Set([...previouslyInstalled, ...definitions.map(agent => agent.name)])) {
       await fs.rm(path.join(this.claudeProjectAgentsRoot, `${name}.md`), { force: true });
       await fs.rm(path.join(this.codexProjectAgentsRoot, `${name}.toml`), { force: true });
@@ -338,20 +357,21 @@ export class SkillCacheManager {
         path.join(this.claudeProjectAgentsRoot, `${agent.name}.md`),
         `---\n${claudeHeader.join('\n')}\n---\n\n${instructions}`,
       );
-      const codexConfigPath = path.join(this.codexProjectAgentsRoot, `${agent.name}.toml`);
-      await this.writeTextFile(codexConfigPath, [
+      await this.writeTextFile(path.join(this.codexProjectAgentsRoot, `${agent.name}.toml`), [
         `name = ${JSON.stringify(agent.name)}`,
         `description = ${JSON.stringify(agent.description)}`,
         `developer_instructions = ${JSON.stringify(instructions)}`,
         '',
       ].join('\n'));
-      codexArgs.push(
-        '-c', quoteForDisplayedShellArg(`agents.${agent.name}.description=${JSON.stringify(agent.description)}`),
-        '-c', quoteForDisplayedShellArg(`agents.${agent.name}.config_file=${JSON.stringify(codexConfigPath)}`),
-      );
     }
-    this.codexSubagentArgs = codexArgs.join(' ');
     return definitions.map(agent => agent.name);
+  }
+
+  private codexSubagentArgsFor(definitions: SubagentDefinition[]): string {
+    return definitions.flatMap(agent => [
+      '-c', quoteForDisplayedShellArg(`agents.${agent.name}.description=${JSON.stringify(agent.description)}`),
+      '-c', quoteForDisplayedShellArg(`agents.${agent.name}.config_file=${JSON.stringify(path.join(this.codexProjectAgentsRoot, `${agent.name}.toml`))}`),
+    ]).join(' ');
   }
 
   /**
@@ -1022,15 +1042,22 @@ async function listEntries(directory: string): Promise<string[]> {
   }
 }
 
-async function readInstalledManifest(manifestPath: string): Promise<{ skills: string[]; agents: string[] }> {
+interface InstalledManifest {
+  skills: string[];
+  agents: string[];
+  bundleHash?: string;
+}
+
+async function readInstalledManifest(manifestPath: string): Promise<InstalledManifest> {
   try {
     const manifest = decodeBoundary(JSON.parse(await fs.readFile(manifestPath, 'utf8')), boundary.object({
       skills: boundary.array(boundary.string),
       agents: boundary.array(boundary.string),
+      bundleHash: boundary.optional(boundary.string),
     }));
     // Names become path segments, so keep only plain folder and file names.
     const safe = (names: string[]) => names.filter(name => /^[\w-][\w.-]*$/.test(name));
-    return { skills: safe(manifest.skills), agents: safe(manifest.agents) };
+    return { skills: safe(manifest.skills), agents: safe(manifest.agents), bundleHash: manifest.bundleHash };
   } catch {
     return { skills: [], agents: [] };
   }
@@ -1066,6 +1093,25 @@ async function readSubagentDefinitions(directory: string): Promise<SubagentDefin
     });
   }
   return definitions;
+}
+
+/** Hashes every file's relative path and contents, in a stable order. */
+async function hashDirectory(root: string): Promise<string> {
+  const files: string[] = [];
+  const visit = async (relative: string): Promise<void> => {
+    const absolute = path.join(root, relative);
+    if (!(await fs.stat(absolute)).isDirectory()) {
+      files.push(relative);
+      return;
+    }
+    await Promise.all((await fs.readdir(absolute)).map(entry => visit(path.join(relative, entry))));
+  };
+  await visit('');
+  files.sort();
+  const contents = await Promise.all(files.map(file => fs.readFile(path.join(root, file))));
+  const hash = createHash('sha256');
+  files.forEach((file, index) => hash.update(`${file}\0`).update(contents[index]));
+  return hash.digest('hex');
 }
 
 // Plain reads and writes, which also work inside Electron's asar archive.
