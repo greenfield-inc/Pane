@@ -456,6 +456,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={onClose}
+      className="w-48"
     >
       <div role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`}>
         <PopoverButton role="menuitem" onClick={onPin}>

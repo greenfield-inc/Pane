@@ -698,18 +698,7 @@ function SessionRowContent({
         )}>
           {title}
         </span>
-        {showMetadata && (
-          <span className="flex flex-shrink-0 items-center gap-1.5 text-xs tabular-nums">
-            {hasDiff && (
-              <span className="flex items-center gap-1">
-                <span className="font-semibold text-status-success">+{adds}</span>
-                <span className="font-semibold text-status-error">-{dels}</span>
-              </span>
-            )}
-            {prNumber && <span className="text-text-tertiary">#{prNumber}</span>}
-            {session.worktreeOwnership === 'external' && <span className="text-text-tertiary">External</span>}
-          </span>
-        )}
+
       </div>
     );
   }
