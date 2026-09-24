@@ -4,8 +4,11 @@
 // Each run spawns Electron against an isolated PANE_DIR and reports ms from spawn:
 //   ready, services, window   main-process log lines
 //   navStart, fcp             renderer navigation start and first contentful paint
-//   paneRow                   the --open-pane row is in the sidebar (window is usable)
+//   reactCommit               React has rendered into #root
+//   paneRow                   the --open-pane row is in React's sidebar (window is usable)
 //   terminal                  after clicking that row, its xterm has mounted
+//   shellShiftPx              when index.html painted a static shell: the largest move of
+//                             any sidebar row between the shell and React's sidebar
 // Seed the PANE_DIR once (a repo plus a few panes). Pass --home <empty dir> to
 // keep the usage scanner from indexing your real ~/.claude while measuring.
 //
@@ -42,17 +45,22 @@ const MAIN_MARKS = {
 };
 
 // Epoch times, so they compare with the spawn clock.
-const paneRowSelector = JSON.stringify(`[data-testid="sidebar"] button[aria-label=${JSON.stringify(args['open-pane'])}]`);
+const paneRowSelector = JSON.stringify(`#root [data-testid="sidebar"] button[aria-label=${JSON.stringify(args['open-pane'])}]`);
 const PROBE = `(() => {
   const fcp = performance.getEntriesByName('first-contentful-paint')[0];
   const row = document.querySelector(${paneRowSelector});
   if (row && !window.__benchClicked) { window.__benchClicked = true; row.click(); }
+  const rowRects = (scope) => Object.fromEntries([...document.querySelectorAll(scope + ' [data-testid="sidebar"] button[aria-label]')]
+    .map((b) => { const r = b.getBoundingClientRect(); return [b.getAttribute('aria-label'), [r.x, r.y, r.width, r.height]]; }));
   return {
     now: performance.timeOrigin + performance.now(),
     navStart: performance.timeOrigin,
     fcp: fcp ? performance.timeOrigin + fcp.startTime : null,
+    reactCommit: document.getElementById('root').childElementCount > 0,
     paneRow: !!row,
     terminal: !!document.querySelector('.xterm-helper-textarea'),
+    shellRows: document.getElementById('static-shell') ? rowRects('#static-shell') : null,
+    reactRows: row ? rowRects('#root') : null,
   };
 })()`;
 
@@ -96,7 +104,10 @@ async function runOnce() {
   const env = { ...process.env, NODE_ENV: 'production', PANE_DIR: paneDir };
   if (args.home) env.HOME = args.home;
   const spawnedAt = Date.now();
-  const child = spawn(electron, ['.', `--remote-debugging-port=${port}`], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // PANE_DIR does not move Chromium's profile; without this the run would share
+  // the installed app's ~/Library/Application Support/Pane.
+  const userDataDir = path.join(paneDir, 'chromium-user-data');
+  const child = spawn(electron, ['.', `--user-data-dir=${userDataDir}`, `--remote-debugging-port=${port}`], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const t = {};
   let output = '';
   child.stdout.on('data', (chunk) => {
@@ -112,6 +123,7 @@ async function runOnce() {
   try {
     const deadline = Date.now() + 90_000;
     const client = cdp((await findPage(deadline)).webSocketDebuggerUrl);
+    let shellRows = null;
     await client.opened;
     while (Date.now() < deadline && t.terminal === undefined) {
       const probe = (await client.send('Runtime.evaluate', { expression: PROBE, returnByValue: true })).result?.result?.value;
@@ -119,7 +131,14 @@ async function runOnce() {
         const rel = (epoch) => Math.round(epoch - spawnedAt);
         t.navStart ??= rel(probe.navStart);
         if (probe.fcp !== null) t.fcp ??= rel(probe.fcp);
+        if (probe.reactCommit) t.reactCommit ??= rel(probe.now);
         if (probe.paneRow) t.paneRow ??= rel(probe.now);
+        shellRows ??= probe.shellRows;
+        if (shellRows && probe.reactRows && t.shellShiftPx === undefined) {
+          t.shellShiftPx = Math.max(0, ...Object.entries(probe.reactRows)
+            .filter(([label]) => shellRows[label])
+            .flatMap(([label, rect]) => rect.map((v, i) => Math.abs(v - shellRows[label][i]))));
+        }
         if (probe.terminal) t.terminal ??= rel(probe.now);
       }
       await sleep(8);
@@ -143,7 +162,7 @@ for (let i = 0; i < Number(args.runs); i += 1) {
 
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 console.log(`milestone   p50    p75   (ms from spawn, n=${runs.length})`);
-for (const key of [...Object.keys(MAIN_MARKS), 'navStart', 'fcp', 'paneRow', 'terminal']) {
+for (const key of [...Object.keys(MAIN_MARKS), 'navStart', 'fcp', 'reactCommit', 'paneRow', 'terminal', 'shellShiftPx']) {
   const vals = runs.map((r) => r[key]).filter((v) => v !== undefined).sort((a, b) => a - b);
   if (vals.length) console.log(`${key.padEnd(10)} ${String(pct(vals, 0.5)).padStart(5)}  ${String(pct(vals, 0.75)).padStart(5)}`);
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { removeStaticShell, startStaticShellSnapshots } from './utils/staticShell';
 import { useIPCEvents } from './hooks/useIPCEvents';
 import { useNotifications } from './hooks/useNotifications';
 import { useResizable } from './hooks/useResizable';
@@ -121,6 +122,14 @@ function App() {
   const sessions = useSessionStore(state => state.sessions);
   const isLoaded = useSessionStore(state => state.isLoaded);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
+
+  // Hand over from index.html's static shell once the real sidebar has rows.
+  useEffect(() => {
+    if (!isLoaded) return;
+    removeStaticShell();
+    return startStaticShellSnapshots();
+  }, [isLoaded]);
+
   const { fetchConfig, config: appConfig } = useConfigStore();
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();

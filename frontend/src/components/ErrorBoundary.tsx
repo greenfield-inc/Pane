@@ -1,6 +1,7 @@
 import React, { Component, ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Button } from './ui/Button';
+import { removeStaticShell } from '../utils/staticShell';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -24,6 +25,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    removeStaticShell();
     console.error('Error caught by boundary:', error, errorInfo);
     console.error('Component stack:', errorInfo.componentStack);
     this.setState({ errorInfo });

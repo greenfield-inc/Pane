@@ -4,7 +4,6 @@ import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserFallback } from './components/BrowserFallback';
-import './index.css';
 import './styles/markdown-preview.css';
 import './styles/notebook-preview.css';
 

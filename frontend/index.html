@@ -74,6 +74,22 @@
       if (localStorage.getItem('high-contrast') === 'true') document.body.classList.add('high-contrast');
     </script>
     <div id="root"></div>
+    <script>
+      // Paint last session's title bar and sidebar (src/utils/staticShell.ts) until React's own have loaded.
+      try {
+        const saved = JSON.parse(localStorage.getItem('pane.staticShell.v1') || 'null');
+        if (saved?.v === 1 && typeof saved.html === 'string' && window.electronAPI) {
+          const shell = document.createElement('div');
+          shell.id = 'static-shell';
+          shell.inert = true;
+          shell.style.cssText = 'position:fixed;inset:0;z-index:2147483647';
+          shell.innerHTML = saved.html;
+          document.body.appendChild(shell);
+          // Never outlive a renderer that failed to boot.
+          setTimeout(() => shell.remove(), 15000);
+        }
+      } catch {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,3 +1,5 @@
+// Linked from index.html's head, so the static shell paints styled before any JS runs.
+import './index.css';
 import { loadReactScan } from './devtools/loadReactScan';
 
 async function bootstrapDesktop(): Promise<void> {
