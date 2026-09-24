@@ -4,6 +4,13 @@ import { Terminal } from '@xterm/headless';
 
 const HEADLESS_SCROLLBACK_LINES = 2500;
 
+// A pane switch reads the same idle terminal's restore serialization several
+// times (mount, activation refresh, its delayed backstop), and serializing 2500
+// rows is the costliest step of each read. Keep each serialization until its emulator next changes,
+// for the most recently read few emulators only, so memory stays bounded.
+const RESTORE_CACHE_LIMIT = 4;
+const restoreCache = new Map<TerminalStateEmulator, { includeScrollback: boolean; serialized: string }>();
+
 /**
  * Maintains an xterm-compatible terminal model for state restoration and
  * local-control screen reads. PTY output parsing is asynchronous, so callers
@@ -69,6 +76,7 @@ export class TerminalStateEmulator {
   write(data: string): void {
     if (!data || this.disposed) return;
 
+    restoreCache.delete(this);
     this.pendingWrites += 1;
     this.terminal.write(data, () => {
       if (this.disposed) return;
@@ -87,7 +95,8 @@ export class TerminalStateEmulator {
   }
 
   resize(cols: number, rows: number): void {
-    if (this.disposed) return;
+    if (this.disposed || (cols === this.terminal.cols && rows === this.terminal.rows)) return;
+    restoreCache.delete(this);
     this.terminal.resize(cols, rows);
   }
 
@@ -104,11 +113,19 @@ export class TerminalStateEmulator {
    * byte and therefore contains no repaint duplication.
    */
   serializeForRestore(includeScrollback = false): string {
-    return this.disposed
-      ? this.finalSerializedBuffer
+    if (this.disposed) return this.finalSerializedBuffer;
+    const cached = restoreCache.get(this);
+    restoreCache.delete(this);
+    const serialized = cached?.includeScrollback === includeScrollback
+      ? cached.serialized
       : this.serializeAddon.serialize({
           scrollback: includeScrollback ? HEADLESS_SCROLLBACK_LINES : 0,
         }) + (this.win32InputMode ? '\x1b[?9001h' : '');
+    // Only a fully parsed buffer is safe to reuse; mid-parse reads are partial.
+    if (this.pendingWrites === 0) restoreCache.set(this, { includeScrollback, serialized });
+    const oldest = restoreCache.size > RESTORE_CACHE_LIMIT ? restoreCache.keys().next().value : undefined;
+    if (oldest) restoreCache.delete(oldest);
+    return serialized;
   }
 
   /**
@@ -188,6 +205,7 @@ export class TerminalStateEmulator {
   }
 
   clearScrollback(): void {
+    restoreCache.delete(this);
     this.terminal.clear();
   }
 
@@ -198,6 +216,7 @@ export class TerminalStateEmulator {
     // awaiting it, so the save usually reads this snapshot after disposal — a
     // viewport-only capture would silently drop the session's history.
     this.finalSerializedBuffer = this.serializeForRestore(true);
+    restoreCache.delete(this);
     this.finalScreenText = this.getScreenText();
     this.finalScrollbackText = this.getScrollbackText();
     this.disposed = true;

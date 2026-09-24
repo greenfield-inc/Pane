@@ -86,6 +86,26 @@ describe('TerminalStateEmulator', () => {
     emulator.dispose();
   });
 
+  it('keeps restore serialization current across output, resizes, and clears', async () => {
+    const emulator = new TerminalStateEmulator(40, 2);
+    emulator.write('line-1\r\nline-2\r\nline-3');
+    await emulator.waitForIdle();
+    expect(emulator.serializeForRestore()).not.toContain('line-1');
+
+    // Growing the viewport pulls scrollback rows back into view.
+    emulator.resize(40, 5);
+    expect(emulator.serializeForRestore()).toContain('line-1');
+
+    expect(emulator.serializeForRestore(true)).not.toContain('line-4');
+    emulator.write('\r\nline-4');
+    await emulator.waitForIdle();
+    expect(emulator.serializeForRestore(true)).toContain('line-4');
+
+    emulator.clearScrollback();
+    expect(emulator.serializeForRestore(true)).not.toContain('line-1');
+    emulator.dispose();
+  });
+
   it('retains scrollback history in the post-dispose serialization snapshot', async () => {
     const emulator = new TerminalStateEmulator(40, 3);
     // 10 lines through a 3-row viewport: the early lines live only in scrollback
