@@ -1277,11 +1277,11 @@ if (launchRemoteSetup) {
     console.error('[Main] Failed to track app lifecycle events:', error);
   }
 
-  // Configure auto-updater
-  setupAutoUpdater(() => mainWindow);
-
-  // Check for updates after window is created
+  // Check for updates after window is created. The auto-updater is set up
+  // here too: loading electron-updater blocks the main thread, which would
+  // hold up the renderer's first requests if it ran as the window opens.
   setTimeout(async () => {
+    setupAutoUpdater(() => mainWindow);
     console.log('[Main] Performing startup version check...');
     await versionChecker.checkOnStartup();
   }, 1000); // Small delay to ensure window is fully ready

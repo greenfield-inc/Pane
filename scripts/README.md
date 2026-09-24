@@ -2,6 +2,23 @@
 
 This directory contains build and maintenance scripts for the Pane application.
 
+## benchmark-cold-start.mjs
+
+Launches the built app repeatedly and reports p50/p75 of wall time from spawn
+to each startup step (main JS running, Electron ready, services up, index.html
+loaded, sidebar on screen) and the main thread's CPU time to ready and to
+index.html loaded. Pass several builds of `main/dist` to compare them; rounds
+alternate between them.
+
+```bash
+pnpm build:frontend && pnpm build:main   # native modules built for Electron
+cp -R main/dist main/dist-before          # or build another commit there
+node scripts/benchmark-cold-start.mjs 20 before=main/dist-before after=main/dist
+```
+
+Uses an isolated Pane directory, profile and HOME under
+`~/.pane_bench_cold_start.noindex` (`PANE_BENCH_DIR`) and CDP port 4160 (`PORT`).
+
 ## benchmark-session-output.js
 
 Compares loading terminal history just to count it with an indexed SQLite
