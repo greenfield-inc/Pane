@@ -145,6 +145,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestratio
   );
   const tabStrip = (
     <PanelTabStrip panels={tabs} activePanelId={active.id} idNamespace={`session-${sessionId}`}
+      alwaysShowClose
       onPanelSelect={panel => usePanelStore.getState().setActivePanel(sessionId, panel.id)}
       onPanelClose={panel => { void closePanel(panel); }} />
   );

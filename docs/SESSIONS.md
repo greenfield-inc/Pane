@@ -109,7 +109,9 @@ context menus use compact widths.
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
 Panes and activity. Files browses the Session workspace. Changes summarizes
 linked worktrees and opens a Pane for detailed review. The upper-right sidebar
-button shows or hides the selected tab.
+button shows or hides the selected tab. Session file clicks open editor tabs
+beside the agent tab in the title bar. These tabs can be selected and closed
+directly, and reopening a file restores its tab.
 
 Right-click a Session to archive it. Archiving hides the chat from the active
 Sessions list while retaining its identity, conversation history, and Pane
