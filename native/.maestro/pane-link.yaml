@@ -1,0 +1,59 @@
+# pane://pane/<id>?host=<url> opens a pane on a saved host, switching hosts
+# first, and refuses a host this phone has not paired with.
+# Needs CONNECTION_CODE (host A), SECOND_CODE (host B), and PANE_ID, PANE_NAME, HOST_URL on host A.
+appId: com.dcouple.pane.mobile
+env:
+  METRO_PORT: ${METRO_PORT || "8137"}
+---
+- runFlow: subflows/signed-in.yaml
+# Pair host B too; it becomes the active host.
+- tapOn: "Settings"
+- tapOn:
+    id: settings-add-host
+- tapOn:
+    id: connect-code-input
+- inputText: ${SECOND_CODE}
+- hideKeyboard
+- tapOn:
+    id: connect-submit
+- extendedWaitUntil:
+    notVisible:
+      id: connect-code-input
+    timeout: 30000
+- openLink: pane://pane/${PANE_ID}?host=${HOST_URL}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 30000
+- assertVisible: ".*${PANE_ID}.*"
+- takeScreenshot: screenshots/pane-link-opened
+# Back lands on host A's pane list, not on a screen left over from host B.
+- swipe:
+    start: 2%, 50%
+    end: 90%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 15000
+- assertVisible: "${PANE_NAME}.*"
+- openLink: pane://pane/some-pane?host=https%3A%2F%2Funknown.example
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible:
+      id: open-unknown-host
+    timeout: 15000
+- takeScreenshot: screenshots/pane-link-unknown-host
+- tapOn:
+    id: open-dismiss
+- assertNotVisible:
+    id: open-unknown-host

@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
+import { NotificationTapRouter, PushRegistration } from '@/features/notifications/NotificationRouting';
 import { useTheme } from '@/theme';
 
 void SplashScreen.preventAutoHideAsync();
@@ -46,10 +47,12 @@ export default function RootLayout() {
           {activeHost ? (
             <DaemonProvider key={activeHost.id} profile={activeHost}>
               <RootStack signedIn />
+              <PushRegistration />
             </DaemonProvider>
           ) : (
             <RootStack signedIn={false} />
           )}
+          <NotificationTapRouter />
         </ThemeProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>
@@ -78,6 +81,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
       </Stack.Protected>
       <Stack.Screen name="scan" options={{ presentation: 'fullScreenModal', headerShown: false }} />
       <Stack.Screen name="pair" options={{ presentation: 'modal', title: 'Connect to host' }} />
+      {/* Notification taps and pane links; works signed in or out. */}
+      <Stack.Screen name="open" options={{ presentation: 'transparentModal', animation: 'fade', headerShown: false }} />
     </Stack>
   );
 }
