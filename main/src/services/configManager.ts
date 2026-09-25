@@ -50,7 +50,7 @@ export class ConfigManager extends EventEmitter {
       gitRepoPath: defaultGitPath || '',
       usePtyHost: process.platform === 'win32',
       verbose: false,
-      experimentalSessionProgress: true,
+      experimentalSessionProgress: false,
       anthropicApiKey: undefined,
       falApiKey: undefined,
       openRouterApiKey: undefined,

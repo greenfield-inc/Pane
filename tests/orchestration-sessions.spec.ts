@@ -149,7 +149,8 @@ async function installSessionsFixture(
   fixtureOptions: SessionFixtureOptions = {},
 ): Promise<void> {
   await installElectronApiMock(page, {
-    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', ...fixtureOptions.initialConfig },
+    // The progress view is off by default; these fixtures cover it switched on.
+    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', experimentalSessionProgress: true, ...fixtureOptions.initialConfig },
     initialProjects: [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
     initialSessions: paneSessions,
   });
