@@ -9,6 +9,12 @@ import { vi } from 'vitest';
 // directory so a test run can never touch the developer's live ~/.pane.
 process.env.PANE_DIR = mkdtempSync(join(tmpdir(), 'pane-vitest-'));
 
+// Voice and model provider keys fall back to these variables when config has
+// none, so a key in the developer's shell would change what tests observe.
+for (const name of ['OPENROUTER_API_KEY', 'DEEPGRAM_API_KEY', 'FAL_KEY']) {
+  delete process.env[name];
+}
+
 export const app = {
   getPath: vi.fn(() => '/mock/path'),
   getName: vi.fn(() => 'Pane'),
