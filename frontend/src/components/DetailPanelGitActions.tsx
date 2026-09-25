@@ -28,7 +28,7 @@ type ActionRow =
   | { type: 'single'; action: GitBranchAction }
   | { type: 'pair'; left: GitBranchAction; right: GitBranchAction };
 
-const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
+const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0 focus-visible:!ring-2';
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -94,7 +94,7 @@ function ActionPair({
   const isRebaseMerge = left.id === 'rebase-from-main';
   const mainBranchName = (gitCommands?.comparisonBaseBranch || 'main').split('/').pop() || 'main';
   const mainBranch = mainBranchName.length > 12 ? `${mainBranchName.slice(0, 12)}…` : mainBranchName;
-  const pairButtonClass = 'flex-1 !min-h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
+  const pairButtonClass = 'flex-1 !min-h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0 focus-visible:!ring-2';
   const pairIconClass = 'mr-1.5 h-3.5 w-3.5 flex-shrink-0';
   const branchName = gitCommands?.currentBranch?.trim() || 'branch';
   const shortBranch = branchName.length > 6 ? `${branchName.slice(0, 6)}…` : branchName;

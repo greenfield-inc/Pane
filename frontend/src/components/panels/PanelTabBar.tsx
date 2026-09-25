@@ -25,6 +25,9 @@ import { isMac } from '../../utils/platformUtils';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
+// Trailing title controls: 116px of app controls past the end of the page's
+// share of the strip (the window edge on macOS, the caption buttons elsewhere).
+const TITLE_CONTROLS_RESERVE = 'calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 116px)';
 const ADD_TOOL_MENU_VIEWPORT_MARGIN = 8;
 const MAX_CUSTOM_COMMAND_LABEL_LENGTH = 18;
 
@@ -524,9 +527,14 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls")}>
       {/* Flex container */}
       <div
-        className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2")}
-        // Beside the collapsed rail, keep tabs clear of the window controls and sidebar toggle.
-        style={trailingSlot && sidebarCollapsed ? { paddingLeft: titleStripContentLeft(COLLAPSED_SIDEBAR_PX, isMac()) - COLLAPSED_SIDEBAR_PX } : undefined}
+        className={cn("relative flex min-h-[38px] items-center", !trailingSlot && "pr-2")}
+        // Leave room for the title bar controls on both sides: beside the collapsed
+        // rail on the left, and the overlay's controls (plus Windows/Linux caption
+        // buttons) on the right.
+        style={trailingSlot ? {
+          paddingLeft: sidebarCollapsed ? titleStripContentLeft(COLLAPSED_SIDEBAR_PX, isMac()) - COLLAPSED_SIDEBAR_PX : undefined,
+          paddingRight: TITLE_CONTROLS_RESERVE,
+        } : undefined}
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
@@ -809,6 +817,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             );
           })()}
         </div>
+
+        {trailingSlot && <div aria-hidden="true" className="pane-drag-area min-w-0 flex-1 self-stretch" />}
 
         {sidebarCollapsed && trailingSlot && session && <PaneStatusPills sessionId={session.id} />}
 

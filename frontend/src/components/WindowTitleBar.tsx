@@ -74,8 +74,10 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
       {activeView === 'pane-chat' && (
         <div
           ref={setSessionTabsSlot}
-          className="pointer-events-auto absolute inset-y-0 flex min-w-0 items-center overflow-hidden transition-[left] duration-reveal ease-out-strong"
-          style={{ ...NO_DRAG, left: sessionTabsLeft, right: sessionTabsRight }}
+          // The slot itself drags; its tabs are no-drag (index.css), so nothing
+          // later in the page has to draw a drag strip under them.
+          className="pane-drag-area pointer-events-auto absolute inset-y-0 flex min-w-0 items-center overflow-hidden transition-[left] duration-reveal ease-out-strong"
+          style={{ left: sessionTabsLeft, right: sessionTabsRight }}
           data-testid="window-title-bar-session-tabs"
         />
       )}

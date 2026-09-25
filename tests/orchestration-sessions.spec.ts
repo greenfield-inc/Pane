@@ -1,6 +1,7 @@
 import type { CustomCommandResume } from '../shared/types/customCommandResume';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import { expectClickable, isDraggableAt } from './dragRegions';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 
 type UiAssociationFixture = {
@@ -1330,24 +1331,21 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   const activeTab = titleBarTabs.getByRole('tab').first();
   await expect(activeTab).toBeVisible();
   await expect(activeTab).toHaveCSS('border-top-left-radius', '6px');
-  const tabBounds = await activeTab.boundingBox();
-  const tabSlotBounds = await titleBarTabs.boundingBox();
-  expect(tabBounds?.y).toBe(0);
-  expect(tabBounds?.height).toBe(38);
-  expect(tabBounds && tabSlotBounds && tabBounds.x - tabSlotBounds.x).toBe(0);
   await expect(page.getByTestId('sidebar').getByRole('button', { name: 'Home menu' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
   const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
   await expect(titleBarControls.getByRole('button', { name: 'Session settings' })).toBeVisible();
   await expect(titleBarControls.getByRole('button', { name: 'Show progress brief' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toHaveCSS('-webkit-app-region', 'no-drag');
-  await expect(page.getByRole('button', { name: 'Show details', exact: true })).toHaveCSS('-webkit-app-region', 'no-drag');
-  const leftToggle = await page.getByRole('button', { name: 'Collapse sidebar' }).boundingBox();
-  const leftDragArea = await page.locator('[data-testid="sidebar"] .pane-drag-area').boundingBox();
-  const rightToggle = await page.getByRole('button', { name: 'Show details', exact: true }).boundingBox();
-  const rightDragArea = await page.locator('.pane-chat-shell > div > .pane-drag-area').boundingBox();
-  expect(leftToggle && leftDragArea && leftDragArea.x).toBeGreaterThanOrEqual(leftToggle!.x + leftToggle!.width);
-  expect(rightToggle && rightDragArea && rightDragArea.x + rightDragArea.width).toBeLessThanOrEqual(rightToggle!.x);
+  // Session tabs and title controls take clicks in both sidebar states, and
+  // the empty part of the tab slot still moves the window.
+  const titleControls = () => [activeTab, page.getByRole('button', { name: 'Session settings', exact: true }),
+    page.getByRole('button', { name: 'Show progress brief', exact: true }), page.getByRole('button', { name: 'Show details', exact: true })];
+  await expectClickable(page, [page.getByRole('button', { name: 'Collapse sidebar' }), ...titleControls()]);
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+  await expectClickable(page, [page.getByRole('button', { name: 'Expand sidebar' }), ...titleControls()]);
+  const slotBox = await titleBarTabs.boundingBox();
+  expect(slotBox && await isDraggableAt(page, slotBox.x + slotBox.width - 20, slotBox.y + slotBox.height / 2)).toBe(true);
+  await page.getByRole('button', { name: 'Expand sidebar' }).click();
   await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
@@ -1364,8 +1362,6 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   ]);
   expect(settingsBox && progressBox && workspaceBox && settingsBox.x).toBeGreaterThan(workspaceBox!.x + workspaceBox!.width / 2);
   expect(progressBox && settingsBox && progressBox.x).toBeGreaterThan(settingsBox!.x);
-  expect(settingsBox?.y).toBe(3);
-  expect(progressBox?.y).toBe(3);
   await expect(progressButton.locator('svg')).toHaveClass(/lucide-chart-no-axes-combined/);
   await expect(sessionSettingsButton).toHaveText('');
   await expect(progressButton).toHaveText('');

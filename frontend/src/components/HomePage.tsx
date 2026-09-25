@@ -4,6 +4,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useConfigStore } from '../stores/configStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
+import { COLLAPSED_SIDEBAR_PX, titleStripContentLeft } from '../utils/titleBarOverlay';
+import { isMac } from '../utils/platformUtils';
 import { API } from '../utils/api';
 import { Dropdown } from './ui/Dropdown';
 import { Badge } from './ui/Badge';
@@ -231,6 +233,7 @@ export function HomePage() {
   const { theme, appearance, activeSystemSlot, setTheme } = useTheme();
   const homeThemeOptions = themeOptionsForSlot(appearance.appearanceMode === 'fixed' ? 'any' : activeSystemSlot ?? 'light');
   const { config, updateConfig } = useConfigStore();
+  const sidebarCollapsed = useNavigationStore(state => state.sidebarCollapsed);
   const sessions = useSessionStore(state => state.sessions);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
@@ -325,7 +328,9 @@ export function HomePage() {
 
   return (
     <div className="relative flex-1 overflow-y-auto bg-bg-primary px-8 py-10">
-      <div aria-hidden="true" data-testid="home-drag-region" className="pane-drag-area absolute inset-x-0 top-0 z-10 h-[38px]" />
+      {/* Starts past the title controls beside the collapsed rail so they stay clickable. */}
+      <div aria-hidden="true" data-testid="home-drag-region" className="pane-drag-area absolute right-0 top-0 z-10 h-[38px]"
+        style={{ left: sidebarCollapsed ? titleStripContentLeft(COLLAPSED_SIDEBAR_PX, isMac()) - COLLAPSED_SIDEBAR_PX : 0 }} />
       <div className="flex min-h-full items-center">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
           <DiscordBanner />
