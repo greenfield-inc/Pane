@@ -209,6 +209,8 @@ const orchestrationLinkSchema = boundary.object({
 const orchestrationSessionCreateSchema = boundary.object({
   name: boundary.nonEmptyString,
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   decisions: boundary.optional(boundary.array(boundary.string)),
@@ -222,6 +224,8 @@ const orchestrationSessionUpdateSchema = boundary.object({
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   decisions: boundary.optional(boundary.array(boundary.string)),

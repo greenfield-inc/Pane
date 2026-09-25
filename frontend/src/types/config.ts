@@ -137,6 +137,10 @@ export interface AppConfig {
   analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  experimentalSessionProgress?: boolean;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -195,6 +199,10 @@ export interface UpdateConfigRequest {
   usePtyHost?: boolean;
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
+  experimentalSessionProgress?: boolean;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   terminalShortcuts?: TerminalShortcut[];
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;

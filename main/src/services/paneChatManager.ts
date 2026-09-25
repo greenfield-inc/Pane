@@ -1,6 +1,6 @@
+import { prepareSessionWorkspace, sessionWorkspacePath } from './sessionWorkspace';
 import { randomUUID } from 'crypto';
 import { withLock } from '../utils/mutex';
-import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { terminalPanelManager } from './terminalPanelManager';
 import type { ConfigManager } from './configManager';
@@ -20,7 +20,7 @@ import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunc
 import { isCliAgentType } from './agents/agentIdentity';
 
 const PANE_CHAT_TITLE = 'Pane Chat';
-const PANE_CHAT_BOOTSTRAP_VERSION = 9;
+const PANE_CHAT_BOOTSTRAP_VERSION = 10;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidUuid(value: string | undefined): value is string {
@@ -53,9 +53,9 @@ export class PaneChatManager {
   private async getOrCreateForAgent(agent: PaneChatAgent): Promise<PaneChatState<Session>> {
     this.assertAgentSupported(agent);
     const guidePath = await this.ensureGuidePath();
-    const cwd = getAppDirectory();
+    const cwd = prepareSessionWorkspace('legacy-pane-chat', this.configManager.getConfig().defaultSessionProfile);
     const session = this.ensureSession(cwd);
-    const panel = await this.ensurePanel(session.id, agent, guidePath);
+    const panel = await this.ensurePanel(session.id, agent);
     await panelManager.setActivePanel(session.id, panel.id);
     const resolvedAgent = this.resolvePanelAgent(panel) ?? agent;
 
@@ -109,7 +109,7 @@ export class PaneChatManager {
     return this.sessionManager.getSession(session.id) ?? session;
   }
 
-  private async ensurePanel(sessionId: string, agent: PaneChatAgent, guidePath: string): Promise<ToolPanel> {
+  private async ensurePanel(sessionId: string, agent: PaneChatAgent): Promise<ToolPanel> {
     const panelId = getPaneChatPanelId(agent);
     const existingPanel = panelManager.getPanel(panelId);
     if (existingPanel) {
@@ -122,7 +122,7 @@ export class PaneChatManager {
       }
 
       if (!isInitialized || needsRepair) {
-        await this.updatePanelLaunchState(existingPanel, agent, guidePath, isInitialized && !needsAgentSwitch);
+        await this.updatePanelLaunchState(existingPanel, agent, isInitialized && !needsAgentSwitch);
       }
       return panelManager.getPanel(panelId) ?? existingPanel;
     }
@@ -134,12 +134,12 @@ export class PaneChatManager {
       title: agent === 'claude'
         ? PANE_CHAT_TITLE
         : `${PANE_CHAT_TITLE} - ${RUNPANE_CONTRACT.agentTemplates[agent].title}`,
-      initialState: this.buildTerminalState(agent, guidePath),
+      initialState: this.buildTerminalState(agent),
       metadata: { permanent: true },
     });
   }
 
-  private async updatePanelLaunchState(panel: ToolPanel, agent: PaneChatAgent, guidePath: string, wasInitialized: boolean): Promise<void> {
+  private async updatePanelLaunchState(panel: ToolPanel, agent: PaneChatAgent, wasInitialized: boolean): Promise<void> {
     // SAFETY: Pane Chat owns this terminal panel and writes its custom state exclusively as TerminalPanelState.
     const previousCustomState = panel.state.customState as TerminalPanelState | undefined;
     const shouldResetClaudeLaunch = agent === 'claude' && !isValidUuid(previousCustomState?.agentSessionId) && !wasInitialized;
@@ -148,7 +148,7 @@ export class PaneChatManager {
     // never clear its durable scrollback, serialized buffer, or captured agent id.
     const nextCustomState: TerminalPanelState = {
       ...previousCustomState,
-      ...this.buildTerminalState(agent, guidePath, previousCustomState, shouldResetClaudeLaunch),
+      ...this.buildTerminalState(agent, previousCustomState, shouldResetClaudeLaunch),
       initialInputSentAt: wasInitialized ? previousCustomState?.initialInputSentAt : undefined,
       initialInputError: wasInitialized ? previousCustomState?.initialInputError : undefined,
     };
@@ -167,7 +167,6 @@ export class PaneChatManager {
 
   private buildTerminalState(
     agent: PaneChatAgent,
-    guidePath: string,
     previousState?: TerminalPanelState,
     forceNewAgentSession = false,
   ): TerminalPanelState {
@@ -175,7 +174,10 @@ export class PaneChatManager {
 
     const panelState: TerminalPanelState = {
       initialCommand: this.skillCacheManager?.launchCommand(agent) ?? RUNPANE_CONTRACT.agentTemplates[agent].command,
-      initialInput: this.buildInitialInput(agent, guidePath),
+      initialInput: undefined,
+      orchestrationSessionId: 'legacy-pane-chat',
+      orchestrationWorkspace: sessionWorkspacePath('legacy-pane-chat'),
+      orchestrationProfile: this.configManager.getConfig().defaultSessionProfile,
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',
       initialInputDeliveryVersion: PANE_CHAT_BOOTSTRAP_VERSION,
@@ -185,13 +187,6 @@ export class PaneChatManager {
     };
     if (agentSessionId) panelState.agentSessionId = agentSessionId;
     return panelState;
-  }
-
-  private buildInitialInput(agent: PaneChatAgent, guidePath: string): string {
-    if (agent === 'cursor') {
-      return `Read ${guidePath} and initialize yourself as Pane Chat.`;
-    }
-    return 'Use the pane-orchestrator skill and initialize yourself as Pane Chat.';
   }
 
   private resolveAgentSessionId(agent: PaneChatAgent, previousState?: TerminalPanelState, forceNewAgentSession = false): string | undefined {
@@ -208,10 +203,7 @@ export class PaneChatManager {
   private needsLaunchStateRepair(panel: ToolPanel, agent: PaneChatAgent): boolean {
     // SAFETY: Pane Chat owns this terminal panel and writes its custom state exclusively as TerminalPanelState.
     const customState = panel.state.customState as TerminalPanelState | undefined;
-    return this.needsBootstrapRefresh(customState) || (agent === 'claude' && (
-      !isValidUuid(customState?.agentSessionId) ||
-      (customState?.hasClaudeSessionId === true && !customState.initialInputSentAt)
-    ));
+    return this.needsBootstrapRefresh(customState) || (agent === 'claude' && !isValidUuid(customState?.agentSessionId));
   }
 
   private needsBootstrapRefresh(customState: TerminalPanelState | undefined): boolean {

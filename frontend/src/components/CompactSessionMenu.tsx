@@ -1,4 +1,6 @@
-import { Archive, Pin } from 'lucide-react';
+import { useState } from 'react';
+import { PromotePaneDialog } from './PromotePaneDialog';
+import { Archive, Pin, ArrowUpRight } from 'lucide-react';
 import type { Session } from '../types/session';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 
@@ -17,7 +19,8 @@ interface CompactSessionMenuProps {
 
 /** Right-click actions for a pane in the collapsed sidebar rail. */
 export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }: CompactSessionMenuProps) {
-  return (
+  const [promoting, setPromoting] = useState<Session | null>(null);
+  return (<>
     <TerminalPopover
       visible={menu !== null}
       x={menu?.x ?? 0}
@@ -31,6 +34,9 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
             {menu?.session.isFavorite ? 'Unpin' : 'Pin'}
           </span>
         </PopoverButton>
+        <PopoverButton role="menuitem" onClick={() => { if (menu) setPromoting(menu.session); onClose(); }}>
+          <span className="flex items-center gap-2"><ArrowUpRight className="h-4 w-4" />Move chat to Session…</span>
+        </PopoverButton>
         {/* Archive sits last, past the divider: the menu opens under the cursor,
             so the top slot is the one clicked by reflex. */}
         <div className="my-1 border-t border-border-primary" />
@@ -42,5 +48,6 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
         </PopoverButton>
       </div>
     </TerminalPopover>
-  );
+    {promoting && <PromotePaneDialog key={promoting.id} paneId={promoting.id} paneName={promoting.name} onClose={() => setPromoting(null)} />}
+  </>);
 }
