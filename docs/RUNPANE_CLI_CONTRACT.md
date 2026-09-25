@@ -198,6 +198,95 @@ When running from WSL while Pane is installed on Windows, the Linux wrapper may 
 
 `sessions overview` read a live status, activity, git, and pull request overview for a named Session.
 
+## Command reference
+
+Every command and its options, from `commands` in `contracts/runpane/contract.json`.
+
+- `help`: Show help for runpane or a specific command.
+- `setup`: Open the guided setup wizard for install, remote host setup, update, and diagnostics.
+- `install`: Install Pane on this machine or configure this machine as a remote daemon host.
+- `update`: Update the Pane desktop app using the same artifact path as install client.
+- `version`: Print the runpane wrapper version without contacting, launching, or focusing Pane.
+- `doctor`: Run platform, release, installed Pane, daemon reachability, and remote setup diagnostics.
+- `daemon repair`: Repair and restart the managed remote-daemon launcher without changing pairing or tunnel configuration.
+- `agents doctor`: Diagnose whether a built-in agent command is available in a Pane repository environment.
+- `agent-context`: Print token-efficient Pane command context for coding agents.
+- `repos list`: List repositories saved in the running Pane app.
+- `repos add`: Register an existing git repository with the running Pane app.
+- `panes list`: List Pane sessions in a saved repository.
+- `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
+- `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
+- `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
+- `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
+- `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
+- `panes archive`: Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.
+- `panes pin`: Declaratively pin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
+- `panes unpin`: Declaratively unpin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
+- `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
+- `panes focus`: Raise the Pane window and select a Pane (and optionally one of its panels) on explicit user request.
+- `panels create`: Create a terminal-backed tool panel inside an existing Pane session.
+- `panels list`: List tool panels inside a Pane session.
+- `panels output`: Read recent terminal output from a panel.
+- `panels screen`: Read a compact current-screen view from a terminal panel.
+- `panels input`: Send input bytes to a terminal panel.
+- `panels submit`: Send and submit text to a terminal panel, including idle agent composers.
+- `panels submit-composer`: Submit an agent composer using the panel-appropriate key sequence.
+- `panels wait`: Wait for a terminal panel to initialize, become ready/idle, or contain text.
+- `sessions list`: List durable named orchestration Sessions.
+- `sessions create`: Create a durable named orchestration Session and its hidden terminal owner.
+- `sessions get`: Read one durable named orchestration Session.
+- `sessions update`: Update a Session overview from structured JSON.
+- `sessions set-agent`: Switch the durable terminal agent for a named Session.
+- `sessions associate`: Associate a user-visible Pane with a named Session.
+- `sessions detach`: Detach a Pane from a named Session.
+- `sessions overview`: Read a live status, activity, git, and pull request overview for a named Session.
+
+```bash
+runpane help [command]
+runpane setup
+runpane install [client|daemon] [options]
+runpane update [options]
+runpane version
+runpane --version
+runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <format>] [--verbose]
+runpane doctor --report [--title <text>] --body-file <path|-> [--yes] [--json]
+runpane daemon repair [--pane-dir <path>] [--pane-path <path>] [--yes] [--json]
+runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]
+runpane agent-context [--json]
+runpane agent-context --command <command> [--json]
+runpane repos list [--json] [--pane-dir <path>]
+runpane repos add --path <path> [--name <name>] [--json] [--yes]
+runpane panes list [--repo <selector>] [--json]
+runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]
+runpane workspace state [--repo <selector>] [--json]
+runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>] [--include-shells] [--self-test] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json]
+runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [options]
+runpane panes create --from-json <path|-> [--yes] [--json]
+runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch] [--no-pinned] [--dry-run] [--yes] [--json]
+runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes [--json]
+runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]
+runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]
+runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]
+runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json]
+runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] --yes [--json]
+runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--focus|--no-focus] --yes [--json]
+runpane panels list --pane <pane-id> [--json]
+runpane panels output --panel <panel-id> [--limit <count>] [--json]
+runpane panels screen --panel <panel-id> [--limit <count>] [--json]
+runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]
+runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]
+runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]
+runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json]
+runpane sessions list [--json] [--pane-dir <path>]
+runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]
+runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
+runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
+runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
+```
+
 ## Agent Context
 
 Pane lets a developer manage saved base repositories, user-visible Panes (Pane sessions) for feature/PR work, and terminal-backed panel tabs. A Pane is a visible workspace that normally maps to one Pane-managed git worktree and branch; a panel is a terminal tab inside one Pane and shares that Pane's worktree; an agent is a CLI process running inside a panel.
@@ -274,7 +363,7 @@ Do not hardcode a specific assistant brand in workflow guidance. Use the Pane ag
 
 Start with `runpane doctor --json` before taking Pane actions. Use it to understand wrapper/runtime details, daemon reachability, and the next safe commands.
 
-In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`.
+In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`.
 
 Use `runpane agent-context --json` for full Pane CLI context. Use `runpane agent-context --command "watch" --json` or another command name for detailed schema only when needed.
 
@@ -382,7 +471,7 @@ These flags are consumed by local daemon-control commands:
 --report
 ```
 
-`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22, for example `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.
+`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.
 
 ## Daemon Passthrough Flags
 

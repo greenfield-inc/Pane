@@ -371,6 +371,56 @@ def run_panes_create(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def build_pane_adopt_request(parsed: Any) -> Dict[str, Any]:
+    if parsed.from_json:
+        payload = json.loads(strip_utf8_bom(read_input_source(parsed.from_json)))
+        if not isinstance(payload, dict):
+            raise ValueError("--from-json payload must be an object.")
+        if not payload.get("panes"):
+            raise ValueError("--from-json payload must include at least one pane.")
+        return payload
+
+    if not parsed.repo or not parsed.repo_path or not parsed.name:
+        raise ValueError("runpane panes adopt requires --repo, --path, and --name.")
+    tool = build_tool_spec(parsed, "panes adopt")
+    pinned_override = resolve_pinned_override(parsed)
+    return {
+        "repo": parsed.repo,
+        "panes": [{
+            "path": parsed.repo_path,
+            "name": parsed.name,
+            **optional_value("baseBranch", parsed.base_branch),
+            **optional_value("folder", parsed.folder),
+            "pinned": True if pinned_override is None else pinned_override,
+            "tool": tool,
+            **optional_value("resume", parsed.resume),
+            **optional_value("launch", True if parsed.launch else None),
+        }],
+        **optional_value("dryRun", True if parsed.dry_run else None),
+        **optional_value("noFocus", True if parsed.no_focus else None),
+        **optional_value("focus", True if parsed.focus else None),
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+    }
+
+
+def run_panes_adopt(parsed: Any) -> int:
+    request = build_pane_adopt_request(parsed)
+    confirm_pane_adopt(parsed, request)
+    result = invoke_daemon(
+        "runpane:panes:adopt",
+        [request],
+        pane_dir=parsed.pane_dir,
+        timeout_ms=120_000,
+    )
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print_pane_create_result(result)
+
+    return 0 if result.get("ok") else 1
+
+
 def run_panes_archive(parsed: Any) -> int:
     if not parsed.pane_id:
         raise ValueError("runpane panes archive requires --pane.")
@@ -821,6 +871,18 @@ def confirm_pane_create(parsed: Any, request: Dict[str, Any]) -> None:
 
     count = len(request.get("panes", []))
     answer = input(f"Create {count} Pane pane{'s' if count != 1 else ''}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def confirm_pane_adopt(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.dry_run or parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panes adopt mutates Pane state. Rerun with --yes in non-interactive shells.")
+
+    count = len(request.get("panes", []))
+    answer = input(f"Adopt {count} existing worktree{'s' if count != 1 else ''}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

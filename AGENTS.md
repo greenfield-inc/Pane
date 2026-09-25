@@ -78,7 +78,7 @@ Do not hardcode a specific assistant brand in workflow guidance. Use the Pane ag
 
 Start with `runpane doctor --json` before taking Pane actions. Use it to understand wrapper/runtime details, daemon reachability, and the next safe commands.
 
-In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`.
+In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`.
 
 Use `runpane agent-context --json` for full Pane CLI context. Use `runpane agent-context --command "watch" --json` or another command name for detailed schema only when needed.
 
