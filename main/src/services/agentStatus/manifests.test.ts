@@ -57,6 +57,49 @@ describe('CLAUDE_MANIFEST', () => {
     expect(r.matchedRuleId).toBe('live_prompt_box');
   });
 
+  // Real Claude Code 2.1.282 screens from launching in an untrusted folder.
+  it('classifies the folder-trust prompt as blocked', () => {
+    const s = [
+      '',
+      '─'.repeat(100),
+      ' Accessing workspace:',
+      '',
+      ' /tmp/untrusted-repo',
+      '',
+      " Quick safety check: Is this a project you created or one you trust? (Like your own code, a",
+      " well-known open source project, or work from your team). If not, take a moment to review what's in",
+      ' this folder first.',
+      '',
+      " Claude Code'll be able to read, edit, and execute files here.",
+      '',
+      ' Security guide',
+      '',
+      ' ❯ No, exit',
+    '   Yes, I trust this folder',
+      '',
+      ' Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.visibleBlocker).toBe(true);
+  });
+
+  it('classifies the fresh prompt box after trusting the folder as idle', () => {
+    const s = [
+      ' ▐▛███▛█   Claude Code v2.1.282',
+      '▝▜██████▀  Opus 5.5 (1M context) · Claude Max',
+      ' ▝▝   ▝▝   /tmp/untrusted-repo',
+      '',
+      '                                                                                ◐ medium · /effort',
+      '─'.repeat(100),
+      '❯ Try "how do I log an error?"',
+      '─'.repeat(100),
+      '  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents',
+    ].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s, '✳ Claude Code'));
+    expect(r.state).toBe('idle');
+  });
+
   it('detects working from a braille-spinner OSC title', () => {
     const r = detectAgentState(CLAUDE_MANIFEST, screen('', '⠙ Building the thing'));
     expect(r.state).toBe('working');
@@ -124,6 +167,27 @@ describe('CODEX_MANIFEST', () => {
     const s = ['Codex wants to run a command', 'allow command?', '  Yes    No'].join('\n');
     const r = detectAgentState(CODEX_MANIFEST, screen(s));
     expect(r.state).toBe('blocked');
+  });
+
+  // Real Codex 0.156.1 screen from launching in an untrusted folder; the title is still empty.
+  it('classifies the folder-trust prompt as blocked', () => {
+    const s = [
+      '',
+      '  Folder access',
+      '  /tmp/untrusted-repo',
+      '',
+      '  Trust this folder? Codex can read, edit, and run files here, subject to your permission',
+      '  settings. Folder settings can run code automatically, even without a model request. Continue',
+      '  only if you trust these files. Your trust decision will be saved.',
+      '',
+      '› 1. Trust and continue',
+      '  2. Quit',
+      '',
+      '  enter continue · esc quit',
+    ].join('\n');
+    const r = detectAgentState(CODEX_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.visibleBlocker).toBe(true);
   });
 
   it('classifies a [y/n] weak blocker as blocked', () => {

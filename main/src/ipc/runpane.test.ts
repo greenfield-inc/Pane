@@ -2179,6 +2179,26 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('reports a CLI-ready agent whose status is blocked as blocked instead of ready', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('Claude screen\n', 'active', 'claude'));
+    vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('blocked');
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id,
+      condition: 'ready',
+      timeoutMs: 10,
+    }]);
+
+    expect(result).toMatchObject({
+      ok: false,
+      condition: 'ready',
+      matched: false,
+      timedOut: false,
+      blocked: { kind: 'agent-prompt' },
+    });
+  });
+
   it('diagnoses built-in agents through the Pane project context', async () => {
     const lookupCommand = process.platform === 'win32' ? 'where codex' : 'command -v codex';
     const executablePath = process.platform === 'win32'

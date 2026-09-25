@@ -2056,7 +2056,7 @@ function detectPanelBlocker(
     };
   }
 
-  if (/press enter to continue/i.test(text)) {
+  if (/press enter to continue/i.test(text) || terminalPanelManager.getAgentStatus(panelId) === 'blocked') {
     return {
       kind: 'agent-prompt',
       message: 'The terminal is waiting at an interactive prompt.',

@@ -86,6 +86,17 @@ export const CLAUDE_MANIFEST: AgentManifest = {
       ],
     },
     {
+      // Single-choice dialogs such as the folder-trust prompt ("❯ No, exit" /
+      // "Yes, I trust this folder" above "Enter to confirm · Esc to cancel").
+      id: 'live_selection_menu',
+      state: 'blocked',
+      priority: 980,
+      region: 'after_last_horizontal_rule',
+      visibleBlocker: true,
+      contains: ['enter to confirm'],
+      lineRegex: [/^\s*❯\s*\S/],
+    },
+    {
       id: 'dynamic_workflow_prompt',
       state: 'blocked',
       priority: 980,
@@ -234,6 +245,8 @@ export const CODEX_MANIFEST: AgentManifest = {
         { contains: ['enter to submit answer'] },
         { contains: ['enter to submit all'] },
         { contains: ['allow command?'] },
+        // Folder-trust prompt footer.
+        { contains: ['enter continue', 'esc quit'] },
       ],
     },
     {
