@@ -42,7 +42,7 @@ describe('Session workspace instructions', () => {
       associations: [], activity: [], revision: 1, createdAt: '2026-09-21', updatedAt: '2026-09-21',
     };
     expect(isPristineSessionWorkspace(record)).toBe(true);
-    const cwd = prepareSessionWorkspace(record.id, undefined, record);
+    const cwd = prepareSessionWorkspace(record.id, undefined, record, true);
     expect(isPristineSessionWorkspace(record)).toBe(true);
     prepareSessionWorkspace(record.id, undefined, record, false);
     expect(isPristineSessionWorkspace(record)).toBe(true);
@@ -101,7 +101,7 @@ describe('Session workspace instructions', () => {
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(broken);
   });
   it('updates progress guidance and status without deleting the document', async () => {
-    const cwd = prepareSessionWorkspace('progress');
+    const cwd = prepareSessionWorkspace('progress', undefined, undefined, true);
     await fs.writeFile(path.join(cwd, 'progress.html'), '<h1>Working</h1>');
     expect(await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).toContain('Experimental progress view');
     prepareSessionWorkspace('progress', 'Custom profile', undefined, false);

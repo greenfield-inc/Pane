@@ -84,9 +84,9 @@ export class OrchestrationSessionManager extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(100);
-    let progressEnabled = this.configManager.getConfig().experimentalSessionProgress !== false;
+    let progressEnabled = this.configManager.getConfig().experimentalSessionProgress === true;
     this.configManager.on('config-updated', () => {
-      const next = this.configManager.getConfig().experimentalSessionProgress !== false;
+      const next = this.configManager.getConfig().experimentalSessionProgress === true;
       if (next === progressEnabled) return;
       progressEnabled = next;
       for (const record of this.store.read().sessions) {
@@ -107,7 +107,7 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   async progress(selector: OrchestrationSessionSelector): Promise<SessionProgress> {
     const record = this.findSession(this.store.read(), selector);
-    return readSessionProgress(record.id, this.configManager.getConfig().experimentalSessionProgress !== false);
+    return readSessionProgress(record.id, this.configManager.getConfig().experimentalSessionProgress === true);
   }
 
   async list(): Promise<OrchestrationSessionListResult> {
@@ -249,7 +249,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       try {
         if (sourcePanel) {
           // Validate the private location and guide before interrupting the source.
-          prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false);
+          prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress === true);
           await this.ensureGuidePath();
           await terminalPanelManager.stopForPromotion(sourcePanel.id);
           const savedPanel = panelManager.getPanel(sourcePanel.id);
@@ -522,7 +522,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       try {
         await this.finishPromotion(record);
         if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
-          prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false);
+          prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress === true);
         }
         for (const agent of PANE_CHAT_AGENTS) {
           const panel = panelManager.getPanel(record.panelIds[agent]);
@@ -682,7 +682,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private createInternalSession(record: OrchestrationSessionRecord): void {
     const existing = this.sessionManager.getSession(record.internalSessionId);
     if (existing) {
-      const workspace = prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false);
+      const workspace = prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress === true);
       if (existing.worktreePath !== workspace) {
         const updated = databaseService.updateSession(existing.id, { worktree_path: workspace });
         if (!updated) throw new Error('Could not update Session workspace location');
@@ -693,7 +693,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     const session = this.sessionManager.createSessionWithId(
       record.internalSessionId,
       `${ORCHESTRATION_SESSION_TITLE}: ${record.name}`,
-      prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false),
+      prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress === true),
       record.goal,
       'orchestration-session',
       'ignore',
@@ -733,7 +733,7 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   private async ensurePanelForAgent(record: OrchestrationSessionRecord): Promise<ToolPanel> {
     if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
-      prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false);
+      prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress === true);
     }
     await this.finishPromotion(record);
     const panelId = record.panelIds[record.agent];

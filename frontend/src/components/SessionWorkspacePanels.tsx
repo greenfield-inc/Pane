@@ -38,7 +38,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestratio
   const [progressVisible, setProgressVisible] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SessionInspectorTab>('overview');
-  const progressEnabled = useConfigStore(state => state.config?.experimentalSessionProgress !== false);
+  const progressEnabled = useConfigStore(state => state.config?.experimentalSessionProgress === true);
   const progress = useSessionProgress(orchestrationSessionId, progressEnabled);
   const autoOpened = useRef(false);
   useEffect(() => {

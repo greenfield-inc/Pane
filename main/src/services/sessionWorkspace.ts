@@ -53,7 +53,7 @@ export function prepareSessionWorkspace(
   sessionId: string,
   profile = DEFAULT_SESSION_PROFILE,
   record?: OrchestrationSessionRecord,
-  progressEnabled = true,
+  progressEnabled = false,
 ): string {
   const cwd = sessionWorkspacePath(sessionId);
   assertOutsideGitWorktree(cwd);

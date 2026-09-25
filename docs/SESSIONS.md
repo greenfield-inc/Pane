@@ -310,7 +310,7 @@ Sessions keeps their shells and files separate.
 
 ## Experimental progress view
 
-Enabled by default in **Settings → Advanced → Session progress view (Experimental)**.
+Off by default. Turn it on in **Settings → Advanced → Session progress view (Experimental)**.
 When an agent writes `progress.html` in its Session folder, Pane opens a resizable
 split beside the conversation, initially dividing the main area equally, and
 refreshes it during work. The icon-only Progress button independently hides or shows the
