@@ -25,9 +25,7 @@ export function ArchivedScreen() {
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => deletePane.mutate([pane.id], {
-          onError: error => Alert.alert('Couldn’t delete the pane', error.message),
-        }),
+        onPress: () => deletePane(pane.id).catch((error: Error) => Alert.alert('Couldn’t delete the pane', error.message)),
       },
     ]);
   };
@@ -40,7 +38,7 @@ export function ArchivedScreen() {
       estimatedItemSize={60}
       contentInsetAdjustmentBehavior="automatic"
       style={{ backgroundColor: theme.colors.background }}
-      ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: theme.colors.border }]} />}
+      ItemSeparatorComponent={Separator}
       ListEmptyComponent={
         projects.isPending ? <View style={styles.loading}><Skeleton width="60%" /><Skeleton width="40%" /></View>
           : projects.isError ? <ErrorState error={projects.error} onRetry={() => void projects.refetch()} />
@@ -58,6 +56,11 @@ export function ArchivedScreen() {
       )}
     />
   );
+}
+
+function Separator() {
+  const theme = useTheme();
+  return <View style={[styles.separator, { backgroundColor: theme.colors.border }]} />;
 }
 
 const styles = StyleSheet.create({
