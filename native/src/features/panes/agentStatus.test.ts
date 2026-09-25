@@ -55,6 +55,23 @@ describe('agentStatusFromWorkspace', () => {
 
     expect(paneDisplayStatus(refetched, 'a')).toBe('done');
   });
+
+  it('calls a pane ready when it finished while the phone was disconnected', () => {
+    const before = agentStatusFromWorkspace(workspace([{ paneId: 'a', panels: [{ panelId: 'p', agentType: 'claude', agentState: 'working' }] }]));
+    const afterReconnect = agentStatusFromWorkspace(
+      workspace([{ paneId: 'a', panels: [{ panelId: 'p', agentType: 'claude', agentState: 'idle' }] }]),
+      before,
+    );
+    expect(paneDisplayStatus(afterReconnect, 'a')).toBe('done');
+  });
+
+  it('knows the agent from the host’s agent entries when the panel was started by hand', () => {
+    const state = workspace([{ paneId: 'a', panels: [{ panelId: 'p', agentState: 'idle' }] }]);
+    state.entries.push({ gen: 3, at: '', kind: 'agent.busy', source: 'agent', paneId: 'a', paneName: 'a', panelId: 'p', agentType: 'codex', to: 'working' });
+    const snapshot = agentStatusFromWorkspace(state);
+    expect(paneDisplayStatus(snapshot, 'a')).toBe('working');
+    expect(paneAgent(snapshot, 'a')).toBe('codex');
+  });
 });
 
 describe('applyAgentStatusEvent', () => {

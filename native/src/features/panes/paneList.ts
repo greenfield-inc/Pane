@@ -95,6 +95,10 @@ export function toggleFavorite(projects: ProjectWithPanes[], paneId: string, now
   }));
 }
 
+export function removePane(projects: ProjectWithPanes[], paneId: string): ProjectWithPanes[] {
+  return projects.map(project => ({ ...project, sessions: project.sessions?.filter(session => session.id !== paneId) }));
+}
+
 function positionOf(index: number, count: number): RowPosition {
   if (count === 1) return 'only';
   if (index === 0) return 'first';

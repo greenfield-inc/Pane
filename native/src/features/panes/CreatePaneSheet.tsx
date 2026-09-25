@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AGENT_LAUNCH_PRESETS, type AgentLaunchPresetId } from '@shared/constants/agentLaunchPresets';
+import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 
 import { useTheme } from '@/theme';
 import { Button, Icon, ListRow, ListSection, Sheet, Text, TextField } from '@/ui';
@@ -42,6 +43,7 @@ export function CreatePaneSheet() {
   };
 
   const submit = () => {
+    if (createPane.isPending) return;
     const draft = buildCreatePaneRequest({ projectId: project?.id, name, baseBranch, agent });
     if ('error' in draft) {
       setError(draft.error);
@@ -59,7 +61,9 @@ export function CreatePaneSheet() {
           setError((createError as Error).message);
         }
       },
-      onError: createError => setError(createError.message),
+      onError: createError => setError(createError instanceof RemoteUnconfirmedResultError
+        ? 'The connection dropped before the host answered. Check the pane list before trying again: the pane may already exist.'
+        : createError.message),
     });
   };
 
@@ -118,7 +122,7 @@ export function CreatePaneSheet() {
             onPress={branchList.length > 0 ? () => setChoosingBranch(!choosingBranch) : undefined}
           />
         </ListSection>
-        {branches.isError ? <Text variant="footnote" tone="danger">{branches.error.message}</Text> : null}
+        {branches.isError ? <Text testID="new-pane-branch-error" variant="footnote" tone="danger">{branches.error.message}</Text> : null}
         {choosingBranch ? (
           <>
             <TextField

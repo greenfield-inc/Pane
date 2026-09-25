@@ -20,7 +20,9 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
   if (!request) {
     return (
       <Sheet testID="permission-sheet" title="Permission request" footer={<Button title="Close" variant="secondary" onPress={() => router.back()} />}>
-        <Text tone="muted">{pending.isPending ? 'Loading…' : 'This request was already answered.'}</Text>
+        <Text testID="permission-missing" tone={pending.isError ? 'danger' : 'muted'}>
+          {pending.isPending ? 'Loading…' : pending.isError ? pending.error.message : 'This request was already answered.'}
+        </Text>
       </Sheet>
     );
   }
@@ -41,7 +43,7 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
       title={title}
       footer={
         <>
-          {respond.isError ? <Text variant="footnote" tone="danger">{respond.error.message}</Text> : null}
+          {respond.isError ? <Text testID="permission-error" variant="footnote" tone="danger">{respond.error.message}</Text> : null}
           <Button testID="permission-allow" title="Allow" loading={respond.isPending && respond.variables?.[1].behavior === 'allow'} disabled={respond.isPending} onPress={() => answer('allow')} />
           <Button testID="permission-deny" title="Deny" variant="destructive" loading={respond.isPending && respond.variables?.[1].behavior === 'deny'} disabled={respond.isPending} onPress={() => answer('deny')} />
         </>

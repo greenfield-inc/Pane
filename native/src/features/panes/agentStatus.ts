@@ -21,18 +21,27 @@ export const emptyAgentStatus: AgentStatusSnapshot = { agentStatus: {}, agentSta
 
 export function agentStatusFromWorkspace(workspace: RunpaneWorkspaceStateResult, previous = emptyAgentStatus): AgentStatusSnapshot {
   const next: AgentStatusSnapshot = { agentStatus: {}, agentStatusSession: {}, agentType: {}, unseen: {} };
+  const track = (paneId: string, panelId: string, state: AgentState, agentType: string) => {
+    next.agentStatus[panelId] = state;
+    next.agentStatusSession[panelId] = paneId;
+    next.agentType[paneId] ??= agentType;
+  };
   for (const entry of workspace.entries) {
-    if (entry.kind !== 'pane.created' || !entry.panels) continue;
-    for (const panel of entry.panels) {
+    // Agent entries also cover agents started by hand in a plain terminal.
+    if (entry.source === 'agent' && entry.panelId && entry.to && entry.agentType) {
+      track(entry.paneId, entry.panelId, entry.to, entry.agentType);
+    }
+    for (const panel of entry.panels ?? []) {
       // Plain shells have no agentType; the desktop leaves them without a badge too.
-      if (!panel.agentType || !panel.agentState) continue;
-      next.agentStatus[panel.panelId] = panel.agentState;
-      next.agentStatusSession[panel.panelId] = entry.paneId;
-      next.agentType[entry.paneId] ??= panel.agentType;
+      if (panel.agentType && panel.agentState && !(panel.panelId in next.agentStatus)) {
+        track(entry.paneId, panel.panelId, panel.agentState, panel.agentType);
+      }
     }
   }
-  for (const paneId of Object.keys(previous.unseen)) {
-    if (rawState(next, paneId) === 'idle') next.unseen[paneId] = true;
+  for (const paneId of new Set(Object.values(next.agentStatusSession))) {
+    if (rawState(next, paneId) !== 'idle') continue;
+    // Still unseen, or finished while the phone was away (the stream doesn't replay).
+    if (previous.unseen[paneId] || rawState(previous, paneId) === 'working') next.unseen[paneId] = true;
   }
   return next;
 }

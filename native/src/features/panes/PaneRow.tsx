@@ -73,7 +73,10 @@ export function PaneRow({ pane, position, showProject, onOpen, onToggleFavorite,
               accessibilityRole="button"
               accessibilityLabel={`${pane.name}, ${subtitle}${pane.isFavorite ? ', favorite' : ''}`}
               accessibilityActions={[{ name: 'favorite', label: favoriteTitle }, { name: 'archive', label: 'Archive' }]}
-              onAccessibilityAction={event => (event.nativeEvent.actionName === 'archive' ? onArchive() : onToggleFavorite())}
+              onAccessibilityAction={event => {
+                if (event.nativeEvent.actionName === 'archive') onArchive();
+                if (event.nativeEvent.actionName === 'favorite') onToggleFavorite();
+              }}
               style={({ pressed }) => [styles.row, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface }]}
             >
               <StatusBadge status={pane.status} />

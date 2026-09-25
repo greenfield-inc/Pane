@@ -40,6 +40,8 @@ export function PaneListScreen() {
     agent: paneId => (statuses.data ? paneAgent(statuses.data, paneId) : undefined),
   });
   const paneNames = new Map((projects.data ?? []).flatMap(project => (project.sessions ?? []).map(session => [session.id, session.name])));
+  // Wait for statuses too, so rows don't flip from "No agent" to their real status.
+  const loading = projects.isPending || statuses.isPending;
   const hasPanes = (projects.data ?? []).some(project => project.sessions?.some(session => !session.archived && !session.isHidden));
 
   const confirmArchive = (pane: PaneListEntry) => {
@@ -48,9 +50,7 @@ export function PaneListScreen() {
       {
         text: 'Archive',
         style: 'destructive',
-        onPress: () => archive.mutate([pane.id], {
-          onError: error => Alert.alert('Couldn’t archive the pane', error.message),
-        }),
+        onPress: () => archive(pane.id).catch((error: Error) => Alert.alert('Couldn’t archive the pane', error.message)),
       },
     ]);
   };
@@ -69,7 +69,7 @@ export function PaneListScreen() {
         position={item.position}
         showProject={item.inFavorites}
         onOpen={() => markSeen(item.pane.id)}
-        onToggleFavorite={() => toggleFavorite(item.pane.id)}
+        onToggleFavorite={() => toggleFavorite(item.pane.id).catch((error: Error) => Alert.alert('Couldn’t update favorites', error.message))}
         onArchive={() => confirmArchive(item.pane)}
       />
     );
@@ -92,7 +92,7 @@ export function PaneListScreen() {
       />
       <LegendList
         testID="panes-list"
-        data={items}
+        data={loading ? [] : items}
         keyExtractor={item => item.key}
         getItemType={item => item.type}
         estimatedItemSize={60}
@@ -128,7 +128,7 @@ export function PaneListScreen() {
           </View>
         }
         ListEmptyComponent={
-          projects.isPending ? <LoadingRows />
+          loading ? <LoadingRows />
             : projects.isError ? <ErrorState error={projects.error} onRetry={() => void projects.refetch()} />
             : hasPanes ? <EmptyState testID="panes-no-results" title="No matches" message={`No pane matches “${query}”.`} />
             : (

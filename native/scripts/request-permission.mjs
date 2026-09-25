@@ -13,7 +13,10 @@ if (!paneDir || !paneId) {
 }
 
 const socketDir = path.join(paneDir, 'sockets');
-const socket = fs.readdirSync(socketDir).find(name => name.startsWith('pane-permissions-'));
+// The newest socket belongs to the running host; older ones can be left over.
+const socket = fs.readdirSync(socketDir)
+  .filter(name => name.startsWith('pane-permissions-'))
+  .sort((a, b) => fs.statSync(path.join(socketDir, b)).mtimeMs - fs.statSync(path.join(socketDir, a)).mtimeMs)[0];
 if (!socket) {
   console.error(`No permission socket in ${socketDir}. Is the host running?`);
   process.exit(1);
