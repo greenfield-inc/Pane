@@ -515,10 +515,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   return (
     <>
-    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", barCollapsed && "hidden")}>
+    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls")}>
       {/* Flex container */}
       <div
-        className="relative flex items-center min-h-[var(--panel-tab-height)] pr-2"
+        className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2")}
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
@@ -543,7 +543,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             here (working tabs live in the group strips); shortcut hints are
             disabled then because the strip shows a subset and the 1-9 indexes
             would lie. */}
-        <PanelTabStrip
+        {!barCollapsed && <PanelTabStrip
           idNamespace="top"
           panels={primaryGroupPanels ?? sortedPanels}
           activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
@@ -558,7 +558,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           isTabDragging={isTabDragging}
           draggedPanelId={draggedPanelId}
           getPanelTabPresentation={getPanelTabPresentation}
-        />
+        />}
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>

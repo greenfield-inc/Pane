@@ -1,4 +1,3 @@
-import { RefreshCw } from 'lucide-react';
 import type { UsageProvider, UsageRateLimitSample } from '../../../../shared/types/usage';
 
 const PROVIDER_META = {
@@ -122,59 +121,5 @@ export function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
           : ''}
       </p>
     </div>
-  );
-}
-
-/**
- * Provider-reported limits panel. Shared between Usage & Limits (full page)
- * and Settings > Usage (compact). Both read from `usage_rate_limits` via the
- * same `getReport()` path — one source of truth for limit display.
- */
-export function ProviderLimitsPanel({
-  limits,
-  refreshing,
-  onRefresh,
-}: {
-  limits: UsageRateLimitSample[];
-  refreshing?: boolean;
-  onRefresh?: () => void;
-}) {
-  return (
-    <section aria-label="Codex usage" className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-          Provider limits
-        </h2>
-        {onRefresh && (
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            aria-label="Refresh usage"
-            className="rounded p-1 transition-colors hover:bg-surface-hover disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3 w-3 text-text-tertiary ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-          </button>
-        )}
-      </div>
-
-      <LimitStatusBanners limits={limits} />
-
-      {limits.length > 0 ? (
-        <ul className="space-y-2">
-          {limits.map(limit => (
-            <li key={`${limit.provider}-${limit.limitId}-${limit.scope}`}>
-              <LimitBar limit={limit} />
-            </li>
-          ))}
-          <CreditsLine limits={limits} />
-        </ul>
-      ) : (
-        <p className="text-[11px] text-text-muted">
-          No provider-reported limits available. Codex writes quota state
-          into its transcripts; Anthropic does not expose plan limits locally.
-        </p>
-      )}
-    </section>
   );
 }

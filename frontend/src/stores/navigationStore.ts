@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { PaneNavigationView } from '../../../shared/types/hostNavigation';
 
-export type SidebarNavigationScope = 'repositories' | 'pinned';
+export type SidebarNavigationScope = 'repositories' | 'pinned' | 'orchestration';
 
 // Tracks which project ids have already been seen so registerProjectIds only
 // auto-expands genuinely new projects (preserves user-collapsed state)
