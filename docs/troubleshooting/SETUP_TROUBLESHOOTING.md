@@ -14,19 +14,15 @@ This happens because Python 3.12+ removed the `distutils` module that `node-gyp`
 brew install python-setuptools
 ```
 
-### Alternative Solutions:
+### Alternative: Use Python 3.11 with pyenv
 
-1. **Use Python 3.11 with pyenv**:
-   ```bash
-   brew install pyenv
-   pyenv install 3.11.9
-   pyenv global 3.11.9
-   ```
+```bash
+brew install pyenv
+pyenv install 3.11.9
+pyenv global 3.11.9
+```
 
-2. **Use the setup script**:
-   ```bash
-   ./setup-dev.sh
-   ```
+Then run `pnpm run setup` again.
 
 ## Other Common Issues
 
@@ -95,4 +91,4 @@ Node.js native modules on Windows are built with Visual Studio's C++ compiler. R
 
 ### Alternative: Use Pre-built Binaries
 
-If you're having trouble with the build process, consider waiting for official Windows binaries to be released in future versions of Pane.
+If you only need to run Pane, download the Windows installer from [GitHub Releases](https://github.com/greenfield-inc/Pane/releases/latest) instead of building from source.

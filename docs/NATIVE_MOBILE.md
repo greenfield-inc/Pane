@@ -4,7 +4,7 @@
 
 ## Development
 
-Use Node 22 and pnpm:
+Use Node 22.18 or newer and pnpm:
 
 ```bash
 pnpm mobile:sync

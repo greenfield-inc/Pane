@@ -41,8 +41,10 @@ Before writing code, verify against the real binary (see the Cursor example):
 classifier (used by terminalPanelManager, sessionManager, and shutdown marking).
 
 - Widen `TerminalPanelState['agentType']` in `shared/types/panels.ts`.
-- Add the id to `CLI_AGENT_TYPES` and a token-boundary regex to
-  `AGENT_COMMAND_PATTERNS` (order matters when one binary name contains another).
+- Add the id to `CLI_AGENT_TYPES` and its executable name(s) to
+  `AGENT_EXECUTABLES`. The classifier parses the command into tokens (it sees
+  through `env`, `command`, `exec` and shell `-c` wrappers) and matches the
+  executable name exactly.
 
 ## 3. Launch/resume branches
 
@@ -77,8 +79,7 @@ binary.
 
 - `shouldUseArgumentDelivery` — how the initial prompt reaches the CLI.
 - `runAgentDoctor` — add fallback binary paths (`AGENT_FALLBACK_BIN_PATHS`) when the
-  install dir is typically off the GUI PATH, and unsupported environments
-  (`AGENT_UNSUPPORTED_ENVIRONMENTS`).
+  install dir is typically off the GUI PATH.
 
 ## 7. Frontend
 
@@ -86,7 +87,8 @@ binary.
 Add Tool dropdowns (desktop + remote), and `mod+alt+N` hotkeys. Add one entry
 (`platforms` gates unsupported OSes); `agentLaunchPresets.test.ts` pins the list
 against the RunPane contract. Add the brand icon to
-`frontend/src/components/ui/BrandIcons.tsx` (`CLI_BRAND_ICONS`) and a search alias in
+`frontend/src/components/ui/BrandIcons.tsx` and register it in `CLI_BRAND_ICONS`
+(`frontend/src/components/ui/brandIconRegistry.ts`), and a search alias in
 `frontend/src/components/settings/catalog.tsx`.
 
 ## 8. Worktree file sync

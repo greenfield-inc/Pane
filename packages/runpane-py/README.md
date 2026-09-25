@@ -5,6 +5,13 @@ Install or configure Pane from PyPI.
 The package does not include the Pane desktop runtime. It downloads the correct
 Pane release artifact only when you run `runpane install` or `runpane update`.
 
+The same CLI also drives a running Pane app: list and add repos, create and
+manage panes, read and send input to panels, manage sessions, and follow events
+with `runpane watch`. See the
+[runpane CLI contract](https://github.com/greenfield-inc/Pane/blob/main/docs/RUNPANE_CLI_CONTRACT.md) for every command.
+
+`runpane panes adopt` is not in the Python CLI yet; use the npm package for it.
+
 ## Quick Start
 
 Run the guided setup:

@@ -93,7 +93,7 @@ has no Oxlint 1.76.0 equivalent and therefore stays in ESLint.
 | `jsx-a11y/tabindex-no-positive` | `jsx-a11y/tabindex-no-positive` | frontend only; moved |
 
 Both Oxlint configs disable the broad `correctness` category. This is
-intentional: the blocking contract is the explicit list above plus the four
+intentional: the blocking contract is the explicit list above plus the 15
 zero-baseline anti-slop rules, rather than an unstable category preset.
 
 A Profiler-based render counter is deliberately deferred. Add one with the

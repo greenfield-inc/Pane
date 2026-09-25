@@ -1,4 +1,4 @@
-# Progressive Disclosure & UX Guidelines
+# UX principles: progressive disclosure
 
 Guidelines for Pane's UI design, informed by Linear and Claude Code CLI patterns.
 
@@ -15,8 +15,8 @@ Every interaction should lead with the primary action. For session creation, tha
 
 Provide one good default rather than forcing a choice. Users interpret defaults as expert recommendations (the "default effect"). When 80%+ of users will pick the same option, make it the default and let the rest override.
 
-**Do:** Default to Claude Code as the AI tool. Default to 1 session. Auto-generate names.
-**Don't:** Present Claude and Codex as equal-weight cards requiring explicit selection every time.
+**Do:** Default to 1 session. Auto-generate names. Remember the last choice where a choice is needed.
+**Don't:** Present every agent as an equal-weight card that must be picked every time.
 
 ### 3. The 80/20 Rule
 
@@ -49,7 +49,7 @@ Linear deliberately constrains flexibility in favor of purpose-built workflows:
 - Opinionated at the atomic level (labels and due dates are issue properties, not configurable)
 - Purpose-built over flexible
 
-**Pane equivalent:** Session creation needs only a **prompt**. Name is auto-generated. Tool defaults to Claude Code. Branch defaults to main.
+**Pane equivalent:** Creating a pane needs nothing typed: the name is auto-generated, and the agent and prompt are optional.
 
 ### Claude Code CLI's Minimalism
 
@@ -58,7 +58,7 @@ Linear deliberately constrains flexibility in favor of purpose-built workflows:
 - Status line is optional and customizable
 - Updates debounced at 300ms to prevent visual flicker
 
-**Pane equivalent:** Replace flashy ThinkingPlaceholder with clean text. Keep status dots simple. No animations unless state actually changes.
+**Pane equivalent:** Keep status dots simple. No animations unless state actually changes.
 
 ### Collapsible Section Pattern
 

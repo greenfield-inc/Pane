@@ -51,10 +51,12 @@ Runs automatically when a new worktree/session is created. Use for dependency in
 
 Runs when you click the **Play** button in the panel tab bar (or press `Ctrl+Shift+D`). Use for starting dev servers, test watchers, or any long-running process.
 
+Pane sets `PANE_PORT` to the first of a block of 10 ports picked from the pane's id (range 3000–8999), so dev servers in parallel panes rarely collide.
+
 **Examples:**
 ```json
 "run": "pnpm dev"
-"run": "npm run dev -- --port $PORT"
+"run": "npm run dev -- --port $PANE_PORT"
 "run": "concurrently \"npm run server\" \"npm run worker\""
 ```
 
@@ -64,8 +66,8 @@ Runs before a worktree is deleted when you archive a session. Use for cleaning u
 
 **Examples:**
 ```json
-"run": "npm run db:teardown"
-"run": "docker compose down"
+"archive": "npm run db:teardown"
+"archive": "docker compose down"
 ```
 
 #### `runScriptMode`
@@ -209,4 +211,4 @@ The Play button tooltip shows exactly what will run and where it came from:
 
 ### Migrating from Conductor
 
-If you already have a `conductor.json`, it works as-is — the schema is identical. You can optionally rename it to `pane.json` for clarity, but both are detected with the same priority.
+If you already have a `conductor.json`, it works as-is — the schema is identical. You can optionally rename it to `pane.json`. If both files exist, `pane.json` wins.

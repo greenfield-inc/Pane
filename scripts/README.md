@@ -30,8 +30,7 @@ pnpm build:main
 node --expose-gc scripts/benchmark-session-output.js
 ```
 
-See [the session output audit](../docs/SESSION_OUTPUT_PERFORMANCE.md) for
-results, regression checks, and measurement limits.
+Results and measurement limits are in the PR that added it (#592).
 
 ## benchmark-terminal-emulation.js
 
@@ -120,16 +119,15 @@ node scripts/generate-notices.js
 
 ### When to run
 
-- Automatically runs during `pnpm run build:mac` and `pnpm run release:mac`
-- Should be run whenever dependencies change
-- CI/CD runs this in the license-compliance workflow
+- Automatically runs in the `build:mac*`, `build:linux*`, `release:mac*` and
+  `release:linux` scripts, and in `scripts/build-win.js` for Windows builds
+- Should be run by hand whenever dependencies change
 
 ### License compliance
 
 The script helps ensure Pane complies with open source license requirements by:
 - Including all third-party license texts in distributions
 - Identifying packages with missing license information
-- Supporting the license-compliance GitHub workflow
 
 ## check-theme-contrast.mjs
 
@@ -146,10 +144,77 @@ pnpm theme:contrast -- --markdown --cvd
 ```
 
 Only the themes in `GATED_THEMES` fail the exit code; every other theme is
-report-only so existing debt does not block CI. Each gated theme carries the
+report-only so existing debt does not fail the run. CI does not run this
+script. Each gated theme carries the
 profile its family was designed to (`body` / `ui` / `terminal` / `status`
 minimums; `strictUi` adds the hairline pairs — 1px input border, scrollbar
 thumb, subtle focus ring — that only the accessibility family commits to;
-`cvd` gates the colour-vision simulation). Add a theme to `THEME_CLASSES` (and
-to `GATED_THEMES` when it should be enforced) when adding one to
-`themeContextValue.ts`.
+`cvd` gates the colour-vision simulation). The script keeps its own copy of
+`THEME_CLASSES`. When adding a theme to `THEME_CLASSES` in
+`shared/types/appearance.ts`, add it to the script's copy too (and to
+`GATED_THEMES` when it should be enforced).
+
+## build-win.js
+
+Builds the Windows installer. Downloads the Electron prebuilt for
+`better-sqlite3-multiple-ciphers`, builds the app, generates notices, and runs
+electron-builder with native rebuilds off. See
+[Building on Windows](../docs/BUILDING_ON_WINDOWS.md).
+
+```bash
+pnpm build:win:x64
+pnpm build:win:arm64
+```
+
+## generate-runpane-contract.js
+
+Validates `contracts/runpane/contract.json` and generates the `runpane`
+wrappers' contract files, the parser fixture, and
+`docs/RUNPANE_CLI_CONTRACT.md` from it. `--check` fails if any generated file
+is out of date.
+
+```bash
+pnpm generate-runpane-contract
+pnpm check:runpane-contract
+```
+
+## pane-remote-setup.js
+
+Sets up this checkout as a remote Pane host. Builds `main` first if needed,
+then runs the same setup as `pane --remote-setup`. Pass options after `--`.
+
+```bash
+pnpm remote:setup -- --help
+```
+
+## pane-run-script.js
+
+The dev launcher behind `pnpm dev`. Picks a free port per worktree, installs
+dependencies or rebuilds native modules when they are stale, then starts the
+main-process watcher, Vite, and Electron. `pnpm perf:scan` runs it with
+`--react-scan` to turn on React Scan.
+
+```bash
+pnpm dev
+pnpm perf:scan
+```
+
+## release.js
+
+Bumps the version, creates the release commit and tag, and pushes them. Run it
+from a clean worktree whose HEAD matches `origin/main`. See
+[the release runbook](../RUNBOOK.md).
+
+```bash
+pnpm release patch   # or minor, major, or an exact x.y.z
+```
+
+## sync-runpane-package-versions.js
+
+Sets the root, npm `runpane`, and PyPI `runpane` package versions to one value.
+`--check` fails if they differ. `release.js` runs it for you.
+
+```bash
+node scripts/sync-runpane-package-versions.js 1.2.3
+pnpm check:runpane-package-versions
+```

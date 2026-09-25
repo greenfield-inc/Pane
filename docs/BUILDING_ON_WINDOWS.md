@@ -2,7 +2,7 @@
 
 This document explains how to build Pane for Windows.
 
-> **Note:** As of February 2026, the Windows build works without major issues. The primary native modules (`@lydell/node-pty` and `better-sqlite3-multiple-ciphers`) have prebuilt binaries for Windows.
+> **Note:** The primary native modules (`@lydell/node-pty` and `better-sqlite3-multiple-ciphers`) have prebuilt binaries for Windows.
 
 ## Quick Start
 
@@ -15,13 +15,13 @@ pnpm run build:win:arm64
 ```
 
 Output files will be in `dist-electron/`:
-- `pane-{version}-Windows-x64.exe` - x64 installer
-- `pane-{version}-Windows-arm64.exe` - ARM64 installer
+- `Pane-{version}-Windows-x64.exe` - x64 installer
+- `Pane-{version}-Windows-arm64.exe` - ARM64 installer
 
 ## Prerequisites
 
-1. **Node.js** - v20.x or later (v22.x recommended)
-2. **pnpm** - v8.x or later
+1. **Node.js** - v22.18 or later
+2. **pnpm** - v10
 3. **Python** - v3.x (for native module compilation)
 4. **Visual Studio Build Tools** - With C++ workload
 
@@ -39,46 +39,35 @@ Make sure to install the "Desktop development with C++" workload.
 
 ## How the Build Works
 
-The Windows build uses a custom script (`scripts/build-win.js`) that handles several compatibility issues:
+The Windows build uses a custom script (`scripts/build-win.js`). It:
 
-### Known Issues & Workarounds
+1. Downloads the Electron prebuilt for `better-sqlite3-multiple-ciphers` for the target architecture.
+2. When building for a different architecture than the host, installs the matching `@lydell/node-pty-win32-<arch>` prebuilt package.
+3. Builds the frontend and main process, injects build info, and generates notices.
+4. Runs electron-builder with native module rebuild disabled.
+5. Checks the icons in the packaged app.
 
-#### 1. winpty.gyp Batch File Path Issue
+### Why These Steps
 
-**Problem:** The `@homebridge/node-pty-prebuilt-multiarch` package uses batch files in its build process:
-```
-cmd /c "cd shared && GetCommitHash.bat"
-```
-
-On Windows, batch files need an explicit `.\` prefix to run from the current directory.
-
-**Solution:** The build script patches `winpty.gyp` to use:
-```
-cmd /c "cd shared && .\GetCommitHash.bat"
-```
-
-#### 2. pnpm + node-gyp Path Resolution
-
-**Problem:** pnpm's nested `node_modules` structure causes node-gyp to fail when resolving relative paths for dependencies like `node-addon-api`. The error looks like:
-```
-FileNotFoundError: [Errno 2] No such file or directory: '...node-addon-api\node_addon_api_maybe.vcxproj.filters'
-```
-
-**Solution:** The build script copies `node-addon-api` files to the location pnpm/node-gyp expects.
-
-#### 3. better-sqlite3-multiple-ciphers Electron Prebuilt
+#### better-sqlite3-multiple-ciphers Electron Prebuilt
 
 **Problem:** When using `pnpm install --ignore-scripts`, the `prebuild-install` postinstall script doesn't run, so the package gets the wrong binary (Node.js ABI instead of Electron ABI). This causes "is not a valid Win32 application" errors at runtime.
 
 **Solution:** The build script runs `prebuild-install` manually with the correct Electron runtime and version to download the Electron-compatible prebuilt binary.
 
-#### 4. Native Module Rebuild
+#### Cross-Architecture node-pty
 
-**Problem:** Even with the above fixes, rebuilding native modules for Electron can fail on Windows due to pnpm path issues.
+**Problem:** pnpm only installs the `@lydell/node-pty` platform package that matches the host architecture.
+
+**Solution:** For cross-architecture builds, the build script downloads the target platform package and links it into `node_modules`.
+
+#### Native Module Rebuild
+
+**Problem:** Rebuilding native modules for Electron can fail on Windows due to pnpm path issues.
 
 **Solution:** The build script disables npm rebuild (`--config.npmRebuild=false`) and relies on:
 - Manually downloaded Electron prebuilts for `better-sqlite3-multiple-ciphers`
-- Pre-bundled ConPTY binaries for `node-pty` (no rebuild needed)
+- Prebuilt platform packages for `@lydell/node-pty` (no rebuild needed)
 
 ## Manual Build Process
 
@@ -90,38 +79,7 @@ If the build script fails, you can try these manual steps:
 pnpm install --ignore-scripts
 ```
 
-### Step 2: Patch winpty.gyp
-
-Edit `node_modules/.pnpm/@homebridge+node-pty-prebuilt-multiarch@*/node_modules/@homebridge/node-pty-prebuilt-multiarch/deps/winpty/src/winpty.gyp`:
-
-Change:
-```python
-'WINPTY_COMMIT_HASH%': '<!(cmd /c "cd shared && GetCommitHash.bat")',
-```
-To:
-```python
-'WINPTY_COMMIT_HASH%': '<!(cmd /c "cd shared && .\\GetCommitHash.bat")',
-```
-
-Also change:
-```python
-'<!(cmd /c "cd shared && UpdateGenVersion.bat <(WINPTY_COMMIT_HASH)")',
-```
-To:
-```python
-'<!(cmd /c "cd shared && .\\UpdateGenVersion.bat <(WINPTY_COMMIT_HASH)")',
-```
-
-### Step 3: Copy node-addon-api
-
-```bash
-# Find the source and target directories (paths may vary by version)
-mkdir -p "node_modules/.pnpm/@homebridge+node-pty-prebuilt-multiarch@*/node-addon-api@*/node_modules/node-addon-api/"
-cp -r "node_modules/.pnpm/node-addon-api@*/node_modules/node-addon-api/"* \
-      "node_modules/.pnpm/@homebridge+node-pty-prebuilt-multiarch@*/node-addon-api@*/node_modules/node-addon-api/"
-```
-
-### Step 4: Download Electron prebuilt for better-sqlite3
+### Step 2: Download Electron prebuilt for better-sqlite3
 
 ```bash
 # Navigate to the better-sqlite3-multiple-ciphers package directory
@@ -134,7 +92,7 @@ npx prebuild-install --runtime electron --target 41.10.3 --arch x64 --verbose
 cd -
 ```
 
-### Step 5: Build
+### Step 3: Build
 
 ```bash
 pnpm run build:frontend
@@ -145,14 +103,6 @@ pnpm exec electron-builder --win --x64 --publish never --config.npmRebuild=false
 ```
 
 ## Troubleshooting
-
-### Error: `GetCommitHash.bat is not recognized`
-
-The winpty.gyp file hasn't been patched. Run the build script or apply the manual patch.
-
-### Error: `FileNotFoundError: node_addon_api_maybe.vcxproj.filters`
-
-The node-addon-api files haven't been copied to the expected location. Run the build script or copy manually.
 
 ### Error: `node-gyp failed to rebuild`
 
@@ -200,4 +150,4 @@ For CI/CD pipelines, use:
 node scripts/build-win.js x64
 ```
 
-This handles all the necessary patches automatically.
+This runs all of the steps above.

@@ -51,55 +51,29 @@ The tool panel system consists of several key components:
 
 ## Implemented Panel Types
 
-The tool panel system currently supports 8 panel types:
+The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
-1. **Terminal** (`terminal`) - Multiple PTY shells per session
-  - Independent processes with command history and scrollback
-  - File operation detection triggers `files:changed` events
-
-2. **Claude** (`claude`) - Multiple Claude Code instances
-  - Managed by `claudePanelManager.ts`
-  - Permission mode: approve/ignore
-  - Automatic context tracking with token usage display
-
-3. **Codex** (`codex`) - Multiple Codex CLI instances
-  - Managed by `codexPanelManager.ts`
-  - Configurable model provider and approval policy
-  - Sandbox mode and web search support
-
-4. **Diff** (`diff`) - Git diff viewer (singleton, permanent)
-  - View modes: split/unified
-  - Whitespace and context line configuration
-  - Auto-refreshes on file changes
-
-5. **Editor** (`editor`) - In-app file editor
-  - Syntax highlighting with Monaco
-  - File tree with expanded directory tracking
-  - Cursor position and scroll persistence
-
-6. **Logs** (`logs`) - Script execution panel (singleton)
-  - Process management with PID tracking
-  - Output buffer with error/warning counts
-  - Start/end time and exit code tracking
-
-7. **Dashboard** (`dashboard`) - Project overview (singleton, permanent, projects-only)
-  - Session health monitoring
-  - Filter by status: all/stale/changes/pr
-  - Cached data persistence
-
-8. **Setup Tasks** (`setup-tasks`) - Project setup checklist (singleton, permanent, projects-only)
-  - Task completion tracking
-  - Dismissible tasks
-  - Last check timestamp
+1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
+   Claude Code, Codex and Cursor Agent run in terminal panels
+   (`TerminalPanelState.agentType` records which one).
+2. **Diff** (`diff`): git diff viewer. Singleton, permanent, worktrees only.
+3. **Explorer** (`explorer`): file tree.
+4. **Editor** (`editor`): Monaco editor, one tab per open file.
+5. **Logs** (`logs`): script execution output. Singleton.
+6. **Dashboard** (`dashboard`): project overview. Singleton, permanent,
+   projects only.
+7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
+   permanent, projects only.
+8. **Browser** (`browser`): embedded browser. Worktrees only.
 
 ## Panel Capabilities
 
 Each panel type has specific capabilities defined in `PANEL_CAPABILITIES`:
 
-- **requiresProcess**: Whether panel needs background process (terminal, claude, codex, logs)
+- **requiresProcess**: Whether panel needs background process (terminal, logs)
 - **singleton**: Only one instance per session (diff, logs, dashboard, setup-tasks)
 - **permanent**: Cannot be closed by user (diff, dashboard, setup-tasks)
-- **canAppearInProjects**: Available in project view (all except diff)
+- **canAppearInProjects**: Available in project view (all except diff and browser)
 - **canAppearInWorktrees**: Available in worktree sessions (all except dashboard, setup-tasks)
 - **canEmit**: Events this panel can produce
 - **canConsume**: Events this panel listens to

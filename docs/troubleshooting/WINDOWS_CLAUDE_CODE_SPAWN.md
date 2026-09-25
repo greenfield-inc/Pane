@@ -38,15 +38,15 @@ Claude Code was failing to spawn properly on Windows when Pane runs it in a work
 
 **Cause:** Error code 193 on Windows means "not a valid Win32 application". This occurs when trying to execute a shell script (like npm bin stubs) directly via `node-pty` instead of through a shell or Node.js.
 
-**Fix Applied:** Added detection for error code 193 in `AbstractCliManager.ts` to trigger the Node.js fallback.
+**Fix Applied:** The PTY host classifies the spawn failure as `E193` (`classifySpawnError()` in `main/src/ptyHost/ptyHostMain.ts`). `AbstractCliManager.ts` matches the error message (`error code: 193` or `not a valid Win32 application`) and retries with the Node.js fallback.
 
-**Location:** `main/src/services/panels/cli/AbstractCliManager.ts`
+**Location:** `main/src/ptyHost/ptyHostMain.ts` and `main/src/services/panels/cli/AbstractCliManager.ts`
 
 ### Issue 2: Module Not Found (Fixed)
 
 **Error:**
 ```
-Error: Cannot find module 'C:\Users\khaza\allGitHubRepos\notetake\worktrees\@anthropic-ai\claude-code\cli.js'
+Error: Cannot find module 'C:\Users\<user>\<repo>\worktrees\@anthropic-ai\claude-code\cli.js'
 ```
 
 **Cause:** The npm bin stub at `node_modules/.bin/claude` uses a relative path:
@@ -65,8 +65,8 @@ On Windows, we now proactively use the Node.js fallback instead of waiting for f
 ```typescript
 // In spawnPtyProcess() at main/src/services/panels/cli/AbstractCliManager.ts
 if (os.platform() === 'win32') {
-  this.logger?.verbose(`Windows detected, using Node.js fallback proactively`);
-  (global as typeof global & Record<string, boolean>)[needsNodeFallbackKey] = true;
+  this.logger?.verbose(`[${this.getCliToolName()}] Windows detected, using Node.js fallback proactively`);
+  nodeFallbackTools.add(needsNodeFallbackKey);
 }
 ```
 
@@ -107,8 +107,9 @@ By proactively using Node.js on Windows, we avoid the shell script entirely and 
 
 1. `main/src/services/panels/cli/AbstractCliManager.ts` - Added:
    - Proactive Windows Node.js fallback detection
-   - Error code 193 detection (reactive fallback)
-2. `main/src/utils/nodeFinder.ts` - Enhanced `findCliNodeScript()` with:
+   - Error code 193 message matching (reactive fallback)
+2. `main/src/ptyHost/ptyHostMain.ts` - `classifySpawnError()` reports error 193 as `E193`
+3. `main/src/utils/nodeFinder.ts` - Enhanced `findCliNodeScript()` with:
    - pnpm structure detection
    - Known package mappings for Claude Code and Codex
    - Generic pnpm package search

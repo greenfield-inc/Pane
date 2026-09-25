@@ -57,11 +57,9 @@ The application uses IPC events to synchronize state between the main process an
 - `session:updated` - Update specific session properties
 - `session:deleted` - Remove session from project list
 
-### Project Events (if implemented)
+### Project Events
 
-- `project:created` - Add new project to list
 - `project:updated` - Update specific project properties
-- `project:deleted` - Remove project from list
 
 ## When Global Refreshes Are Acceptable
 

@@ -197,12 +197,18 @@ exit remains activity evidence only.
 ## Skill contract
 
 `main/src/services/skillCacheManager.ts` installs the skills that ship in
-`main/src/services/paneChatBundle/` once per run: into
+`main/src/services/paneChatBundle/` into
 `<PANE_DIR>/skills/pane-chat/skills/` and into the `.claude/skills/` and
 `.codex/skills/` folders of the data directory. It also generates the
-`pane-orchestrator` entry skill, the runtime context, and the helper subagents
-in `.claude/agents/` and `.codex/agents/`. A manifest records what it
-installed, so later installs replace only those entries.
+`pane-orchestrator` entry skill (plus a Cursor rule at
+`.cursor/rules/pane-orchestrator.mdc`), the runtime context, and the helper
+subagents in `.claude/agents/` and `.codex/agents/`. A manifest
+(`skills/pane-chat/installed.json`) records what it installed and a hash of the
+bundle: startup skips the install when the hash is unchanged, and later installs
+replace only the recorded entries.
+
+To change Pane Chat behavior, edit the bundle or `buildPaneOrchestratorSkill()`
+in `skillCacheManager.ts`, then run `paneChatBundle.test.ts`.
 
 The Session route depends on `pane-orchestrator`, `runpane`,
 `orchestrate-sessions`, `create-ticket`, and `pane-work`. Agents dispatched to
