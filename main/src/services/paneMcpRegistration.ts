@@ -9,7 +9,8 @@ import type { AppConfig } from '../types/config';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getShellPath } from '../utils/shellPath';
 import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/wslUtils';
-import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
+import { parse as parseToml } from 'smol-toml';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);
 
@@ -70,8 +71,12 @@ async function syncClaude(
   claude: NonNullable<McpRegistrationTarget['claude']>,
   server: PaneMcpServerEntry,
   enabled: boolean,
-): Promise<{ action: RegistrationAction }> {
+): Promise<Omit<RegistrationOutcome, 'client'>> {
   const current = await readClaudeEntry(claude.configPath);
+  // Pane owns only an entry that runs its own copy of runpane; anything else was added by hand.
+  if (current && current.args?.[0] !== server.args[0]) {
+    return { action: 'skipped', detail: `${claude.configPath} has a "pane" MCP server that Pane did not add; left it unchanged` };
+  }
   const remove = ['mcp', 'remove', PANE_MCP_SERVER_NAME, '--scope', 'user'];
   if (!enabled) {
     if (!current) return { action: 'unchanged' };
@@ -79,13 +84,24 @@ async function syncClaude(
     return { action: 'removed' };
   }
   if (current && sameClaudeEntry(current, server)) return { action: 'unchanged' };
+  // `claude mcp add` refuses to overwrite, so an update is remove + add, with the old entry restored on failure.
   if (current) await claude.run(remove);
-  await claude.run([
+  try {
+    await claude.run(claudeAddArgs(server));
+  } catch (error) {
+    const previous = current && claudeEntryAsServer(current);
+    if (previous) await claude.run(claudeAddArgs(previous)).catch(() => undefined);
+    throw error;
+  }
+  return { action: current ? 'updated' : 'added' };
+}
+
+function claudeAddArgs(server: PaneMcpServerEntry): string[] {
+  return [
     'mcp', 'add', PANE_MCP_SERVER_NAME, '--scope', 'user',
     ...Object.entries(server.env).flatMap(([key, value]) => ['-e', `${key}=${value}`]),
     '--', server.command, ...server.args,
-  ]);
-  return { action: current ? 'updated' : 'added' };
+  ];
 }
 
 const claudeEntrySchema = boundary.object({
@@ -95,6 +111,15 @@ const claudeEntrySchema = boundary.object({
   env: boundary.optional(boundary.jsonObject),
 });
 type ClaudeEntry = ReturnType<typeof claudeEntrySchema.decode>;
+
+function claudeEntryAsServer(entry: ClaudeEntry): PaneMcpServerEntry | undefined {
+  if (!entry.command) return undefined;
+  return {
+    command: entry.command,
+    args: entry.args ?? [],
+    env: Object.fromEntries(Object.entries(entry.env ?? {}).map(([key, value]) => [key, String(value)])),
+  };
+}
 
 async function readClaudeEntry(configPath: string): Promise<ClaudeEntry | undefined> {
   const text = await readIfExists(configPath);
@@ -117,82 +142,122 @@ function sameClaudeEntry(entry: ClaudeEntry, server: PaneMcpServerEntry): boolea
     && sortedEnv(entry.env ?? {}) === sortedEnv(server.env);
 }
 
+const CODEX_MANAGED_MARKER = '# Managed by Pane (Settings > AI & Agents). Pane rewrites this table on launch.';
+
 async function syncCodex(configPath: string, server: PaneMcpServerEntry, enabled: boolean): Promise<Omit<RegistrationOutcome, 'client'>> {
   const current = await readIfExists(configPath) ?? '';
-  if (hasUnmanagedCodexEntry(current)) {
-    return { action: 'skipped', detail: `${configPath} already defines mcp_servers.pane in a form Pane does not manage` };
+  const before = parseTomlConfig(current);
+  if (!before) return { action: 'skipped', detail: `${configPath} is not valid TOML; left it unchanged` };
+  const table = findManagedCodexTable(current);
+  if (!table && before.paneEntry !== undefined) {
+    return { action: 'skipped', detail: `${configPath} has a "pane" MCP server that Pane did not write; left it unchanged` };
   }
-  const next = enabled ? upsertCodexServer(current, server) : removeCodexServer(current);
+  const next = enabled ? upsertCodexServer(current, server, table) : removeCodexServer(current, table);
   if (next === current) return { action: 'unchanged' };
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
-  // writeFile follows a symlinked config (dotfile managers) instead of replacing it.
-  await fs.writeFile(configPath, next, 'utf8');
+  const after = parseTomlConfig(next);
+  const expected = enabled ? JSON.stringify(codexEntry(server)) : undefined;
+  // Text edits keep the user's comments and formatting; parsing the result proves they changed nothing else.
+  if (!after || after.rest !== before.rest || (after.paneEntry && JSON.stringify(after.paneEntry)) !== expected) {
+    return { action: 'skipped', detail: `editing ${configPath} would have changed more than Pane's entry; left it unchanged` };
+  }
+  await writeFileAtomic(configPath, next);
   if (!enabled) return { action: 'removed' };
-  return { action: findCodexTable(current) ? 'updated' : 'added' };
+  return { action: table ? 'updated' : 'added' };
 }
 
-/** Returns config.toml with exactly one `[mcp_servers.pane]` table matching `server`. */
-function upsertCodexServer(toml: string, server: PaneMcpServerEntry): string {
+function codexEntry(server: PaneMcpServerEntry) {
+  return { command: server.command, args: server.args, env: server.env, tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC };
+}
+
+/** The `pane` MCP entry and a JSON fingerprint of everything else, or undefined when the text is not valid TOML. */
+function parseTomlConfig(text: string): { paneEntry: JsonValue | undefined; rest: string } | undefined {
+  let config: JsonObject;
+  try {
+    config = decodeBoundary(JSON.parse(JSON.stringify(parseToml(text))), boundary.jsonObject);
+  } catch {
+    return undefined;
+  }
+  const servers = decodeOptionalBoundary(config.mcp_servers, boundary.jsonObject);
+  const paneEntry = servers?.[PANE_MCP_SERVER_NAME];
+  if (servers) {
+    const { [PANE_MCP_SERVER_NAME]: _pane, ...others } = servers;
+    if (Object.keys(others).length > 0) config.mcp_servers = others;
+    else delete config.mcp_servers;
+  }
+  return { paneEntry, rest: JSON.stringify(config) };
+}
+
+/** Returns config.toml with Pane's table written in place, or appended when there is none. */
+function upsertCodexServer(toml: string, server: PaneMcpServerEntry, table: LineRange | undefined): string {
   const block = renderCodexTable(server);
-  const table = findCodexTable(toml);
   if (table) {
     const lines = toml.split('\n');
     return [...lines.slice(0, table.start), ...block, ...lines.slice(table.end)].join('\n');
   }
-  if (toml.trim().length === 0) return block.join('\n');
+  if (toml.trim().length === 0) return `${block.join('\n')}\n`;
   const separator = toml.endsWith('\n') ? '\n' : '\n\n';
-  return `${toml}${separator}${block.join('\n')}`;
+  return `${toml}${separator}${block.join('\n')}\n`;
 }
 
-/** Returns config.toml without Pane's `[mcp_servers.pane]` table and its subtables. */
-function removeCodexServer(toml: string): string {
-  const table = findCodexTable(toml);
+/** Returns config.toml without Pane's table, collapsing only the blank lines left where it was. */
+function removeCodexServer(toml: string, table: LineRange | undefined): string {
   if (!table) return toml;
   const lines = toml.split('\n');
-  return [...lines.slice(0, table.start), ...lines.slice(table.end)].join('\n').replace(/\n{3,}/g, '\n\n');
+  lines.splice(table.start, table.end - table.start);
+  const junction = table.start;
+  const blankAt = (index: number) => index < lines.length && lines[index].trim() === '';
+  // Drop the separator blank lines Pane's table leaves behind: doubled ones mid-file, leading ones at the top.
+  while (blankAt(junction) && (junction === 0 ? lines.length > 1 : blankAt(junction - 1))) {
+    lines.splice(junction, 1);
+  }
+  return lines.join('\n');
 }
 
 function renderCodexTable(server: PaneMcpServerEntry): string[] {
-  const env = Object.entries(server.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(', ');
+  const entry = codexEntry(server);
+  const env = Object.entries(entry.env).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(', ');
   return [
     `[mcp_servers.${PANE_MCP_SERVER_NAME}]`,
-    '# Managed by Pane (Settings > AI & Agents). Pane rewrites this table on launch.',
-    `command = ${JSON.stringify(server.command)}`,
-    `args = [${server.args.map((arg) => JSON.stringify(arg)).join(', ')}]`,
+    CODEX_MANAGED_MARKER,
+    `command = ${JSON.stringify(entry.command)}`,
+    `args = [${entry.args.map((arg) => JSON.stringify(arg)).join(', ')}]`,
     `env = { ${env} }`,
-    `tool_timeout_sec = ${CODEX_TOOL_TIMEOUT_SEC}`,
-    '',
+    `tool_timeout_sec = ${entry.tool_timeout_sec}`,
   ];
 }
 
-const PANE_TABLE_HEADER = /^\s*\[\s*mcp_servers\s*\.\s*(?:pane|"pane")\s*(?:\.[^\]]*)?\]\s*(?:#.*)?$/;
+interface LineRange { start: number; end: number }
+
+const PANE_TABLE_HEADER = /^\s*\[\s*mcp_servers\s*\.\s*pane\s*\]\s*$/;
 const ANY_TABLE_HEADER = /^\s*\[/;
 
-/** Line range [start, end) of the `[mcp_servers.pane]` table plus its `[mcp_servers.pane.*]` subtables. */
-function findCodexTable(toml: string): { start: number; end: number } | undefined {
+/**
+ * Line range [start, end) of the `[mcp_servers.pane]` table Pane wrote (header followed by its marker),
+ * ending at the table's last key so comments that introduce the next table stay put.
+ */
+function findManagedCodexTable(toml: string): LineRange | undefined {
   const lines = toml.split('\n');
-  const start = lines.findIndex((line) => PANE_TABLE_HEADER.test(line));
+  const start = lines.findIndex((line, index) => PANE_TABLE_HEADER.test(line) && lines[index + 1]?.trim() === CODEX_MANAGED_MARKER);
   if (start === -1) return undefined;
-  let end = start + 1;
-  while (end < lines.length && !(ANY_TABLE_HEADER.test(lines[end]) && !PANE_TABLE_HEADER.test(lines[end]))) {
-    end++;
-  }
+  let end = start + 2;
+  while (end < lines.length && !ANY_TABLE_HEADER.test(lines[end])) end++;
+  while (end > start + 2 && /^\s*(#.*)?$/.test(lines[end - 1])) end--;
   return { start, end };
 }
 
-/** A `pane` server written as a dotted key or inline table: rewriting it could duplicate the key and break the file. */
-function hasUnmanagedCodexEntry(toml: string): boolean {
-  let table = '';
-  for (const line of toml.split('\n')) {
-    const header = /^\s*\[([^\]]+)\]/.exec(line);
-    if (header) {
-      table = header[1].replace(/\s+/g, '');
-      continue;
-    }
-    if (table === '' && /^\s*mcp_servers\s*\.\s*"?pane"?\s*[.=]/.test(line)) return true;
-    if (table === 'mcp_servers' && /^\s*"?pane"?\s*[.=]/.test(line)) return true;
+/** Replaces the file in one rename so a crash or a concurrent reader never sees half a config. Follows symlinks. */
+async function writeFileAtomic(filePath: string, content: string | Buffer): Promise<void> {
+  const target = await fs.realpath(filePath).catch(() => filePath);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const mode = (await fs.stat(target).catch(() => undefined))?.mode;
+  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.writeFile(temp, content, mode === undefined ? undefined : { mode });
+    await fs.rename(temp, target);
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
   }
-  return false;
 }
 
 async function readIfExists(filePath: string): Promise<string | undefined> {
@@ -248,6 +313,7 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
     '{ [ -d "${CODEX_HOME:-$HOME/.codex}" ] || command -v codex >/dev/null; } && echo codex=1',
     'echo "codexHome=${CODEX_HOME:-$HOME/.codex}"',
     'echo "claudeHome=${CLAUDE_CONFIG_DIR:-$HOME}"',
+    `echo "exe=$(wslpath -u ${escapeForBash(host.executable)})"`,
   ].join('; ')).catch(() => undefined);
   if (probe === undefined) return undefined;
   const values = Object.fromEntries(probe.split('\n').map((line) => line.trim().split('=')).filter((pair) => pair.length >= 2)
@@ -255,7 +321,8 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
 
   const target: McpRegistrationTarget = {
     label: `WSL (${distro})`,
-    server: { command: windowsPathToWSLMount(host.executable), args: [host.scriptPath, 'mcp'], env: serverEnv(host.paneDir, true) },
+    // wslpath honors a custom automount root; /mnt/<drive> is the default if it is unavailable.
+    server: { command: values.exe?.startsWith('/') ? values.exe : windowsPathToWSLMount(host.executable), args: [host.scriptPath, 'mcp'], env: serverEnv(host.paneDir, true) },
   };
   if (values.claude === '1' && values.claudeHome?.startsWith('/')) {
     target.claude = {
@@ -269,7 +336,10 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
   return target;
 }
 
-/** Runs the Pane binary as Node; WSLENV carries the variables across WSL interop to Pane.exe. */
+/**
+ * Runs the Pane binary as Node; WSLENV carries the variables across WSL interop to Pane.exe.
+ * This relies on Electron's RunAsNode fuse staying enabled: flipping it off breaks every registration.
+ */
 function serverEnv(paneDir: string, forWsl: boolean): PaneMcpServerEntry['env'] {
   const entries: [string, string][] = [['ELECTRON_RUN_AS_NODE', '1']];
   if (!isDefaultPaneDir(paneDir)) entries.push(['PANE_DIR', paneDir]);
@@ -368,13 +438,21 @@ async function syncRegistrations(
     paneDir,
     claudeExecutablePath: options.config.claudeExecutablePath,
   };
-  const wslDistros = process.platform === 'win32'
-    ? new Set(options.getProjects().flatMap((project) => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []))
-    : new Set<string>();
-  const targets = await Promise.all([
-    buildHostTarget(host),
-    ...[...wslDistros].map((distro) => buildWslTarget(host, distro)),
-  ]);
+  // Remember which distros were registered so turning the setting off also cleans a distro whose repos are gone.
+  const distroRecord = path.join(paneDir, 'mcp', 'wsl-distros.json');
+  const wslDistros = new Set<string>();
+  if (process.platform === 'win32') {
+    for (const project of options.getProjects()) {
+      if (project.wsl_enabled && project.wsl_distribution) wslDistros.add(project.wsl_distribution);
+    }
+    if (!enabled) for (const distro of await readDistroRecord(distroRecord)) wslDistros.add(distro);
+  }
+  const wslTargets = await Promise.all([...wslDistros].map((distro) => buildWslTarget(host, distro)));
+  const targets = [await buildHostTarget(host), ...wslTargets];
+  if (process.platform === 'win32') {
+    const registered = enabled ? [...wslDistros].filter((_, index) => wslTargets[index]) : [];
+    await writeFileAtomic(distroRecord, `${JSON.stringify(registered)}\n`);
+  }
   await Promise.all(targets.map(async (target) => {
     if (!target) return;
     for (const outcome of await syncMcpRegistration(target, enabled)) {
@@ -391,7 +469,17 @@ async function installRunpaneCopy(destination: string): Promise<void> {
     const target = path.join(destination, file);
     const current = await fs.readFile(target).catch(() => undefined);
     if (current && current.equals(source)) continue;
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, source);
+    // Atomic, so an agent starting the MCP server mid-update never loads half a file.
+    await writeFileAtomic(target, source);
+  }
+}
+
+async function readDistroRecord(recordPath: string): Promise<string[]> {
+  const text = await readIfExists(recordPath).catch(() => undefined);
+  if (!text) return [];
+  try {
+    return decodeBoundary(JSON.parse(text), boundary.array(boundary.string));
+  } catch {
+    return [];
   }
 }
