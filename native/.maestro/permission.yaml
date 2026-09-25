@@ -1,0 +1,25 @@
+# Answer an agent's permission request from the list. Before running, queue a
+# request on the dev host: `node scripts/request-permission.mjs <pane-dir> <pane-id>`
+# (see native/README.md).
+appId: com.dcouple.pane.mobile
+name: Approve a permission request
+env:
+  METRO_PORT: "8137"
+---
+- runFlow: subflows/signed-in.yaml
+- extendedWaitUntil:
+    visible: "NEEDS APPROVAL"
+    timeout: 20000
+- tapOn:
+    id: "permission-row-.*"
+- extendedWaitUntil:
+    visible:
+      id: permission-sheet
+    timeout: 10000
+- assertVisible:
+    id: permission-target
+- tapOn:
+    id: permission-allow
+- extendedWaitUntil:
+    notVisible: "NEEDS APPROVAL"
+    timeout: 15000

@@ -1,0 +1,81 @@
+# Create a pane, find it by search, favorite it, archive it, then delete it
+# from Archived. Needs a dev host with at least one repository (README).
+appId: com.dcouple.pane.mobile
+name: Pane list journeys
+env:
+  METRO_PORT: "8137"
+---
+- runFlow: subflows/signed-in.yaml
+- evalScript: ${output.pane = 'mae-' + Date.now().toString(36)}
+
+# Create: repository and base branch default, pick an agent, name the pane.
+- tapOn:
+    id: panes-new
+- extendedWaitUntil:
+    visible:
+      id: new-pane-branch
+    timeout: 15000
+- tapOn:
+    id: new-pane-agent-claude
+- tapOn:
+    id: new-pane-name
+- eraseText: 60
+- inputText: ${output.pane}
+- hideKeyboard
+- tapOn:
+    id: new-pane-create
+# The new pane opens; come back to the list.
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 60000
+- back
+- extendedWaitUntil:
+    visible: "${output.pane}.*"
+    timeout: 15000
+- assertVisible: ".*Claude Code.*"
+
+# Search narrows the list to matching panes.
+- tapOn: "Search panes"
+- inputText: ${output.pane}
+- assertVisible: "${output.pane}.*"
+- tapOn: "Cancel"
+
+# Favorite from the context menu, then check the Favorites section.
+- longPressOn: "${output.pane}.*"
+- tapOn: "Favorite"
+- extendedWaitUntil:
+    visible: "FAVORITES"
+    timeout: 10000
+
+# Archive with a swipe and confirm.
+- swipe:
+    from: "${output.pane}.*"
+    direction: LEFT
+- tapOn:
+    id: "pane-archive-.*"
+- tapOn:
+    text: "Archive"
+    below:
+      text: "Archive “.*”\\?"
+- extendedWaitUntil:
+    notVisible: "${output.pane}.*"
+    timeout: 20000
+
+# Delete it for good from Archived.
+- scrollUntilVisible:
+    element:
+      id: panes-archived
+- tapOn:
+    id: panes-archived
+- extendedWaitUntil:
+    visible: "${output.pane}.*"
+    timeout: 15000
+- tapOn: "${output.pane}.*"
+- tapOn:
+    text: "Delete"
+    below:
+      text: "Delete “.*”\\?"
+- extendedWaitUntil:
+    notVisible: "${output.pane}.*"
+    timeout: 20000
