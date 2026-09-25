@@ -228,7 +228,7 @@ runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick
 
 `runpane agent-context` is token-efficient by default and prints only command names, arguments, and safe usage notes. Agents can lazy-load full details for a specific command with `runpane agent-context --command "panes create" --json`.
 
-Pane also registers a `pane` MCP server with Claude Code and Codex, so agents in every repository get these commands as tools without any setup. You can turn this off in Settings → AI & Agents. Other MCP clients can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
+Pane also registers a `pane` MCP server with Claude Code and Codex, so agents in every repository get these commands as tools without any setup. The default core toolset covers the common jobs in one call each: start an agent on a task, check on it, and send it a follow-up. It also has git status, docs search, and `pane://` links that open a Pane in the app. You can turn this off, or register every tool, in Settings → AI & Agents. Other MCP clients (Cursor, VS Code, any stdio client) can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
 
 See [Runpane CLI Contract](docs/RUNPANE_CLI_CONTRACT.md) for the full schema and automation examples.
 

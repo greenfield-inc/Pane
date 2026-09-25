@@ -7986,7 +7986,8 @@
           "Inspect safetyCheck.unpushedCommitDetails for exact commit IDs and subjects; upstreamRefreshed confirms the tracking ref was refreshed first.",
           "A --dry-run result sets dryRun:true and wouldArchive without deleting the Pane or its worktree.",
           "A successful archive waits for the Pane-managed worktree to be removed before returning; check worktreeCleanup in the result for the final outcome.",
-          "Archiving a main-repo Pane (no Pane-managed worktree) always succeeds immediately since nothing is deleted from disk."
+          "Archiving a main-repo Pane (no Pane-managed worktree) always succeeds immediately since nothing is deleted from disk.",
+          "Undo an archive with `runpane panes restore --pane <pane-id> --yes`, which recreates the worktree. `runpane links create --pane <pane-id>` gives the user a link to review the Pane first."
         ]
       },
       "panes pin": {
