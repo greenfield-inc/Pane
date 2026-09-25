@@ -332,6 +332,25 @@ describe('OrchestrationSessionManager', () => {
     expect(view.panel.sessionId).toBe(view.session.internalSessionId);
   });
 
+  it('keeps opening other Sessions when one cannot be restored on startup', async () => {
+    const fixture = createFixture();
+    const healthy = await fixture.manager.create({ name: 'Healthy' });
+    const broken = await fixture.manager.create({ name: 'Broken' });
+    const data = fixture.store.read();
+    fixture.store.write({ ...data, sessions: data.sessions.map(record => record.id === broken.session.id
+      ? { ...record, promotedFrom: { paneId: 'gone-pane', panelId: 'gone-chat' } }
+      : record) });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await restarted.initialize();
+
+    const view = await restarted.getView({ sessionId: healthy.session.id });
+    expect(view.panel.id).toBe(healthy.panel.id);
+    const failed = fixture.store.read().sessions.find(record => record.id === broken.session.id);
+    expect(failed?.activity.at(-1)?.message).toBe('Session could not be restored: Promoted chat is missing; refusing to replace its history');
+  });
+
   it('unpins first-time Session children and preserves later manual pins', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Coordinator' });
