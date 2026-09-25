@@ -32,3 +32,10 @@ export function inheritedProcessEnv(env: NodeJS.ProcessEnv = process.env): PtyHo
   }
   return result;
 }
+
+/** Interactive terminals advertise color; don't inherit a launcher’s NO_COLOR flag. */
+export function interactiveTerminalEnv(env: NodeJS.ProcessEnv = process.env): PtyHostSpawnOpts['env'] {
+  const result = inheritedProcessEnv(env);
+  delete result.NO_COLOR;
+  return result;
+}
