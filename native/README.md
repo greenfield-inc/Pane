@@ -119,6 +119,8 @@ xcrun simctl openurl <simulator-udid> 'pane://pane/<session id>?host=http%3A%2F%
 
 **Needs a real device:** APNs delivery end to end (a signed build with the Push Notifications capability and a real `.p8` key on the host), and FCM on Android. FCM also needs a Firebase app for `com.dcouple.pane.mobile` and its `google-services.json` set as `android.googleServicesFile`. Without that file, Android registration reports an error in Settings, and the rest of the app works.
 
+`panes.yaml` creates a pane, searches, favorites, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
+
 ## How the code is organised
 
 | Path | What goes there |
