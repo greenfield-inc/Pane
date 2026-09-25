@@ -115,7 +115,12 @@ export interface AppConfig {
   gitAttributionEnabled?: boolean;
   // Agent-facing Pane context in repository instructions files
   agentContext?: {
-    managedAgentsMd: boolean;
+    /** Legacy opt-in: write Pane's managed block into repositories' AGENTS.md. */
+    managedAgentsMd?: boolean;
+    /** Register Pane's MCP server with the user-level Claude Code and Codex configs. */
+    registerMcp?: boolean;
+    /** Toolsets the registered server serves (`runpane mcp --toolsets`); core when absent. */
+    mcpToolsets?: string[];
   };
   // Use interactive mode for Claude CLI (persistent process with stdin instead of spawn-per-message)
   useInteractiveMode?: boolean;

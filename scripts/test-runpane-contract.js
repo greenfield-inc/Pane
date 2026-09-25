@@ -599,6 +599,14 @@ function compareParserParity() {
       selfTest: parsed.selfTest ?? false,
       report: parsed.report ?? false,
       bodyFile: parsed.bodyFile ?? null,
+      message: parsed.message ?? null,
+      query: parsed.query ?? null,
+      doc: parsed.doc ?? null,
+      url: parsed.url ?? null,
+      folder: parsed.folder ?? null,
+      keys: parsed.keys ?? null,
+      toolsets: parsed.toolsets ?? null,
+      readOnly: parsed.readOnly ?? false,
       remoteSetupArgs: parsed.remoteSetupArgs
     };
   });
@@ -680,6 +688,14 @@ for args in samples:
         "selfTest": parsed.self_test,
         "report": parsed.report,
         "bodyFile": parsed.body_file,
+        "message": parsed.message,
+        "query": parsed.query,
+        "doc": parsed.doc,
+        "url": parsed.url,
+        "folder": parsed.folder,
+        "keys": parsed.keys,
+        "toolsets": parsed.toolsets,
+        "readOnly": parsed.read_only,
         "remoteSetupArgs": parsed.remote_setup_args,
     })
 print(json.dumps(normalized))

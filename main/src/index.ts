@@ -109,6 +109,8 @@ import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
+import { syncPaneMcpForApp } from './services/paneMcpRegistration';
+import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
@@ -226,6 +228,19 @@ let archiveProgressManager: ArchiveProgressManager;
 let leaderboardService: LeaderboardService;
 let analyticsManager: AnalyticsManager;
 let paneDaemonHost: PaneDaemonHost | null = null;
+let pendingPaneLink: string | undefined;
+let paneLinksReady = false;
+
+function openPaneLink(link: string): void {
+  if (!paneLinksReady || !paneDaemonHost) {
+    pendingPaneLink = link;
+    return;
+  }
+  pendingPaneLink = undefined;
+  void paneDaemonHost.commandRegistry.invoke(OPEN_PANE_LINK_CHANNEL, [link]).then((result) => {
+    console.log('[Main] Opened pane link:', JSON.stringify(result));
+  }).catch((error) => console.warn('[Main] Could not open pane link:', error));
+}
 let powerSaveManager: PowerSaveManager | null = null;
 
 // ptyHost supervisor — forked as an Electron UtilityProcess on app ready,
@@ -1152,10 +1167,27 @@ if (launchRemoteSetup) {
 } else if (launchHeadlessDaemon) {
   startHeadlessPaneProcess();
 } else {
+  // pane:// links: macOS delivers them as open-url (also before ready); Windows and Linux
+  // start Pane with the link in argv. Links wait for the window, then go through the daemon.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    openPaneLink(url);
+  });
+  pendingPaneLink = findPaneLinkArg(process.argv);
+
   app.whenReady().then(async () => {
     appStartTime = Date.now();
     if (process.platform === 'darwin') {
       app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
+    }
+
+    // A second Pane launched only to open a link hands it to the running Pane and exits.
+    if (pendingPaneLink && process.platform !== 'darwin' && await forwardPaneLinkToRunningPane(pendingPaneLink, getAppDirectory())) {
+      app.exit(0);
+      return;
+    }
+    if (app.isPackaged && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
+      app.setAsDefaultProtocolClient(PANE_LINK_SCHEME);
     }
 
     console.log('[Main] App is ready, initializing services...');
@@ -1164,6 +1196,11 @@ if (launchRemoteSetup) {
     void warmShellPath();
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    setTimeout(() => syncPaneMcpForApp({
+      isPackaged: app.isPackaged,
+      config: configManager.getConfig(),
+      getProjects: () => databaseService.getAllProjects(),
+    }), 5_000);
     console.log('[Main] Services initialized, creating window...');
 
   // Register before any renderer loads. useNotifications pulls this on mount
@@ -1221,6 +1258,8 @@ if (launchRemoteSetup) {
 
   await createWindow();
   console.log('[Main] Window created successfully');
+  paneLinksReady = true;
+  if (pendingPaneLink) openPaneLink(pendingPaneLink);
 
   // Crash sentinel: detect if the previous session ended uncleanly.
   // We write a file on startup and delete it on clean shutdown.

@@ -6,9 +6,10 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsc -w",
-    "build": "rimraf dist && tsc && npm run bundle:preload && npm run copy:assets && npm run bundle:mcp",
+    "build": "rimraf dist && tsc && npm run bundle:preload && npm run copy:assets && npm run bundle:mcp && npm run bundle:runpane",
     "headless": "npm run build && electron dist/main/src/daemon/headless.js",
     "bundle:mcp": "node build-mcp-bridge.js",
+    "bundle:runpane": "node build-runpane.js",
     "bundle:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --target=node24 --external:electron --sourcemap --outfile=dist/main/src/preload.js && node ../scripts/verify-sandboxed-preload.js",
     "copy:assets": "mkdirp dist/main/src/database/migrations dist/main/assets dist/main/src/services && shx cp src/database/*.sql dist/main/src/database/ && shx cp src/database/migrations/*.sql dist/main/src/database/migrations/ && shx cp assets/icon.png assets/icon-macos.png dist/main/assets/ && shx cp -r src/services/paneChatBundle dist/main/src/services/",
     "lint": "pnpm --dir .. run lint:ox:main && pnpm run lint:eslint",
@@ -31,6 +32,7 @@
     "electron-updater": "^6.6.8",
     "glob": "^11.0.0",
     "js-yaml": "^4.1.1",
+    "smol-toml": "1.7.1",
     "uuid": "^13.0.0",
     "web-streams-polyfill": "^3.3.3",
     "ws": "^8.20.1"

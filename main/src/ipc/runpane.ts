@@ -487,7 +487,7 @@ export function registerRunpaneHandlers(
           panes = [pane];
         } else {
           const session = databaseService.getSession(normalized.paneId);
-          if (!session) throw new Error(`No Pane pane found with id ${normalized.paneId}`);
+          if (!session) throw new Error(`No Pane pane found with id ${normalized.paneId}. Run \`runpane panes list\` to see Pane ids.`);
           panes = [{
             paneId: session.id,
             paneName: session.name,
@@ -3016,7 +3016,7 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
 function resolvePane(sessionManager: AppServices['sessionManager'], paneId: string): Session {
   const session = sessionManager.getSession(paneId);
   if (!session) {
-    throw new Error(`No Pane pane found with id ${paneId}`);
+    throw new Error(`No Pane pane found with id ${paneId}. Run \`runpane panes list\` to see Pane ids.`);
   }
   return session;
 }
@@ -3281,7 +3281,7 @@ function parsePaneFocusRequest(value: PaneCommandValue): RunpanePaneFocusRequest
 function resolvePanel(panelId: string): ToolPanel {
   const panel = panelManager.getPanel(panelId);
   if (!panel) {
-    throw new Error(`No Pane panel found with id ${panelId}`);
+    throw new Error(`No Pane panel found with id ${panelId}. Run \`runpane panels list --pane <pane-id>\` to see panel ids.`);
   }
   return panel;
 }
@@ -3415,7 +3415,7 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   if (selectorObject.id !== undefined) {
     const project = projects.find(candidate => candidate.id === selectorObject.id);
     if (!project) {
-      throw new Error(`No Pane repo found with id ${selectorObject.id}`);
+      throw new Error(`No Pane repo found with id ${selectorObject.id}. Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
     }
     return project;
   }
@@ -3423,7 +3423,7 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   if (selectorObject.path !== undefined) {
     const project = resolveProjectByPath(projects, selectorObject.path);
     if (!project) {
-      throw new Error(`No Pane repo found at path ${selectorObject.path}`);
+      throw new Error(`No Pane repo found at path ${selectorObject.path}. Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
     }
     return project;
   }
@@ -3451,7 +3451,7 @@ function resolveProjectByPath(projects: Project[], selectorPath: string): Projec
 function resolveProjectByName(projects: Project[], selectorName: string): Project {
   const matches = projects.filter(project => project.name.toLowerCase() === selectorName.toLowerCase());
   if (matches.length === 0) {
-    throw new Error(`No Pane repo found named "${selectorName}"`);
+    throw new Error(`No Pane repo found named "${selectorName}". Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
   }
   if (matches.length > 1) {
     throw new Error(`Multiple Pane repos are named "${selectorName}". Use --repo-id or an exact path.`);

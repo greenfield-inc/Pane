@@ -14,7 +14,7 @@ import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type
 import type { AppServices } from './types';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
-import { getWSLHome, linuxToUNCPath, posixJoin } from '../utils/wslUtils';
+import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '../utils/wslUtils';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);
@@ -45,18 +45,6 @@ const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.ob
   focusedGroupId: boundary.optional(boundary.string),
   zoomedGroupId: boundary.optional(boundary.nullable(boundary.string)),
 });
-
-/**
- * Convert a Windows path to a WSL mount path.
- * C:\Users\khaza\.pane\images\file.png → /mnt/c/Users/khaza/.pane/images/file.png
- */
-function windowsPathToWSLMount(winPath: string): string {
-  const match = winPath.match(/^([a-zA-Z]):\\(.*)/);
-  if (!match) return winPath;
-  const drive = match[1].toLowerCase();
-  const rest = match[2].replace(/\\/g, '/');
-  return `/mnt/${drive}/${rest}`;
-}
 
 /**
  * Check if a session's project is WSL-enabled and convert path if needed.

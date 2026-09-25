@@ -199,6 +199,14 @@
         "$ref": "#/$defs/agentTemplate"
       }
     },
+    "terminalKeys": {
+      "description": "Named keys for `panels input --keys`, mapped to the bytes a terminal receives.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "commands": {
       "type": "array",
       "items": {
@@ -329,6 +337,50 @@
         "mutates": {
           "type": "boolean"
         },
+        "additive": {
+          "description": "A mutating command that only adds state, never changes or removes it (MCP destructiveHint false).",
+          "type": "boolean"
+        },
+        "idempotent": {
+          "description": "Repeating the command with the same arguments has no further effect (MCP idempotentHint).",
+          "type": "boolean"
+        },
+        "openWorld": {
+          "description": "The command can reach services outside the local Pane app (MCP openWorldHint).",
+          "type": "boolean"
+        },
+        "toolsets": {
+          "description": "MCP toolsets that serve this command; see runpane mcp --toolsets.",
+          "$ref": "#/$defs/stringList"
+        },
+        "wrappers": {
+          "description": "Wrappers that implement the command; both when absent.",
+          "type": "array",
+          "items": {
+            "enum": [
+              "npm",
+              "pip"
+            ]
+          }
+        },
+        "daemonAction": {
+          "description": "Invoke this Pane daemon channel with the listed flags' values as positional arguments.",
+          "type": "object",
+          "required": [
+            "channel",
+            "args"
+          ],
+          "properties": {
+            "channel": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "$ref": "#/$defs/stringList"
+            }
+          },
+          "additionalProperties": false
+        },
         "jsonSchemas": {
           "$ref": "#/$defs/stringList"
         }
@@ -418,6 +470,30 @@
         "panels submit-composer",
         "panels wait",
         "agent-context",
+        "mcp",
+        "panes git-status",
+        "panes commit",
+        "panes push",
+        "panes pull",
+        "panes rebase-main",
+        "panes restore",
+        "panes squash-rebase",
+        "panes stash",
+        "panes stash-pop",
+        "panes soft-reset",
+        "panes fetch",
+        "panes run-script",
+        "panes stop-script",
+        "panes move",
+        "folders list",
+        "folders create",
+        "links create",
+        "links open",
+        "docs search",
+        "docs read",
+        "agents start",
+        "agents status",
+        "agents send",
         "sessions",
         "sessions list",
         "sessions create",
@@ -526,6 +602,78 @@
           "$ref": "#/$defs/helpLines"
         },
         "agent-context": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "mcp": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes git-status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes commit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes push": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes pull": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes rebase-main": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes restore": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes squash-rebase": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes stash": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes stash-pop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes soft-reset": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes fetch": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes run-script": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes stop-script": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes move": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "folders list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "folders create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "links create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "links open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "docs search": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "docs read": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "agents start": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "agents status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "agents send": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions": {

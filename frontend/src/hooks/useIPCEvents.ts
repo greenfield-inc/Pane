@@ -3,6 +3,8 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useErrorStore } from '../stores/errorStore';
 import { usePanelStore } from '../stores/panelStore';
 import { useConfigStore } from '../stores/configStore';
+import { useNavigationStore } from '../stores/navigationStore';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { panelApi } from '../services/panelApi';
 import { API } from '../utils/api';
 import { devLog } from '../utils/console';
@@ -221,6 +223,8 @@ export function useIPCEvents() {
 
     const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(({ paneId, panelId }) => {
       devLog.debug('[useIPCEvents] Pane focus requested:', { paneId, panelId });
+      // Same as clicking the Pane in the sidebar, which also leaves a repository or Sessions view.
+      useNavigationStore.getState().navigateToSessions();
       void useSessionStore.getState().setActiveSession(paneId).then(() => {
         if (panelId) {
           usePanelStore.getState().setActivePanel(paneId, panelId);
@@ -228,6 +232,17 @@ export function useIPCEvents() {
       });
     });
     unsubscribeFunctions.push(unsubscribePaneFocusRequested);
+
+    // pane:// links to a repository or Session (pane links arrive as pane:focus-requested).
+    const unsubscribePaneOpenLink = window.electronAPI.events.onPaneOpenLink((target) => {
+      if (target.kind === 'repo') {
+        useNavigationStore.getState().navigateToProject(target.repoId);
+        return;
+      }
+      useNavigationStore.getState().navigateToPaneChat();
+      void useOrchestrationSessionStore.getState().select({ sessionId: target.sessionId });
+    });
+    unsubscribeFunctions.push(unsubscribePaneOpenLink);
 
     const unsubscribeSessionDeleted = window.electronAPI.events.onSessionDeleted((sessionData) => {
       devLog.debug('[useIPCEvents] Session deleted:', sessionData);

@@ -64,6 +64,7 @@
     "generate-runpane-contract": "node scripts/generate-runpane-contract.js",
     "check:runpane-contract": "node scripts/generate-runpane-contract.js --check",
     "test:runpane-contract": "pnpm run check:runpane-contract && pnpm --filter runpane build && node scripts/test-runpane-contract.js",
+    "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
     "test:runpane-package-smoke": "pnpm --filter runpane build && node scripts/test-runpane-package-smoke.js",
     "inject-build-info": "node scripts/inject-build-info.js",
     "release:mac": "pnpm run build:frontend && pnpm run build:main && pnpm run inject-build-info && pnpm run generate-notices && node scripts/configure-build.js && electron-builder --mac --publish always && node scripts/verify-mac-universal-binaries.js",
@@ -111,6 +112,7 @@
     "chokidar": "^5.0.0",
     "electron-updater": "^6.6.8",
     "glob": "^11.0.0",
+    "smol-toml": "1.7.1",
     "web-streams-polyfill": "^3.3.3",
     "ws": "^8.20.1"
   },
@@ -137,6 +139,14 @@
   "build": {
     "appId": "com.dcouple.pane",
     "productName": "Pane",
+    "protocols": [
+      {
+        "name": "Pane link",
+        "schemes": [
+          "pane"
+        ]
+      }
+    ],
     "afterPack": "./scripts/after-pack.js",
     "directories": {
       "output": "dist-electron"

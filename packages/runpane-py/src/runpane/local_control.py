@@ -662,15 +662,32 @@ def build_repo_add_request(parsed: Any) -> Dict[str, Any]:
 def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, Any]:
     if not parsed.panel_id:
         raise ValueError(f"runpane panels {command} requires --panel.")
-    if parsed.panel_input is not None and parsed.panel_input_file:
-        raise ValueError("Use either --text or --input-file, not both.")
-    if parsed.panel_input is None and not parsed.panel_input_file:
-        raise ValueError(f"runpane panels {command} requires --text or --input-file.")
+    sources = sum([parsed.panel_input is not None, bool(parsed.panel_input_file), parsed.keys is not None])
+    if sources > 1:
+        raise ValueError("Use only one of --text, --keys, or --input-file.")
+    if sources == 0:
+        raise ValueError(f"runpane panels {command} requires --text, --keys, or --input-file.")
+    if parsed.keys is not None and command != "input":
+        raise ValueError("--keys is for panels input; panels submit sends text followed by Enter.")
 
-    return {
-        "panelId": parsed.panel_id,
-        "input": read_input_source(parsed.panel_input_file) if parsed.panel_input_file else parsed.panel_input or "",
-    }
+    if parsed.keys is not None:
+        text = keys_to_bytes(parsed.keys)
+    elif parsed.panel_input_file:
+        text = read_input_source(parsed.panel_input_file)
+    else:
+        text = parsed.panel_input or ""
+    return {"panelId": parsed.panel_id, "input": text}
+
+
+def keys_to_bytes(keys: Any) -> str:
+    named = RUNPANE_CONTRACT["terminalKeys"]
+    out = []
+    for key in keys:
+        value = named.get(key.lower(), key if len(key) == 1 else None)
+        if value is None:
+            raise ValueError(f'Unknown key "{key}". Use {", ".join(named)}, or a single character.')
+        out.append(value)
+    return "".join(out)
 
 
 def build_panel_create_request(parsed: Any) -> Dict[str, Any]:

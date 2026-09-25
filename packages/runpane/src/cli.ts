@@ -3,6 +3,10 @@ import * as os from 'node:os';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { runAgentContext } from './agentContext';
+import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
+import { daemonActionFor, runDaemonAction } from './daemonActions';
+import { runDocsRead, runDocsSearch } from './docs';
+import { runLinksCreate } from './links';
 import { helpText, parseRunpaneArgs, type ParsedArgs } from './commands';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
@@ -115,6 +119,40 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'agent-context') {
     return runAgentContext(parsed);
+  }
+
+  if (parsed.command === 'mcp') {
+    const { runMcpServer } = await import('./mcp');
+    return runMcpServer({ toolsets: parsed.toolsets, readOnly: parsed.readOnly === true });
+  }
+
+  const daemonAction = daemonActionFor(parsed.command);
+  if (daemonAction) {
+    return runDaemonAction(parsed, daemonAction);
+  }
+
+  if (parsed.command === 'links create') {
+    return runLinksCreate(parsed);
+  }
+
+  if (parsed.command === 'docs search') {
+    return runDocsSearch(parsed);
+  }
+
+  if (parsed.command === 'docs read') {
+    return runDocsRead(parsed);
+  }
+
+  if (parsed.command === 'agents start') {
+    return runAgentsStart(parsed);
+  }
+
+  if (parsed.command === 'agents status') {
+    return runAgentsStatus(parsed);
+  }
+
+  if (parsed.command === 'agents send') {
+    return runAgentsSend(parsed);
   }
 
   if (parsed.command === 'repos list') {

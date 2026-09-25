@@ -35,6 +35,7 @@ import { registerAgentUsageHandlers } from './agentUsage';
 import { registerFeedbackHandlers } from './feedback';
 import { registerMobilePushHandlers } from './mobilePush';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { registerPaneLinkHandler } from '../services/paneLinks';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 
 
@@ -82,6 +83,17 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerJourneyTimingHandlers(ipcMain, services);
   registerRemoteDaemonHandlers(ipcMain, services);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
+  registerPaneLinkHandler(commandRegistry, {
+    repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
+    navigate: (target) => {
+      const window = services.getMainWindow();
+      if (!window || window.isDestroyed()) throw new Error('Pane window is not available to open the link');
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      window.webContents.send('pane:open-link', target);
+    },
+  });
   registerClipboardHandlers(ipcMain, services);
   registerResourceMonitorHandlers(ipcMain, services, commandRegistry);
   registerAgentUsageHandlers(ipcMain, services, commandRegistry);
