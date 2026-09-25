@@ -1291,7 +1291,9 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   });
   await page.goto('/');
   await page.getByTestId('orchestration-session-tools').click();
-  await expect(page.locator('.pane-chat-shell').getByRole('tab').first()).toBeVisible();
+  const sessionTabs = page.locator('.pane-chat-shell');
+  const activeTab = sessionTabs.getByRole('tab').first();
+  await expect(activeTab).toBeVisible();
   await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
   const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
   await expect(titleBarControls.getByRole('button', { name: 'Session settings' })).toBeVisible();
@@ -1335,12 +1337,31 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
     { id: 'mock-panel-1', type: 'terminal', title: 'Terminal' },
     { id: 'mock-panel-2', type: 'explorer', title: 'Files' },
   ]);
+  await page.getByRole('button', { name: 'Show progress brief', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
-  await expect(page.getByRole('tab', { name: /notes.txt/ })).toBeVisible();
+  const fileTab = sessionTabs.getByRole('tab', { name: 'notes.txt', exact: true });
+  await expect(fileTab).toBeVisible();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
+  const closeFile = sessionTabs.getByRole('button', { name: 'Close notes.txt' });
+  await expect(closeFile).toHaveCSS('opacity', '1');
+  await activeTab.click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'false');
+  await fileTab.click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect.poll(readPanels).toHaveLength(3);
   const path = testInfo.outputPath('session-tools.png');
   await page.screenshot({ path });
   await testInfo.attach('session-tools.png', { path, contentType: 'image/png' });
+  await closeFile.click();
+  await expect(fileTab).toHaveCount(0);
+  await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
+  await expect.poll(readPanels).toHaveLength(2);
+  await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(3);
   await page.getByRole('button', { name: 'Collapse terminal', exact: true }).click();
   await page.getByTestId('orchestration-session-other').click();
   await expect(page.getByRole('complementary', { name: 'Session files' })).toHaveCount(0);
@@ -1349,6 +1370,13 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
+  await expect.poll(readPanels).toHaveLength(3);
+  await closeFile.click();
+  await expect(fileTab).toHaveCount(0);
+  await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(2);
+  await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect.poll(readPanels).toHaveLength(3);
 });
 
