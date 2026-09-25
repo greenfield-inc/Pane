@@ -59,7 +59,8 @@
             "image": "./assets/images/splash-icon.png"
           }
         }
-      ]
+      ],
+      "./plugins/withQuietDevMenu"
     ],
     "experiments": {
       "typedRoutes": true,

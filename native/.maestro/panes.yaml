@@ -48,7 +48,17 @@ name: Pane list journeys
     timeout: 10000
 
 # Search narrows the list to matching panes.
-- tapOn: "Search panes"
+# iOS shows the header search field; Android opens it from the Search icon.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn: "Search"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Search panes"
 - inputText: ${output.pane}
 # Match the row by its subtitle: the search field holds the name too.
 - assertVisible: "${output.pane}, .*Claude Code.*"
@@ -67,8 +77,17 @@ name: Pane list journeys
     visible:
       id: panes-no-results
     timeout: 20000
-# iOS 26 shows the search bar's cancel as a close button.
-- tapOn: "Close|Cancel"
+# iOS 26 shows the search bar's cancel as a close button; Android uses Back.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Close|Cancel"
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
 - waitForAnimationToEnd
 
 # Delete it for good from Archived.

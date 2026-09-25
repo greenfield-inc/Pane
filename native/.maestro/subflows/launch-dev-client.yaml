@@ -1,4 +1,5 @@
 # Opens the dev build against the local Metro server with no saved hosts.
+# (plugins/withQuietDevMenu keeps the dev menu from opening over the app.)
 appId: com.dcouple.pane.mobile
 ---
 - launchApp:
@@ -22,33 +23,3 @@ appId: com.dcouple.pane.mobile
       visible: "DEVELOPMENT SERVERS"
     commands:
       - tapOn: "http://.*:${METRO_PORT || '8137'}"
-# clearState brings back the dev menu's first-run introduction; it opens
-# once the bundle loads, then shows the menu itself.
-- extendedWaitUntil:
-    visible: "Continue"
-    timeout: 180000
-    optional: true
-- runFlow:
-    when:
-      visible: "Continue"
-    commands:
-      - tapOn: "Continue"
-      - tapOn:
-          id: xmark
-          optional: true
-- runFlow:
-    when:
-      platform: Android
-      visible: "Go home"
-    commands:
-      - back
-# Drag the iOS dev client's floating tools button off the header's right
-# button. (On Android the same swipe opens the notification shade.)
-- runFlow:
-    when:
-      platform: iOS
-    commands:
-      - swipe:
-          start: 90%, 12%
-          end: 8%, 60%
-          duration: 600

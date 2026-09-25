@@ -12,8 +12,9 @@ export default function PairFromLinkScreen() {
     <Screen scroll>
       <ConnectForm
         initialCode={code}
-        // A cold-start link opens this screen with nothing under it.
-        onPaired={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        // Pairing switches hosts, which remounts the navigator; leave for the
+        // app root first so this screen isn't left behind with an empty code.
+        onPaired={() => router.replace('/')}
       />
     </Screen>
   );

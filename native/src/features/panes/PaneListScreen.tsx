@@ -83,6 +83,10 @@ export function PaneListScreen() {
         options={{
           headerSearchBarOptions: {
             placeholder: 'Search panes',
+            // Android draws the search icon and field itself; match the theme.
+            headerIconColor: theme.colors.accentText,
+            textColor: theme.colors.text,
+            hintTextColor: theme.colors.textMuted,
             hideWhenScrolling: false,
             onChangeText: event => setQuery(event.nativeEvent.text),
             onCancelButtonPress: () => setQuery(''),

@@ -110,11 +110,21 @@ appId: com.dcouple.pane.mobile
       text: "(?s).*%.*"
     timeout: 20000
 
-# Swipe back from the middle of the terminal, not only the screen edge.
-- swipe:
-    start: 30%, 45%
-    end: 95%, 45%
-    duration: 500
+# iOS: swipe back from the middle of the terminal, not only the screen edge.
+# Android goes back with the system Back gesture.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - swipe:
+          start: 30%, 45%
+          end: 95%, 45%
+          duration: 500
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
 - extendedWaitUntil:
     visible:
       id: panes-list

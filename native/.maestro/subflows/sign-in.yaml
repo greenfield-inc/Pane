@@ -5,22 +5,33 @@ appId: com.dcouple.pane.mobile
     visible:
       id: connect-code-input
     timeout: 180000
-- tapOn:
-    id: connect-code-input
-# Typed in chunks: Android's driver gives up on one command after 120 s.
-- inputText: ${CONNECTION_CODE.substring(0, 64)}
-- inputText: ${CONNECTION_CODE.substring(64, 128)}
-- inputText: ${CONNECTION_CODE.substring(128, 192)}
-- inputText: ${CONNECTION_CODE.substring(192, 256)}
-- inputText: ${CONNECTION_CODE.substring(256, 320)}
-- inputText: ${CONNECTION_CODE.substring(320, 384)}
-- inputText: ${CONNECTION_CODE.substring(384, 448)}
-- inputText: ${CONNECTION_CODE.substring(448, 512)}
-- inputText: ${CONNECTION_CODE.substring(512, 576)}
-- inputText: ${CONNECTION_CODE.substring(576, 640)}
-- hideKeyboard
-- tapOn:
-    id: connect-submit
+# iOS types the code, which covers the paste/type path.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: connect-code-input
+      - inputText: ${CONNECTION_CODE}
+      - hideKeyboard
+      - tapOn:
+          id: connect-submit
+# Typing 500+ characters through Maestro's Android driver outlasts its 120 s
+# command deadline on a loaded machine, so Android pairs through the
+# pane-remote:// link instead, which covers the link path.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - openLink: ${CONNECTION_CODE}
+      - extendedWaitUntil:
+          visible:
+            id: connect-host
+          timeout: 30000
+      - tapOn:
+          id: connect-submit
+          below:
+            id: connect-host
 - extendedWaitUntil:
     visible:
       id: panes-list

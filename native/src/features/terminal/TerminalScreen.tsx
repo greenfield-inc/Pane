@@ -73,7 +73,7 @@ export function TerminalScreen() {
   return (
     <KeyboardAvoidingView
       testID="pane-detail-screen"
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
       keyboardVerticalOffset={headerHeight}
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >

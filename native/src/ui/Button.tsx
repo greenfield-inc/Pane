@@ -46,7 +46,7 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled,
         {
           backgroundColor: background,
           borderRadius: theme.radius.md,
-          borderColor: variant === 'secondary' ? theme.colors.border : 'transparent',
+          borderColor: variant === 'secondary' || variant === 'destructive' ? theme.colors.border : 'transparent',
           opacity: inactive ? 0.5 : pressed ? 0.75 : 1,
         },
       ]}
