@@ -139,6 +139,14 @@
   "build": {
     "appId": "com.dcouple.pane",
     "productName": "Pane",
+    "protocols": [
+      {
+        "name": "Pane link",
+        "schemes": [
+          "pane"
+        ]
+      }
+    ],
     "afterPack": "./scripts/after-pack.js",
     "directories": {
       "output": "dist-electron"

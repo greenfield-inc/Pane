@@ -18,6 +18,12 @@ const PANE_CHAT_AGENT_LABELS = {
 
 const paneChatAgentOptions = visibleAgentPresets().map(({ id }) => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
+type McpToolsetChoice = 'core' | 'all';
+const mcpToolsetOptions: { id: McpToolsetChoice; label: string }[] = [
+  { id: 'core', label: 'Core' },
+  { id: 'all', label: 'All' },
+];
+
 interface AIAgentsSettingsProps {
   persistence: SettingsPersistence;
   onDirtyChange: (dirty: boolean) => void;
@@ -63,6 +69,19 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             label="Register Pane tools with Claude Code and Codex"
             value={config.agentContext?.registerMcp !== false}
             onSave={(value) => persistence.saveConfig('mcp-registration', { agentContext: { registerMcp: value } })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="mcp-toolsets"
+          label="Pane tools to register"
+          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, and links. All adds every Pane command, which can make smaller models pick tools less accurately."
+          saveState={persistence.saveStates['mcp-toolsets']}
+        >
+          <SegmentedControl<McpToolsetChoice>
+            label="Pane tools to register"
+            value={config.agentContext?.mcpToolsets?.includes('all') ? 'all' : 'core'}
+            options={mcpToolsetOptions}
+            onChange={(value) => void persistence.saveConfig('mcp-toolsets', { agentContext: { mcpToolsets: [value] } })}
           />
         </SettingRow>
         <SettingRow

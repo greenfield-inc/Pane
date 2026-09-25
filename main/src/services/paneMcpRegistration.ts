@@ -280,14 +280,22 @@ interface PaneMcpHost {
   scriptPath: string;
   /** Pane data directory; passed as PANE_DIR when it is not the default. */
   paneDir: string;
+  /** `runpane mcp --toolsets`; the server's default (core) when absent. */
+  toolsets?: string[];
   claudeExecutablePath?: string;
+}
+
+function serverArgs(host: PaneMcpHost): string[] {
+  const args = [host.scriptPath, 'mcp'];
+  if (host.toolsets && host.toolsets.length > 0) args.push('--toolsets', host.toolsets.join(','));
+  return args;
 }
 
 /** The host's own Claude Code and Codex configs. */
 async function buildHostTarget(host: PaneMcpHost): Promise<McpRegistrationTarget> {
   const target: McpRegistrationTarget = {
     label: 'this machine',
-    server: { command: host.executable, args: [host.scriptPath, 'mcp'], env: serverEnv(host.paneDir, false) },
+    server: { command: host.executable, args: serverArgs(host), env: serverEnv(host.paneDir, false) },
   };
 
   const claude = host.claudeExecutablePath || await findExecutable('claude');
@@ -323,7 +331,7 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
   const target: McpRegistrationTarget = {
     label: `WSL (${distro})`,
     // wslpath honors a custom automount root; /mnt/<drive> is the default if it is unavailable.
-    server: { command: values.exe?.startsWith('/') ? values.exe : windowsPathToWSLMount(host.executable), args: [host.scriptPath, 'mcp'], env: serverEnv(host.paneDir, true) },
+    server: { command: values.exe?.startsWith('/') ? values.exe : windowsPathToWSLMount(host.executable), args: serverArgs(host), env: serverEnv(host.paneDir, true) },
   };
   if (values.claude === '1' && values.claudeHome?.startsWith('/')) {
     target.claude = {
@@ -437,6 +445,7 @@ async function syncRegistrations(
     executable: process.env.APPIMAGE || process.execPath,
     scriptPath,
     paneDir,
+    toolsets: options.config.agentContext?.mcpToolsets,
     claudeExecutablePath: options.config.claudeExecutablePath,
   };
   // Remember which distros were registered so turning the setting off also cleans a distro whose repos are gone.
@@ -465,7 +474,7 @@ async function syncRegistrations(
 }
 
 async function installRunpaneCopy(destination: string): Promise<void> {
-  for (const file of ['package.json', path.join('dist', 'cli.js')]) {
+  for (const file of ['package.json', path.join('dist', 'cli.js'), path.join('dist', 'docs-index.json')]) {
     const source = await fs.readFile(path.join(BUNDLED_RUNPANE_DIR, file));
     const target = path.join(destination, file);
     const current = await fs.readFile(target).catch(() => undefined);

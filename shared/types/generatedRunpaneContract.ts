@@ -663,7 +663,7 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "idempotent": true,
       "daemonAction": {
-        "channel": "links:open",
+        "channel": "runpane:links:open",
         "args": [
           "--url"
         ]

@@ -24,18 +24,79 @@ To turn this off, open **Settings → AI & Agents** and switch off **Register Pa
 
 Restart a running `claude` or `codex` session to pick up a new registration. Check it with `claude mcp list` or `codex mcp list`.
 
+## Toolsets
+
+A server that offers dozens of tools makes models, especially smaller ones, worse at choosing the right one. So by default the server serves a lean `core` toolset, and everything else is opt-in:
+
+| Toolset | Tools |
+|---|---|
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor` |
+| `agents` | the three agent tasks, `workspace_state`, `watch` |
+| `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, cost |
+| `panels` | create, list, output, screen, input, submit, submit-composer, wait |
+| `git` | `panes_git_status`, `panes_commit`, `panes_push`, `panes_pull`, `panes_rebase_main` |
+| `sessions` | the eight `sessions_*` tools |
+| `repos`, `docs`, `links`, `admin` | repository, documentation, deep-link, and diagnostic tools |
+| `all` / `read` | every tool / every read-only tool |
+
+Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field.
+
+## The three agent jobs
+
+The core set is built around the three jobs agents most often need, each finished in one call:
+
+- `agents_start`: creates a Pane in a repository, starts the agent with the task, waits until it is ready, and returns the pane and panel ids and a `pane://` link.
+- `agents_status`: whether the agent is working, ready, blocked (waiting on a person), idle, or exited, plus its current screen.
+- `agents_send`: submits a follow-up and reports whether Pane saw it leave the composer.
+
+## Docs and links
+
+`docs_search` searches Pane's docs, `runpane` help, per-command context, and the Pane Chat skills installed in the Pane data directory. It returns short excerpts with paths. `docs_read` returns one path in full. Both work offline, and the same docs are listed as `runpane-docs:` MCP resources.
+
+`links_create` builds `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or `pane://open?session=<id>`. Pane registers the `pane://` scheme on macOS, Windows, and Linux. Opening a link (from a browser, a terminal, or `links_open`) raises Pane and selects what it names. It never changes Pane state, and a link with any unexpected part is rejected.
+
 ## Registering by hand
 
-Without the desktop app, or for another MCP client, run the server from npm:
+Without the desktop app, or for another MCP client, run the server from npm: `npx --yes runpane@latest mcp`. Add `--toolsets <names>` to choose tools.
 
 ```bash
 claude mcp add --scope user pane -- npx --yes runpane@latest mcp
 codex mcp add pane -- npx --yes runpane@latest mcp
 ```
 
-Any MCP client that can launch a stdio server can use the same command: `npx --yes runpane@latest mcp`.
+Cursor (`~/.cursor/mcp.json`):
 
-The Python package (`pipx run runpane`) does not include the MCP server, because it needs the Node MCP SDK. `runpane mcp` from Python prints the npm command and exits with status 2.
+```json
+{ "mcpServers": { "pane": { "command": "npx", "args": ["--yes", "runpane@latest", "mcp"] } } }
+```
+
+VS Code (`.vscode/mcp.json`, or run **MCP: Add Server**):
+
+```json
+{ "servers": { "pane": { "type": "stdio", "command": "npx", "args": ["--yes", "runpane@latest", "mcp"] } } }
+```
+
+Any other client that can launch a stdio server uses the same command and arguments.
+
+The server is stdio only: it runs next to the Pane app on the same machine, so there is no HTTP transport and no OAuth. To drive a remote Pane, run the server on the remote host.
+
+The Python package (`pipx run runpane`) does not include the MCP server, the docs search, or the agent tasks, because they need Node. From Python, those commands print the npm command and exit with status 2.
+
+## Example prompts
+
+- "Use Pane to start Claude on fixing the login redirect in the web repo, and give me a link to watch it."
+- "How is the agent in my fix-login Pane doing? Does it need anything from me?"
+- "Tell the fix-login agent to also add a test for the redirect."
+- "Which of my Panes have uncommitted or unpushed work?"
+- "How do I archive a Pane and get it back later? Check Pane's docs."
+
+## Not supported
+
+- Streaming. `watch --follow` isn't offered; use `agents_status`, or `watch` with `timeoutMs`.
+- App settings. Agents can't read or change Pane's settings.
+- Permanently deleting Panes or removing repositories. Those stay in the app, where the user sees what goes.
+- Progress notifications and pagination (the full list is small).
+- Code or scripts run inside the MCP server itself. Agents run code in Pane terminals through `agents_start` and `agents_send`.
 
 ## Protocol
 

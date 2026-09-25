@@ -16,11 +16,11 @@ const sdk = (subpath) => require(require.resolve(`@modelcontextprotocol/sdk/${su
 const { Client } = sdk('client/index.js');
 const { StdioClientTransport } = sdk('client/stdio.js');
 
-async function withMcpClient(action) {
+async function withMcpClient(action, { args = ['--toolsets', 'all'], env = {} } = {}) {
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [dist('cli.js'), 'mcp'],
-    env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' },
+    args: [dist('cli.js'), 'mcp', ...args],
+    env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', ...env },
     stderr: 'pipe',
   });
   const client = new Client({ name: 'runpane-mcp-test', version: '1.0.0' });
@@ -87,8 +87,10 @@ async function withStubDaemon(paneDir, results, action) {
         buffer = buffer.slice(index + 1);
         if (frame.type !== 'request') continue;
         requests.push({ channel: frame.channel, args: frame.args, socket });
-        if (results[frame.channel] === HOLD) continue;
-        socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result: results[frame.channel] })}\n`);
+        const answer = results[frame.channel];
+        if (answer === HOLD) continue;
+        const result = answer instanceof Function ? answer(frame.args) : answer;
+        socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result })}\n`);
       }
     });
   });
@@ -238,7 +240,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
 
   const discover = responses.get(1).result;
   assert.ok(discover.supportedVersions.includes('2026-07-28'));
-  assert.deepEqual(Object.keys(discover.capabilities), ['tools']);
+  assert.deepEqual(Object.keys(discover.capabilities).sort(), ['resources', 'tools']);
   assert.equal(discover._meta['io.modelcontextprotocol/serverInfo'].name, 'pane');
   assert.ok(discover.instructions.length > 0);
 
@@ -259,7 +261,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   const annotationsOf = (name) => list.tools.find((tool) => tool.name === name).annotations;
   assert.equal(annotationsOf('repos_list').readOnlyHint, true);
   assert.equal(annotationsOf('panes_archive').destructiveHint, true);
-  assert.equal(annotationsOf('panes_create').destructiveHint, false);
+  assert.equal(annotationsOf('agents_start').destructiveHint, false);
 
   assert.equal(responses.get(3).error.code, -32602, 'an unknown tool is an Invalid Params protocol error');
   assert.equal(responses.get(4).result.isError, true, 'bad arguments are a tool execution error');
@@ -309,6 +311,164 @@ test('cancelling a call stops its runpane process', async () => {
           new Promise((_, reject) => setTimeout(() => reject(new Error('the runpane process kept its daemon connection open')), 5_000)),
         ]);
       });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('serves the core toolset by default, and named toolsets or read-only on request', async () => {
+  const names = (args) => withMcpClient(async (client) => (await client.listTools()).tools, { args });
+
+  const core = await names([]);
+  assert.deepEqual(core.map((tool) => tool.name).sort(), [
+    'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+    'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
+  ]);
+  const git = await names(['--toolsets', 'git']);
+  assert.deepEqual(git.map((tool) => tool.name).sort(), ['panes_commit', 'panes_git_status', 'panes_pull', 'panes_push', 'panes_rebase_main']);
+  const readOnly = await names(['--toolsets', 'all', '--read-only']);
+  assert.ok(readOnly.length > 0 && readOnly.every((tool) => tool.annotations.readOnlyHint));
+  assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
+});
+
+test('an unknown toolset stops the server with the valid names', () => {
+  const result = require('node:child_process').spawnSync(process.execPath, [dist('cli.js'), 'mcp', '--toolsets', 'everything'], {
+    encoding: 'utf8', input: '', env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' },
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Unknown toolset\(s\): everything\. Choose from: .*core.*git/);
+});
+
+test('a tool outside the served toolsets says which toolset has it', async () => {
+  const { responses } = await exchangeRaw([
+    { id: 1, method: 'tools/call', params: { name: 'panes_push', arguments: {}, _meta: MODERN_META } },
+  ]);
+  assert.equal(responses.get(1).error.code, -32602);
+  assert.match(responses.get(1).error.message, /"git" toolset/);
+});
+
+test('docs search finds docs, help, and installed skills; docs read and resources return the full text', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const skillDir = path.join(paneDir, 'skills', 'pane-chat', 'skills', 'zebra-release');
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: zebra-release\ndescription: "Ship a zebra release"\n---\n\nRun the zebrafication checklist before tagging.\n');
+  try {
+    await withMcpClient(async (client) => {
+      const skill = (await client.callTool({ name: 'docs_search', arguments: { query: 'zebrafication checklist' } })).structuredContent;
+      assert.equal(skill.results[0].path, 'skills/zebra-release/SKILL.md');
+      assert.equal(skill.results[0].kind, 'skill');
+      assert.match(skill.results[0].excerpt, /zebrafication checklist/);
+
+      const doc = (await client.callTool({ name: 'docs_search', arguments: { query: 'pane mcp toolsets', limit: 3 } })).structuredContent;
+      assert.ok(doc.results.some((result) => result.path === 'docs/PANE_MCP.md'), JSON.stringify(doc.results));
+
+      const read = (await client.callTool({ name: 'docs_read', arguments: { doc: 'docs/PANE_MCP.md' } })).structuredContent;
+      assert.match(read.text, /^# Pane MCP Server/);
+      const missing = await client.callTool({ name: 'docs_read', arguments: { doc: 'docs/NOPE.md' } });
+      assert.equal(missing.isError, true);
+      assert.match(missing.content[0].text, /docs search/);
+
+      const { resources } = await client.listResources();
+      const resource = resources.find((entry) => entry.name === 'docs/PANE_MCP.md');
+      const contents = await client.readResource({ uri: resource.uri });
+      assert.match(contents.contents[0].text, /^# Pane MCP Server/);
+    }, { args: [], env: { PANE_DIR: paneDir } });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('links_create returns a pane:// link and explains bad ids', async () => {
+  await withMcpClient(async (client) => {
+    const link = await client.callTool({ name: 'links_create', arguments: { pane: 'pane-1', panel: 'panel-2' } });
+    assert.deepEqual(link.structuredContent, {
+      ok: true, url: 'pane://open?pane=pane-1&panel=panel-2', target: { kind: 'pane', id: 'pane-1', panelId: 'panel-2' },
+    });
+    const bad = await client.callTool({ name: 'links_create', arguments: { repo: 'Pane' } });
+    assert.equal(bad.isError, true);
+    assert.match(bad.content[0].text, /`repos_list`/);
+  }, { args: [] });
+});
+
+test('parity tools call the app daemon channel with the pane id and keep the --yes rule', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, {
+      'sessions:get-git-status': { success: true, gitStatus: { state: 'ahead', ahead: 2 } },
+      'sessions:git-push': { success: false, error: 'No upstream branch' },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const status = await client.callTool({ name: 'panes_git_status', arguments: { pane: 'pane-1', paneDir } });
+        assert.deepEqual(status.structuredContent, { ok: true, data: { gitStatus: { state: 'ahead', ahead: 2 } } });
+
+        const refused = await client.callTool({ name: 'panes_push', arguments: { pane: 'pane-1', paneDir } });
+        assert.equal(refused.isError, true);
+        const failed = await client.callTool({ name: 'panes_push', arguments: { pane: 'pane-1', paneDir, yes: true } });
+        assert.equal(failed.isError, true);
+        assert.match(failed.content[0].text, /No upstream branch/);
+      });
+      assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
+        { channel: 'sessions:get-git-status', args: ['pane-1'] },
+        { channel: 'sessions:git-push', args: ['pane-1'] },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('agent tasks start, check on, and message an agent in one call each', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const repo = { id: 3, name: 'app', path: '/work/app', active: true, environment: 'linux', sessionCount: 1 };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panes:create': {
+        ok: true, repo,
+        items: [{
+          ok: true, index: 0, name: 'fix-login', pinned: true, sessionId: 'pane-7', panelId: 'panel-8', worktreePath: '/work/app-fix-login',
+          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 900, state: { initialized: true } },
+          initialInput: { delivered: true, submitted: true, inputBytes: 17 },
+        }],
+      },
+      'runpane:panels:list': { ok: true, paneId: 'pane-7', panels: [
+        { id: 'panel-shell', panelId: 'panel-shell', paneId: 'pane-7', type: 'terminal', title: 'Terminal', active: false },
+        { id: 'panel-8', panelId: 'panel-8', paneId: 'pane-7', type: 'terminal', title: 'Claude', active: true, isCliPanel: true, agentType: 'claude' },
+      ] },
+      'runpane:workspace:state': { ok: true, epoch: 'epoch-1', generation: 4, entries: [
+        { gen: 4, at: '2026-09-25T00:00:00.000Z', kind: 'agent.blocked', paneId: 'pane-7', paneName: 'fix-login', panelId: 'panel-8', source: 'agent', baseline: true },
+      ] },
+      'runpane:panels:screen': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', source: 'scrollback', limit: args[0].limit, returnedLineCount: 1, hasMore: false,
+        text: 'Allow edits to login.ts? (y/n)', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false },
+      }),
+      'runpane:panels:submit': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', inputBytes: 1, enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: true, sentAt: '2026-09-25T00:00:01.000Z',
+      }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const started = await client.callTool({ name: 'agents_start', arguments: {
+          repo: 'app', name: 'fix-login', agent: 'claude', prompt: 'Fix the login redirect', yes: true, paneDir,
+        } });
+        assert.equal(started.isError, undefined, started.content[0].text);
+        assert.equal(started.structuredContent.link, 'pane://open?pane=pane-7&panel=panel-8');
+        assert.equal(started.structuredContent.ready, true);
+
+        const status = await client.callTool({ name: 'agents_status', arguments: { pane: 'pane-7', paneDir } });
+        assert.equal(status.isError, undefined, status.content[0].text);
+        assert.equal(status.structuredContent.status, 'blocked');
+        assert.equal(status.structuredContent.panelId, 'panel-8');
+        assert.match(status.structuredContent.screen, /Allow edits/);
+
+        const sent = await client.callTool({ name: 'agents_send', arguments: { pane: 'pane-7', text: 'y', yes: true, paneDir } });
+        assert.equal(sent.structuredContent.delivered, true);
+        assert.match(sent.structuredContent.next, /`agents_status` with pane: pane-7/);
+      }, { args: [] });
+      const create = requests.find((request) => request.channel === 'runpane:panes:create').args[0];
+      assert.equal(create.source, 'agent');
+      assert.equal(create.waitReady, true);
+      assert.equal(create.noFocus, true);
+      assert.deepEqual(requests.find((request) => request.channel === 'runpane:panels:submit').args[0], { panelId: 'panel-8', input: 'y' });
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

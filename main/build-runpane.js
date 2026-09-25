@@ -1,5 +1,6 @@
 // Bundles the runpane CLI (including its MCP server) into one file that ships
 // inside Pane, so `runpane mcp` works without a global npm install.
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
@@ -17,6 +18,9 @@ esbuild.buildSync({
   format: 'cjs',
   legalComments: 'none',
 });
+
+// `runpane docs search` reads docs-index.json next to cli.js.
+execFileSync(process.execPath, [path.join(runpaneDir, 'scripts', 'build-docs-index.js'), path.join(outDir, 'dist', 'docs-index.json')], { stdio: 'inherit' });
 
 // version.ts reads ../package.json next to dist/cli.js.
 const { name, version } = require(path.join(runpaneDir, 'package.json'));

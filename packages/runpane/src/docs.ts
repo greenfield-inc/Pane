@@ -96,18 +96,18 @@ export function runDocsRead(parsed: ParsedArgs): number {
 
 function score(doc: DocEntry, terms: string[]): number {
   if (terms.length === 0) return 0;
-  const title = doc.title.toLowerCase();
+  const heading = `${doc.path} ${doc.title}`.toLowerCase();
   const text = doc.text.toLowerCase();
   let total = 0;
   let matched = 0;
   for (const term of terms) {
-    const inTitle = title.includes(term) ? 5 : 0;
-    const inText = Math.min(text.split(term).length - 1, 10);
-    if (inTitle + inText > 0) matched++;
-    total += inTitle + inText;
+    // A word in the title or path says what the doc is about; repeats in a long body say little.
+    const inHeading = heading.includes(term) ? 8 : 0;
+    const inText = Math.min(text.split(term).length - 1, 3);
+    if (inHeading + inText > 0) matched++;
+    total += inHeading + inText;
   }
-  // Documents that contain every word rank above partial matches.
-  return matched === terms.length ? total + 100 : total;
+  return total + (matched === terms.length ? 10 : 0) - (terms.length - matched) * 4;
 }
 
 function excerpt(text: string, terms: string[]): string {

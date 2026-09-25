@@ -57,8 +57,10 @@ export function registerConfigHandlers(
                                updates.claudeExecutablePath !== oldConfig.claudeExecutablePath;
       const managedAgentsMdChanged = updates.agentContext?.managedAgentsMd !== undefined
         && updates.agentContext.managedAgentsMd !== oldConfig.agentContext?.managedAgentsMd;
-      const registerMcpChanged = updates.agentContext?.registerMcp !== undefined
-        && updates.agentContext.registerMcp !== (oldConfig.agentContext?.registerMcp !== false);
+      const registerMcpChanged = (updates.agentContext?.registerMcp !== undefined
+        && updates.agentContext.registerMcp !== (oldConfig.agentContext?.registerMcp !== false))
+        || (updates.agentContext?.mcpToolsets !== undefined
+          && updates.agentContext.mcpToolsets.join(',') !== (oldConfig.agentContext?.mcpToolsets ?? []).join(','));
 
       const updatedConfig = await configManager.updateConfig(updates);
 

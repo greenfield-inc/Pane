@@ -35,6 +35,7 @@ export type SettingsSettingId =
   | 'terminal-shell'
   | 'default-pane-chat-agent'
   | 'mcp-registration'
+  | 'mcp-toolsets'
   | 'agent-context'
   | 'claude-executable'
   | 'commit-footer'
