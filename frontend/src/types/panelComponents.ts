@@ -1,8 +1,10 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { ProjectEnvironment, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
 
 type PanelContext = 'project' | 'worktree';
 
 export interface PanelCreateOptions {
+  customResume?: CustomCommandResume | null;
   initialCommand?: string;  // Command to run on terminal init
   title?: string;           // Custom panel title
   initialState?: { customState?: unknown };

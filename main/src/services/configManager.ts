@@ -1,3 +1,4 @@
+import { validateCustomCommandResume } from '../../../shared/types/customCommandResume';
 import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
@@ -339,6 +340,9 @@ export class ConfigManager extends EventEmitter {
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
+    for (const command of updates.customCommands ?? []) {
+      if (command.resume) validateCustomCommandResume(command.resume);
+    }
     return this.updateConfigWith(() => updates);
   }
 
