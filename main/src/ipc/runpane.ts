@@ -1517,7 +1517,7 @@ async function submitCreateInitialInput(
       delivered: false,
       submitted: false,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
-      error: { message: 'The terminal panel is not ready yet, so initial input is queued until the agent reaches its composer.' },
+      error: { message: 'The agent is not ready yet, so initial input is queued and sent once it is.' },
       nextCommand: readiness.nextCommand ?? panelWaitCommand(panel.id),
     };
   }

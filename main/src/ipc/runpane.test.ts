@@ -3321,7 +3321,7 @@ describe('runpane IPC handlers', () => {
         initialInput: {
           delivered: false,
           submitted: false,
-          error: { message: 'The terminal panel is not ready yet, so initial input is queued until the agent reaches its composer.' },
+          error: { message: 'The agent is not ready yet, so initial input is queued and sent once it is.' },
           nextCommand: expect.stringContaining(`runpane panels wait --panel ${createdPanel.id}`),
         },
       }],
