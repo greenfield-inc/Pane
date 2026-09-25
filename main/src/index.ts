@@ -114,6 +114,7 @@ import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
+import { warmShellPath } from './utils/shellPath';
 
 export let mainWindow: BrowserWindow | null = null;
 
@@ -1158,6 +1159,9 @@ if (launchRemoteSetup) {
     }
 
     console.log('[Main] App is ready, initializing services...');
+    // Probe the login-shell PATH while services start, so the first command
+    // after the window opens reads the cache instead of blocking on the shell.
+    void warmShellPath();
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     console.log('[Main] Services initialized, creating window...');

@@ -1548,6 +1548,46 @@ finally:
   });
 }
 
+async function checkPaneCreateBlockedReadiness() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runPanesCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const stdout = [];
+  daemonClient.invokeDaemon = async () => ({
+    ok: false,
+    repo: { id: 1, name: 'repo', path: '/repo', active: true, environment: 'macos', sessionCount: 1 },
+    items: [{
+      ok: false,
+      index: 0,
+      name: 'trust',
+      pinned: true,
+      sessionId: 'session-1',
+      panelId: 'panel-1',
+      readiness: {
+        ok: false,
+        condition: 'ready',
+        matched: false,
+        timedOut: false,
+        elapsedMs: 5,
+        state: { initialized: true, isCliPanel: true, isCliReady: true, agentType: 'claude' },
+        blocked: { kind: 'agent-prompt', message: 'The terminal is waiting at an interactive prompt.' },
+      },
+    }],
+  });
+  console.log = (line) => stdout.push(String(line));
+  try {
+    await runPanesCreate(parseRunpaneArgs([
+      'panes', 'create', '--repo', 'active', '--name', 'trust', '--agent', 'claude', '--wait-ready', '--yes'
+    ]));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  assert.ok(stdout.some(line => line.includes('Ready: blocked')), stdout.join('\n'));
+}
+
 async function checkPanePinParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -2539,6 +2579,7 @@ async function runChecks() {
   await checkPaneArchiveDryRunParity();
   await checkPanePinParity();
   await checkSessionChildPinDefaults();
+  await checkPaneCreateBlockedReadiness();
   await checkPanesCostParity();
   await checkPaneRenameParity();
   await checkAgentTemplateParity();
