@@ -819,11 +819,15 @@ describe('TerminalPanelManager hidden output delivery', () => {
   it('reopens an untouched Claude Session without resuming a nonexistent transcript', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const id = '00000000-0000-4000-8000-000000000001';
-    const result = manager.resolveCliLaunchCommand('panel', 'claude --model test', {
-      agentType: 'claude', orchestrationSessionId: 'untouched', agentSessionId: id, hasClaudeSessionId: true,
-    });
-    expect(result.commandToRun).toBe(`claude --model test --session-id ${id}`);
-    expect(result.customState.initialInputSentAt).toBeUndefined();
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    try {
+      const result = manager.resolveCliLaunchCommand('panel', 'claude --model test', {
+        agentType: 'claude', orchestrationSessionId: 'untouched', agentSessionId: id, hasClaudeSessionId: true,
+      });
+      expect(result.commandToRun).toBe(`claude --model test --session-id ${id}`);
+      expect(result.customState.initialInputSentAt).toBeUndefined();
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
 
   it('does not mistake a Codex option value for a subcommand on resume', () => {
@@ -915,6 +919,17 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(() => manager.resolveCliLaunchCommand('panel', 'wrapper', { customResume: {
       mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --latest',
     } })).toThrow('must contain {sessionId}');
+  });
+
+  it('passes Session wrapper commands through without appending agent flags or prompts', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'agent-farm run planner -- --model "my model"';
+    const result = manager.resolveCliLaunchCommand('panel', command, {
+      agentType: 'claude', preserveLaunchCommand: true, wasInterrupted: true,
+      agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+    });
+    expect(result.commandToRun).toBe(command);
+    expect(result.customState.initialInputSentAt).toBeUndefined();
   });
 
   it('keeps resumed Claude input composer-bound', () => {

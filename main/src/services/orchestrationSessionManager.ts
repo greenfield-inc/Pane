@@ -1,4 +1,4 @@
-import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
+import { validateCustomCommandResume, customResumeAgentType, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { readSessionProgress } from './sessionProgress';
 import { resolveAgentTypeFromCommand } from './agents/agentIdentity';
@@ -206,11 +206,19 @@ export class OrchestrationSessionManager extends EventEmitter {
       const now = new Date().toISOString();
       const id = `${ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX}${randomUUID()}__`;
       const internalSessionId = `${id}terminal__`;
-      const launchCommand = sourceState?.agentType ? sourceState.initialCommand! : input.launchCommand ?? this.configManager.getConfig().defaultSessionCommand ?? '';
-      const customResume = sourcePanel ? sourceState?.customResume : input.customResume !== undefined ? input.customResume : this.configManager.getConfig().defaultSessionResume;
-      const agent = customResumeAgentType(customResume) ?? resolveAgentTypeFromCommand(launchCommand) ?? (input.agent
-        ? normalizePaneChatAgent(input.agent)
-        : normalizePaneChatAgent(this.configManager.getConfig().defaultOrchestratorAgent));
+      const config = this.configManager.getConfig();
+      const explicitAgent = input.agent ? normalizePaneChatAgent(input.agent) : undefined;
+      // App defaults apply only when they fit the agent the caller asked for.
+      const fits = (command: string, resume?: CustomCommandResume | null) =>
+        !explicitAgent || [explicitAgent, undefined].includes(launchAgent(command, resume));
+      const defaultCommand = config.defaultSessionCommand ?? '';
+      const launchCommand = sourceState?.agentType ? sourceState.initialCommand!
+        : input.launchCommand ?? (fits(defaultCommand) ? defaultCommand : '');
+      const customResume = sourcePanel ? sourceState?.customResume
+        : input.customResume !== undefined ? input.customResume
+          : fits('', config.defaultSessionResume) ? config.defaultSessionResume : null;
+      const agent = resolveSessionAgent(explicitAgent, launchCommand, customResume)
+        ?? normalizePaneChatAgent(config.defaultOrchestratorAgent);
       this.assertAgentSupported(agent);
       const record: OrchestrationSessionRecord = {
         id,
@@ -298,9 +306,11 @@ export class OrchestrationSessionManager extends EventEmitter {
         throw new Error(`Session ${current.name} changed; expected revision ${input.expectedRevision}, found ${current.revision}`);
       }
       const name = input.name?.trim() ?? current.name;
-      const launchCommand = input.launchCommand ?? (input.agent && input.agent !== current.agent ? '' : current.launchCommand);
-      const customResume = input.customResume !== undefined ? input.customResume : current.customResume;
-      const agent = customResumeAgentType(customResume) ?? resolveAgentTypeFromCommand(launchCommand) ?? input.agent ?? current.agent;
+      // A new agent drops the previous agent's command and resume settings.
+      const agentChanging = input.agent !== undefined && input.agent !== current.agent;
+      const launchCommand = input.launchCommand ?? (agentChanging ? '' : current.launchCommand);
+      const customResume = input.customResume !== undefined ? input.customResume : agentChanging ? undefined : current.customResume;
+      const agent = resolveSessionAgent(input.agent, launchCommand ?? '', customResume) ?? current.agent;
       const nextRecord: OrchestrationSessionRecord = {
         ...current,
         name,
@@ -512,14 +522,14 @@ export class OrchestrationSessionManager extends EventEmitter {
       launchCommand: record.launchCommand ?? '',
       profile: record.profile ?? DEFAULT_SESSION_PROFILE,
     })) };
-    if (normalized !== data) this.store.write(normalized);
-    await this.reconcilePersistedSessionOwners(normalized);
+    if (JSON.stringify(normalized) !== JSON.stringify(data)) this.store.write(normalized);
     // Repair persisted launch metadata before any restored terminal can replay
     // a pre-upgrade bootstrap. Keep agent IDs and buffers, including inactive agents.
     // One broken Session must not block the others, Pane Chat included.
     let withFailures: OrchestrationSessionStoreData = normalized;
     for (const record of normalized.sessions) {
       try {
+        await this.reconcilePersistedSessionOwner(record);
         await this.finishPromotion(record);
         if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
           prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress === true);
@@ -530,7 +540,9 @@ export class OrchestrationSessionManager extends EventEmitter {
             // Inactive agents retain their own command and transcript identity.
             // SAFETY: Session-owned terminal panels persist TerminalPanelState exclusively.
             const state = panel.state.customState as TerminalPanelState | undefined;
-            await this.refreshPanelLaunchState(panel, { ...record, agent, launchCommand: agent === record.agent ? record.launchCommand : state?.initialCommand });
+            await this.refreshPanelLaunchState(panel, agent === record.agent ? record : {
+              ...record, agent, launchCommand: state?.initialCommand, customResume: state?.customResume,
+            });
           }
         }
       } catch (error) {
@@ -583,20 +595,18 @@ export class OrchestrationSessionManager extends EventEmitter {
     return changed ? { ...data, sessions } : data;
   }
 
-  private async reconcilePersistedSessionOwners(data: OrchestrationSessionStoreData): Promise<void> {
-    for (const record of data.sessions) {
-      // The original Pane Chat keeps its fixed owner. Older supplemental rows
-      // get independent owners; persisted IDs make interrupted moves retryable.
-      if (record.internalSessionId === PANE_CHAT_SESSION_ID) continue;
-      this.createInternalSession(record);
-      if (!PANE_CHAT_AGENTS.some(agent => record.id === getLegacyAgentSessionId(agent))) continue;
-      for (const panelId of Object.values(record.panelIds)) {
-        const panel = panelManager.getPanel(panelId);
-        if (panel?.sessionId === PANE_CHAT_SESSION_ID) {
-          await panelManager.movePanel(panelId, PANE_CHAT_SESSION_ID, record.internalSessionId);
-        } else if (panel && panel.sessionId !== record.internalSessionId) {
-          throw new Error('Imported chat has conflicting ownership');
-        }
+  private async reconcilePersistedSessionOwner(record: OrchestrationSessionRecord): Promise<void> {
+    // The original Pane Chat keeps its fixed owner. Older supplemental rows
+    // get independent owners; persisted IDs make interrupted moves retryable.
+    if (record.internalSessionId === PANE_CHAT_SESSION_ID) return;
+    this.createInternalSession(record);
+    if (!PANE_CHAT_AGENTS.some(agent => record.id === getLegacyAgentSessionId(agent))) return;
+    for (const panelId of Object.values(record.panelIds)) {
+      const panel = panelManager.getPanel(panelId);
+      if (panel?.sessionId === PANE_CHAT_SESSION_ID) {
+        await panelManager.movePanel(panelId, PANE_CHAT_SESSION_ID, record.internalSessionId);
+      } else if (panel && panel.sessionId !== record.internalSessionId) {
+        throw new Error('Imported chat has conflicting ownership');
       }
     }
   }
@@ -942,6 +952,19 @@ export class OrchestrationSessionManager extends EventEmitter {
   private emitChanged(record: OrchestrationSessionRecord, kind: OrchestrationActivity['kind'] | 'selected', selectionChanged = false): void {
     this.emit('changed', selectionChanged ? { sessionId: record.id, kind, selectionChanged: true } : { sessionId: record.id, kind });
   }
+}
+
+function launchAgent(command: string, resume?: CustomCommandResume | null): PaneChatAgent | undefined {
+  return customResumeAgentType(resume) ?? resolveAgentTypeFromCommand(command);
+}
+
+/** An explicit agent wins; a launch command for a different agent is rejected. */
+function resolveSessionAgent(explicit: PaneChatAgent | undefined, command: string, resume?: CustomCommandResume | null): PaneChatAgent | undefined {
+  const commandAgent = launchAgent(command, resume);
+  if (explicit && commandAgent && commandAgent !== explicit) {
+    throw new Error(`The launch command runs ${commandAgent}, but the Session agent is ${explicit}; change one to match`);
+  }
+  return explicit ?? commandAgent;
 }
 
 function validateCreateInput(input: OrchestrationSessionCreateInput): void {

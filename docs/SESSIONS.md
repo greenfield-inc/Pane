@@ -335,9 +335,10 @@ worktree defaults and existing historical pins are unchanged.
 ### Generated instructions and Git
 
 Session instructions and progress pages live under `<PANE_DIR>/sessions/<id>/`,
-outside the project. Pane refuses to generate Session files when that directory
-is inside a Git worktree, including through a symlink. Do not configure PANE_DIR
-inside a repository.
+outside the project. Session terminals set `GIT_CEILING_DIRECTORIES` to
+`<PANE_DIR>/sessions`, so git run in a Session folder never picks up a repository
+above it, such as a home directory tracked as a dotfiles repo. Do not configure
+PANE_DIR inside a project repository.
 
 ### Move an existing chat to a Session
 
