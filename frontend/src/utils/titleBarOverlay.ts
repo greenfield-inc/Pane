@@ -30,6 +30,17 @@ export function isWindowControlsOverlayEnabled(): boolean {
   return window.electronAPI?.windowControlsOverlayEnabled === true;
 }
 
+/** Collapsed sidebar rail width, which is where a collapsed layout's content starts. */
+export const COLLAPSED_SIDEBAR_PX = 48;
+
+/**
+ * Where tabs may start in the title strip: past the sidebar, and never under the
+ * macOS traffic lights and sidebar toggle (or the overlay's leading controls).
+ */
+export function titleStripContentLeft(sidebarPx: number, mac: boolean): number {
+  return Math.max(sidebarPx, mac ? 136 : 72);
+}
+
 const HEX_SHORT = /^#([0-9a-f])([0-9a-f])([0-9a-f])([0-9a-f])?$/i;
 const HEX_LONG = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i;
 const FUNCTIONAL = /^rgba?\(([^)]+)\)$/i;

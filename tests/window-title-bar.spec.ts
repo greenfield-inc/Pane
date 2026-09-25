@@ -120,6 +120,32 @@ test.describe('window chrome', () => {
     await expect(pills).toHaveCount(0);
   });
 
+  test('keeps pane tabs clear of the window controls while the sidebar is collapsed', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'platform', { get: () => 'MacIntel' });
+    });
+    await installElectronApiMock(page, {
+      platform: 'darwin',
+      initialProjects: [project],
+      initialSessions: [session],
+      // The first terminal docks at the bottom; the second one is a tab.
+      initialPanels: ['Terminal', 'Codex'].map((title, position) => ({
+        id: `title-bar-${position}`, sessionId: session.id, type: 'terminal', title,
+        state: { isActive: position === 1, hasBeenViewed: true, customState: { isInitialized: false } },
+        metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position },
+      })),
+      initialUiState: { expandedProjects: [project.id] },
+      activeProjectId: project.id,
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.getByRole('button', { name: session.name, exact: true }).click();
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+
+    const toggle = await page.getByRole('button', { name: 'Expand sidebar' }).boundingBox();
+    const tab = await page.getByRole('tab', { name: 'Codex' }).boundingBox();
+    expect(toggle && tab && tab.x).toBeGreaterThanOrEqual(toggle!.x + toggle!.width);
+  });
+
   test('keeps window controls clickable and clears the macOS traffic lights', async ({ page }) => {
     await openDesktop(page);
     const controls = page.getByTestId('window-title-bar-controls');
