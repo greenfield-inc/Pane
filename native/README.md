@@ -88,7 +88,17 @@ xcrun simctl push <simulator-udid> com.dcouple.pane.mobile /tmp/pane-push.apns
 xcrun simctl openurl <simulator-udid> 'pane://pane/<session id>?host=http%3A%2F%2F127.0.0.1%3A42157'
 ```
 
-**Needs a real device:** APNs delivery end to end (a signed build with the Push Notifications capability and a real `.p8` key on the host), and FCM on Android. FCM also needs a Firebase app for `com.dcouple.pane.mobile` and its `google-services.json` set as `android.googleServicesFile`. Without that file, Android registration reports an error in Settings, and the rest of the app works.
+**Needs a real device:** APNs delivery end to end (a signed build with the Push Notifications capability and a real `.p8` key on the host). FCM on Android works in an emulator with a Google Play system image. It needs the Firebase app config in `native/google-services.json`, which `app.config.js` sets as `android.googleServicesFile` when the file exists. It also needs a host set up to send FCM (see [Push delivery operator setup](../docs/NATIVE_MOBILE.md#push-delivery-operator-setup)). Without the file, Android registration reports an error in Settings, and the rest of the app works.
+
+### Firebase config (google-services.json)
+
+`native/google-services.json` is gitignored. It is the Firebase Android app config for `com.dcouple.pane.mobile` in the `pane-pwa-preview` project. It identifies the app and cannot send pushes. Get it locally from the Firebase console (Project settings, Your apps, Android) or with `firebase apps:sdkconfig ANDROID <app-id> --project pane-pwa-preview -o native/google-services.json`.
+
+CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base64-encoded. `.github/workflows/native-android.yml` decodes it into `native/google-services.json`, then builds the Android dev client. The step fails if the secret is missing or not for this package; fork PRs, which get no secrets, build without FCM. To rotate it:
+
+```bash
+base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R dcouple/Pane
+```
 
 ## How the code is organised
 
