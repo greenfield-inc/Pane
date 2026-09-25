@@ -1,7 +1,5 @@
 # Fresh launch, signed in to CONNECTION_CODE. Start feature flows with this.
 appId: com.dcouple.pane.mobile
-env:
-  METRO_PORT: ${METRO_PORT || "8137"}
 ---
 - runFlow: launch-dev-client.yaml
 - runFlow: sign-in.yaml

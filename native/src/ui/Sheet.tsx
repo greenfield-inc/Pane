@@ -29,6 +29,7 @@ export function Sheet({ title, children, footer, testID }: SheetProps) {
       style={{ backgroundColor: theme.colors.surface }}
       contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) }]}
       keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets
     >
       {title ? <Text variant="title">{title}</Text> : null}
       {children}

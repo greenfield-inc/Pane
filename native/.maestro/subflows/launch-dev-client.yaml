@@ -4,7 +4,7 @@ appId: com.dcouple.pane.mobile
 - launchApp:
     clearState: true
     clearKeychain: true
-- openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT}
+- openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT || '8137'}
 # iOS asks before opening a link in the app.
 - extendedWaitUntil:
     visible: "Open"
@@ -15,6 +15,13 @@ appId: com.dcouple.pane.mobile
       visible: "Open"
     commands:
       - tapOn: "Open"
+# Android's dev launcher can miss a link sent while it starts; pick the
+# server from its list instead.
+- runFlow:
+    when:
+      visible: "DEVELOPMENT SERVERS"
+    commands:
+      - tapOn: "http://.*:${METRO_PORT || '8137'}"
 # clearState brings back the dev menu's first-run introduction; it opens
 # once the bundle loads, then shows the menu itself.
 - extendedWaitUntil:
@@ -29,8 +36,19 @@ appId: com.dcouple.pane.mobile
       - tapOn:
           id: xmark
           optional: true
-# Drag the dev client's floating tools button off the header's right button.
-- swipe:
-    start: 90%, 12%
-    end: 8%, 60%
-    duration: 600
+- runFlow:
+    when:
+      platform: Android
+      visible: "Go home"
+    commands:
+      - back
+# Drag the iOS dev client's floating tools button off the header's right
+# button. (On Android the same swipe opens the notification shade.)
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - swipe:
+          start: 90%, 12%
+          end: 8%, 60%
+          duration: 600

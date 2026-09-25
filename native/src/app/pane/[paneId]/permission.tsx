@@ -1,13 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 
-import { Button, Sheet, Text } from '@/ui';
+import { PermissionSheet } from '@/features/panes/PermissionSheet';
 
-// PLACEHOLDER: the permission feature answers a blocked agent's prompt here.
-export default function PermissionSheet() {
-  const { paneId } = useLocalSearchParams<{ paneId: string }>();
-  return (
-    <Sheet title="Permission request" footer={<Button title="Close" variant="secondary" onPress={() => router.back()} />}>
-      <Text tone="muted">{`Pane ${paneId} is waiting for approval.`}</Text>
-    </Sheet>
-  );
+export default function PermissionRoute() {
+  const { paneId, requestId } = useLocalSearchParams<{ paneId: string; requestId?: string }>();
+  return <PermissionSheet paneId={paneId} requestId={requestId} />;
 }

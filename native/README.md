@@ -54,6 +54,9 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 `subflows/launch-dev-client.yaml` clears app state and the Keychain, opens the dev client against `127.0.0.1:${METRO_PORT}` and gets the dev menu out of the way. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`. Start a feature flow with `- runFlow: subflows/signed-in.yaml`, which runs both. Pressable rows merge their text for accessibility, so match rows by `testID` or a regex such as `"fix-login-bug.*"`.
 
+`panes.yaml` creates a pane, searches, favorites, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
+
+
 ## Notifications and links
 
 **Push.** The host sends APNs and FCM alerts itself when an agent is blocked or finishes a turn (`main/src/daemon/mobilePushSender.ts`, operator setup in `docs/NATIVE_MOBILE.md`). The app registers the raw device token from `getDevicePushTokenAsync`, not an Expo push token, through `mobile:push-status` and `mobile:push-register`. It registers on every connect, so a rotated token replaces the old one. It asks for notification permission only when the host reports that delivery is set up. Settings > Notifications shows the "Needs Input" and "Finished" switches (`mobile:push-controls`), and Sign Out revokes the registration before it deletes the token.
