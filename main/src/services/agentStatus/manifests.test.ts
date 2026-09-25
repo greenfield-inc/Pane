@@ -84,6 +84,69 @@ describe('CLAUDE_MANIFEST', () => {
     expect(r.visibleBlocker).toBe(true);
   });
 
+  // Real Claude Code 2.1.282 startup screens: bypass-permissions warning and first-run setup.
+  it.each([
+    [
+      'bypass-permissions warning',
+      [
+        '─'.repeat(100),
+        '  WARNING: Claude Code running in Bypass Permissions mode',
+        '',
+        '  In Bypass Permissions mode, Claude Code will not ask for your approval before running',
+        '  potentially dangerous commands.',
+        '',
+        '  ❯ No, exit',
+        '    Yes, I accept',
+        '',
+        '  Enter to confirm · Esc to cancel',
+      ],
+    ],
+    [
+      'theme picker',
+      [
+        ' Let\'s get started.',
+        '',
+        ' Choose the text style that looks best with your terminal',
+        ' To change this later, run /theme',
+        '',
+        '   1. Auto (match terminal)',
+        ' ❯ 2. Dark mode ✔',
+        '   3. Light mode',
+        '',
+        ' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
+        '  1  function greet() {',
+        '  2 -  console.log("Hello, World!");',
+        '  2 +  console.log("Hello, Claude!");',
+        '  3  }',
+        ' ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
+        '  Syntax theme: Monokai Extended (ctrl+t to disable)',
+      ],
+    ],
+    [
+      'login method picker',
+      [
+        ' Select login method:',
+        '',
+        ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise',
+        '   2. Anthropic Console account · API usage billing',
+        '   3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI',
+      ],
+    ],
+    [
+      'login code prompt',
+      [
+        ' Browser didn\'t open? Use the url below to sign in (c to copy)',
+        '',
+        'https://claude.com/cai/oauth/authorize?code=true',
+        '',
+        ' Paste code here if prompted >',
+      ],
+    ],
+  ])('classifies the %s as blocked', (_name, lines) => {
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(lines.join('\n')));
+    expect(r.state).toBe('blocked');
+  });
+
   it('classifies the fresh prompt box after trusting the folder as idle', () => {
     const s = [
       ' ▐▛███▛█   Claude Code v2.1.282',
@@ -188,6 +251,21 @@ describe('CODEX_MANIFEST', () => {
     const r = detectAgentState(CODEX_MANIFEST, screen(s));
     expect(r.state).toBe('blocked');
     expect(r.visibleBlocker).toBe(true);
+  });
+
+  // Real Codex 0.156.1 boot frame: the composer shows before the trust prompt replaces it.
+  it('classifies the boot screen as working, not idle', () => {
+    const s = [
+      '╭───────────────────────────────────────╮',
+      '│ >_ OpenAI Codex (v0.156.1)            │',
+      '│                                       │',
+      '│ model:     loading   /model to change │',
+      '│ directory: loading                    │',
+      '╰───────────────────────────────────────╯',
+      '› Ask Codex to do anything',
+    ].join('\n');
+    const r = detectAgentState(CODEX_MANIFEST, screen(s));
+    expect(r.state).toBe('working');
   });
 
   it('classifies a [y/n] weak blocker as blocked', () => {

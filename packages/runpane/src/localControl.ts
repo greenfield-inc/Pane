@@ -233,7 +233,8 @@ type PaneToolSpec =
   | { command: string; title?: string; initialInput?: string };
 
 interface PaneCreateSuccessItem {
-  ok: true;
+  /** False when the pane was created but did not become ready or take its initial input. */
+  ok: boolean;
   index: number;
   name?: string;
   pinned: boolean;
@@ -1024,7 +1025,7 @@ const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object
   repo: repoSummarySchema,
   items: boundary.array(boundary.union(
     boundary.object({
-      ok: boundary.literal(true),
+      ok: boundary.boolean,
       index: boundary.number,
       name: boundary.optional(boundary.string),
       pinned: boundary.boolean,
@@ -2572,7 +2573,7 @@ function printPaneCostModels(models: UsageByModelResult[]): void {
 
 function printPaneCreateResult(result: PaneCreateResult): void {
   for (const item of result.items) {
-    if (item.ok) {
+    if (!('error' in item)) {
       const worktree = item.worktreePath ? ` at ${item.worktreePath}` : '';
       console.log(`Created ${item.name ?? `pane ${item.index}`}: session ${item.sessionId ?? 'unknown'} panel ${item.panelId ?? 'unknown'}${worktree}`);
       if (item.readiness) {

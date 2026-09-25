@@ -17,6 +17,8 @@ import type { AgentManifest } from './manifestEngine';
 /** Braille spinner glyphs Claude/Codex animate in their OSC title / status line. */
 const SPINNER_TITLE = /^[\u{2800}-\u{28FF}] /u;
 const CODEX_SPINNER = /(?:^| )[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?: |$)/u;
+/** Codex's header while it boots; its composer shows early and may give way to the trust prompt. */
+export const CODEX_LOADING_HEADER = /\bmodel:\s+loading\b/;
 
 export const CLAUDE_MANIFEST: AgentManifest = {
   id: 'claude',
@@ -86,15 +88,16 @@ export const CLAUDE_MANIFEST: AgentManifest = {
       ],
     },
     {
-      // Single-choice dialogs such as the folder-trust prompt ("❯ No, exit" /
-      // "Yes, I trust this folder" above "Enter to confirm · Esc to cancel").
+      // Startup menus: folder trust and bypass-permissions warnings ("❯ No, exit"
+      // above "Enter to confirm · Esc to cancel"), and first-run theme and login
+      // pickers ("❯ 2. Dark mode").
       id: 'live_selection_menu',
       state: 'blocked',
       priority: 980,
       region: 'after_last_horizontal_rule',
       visibleBlocker: true,
-      contains: ['enter to confirm'],
       lineRegex: [/^\s*❯\s*\S/],
+      any: [{ contains: ['enter to confirm'] }, { lineRegex: [/^\s*❯\s*\d+\.\s/] }],
     },
     {
       id: 'dynamic_workflow_prompt',
@@ -185,6 +188,7 @@ export const CLAUDE_MANIFEST: AgentManifest = {
         { contains: ['do you want to proceed?', 'esc to cancel'] },
         { contains: ['review your answers'] },
         { contains: ['skip interview and plan immediately'] },
+        { contains: ['paste code here if prompted'] },
       ],
       not: [{ regex: [/^\s*❯\s*$/m] }],
     },
@@ -260,6 +264,14 @@ export const CODEX_MANIFEST: AgentManifest = {
         { contains: ['do you want to'], any: [{ contains: ['yes'] }, { contains: ['❯'] }] },
         { contains: ['would you like to'], any: [{ contains: ['yes'] }, { contains: ['❯'] }] },
       ],
+    },
+    {
+      id: 'startup_loading',
+      state: 'working',
+      priority: 550,
+      region: 'whole_recent',
+      visibleWorking: true,
+      regex: [CODEX_LOADING_HEADER],
     },
     {
       id: 'screen_working_fallback',

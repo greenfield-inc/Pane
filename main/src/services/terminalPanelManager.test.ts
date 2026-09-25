@@ -77,6 +77,8 @@ type InitialInputAccess = {
   terminals: Map<string, TerminalUnderTest>;
   sendInitialInputOnce(panelId: string): void;
   deliverPendingInitialInput(panelId: string): void;
+  registerAgentStatusPanel(terminal: TerminalUnderTest): void;
+  pollAgentStatus(): void;
   getLastOutputAt(panelId: string): string | undefined;
   getOutputGeneration(panelId: string): number;
 };
@@ -599,8 +601,9 @@ describe('TerminalPanelManager hidden output delivery', () => {
   it('delivers pending ready initial input with the panel submit strategy', async () => {
     vi.useFakeTimers();
     const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
-    const terminal = createTerminal();
+    const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
     vi.mocked(panelManager.getPanel).mockReturnValue({
       id: terminal.panelId,
       sessionId: terminal.sessionId,
@@ -622,6 +625,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
 
     manager.deliverPendingInitialInput(terminal.panelId);
+    manager.pollAgentStatus();
     await flushPromises();
 
     expect(terminal.pty.write).toHaveBeenCalledTimes(1);
@@ -636,8 +640,9 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('delivers after a premark clear when the cliReady path already skipped', async () => {
     const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
-    const terminal = createTerminal();
+    const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
     const panel = {
       id: terminal.panelId,
       sessionId: terminal.sessionId,
@@ -667,6 +672,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     delete panel.state.customState.initialInputSentAt;
 
     manager.deliverPendingInitialInput(terminal.panelId);
+    manager.pollAgentStatus();
     await flushPromises();
 
     expect(terminal.pty.write).toHaveBeenCalledTimes(1);
@@ -1119,5 +1125,40 @@ describe('TerminalPanelManager agent status poll', () => {
     expect(manager.getAgentStatus(terminal.panelId)).toBe('blocked');
 
     manager.destroyTerminal(terminal.panelId);
+  });
+
+  it('holds typed initial input on the trust prompt and sends it once the agent is ready', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const manager = testAccess<AgentStatusAccess & InitialInputAccess>(new TerminalPanelManager());
+    const screenEmulator = inProcessEmulatorHost().createEmulator(60, 10);
+    const terminal = createTerminal({ agentType: 'claude', screenEmulator });
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: terminal.panelId,
+      sessionId: terminal.sessionId,
+      type: 'terminal',
+      title: 'Claude',
+      state: { isActive: true, customState: { isCliReady: true, initialInput: '/review' } },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+    });
+    const rule = '─'.repeat(40);
+
+    screenEmulator.write(`${rule}\r\n Accessing workspace:\r\n\r\n ❯ No, exit\r\n   Yes, I trust this folder\r\n\r\n Enter to confirm · Esc to cancel`);
+    await screenEmulator.refresh();
+    manager.deliverPendingInitialInput(terminal.panelId);
+    manager.pollAgentStatus();
+    await flushPromises();
+    expect(terminal.pty.write).not.toHaveBeenCalled();
+
+    screenEmulator.write(`\x1b[2J\x1b[H${rule}\r\n❯ \r\n${rule}`);
+    await screenEmulator.refresh();
+    vi.setSystemTime(Date.now() + 3_000); // past the monitor's startup grace
+    manager.pollAgentStatus();
+    await flushPromises();
+    expect(terminal.pty.write).toHaveBeenCalledWith('/review\r');
+
+    manager.destroyTerminal(terminal.panelId);
+    vi.useRealTimers();
   });
 });

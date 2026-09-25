@@ -15,6 +15,8 @@ import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assessComposerEvidence, isSlashCommandInput } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
+import { detectAgentState } from '../services/agentStatus/manifestEngine';
+import { CODEX_LOADING_HEADER, getManifestForAgent } from '../services/agentStatus/manifests';
 import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/archiveProgressManager';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
@@ -1515,7 +1517,7 @@ async function submitCreateInitialInput(
       delivered: false,
       submitted: false,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
-      error: { message: 'Initial input was not sent because the terminal panel did not become ready.' },
+      error: { message: 'The terminal panel is not ready yet, so initial input is queued until the agent reaches its composer.' },
       nextCommand: readiness.nextCommand ?? panelWaitCommand(panel.id),
     };
   }
@@ -1533,8 +1535,8 @@ async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
     return;
   }
 
-  const nextCustomState = { ...customState };
-  delete nextCustomState.initialInputSentAt;
+  // Panel state writes merge into the stored row; an explicit undefined removes the key, a delete does not.
+  const nextCustomState = { ...customState, initialInputSentAt: undefined };
   await panelManager.updatePanel(panel.id, {
     state: {
       ...state,
@@ -1821,7 +1823,7 @@ function detectPanelComposer(
   if (agentType === 'claude') {
     return detectClaudeComposer(text);
   }
-  if (agentType !== 'codex') {
+  if (agentType !== 'codex' || CODEX_LOADING_HEADER.test(text)) {
     return { isPresent: false, hasUndeliveredText: false };
   }
 
@@ -2000,8 +2002,11 @@ function isWaitConditionMatched(
     case 'initialized':
       return screen.state.initialized;
     case 'ready':
-      if (blocked) return false;
-      return screen.state.initialized && (screen.state.isCliPanel ? screen.state.isCliReady === true : true);
+      if (blocked || !screen.state.initialized) return false;
+      if (!screen.state.isCliPanel) return true;
+      // Claude and Codex are ready once their composer is on screen, not at their first output.
+      return screen.state.isCliReady === true
+        && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
     case 'idle':
       return screen.state.initialized && screen.state.activityStatus === 'idle';
     case 'text':
@@ -2056,7 +2061,10 @@ function detectPanelBlocker(
     };
   }
 
-  if (/press enter to continue/i.test(text) || terminalPanelManager.getAgentStatus(panelId) === 'blocked') {
+  // Scan the current screen as well as reading the published status, which lags it by up to one poll.
+  const screenBlocked = detectAgentState(getManifestForAgent(agentType), { screen: text, oscTitle: '', oscProgress: '' })
+    .state === 'blocked';
+  if (/press enter to continue/i.test(text) || screenBlocked || terminalPanelManager.getAgentStatus(panelId) === 'blocked') {
     return {
       kind: 'agent-prompt',
       message: 'The terminal is waiting at an interactive prompt.',

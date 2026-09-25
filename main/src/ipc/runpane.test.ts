@@ -2059,7 +2059,7 @@ describe('runpane IPC handlers', () => {
   it('waits for ready terminal state with bounded screen output', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: 'agent ready\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -2084,7 +2084,7 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       screen: {
         source: 'scrollback',
-        text: 'agent ready\n',
+        text: '› Ask Codex to do anything\n',
       },
       nextCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
     });
@@ -2179,9 +2179,11 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('reports a CLI-ready agent whose status is blocked as blocked instead of ready', async () => {
-    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('Claude screen\n', 'active', 'claude'));
-    vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('blocked');
+  it('reports a trust prompt as blocked before the published agent status catches up', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'Folder access\n\n› 1. Trust and continue\n  2. Quit\n\n  enter continue · esc quit\n',
+      'active',
+    ));
     const registry = createRegistry();
 
     const result = await registry.invoke('runpane:panels:wait', [{
@@ -2197,6 +2199,24 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       blocked: { kind: 'agent-prompt' },
     });
+  });
+
+  it('does not report an agent ready before its composer is on screen', async () => {
+    // Real Codex 0.156.1 boot frame, drawn about half a second before its trust prompt.
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      '╭───────────────────────────────────────╮\n│ >_ OpenAI Codex (v0.156.1)            │\n│                                       │\n│ model:     loading   /model to change │\n│ directory: loading                    │\n╰───────────────────────────────────────╯\n› Ask Codex to do anything\n',
+      'active',
+    ));
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id,
+      condition: 'ready',
+      timeoutMs: 10,
+      intervalMs: 5,
+    }]);
+
+    expect(result).toMatchObject({ ok: false, matched: false, timedOut: true });
   });
 
   it('diagnoses built-in agents through the Pane project context', async () => {
@@ -2875,7 +2895,7 @@ describe('runpane IPC handlers', () => {
     } as never);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: 'ready\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -2942,7 +2962,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.getPanel).mockReturnValue(claudePanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: 'claude ready\n',
+      scrollbackBuffer: `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}\n`,
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -3301,7 +3321,7 @@ describe('runpane IPC handlers', () => {
         initialInput: {
           delivered: false,
           submitted: false,
-          error: { message: 'Initial input was not sent because the terminal panel did not become ready.' },
+          error: { message: 'The terminal panel is not ready yet, so initial input is queued until the agent reaches its composer.' },
           nextCommand: expect.stringContaining(`runpane panels wait --panel ${createdPanel.id}`),
         },
       }],
@@ -3398,7 +3418,9 @@ describe('runpane IPC handlers', () => {
             }
             // SAFETY: The `custom` kind is handled above, leaving only agent kinds the snapshot frames as claude/codex.
             return terminalSnapshot(
-              toolKind === 'codex' && inputCase.name === 'slash' ? `› ${inputCase.input}` : 'ready',
+              toolKind === 'codex'
+                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}`
+                : `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`,
               'idle',
               toolKind as 'claude' | 'codex',
             );
