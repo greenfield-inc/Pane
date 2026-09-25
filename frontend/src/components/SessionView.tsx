@@ -16,7 +16,6 @@ import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectView } from './ProjectView';
-import { UsageView } from './usage/UsageView';
 import { API } from '../utils/api';
 import { markPaneViewShown } from '../utils/journeyTimings';
 import { useObservedContentBox } from '../hooks/useObservedContentBox';
@@ -1749,11 +1748,6 @@ export const SessionView = memo(() => {
   })();
   
   // Removed unused variables - now handled by panels
-
-  // Token usage, cost and rate limits — reported per host.
-  if (activeView === 'usage') {
-    return <UsageView />;
-  }
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {

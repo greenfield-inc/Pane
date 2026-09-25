@@ -50,7 +50,7 @@ export function SettingsLayout({ category, categories, onCategoryChange, onBack,
                 title={item.availability?.reason}
                 onClick={() => onCategoryChange(item.id)}
                 className={cn(
-                  'flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px] transition-colors focus:outline-none',
+                  'flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle',
                   selected
                     ? 'bg-surface-selected font-medium text-text-primary'
                     : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
