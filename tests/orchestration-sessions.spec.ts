@@ -149,7 +149,7 @@ async function installSessionsFixture(
   fixtureOptions: SessionFixtureOptions = {},
 ): Promise<void> {
   await installElectronApiMock(page, {
-    // The progress view is off by default; these fixtures cover it switched on.
+    // Progress is off by default; these fixtures cover it switched on.
     initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', experimentalSessionProgress: true, ...fixtureOptions.initialConfig },
     initialProjects: [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
     initialSessions: paneSessions,
@@ -755,7 +755,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await dismissStartupDialogs(page);
 
   await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('usage-nav')).toBeVisible();
+  await expect(page.getByTestId('usage-nav')).toHaveCount(0);
   const sessionsToggle = page.getByTestId('sessions-section-header').getByRole('button', { name: 'Sessions', exact: true });
   await expect(sessionsToggle).toHaveAttribute('aria-expanded', 'true');
   await sessionsToggle.click();
@@ -776,12 +776,18 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(page.getByText('Pinned pane', { exact: true })).toBeVisible();
 
   const evolutionRow = page.getByTestId('orchestration-session-evolution');
-  await expect(evolutionRow).toHaveAttribute('aria-expanded', 'true');
+  const childrenToggle = page.getByRole('button', { name: 'Collapse Pane evolution children' });
+  await expect(childrenToggle).toHaveAttribute('aria-expanded', 'true');
   await evolutionRow.click();
-  await expect(evolutionRow).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByRole('button', { name: 'Pane/pane chat to session', exact: true })).toHaveCount(0);
+  await expect(childrenToggle).toHaveAttribute('aria-expanded', 'true');
+  await childrenToggle.click();
+  await expect(page.getByRole('button', { name: 'Expand Pane evolution children' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Pane/pane chat to session', exact: true })).toBeHidden();
   await evolutionRow.click();
-  await expect(evolutionRow).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Expand Pane evolution children' })).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Expand Pane evolution children' }).press('Enter');
+  await expect(childrenToggle).toHaveAttribute('aria-expanded', 'true');
+  await page.getByRole('button', { name: 'Collapse Doozy fixes children' }).click();
 
   await expect(page.getByRole('heading', { name: 'Pane evolution', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
@@ -811,7 +817,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   const doozyRow = page.getByTestId('orchestration-session-doozy');
   await doozyRow.click();
   await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeAttached();
-  await doozyRow.click();
+  await page.getByRole('button', { name: 'Expand Doozy fixes children' }).click();
   await page.getByRole('button', { name: 'Pane/managed pane sidebar', exact: true }).click();
   await doozyRow.click();
   await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeAttached();
@@ -824,6 +830,20 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   });
   await expect(page.getByTestId('orchestration-session-evolution')).toContainText('2');
   await expect(page.getByRole('button', { name: 'Pinned pane', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
+  const child = page.locator('#orchestration-session-panes-sessions-doozy').getByRole('button', { name: 'Pane/managed pane sidebar', exact: true });
+  const repository = page.locator('#project-sessions-1').getByRole('button', { name: 'Pane/managed pane sidebar', exact: true });
+  const selectedRow = (button: typeof child) => button.locator('xpath=ancestor::div[contains(@class,"group/session")][1]');
+  await child.click();
+  await expect(selectedRow(child)).toHaveClass(/bg-surface-selected/);
+  await expect(selectedRow(repository)).not.toHaveClass(/bg-surface-selected/);
+  await repository.click();
+  await expect(selectedRow(repository)).toHaveClass(/bg-surface-selected/);
+  await expect(selectedRow(child)).not.toHaveClass(/bg-surface-selected/);
+  await doozyRow.click();
+  await expect(selectedRow(repository)).not.toHaveClass(/bg-surface-selected/);
+  await expect(selectedRow(child)).not.toHaveClass(/bg-surface-selected/);
 });
 
 test('Sessions can be pinned, persist across reload, and unpin back to the normal list', async ({ page }) => {
@@ -837,6 +857,16 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
+  const emptyChildren = page.locator('#orchestration-session-panes-sessions-alpha');
+  await expect(page.getByRole('button', { name: 'Expand Alpha children' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(emptyChildren).toBeHidden();
+  await page.getByRole('button', { name: 'Expand Alpha children' }).click();
+  const collapseChildren = page.getByRole('button', { name: 'Collapse Alpha children' });
+  await expect(collapseChildren).toHaveAttribute('aria-expanded', 'true');
+  await expect(emptyChildren.getByText('No child sessions')).toBeVisible();
+  await collapseChildren.click();
+  await expect(page.getByRole('button', { name: 'Expand Alpha children' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(emptyChildren).toBeHidden();
   await alphaRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin Session', exact: true }).click();
 
@@ -903,8 +933,11 @@ test('Session rows archive and restore without losing selection or associated Pa
   await page.getByRole('button', { name: 'Archived', exact: true }).click();
   const archivedAlpha = page.getByTestId('archived-orchestration-session-alpha');
   await expect(archivedAlpha).toBeVisible();
+  await expect(page.getByText('Worktrees', { exact: true })).toBeVisible();
+  await expect(page.getByText('No archived worktrees', { exact: true })).toBeVisible();
   await archivedAlpha.getByRole('button', { name: 'Restore Session Alpha', exact: true }).click();
   await expect(archivedAlpha).toHaveCount(0);
+  await expect(page.getByText('No archived Sessions', { exact: true })).toBeVisible();
   await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
   await expect(page.getByRole('button', { name: 'Associated Alpha Pane', exact: true })).toBeVisible();
@@ -1238,7 +1271,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const appSettings = page.getByRole('dialog', { name: 'Pane Settings' });
+  const appSettings = page.getByTestId('settings-page');
   await appSettings.getByRole('button', { name: 'AI & Agents', exact: true }).click();
   await appSettings.getByLabel('Custom command and arguments').fill('af run coordinator --quiet');
   await appSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
@@ -1246,7 +1279,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
   await appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true }).click();
   await expect(appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true })).toBeDisabled();
-  await appSettings.getByRole('button', { name: 'Close modal' }).click();
+  await appSettings.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(appSettings).not.toBeVisible();
   await page.getByTestId('new-orchestration-session').click();
   const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
@@ -1291,13 +1324,28 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   });
   await page.goto('/');
   await page.getByTestId('orchestration-session-tools').click();
-  const sessionTabs = page.locator('.pane-chat-shell');
-  const activeTab = sessionTabs.getByRole('tab').first();
+  const titleBarTabs = page.getByTestId('window-title-bar-session-tabs');
+  const activeTab = titleBarTabs.getByRole('tab').first();
   await expect(activeTab).toBeVisible();
+  await expect(activeTab).toHaveCSS('border-top-left-radius', '6px');
+  const tabBounds = await activeTab.boundingBox();
+  const tabSlotBounds = await titleBarTabs.boundingBox();
+  expect(tabBounds?.y).toBe(0);
+  expect(tabBounds?.height).toBe(38);
+  expect(tabBounds && tabSlotBounds && tabBounds.x - tabSlotBounds.x).toBe(0);
+  await expect(page.getByTestId('sidebar').getByRole('button', { name: 'Home menu' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
   const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
   await expect(titleBarControls.getByRole('button', { name: 'Session settings' })).toBeVisible();
   await expect(titleBarControls.getByRole('button', { name: 'Show progress brief' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toHaveCSS('-webkit-app-region', 'no-drag');
+  await expect(page.getByRole('button', { name: 'Show details', exact: true })).toHaveCSS('-webkit-app-region', 'no-drag');
+  const leftToggle = await page.getByRole('button', { name: 'Collapse sidebar' }).boundingBox();
+  const leftDragArea = await page.locator('[data-testid="sidebar"] .pane-drag-area').boundingBox();
+  const rightToggle = await page.getByRole('button', { name: 'Show details', exact: true }).boundingBox();
+  const rightDragArea = await page.locator('.pane-chat-shell > div > .pane-drag-area').boundingBox();
+  expect(leftToggle && leftDragArea && leftDragArea.x).toBeGreaterThanOrEqual(leftToggle!.x + leftToggle!.width);
+  expect(rightToggle && rightDragArea && rightDragArea.x + rightDragArea.width).toBeLessThanOrEqual(rightToggle!.x);
   await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
@@ -1340,11 +1388,11 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await page.getByRole('button', { name: 'Show progress brief', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
-  const fileTab = sessionTabs.getByRole('tab', { name: 'notes.txt', exact: true });
+  const fileTab = titleBarTabs.getByRole('tab', { name: 'notes.txt', exact: true });
   await expect(fileTab).toBeVisible();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
-  const closeFile = sessionTabs.getByRole('button', { name: 'Close notes.txt' });
+  const closeFile = titleBarTabs.getByRole('button', { name: 'Close notes.txt' });
   await expect(closeFile).toHaveCSS('opacity', '1');
   await activeTab.click();
   await expect(fileTab).toHaveAttribute('aria-selected', 'false');
@@ -1428,11 +1476,27 @@ test('experimental progress opens, refreshes, stays isolated and can be disabled
   await page.getByRole('button', { name: 'Hide details', exact: true }).click();
   await expect(brief).toBeVisible();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const settings = page.getByRole('dialog', { name: 'Pane Settings' });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByTestId('settings-page');
   await settings.getByRole('button', { name: 'Advanced', exact: true }).click();
   await settings.getByRole('switch', { name: 'Session progress view (Experimental)' }).click();
-  await settings.getByRole('button', { name: 'Close modal' }).click();
+  await settings.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Session progress view' })).toHaveCount(0);
   await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
+});
+
+
+test('Sessions can be renamed from their right-click menu', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('rename-menu', 'Original', '', '', new Date(0).toISOString())]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-rename-menu').click();
+  await page.getByTestId('orchestration-session-rename-menu').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename Session…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Rename Session', exact: true });
+  await expect(dialog.getByRole('textbox', { name: 'Session name' })).toHaveValue('Original');
+  await dialog.getByRole('textbox', { name: 'Session name' }).fill('New name');
+  await dialog.getByRole('button', { name: 'Save name', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open Session New name', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New name', exact: true, level: 1 })).toBeAttached();
 });
