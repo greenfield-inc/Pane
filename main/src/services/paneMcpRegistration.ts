@@ -394,17 +394,25 @@ async function installRunpaneCopy(paneDir: string): Promise<string> {
   return path.join(destination, 'dist', 'cli.js');
 }
 
-/** Applies the "Register Pane tools" setting. Only packaged builds register: a dev build would point every agent at a worktree. */
-export async function syncPaneMcpForApp(options: {
+let syncQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Applies the "Register Pane tools" setting. Runs one sync at a time so a settings toggle
+ * cannot interleave with the launch sync. Only packaged builds register: a dev build would
+ * point every agent at a worktree.
+ */
+export function syncPaneMcpForApp(options: {
   isPackaged: boolean;
   config: Pick<AppConfig, 'agentContext' | 'claudeExecutablePath'>;
   projects: Pick<Project, 'wsl_enabled' | 'wsl_distribution'>[];
 }): Promise<void> {
-  if (!options.isPackaged) return;
-  await syncPaneMcpRegistrations({
+  if (!options.isPackaged) return Promise.resolve();
+  const run = syncQueue.then(() => syncPaneMcpRegistrations({
     enabled: options.config.agentContext?.registerMcp !== false,
     paneDir: getAppDirectory(),
     wslDistros: options.projects.flatMap((project) => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     claudeExecutablePath: options.config.claudeExecutablePath,
-  });
+  }));
+  syncQueue = run.catch(() => undefined);
+  return run;
 }
