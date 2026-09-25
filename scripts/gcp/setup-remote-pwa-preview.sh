@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
+# One-time GCP setup for the Remote PWA preview deploy
+# (.github/workflows/deploy-remote-pwa-preview.yml).
+#   BILLING_ACCOUNT_ID=<billing account> scripts/gcp/setup-remote-pwa-preview.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-pane-pwa-preview}"
 PROJECT_NAME="${PROJECT_NAME:-Pane PWA Preview}"
-BILLING_ACCOUNT_ID="${BILLING_ACCOUNT_ID:-019B6D-4631BC-4B75C5}"
+BILLING_ACCOUNT_ID="${BILLING_ACCOUNT_ID:?Set BILLING_ACCOUNT_ID to the billing account for the preview project (gcloud billing accounts list)}"
 ORG_DOMAIN="${ORG_DOMAIN:-dcouple.ai}"
 REGION="${REGION:-us-central1}"
 ARTIFACT_REPOSITORY="${ARTIFACT_REPOSITORY:-pane-preview}"
