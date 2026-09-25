@@ -478,6 +478,35 @@
       "down,enter",
       "--yes",
       "--json"
+    ],
+    [
+      "panes",
+      "squash-rebase",
+      "--pane",
+      "pane-1",
+      "--message",
+      "feat: land it",
+      "--yes",
+      "--json"
+    ],
+    [
+      "folders",
+      "create",
+      "--repo",
+      "3",
+      "--name",
+      "Reviews",
+      "--yes"
+    ],
+    [
+      "panes",
+      "move",
+      "--pane",
+      "pane-1",
+      "--folder",
+      "folder-9",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

@@ -652,6 +652,215 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "panes squash-rebase",
+      "summary": "Squash a Pane branch into one commit and rebase it onto main.",
+      "usage": [
+        "runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "sessions:squash-and-rebase-to-main",
+        "args": [
+          "--pane",
+          "--message"
+        ]
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes stash",
+      "summary": "Stash uncommitted changes in a Pane worktree.",
+      "usage": [
+        "runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "sessions:git-stash",
+        "args": [
+          "--pane"
+        ]
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes stash-pop",
+      "summary": "Apply and drop the latest stash in a Pane worktree.",
+      "usage": [
+        "runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "sessions:git-stash-pop",
+        "args": [
+          "--pane"
+        ]
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes soft-reset",
+      "summary": "Undo the last commit in a Pane, keeping its changes staged.",
+      "usage": [
+        "runpane panes soft-reset --pane <pane-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "daemonAction": {
+        "channel": "sessions:git-soft-reset",
+        "args": [
+          "--pane"
+        ]
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes fetch",
+      "summary": "Fetch the remote for a Pane worktree.",
+      "usage": [
+        "runpane panes fetch --pane <pane-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "openWorld": true,
+      "mutates": true,
+      "additive": true,
+      "idempotent": true,
+      "daemonAction": {
+        "channel": "sessions:git-fetch",
+        "args": [
+          "--pane"
+        ]
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes run-script",
+      "summary": "Run the repository's run script in a Pane.",
+      "usage": [
+        "runpane panes run-script --pane <pane-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "daemonAction": {
+        "channel": "sessions:run-script",
+        "args": [
+          "--pane"
+        ]
+      },
+      "toolsets": [
+        "panes"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes stop-script",
+      "summary": "Stop the run script running in a Pane.",
+      "usage": [
+        "runpane panes stop-script --pane <pane-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "daemonAction": {
+        "channel": "sessions:stop-script",
+        "args": [
+          "--pane"
+        ]
+      },
+      "toolsets": [
+        "panes"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "panes move",
+      "summary": "Move a Pane into a sidebar folder.",
+      "usage": [
+        "runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "daemonAction": {
+        "channel": "folders:move-session",
+        "args": [
+          "--pane",
+          "--folder"
+        ]
+      },
+      "toolsets": [
+        "panes"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "folders list",
+      "summary": "List the sidebar folders of a repository.",
+      "usage": [
+        "runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]"
+      ],
+      "daemonAction": {
+        "channel": "folders:get-by-project",
+        "args": [
+          "--repo"
+        ]
+      },
+      "toolsets": [
+        "panes"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
+      "name": "folders create",
+      "summary": "Create a sidebar folder in a repository.",
+      "usage": [
+        "runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "daemonAction": {
+        "channel": "folders:create",
+        "args": [
+          "--name",
+          "--repo"
+        ]
+      },
+      "toolsets": [
+        "panes"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ]
+    },
+    {
       "name": "links create",
       "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
       "usage": [
@@ -1353,6 +1562,16 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start --repo <selector> --name <name> (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> [--base-branch <branch>] --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes soft-reset --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes fetch --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes run-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes stop-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
+        "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -2035,6 +2254,128 @@ export const RUNPANE_CONTRACT = {
         "  --json                          Print machine-readable output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
+      "panes squash-rebase": [
+        "Usage:",
+        "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Squash a Pane branch into one commit and rebase it onto main.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --message <message>             Commit message; the first line is the title.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes stash": [
+        "Usage:",
+        "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Stash uncommitted changes in a Pane worktree.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes stash-pop": [
+        "Usage:",
+        "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Apply and drop the latest stash in a Pane worktree.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes soft-reset": [
+        "Usage:",
+        "  runpane panes soft-reset --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Undo the last commit in a Pane, keeping its changes staged.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes fetch": [
+        "Usage:",
+        "  runpane panes fetch --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Fetch the remote for a Pane worktree.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes run-script": [
+        "Usage:",
+        "  runpane panes run-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Run the repository's run script in a Pane.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes stop-script": [
+        "Usage:",
+        "  runpane panes stop-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Stop the run script running in a Pane.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes move": [
+        "Usage:",
+        "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Move a Pane into a sidebar folder.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --folder <folder-id>            Folder id from folders list.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "folders list": [
+        "Usage:",
+        "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
+        "",
+        "List the sidebar folders of a repository.",
+        "",
+        "Options:",
+        "  --repo <repo-id>                Numeric repository id from repos list.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "folders create": [
+        "Usage:",
+        "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Create a sidebar folder in a repository.",
+        "",
+        "Options:",
+        "  --repo <repo-id>                Numeric repository id from repos list.",
+        "  --name <name>                   Folder name.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
       "links create": [
         "Usage:",
         "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
@@ -2177,6 +2518,16 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start --repo <selector> --name <name> (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> [--base-branch <branch>] --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes soft-reset --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes fetch --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes run-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes stop-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
+        "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
+        "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -2840,6 +3191,128 @@ export const RUNPANE_CONTRACT = {
         "  --json                          Print machine-readable output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
+      "panes squash-rebase": [
+        "Usage:",
+        "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Squash a Pane branch into one commit and rebase it onto main.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --message <message>             Commit message; the first line is the title.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes stash": [
+        "Usage:",
+        "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Stash uncommitted changes in a Pane worktree.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes stash-pop": [
+        "Usage:",
+        "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Apply and drop the latest stash in a Pane worktree.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes soft-reset": [
+        "Usage:",
+        "  runpane panes soft-reset --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Undo the last commit in a Pane, keeping its changes staged.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes fetch": [
+        "Usage:",
+        "  runpane panes fetch --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Fetch the remote for a Pane worktree.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes run-script": [
+        "Usage:",
+        "  runpane panes run-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Run the repository's run script in a Pane.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes stop-script": [
+        "Usage:",
+        "  runpane panes stop-script --pane <pane-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Stop the run script running in a Pane.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "panes move": [
+        "Usage:",
+        "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Move a Pane into a sidebar folder.",
+        "",
+        "Options:",
+        "  --pane <pane-id>                Pane id from panes list or agents start.",
+        "  --folder <folder-id>            Folder id from folders list.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "folders list": [
+        "Usage:",
+        "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
+        "",
+        "List the sidebar folders of a repository.",
+        "",
+        "Options:",
+        "  --repo <repo-id>                Numeric repository id from repos list.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "folders create": [
+        "Usage:",
+        "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Create a sidebar folder in a repository.",
+        "",
+        "Options:",
+        "  --repo <repo-id>                Numeric repository id from repos list.",
+        "  --name <name>                   Folder name.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
       "links create": [
         "Usage:",
         "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
@@ -3046,7 +3519,7 @@ export const RUNPANE_CONTRACT = {
       "`sessions detach` detach a Pane from a named Session.",
       "`sessions overview` read a live status, activity, git, and pull request overview for a named Session.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.",
-      "Commands with a contract `daemonAction` (`panes git-status`, `commit`, `push`, `pull`, `rebase-main`, `restore`, `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`.",
+      "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only."
     ],
@@ -3545,6 +4018,35 @@ export const RUNPANE_CONTRACT = {
         "panel-1",
         "--keys",
         "down,enter",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "squash-rebase",
+        "--pane",
+        "pane-1",
+        "--message",
+        "feat: land it",
+        "--yes",
+        "--json"
+      ],
+      [
+        "folders",
+        "create",
+        "--repo",
+        "3",
+        "--name",
+        "Reviews",
+        "--yes"
+      ],
+      [
+        "panes",
+        "move",
+        "--pane",
+        "pane-1",
+        "--folder",
+        "folder-9",
         "--yes",
         "--json"
       ]
@@ -6766,6 +7268,9 @@ export const RUNPANE_CONTRACT = {
             }
           },
           "additionalProperties": false
+        },
+        "link": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -9129,6 +9634,435 @@ export const RUNPANE_CONTRACT = {
         ],
         "examples": [
           "runpane panes restore --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "panes squash-rebase": {
+        "name": "panes squash-rebase",
+        "summary": "Squash a Pane branch into one commit and rebase it onto main.",
+        "details": "Use this to land a Pane's work on the repository's main branch the way the app's squash-and-rebase action does. It rewrites the Pane branch and updates main.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--message",
+            "value": "<message>",
+            "required": true,
+            "description": "Commit message; the first line is the title."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes squash-rebase --pane <pane-id> --message <message> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message.",
+          "The result includes `link`, a pane:// link the user can open to review the Pane."
+        ]
+      },
+      "panes stash": {
+        "name": "panes stash",
+        "summary": "Stash uncommitted changes in a Pane worktree.",
+        "details": "Use this to set aside work in progress, the way the app's stash action does. `panes stash-pop` brings it back.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes stash --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message.",
+          "The result includes `link`, a pane:// link the user can open to review the Pane."
+        ]
+      },
+      "panes stash-pop": {
+        "name": "panes stash-pop",
+        "summary": "Apply and drop the latest stash in a Pane worktree.",
+        "details": "Use this to bring back work set aside with `panes stash`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes stash-pop --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message.",
+          "The result includes `link`, a pane:// link the user can open to review the Pane."
+        ]
+      },
+      "panes soft-reset": {
+        "name": "panes soft-reset",
+        "summary": "Undo the last commit in a Pane, keeping its changes staged.",
+        "details": "Use this to reword or regroup the latest commit, the way the app's soft reset action does.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes soft-reset --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message.",
+          "The result includes `link`, a pane:// link the user can open to review the Pane."
+        ]
+      },
+      "panes fetch": {
+        "name": "panes fetch",
+        "summary": "Fetch the remote for a Pane worktree.",
+        "details": "Use this to refresh remote branches before checking git status or rebasing.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes fetch --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "panes run-script": {
+        "name": "panes run-script",
+        "summary": "Run the repository's run script in a Pane.",
+        "details": "Use this to start the dev server or app for a Pane, the way the app's Run button does.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes run-script --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "panes stop-script": {
+        "name": "panes stop-script",
+        "summary": "Stop the run script running in a Pane.",
+        "details": "Use this to stop what `panes run-script` started.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes stop-script --pane <pane-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message.",
+          "The result includes `link`, a pane:// link the user can open to review the Pane."
+        ]
+      },
+      "panes move": {
+        "name": "panes move",
+        "summary": "Move a Pane into a sidebar folder.",
+        "details": "Use this to organize Panes. Folder ids come from `runpane folders list`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane id from panes list or agents start."
+          },
+          {
+            "name": "--folder",
+            "value": "<folder-id>",
+            "required": true,
+            "description": "Folder id from folders list."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panes move --pane <pane-id> --folder <folder-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message.",
+          "The result includes `link`, a pane:// link the user can open to review the Pane."
+        ]
+      },
+      "folders list": {
+        "name": "folders list",
+        "summary": "List the sidebar folders of a repository.",
+        "details": "Use this to find folder ids for `panes move`.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<repo-id>",
+            "required": true,
+            "description": "Numeric repository id from repos list."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane folders list --repo <repo-id> --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Runs the same Pane action as the button in the app, through the running Pane daemon.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "folders create": {
+        "name": "folders create",
+        "summary": "Create a sidebar folder in a repository.",
+        "details": "Use this to add a folder for grouping Panes.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<repo-id>",
+            "required": true,
+            "description": "Numeric repository id from repos list."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "Folder name."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane folders create --repo <repo-id> --name <name> --yes --json"
         ],
         "jsonSchemas": [
           "daemonActionResult"

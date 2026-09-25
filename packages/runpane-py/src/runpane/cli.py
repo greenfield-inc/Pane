@@ -171,6 +171,7 @@ class ParsedArgs:
     query: Optional[str] = None
     doc: Optional[str] = None
     url: Optional[str] = None
+    folder: Optional[str] = None
     keys: Optional[List[str]] = None
     toolsets: Optional[List[str]] = None
     read_only: bool = False
@@ -837,6 +838,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--url":
         parsed.url = value
         return
+    if flag == "--folder":
+        parsed.folder = value
+        return
     if flag == "--keys":
         parsed.keys = [key.strip() for key in value.split(",") if key.strip()]
         return
@@ -888,6 +892,16 @@ def is_runpane_local_command(command: str) -> bool:
         "panes pull",
         "panes rebase-main",
         "panes restore",
+        "panes squash-rebase",
+        "panes stash",
+        "panes stash-pop",
+        "panes soft-reset",
+        "panes fetch",
+        "panes run-script",
+        "panes stop-script",
+        "panes move",
+        "folders list",
+        "folders create",
         "links create",
         "links open",
         "docs search",

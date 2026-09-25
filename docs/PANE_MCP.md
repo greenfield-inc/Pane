@@ -32,9 +32,9 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 |---|---|
 | `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_input` (exact keys, for menus and prompts), `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor` |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
-| `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, cost |
+| `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
 | `panels` | create, list, output, screen, input, submit, submit-composer, wait |
-| `git` | `panes_git_status`, `panes_commit`, `panes_push`, `panes_pull`, `panes_rebase_main` |
+| `git` | status, commit, push, pull, fetch, rebase onto main, squash-rebase onto main, stash, stash-pop, soft reset (`panes_*`) |
 | `sessions` | the eight `sessions_*` tools |
 | `repos`, `docs`, `links`, `admin` | repository, documentation, deep-link, and diagnostic tools |
 | `all` / `read` | every tool / every read-only tool |
@@ -81,6 +81,37 @@ Any other client that can launch a stdio server uses the same command and argume
 The server is stdio only: it runs next to the Pane app on the same machine, so there is no HTTP transport and no OAuth. To drive a remote Pane, run the server on the remote host.
 
 The Python package (`pipx run runpane`) does not include the MCP server, the docs search, or the agent tasks, because they need Node. From Python, those commands print the npm command and exit with status 2.
+
+## Manual test steps
+
+Automated tests cover the registration and link logic on every OS. Check these by hand on a packaged build of each platform.
+
+**macOS, Windows, and Linux**
+
+1. Install and launch Pane, with Claude Code and Codex installed.
+2. Run `claude mcp list` and `codex mcp list`. Each shows `pane` as connected.
+3. In a fresh `claude` session, ask "Use Pane to list my repos". It calls `repos_list`.
+4. Quit and relaunch Pane. The Claude and Codex configs are unchanged.
+5. Turn off **Settings → AI & Agents → Register Pane tools with Claude Code and Codex**. `pane` is gone from both lists, and the other entries are unchanged.
+
+**pane:// links**
+
+1. Get a link: `runpane links create --pane <pane-id>`.
+2. With Pane running, open it from a browser or a terminal:
+   - macOS: `open "pane://open?pane=<pane-id>"`
+   - Windows: `start "" "pane://open?pane=<pane-id>"`
+   - Linux: `xdg-open "pane://open?pane=<pane-id>"`
+3. Pane comes to the front on that Pane, and no second Pane window opens. On Windows and Linux, the extra process hands the link to the running Pane and exits.
+4. Quit Pane and open the link again. Pane starts and opens that Pane.
+5. Open `pane://open?pane=<pane-id>&archive=1`. Pane logs `Unknown pane link parameter: archive` and changes nothing.
+6. On Linux, check the handler: `xdg-mime query default x-scheme-handler/pane` names Pane's desktop file (AppImage and .deb).
+
+**Windows with WSL**
+
+1. Save a repository that lives in a WSL distro, with Claude Code and Codex installed inside that distro.
+2. Relaunch Pane. Inside the distro, `claude mcp list` and `codex mcp list` show `pane`, whose command is `/mnt/c/.../Pane.exe`.
+3. From a `claude` session inside the distro, ask "Use Pane to list my repos". The call reaches the Windows Pane.
+4. Turn the setting off. `pane` is gone from the distro's configs too.
 
 ## Example prompts
 

@@ -326,7 +326,10 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
   ]);
   const git = await names(['--toolsets', 'git']);
-  assert.deepEqual(git.map((tool) => tool.name).sort(), ['panes_commit', 'panes_git_status', 'panes_pull', 'panes_push', 'panes_rebase_main']);
+  assert.deepEqual(git.map((tool) => tool.name).sort(), [
+    'panes_commit', 'panes_fetch', 'panes_git_status', 'panes_pull', 'panes_push', 'panes_rebase_main',
+    'panes_soft_reset', 'panes_squash_rebase', 'panes_stash', 'panes_stash_pop',
+  ]);
   const readOnly = await names(['--toolsets', 'all', '--read-only']);
   assert.ok(readOnly.length > 0 && readOnly.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
@@ -494,6 +497,36 @@ test('panels_input presses named keys, so a model can answer a menu without raw 
         assert.match(unknown.content[0].text, /Unknown key "pagedown"\. Use enter, escape/);
       }, { args: [] });
       assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-8', input: '\u001b[B\r' }]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('destructive pane actions return a review link, and folder actions pass the numeric repo id', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, {
+      'sessions:git-stash-pop': { success: true },
+      'sessions:git-fetch': { success: true },
+      'folders:create': { success: true, data: { id: 'folder-9', name: 'Reviews' } },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const popped = await client.callTool({ name: 'panes_stash_pop', arguments: { pane: 'pane-1', yes: true, paneDir } });
+        assert.deepEqual(popped.structuredContent, { ok: true, link: 'pane://open?pane=pane-1' });
+        const fetched = await client.callTool({ name: 'panes_fetch', arguments: { pane: 'pane-1', yes: true, paneDir } });
+        assert.deepEqual(fetched.structuredContent, { ok: true });
+        const folder = await client.callTool({ name: 'folders_create', arguments: { repo: '3', name: 'Reviews', yes: true, paneDir } });
+        assert.deepEqual(folder.structuredContent, { ok: true, data: { id: 'folder-9', name: 'Reviews' } });
+        const badRepo = await client.callTool({ name: 'folders_list', arguments: { repo: 'web', paneDir } });
+        assert.equal(badRepo.isError, true);
+        assert.match(badRepo.content[0].text, /`repos_list`/);
+      });
+      assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
+        { channel: 'sessions:git-stash-pop', args: ['pane-1'] },
+        { channel: 'sessions:git-fetch', args: ['pane-1'] },
+        { channel: 'folders:create', args: ['Reviews', 3] },
+      ]);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

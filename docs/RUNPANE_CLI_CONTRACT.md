@@ -209,7 +209,7 @@ When running from WSL while Pane is installed on Windows, the Linux wrapper may 
 
 `runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.
 
-Commands with a contract `daemonAction` (`panes git-status`, `commit`, `push`, `pull`, `rebase-main`, `restore`, `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`.
+Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.
 
 `runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.
 

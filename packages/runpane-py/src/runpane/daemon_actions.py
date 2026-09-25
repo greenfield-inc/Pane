@@ -15,7 +15,19 @@ FLAG_VALUES = {
     "--panel": lambda parsed: parsed.panel_id,
     "--message": lambda parsed: parsed.message,
     "--url": lambda parsed: parsed.url,
+    "--name": lambda parsed: parsed.name,
+    "--folder": lambda parsed: parsed.folder,
+    "--repo": lambda parsed: repo_id(parsed.repo),
 }
+
+
+def repo_id(repo: Optional[str]) -> Optional[int]:
+    """App channels take the numeric repository id."""
+    if repo is None:
+        return None
+    if not REPO_ID.match(repo):
+        raise ValueError("--repo must be a numeric repository id. Run `runpane repos list` to find it.")
+    return int(repo)
 LINK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
 
@@ -37,6 +49,10 @@ def run_daemon_action(parsed: Any, action: Dict[str, Any]) -> int:
         if input(f"Run {parsed.command}? [y/N] ").strip().lower() not in {"y", "yes"}:
             raise ValueError("Cancelled.")
     result = normalize_response(invoke_daemon(action["channel"], args, pane_dir=parsed.pane_dir))
+    spec = contract_command(parsed.command)
+    # A destructive change to a Pane comes back with a link the user can open to review it.
+    if result["ok"] and parsed.pane_id and spec.get("mutates") and not spec.get("additive"):
+        result["link"] = build_pane_link("pane", parsed.pane_id)
     if parsed.json:
         print(json.dumps(result, indent=2))
     elif result["ok"]:

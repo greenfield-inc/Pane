@@ -477,6 +477,16 @@
         "panes pull",
         "panes rebase-main",
         "panes restore",
+        "panes squash-rebase",
+        "panes stash",
+        "panes stash-pop",
+        "panes soft-reset",
+        "panes fetch",
+        "panes run-script",
+        "panes stop-script",
+        "panes move",
+        "folders list",
+        "folders create",
         "links create",
         "links open",
         "docs search",
@@ -613,6 +623,36 @@
           "$ref": "#/$defs/helpLines"
         },
         "panes restore": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes squash-rebase": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes stash": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes stash-pop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes soft-reset": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes fetch": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes run-script": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes stop-script": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes move": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "folders list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "folders create": {
           "$ref": "#/$defs/helpLines"
         },
         "links create": {
