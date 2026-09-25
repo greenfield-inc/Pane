@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { monoFontFamily, useTheme } from '@/theme';
 import { Button, Sheet, Text } from '@/ui';
@@ -13,6 +14,7 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
   const pending = usePendingPermissions();
   const projects = useProjects();
   const respond = useRespondToPermission();
+  const [showInput, setShowInput] = useState(false);
   const request = (pending.data ?? []).find(candidate =>
     requestId ? candidate.id === requestId : candidate.sessionId === paneId);
   const paneName = (projects.data ?? []).flatMap(project => project.sessions ?? []).find(session => session.id === paneId)?.name;
@@ -44,8 +46,15 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
       footer={
         <>
           {respond.isError ? <Text testID="permission-error" variant="footnote" tone="danger">{respond.error.message}</Text> : null}
-          <Button testID="permission-allow" title="Allow" loading={respond.isPending && respond.variables?.[1].behavior === 'allow'} disabled={respond.isPending} onPress={() => answer('allow')} />
-          <Button testID="permission-deny" title="Deny" variant="destructive" loading={respond.isPending && respond.variables?.[1].behavior === 'deny'} disabled={respond.isPending} onPress={() => answer('deny')} />
+          {/* Side by side so both answers fit at the half-height detent. */}
+          <View style={styles.answers}>
+            <View style={styles.answer}>
+              <Button testID="permission-deny" title="Deny" variant="destructive" loading={respond.isPending && respond.variables?.[1].behavior === 'deny'} disabled={respond.isPending} onPress={() => answer('deny')} />
+            </View>
+            <View style={styles.answer}>
+              <Button testID="permission-allow" title="Allow" loading={respond.isPending && respond.variables?.[1].behavior === 'allow'} disabled={respond.isPending} onPress={() => answer('allow')} />
+            </View>
+          </View>
         </>
       }
     >
@@ -55,14 +64,22 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
           <Text testID="permission-target" selectable style={{ fontFamily: monoFontFamily, fontSize: 14 }}>{target}</Text>
         </View>
       ) : null}
-      <Text variant="footnote" tone="muted">{`${request.toolName} input`}</Text>
-      <View style={[styles.block, { backgroundColor: theme.colors.surfaceRaised, borderRadius: theme.radius.md, borderColor: theme.colors.border }]}>
-        <Text selectable variant="footnote" tone="secondary" style={{ fontFamily: monoFontFamily }}>{detail}</Text>
-      </View>
+      {/* The target is usually enough; the full input would push the answers off a half-height sheet. */}
+      {showInput || !target ? (
+        <View style={[styles.block, { backgroundColor: theme.colors.surfaceRaised, borderRadius: theme.radius.md, borderColor: theme.colors.border }]}>
+          <Text selectable variant="footnote" tone="secondary" style={{ fontFamily: monoFontFamily }}>{detail}</Text>
+        </View>
+      ) : (
+        <Pressable testID="permission-show-input" accessibilityRole="button" hitSlop={8} onPress={() => setShowInput(true)}>
+          <Text variant="footnote" tone="accent">{`Show full ${request.toolName} input`}</Text>
+        </Pressable>
+      )}
     </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
   block: { padding: 12, borderWidth: StyleSheet.hairlineWidth },
+  answers: { flexDirection: 'row', gap: 12 },
+  answer: { flex: 1 },
 });
