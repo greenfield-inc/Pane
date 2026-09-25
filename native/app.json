@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pane",
     "slug": "pane",
-    "version": "1.0.0",
+    "version": "1.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -19,7 +19,9 @@
           "NSAllowsLocalNetworking": true
         },
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "2",
+      "appleTeamId": "FBM5YSF467"
     },
     "android": {
       "package": "com.dcouple.pane.mobile",
@@ -27,7 +29,8 @@
         "backgroundColor": "#010409",
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 2
     },
     "plugins": [
       "expo-router",
