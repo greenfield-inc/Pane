@@ -516,21 +516,33 @@ export class OrchestrationSessionManager extends EventEmitter {
     await this.reconcilePersistedSessionOwners(normalized);
     // Repair persisted launch metadata before any restored terminal can replay
     // a pre-upgrade bootstrap. Keep agent IDs and buffers, including inactive agents.
+    // One broken Session must not block the others, Pane Chat included.
+    let withFailures: OrchestrationSessionStoreData = normalized;
     for (const record of normalized.sessions) {
-      await this.finishPromotion(record);
-      if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
-        prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false);
-      }
-      for (const agent of PANE_CHAT_AGENTS) {
-        const panel = panelManager.getPanel(record.panelIds[agent]);
-        if (panel) {
-          // Inactive agents retain their own command and transcript identity.
-          // SAFETY: Session-owned terminal panels persist TerminalPanelState exclusively.
-          const state = panel.state.customState as TerminalPanelState | undefined;
-          await this.refreshPanelLaunchState(panel, { ...record, agent, launchCommand: agent === record.agent ? record.launchCommand : state?.initialCommand });
+      try {
+        await this.finishPromotion(record);
+        if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
+          prepareSessionWorkspace(record.id, record.profile, record, this.configManager.getConfig().experimentalSessionProgress !== false);
         }
+        for (const agent of PANE_CHAT_AGENTS) {
+          const panel = panelManager.getPanel(record.panelIds[agent]);
+          if (panel) {
+            // Inactive agents retain their own command and transcript identity.
+            // SAFETY: Session-owned terminal panels persist TerminalPanelState exclusively.
+            const state = panel.state.customState as TerminalPanelState | undefined;
+            await this.refreshPanelLaunchState(panel, { ...record, agent, launchCommand: agent === record.agent ? record.launchCommand : state?.initialCommand });
+          }
+        }
+      } catch (error) {
+        const message = `Session could not be restored: ${error instanceof Error ? error.message : String(error)}`;
+        console.error(`[OrchestrationSessionManager] ${record.name} (${record.id}): ${message}`);
+        if (record.activity.at(-1)?.message === message) continue;
+        const failed = { ...record, revision: record.revision + 1, activity: [...record.activity, this.activity('updated', message, 'system')] };
+        trimActivity(failed);
+        withFailures = replaceSession(withFailures, failed);
       }
     }
+    if (withFailures !== normalized) this.store.write(withFailures);
     this.initialized = true;
   }
 
