@@ -126,7 +126,7 @@ describe('Remote PWA browser runtime', () => {
     const fetchMock = vi.fn(async () => new Response('truncated JSON', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createClient().invoke('terminal:input')).rejects.toThrow(/may have completed/);
+    await expect(createClient().invoke('terminal:input', ['panel-1', 'x'])).rejects.toThrow(/may have completed/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

@@ -7,6 +7,7 @@ import {
   type RemotePaneConnectionProfile,
   type RemotePaneConnectionStatus,
 } from '../../../../shared/types/remoteDaemon';
+import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 
 type RemoteBrowserEvent =
   | { type: 'ready'; timestamp: string }
@@ -66,6 +67,8 @@ export class RemoteDaemonBrowserClient {
   private reconnectAttempt = 0;
   private eventListeners = new Set<RemoteBrowserEventListener>();
   private statusListeners = new Set<RemoteStatusListener>();
+  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
+    this.invokeRequest(channel, args, signal));
   private state: RemoteBrowserConnectionState = {
     status: 'local',
     lastError: null,
@@ -90,6 +93,7 @@ export class RemoteDaemonBrowserClient {
   }
 
   async connect(): Promise<void> {
+    this.inputQueue.cancel(new Error('Remote Pane reconnecting; pending terminal input was discarded'));
     this.clearReconnectTimer();
     this.abortController?.abort();
     this.closeEventSource();
@@ -102,6 +106,7 @@ export class RemoteDaemonBrowserClient {
   }
 
   disconnect(): void {
+    this.inputQueue.cancel(new Error('Remote Pane disconnected; pending terminal input was discarded'));
     this.clearReconnectTimer();
     this.abortController?.abort();
     this.closeEventSource();
@@ -111,8 +116,13 @@ export class RemoteDaemonBrowserClient {
   }
 
   async invoke<T = unknown>(channel: string, args: unknown[] = []): Promise<T> {
+    // SAFETY: The named IPC/API channel contract establishes this response payload type.
+    return this.inputQueue.invoke(channel, args) as Promise<T>;
+  }
+
+  private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal): Promise<T> {
     let lastError: Error | null = null;
-    const signal = this.abortController?.signal;
+    const signal = inputSignal ?? this.abortController?.signal;
     const retryableRead = RETRYABLE_READ_CHANNELS.has(channel);
     const attempts = retryableRead ? INVOKE_ATTEMPTS : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -417,6 +427,7 @@ export class RemoteDaemonBrowserClient {
   }
 
   private scheduleReconnect(message: string): void {
+    this.inputQueue.cancel(new Error(message));
     if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
       this.setState({ status: 'error', lastError: message });
       return;
