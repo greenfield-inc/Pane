@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { MobilePushSender, type MobilePushTransport } from './mobilePushSender';
-import { decodeRemoteConnectionCode } from '../../../frontend/src/remote/runtime/remoteProfile';
+import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { ConfigManager } from '../services/configManager';
 

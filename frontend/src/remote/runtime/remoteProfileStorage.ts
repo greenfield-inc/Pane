@@ -1,23 +1,24 @@
 import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
-import { isRemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
+import {
+  loadRemoteProfiles as loadProfiles,
+  saveRemoteProfiles as saveProfiles,
+  type RemoteKeyValueStorage,
+} from '../../../../shared/remoteClient/storage';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { isNativeMobile, nativeSecureStoreCall } from './nativeMobile';
 
-const SAVED_PROFILES_KEY = 'pane.remotePwa.savedProfiles';
-export async function loadRemoteProfiles(): Promise<RemotePaneConnectionProfile[]> {
-  if (!isNativeMobile()) return loadBrowserProfiles();
-  const result = await nativeSecureStoreCall('get', { key: SAVED_PROFILES_KEY });
-  return parseProfiles(decodeOptionalBoundary(result.value, boundary.string) ?? null);
-}
-export async function saveRemoteProfiles(profiles: RemotePaneConnectionProfile[]): Promise<void> {
-  const value = JSON.stringify(profiles);
-  if (isNativeMobile()) { await nativeSecureStoreCall('set', { key: SAVED_PROFILES_KEY, value }); return; }
-  window.localStorage.setItem(SAVED_PROFILES_KEY, value);
-}
-function loadBrowserProfiles(): RemotePaneConnectionProfile[] { try { return parseProfiles(window.localStorage.getItem(SAVED_PROFILES_KEY)); } catch { return []; } }
-function parseProfiles(value: string | null): RemotePaneConnectionProfile[] {
-  try {
-    const parsed: unknown = value ? JSON.parse(value) : [];
-    return Array.isArray(parsed) ? parsed.filter(isRemotePaneConnectionProfile) : [];
-  } catch { return []; }
-}
+const browserStorage: RemoteKeyValueStorage = {
+  async getItem(key) { try { return window.localStorage.getItem(key); } catch { return null; } },
+  async setItem(key, value) { window.localStorage.setItem(key, value); },
+};
+const nativeStorage: RemoteKeyValueStorage = {
+  async getItem(key) {
+    const result = await nativeSecureStoreCall('get', { key });
+    return decodeOptionalBoundary(result.value, boundary.string) ?? null;
+  },
+  async setItem(key, value) { await nativeSecureStoreCall('set', { key, value }); },
+};
+function storage(): RemoteKeyValueStorage { return isNativeMobile() ? nativeStorage : browserStorage; }
+
+export function loadRemoteProfiles(): Promise<RemotePaneConnectionProfile[]> { return loadProfiles(storage()); }
+export function saveRemoteProfiles(profiles: RemotePaneConnectionProfile[]): Promise<void> { return saveProfiles(storage(), profiles); }

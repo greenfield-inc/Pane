@@ -107,8 +107,8 @@
       ]
     },
     "shared": {
-      "entry": ["types/*.ts"],
-      "project": ["types/*.ts"]
+      "entry": ["types/*.ts", "remoteClient/index.ts"],
+      "project": ["types/*.ts", "remoteClient/*.ts"]
     }
   }
 }

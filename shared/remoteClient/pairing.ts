@@ -1,9 +1,9 @@
 import type {
   PaneRemoteConnectionImportPayload,
   RemotePaneConnectionProfile,
-} from '../../../../shared/types/remoteDaemon';
-import { decodePaneRemoteConnection } from '../../../../shared/types/remoteDaemon';
-import { BoundaryDecodeError } from '../../../../shared/validation/boundaryDecoder';
+} from '../types/remoteDaemon';
+import { decodePaneRemoteConnection } from '../types/remoteDaemon';
+import { BoundaryDecodeError } from '../validation/boundaryDecoder';
 
 const PROFILE_PREFIX = 'pane-remote://';
 

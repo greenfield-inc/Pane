@@ -17,7 +17,7 @@ import { RemoteSessionList } from './components/RemoteSessionList';
 import { RemoteSidebar } from './components/RemoteSidebar';
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
-import { decodeRemoteConnectionCode } from './runtime/remoteProfile';
+import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
