@@ -218,13 +218,19 @@ const report = {
   pricingAsOf: '2026-08-10',
 };
 
+async function openUsageSettings(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByRole('navigation', { name: 'Settings categories' })
+    .getByRole('button', { name: 'Usage & Limits', exact: true }).click();
+}
+
 async function capture(page: Page, testInfo: TestInfo, filename: string): Promise<void> {
   const path = testInfo.outputPath(filename);
   await page.screenshot({ path, fullPage: true });
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
-test('opens Usage & Limits from expanded and compact navigation', async ({ page }, testInfo) => {
+test('opens Usage & Limits from settings with expanded and compact sidebar', async ({ page }, testInfo) => {
   await installElectronApiMock(page, {
     initialProjects: [project],
     initialUsageReport: report,
@@ -233,11 +239,11 @@ test('opens Usage & Limits from expanded and compact navigation', async ({ page 
   await page.setViewportSize({ width: 1_600, height: 900 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
   await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
   await expect(page.getByText('6.1M', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('gpt-5.6-sol', { exact: true })).toBeVisible();
-  await expect(page.getByText('Usage fixture', { exact: true }).last()).toBeVisible();
+  await expect(page.getByText('Usage fixture', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText('58% left', { exact: true })).toBeVisible();
 
   // Share and download buttons
@@ -251,9 +257,9 @@ test('opens Usage & Limits from expanded and compact navigation', async ({ page 
   await expect(page.getByText(/^Last successful scan:/)).toBeVisible();
   await capture(page, testInfo, '04-usage-freshness-footer.png');
 
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
-  await expect(page.getByTestId('compact-usage')).toBeVisible();
-  await page.getByTestId('compact-usage').click();
+  await openUsageSettings(page);
   await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
 
   await page.setViewportSize({ width: 720, height: 760 });
@@ -270,7 +276,7 @@ test('shows sortable per-pane costs, model breakdowns, and unattributed usage', 
   });
   await page.setViewportSize({ width: 1_600, height: 900 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
 
   const section = page.getByTestId('usage-by-pane');
   await expect(section).toBeVisible();
@@ -295,7 +301,7 @@ test('shows sortable per-pane costs, model breakdowns, and unattributed usage', 
 test('per-pane averages exclude unattributed usage and explain small trimmed samples', async ({ page }, testInfo) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
   await page.goto('/');
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary.getByText('740.0K', { exact: true })).toBeVisible();
   await expect(summary.getByText('$5.75', { exact: true })).toBeVisible();
@@ -320,7 +326,7 @@ test('trims each metric independently, ignores empty panes, and preserves missin
     initialProjects: [project], initialUsageReport: { ...report, byPane: { ...report.byPane, panes } }, activeProjectId: project.id,
   });
   await page.goto('/');
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary).toContainText('10 panes with recorded usage');
   await summary.getByRole('button', { name: 'Trim 10%' }).click();
@@ -347,7 +353,7 @@ test('custom inclusive local dates reach the API, preserve provider filters, and
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
   await page.goto('/');
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
   await expect(page.getByTestId('pane-usage-summary')).toBeVisible();
   await page.evaluate(() => {
     const usage = window.electronAPI.usage;
@@ -403,7 +409,7 @@ test('custom inclusive local dates reach the API, preserve provider filters, and
 test('empty pane history shows unavailable averages', async ({ page }) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, byPane: { ...report.byPane, panes: [] } }, activeProjectId: project.id });
   await page.goto('/');
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary.getByText('—', { exact: true })).toHaveCount(3);
   await expect(summary).toContainText('No pane-attributed usage');
@@ -412,7 +418,7 @@ test('empty pane history shows unavailable averages', async ({ page }) => {
 test('rescan completion keeps the latest filter and late requests cannot replace it', async ({ page }) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
   await page.goto('/');
-  await page.getByTestId('usage-nav').click();
+  await openUsageSettings(page);
   await expect(page.getByTestId('pane-usage-summary')).toBeVisible();
   await page.evaluate(() => {
     const usage = window.electronAPI.usage;

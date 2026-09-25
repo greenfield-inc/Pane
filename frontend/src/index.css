@@ -269,6 +269,10 @@ body.understory {
   border-bottom: var(--border-hairline) solid var(--color-border-primary);
 }
 
+.pane-drag-area {
+  -webkit-app-region: drag;
+}
+
 /* Hide scrollbar completely */
 .scrollbar-none {
   scrollbar-width: none;

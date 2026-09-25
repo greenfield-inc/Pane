@@ -12,18 +12,16 @@ async function openedExternalUrls(page: Page): Promise<string[]> {
   ).__paneTestElectronMock.getOpenedExternalUrls());
 }
 
-test('sidebar Discord action opens the community invite', async ({ page }) => {
+test('Home menu Discord action opens the community invite', async ({ page }) => {
   await installElectronApiMock(page, {
     initialPreferences: { hide_discord: 'true', hide_welcome: 'true' },
   });
   await page.goto('/');
 
-  const feedback = page.getByRole('button', { name: 'Feedback', exact: true });
-  const discord = page.getByRole('button', { name: 'Discord', exact: true });
-  await expect(feedback).toBeVisible();
-  await expect(discord).toBeVisible();
-  expect(await feedback.evaluate((element) => element.nextElementSibling?.textContent)).toContain('Discord');
-  await discord.click();
+  await page.getByRole('button', { name: 'Home menu' }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByRole('menuitem', { name: 'Feedback', exact: true })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Discord', exact: true }).click();
 
   await expect.poll(() => openedExternalUrls(page)).toContain(inviteUrl);
 });
@@ -37,7 +35,7 @@ test('sidebar footer keeps utility controls reachable at minimum width', async (
 
   const sidebarBounds = await page.getByTestId('sidebar').boundingBox();
   if (!sidebarBounds) throw new Error('Sidebar has no visible bounds');
-  for (const name of ['Add repository', 'Feedback', 'Discord', 'Settings']) {
+  for (const name of ['New project', 'Home menu', 'Settings']) {
     const button = page.getByRole('button', { name, exact: true }).first();
     await expect(button).toBeVisible();
     const buttonBounds = await button.boundingBox();

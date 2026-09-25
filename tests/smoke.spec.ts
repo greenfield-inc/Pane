@@ -75,7 +75,7 @@ async function openSettings(page: Page) {
   await expect(settingsButton).toBeVisible({ timeout: 5000 });
   await clickDomNode(settingsButton);
 
-  await expect(page.getByText('Pane Settings')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('settings-page')).toBeVisible({ timeout: 5000 });
 }
 
 async function openRemotePaneSettings(page: Page) {
@@ -116,7 +116,7 @@ test.describe('Smoke Tests', () => {
     const sidebar = page.locator('[data-testid="sidebar"]').first();
     await expect(sidebar).toBeVisible({ timeout: 10000 });
 
-    const sidebarMenuButton = page.getByRole('button', { name: 'Sidebar menu' });
+    const sidebarMenuButton = page.getByRole('button', { name: 'Home menu' });
     await expect(sidebarMenuButton).toBeVisible();
   });
 
