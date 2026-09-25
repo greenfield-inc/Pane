@@ -42,6 +42,8 @@ To try the `runpane` CLI against your dev build, build it with
 `pnpm --filter runpane build` and run `node packages/runpane/dist/cli.js doctor --json`
 with the same `PANE_DIR`.
 
+Keep the TypeScript and Python CLIs' `--json` output byte-identical: the TypeScript client rebuilds each daemon result in its `boundary.object` schema's field order (`packages/runpane/src/boundaryDecoder.ts`), while the Python client prints the daemon's result as received, so list schema fields in the daemon's insertion order (`generation` last, as `withRunpaneAction` appends it) and print non-ASCII the same way (`ensure_ascii=False` in Python).
+
 Development runs write renderer and main-process output to `frontend-debug.log`
 and `backend-debug.log` in the repository root. Both are reset at startup.
 
