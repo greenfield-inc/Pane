@@ -104,6 +104,11 @@ const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.ma
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
+const INLINE_VALUE_FLAGS = new Set<string>([
+  ...LOCAL_VALUE_FLAGS,
+  ...RUNPANE_CONTRACT.flags.wrapper.filter((flag) => 'value' in flag).map((flag) => flag.name),
+  '--command',
+]);
 
 const DEFAULTS: Omit<ParsedArgs, 'command'> = {
   target: RUNPANE_CONTRACT.defaults.target,
@@ -189,7 +194,8 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   return parsed;
 }
 
-function parseFlags(args: string[], parsed: ParsedArgs): void {
+function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
+  const { args, literalValues } = splitInlineValues(rawArgs);
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     const isAgentContextCommand = parsed.command === 'agent-context';
@@ -218,7 +224,7 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
       continue;
     }
     if (isAgentContextCommand && arg === '--command') {
-      parsed.contextCommand = readValue(args, ++index, arg);
+      parsed.contextCommand = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
@@ -226,24 +232,24 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
       continue;
     }
     if (isLocalCommand && LOCAL_VALUE_FLAGS.has(arg)) {
-      const value = readValue(args, ++index, arg);
+      const value = readValue(args, ++index, arg, literalValues);
       parseLocalValueFlag(arg, value, parsed);
       continue;
     }
     if (arg === '--version') {
-      parsed.paneVersion = readValue(args, ++index, arg);
+      parsed.paneVersion = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (arg === '--download-dir') {
-      parsed.downloadDir = readValue(args, ++index, arg);
+      parsed.downloadDir = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (arg === '--pane-path') {
-      parsed.panePath = readValue(args, ++index, arg);
+      parsed.panePath = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (arg === '--format') {
-      const value = readValue(args, ++index, arg);
+      const value = readValue(args, ++index, arg, literalValues);
       if (!FORMATS.has(value)) {
         throw new Error(`Invalid --format "${value}". Expected one of: ${[...FORMATS].join(', ')}`);
       }
@@ -252,7 +258,7 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
     }
 
     if (REMOTE_VALUE_FLAGS.has(arg)) {
-      const value = readValue(args, ++index, arg);
+      const value = readValue(args, ++index, arg, literalValues);
       if (arg === '--channel') {
         if (!CHANNELS.has(value)) {
           throw new Error(`Invalid --channel "${value}". Expected stable or nightly.`);
@@ -661,8 +667,30 @@ function appendUnknownRemoteArg(args: string[], index: number, parsed: ParsedArg
   return index;
 }
 
-function readValue(args: string[], index: number, flag: string): string {
+/**
+ * Splits `--flag=value` for the value flags runpane parses itself. A value given this way is taken
+ * literally, even when it starts with "-" (for example `--text=- [ ] item`).
+ */
+function splitInlineValues(rawArgs: string[]): { args: string[]; literalValues: Set<number> } {
+  const args: string[] = [];
+  const literalValues = new Set<number>();
+  for (const arg of rawArgs) {
+    const separator = arg.indexOf('=');
+    const flag = separator === -1 ? '' : arg.slice(0, separator);
+    if (INLINE_VALUE_FLAGS.has(flag)) {
+      args.push(flag);
+      literalValues.add(args.length);
+      args.push(arg.slice(separator + 1));
+    } else {
+      args.push(arg);
+    }
+  }
+  return { args, literalValues };
+}
+
+function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
+  if (literalValues.has(index)) return value;
   if (!value || (value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

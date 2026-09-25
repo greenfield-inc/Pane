@@ -5,7 +5,7 @@ import json
 import os
 import socket
 import sys
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from .agent_context import run_agent_context
 from .doctor import run_doctor
@@ -87,6 +87,11 @@ LOCAL_BOOLEAN_FLAGS = {
     value
     for flag in RUNPANE_CONTRACT["flags"]["localBoolean"]
     for value in [flag["name"], *flag.get("aliases", [])]
+}
+INLINE_VALUE_FLAGS = {
+    *LOCAL_VALUE_FLAGS,
+    *(flag["name"] for flag in RUNPANE_CONTRACT["flags"]["wrapper"] if "value" in flag),
+    "--command",
 }
 DEFAULTS = RUNPANE_CONTRACT["defaults"]
 
@@ -486,7 +491,23 @@ def parse_non_negative_int_flag(flag: str, value: str) -> int:
     return parsed
 
 
-def parse_flags(args: List[str], parsed: ParsedArgs) -> None:
+def split_inline_values(raw_args: List[str]) -> Tuple[List[str], Set[int]]:
+    """Split `--flag=value` for runpane's own value flags; such values are literal even if they start with "-"."""
+    args: List[str] = []
+    literal_values: Set[int] = set()
+    for arg in raw_args:
+        flag, separator, value = arg.partition("=")
+        if separator and flag in INLINE_VALUE_FLAGS:
+            args.append(flag)
+            literal_values.add(len(args))
+            args.append(value)
+        else:
+            args.append(arg)
+    return args, literal_values
+
+
+def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
+    args, literal_values = split_inline_values(raw_args)
     index = 0
     while index < len(args):
         arg = args[index]
@@ -505,30 +526,30 @@ def parse_flags(args: List[str], parsed: ParsedArgs) -> None:
             parsed.json = True
         elif is_agent_context_command and arg == "--command":
             index += 1
-            parsed.context_command = read_value(args, index, arg)
+            parsed.context_command = read_value(args, index, arg, literal_values)
         elif is_local_command and arg in LOCAL_BOOLEAN_FLAGS:
             parse_local_boolean_flag(parsed, arg)
         elif is_local_command and arg in LOCAL_VALUE_FLAGS:
             index += 1
-            parse_local_value_flag(parsed, arg, read_value(args, index, arg))
+            parse_local_value_flag(parsed, arg, read_value(args, index, arg, literal_values))
         elif arg == "--version":
             index += 1
-            parsed.pane_version = read_value(args, index, arg)
+            parsed.pane_version = read_value(args, index, arg, literal_values)
         elif arg == "--download-dir":
             index += 1
-            parsed.download_dir = read_value(args, index, arg)
+            parsed.download_dir = read_value(args, index, arg, literal_values)
         elif arg == "--pane-path":
             index += 1
-            parsed.pane_path = read_value(args, index, arg)
+            parsed.pane_path = read_value(args, index, arg, literal_values)
         elif arg == "--format":
             index += 1
-            value = read_value(args, index, arg)
+            value = read_value(args, index, arg, literal_values)
             if value not in FORMATS:
                 raise ValueError(f"Invalid --format {value}. Expected one of: {', '.join(sorted(FORMATS))}")
             parsed.format = value
         elif arg in REMOTE_VALUE_FLAGS:
             index += 1
-            value = read_value(args, index, arg)
+            value = read_value(args, index, arg, literal_values)
             if arg == "--channel":
                 if value not in CHANNELS:
                     raise ValueError(f"Invalid --channel {value}. Expected stable or nightly.")
@@ -836,7 +857,9 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
     raise ValueError(f'{flag} is only valid with "runpane install daemon".')
 
 
-def read_value(args: List[str], index: int, flag: str) -> str:
+def read_value(args: List[str], index: int, flag: str, literal_values: Set[int]) -> str:
+    if index in literal_values:
+        return args[index]
     if index >= len(args) or (args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]

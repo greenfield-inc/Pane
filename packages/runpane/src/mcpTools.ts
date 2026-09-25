@@ -138,7 +138,8 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
       argv.push(parameter.flag);
       continue;
     }
-    argv.push(parameter.flag, String(decodeBoundary(value, flagValueSchema)));
+    // `--flag=value` keeps values that start with "-" (like "- [ ] item") from reading as flags.
+    argv.push(`${parameter.flag}=${String(decodeBoundary(value, flagValueSchema))}`);
   }
   argv.push('--json');
   return argv;

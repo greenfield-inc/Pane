@@ -2693,6 +2693,14 @@ export const RUNPANE_CONTRACT = {
         "demo",
         "--from-json",
         "-"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel=panel-1",
+        "--text=- [ ] item",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [

@@ -106,8 +106,8 @@ test('a new contract command becomes a tool with inputs from its usage and agent
     { widget: 'string', force: 'boolean', limit: 'string', yes: 'boolean', dryRun: 'boolean' },
   );
   assert.deepEqual(
-    buildToolArgv(tool, { widget: 'w1', limit: 5, force: true, dryRun: false, yes: true }),
-    ['widgets', 'frob', '--widget', 'w1', '--force', '--limit', '5', '--yes', '--json'],
+    buildToolArgv(tool, { widget: '- w1', limit: 5, force: true, dryRun: false, yes: true }),
+    ['widgets', 'frob', '--widget=- w1', '--force', '--limit=5', '--yes', '--json'],
   );
   assert.throws(() => buildToolArgv(tool, { widget: 'w1', color: 'red' }), /Unknown argument\(s\) for widgets_frob: color/);
 });
