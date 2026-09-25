@@ -26,31 +26,24 @@ Pane provides timestamp utilities in both frontend and backend:
 ### Backend (`main/src/utils/timestampUtils.ts`)
 
 ```typescript
-import { formatForDatabase, getCurrentTimestamp } from '../utils/timestampUtils';
+import { formatForDatabase, formatForDisplay, getTimeDifference, formatDuration, isValidTimestamp } from '../utils/timestampUtils';
 
-// For database storage
-const timestamp = formatForDatabase(); // Returns ISO string
-const now = getCurrentTimestamp();    // Alias for formatForDatabase()
-
-// For display formatting
-const displayTime = formatForDisplay(timestamp);
+const timestamp = formatForDatabase();            // ISO 8601 string, UTC
+const displayTime = formatForDisplay(timestamp);  // local time for display
+const durationMs = getTimeDifference(start, end); // end defaults to now
+const formatted = formatDuration(durationMs);     // "2m 34s"
 ```
 
 ### Frontend (`frontend/src/utils/timestampUtils.ts`)
 
 ```typescript
-import { parseTimestamp, formatDuration, getTimeDifference } from '../utils/timestampUtils';
+import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
 
-// Parse SQLite timestamps correctly
-const date = parseTimestamp("2024-01-01 12:00:00"); // Handles UTC conversion
-
-// Calculate durations
-const durationMs = getTimeDifference(startTime, endTime);
-const formatted = formatDuration(durationMs); // "2m 34s"
-
-// Display relative time
 const ago = formatDistanceToNow(timestamp); // "5 minutes ago"
 ```
+
+The frontend helpers call `new Date()` on their input, so pass them ISO strings
+with a `Z` (or `Date` objects), never raw SQLite `YYYY-MM-DD HH:MM:SS` values.
 
 ## Database Operations
 
@@ -117,8 +110,8 @@ return formatDuration(duration) + ' (ongoing)';
 // ❌ WRONG - treats UTC as local time
 const date = new Date("2024-01-01 12:00:00");
 
-// ✅ CORRECT - uses parseTimestamp utility
-const date = parseTimestamp("2024-01-01 12:00:00");
+// ✅ CORRECT - select it with `datetime(col) || 'Z'` in SQL, or mark it as UTC first
+const date = new Date("2024-01-01 12:00:00".replace(' ', 'T') + 'Z');
 ```
 
 ### 2. Always validate timestamps before calculations
@@ -134,7 +127,7 @@ if (!isValidTimestamp(timestamp)) {
 ```typescript
 // Database stores UTC, display shows local
 const dbTime = "2024-01-01 12:00:00";    // UTC
-const parsed = parseTimestamp(dbTime);    // Correctly handled as UTC
+const parsed = new Date(dbTime.replace(' ', 'T') + 'Z'); // parsed as UTC
 const display = formatForDisplay(parsed); // Converts to local for display
 ```
 

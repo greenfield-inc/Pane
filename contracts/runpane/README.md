@@ -1,8 +1,8 @@
 # Runpane Contract
 
 `contract.json` is the source of truth for public `runpane` command metadata,
-help text, docs fragments, parity fixtures, and future machine-readable result
-schemas.
+help text, docs fragments, parity fixtures, and the JSON schemas for `--json`
+results (under `jsonSchemas`). `schema.json` validates `contract.json` itself.
 
 Update flow:
 

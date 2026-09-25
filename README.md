@@ -143,9 +143,9 @@ Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine wh
 The easiest setup path is in the app:
 
 1. Install Pane normally on the machine that should host your projects and agents.
-2. Open `Settings > Remote Pane` on that host machine.
+2. Open `Settings > Remote Access` on that host machine.
 3. Set it up as a remote host and copy the generated `pane-remote://...` connection code.
-4. On another desktop, open Pane, go to `Settings > Remote Pane`, paste the code, and connect.
+4. On another desktop, open Pane, go to `Settings > Remote Access`, paste the code under **Add connection**, and connect.
 5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
 
 For a headless VM or server, use `runpane`:
@@ -184,7 +184,7 @@ Windows PowerShell:
 & ([scriptblock]::Create((irm https://runpane.com/install-remote.ps1))) -Label "My Server"
 ```
 
-The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model.
+The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model, or [docs/SELF_HOSTED_REMOTE_DAEMON.md](docs/SELF_HOSTED_REMOTE_DAEMON.md) in this repo.
 
 ---
 
@@ -200,14 +200,14 @@ Add this repo, create three worktree panes for the next features, start Codex in
 
 Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, or Cursor agents in Panes through RunPane.
 
-The prompt stays small because Pane ships its skills and writes them into the Pane data directory on every start:
+The prompt stays small because Pane ships its skills and installs them into the Pane data directory at startup, whenever the bundled copy has changed:
 
 - `skills/pane-chat/pane-orchestrator/SKILL.md`: the Pane Chat entry point (also in `.claude/skills/`, `.codex/skills/`, and as `.cursor/rules/pane-orchestrator.mdc`)
 - `skills/pane-chat/runtime-context.md`: how to reach this Pane install
 - `skills/pane-chat/skills/`: the bundled skills, also installed in `.claude/skills/` and `.codex/skills/`
 - `.claude/agents/` and `.codex/agents/`: helper subagents (explorer, cold-reader, qa-and-verify, reviewer)
 
-The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and three Pane-specific skills: `pane-orchestrator`, `runpane`, and `pane-work`. Nothing is downloaded at runtime.
+The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and two Pane-specific skills, `runpane` and `pane-work`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
 
 The top-right toggle switches Pane Chat between Claude, Codex, and Cursor and persists the default orchestrator agent in Pane settings. All three use the same Pane-specific contract and the same bundled skills.
 
@@ -261,7 +261,7 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 | `⌘⌥<key>` / `Ctrl+Alt+<key>` | Paste a clipboard shortcut into the active terminal |
 | `⌘⌥/` / `Ctrl+Alt+/` | Open Settings → Shortcuts |
 | `⌘⌥` (hold) / `Ctrl+Alt` (hold) | Show all configured shortcuts as an overlay |
-| `Ctrl+B` | Toggle sidebar |
+| `⌘B` / `Ctrl+B` | Toggle sidebar |
 
 ---
 
@@ -288,26 +288,7 @@ pnpm dlx runpane@latest install client
 pipx run runpane install client
 ```
 
-Persistent npm install:
-
-```bash
-npm i -g runpane
-runpane setup
-```
-
-### Shell Installers
-
-Mac / Linux shell installer:
-
-```bash
-curl -fsSL https://runpane.com/install.sh | sh
-```
-
-Windows PowerShell installer:
-
-```powershell
-irm https://runpane.com/install.ps1 | iex
-```
+The shell installers and the other one-shot commands are at the top of this README.
 
 ### Direct Download
 
@@ -420,7 +401,7 @@ Yes. Each pane gets its own worktree, its own port range, and its own copy of yo
 Because you look through a pane to see what's happening. Each pane is a window into an agent's work.
 
 **"Why Electron?"**
-Pane uses xterm.js, the same terminal engine that powers VS Code's integrated terminal. Same rendering, same reliability, with 50,000 lines of scrollback. Electron also powers VS Code, Slack, Discord, and Figma.
+Pane uses xterm.js, the same terminal engine that powers VS Code's integrated terminal. Same rendering, same reliability. Electron also powers VS Code, Slack, Discord, and Figma.
 
 ---
 
@@ -430,8 +411,13 @@ Pane uses xterm.js, the same terminal engine that powers VS Code's integrated te
 git clone https://github.com/greenfield-inc/Pane.git
 cd Pane
 pnpm run setup
-pnpm run electron-dev
+PANE_DIR=~/.pane_test pnpm dev
 ```
+
+You need Node 22.18 or newer and pnpm 10 (`corepack enable`). `PANE_DIR` keeps
+the dev build away from an installed Pane's data in `~/.pane`. It doesn't
+isolate Electron's browser profile; see
+[Running a dev build safely](CONTRIBUTING.md#running-a-dev-build-safely).
 
 ### Production Builds
 
@@ -439,19 +425,12 @@ pnpm run electron-dev
 pnpm build:win:x64    # Windows (x64)
 pnpm build:win:arm64  # Windows (ARM64)
 pnpm build:mac        # macOS (Apple Silicon + Intel)
-pnpm build:linux  # Linux (x64 + ARM64)
+pnpm build:linux      # Linux (x64 + ARM64)
 ```
 
 ### Releasing
 
-```bash
-pnpm run release patch   # 0.0.2 -> 0.0.3
-pnpm run release minor   # 0.0.2 -> 0.1.0
-pnpm run release major   # 0.0.2 -> 1.0.0
-pnpm run release 2.2.1   # explicit version when package.json and tags diverge
-```
-
-Run releases only from a clean `main` checkout that matches `origin/main`. The release script refuses inferred bumps when `package.json` and the latest `v*` tag disagree; use an explicit version after deciding the intended next release. See [Release Instructions](docs/RELEASE_INSTRUCTIONS.md) for the workflow and required GitHub checks.
+Maintainers: see [RUNBOOK.md](RUNBOOK.md).
 
 ---
 

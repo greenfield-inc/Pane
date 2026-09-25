@@ -5,6 +5,11 @@ Install or configure Pane from npm.
 The package does not include the Pane desktop runtime. It downloads the correct
 Pane release artifact only when you run `runpane install` or `runpane update`.
 
+The same CLI also drives a running Pane app: list and add repos, create and
+manage panes, read and send input to panels, manage sessions, and follow events
+with `runpane watch`. See the
+[runpane CLI contract](https://github.com/greenfield-inc/Pane/blob/main/docs/RUNPANE_CLI_CONTRACT.md) for every command.
+
 ## Quick Start
 
 Run the guided setup:
@@ -26,10 +31,11 @@ host, update Pane, or run diagnostics.
 ## Developing This Repository
 
 When debugging RunPane from a Pane repository checkout, prefer the built local
-wrapper over `npx --yes runpane@latest` so diagnostics exercise local changes:
+wrapper over `npx --yes runpane@latest` so diagnostics exercise local changes.
+Use Node 22 or newer:
 
 ```bash
-PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json
+node packages/runpane/dist/cli.js doctor --json
 ```
 
 `doctor` remains the first diagnostic command before local-control actions. On

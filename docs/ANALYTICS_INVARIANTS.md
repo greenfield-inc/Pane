@@ -41,14 +41,18 @@ Every first-run funnel event must include:
 - `install_id`
 - `app_version`
 - `platform`
-- `analytics_identity_source`
+- `identity_source`
 
-The event should also set person properties when the identity is known:
+The event should also set person properties when the identity is known
+(`personProperties` in `frontend/src/services/posthog.ts`):
 
-- `email`
+- `install_id`
+- `identity_source`
+- `github_username`
 - `github_email`
 - `git_email`
-- `install_id`
+- `git_email_sha256`
+- `git_user_name`
 - `app_version`
 - `platform`
 
@@ -66,13 +70,13 @@ This records who opted out without sending their later product usage.
 ## Config Saves Preserve Analytics Fields
 
 Renderer settings updates must deep-merge analytics config instead of replacing
-it. In particular, do not drop:
+it. In particular, do not drop the identity fields in `analytics`
+(`main/src/types/config.ts`):
 
-- `identity`
 - `installId`
-- `attribution`
-- `hasTrackedFirstOpen`
-- `hasTrackedWebAttribution`
+- `distinctId`
+- `identitySource`
+- `githubUsername`, `githubEmail`, `gitEmail`, `gitEmailHash`, `gitUserName`
 
 ## Attribution and Versioning
 
@@ -118,7 +122,6 @@ count buckets.
 | `remote_pane_host_setup_failed` | `main/src/ipc/remoteDaemon.ts`, `main/src/daemon/remoteTransportController.ts` | Host setup or transport failed |
 | `remote_pane_setup_terminal_opened` | `main/src/ipc/remoteDaemon.ts` | Setup command opened in terminal |
 | `remote_pane_connection_code_created` | `main/src/ipc/remoteDaemon.ts` | Host code created |
-| `remote_pane_connection_code_copied` | `frontend/src/components/Settings.tsx` | Host code copied |
 | `remote_pane_connection_pair_created` | `main/src/ipc/remoteDaemon.ts` | Advanced paired profile created |
 | `remote_pane_connection_code_imported` | `main/src/ipc/remoteDaemon.ts` | Client imported code |
 | `remote_pane_connection_code_import_failed` | `main/src/ipc/remoteDaemon.ts` | Client import failed |
