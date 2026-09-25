@@ -10,7 +10,11 @@ export default function PairFromLinkScreen() {
   const [code] = useState(() => takePendingPairingCode() ?? '');
   return (
     <Screen scroll>
-      <ConnectForm initialCode={code} onPaired={() => router.back()} />
+      <ConnectForm
+        initialCode={code}
+        // A cold-start link opens this screen with nothing under it.
+        onPaired={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      />
     </Screen>
   );
 }
