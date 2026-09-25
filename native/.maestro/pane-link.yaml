@@ -21,6 +21,11 @@ env:
       id: connect-code-input
     timeout: 30000
 - openLink: pane://pane/${PANE_ID}?host=${HOST_URL}
+# iOS asks before opening a link in the app.
+- extendedWaitUntil:
+    visible: "Open"
+    timeout: 5000
+    optional: true
 - runFlow:
     when:
       visible: "Open"
@@ -43,6 +48,11 @@ env:
     timeout: 15000
 - assertVisible: "${PANE_NAME}.*"
 - openLink: pane://pane/some-pane?host=https%3A%2F%2Funknown.example
+# iOS asks before opening a link in the app.
+- extendedWaitUntil:
+    visible: "Open"
+    timeout: 5000
+    optional: true
 - runFlow:
     when:
       visible: "Open"

@@ -105,7 +105,8 @@ const styles = StyleSheet.create({
   outer: { marginBottom: 4, overflow: 'hidden' },
   // rounded-md px-3 py-3 gap-2; the open target spans the row's full height.
   row: { flexDirection: 'row', alignItems: 'center', paddingRight: 12, gap: 8 },
-  open: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingVertical: 12 },
+  // PWA row: py-3 around an h-8 icon button = 56.
+  open: { flex: 1, minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingVertical: 12 },
   name: { flex: 1 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   // Lucide's Pin drawn `rotate-45`.
