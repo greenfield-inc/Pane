@@ -1,7 +1,7 @@
 import type { AgentDisplayStatus } from '@shared/types/agentStatus';
 
 /** The fields of `sessions:get-all-with-projects` the app reads (main/src/types/session.ts). */
-export interface PaneSession {
+interface PaneSession {
   id: string;
   name: string;
   baseBranch?: string;
