@@ -14,7 +14,9 @@ import {
  * Sends the token only in the Authorization header and reads `/events` from
  * a streaming fetch body. React Native's XHR-based fetch resolves only after
  * the whole body arrives, so pass `fetch` from `expo/fetch` in the app (Expo
- * SDK 57 also installs it as the global fetch).
+ * SDK 57 also installs it as the global fetch). It also relies on the
+ * WHATWG `URL` and streaming `TextDecoder` that Expo's runtime provides on
+ * Hermes; plain React Native lacks both.
  *
  * The client never sets Accept-Encoding. The platform HTTP stack adds it and
  * then inflates the gzip stream itself (browsers, NSURLSession, OkHttp);

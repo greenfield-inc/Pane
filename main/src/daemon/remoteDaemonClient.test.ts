@@ -32,6 +32,7 @@ function createFakeHost() {
   const requests: RecordedRequest[] = [];
   const streams: Array<ReadableStreamDefaultController<Uint8Array>> = [];
   let eventsStatus = 200;
+  let hangEvents = false;
   let invokeHandler: (body: { channel: string; args: unknown[] }) => Response = () =>
     Response.json({ ok: true, result: null });
 
@@ -41,6 +42,8 @@ function createFakeHost() {
     if (path === '/health') return Response.json({ ok: true });
     if (path === '/invoke') return invokeHandler(JSON.parse(String(init?.body)));
     if (path === '/events') {
+      // Like a half-dead mobile socket: no headers, and aborting does not settle it.
+      if (hangEvents) return new Promise<Response>(() => {});
       if (eventsStatus !== 200) return Response.json({ ok: false }, { status: eventsStatus });
       const body = new ReadableStream<Uint8Array>({
         start: (controller) => { streams.push(controller); },
@@ -61,6 +64,7 @@ function createFakeHost() {
     writeBytes(bytes: Uint8Array) { streams.at(-1)?.enqueue(bytes); },
     end() { streams.at(-1)?.close(); },
     rejectEvents(status: number) { eventsStatus = status; },
+    hangEvents(hang: boolean) { hangEvents = hang; },
     onInvoke(handler: typeof invokeHandler) { invokeHandler = handler; },
   };
 }
@@ -208,6 +212,35 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     client.disconnect();
   });
 
+  it('cuts an event stream request that never answers', async () => {
+    const host = createFakeHost();
+    host.hangEvents(true);
+    const client = createClient(host, 12_000);
+    await client.connect();
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    expect(client.getState()).toMatchObject({
+      status: 'reconnecting',
+      lastError: 'Remote event stream stopped responding',
+    });
+    host.hangEvents(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it('stays disconnected when a stalled stream request outlives disconnect', async () => {
+    const host = createFakeHost();
+    host.hangEvents(true);
+    const client = createClient(host, 12_000);
+    await client.connect();
+    client.disconnect();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(client.getState().status).toBe('local');
+    expect(host.requests.filter(({ url }) => url.endsWith('/events'))).toHaveLength(1);
+  });
+
   it('stops without retrying when the host rejects the token on the stream', async () => {
     const host = createFakeHost();
     host.rejectEvents(401);
@@ -266,11 +299,15 @@ describe('RemoteDaemonClient invoke errors', () => {
     expect(host.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('reports a rejected token as an auth error', async () => {
+  it.each([
+    ['a text body', () => new Response('Forbidden', { status: 403 })],
+    ['a proxy JSON body', () => Response.json({ message: 'Forbidden' }, { status: 403 })],
+  ])('reports a rejected token with %s as an auth error without retrying', async (_name, respond) => {
     const host = createFakeHost();
-    host.onInvoke(() => new Response('Forbidden', { status: 403 }));
+    host.onInvoke(respond);
 
     await expect(createClient(host).invoke('panels:list')).rejects.toBeInstanceOf(RemoteAuthError);
+    expect(host.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('does not replay a mutation whose response was lost', async () => {
