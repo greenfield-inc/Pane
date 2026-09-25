@@ -13,21 +13,26 @@ name: Pane list journeys
     visible:
       id: new-pane-branch
     timeout: 15000
+# The sheet slides up to its detent; tapping mid-slide hits the wrong row.
+- waitForAnimationToEnd
 - tapOn:
     id: new-pane-agent-claude
 - tapOn:
     id: new-pane-name
 - eraseText: 60
 - inputText: ${output.pane}
-- hideKeyboard
-- tapOn:
-    id: new-pane-create
+# Return submits the sheet (the keyboard covers the Create button).
+- pressKey: Enter
 # The new pane opens; come back to the list.
 - extendedWaitUntil:
     visible:
       id: pane-detail-screen
     timeout: 60000
-- back
+# Swipe back (`back` is Android-only); this also checks the full-screen gesture.
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
 - extendedWaitUntil:
     visible: "${output.pane}.*"
     timeout: 15000
@@ -37,10 +42,14 @@ name: Pane list journeys
 - tapOn: "Search panes"
 - inputText: ${output.pane}
 - assertVisible: "${output.pane}.*"
-- tapOn: "Cancel"
+# iOS 26 shows the search bar's cancel as a close button.
+- tapOn: "Close|Cancel"
+- waitForAnimationToEnd
 
-# Favorite from the context menu, then check the Favorites section.
+# Favorite from the long-press actions, then check the Favorites section.
 - longPressOn: "${output.pane}.*"
+# The action sheet is titled with the pane it acts on.
+- assertVisible: "${output.pane}"
 - tapOn: "Favorite"
 - extendedWaitUntil:
     visible: "FAVORITES"
@@ -64,6 +73,7 @@ name: Pane list journeys
 - scrollUntilVisible:
     element:
       id: panes-archived
+    centerElement: true
 - tapOn:
     id: panes-archived
 - extendedWaitUntil:

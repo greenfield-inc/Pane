@@ -1,6 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { Link } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActionSheetIOS, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
@@ -66,38 +65,52 @@ export function PaneRow({ pane, position, showProject, onOpen, onToggleFavorite,
         )}
         onSwipeableWillOpen={() => void Haptics.selectionAsync()}
       >
-        <Link href={{ pathname: '/pane/[paneId]', params: { paneId: pane.id } }} asChild onPress={onOpen}>
-          <Link.Trigger>
-            <Pressable
-              testID={`pane-row-${pane.id}`}
-              accessibilityRole="button"
-              accessibilityLabel={`${pane.name}, ${subtitle}${pane.isFavorite ? ', favorite' : ''}`}
-              accessibilityActions={[{ name: 'favorite', label: favoriteTitle }, { name: 'archive', label: 'Archive' }]}
-              onAccessibilityAction={event => {
-                if (event.nativeEvent.actionName === 'archive') onArchive();
-                if (event.nativeEvent.actionName === 'favorite') onToggleFavorite();
-              }}
-              style={({ pressed }) => [styles.row, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface }]}
-            >
-              <StatusBadge status={pane.status} />
-              <View style={[styles.body, position !== 'first' && position !== 'only' && { borderTopColor: theme.colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
-                <View style={styles.text}>
-                  <Text variant="body" numberOfLines={1}>{pane.name}</Text>
-                  <Text variant="footnote" tone="muted" numberOfLines={1}>{subtitle}</Text>
-                </View>
-                {pane.isFavorite ? <Icon ios="star.fill" android="star" size={14} color={theme.colors.warning} /> : null}
-                <Icon ios="chevron.right" android="chevron_right" size={14} />
-              </View>
-            </Pressable>
-          </Link.Trigger>
-          <Link.Menu>
-            <Link.MenuAction icon={pane.isFavorite ? 'star.slash' : 'star'} onPress={onToggleFavorite}>{favoriteTitle}</Link.MenuAction>
-            <Link.MenuAction icon="archivebox" destructive onPress={onArchive}>Archive</Link.MenuAction>
-          </Link.Menu>
-        </Link>
+        <Pressable
+          testID={`pane-row-${pane.id}`}
+          accessibilityRole="button"
+          accessibilityLabel={`${pane.name}, ${subtitle}${pane.isFavorite ? ', favorite' : ''}`}
+          accessibilityActions={[{ name: 'favorite', label: favoriteTitle }, { name: 'archive', label: 'Archive' }]}
+          onAccessibilityAction={event => {
+            if (event.nativeEvent.actionName === 'archive') onArchive();
+            if (event.nativeEvent.actionName === 'favorite') onToggleFavorite();
+          }}
+          onPress={onOpen}
+          onLongPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            showRowActions(pane.name, favoriteTitle, onToggleFavorite, onArchive);
+          }}
+          android_ripple={{ color: theme.colors.surfacePressed }}
+          style={({ pressed }) => [styles.row, { backgroundColor: pressed && Platform.OS === 'ios' ? theme.colors.surfacePressed : theme.colors.surface }]}
+        >
+          <StatusBadge status={pane.status} />
+          <View style={[styles.body, position !== 'first' && position !== 'only' && { borderTopColor: theme.colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+            <View style={styles.text}>
+              <Text variant="body" numberOfLines={1}>{pane.name}</Text>
+              <Text variant="footnote" tone="muted" numberOfLines={1}>{subtitle}</Text>
+            </View>
+            {pane.isFavorite ? <Icon ios="star.fill" android="star" size={14} color={theme.colors.warning} /> : null}
+            <Icon ios="chevron.right" android="chevron_right" size={14} />
+          </View>
+        </Pressable>
       </ReanimatedSwipeable>
     </View>
   );
+}
+
+/** Long-press actions: the system action sheet on iOS, an alert on Android. */
+function showRowActions(title: string, favoriteTitle: string, onToggleFavorite: () => void, onArchive: () => void) {
+  if (Platform.OS === 'ios') {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title, options: [favoriteTitle, 'Archive', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2 },
+      index => (index === 0 ? onToggleFavorite() : index === 1 ? onArchive() : undefined),
+    );
+    return;
+  }
+  Alert.alert(title, undefined, [
+    { text: favoriteTitle, onPress: onToggleFavorite },
+    { text: 'Archive', style: 'destructive', onPress: onArchive },
+    { text: 'Cancel', style: 'cancel' },
+  ]);
 }
 
 interface SwipeActionProps {

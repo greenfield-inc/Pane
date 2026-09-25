@@ -68,7 +68,10 @@ export function PaneListScreen() {
         pane={item.pane}
         position={item.position}
         showProject={item.inFavorites}
-        onOpen={() => markSeen(item.pane.id)}
+        onOpen={() => {
+          markSeen(item.pane.id);
+          router.push({ pathname: '/pane/[paneId]', params: { paneId: item.pane.id } });
+        }}
         onToggleFavorite={() => toggleFavorite(item.pane.id).catch((error: Error) => Alert.alert('Couldn’t update favorites', error.message))}
         onArchive={() => confirmArchive(item.pane)}
       />
@@ -80,6 +83,7 @@ export function PaneListScreen() {
         options={{
           headerSearchBarOptions: {
             placeholder: 'Search panes',
+            hideWhenScrolling: false,
             onChangeText: event => setQuery(event.nativeEvent.text),
             onCancelButtonPress: () => setQuery(''),
           },

@@ -25,6 +25,8 @@ export function ListRow({ title, subtitle, leading, trailing, onPress, onLongPre
     <Pressable
       testID={testID}
       accessibilityRole={onPress ? 'button' : undefined}
+      // Explicit, so icon symbol names don't leak into the merged label.
+      accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={!onPress && !onLongPress}
