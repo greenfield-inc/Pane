@@ -15,8 +15,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 ## Commands
 
 - Node >= 22.18 (`.nvmrc`), pnpm 10. Setup `pnpm run setup`; run
-  `PANE_DIR=~/.pane_test pnpm dev` (never `electron-dev`: it skips the preload
-  bundle). Build the local CLI with `pnpm --filter runpane build`.
+  `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
+  the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
 - Before a PR: `pnpm typecheck && pnpm lint`, plus the tests your change touches.
 - Tests: `pnpm --filter frontend test`. Main: `npm rebuild
   better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then

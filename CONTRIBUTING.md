@@ -31,8 +31,10 @@ PANE_DIR=~/.pane_test pnpm dev
 ```
 
 `pnpm dev` starts Vite, the main-process TypeScript watcher and Electron. It
-re-bundles the preload script whenever the watcher overwrites it. Use it rather
-than `pnpm electron-dev`, which doesn't and exists for Playwright's web server.
+re-bundles the preload script whenever the watcher overwrites it. Don't use
+`pnpm electron-dev` to run the app: its watcher overwrites the bundled preload,
+so the window can open on the browser fallback screen. It exists only to start
+Vite for Playwright.
 
 To try the `runpane` CLI against your dev build, build it with
 `pnpm --filter runpane build` and run `node packages/runpane/dist/cli.js doctor --json`
@@ -106,8 +108,10 @@ pnpm test:ci:minimal
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
   CI runs: smoke, health check, accessibility and settings.
-- Playwright starts the dev app (`pnpm electron-dev`) as its web server on port
-  `4521`. Set `PANE_DIR` for the run. Don't run two Playwright commands on the
+- The tests load the renderer from Vite in Chromium, with a mocked Electron API
+  (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
+  on port `4521`, which also opens an Electron window against your data
+  directory, so set `PANE_DIR` for the run. Don't run two Playwright commands on the
   same port at once: the second can attach to or kill the first one's server.
   Use `PLAYWRIGHT_PORT` to separate them:
   ```bash
