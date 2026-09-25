@@ -1,8 +1,8 @@
-import type { VoiceDeepgramStreamingMetadata } from '../../../../shared/types/voiceTranscription';
+import type { VoiceDeepgramStreamingMetadata } from '../types/voiceTranscription';
 import {
   boundary,
   decodeOptionalBoundary,
-} from '../../../../shared/validation/boundaryDecoder';
+} from '../validation/boundaryDecoder';
 
 const DEEPGRAM_STREAMING_KEYTERMS = [
   'Doozy',

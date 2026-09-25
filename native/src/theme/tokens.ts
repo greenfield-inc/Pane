@@ -49,6 +49,62 @@ const light: ColorTokens = {
 };
 
 export const colors = { light, dark };
+
+/**
+ * xterm palettes from the desktop app's default terminal themes
+ * (`--color-terminal-*` in frontend/src/styles/tokens/colors.css).
+ */
+const darkTerminal = {
+  background: '#010409',
+  foreground: '#e6edf3',
+  cursor: '#58a6ff',
+  cursorAccent: '#010409',
+  selectionBackground: '#264f78',
+  black: '#010409',
+  red: '#f85149',
+  green: '#3fb950',
+  yellow: '#d29922',
+  blue: '#58a6ff',
+  magenta: '#bc8cff',
+  cyan: '#39d3de',
+  white: '#e6edf3',
+  brightBlack: '#6e7681',
+  brightRed: '#ff7b72',
+  brightGreen: '#56d364',
+  brightYellow: '#e0af3f',
+  brightBlue: '#79b8ff',
+  brightMagenta: '#d2a8ff',
+  brightCyan: '#5ae1ea',
+  brightWhite: '#ffffff',
+};
+
+type TerminalColors = { [Key in keyof typeof darkTerminal]: string };
+
+const lightTerminal: TerminalColors = {
+  background: '#f9fcff',
+  foreground: '#0d141a',
+  cursor: '#1f6dc6',
+  cursorAccent: '#f9fcff',
+  selectionBackground: '#1f6dc640',
+  black: '#f9fcff',
+  red: '#ff6860',
+  green: '#0f8920',
+  yellow: '#985f00',
+  blue: '#1f6dc6',
+  magenta: '#7e4ec1',
+  cyan: '#006c77',
+  white: '#0d141a',
+  brightBlack: '#838b96',
+  brightRed: '#d14d44',
+  brightGreen: '#007102',
+  brightYellow: '#7c4b00',
+  brightBlue: '#19589f',
+  brightMagenta: '#633990',
+  brightCyan: '#00565f',
+  brightWhite: '#000000',
+};
+
+export const terminalColors = { light: lightTerminal, dark: darkTerminal };
 export type ThemeColors = ColorTokens;
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
