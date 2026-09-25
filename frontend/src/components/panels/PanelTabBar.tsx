@@ -18,6 +18,8 @@ import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
 import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
+import { PaneStatusPills } from '../PaneStatusPills';
+import { useNavigationStore } from '../../stores/navigationStore';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
@@ -136,6 +138,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   // A group strip's "+" opens this same menu, anchored to that button instead.
   const externalAnchorRef = useRef<DOMRect | null>(null);
   const trailingSlot = useTitleBarSlotStore((state) => state.trailingSlot);
+  // PR and merge pills show in the title strip only while the sidebar is collapsed.
+  const sidebarCollapsed = useNavigationStore((state) => state.sidebarCollapsed);
   // Rename state moved to PanelTabStrip
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null);
@@ -801,6 +805,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             );
           })()}
         </div>
+
+        {sidebarCollapsed && trailingSlot && session && <PaneStatusPills sessionId={session.id} />}
 
         {/* Run / inspector controls live on the title plane when the
             window owns its title bar; otherwise they stay at the bar's end. */}
