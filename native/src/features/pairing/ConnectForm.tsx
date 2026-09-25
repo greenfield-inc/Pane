@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { Button, Icon, TextField } from '@/ui';
 import { useTheme } from '@/theme';
@@ -30,6 +30,11 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
         autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}
+        // The code holds a bearer token: keep it out of keyboard suggestions,
+        // the learned dictionary and autofill.
+        autoComplete="off"
+        importantForAutofill="no"
+        keyboardType={Platform.OS === 'android' ? 'visible-password' : 'default'}
         mono
         returnKeyType="go"
         onSubmitEditing={() => { if (code.trim()) pairing.mutate(code); }}
