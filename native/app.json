@@ -38,9 +38,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host.",
-          "microphonePermission": false,
-          "recordAudioAndroid": false
+          "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host."
         }
       ],
       [

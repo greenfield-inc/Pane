@@ -9,7 +9,8 @@
     "android": "expo run:android --port ${RCT_METRO_PORT:-8137}",
     "prebuild": "expo prebuild --clean",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p terminal-web",
+    "build:terminal-web": "node scripts/build-terminal-web.mjs"
   },
   "dependencies": {
     "@legendapp/list": "~3.3.11",
@@ -44,6 +45,9 @@
   "devDependencies": {
     "@react-native/metro-config": "0.86.3",
     "@types/react": "~19.2.2",
+    "@xterm/addon-fit": "0.12.0-beta.299",
+    "@xterm/xterm": "6.1.0-beta.302",
+    "esbuild": "0.25.7",
     "typescript": "~6.0.3",
     "vitest": "3.2.6"
   }

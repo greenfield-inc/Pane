@@ -487,6 +487,15 @@ importers:
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.18
+      '@xterm/addon-fit':
+        specifier: 0.12.0-beta.299
+        version: 0.12.0-beta.299(@xterm/xterm@6.1.0-beta.302)
+      '@xterm/xterm':
+        specifier: 6.1.0-beta.302
+        version: 6.1.0-beta.302
+      esbuild:
+        specifier: 0.25.7
+        version: 0.25.7
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

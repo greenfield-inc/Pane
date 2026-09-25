@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDeepgramLiveMessage, readResultsMetadata } from './deepgramLive';
+import { parseDeepgramLiveMessage, readResultsMetadata } from '../../../../shared/voice/deepgramLive';
 
 describe('Deepgram live message decoding', () => {
   it('decodes transcript, metadata, and error messages', () => {
