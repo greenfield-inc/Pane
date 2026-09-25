@@ -26,6 +26,8 @@ export interface CreatePaneDraft {
   name: string;
   baseBranch: string | undefined;
   agent: AgentLaunchPresetId;
+  /** Starts the pane in the Pinned section (runpane calls favorites "pinned"). */
+  pinned: boolean;
 }
 
 /** Builds the `runpane:panes:create` request, which creates the worktree and starts the agent in one call. */
@@ -37,8 +39,7 @@ export function buildCreatePaneRequest(draft: CreatePaneDraft): { request: Runpa
   return {
     request: {
       repo: { id: draft.projectId },
-      // `pinned` means favorite; runpane defaults it on, the app starts panes unfavorited.
-      panes: [{ name, baseBranch: draft.baseBranch, pinned: false, tool: { agent: draft.agent } }],
+      panes: [{ name, baseBranch: draft.baseBranch, pinned: draft.pinned, tool: { agent: draft.agent } }],
     },
   };
 }

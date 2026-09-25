@@ -1,5 +1,6 @@
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 import type { ToolPanel } from '@shared/types/panels';
+import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
 
 /** The pane's terminal panels in tab order. Other panel types (diff, editor, …) are desktop-only. */
 export function terminalPanels(panels: readonly ToolPanel[]): ToolPanel[] {
@@ -26,14 +27,30 @@ export function pickPanel(
 export interface NewPanelOption {
   id: string;
   title: string;
+  /** The line under the title in the Add tool list. */
+  description: string;
   /** Command the host runs when the panel starts; none opens a shell. */
   initialCommand?: string;
 }
 
-export const NEW_PANEL_OPTIONS: readonly NewPanelOption[] = [
-  { id: 'terminal', title: 'Terminal' },
-  ...AGENT_LAUNCH_PRESETS.map(preset => ({ id: preset.id, title: preset.title, initialCommand: preset.command })),
-];
+/** The web app's Add tool menu: a shell, the agent presets, then the host's custom commands. */
+export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[]): NewPanelOption[] {
+  return [
+    { id: 'terminal', title: 'Terminal', description: 'Start a shell on the remote host' },
+    ...AGENT_LAUNCH_PRESETS.map(preset => ({
+      id: preset.id,
+      title: preset.title,
+      description: `Run ${preset.command}`,
+      initialCommand: preset.command,
+    })),
+    ...customCommands.map((command, index) => ({
+      id: `custom-${index}`,
+      title: command.name,
+      description: command.command,
+      initialCommand: command.command,
+    })),
+  ];
+}
 
 /** `panels:create` arguments for a new terminal tab. */
 export function createPanelRequest(sessionId: string, option: NewPanelOption) {

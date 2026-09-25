@@ -20,7 +20,7 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "2",
+      "buildNumber": "3",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -30,7 +30,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 2
+      "versionCode": 3
     },
     "plugins": [
       "expo-router",

@@ -67,8 +67,12 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="connect" options={{ headerShown: false }} />
       </Stack.Protected>
       <Stack.Protected guard={signedIn}>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="pane/[paneId]/index" options={{ title: '' }} />
+        {/* The pane list is home, like the PWA's pane drawer; it draws its own header. */}
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="archived" options={{ title: 'Archived' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        {/* The terminal draws the PWA's top bar itself. */}
+        <Stack.Screen name="pane/[paneId]/index" options={{ headerShown: false }} />
         <Stack.Screen
           name="pane/[paneId]/permission"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}

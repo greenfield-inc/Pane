@@ -1,15 +1,18 @@
 # Pairs with the host in CONNECTION_CODE and waits for the pane list.
 appId: com.dcouple.pane.mobile
 ---
+# The connect screen opens on the PWA's first-run menu.
 - extendedWaitUntil:
     visible:
-      id: connect-code-input
+      id: connect-open-form
     timeout: 180000
 # iOS types the code, which covers the paste/type path.
 - runFlow:
     when:
       platform: iOS
     commands:
+      - tapOn:
+          id: connect-open-form
       - tapOn:
           id: connect-code-input
       - inputText: ${CONNECTION_CODE}

@@ -34,19 +34,19 @@ describe('suggestPaneName', () => {
 });
 
 describe('buildCreatePaneRequest', () => {
-  it('asks the host for one pane running the chosen agent on the chosen base branch', () => {
-    expect(buildCreatePaneRequest({ projectId: 3, name: '  fix: login?  ', baseBranch: 'origin/main', agent: 'codex' })).toEqual({
+  it('asks the host for one pane running the chosen agent on the chosen base branch, pinned if asked', () => {
+    expect(buildCreatePaneRequest({ projectId: 3, name: '  fix: login?  ', baseBranch: 'origin/main', agent: 'codex', pinned: true })).toEqual({
       request: {
         repo: { id: 3 },
-        panes: [{ name: 'fix login', baseBranch: 'origin/main', pinned: false, tool: { agent: 'codex' } }],
+        panes: [{ name: 'fix login', baseBranch: 'origin/main', pinned: true, tool: { agent: 'codex' } }],
       },
     });
   });
 
   it('explains what is missing instead of building a request', () => {
-    expect(buildCreatePaneRequest({ projectId: 3, name: ' ?? ', baseBranch: 'main', agent: 'claude' })).toEqual({ error: 'Give the pane a name.' });
-    expect(buildCreatePaneRequest({ projectId: undefined, name: 'x', baseBranch: 'main', agent: 'claude' })).toEqual({ error: 'Choose a repository.' });
-    expect(buildCreatePaneRequest({ projectId: 3, name: 'x', baseBranch: undefined, agent: 'claude' })).toEqual({ error: 'Choose a base branch.' });
+    expect(buildCreatePaneRequest({ projectId: 3, name: ' ?? ', baseBranch: 'main', agent: 'claude', pinned: false })).toEqual({ error: 'Give the pane a name.' });
+    expect(buildCreatePaneRequest({ projectId: undefined, name: 'x', baseBranch: 'main', agent: 'claude', pinned: false })).toEqual({ error: 'Choose a repository.' });
+    expect(buildCreatePaneRequest({ projectId: 3, name: 'x', baseBranch: undefined, agent: 'claude', pinned: false })).toEqual({ error: 'Choose a base branch.' });
   });
 });
 

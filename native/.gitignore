@@ -44,3 +44,6 @@ example
 
 # Maestro
 .maestro/screenshots/
+
+# Firebase config for this app (kept out of git; see README)
+google-services.json

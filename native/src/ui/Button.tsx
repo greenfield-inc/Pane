@@ -23,11 +23,12 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled,
   const inactive = disabled || loading;
   const background = {
     primary: theme.colors.accent,
-    secondary: theme.colors.surfaceRaised,
+    secondary: theme.colors.surface,
     plain: 'transparent',
-    destructive: theme.colors.surfaceRaised,
+    destructive: theme.colors.surface,
   }[variant];
-  const tone = variant === 'primary' ? 'onAccent' : variant === 'destructive' ? 'danger' : 'accent';
+  // PWA buttons: blue filled primary; bordered white secondary with body-colored text.
+  const tone = variant === 'primary' ? 'onAccent' : variant === 'destructive' ? 'danger' : variant === 'secondary' ? 'primary' : 'accent';
 
   return (
     <Pressable
@@ -53,13 +54,15 @@ export function Button({ title, onPress, variant = 'primary', loading, disabled,
     >
       <View style={styles.content}>
         {loading ? <ActivityIndicator color={variant === 'primary' ? theme.colors.onAccent : theme.colors.accentText} /> : icon}
-        <Text variant="headline" tone={tone}>{title}</Text>
+        <Text variant="callout" tone={tone} style={styles.label}>{title}</Text>
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  base: { minHeight: 50, paddingHorizontal: 16, justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  // PWA: rounded-md px-4 py-2.5 text-sm font-semibold, 1px border on outlined buttons.
+  base: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', borderWidth: 1 },
+  label: { fontWeight: '600' },
   content: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
 });

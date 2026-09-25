@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import type { WebView, WebViewMessageEvent } from 'react-native-webview';
 
-import { useDaemon, useDaemonEvent } from '@/daemon';
+import { invokeChannel, useDaemon, useDaemonEvent } from '@/daemon';
 import { useTheme } from '@/theme';
 
 import { parsePageEvent, type TerminalCommand } from './bridge';
@@ -171,6 +171,11 @@ export function useTerminal(panelId: string, sessionId: string) {
       if (size) void session.restore(size);
     },
     sendInput: (data: string) => session.sendInput(data),
+    /** Clears the scrollback on the host, then redraws the screen from the host's copy. */
+    clearScrollback: async () => {
+      await invokeChannel(client, 'terminal:clearScrollback', [panelId]);
+      if (size) await session.restore(size);
+    },
     scrollLines: (lines: number) => send({ type: 'scroll', lines }),
     scrollToBottom: () => send({ type: 'scrollToBottom' }),
   };

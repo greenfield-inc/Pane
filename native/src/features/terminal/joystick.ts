@@ -1,5 +1,5 @@
 /** How far the joystick thumb travels from center, in points. */
-export const JOYSTICK_TRAVEL = 48;
+export const JOYSTICK_TRAVEL = 60;
 const DEAD_ZONE = 8;
 const MAX_LINES_PER_SECOND = 72;
 

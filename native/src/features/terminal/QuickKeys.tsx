@@ -1,63 +1,78 @@
+import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import type { RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
-
-import { monoFontFamily, useTheme } from '@/theme';
+import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { QUICK_KEYS } from './keys';
 
 export interface QuickKeysProps {
   onKey: (data: string) => void;
-  /** Host-configured snippets; tapping one inserts its text into the draft. */
-  shortcuts: readonly RemotePwaTerminalShortcut[];
-  onShortcut: (text: string) => void;
+  /** Pastes the clipboard into the draft. */
+  onPaste: () => void;
+  /** Clears the terminal's scrollback, here and on the host. */
+  onReset: () => void;
+  shortcutsOpen: boolean;
+  onToggleShortcuts: () => void;
+  disabled?: boolean;
 }
 
-export function QuickKeys({ onKey, shortcuts, onShortcut }: QuickKeysProps) {
+/** The web app's row of keys under the input: Paste, the control keys, Reset and Shortcuts. */
+export function QuickKeys({ onKey, onPaste, onReset, shortcutsOpen, onToggleShortcuts, disabled = false }: QuickKeysProps) {
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      keyboardShouldPersistTaps="always"
-      contentContainerStyle={styles.row}
-      testID="terminal-quick-keys"
-    >
+    <View style={styles.row} testID="terminal-quick-keys">
+      <Key
+        testID="quick-key-paste"
+        label="Paste"
+        hint="Pastes the clipboard into the input"
+        icon={{ ios: 'doc.on.clipboard', android: 'content_paste' }}
+        disabled={disabled}
+        onPress={onPaste}
+      />
       {QUICK_KEYS.map(key => (
         <Key
           key={key.id}
           testID={`quick-key-${key.id}`}
           label={key.label}
-          icon={key.icon}
+          hint={key.hint}
+          disabled={disabled}
           onPress={() => onKey(key.data)}
         />
       ))}
-      {shortcuts.filter(shortcut => shortcut.enabled).map(shortcut => (
-        <Key
-          key={shortcut.id}
-          testID={`terminal-shortcut-${shortcut.id}`}
-          label={shortcut.label}
-          onPress={() => onShortcut(shortcut.text)}
-        />
-      ))}
-    </ScrollView>
+      <Key testID="quick-key-reset" label="Reset" hint="Clears the terminal scrollback" disabled={disabled} onPress={onReset} />
+      <Key
+        testID="terminal-shortcuts"
+        label="Shortcuts"
+        icon={{ ios: 'command', android: 'keyboard_command_key' }}
+        expanded={shortcutsOpen}
+        disabled={disabled}
+        onPress={onToggleShortcuts}
+      />
+    </View>
   );
 }
 
-function Key({ label, icon, onPress, testID }: {
+function Key({ label, hint, icon, expanded, disabled, onPress, testID }: {
   label: string;
-  icon?: (typeof QUICK_KEYS)[number]['icon'];
+  hint?: string;
+  icon?: { ios: SFSymbol; android: AndroidSymbol };
+  /** For a key that opens a panel: whether it is open. */
+  expanded?: boolean;
+  disabled: boolean;
   onPress: () => void;
   testID: string;
 }) {
   const theme = useTheme();
+  const { colors } = theme;
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
-      hitSlop={4}
+      accessibilityHint={hint}
+      accessibilityState={{ disabled, expanded }}
+      disabled={disabled}
       onPress={() => {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress();
@@ -65,28 +80,27 @@ function Key({ label, icon, onPress, testID }: {
       style={({ pressed }) => [
         styles.key,
         {
-          backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radius.sm,
+          borderRadius: theme.radius.md,
+          borderColor: colors.border,
+          backgroundColor: pressed || expanded ? colors.surfacePressed : colors.surface,
+          opacity: disabled ? 0.5 : 1,
         },
       ]}
     >
-      {icon
-        ? <Icon ios={icon.ios} android={icon.android} size={15} color={theme.colors.text} />
-        : <Text variant="footnote" style={styles.label}>{label}</Text>}
+      {icon ? <Icon ios={icon.ios} android={icon.android} size={14} color={colors.textSecondary} /> : null}
+      <Text variant="callout" tone="secondary">{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { gap: 6, paddingHorizontal: 12, paddingVertical: 6 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   key: {
-    minWidth: 40,
-    height: 34,
-    paddingHorizontal: 10,
+    height: 36,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+    paddingHorizontal: 10,
+    borderWidth: 1,
   },
-  label: { fontFamily: monoFontFamily, fontWeight: '600' },
 });

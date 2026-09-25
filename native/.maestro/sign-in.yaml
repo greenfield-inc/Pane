@@ -5,7 +5,8 @@ name: Sign in and sign out
 ---
 - runFlow: subflows/launch-dev-client.yaml
 - runFlow: subflows/sign-in.yaml
-- tapOn: "Settings"
+- tapOn:
+    id: open-settings
 - extendedWaitUntil:
     visible:
       id: connection-status-connected
@@ -21,5 +22,5 @@ name: Sign in and sign out
       text: "Sign out of .*"
 - extendedWaitUntil:
     visible:
-      id: connect-code-input
+      id: connect-open-form
     timeout: 10000

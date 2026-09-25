@@ -1,4 +1,4 @@
-# Create a pane, find it by search, favorite it, archive it, then delete it
+# Create a pane, find it by search, pin it, archive it, then delete it
 # from Archived. Needs a dev host with at least one repository (README).
 appId: com.dcouple.pane.mobile
 name: Pane list journeys
@@ -6,7 +6,8 @@ name: Pane list journeys
 - runFlow: subflows/signed-in.yaml
 - evalScript: ${output.pane = 'mae-' + Date.now().toString(36)}
 
-# Create: repository and base branch default, pick an agent, name the pane.
+# Create from the header "+": repository and base branch default, pick an
+# agent, name the pane.
 - tapOn:
     id: panes-new
 - extendedWaitUntil:
@@ -38,37 +39,26 @@ name: Pane list journeys
     timeout: 15000
 - assertVisible: ".*Claude Code.*"
 
-# Favorite from the long-press actions, then check the Favorites section.
-- longPressOn: "${output.pane}.*"
-# The action sheet is titled with the pane it acts on.
-- assertVisible: "${output.pane}"
-- tapOn: "Favorite"
+# Search narrows the list to matching panes.
+- tapOn:
+    id: panes-search
+- inputText: ${output.pane}
+# Match the row by its status: the search field holds the name too.
+- assertVisible: "${output.pane}, .*Claude Code.*"
+- hideKeyboard
+
+# Pin it with the row's pin button; it then shows under Pinned as well.
+- tapOn:
+    id: "pane-pin-.*"
+    index: 0
 - extendedWaitUntil:
-    visible: "FAVORITES"
+    visible: "PINNED"
     timeout: 10000
 
-# Search narrows the list to matching panes.
-# iOS shows the header search field; Android opens it from the Search icon.
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - tapOn: "Search"
-- runFlow:
-    when:
-      platform: iOS
-    commands:
-      - tapOn: "Search panes"
-- inputText: ${output.pane}
-# Match the row by its subtitle: the search field holds the name too.
-- assertVisible: "${output.pane}, .*Claude Code.*"
-
-# Archive with a swipe and confirm, while search shows only this pane.
-- swipe:
-    from: "${output.pane}, .*"
-    direction: LEFT
+# Archive it with the row's archive button and confirm.
 - tapOn:
     id: "pane-archive-.*"
+    index: 0
 - tapOn:
     text: "Archive"
     below:
@@ -77,28 +67,14 @@ name: Pane list journeys
     visible:
       id: panes-no-results
     timeout: 20000
-# iOS 26 shows the search bar's cancel as a close button; Android uses Back.
-- runFlow:
-    when:
-      platform: iOS
-    commands:
-      - tapOn: "Close|Cancel"
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - back
+- tapOn:
+    id: panes-search-clear
 - waitForAnimationToEnd
 
 # Delete it for good from Archived.
 - scrollUntilVisible:
     element:
       id: panes-archived
-# One more swipe so the row clears the floating tab bar.
-- swipe:
-    start: 50%, 70%
-    end: 50%, 30%
-- waitForAnimationToEnd
 - tapOn:
     id: panes-archived
 - extendedWaitUntil:

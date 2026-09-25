@@ -16,6 +16,6 @@ describe('joystickLinesPerSecond', () => {
   });
 
   it('ramps gently: halfway past the dead zone is a quarter of full speed', () => {
-    expect(joystickLinesPerSecond(28)).toBe(18);
+    expect(joystickLinesPerSecond(34)).toBe(18);
   });
 });

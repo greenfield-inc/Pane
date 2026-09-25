@@ -17,7 +17,7 @@ export function ListSection({ title, footer, children }: ListSectionProps) {
   const rows = Children.toArray(children);
   return (
     <View style={styles.container}>
-      {title ? <Text variant="footnote" tone="muted" style={styles.caption}>{title.toUpperCase()}</Text> : null}
+      {title ? <Text variant="caption" tone="muted" style={styles.caption}>{title.toUpperCase()}</Text> : null}
       <View style={[styles.group, { borderRadius: theme.radius.md, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
         {rows.map((row, index) => (
           <Fragment key={index}>
@@ -26,14 +26,16 @@ export function ListSection({ title, footer, children }: ListSectionProps) {
           </Fragment>
         ))}
       </View>
-      {footer ? <Text variant="footnote" tone="muted" style={styles.caption}>{footer}</Text> : null}
+      {footer ? <Text variant="footnote" tone="muted" style={styles.footer}>{footer}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { gap: 6 },
-  caption: { paddingHorizontal: 16 },
-  group: { overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
+  caption: { paddingHorizontal: 4, letterSpacing: 0.5 },
+  footer: { paddingHorizontal: 4 },
+  // The PWA's rounded-md bordered cards.
+  group: { overflow: 'hidden', borderWidth: 1 },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 16 },
 });

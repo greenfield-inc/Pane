@@ -7,7 +7,8 @@ env:
 ---
 - runFlow: subflows/signed-in.yaml
 # Pair host B too; it becomes the active host.
-- tapOn: "Settings"
+- tapOn:
+    id: open-settings
 - tapOn:
     id: settings-add-host
 - tapOn:

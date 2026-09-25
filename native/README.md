@@ -60,7 +60,7 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 The pane screen runs xterm in a WebView. The page source is `terminal-web/page.ts`. `pnpm build:terminal-web` bundles it, with xterm and its CSS, into `src/features/terminal/terminalHtml.generated.ts`, so the WebView needs no network. Run it after changing the page or upgrading xterm, and commit the generated file. The page and the screen talk through the messages in `src/features/terminal/bridge.ts`.
 
-`panes.yaml` creates a pane, searches, favorites, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
+`panes.yaml` creates a pane, searches, pins, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
 
 
 ## Notifications and links

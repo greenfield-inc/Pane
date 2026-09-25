@@ -19,7 +19,8 @@ env:
     commands:
       - takeScreenshot: screenshots/notifications-permission
       - tapOn: "Allow"
-- tapOn: "Settings"
+- tapOn:
+    id: open-settings
 - extendedWaitUntil:
     visible:
       id: notifications-needs-input

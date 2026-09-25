@@ -28,12 +28,9 @@ export interface PaneListEntry {
   agent?: string;
 }
 
-/** Where a row sits in its section, so it can round the right corners. */
-export type RowPosition = 'only' | 'first' | 'middle' | 'last';
-
 export type PaneListItem =
-  | { type: 'section'; key: string; title: string }
-  | { type: 'pane'; key: string; pane: PaneListEntry; position: RowPosition; inFavorites: boolean };
+  | { type: 'section'; key: string; title: string; projectId?: number }
+  | { type: 'pane'; key: string; pane: PaneListEntry; label: string };
 
 interface StatusLookup {
   status: (paneId: string) => AgentDisplayStatus;
@@ -41,22 +38,23 @@ interface StatusLookup {
 }
 
 /**
- * Flattens projects into list rows: a Favorites section (pin order), then one
- * section per project with its remaining panes. `query` keeps panes whose
- * name, project or base branch contain every word.
+ * Flattens projects into list rows the way the PWA's drawer does: a Pinned
+ * section (newest pin first), then every project with all its panes, pinned
+ * ones included. `query` keeps panes whose name, project or base branch
+ * contain every word; while searching, projects without a match are left out.
  */
 export function buildPaneList(projects: ProjectWithPanes[], query: string, lookup: StatusLookup): PaneListItem[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const favorites: Array<PaneListEntry & { pinnedAt: string }> = [];
-  const sections: Array<{ project: ProjectWithPanes; panes: PaneListEntry[] }> = [];
+  const pinned: Array<{ pane: PaneListEntry; label: string; pinnedAt: string }> = [];
+  const sections: PaneListItem[] = [];
 
   for (const project of projects) {
-    const panes: PaneListEntry[] = [];
+    const panes: PaneListItem[] = [];
     for (const session of project.sessions ?? []) {
       if (session.archived || session.isHidden) continue;
       const haystack = `${session.name} ${project.name} ${session.baseBranch ?? ''}`.toLowerCase();
       if (!words.every(word => haystack.includes(word))) continue;
-      const entry: PaneListEntry = {
+      const pane: PaneListEntry = {
         id: session.id,
         name: session.name,
         projectId: project.id,
@@ -66,21 +64,25 @@ export function buildPaneList(projects: ProjectWithPanes[], query: string, looku
         status: lookup.status(session.id),
         agent: lookup.agent(session.id),
       };
-      if (entry.isFavorite) favorites.push({ ...entry, pinnedAt: session.favoritePinnedAt ?? '' });
-      else panes.push(entry);
+      if (pane.isFavorite) pinned.push({ pane, label: pinnedPaneLabel(project.name, pane.name), pinnedAt: session.favoritePinnedAt ?? '' });
+      panes.push({ type: 'pane', key: pane.id, pane, label: pane.name });
     }
-    if (panes.length > 0) sections.push({ project, panes });
+    if (panes.length > 0 || words.length === 0) {
+      sections.push({ type: 'section', key: `project-${project.id}`, title: project.name, projectId: project.id }, ...panes);
+    }
   }
 
-  favorites.sort((a, b) => a.pinnedAt.localeCompare(b.pinnedAt));
-  const items: PaneListItem[] = [];
-  const pushSection = (key: string, title: string, panes: PaneListEntry[]) => {
-    items.push({ type: 'section', key, title });
-    panes.forEach((pane, index) => items.push({ type: 'pane', key: pane.id, pane, position: positionOf(index, panes.length), inFavorites: key === 'favorites' }));
-  };
-  if (favorites.length > 0) pushSection('favorites', 'Favorites', favorites.map(({ pinnedAt: _, ...pane }) => pane));
-  for (const { project, panes } of sections) pushSection(`project-${project.id}`, project.name, panes);
-  return items;
+  pinned.sort((a, b) => b.pinnedAt.localeCompare(a.pinnedAt) || a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+  const pinnedItems: PaneListItem[] = pinned.length > 0
+    ? [{ type: 'section', key: 'pinned', title: 'Pinned' }, ...pinned.map(({ pane, label }) => ({ type: 'pane' as const, key: `pinned-${pane.id}`, pane, label }))]
+    : [];
+  return [...pinnedItems, ...sections];
+}
+
+/** The PWA's pinned-row label: the project cut to six characters, then the pane. */
+function pinnedPaneLabel(projectName: string, paneName: string): string {
+  const project = projectName.length > 6 ? `${projectName.slice(0, 6)}...` : projectName;
+  return `${project}/${paneName}`;
 }
 
 /** Optimistic copy of what `sessions:toggle-favorite` does on the host. */
@@ -97,10 +99,4 @@ export function toggleFavorite(projects: ProjectWithPanes[], paneId: string, now
 
 export function removePane(projects: ProjectWithPanes[], paneId: string): ProjectWithPanes[] {
   return projects.map(project => ({ ...project, sessions: project.sessions?.filter(session => session.id !== paneId) }));
-}
-
-function positionOf(index: number, count: number): RowPosition {
-  if (count === 1) return 'only';
-  if (index === 0) return 'first';
-  return index === count - 1 ? 'last' : 'middle';
 }

@@ -10,11 +10,12 @@ import { Icon } from '@/ui';
 
 import { JOYSTICK_TRAVEL, joystickLinesPerSecond } from './joystick';
 
-const THUMB = 32;
+const THUMB = 40;
 
 /**
  * Hold and drag the thumb up or down to scroll the terminal; the further it
  * goes, the faster it scrolls. It springs back to center when released.
+ * Styled as the web app's vertical pill: a track with a center line and a round thumb.
  */
 export function ScrollJoystick({ onScroll }: { onScroll: (lines: number) => void }) {
   const theme = useTheme();
@@ -54,6 +55,8 @@ export function ScrollJoystick({ onScroll }: { onScroll: (lines: number) => void
     });
 
   const thumbStyle = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
+  // The terminal is dark in both themes, so the control is drawn from its palette.
+  const { foreground, background } = theme.terminal;
 
   return (
     <GestureDetector gesture={pan}>
@@ -64,32 +67,41 @@ export function ScrollJoystick({ onScroll }: { onScroll: (lines: number) => void
         accessibilityHint="Drag up or down to scroll"
         accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
         onAccessibilityAction={event => onScroll(event.nativeEvent.actionName === 'increment' ? -10 : 10)}
-        style={[styles.track, { borderColor: theme.colors.border }]}
+        style={[styles.track, { borderColor: withAlpha(foreground, 0.1), backgroundColor: withAlpha(background, 0.45) }]}
       >
-        <View style={[StyleSheet.absoluteFill, styles.trackFill, { backgroundColor: theme.colors.surfaceRaised }]} />
-        <Animated.View style={[styles.thumb, { backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border }, thumbStyle]}>
-          <Icon ios="arrow.up.and.down" android="unfold_more" size={16} color={theme.colors.textSecondary} />
+        <View style={[styles.line, { backgroundColor: withAlpha(foreground, 0.15) }]} />
+        <Animated.View style={[styles.thumb, { backgroundColor: background, borderColor: withAlpha(foreground, 0.15) }, thumbStyle]}>
+          <Icon ios="chevron.up.chevron.down" android="unfold_more" size={20} color={theme.terminal.brightBlack} />
         </Animated.View>
       </View>
     </GestureDetector>
   );
 }
 
+/** `#rrggbb` at `alpha` opacity. */
+function withAlpha(hex: string, alpha: number): string {
+  const value = Number.parseInt(hex.slice(1, 7), 16);
+  return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
+
+// The web app's track: 44 wide, 160 tall, a 40 pt thumb.
+const TRACK_WIDTH = 44;
+
 const styles = StyleSheet.create({
   track: {
-    width: THUMB + 8,
-    height: THUMB + JOYSTICK_TRAVEL * 2 + 8,
-    borderRadius: (THUMB + 8) / 2,
-    borderWidth: StyleSheet.hairlineWidth,
+    width: TRACK_WIDTH,
+    height: THUMB + JOYSTICK_TRAVEL * 2,
+    borderRadius: TRACK_WIDTH / 2,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  trackFill: { borderRadius: 999, opacity: 0.45 },
+  line: { position: 'absolute', top: 16, bottom: 16, width: 1 },
   thumb: {
     width: THUMB,
     height: THUMB,
     borderRadius: THUMB / 2,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

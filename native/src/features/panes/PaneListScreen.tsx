@@ -1,12 +1,14 @@
 import { LegendList } from '@legendapp/list/react-native';
-import { router, Stack } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
 import { useTheme } from '@/theme';
-import { Button, EmptyState, ErrorState, Icon, ListRow, ListSection, Skeleton, Text } from '@/ui';
+import { Icon, Text } from '@/ui';
 
 import { paneAgent, paneDisplayStatus } from './agentStatus';
 import {
@@ -17,13 +19,16 @@ import {
   useProjects,
   useToggleFavorite,
 } from './hooks';
+import { IconButton, LoadingRows, Notice, SectionHeader } from './PaneKit';
 import { buildPaneList, type PaneListEntry, type PaneListItem } from './paneList';
 import { PaneRow } from './PaneRow';
 import { describePermission, pendingByPane } from './permissions';
 import { StatusBadge } from './StatusBadge';
 
+/** Home: the PWA's pane drawer as a full screen, plus search and permission requests. */
 export function PaneListScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { connection } = useDaemon();
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -34,15 +39,16 @@ export function PaneListScreen() {
   const toggleFavorite = useToggleFavorite();
   const archive = useArchivePane();
 
-  const waiting = pendingByPane(permissions.data ?? []);
+  const waiting = Object.values(pendingByPane(permissions.data ?? []));
+  const blocked = new Set(waiting.map(request => request.sessionId));
   const items = buildPaneList(projects.data ?? [], query, {
-    status: paneId => (waiting[paneId] ? 'blocked' : statuses.data ? paneDisplayStatus(statuses.data, paneId) : 'unknown'),
+    status: paneId => (blocked.has(paneId) ? 'blocked' : statuses.data ? paneDisplayStatus(statuses.data, paneId) : 'unknown'),
     agent: paneId => (statuses.data ? paneAgent(statuses.data, paneId) : undefined),
   });
   const paneNames = new Map((projects.data ?? []).flatMap(project => (project.sessions ?? []).map(session => [session.id, session.name])));
-  // Wait for statuses too, so rows don't flip from "No agent" to their real status.
+  // Wait for statuses too, so dots don't flip from "No agent" to their real status.
   const loading = projects.isPending || statuses.isPending;
-  const hasPanes = (projects.data ?? []).some(project => project.sessions?.some(session => !session.archived && !session.isHidden));
+  const divider = { borderColor: theme.colors.border };
 
   const confirmArchive = (pane: PaneListEntry) => {
     Alert.alert(`Archive “${pane.name}”?`, 'Its agents stop and its worktree is removed. You can still find it under Archived.', [
@@ -61,138 +67,194 @@ export function PaneListScreen() {
     setRefreshing(false);
   };
 
-  const renderItem = ({ item }: { item: PaneListItem }) => item.type === 'section'
-    ? <Text variant="footnote" tone="muted" style={styles.sectionTitle}>{item.title.toUpperCase()}</Text>
+  const renderItem = ({ item, index }: { item: PaneListItem; index: number }) => item.type === 'section'
+    ? (
+      <SectionHeader
+        title={item.title}
+        first={index === 0 && waiting.length === 0}
+        icon={item.projectId !== undefined ? <Icon ios="desktopcomputer" android="desktop_windows" size={14} /> : undefined}
+        add={item.projectId !== undefined ? {
+          label: `New pane in ${item.title}`,
+          testID: `panes-new-${item.projectId}`,
+          onPress: () => router.push({ pathname: '/pane/new', params: { projectId: String(item.projectId) } }),
+        } : undefined}
+      />
+    )
     : (
       <PaneRow
         pane={item.pane}
-        position={item.position}
-        showProject={item.inFavorites}
+        label={item.label}
         onOpen={() => {
           markSeen(item.pane.id);
           router.push({ pathname: '/pane/[paneId]', params: { paneId: item.pane.id } });
         }}
-        onToggleFavorite={() => toggleFavorite(item.pane.id).catch((error: Error) => Alert.alert('Couldn’t update favorites', error.message))}
+        onTogglePinned={() => toggleFavorite(item.pane.id).catch((error: Error) => Alert.alert('Couldn’t update pinned panes', error.message))}
         onArchive={() => confirmArchive(item.pane)}
       />
     );
 
   return (
-    <>
-      <Stack.Screen
-        options={{
-          headerSearchBarOptions: {
-            placeholder: 'Search panes',
-            // Android draws the search icon and field itself; match the theme.
-            headerIconColor: theme.colors.accentText,
-            textColor: theme.colors.text,
-            hintTextColor: theme.colors.textMuted,
-            hideWhenScrolling: false,
-            onChangeText: event => setQuery(event.nativeEvent.text),
-            onCancelButtonPress: () => setQuery(''),
-          },
-          headerRight: () => (
-            <Pressable testID="panes-new" accessibilityRole="button" accessibilityLabel="New pane" hitSlop={12} onPress={() => router.push('/pane/new')}>
-              <Icon ios="plus" android="add" size={22} color={theme.colors.accentText} />
-            </Pressable>
-          ),
-        }}
-      />
+    <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
+      {/* px-4 py-2 min-h-12 border-b: icon and title, then the actions. */}
+      <View style={[styles.header, divider, { paddingTop: insets.top + 8 }]}>
+        <View style={styles.brand}>
+          <Icon ios="apple.terminal" android="terminal" size={20} color={theme.colors.accent} />
+          <Text variant="headline" accessibilityRole="header" numberOfLines={1} style={styles.brandTitle}>Remote Pane</Text>
+        </View>
+        <ConnectionStatus status={connection.status} />
+        <View style={styles.headerActions}>
+          <IconButton label="Refresh remote sessions" testID="panes-refresh" onPress={() => void refresh()}>
+            <RefreshIcon spinning={loading || refreshing} />
+          </IconButton>
+          <IconButton label="New pane" testID="panes-new" onPress={() => router.push('/pane/new')}>
+            <Icon ios="plus" android="add" size={16} />
+          </IconButton>
+          <IconButton label="Settings" testID="open-settings" onPress={() => router.push('/settings')}>
+            <Icon ios="gearshape" android="settings" size={16} />
+          </IconButton>
+        </View>
+      </View>
+
+      {/* Where the PWA shows its Remote Desktop link: p-3 border-b. */}
+      <View style={[styles.toolbar, divider]}>
+        <View style={[styles.search, { borderRadius: theme.radius.md, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
+          <Icon ios="magnifyingglass" android="search" size={16} />
+          <TextInput
+            testID="panes-search"
+            accessibilityLabel="Search panes"
+            placeholder="Search panes"
+            placeholderTextColor={theme.colors.textMuted}
+            selectionColor={theme.colors.accent}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            value={query}
+            onChangeText={setQuery}
+            style={[theme.typography.subhead, styles.searchInput, { color: theme.colors.text }]}
+          />
+          {query ? (
+            <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
+              <Icon ios="xmark.circle.fill" android="cancel" size={16} />
+            </IconButton>
+          ) : null}
+        </View>
+      </View>
+
       <LegendList
         testID="panes-list"
         data={loading ? [] : items}
         keyExtractor={item => item.key}
         getItemType={item => item.type}
-        estimatedItemSize={60}
-        contentInsetAdjustmentBehavior="automatic"
+        estimatedItemSize={48}
         keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         refreshing={refreshing}
         onRefresh={() => void refresh()}
-        style={{ backgroundColor: theme.colors.background }}
-        contentContainerStyle={styles.content}
-        ListHeaderComponent={
-          <View style={styles.header}>
-            <View style={styles.connection}><ConnectionStatus status={connection.status} /></View>
-            {Object.values(waiting).length > 0 ? (
-              <View style={styles.inset}>
-                <ListSection title="Needs approval">
-                  {Object.values(waiting).map(request => {
-                    const { title, target } = describePermission(request);
-                    return (
-                      <ListRow
-                        key={request.id}
-                        testID={`permission-row-${request.sessionId}`}
-                        leading={<StatusBadge status="blocked" />}
-                        title={paneNames.get(request.sessionId) ?? 'Pane'}
-                        subtitle={target ? `${title}: ${target}` : title}
-                        trailing="chevron"
-                        onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
-                      />
-                    );
-                  })}
-                </ListSection>
-              </View>
-            ) : null}
+        style={styles.fill}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
+        ListHeaderComponent={waiting.length > 0 ? (
+          <View>
+            <SectionHeader title="Needs approval" first />
+            {waiting.map(request => {
+              const { title, target } = describePermission(request);
+              return (
+                <PermissionRow
+                  key={request.id}
+                  testID={`permission-row-${request.sessionId}`}
+                  name={paneNames.get(request.sessionId) ?? 'Pane'}
+                  detail={target ? `${title}: ${target}` : title}
+                  onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
+                />
+              );
+            })}
           </View>
-        }
+        ) : null}
         ListEmptyComponent={
           loading ? <LoadingRows />
-            : projects.isError ? <ErrorState error={projects.error} onRetry={() => void projects.refetch()} />
-            : hasPanes ? <EmptyState testID="panes-no-results" title="No matches" message={`No pane matches “${query}”.`} />
-            : (
-              <EmptyState
-                testID="panes-empty"
-                title="No panes yet"
-                message="Start an agent on one of this host’s repositories."
-                action={<Button testID="panes-empty-new" title="New pane" onPress={() => router.push('/pane/new')} />}
-              />
-            )
+            : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
+            : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
+            : <Notice testID="panes-empty" message="No remote panes found on this host." />
         }
-        ListFooterComponent={
-          projects.isSuccess ? (
-            <View style={[styles.inset, styles.footer]}>
-              <ListSection>
-                <ListRow
-                  testID="panes-archived"
-                  leading={<Icon ios="archivebox" android="archive" size={20} color={theme.colors.accentText} />}
-                  title="Archived"
-                  trailing="chevron"
-                  onPress={() => router.push('/archived')}
-                />
-              </ListSection>
-            </View>
-          ) : null
-        }
+        ListFooterComponent={projects.isSuccess ? <ArchivedLink /> : null}
         renderItem={renderItem}
       />
-    </>
-  );
-}
-
-function LoadingRows() {
-  return (
-    <View style={styles.loading}>
-      {[0, 1, 2, 3].map(index => (
-        <View key={index} style={styles.loadingRow}>
-          <Skeleton width={22} height={22} radius={11} />
-          <View style={styles.loadingText}>
-            <Skeleton width="60%" height={16} />
-            <Skeleton width="35%" height={12} />
-          </View>
-        </View>
-      ))}
     </View>
   );
 }
 
+/** The drawer's refresh icon, spinning while the list loads. */
+function RefreshIcon({ spinning }: { spinning: boolean }) {
+  const rotation = useSharedValue(0);
+  useEffect(() => {
+    if (spinning) {
+      rotation.value = 0;
+      rotation.value = withRepeat(withTiming(360, { duration: 1000, easing: Easing.linear }), -1, false);
+    } else if (rotation.value % 360 !== 0) {
+      // Finish the turn instead of snapping back.
+      cancelAnimation(rotation);
+      rotation.value = withTiming(360, { duration: ((360 - (rotation.value % 360)) / 360) * 1000, easing: Easing.linear });
+    }
+  }, [spinning, rotation]);
+  const spin = useAnimatedStyle(() => ({ transform: [{ rotate: `${rotation.value}deg` }] }));
+  return (
+    <Animated.View style={spin}>
+      <Icon ios="arrow.clockwise" android="refresh" size={16} />
+    </Animated.View>
+  );
+}
+
+function PermissionRow({ name, detail, onPress, testID }: { name: string; detail: string; onPress: () => void; testID: string }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={`${name}, ${detail}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.permissionRow, { borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}
+    >
+      <StatusBadge status="blocked" />
+      <View style={styles.fill}>
+        <Text variant="callout" numberOfLines={1}>{name}</Text>
+        <Text variant="footnote" tone="muted" numberOfLines={2}>{detail}</Text>
+      </View>
+      <Icon ios="chevron.right" android="chevron_right" size={14} />
+    </Pressable>
+  );
+}
+
+/** Styled like the PWA's Remote Desktop link. */
+function ArchivedLink() {
+  const theme = useTheme();
+  return (
+    <Pressable
+      testID="panes-archived"
+      accessibilityRole="button"
+      accessibilityLabel="Archived"
+      onPress={() => router.push('/archived')}
+      style={({ pressed }) => [styles.archived, {
+        borderRadius: theme.radius.md,
+        borderColor: theme.colors.border,
+        backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised,
+      }]}
+    >
+      <Icon ios="archivebox" android="archive" size={16} />
+      <Text variant="callout" tone="secondary" style={styles.fill}>Archived</Text>
+      <Icon ios="chevron.right" android="chevron_right" size={14} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  content: { paddingBottom: 32 },
-  header: { gap: 16, paddingBottom: 4 },
-  connection: { paddingHorizontal: 20 },
-  inset: { paddingHorizontal: 16 },
-  footer: { paddingTop: 28 },
-  sectionTitle: { paddingHorizontal: 32, paddingTop: 24, paddingBottom: 6 },
-  loading: { padding: 20, gap: 24 },
-  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  loadingText: { flex: 1, gap: 8 },
+  fill: { flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
+  brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandTitle: { flexShrink: 1, fontSize: 18, lineHeight: 28 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  toolbar: { padding: 12, borderBottomWidth: 1 },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingLeft: 12, paddingRight: 6, borderWidth: 1 },
+  searchInput: { flex: 1, height: '100%', paddingVertical: 0 },
+  content: { padding: 12 },
+  permissionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, marginBottom: 4 },
+  archived: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1 },
 });

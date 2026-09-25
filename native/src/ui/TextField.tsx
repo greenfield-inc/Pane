@@ -15,7 +15,7 @@ export function TextField({ label, error, hint, mono, style, ...props }: TextFie
   const theme = useTheme();
   return (
     <View style={styles.container}>
-      {label ? <Text variant="footnote" tone="secondary">{label}</Text> : null}
+      {label ? <Text variant="callout" tone="secondary">{label}</Text> : null}
       <TextInput
         placeholderTextColor={theme.colors.textMuted}
         selectionColor={theme.colors.accent}
@@ -41,6 +41,7 @@ export function TextField({ label, error, hint, mono, style, ...props }: TextFie
 }
 
 const styles = StyleSheet.create({
-  container: { gap: 6 },
-  input: { minHeight: 48, paddingHorizontal: 14, paddingVertical: 12, borderWidth: StyleSheet.hairlineWidth },
+  container: { gap: 8 },
+  // PWA inputs: rounded-md, 1px border, bg-secondary, p-3.
+  input: { minHeight: 44, padding: 12, borderWidth: 1 },
 });

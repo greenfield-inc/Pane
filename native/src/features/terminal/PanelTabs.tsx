@@ -12,19 +12,23 @@ export interface PanelTabsProps {
   onAdd: () => void;
 }
 
+/** The web app's tool tabs: bordered tabs on a raised strip, then a square + that adds one. */
 export function PanelTabs({ panels, selectedId, onSelect, onAdd }: PanelTabsProps) {
   const theme = useTheme();
+  const { colors } = theme;
   return (
-    <View style={[styles.bar, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+    <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.scroll}
         contentContainerStyle={styles.tabs}
         accessibilityRole="tablist"
         testID="terminal-panel-tabs"
       >
         {panels.map(panel => {
           const selected = panel.id === selectedId;
+          const tint = selected ? colors.text : colors.textSecondary;
           return (
             <Pressable
               key={panel.id}
@@ -40,12 +44,15 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd }: PanelTabsProp
               style={({ pressed }) => [
                 styles.tab,
                 {
-                  borderRadius: theme.radius.pill,
-                  backgroundColor: selected ? theme.colors.surfacePressed : pressed ? theme.colors.surfaceRaised : 'transparent',
+                  borderTopLeftRadius: theme.radius.md,
+                  borderTopRightRadius: theme.radius.md,
+                  borderColor: colors.border,
+                  backgroundColor: selected ? colors.background : pressed ? colors.surfacePressed : colors.surface,
                 },
               ]}
             >
-              <Text variant="subhead" tone={selected ? 'primary' : 'muted'} style={selected && styles.selected} numberOfLines={1}>
+              <Icon ios="apple.terminal" android="terminal" size={16} color={tint} />
+              <Text variant="callout" style={[styles.label, { color: tint }]} numberOfLines={1}>
                 {panel.title}
               </Text>
             </Pressable>
@@ -55,21 +62,47 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd }: PanelTabsProp
       <Pressable
         testID="panel-tab-add"
         accessibilityRole="button"
-        accessibilityLabel="New terminal tab"
-        hitSlop={8}
+        accessibilityLabel="Add tool"
+        hitSlop={6}
         onPress={onAdd}
-        style={({ pressed }) => [styles.add, { opacity: pressed ? 0.6 : 1 }]}
+        style={({ pressed }) => [
+          styles.add,
+          {
+            borderRadius: theme.radius.md,
+            borderColor: colors.border,
+            backgroundColor: pressed ? colors.surfacePressed : colors.surface,
+          },
+        ]}
       >
-        <Icon ios="plus" android="add" size={18} color={theme.colors.accentText} />
+        <Icon ios="plus" android="add" size={16} color={colors.textSecondary} />
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
-  tabs: { gap: 4, paddingHorizontal: 8, paddingVertical: 6 },
-  tab: { paddingHorizontal: 12, height: 30, justifyContent: 'center', maxWidth: 180 },
-  selected: { fontWeight: '600' },
-  add: { width: 44, height: 42, alignItems: 'center', justifyContent: 'center' },
+  bar: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+  },
+  scroll: { flex: 1 },
+  tabs: { alignItems: 'flex-end', gap: 4 },
+  // Open at the bottom, so the tab reads as attached to the terminal below it.
+  tab: {
+    height: 40,
+    maxWidth: 192,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+  },
+  label: { flexShrink: 1 },
+  add: { width: 32, height: 32, marginBottom: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

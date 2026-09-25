@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { ActionSheetIOS, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
@@ -7,37 +8,29 @@ import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 import { useTheme, type ThemeColors } from '@/theme';
 import { Icon, Text } from '@/ui';
 
-import type { PaneListEntry, RowPosition } from './paneList';
+import type { PaneListEntry } from './paneList';
+import { IconButton } from './PaneKit';
 import { StatusBadge, statusPresentation } from './StatusBadge';
 
 export interface PaneRowProps {
   pane: PaneListEntry;
-  position: RowPosition;
-  /** Favorites mix projects, so their rows name the project. */
-  showProject: boolean;
+  /** The pane name, or "project/pane" in the Pinned section. */
+  label: string;
   onOpen: () => void;
-  onToggleFavorite: () => void;
+  onTogglePinned: () => void;
   onArchive: () => void;
 }
 
-export function PaneRow({ pane, position, showProject, onOpen, onToggleFavorite, onArchive }: PaneRowProps) {
+/** The PWA drawer's pane row, with the live agent status as a dot and swipe actions as an extra. */
+export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive }: PaneRowProps) {
   const theme = useTheme();
+  const [pressed, setPressed] = useState(false);
   const agent = AGENT_LAUNCH_PRESETS.find(preset => preset.id === pane.agent)?.title;
-  const subtitle = [
-    statusPresentation[pane.status].label,
-    agent,
-    showProject ? pane.projectName : pane.baseBranch,
-  ].filter(Boolean).join(' · ');
-  const favoriteTitle = pane.isFavorite ? 'Unfavorite' : 'Favorite';
-  const rounded = {
-    borderTopLeftRadius: position === 'first' || position === 'only' ? theme.radius.md : 0,
-    borderTopRightRadius: position === 'first' || position === 'only' ? theme.radius.md : 0,
-    borderBottomLeftRadius: position === 'last' || position === 'only' ? theme.radius.md : 0,
-    borderBottomRightRadius: position === 'last' || position === 'only' ? theme.radius.md : 0,
-  };
+  const status = [statusPresentation[pane.status].label, agent].filter(Boolean).join(' · ');
+  const pinLabel = pane.isFavorite ? 'Unpin pane' : 'Pin pane';
 
   return (
-    <View style={[styles.outer, rounded]}>
+    <View style={[styles.outer, { borderRadius: theme.radius.md }]}>
       <ReanimatedSwipeable
         friction={2}
         overshootFriction={8}
@@ -45,84 +38,54 @@ export function PaneRow({ pane, position, showProject, onOpen, onToggleFavorite,
         rightThreshold={48}
         renderLeftActions={(_progress, _translation, swipe) => (
           <SwipeAction
-            testID={`pane-favorite-${pane.id}`}
-            label={favoriteTitle}
-            color="warning"
-            ios={pane.isFavorite ? 'star.slash.fill' : 'star.fill'}
-            android="star"
-            onPress={() => { swipe.close(); onToggleFavorite(); }}
+            testID={`pane-swipe-pin-${pane.id}`}
+            label={pane.isFavorite ? 'Unpin' : 'Pin'}
+            color="accent"
+            onPress={() => { swipe.close(); onTogglePinned(); }}
           />
         )}
         renderRightActions={(_progress, _translation, swipe) => (
           <SwipeAction
-            testID={`pane-archive-${pane.id}`}
+            testID={`pane-swipe-archive-${pane.id}`}
             label="Archive"
             color="danger"
-            ios="archivebox.fill"
-            android="archive"
             onPress={() => { swipe.close(); onArchive(); }}
           />
         )}
         onSwipeableWillOpen={() => void Haptics.selectionAsync()}
       >
-        <Pressable
-          testID={`pane-row-${pane.id}`}
-          accessibilityRole="button"
-          accessibilityLabel={`${pane.name}, ${subtitle}${pane.isFavorite ? ', favorite' : ''}`}
-          accessibilityActions={[{ name: 'favorite', label: favoriteTitle }, { name: 'archive', label: 'Archive' }]}
-          onAccessibilityAction={event => {
-            if (event.nativeEvent.actionName === 'archive') onArchive();
-            if (event.nativeEvent.actionName === 'favorite') onToggleFavorite();
-          }}
-          onPress={onOpen}
-          onLongPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            showRowActions(pane.name, favoriteTitle, onToggleFavorite, onArchive);
-          }}
-          android_ripple={{ color: theme.colors.surfacePressed }}
-          style={({ pressed }) => [styles.row, { backgroundColor: pressed && Platform.OS === 'ios' ? theme.colors.surfacePressed : theme.colors.surface }]}
-        >
-          <StatusBadge status={pane.status} />
-          <View style={[styles.body, position !== 'first' && position !== 'only' && { borderTopColor: theme.colors.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
-            <View style={styles.text}>
-              <Text variant="body" numberOfLines={1}>{pane.name}</Text>
-              <Text variant="footnote" tone="muted" numberOfLines={1}>{subtitle}</Text>
-            </View>
-            {pane.isFavorite ? <Icon ios="star.fill" android="star" size={14} color={theme.colors.warning} /> : null}
-            <Icon ios="chevron.right" android="chevron_right" size={14} />
+        <View style={[styles.row, { backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}>
+          <Pressable
+            testID={`pane-row-${pane.id}`}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${status}`}
+            onPress={onOpen}
+            onPressIn={() => setPressed(true)}
+            onPressOut={() => setPressed(false)}
+            style={styles.open}
+          >
+            <StatusBadge status={pane.status} />
+            <Text variant="callout" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : theme.colors.textSecondary }]}>
+              {label}
+            </Text>
+          </Pressable>
+          <View style={styles.actions}>
+            <IconButton testID={`pane-pin-${pane.id}`} label={pinLabel} onPress={onTogglePinned}>
+              <View style={styles.pinTilt}>
+                <Icon ios="pin" android="keep" size={14} color={pane.isFavorite ? theme.colors.textSecondary : theme.colors.textMuted} />
+              </View>
+            </IconButton>
+            <IconButton testID={`pane-archive-${pane.id}`} label="Archive pane" onPress={onArchive}>
+              <Icon ios="archivebox" android="archive" size={14} />
+            </IconButton>
           </View>
-        </Pressable>
+        </View>
       </ReanimatedSwipeable>
     </View>
   );
 }
 
-/** Long-press actions: the system action sheet on iOS, an alert on Android. */
-function showRowActions(title: string, favoriteTitle: string, onToggleFavorite: () => void, onArchive: () => void) {
-  if (Platform.OS === 'ios') {
-    ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: [favoriteTitle, 'Archive', 'Cancel'], destructiveButtonIndex: 1, cancelButtonIndex: 2 },
-      index => (index === 0 ? onToggleFavorite() : index === 1 ? onArchive() : undefined),
-    );
-    return;
-  }
-  Alert.alert(title, undefined, [
-    { text: favoriteTitle, onPress: onToggleFavorite },
-    { text: 'Archive', style: 'destructive', onPress: onArchive },
-    { text: 'Cancel', style: 'cancel' },
-  ]);
-}
-
-interface SwipeActionProps {
-  label: string;
-  color: keyof ThemeColors;
-  ios: 'star.fill' | 'star.slash.fill' | 'archivebox.fill';
-  android: 'star' | 'archive';
-  onPress: () => void;
-  testID: string;
-}
-
-function SwipeAction({ label, color, ios, android, onPress, testID }: SwipeActionProps) {
+function SwipeAction({ label, color, onPress, testID }: { label: string; color: keyof ThemeColors; onPress: () => void; testID: string }) {
   const theme = useTheme();
   return (
     <Pressable
@@ -130,18 +93,22 @@ function SwipeAction({ label, color, ios, android, onPress, testID }: SwipeActio
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={[styles.action, { backgroundColor: theme.colors[color] }]}
+      style={[styles.swipeAction, { backgroundColor: theme.colors[color] }]}
     >
-      <Icon ios={ios} android={android} size={20} color={theme.colors.onAccent} />
       <Text variant="caption" tone="onAccent">{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  outer: { marginHorizontal: 16, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', paddingLeft: 16, gap: 12 },
-  body: { flex: 1, minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 16, paddingVertical: 10 },
-  text: { flex: 1, gap: 2 },
-  action: { width: 84, alignItems: 'center', justifyContent: 'center', gap: 4 },
+  // space-y-1 between rows.
+  outer: { marginBottom: 4, overflow: 'hidden' },
+  // rounded-md px-3 py-3 gap-2; the open target spans the row's full height.
+  row: { flexDirection: 'row', alignItems: 'center', paddingRight: 12, gap: 8 },
+  open: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingVertical: 12 },
+  name: { flex: 1 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  // Lucide's Pin drawn `rotate-45`.
+  pinTilt: { transform: [{ rotate: '45deg' }] },
+  swipeAction: { width: 84, alignItems: 'center', justifyContent: 'center' },
 });

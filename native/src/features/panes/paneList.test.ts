@@ -27,32 +27,42 @@ const projects: ProjectWithPanes[] = [
 const noStatus = { status: () => 'unknown' as const, agent: () => undefined };
 
 function shape(items: ReturnType<typeof buildPaneList>) {
-  return items.map(item => item.type === 'section' ? `# ${item.title}` : `${item.pane.name} (${item.position})`);
+  return items.map(item => item.type === 'section' ? `# ${item.title}` : item.label);
 }
 
 describe('buildPaneList', () => {
-  it('puts favorites first in pin order, then each project with panes, skipping archived and hidden panes', () => {
+  it('lists pinned panes first, newest pin first, then every project with all its panes, skipping archived and hidden ones', () => {
     expect(shape(buildPaneList(projects, '', noStatus))).toEqual([
-      '# Favorites',
-      'push-alerts (first)',
-      'terminal-speed (last)',
+      '# Pinned',
+      'pane/terminal-speed',
+      'doozy/push-alerts',
       '# pane',
-      'fix-login (only)',
+      'fix-login',
+      'terminal-speed',
+      '# website',
       '# doozy',
-      'login-copy (only)',
+      'push-alerts',
+      'login-copy',
     ]);
   });
 
-  it('matches every search word against the pane, project and branch names', () => {
+  it('labels a pinned pane with its project cut to six characters, as the PWA does', () => {
+    const demo: ProjectWithPanes[] = [{ id: 9, name: 'demo-app', sessions: [{ id: 'd1', name: 'claude-agent', isFavorite: true }] }];
+    expect(shape(buildPaneList(demo, '', noStatus))).toEqual(['# Pinned', 'demo-a.../claude-agent', '# demo-app', 'claude-agent']);
+  });
+
+  it('matches every search word against the pane, project and branch names, leaving out projects without a match', () => {
     expect(shape(buildPaneList(projects, 'LOGIN', noStatus))).toEqual([
       '# pane',
-      'fix-login (only)',
+      'fix-login',
       '# doozy',
-      'login-copy (only)',
+      'login-copy',
     ]);
     expect(shape(buildPaneList(projects, 'doozy release', noStatus))).toEqual([
-      '# Favorites',
-      'push-alerts (only)',
+      '# Pinned',
+      'doozy/push-alerts',
+      '# doozy',
+      'push-alerts',
     ]);
   });
 
@@ -73,7 +83,7 @@ describe('toggleFavorite', () => {
     const pinned = toggleFavorite(projects, 's1', '2026-09-25T08:00:00.000Z');
     expect(pinned[0].sessions?.[0]).toMatchObject({ isFavorite: true, favoritePinnedAt: '2026-09-25T08:00:00.000Z' });
     expect(shape(buildPaneList(pinned, '', noStatus)).slice(0, 4)).toEqual([
-      '# Favorites', 'push-alerts (first)', 'terminal-speed (middle)', 'fix-login (last)',
+      '# Pinned', 'pane/fix-login', 'pane/terminal-speed', 'doozy/push-alerts',
     ]);
 
     const unpinned = toggleFavorite(pinned, 's1', '2026-09-25T09:00:00.000Z');
