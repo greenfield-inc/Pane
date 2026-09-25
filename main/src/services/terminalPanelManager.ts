@@ -1,3 +1,6 @@
+import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
+import { codexResumeBase } from './agents/agentIdentity';
+import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
@@ -272,7 +275,27 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState,
     shellType?: string,
   ): CliLaunchResolution {
+    if (customState.customResume) {
+      const config = validateCustomCommandResume(customState.customResume);
+      const allocated = config.mode === 'claude' || config.mode === 'generated';
+      const sessionId = customState.agentSessionId || (allocated ? randomUUID() : undefined);
+      const hasConversation = Boolean(customState.agentSessionId && (customState.customResumeStarted || customState.wasInterrupted));
+      const transcript = config.mode === 'claude' && sessionId ? findClaudeSessionTranscript(sessionId) : undefined;
+      const shouldResume = hasConversation && (config.mode !== 'claude' || Boolean(transcript));
+      const template = shouldResume ? config.resumeTemplate : config.initialTemplate || '{command}';
+      if (template.includes('{sessionId}') && !sessionId) throw new Error('No session ID is available for this launch template');
+      const commandToRun = template.replace(/\{command\}|\{sessionId\}/g, token =>
+        token === '{command}' ? initialCommand : this.quoteCommandArgument(sessionId!));
+      const agentType = customResumeAgentType(config);
+      return { commandToRun, isCliCommand: true, customState: {
+        ...customState, agentType, agentSessionId: sessionId, customResumeStarted: true,
+        isCliPanel: true, isCliReady: false, wasInterrupted: undefined,
+      } };
+    }
     const agentType = customState.agentType ?? resolveAgentTypeFromCommand(initialCommand);
+    if (customState.preserveLaunchCommand) {
+      return { commandToRun: initialCommand, customState, isCliCommand: Boolean(agentType) };
+    }
     if (!agentType) {
       return { commandToRun: initialCommand, customState, isCliCommand: false };
     }
@@ -301,7 +324,7 @@ export class TerminalPanelManager extends EventEmitter {
   ): CliLaunchResolution | undefined {
     if (
       !initialCommand.includes('--session-id') &&
-      !initialCommand.includes('--resume')
+      !/(?:^|\s)(?:--resume|--continue|-r|-c)(?:\s|=|$)/.test(initialCommand)
     ) {
       const existingClaudeSessionId = isValidUuid(customState.agentSessionId)
         ? customState.agentSessionId
@@ -324,7 +347,7 @@ export class TerminalPanelManager extends EventEmitter {
 
       return {
         commandToRun: canResumeClaudeSession
-          ? `claude --resume ${claudeSessionId} --dangerously-skip-permissions`
+          ? `${initialCommand} --resume ${this.quoteCommandArgument(claudeSessionId)}`
           : `${initialCommand} --session-id ${claudeSessionId}${initialPromptArg}`,
         customState: nextState,
         isCliCommand: true,
@@ -345,14 +368,12 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
   ): CliLaunchResolution | undefined {
-    if (customState.wasInterrupted) {
+    const resumeBase = codexResumeBase(initialCommand);
+    if (customState.wasInterrupted && resumeBase !== undefined) {
       nextState.wasInterrupted = undefined;
-      // Keep Pane Chat's helper-subagent flags (`-c 'agents.…'`) on resume;
-      // other options, such as a prompt in a custom command, don't apply.
-      const launchOptions = (initialCommand.match(/ -c 'agents\.(?:[^']|'\\'')*'/g) ?? []).join('');
       const commandToRun = customState.agentSessionId
-        ? `codex resume --yolo${launchOptions} ${customState.agentSessionId}`
-        : `codex resume --yolo${launchOptions}`;
+        ? `${resumeBase} resume ${this.quoteCommandArgument(customState.agentSessionId)}`
+        : `${resumeBase} resume`;
 
       if (customState.agentSessionId) {
         console.log(`[TerminalPanelManager] Resolved interrupted Codex panel ${panelId} to direct resume`);
@@ -391,7 +412,7 @@ export class TerminalPanelManager extends EventEmitter {
     nextState: TerminalPanelState,
     shellType?: string,
   ): CliLaunchResolution | undefined {
-    if (customState.wasInterrupted) {
+    if (customState.wasInterrupted && !/--resume\b|--continue\b/.test(initialCommand)) {
       nextState.wasInterrupted = undefined;
       const commandToRun = customState.agentSessionId
         ? buildCursorLaunchCommand({ baseCommand: initialCommand, resumeChatId: customState.agentSessionId })
@@ -549,21 +570,23 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private captureAgentSessionId(terminal: TerminalProcess, output: string): void {
-    if (terminal.agentType !== 'codex' && terminal.agentType !== 'cursor') return;
+    const panel = panelManager.getPanel(terminal.panelId);
+    if (!panel) return;
+    const customState = terminalCustomState(panel.state);
+    if (!customState.customResume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor') return;
 
     terminal.agentSessionScrapeBuffer = trimAnsiSafe(
       terminal.agentSessionScrapeBuffer + output,
       2000
     );
 
-    const agentSessionId = this.extractAgentSessionId(terminal.agentType, terminal.agentSessionScrapeBuffer);
+    const reported = customState.customResume?.mode === 'reported'
+      ? Array.from(terminal.agentSessionScrapeBuffer.matchAll(/(?:^|[\r\n])PANE_AGENT_SESSION_ID=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})(?=[\r\n])/g)).at(-1)?.[1]
+      : undefined;
+    const agentSessionId = reported ?? this.extractAgentSessionId(terminal.agentType, terminal.agentSessionScrapeBuffer);
     if (!agentSessionId) return;
 
-    const panel = panelManager.getPanel(terminal.panelId);
-    if (!panel) return;
-
-    const customState = terminalCustomState(panel.state);
-    const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand);
+    const agentType = this.resolveTerminalAgentType(customState);
     if (agentType !== terminal.agentType || customState.agentSessionId === agentSessionId) return;
 
     terminal.capturedAgentSessionId = agentSessionId;
@@ -861,6 +884,15 @@ export class TerminalPanelManager extends EventEmitter {
   async initializeTerminal(panel: ToolPanel, cwd: string, wslContext?: WSLContext | null, priority: number = 1, initialDimensions?: { cols: number; rows: number }): Promise<void> {
     if (this.terminals.has(panel.id)) {
       return;
+    }
+
+    const sessionState = terminalCustomState(panel.state);
+    if (sessionState.customResume === undefined && sessionState.initialCommand) {
+      const saved = getRuntimeConfigManager().getConfig().customCommands?.find(item => item.command === sessionState.initialCommand);
+      if (saved?.resume) {
+        sessionState.customResume = validateCustomCommandResume(saved.resume);
+        panel.state.customState = sessionState;
+      }
     }
 
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
@@ -1640,6 +1672,9 @@ export class TerminalPanelManager extends EventEmitter {
   private resolveTerminalAgentType(
     customState: TerminalPanelState | undefined,
   ): CliAgentType | undefined {
+    if (customState?.customResume) {
+      return customResumeAgentType(customState.customResume);
+    }
     return customState?.agentType ?? resolveAgentTypeFromCommand(customState?.initialCommand);
   }
 

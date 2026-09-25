@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
@@ -13,6 +14,7 @@ export interface TerminalShortcut {
 }
 
 interface CustomCommand {
+  resume?: CustomCommandResume | null;
   name: string;
   command: string;
 }

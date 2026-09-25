@@ -314,3 +314,27 @@ export function resolveAgentTypeFromCommand(
   const basename = executable?.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
   return basename ? AGENT_EXECUTABLES[basename] : undefined;
 }
+
+/** Inspect positional command tokens, never words inside option values. */
+const CODEX_SUBCOMMANDS = new Set(['agents', 'exec', 'e', 'review', 'login', 'logout', 'mcp', 'mcp-server', 'plugin', 'app-server', 'remote-control', 'app', 'completion', 'update', 'doctor', 'sandbox', 'debug', 'apply', 'a', 'resume', 'queue', 'archive', 'delete', 'migrate-rollouts', 'unarchive', 'fork', 'cloud', 'exec-server', 'features', 'help']);
+
+/**
+ * The Codex command a `resume` can be appended to: the command itself, minus
+ * any prompt (it would be read as a new first message). Undefined when the
+ * command already runs a subcommand or its shell syntax is unknown.
+ */
+export function codexResumeBase(command: string): string | undefined {
+  const tokens = tokenizeShellCommand(command, process.platform);
+  if (!tokens) return undefined; // Unknown shell syntax must remain untouched.
+  const operands = new Set(['-c', '--config', '-m', '--model', '-p', '--profile', '-C', '--cd', '-s', '--sandbox', '-a', '--ask-for-approval', '-i', '--image', '--remote', '--remote-auth-token-env', '--enable', '--disable', '--add-dir']);
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (operands.has(token)) { i += 1; continue; }
+    if (token.startsWith('-')) continue;
+    if (CODEX_SUBCOMMANDS.has(token)) return undefined;
+    return tokens.filter((_, index) => index !== i)
+      .map((part) => /^[\w@%+=:,./-]+$/.test(part) ? part : `"${part.replace(/([\\"$`])/g, '\\$1')}"`)
+      .join(' ');
+  }
+  return command;
+}
