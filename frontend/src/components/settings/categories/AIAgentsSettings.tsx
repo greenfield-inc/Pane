@@ -54,14 +54,26 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
           />
         </SettingRow>
         <SettingRow
+          settingId="mcp-registration"
+          label="Register Pane tools with Claude Code and Codex"
+          description="Adds a pane MCP server to your user-level Claude Code and Codex config, so agents in every repository can list, create, and drive Panes. Turning this off removes the entry."
+          saveState={persistence.saveStates['mcp-registration']}
+        >
+          <ImmediateToggle
+            label="Register Pane tools with Claude Code and Codex"
+            value={config.agentContext?.registerMcp !== false}
+            onSave={(value) => persistence.saveConfig('mcp-registration', { agentContext: { registerMcp: value } })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="agent-context"
           label="Publish Pane instructions to AGENTS.md"
-          description="Adds a managed block to active repositories so coding agents can discover RunPane commands."
+          description="Adds a managed block to the active repository's AGENTS.md for agents that don't use MCP. Turning this off removes the block from all saved repositories."
           saveState={persistence.saveStates['agent-context']}
         >
           <ImmediateToggle
             label="Publish Pane instructions to AGENTS.md"
-            value={config.agentContext?.managedAgentsMd !== false}
+            value={config.agentContext?.managedAgentsMd === true}
             onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
           />
         </SettingRow>

@@ -215,6 +215,10 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_daemon_repair(parsed)
     if parsed.command == "agent-context":
         return run_agent_context(parsed)
+    if parsed.command == "mcp":
+        # The MCP server needs the Node MCP SDK, so only the npm package and the Pane app ship it.
+        print(help_text("mcp"), file=sys.stderr)
+        return 2
     if parsed.command == "repos list":
         return run_repos_list(parsed)
     if parsed.command == "repos add":

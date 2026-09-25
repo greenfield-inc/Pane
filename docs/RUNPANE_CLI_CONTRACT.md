@@ -102,6 +102,7 @@ runpane doctor --json
 runpane daemon repair --pane-dir ~/.pane_remote --yes --json
 runpane agent-context
 runpane agent-context --command "panes create" --json
+runpane mcp
 runpane repos list --json
 runpane repos add --path /path/to/repo --name Pane --yes --json
 runpane panes list --repo active --json
@@ -149,6 +150,8 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 `runpane agent-context` prints a brief, token-efficient command schema for coding agents without connecting to the Pane daemon.
 
 `runpane agent-context --command "panes create"` prints the detailed definition for one command. Add `--json` for machine-readable output.
+
+`runpane mcp` runs a stdio MCP server whose tools are generated from this contract: every command with result `jsonSchemas` becomes a tool that runs `runpane <command> --json` and returns its output. Only the npm package and the Pane app include it; the Python wrapper prints how to run it with Node and exits non-zero.
 
 `runpane repos list` connects to the running local Pane daemon and prints saved repository records.
 

@@ -121,7 +121,7 @@ Each of these is a small thing. Together they compound fast.
 |---|---|---|
 | **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, loads local Pane orchestration skills, and can coordinate Claude, Codex, or Cursor across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
-| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, and open follow-up panes for issues or tasks. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) |
+| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, and open follow-up panes for issues or tasks. Claude Code and Codex get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
@@ -228,7 +228,7 @@ runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick
 
 `runpane agent-context` is token-efficient by default and prints only command names, arguments, and safe usage notes. Agents can lazy-load full details for a specific command with `runpane agent-context --command "panes create" --json`.
 
-Pane can also manage a short `AGENTS.md` block in saved repositories so agent CLIs know the developer is using Pane and can discover the CLI contract without bloating their context.
+Pane also registers a `pane` MCP server with Claude Code and Codex, so agents in every repository get these commands as tools without any setup. You can turn this off in Settings → AI & Agents. Other MCP clients can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
 
 See [Runpane CLI Contract](docs/RUNPANE_CLI_CONTRACT.md) for the full schema and automation examples.
 

@@ -169,6 +169,13 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "mcp",
+      "summary": "Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.",
+      "usage": [
+        "runpane mcp"
+      ]
+    },
+    {
       "name": "repos list",
       "summary": "List repositories saved in the running Pane app.",
       "usage": [
@@ -878,6 +885,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane doctor --report --body-file <path|->",
         "  runpane daemon repair [--pane-dir <path>] [--yes] [--json]",
         "  runpane agent-context [--json]",
+        "  runpane mcp",
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -1322,6 +1330,17 @@ export const RUNPANE_CONTRACT = {
         "  runpane agent-context --command \"panes create\"",
         "  runpane agent-context --command \"panes create\" --json"
       ],
+      "mcp": [
+        "Usage:",
+        "  runpane mcp",
+        "",
+        "Runs the Pane MCP server over stdio. Each runpane command with a JSON result becomes a tool that returns the same JSON as `runpane <command> --json`; mutating tools need `yes: true`.",
+        "Pane registers this server with Claude Code and Codex automatically (Settings > AI & Agents). To register it by hand:",
+        "  claude mcp add --scope user pane -- npx --yes runpane@latest mcp",
+        "  codex mcp add pane -- npx --yes runpane@latest mcp",
+        "",
+        "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it."
+      ],
       "agents doctor": [
         "Usage:",
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
@@ -1516,6 +1535,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane doctor --report --body-file <path|->",
         "  runpane daemon repair [--pane-dir <path>] [--yes] [--json]",
         "  runpane agent-context [--json]",
+        "  runpane mcp",
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -1941,6 +1961,13 @@ export const RUNPANE_CONTRACT = {
         "  runpane agent-context --command \"panes create\"",
         "  runpane agent-context --command \"panes create\" --json"
       ],
+      "mcp": [
+        "Usage:",
+        "  runpane mcp",
+        "",
+        "The Pane MCP server ships in the npm package and inside the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest mcp"
+      ],
       "agents doctor": [
         "Usage:",
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
@@ -2190,6 +2217,7 @@ export const RUNPANE_CONTRACT = {
       "runpane daemon repair --pane-dir ~/.pane_remote --yes --json",
       "runpane agent-context",
       "runpane agent-context --command \"panes create\" --json",
+      "runpane mcp",
       "runpane repos list --json",
       "runpane repos add --path /path/to/repo --name Pane --yes --json",
       "runpane panes list --repo active --json",
@@ -2227,6 +2255,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane daemon repair` rewrites and restarts only the managed remote-daemon launcher/service. It never creates pairing credentials, changes tunnels, or downloads Pane; doctor only recommends it and never runs it automatically.",
       "`runpane agent-context` prints a brief, token-efficient command schema for coding agents without connecting to the Pane daemon.",
       "`runpane agent-context --command \"panes create\"` prints the detailed definition for one command. Add `--json` for machine-readable output.",
+      "`runpane mcp` runs a stdio MCP server whose tools are generated from this contract: every command with result `jsonSchemas` becomes a tool that runs `runpane <command> --json` and returns its output. Only the npm package and the Pane app include it; the Python wrapper prints how to run it with Node and exits non-zero.",
       "`runpane repos list` connects to the running local Pane daemon and prints saved repository records.",
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
@@ -6412,6 +6441,22 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Default output is brief so AGENTS.md can point here without bloating context.",
           "`--command` accepts canonical spaced names and common copied forms, including `panes.create` and `runpane panes create`."
+        ]
+      },
+      "mcp": {
+        "name": "mcp",
+        "summary": "Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.",
+        "details": "Use this to register Pane with an MCP client. Pane registers it with Claude Code and Codex automatically; each tool mirrors one runpane command and returns its --json result.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [],
+        "examples": [
+          "claude mcp add --scope user pane -- npx --yes runpane@latest mcp",
+          "codex mcp add pane -- npx --yes runpane@latest mcp"
+        ],
+        "notes": [
+          "Only the npm package and the Pane app include the MCP server; the Python package prints how to run it with Node.",
+          "Mutating tools take `yes: true`, the same confirmation as the CLI's --yes."
         ]
       },
       "repos list": {

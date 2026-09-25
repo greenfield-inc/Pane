@@ -7,7 +7,8 @@ import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
-import { ensureProjectAgentContext } from '../services/agentContextManager';
+import { ensureProjectAgentContext, removeProjectAgentContext } from '../services/agentContextManager';
+import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { AppearanceValidationError } from '../../../shared/types/appearance';
 
@@ -56,6 +57,8 @@ export function registerConfigHandlers(
                                updates.claudeExecutablePath !== oldConfig.claudeExecutablePath;
       const managedAgentsMdChanged = updates.agentContext?.managedAgentsMd !== undefined
         && updates.agentContext.managedAgentsMd !== oldConfig.agentContext?.managedAgentsMd;
+      const registerMcpChanged = updates.agentContext?.registerMcp !== undefined
+        && updates.agentContext.registerMcp !== (oldConfig.agentContext?.registerMcp !== false);
 
       const updatedConfig = await configManager.updateConfig(updates);
 
@@ -72,17 +75,30 @@ export function registerConfigHandlers(
       if (managedAgentsMdChanged) {
         const nextConfig = configManager.getConfig();
         const activeProject = sessionManager.getActiveProject();
-        const projects = nextConfig.agentContext?.managedAgentsMd === false
+        // Turning the setting off is the one explicit cleanup of existing blocks.
+        const removing = nextConfig.agentContext?.managedAgentsMd !== true;
+        const projects = removing
           ? databaseService.getAllProjects()
           : activeProject ? [activeProject] : [];
 
         for (const project of projects) {
           try {
-            await ensureProjectAgentContext(project, nextConfig);
+            const result = removing
+              ? await removeProjectAgentContext(project)
+              : await ensureProjectAgentContext(project, nextConfig);
+            if (result.removed) console.log(`[Config] Removed Pane's AGENTS.md block from ${result.filePath}`);
           } catch (error) {
             console.warn('[Config] Failed to update Pane agent context after setting change:', error);
           }
         }
+      }
+
+      if (registerMcpChanged) {
+        void syncPaneMcpForApp({
+          isPackaged: app.isPackaged,
+          config: configManager.getConfig(),
+          projects: databaseService.getAllProjects(),
+        }).catch((error) => console.warn('[PaneMcp] Registration update failed:', error));
       }
 
       // Apply UI scale live

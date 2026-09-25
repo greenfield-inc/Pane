@@ -23,6 +23,19 @@ runpane setup
 The wizard can install Pane on this machine, configure this machine as a remote
 host, update Pane, or run diagnostics.
 
+## MCP Server
+
+`runpane mcp` runs a stdio MCP server whose tools mirror the `runpane`
+commands, generated from the CLI contract. The Pane desktop app registers it
+with Claude Code and Codex automatically. To register it yourself:
+
+```bash
+claude mcp add --scope user pane -- npx --yes runpane@latest mcp
+codex mcp add pane -- npx --yes runpane@latest mcp
+```
+
+See [docs/PANE_MCP.md](https://github.com/greenfield-inc/Pane/blob/main/docs/PANE_MCP.md).
+
 ## Developing This Repository
 
 When debugging RunPane from a Pane repository checkout, prefer the built local

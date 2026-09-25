@@ -178,6 +178,7 @@ jobs:
     - run: pnpm run check:runpane-package-versions
     - run: pnpm --filter runpane build
     - run: pnpm run test:runpane-contract
+    - run: pnpm run test:runpane-mcp
     - run: pnpm run test:runpane-package-smoke
 
   publish-npm:

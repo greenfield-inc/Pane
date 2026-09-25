@@ -117,6 +117,11 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return runAgentContext(parsed);
   }
 
+  if (parsed.command === 'mcp') {
+    const { runMcpServer } = await import('./mcp');
+    return runMcpServer();
+  }
+
   if (parsed.command === 'repos list') {
     return runReposList(parsed);
   }

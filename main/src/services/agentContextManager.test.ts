@@ -6,6 +6,7 @@ import {
   ensureProjectAgentContext,
   PANE_AGENT_CONTEXT_END,
   PANE_AGENT_CONTEXT_START,
+  removeProjectAgentContext,
 } from './agentContextManager';
 
 const tempDirs: string[] = [];
@@ -34,7 +35,7 @@ describe('agentContextManager', () => {
     }
   });
 
-  it('creates AGENTS.md with a managed Pane block by default', async () => {
+  it('creates AGENTS.md with a managed Pane block when the setting is on', async () => {
     const projectPath = await createTempProject();
 
     const result = await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
@@ -93,21 +94,38 @@ describe('agentContextManager', () => {
     expect(content.match(/pane-agent-context:start/g)).toHaveLength(1);
   });
 
-  it('removes the Pane-owned block when managed AGENTS is disabled', async () => {
+  const agentsWithBlock = [
+    '# User Top',
+    '',
+    PANE_AGENT_CONTEXT_START,
+    'old managed content',
+    PANE_AGENT_CONTEXT_END,
+    '',
+    '# User Bottom',
+    ''
+  ].join('\n');
+
+  it('neither writes nor removes a block while the setting is off', async () => {
     const projectPath = await createTempProject();
     const agentsPath = path.join(projectPath, 'AGENTS.md');
-    await fs.writeFile(agentsPath, [
-      '# User Top',
-      '',
-      PANE_AGENT_CONTEXT_START,
-      'old managed content',
-      PANE_AGENT_CONTEXT_END,
-      '',
-      '# User Bottom',
-      ''
-    ].join('\n'), 'utf8');
+    await fs.writeFile(agentsPath, agentsWithBlock, 'utf8');
+    const emptyProjectPath = await createTempProject();
 
-    const result = await ensureProjectAgentContext({ path: projectPath }, disabledConfig());
+    const existing = await ensureProjectAgentContext({ path: projectPath }, disabledConfig());
+    const fresh = await ensureProjectAgentContext({ path: emptyProjectPath }, {});
+
+    expect(existing).toMatchObject({ changed: false, skipped: 'disabled' });
+    expect(fresh).toMatchObject({ changed: false, skipped: 'disabled' });
+    await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(agentsWithBlock);
+    await expect(fs.readdir(emptyProjectPath)).resolves.toEqual([]);
+  });
+
+  it('removes only the Pane-owned block on explicit removal', async () => {
+    const projectPath = await createTempProject();
+    const agentsPath = path.join(projectPath, 'AGENTS.md');
+    await fs.writeFile(agentsPath, agentsWithBlock, 'utf8');
+
+    const result = await removeProjectAgentContext({ path: projectPath });
 
     expect(result).toMatchObject({ changed: true, removed: true, filePath: agentsPath });
     const content = await fs.readFile(agentsPath, 'utf8');
@@ -116,12 +134,12 @@ describe('agentContextManager', () => {
     expect(content).not.toContain(PANE_AGENT_CONTEXT_START);
   });
 
-  it('keeps an otherwise empty AGENTS.md file when disabling', async () => {
+  it('keeps an otherwise empty AGENTS.md file when removing the block', async () => {
     const projectPath = await createTempProject();
     const agentsPath = path.join(projectPath, 'AGENTS.md');
 
     await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
-    await ensureProjectAgentContext({ path: projectPath }, disabledConfig());
+    await removeProjectAgentContext({ path: projectPath });
 
     await expect(fs.access(agentsPath)).resolves.toBeUndefined();
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe('');

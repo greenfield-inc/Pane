@@ -108,6 +108,7 @@ import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
+import { syncPaneMcpForApp } from './services/paneMcpRegistration';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
@@ -1162,6 +1163,13 @@ if (launchRemoteSetup) {
     void warmShellPath();
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    setTimeout(() => {
+      void syncPaneMcpForApp({
+        isPackaged: app.isPackaged,
+        config: configManager.getConfig(),
+        projects: databaseService.getAllProjects(),
+      }).catch((error) => console.warn('[PaneMcp] Registration failed:', error));
+    }, 5_000);
     console.log('[Main] Services initialized, creating window...');
 
   // Register before any renderer loads. useNotifications pulls this on mount

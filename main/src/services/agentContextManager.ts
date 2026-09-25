@@ -23,13 +23,13 @@ export async function ensureProjectAgentContext(
   project: Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>,
   config: Pick<AppConfig, 'agentContext'>,
 ): Promise<AgentContextWriteResult> {
-  const root = resolveProjectRoot(project);
-  const enabled = config.agentContext?.managedAgentsMd !== false;
-
-  if (!enabled) {
-    return removeProjectAgentContext(root);
+  // Off by default: Pane registers its MCP server instead. Existing blocks are left alone here;
+  // only turning the setting off removes them (removeProjectAgentContext).
+  if (config.agentContext?.managedAgentsMd !== true) {
+    return { changed: false, skipped: 'disabled' };
   }
 
+  const root = resolveProjectRoot(project);
   const filePath = await resolveAgentsFilePath(root);
   if (!filePath) {
     return { changed: false, skipped: 'unsafe-file' };
@@ -85,7 +85,11 @@ function removeManagedBlock(existing: string): string {
   return next.trim().length === 0 ? '' : next;
 }
 
-async function removeProjectAgentContext(root: string): Promise<AgentContextWriteResult> {
+/** Removes Pane's managed block from a project's AGENTS.md, if present. */
+export async function removeProjectAgentContext(
+  project: Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>,
+): Promise<AgentContextWriteResult> {
+  const root = resolveProjectRoot(project);
   const { filePath } = await findExistingAgentsFile(root);
   if (!filePath) {
     return { changed: false, skipped: 'disabled' };
