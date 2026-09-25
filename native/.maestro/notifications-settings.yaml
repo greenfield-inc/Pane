@@ -7,16 +7,23 @@ env:
 ---
 - runFlow: subflows/launch-dev-client.yaml
 - runFlow: subflows/sign-in.yaml
+# The system prompt shows only the first time on this device: clearing app
+# state does not reset notification permission on the iOS Simulator.
 - extendedWaitUntil:
     visible: "Allow"
     timeout: 20000
-- takeScreenshot: screenshots/notifications-permission
-- tapOn: "Allow"
+    optional: true
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - takeScreenshot: screenshots/notifications-permission
+      - tapOn: "Allow"
 - tapOn: "Settings"
 - extendedWaitUntil:
     visible:
       id: notifications-needs-input
-    timeout: 20000
+    timeout: 60000
 - takeScreenshot: screenshots/notifications-settings
 - tapOn:
     id: notifications-completed

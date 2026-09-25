@@ -24,6 +24,9 @@ export function ListRow({ title, subtitle, leading, trailing, onPress, onLongPre
   return (
     <Pressable
       testID={testID}
+      // A row without an action must not group its children, or it hides a
+      // trailing control (a Switch) from VoiceOver and TalkBack.
+      accessible={Boolean(onPress || onLongPress)}
       accessibilityRole={onPress ? 'button' : undefined}
       // Explicit, so icon symbol names don't leak into the merged label.
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}

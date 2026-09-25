@@ -30,7 +30,7 @@ env:
     visible:
       id: pane-detail-screen
     timeout: 30000
-- assertVisible: ".*${PANE_ID}.*"
+- assertVisible: "${PANE_NAME}"
 - takeScreenshot: screenshots/pane-link-opened
 # Back lands on host A's pane list, not on a screen left over from host B.
 - swipe:
