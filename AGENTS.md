@@ -22,8 +22,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then
   `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch
   mode); run `pnpm electron:rebuild` before starting the app again.
-  `pnpm test:ci:minimal` launches the app, so set `PANE_DIR` (once:
-  `pnpm exec playwright install chromium`).
+  Playwright: install the browser once with `pnpm exec playwright install
+  chromium`; `pnpm test:ci:minimal` launches the app, so set `PANE_DIR`.
 
 ## Rules
 

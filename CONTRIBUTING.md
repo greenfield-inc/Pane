@@ -19,6 +19,8 @@ have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
    ```bash
    pnpm run setup
    ```
+   Setup warns that it can't link `node_modules/.bin/runpane` (the local CLI
+   isn't built yet) and lists ignored build scripts. Both are harmless.
 3. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
