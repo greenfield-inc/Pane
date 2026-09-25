@@ -23,10 +23,11 @@ import {
   onPtyBytes as flowControlOnPtyBytes,
 } from '../ptyHost/flowControl';
 import { sharedEmulatorThread, type RemoteTerminalEmulator, type TerminalEmulatorHostConnection } from './terminalEmulatorClient';
+import type { ScreenState } from './terminalEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
 import { detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
-import type { AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
 
 const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
@@ -228,6 +229,8 @@ interface TerminalProcess {
   isAlternateScreen: boolean;
   /** CLI agent driving this panel, when any — selects the status-detection manifest. */
   agentType?: CliAgentType;
+  /** Last status scan, reused while the emulator pushes no new screen. */
+  lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   // DEC Mode 2026 synchronized-output block tracking — persists across chunks
   inSyncBlock: boolean;
   /** Alt-screen state as seen by filterSyncBlockClears (stream-ordered, may
@@ -1727,12 +1730,18 @@ export class TerminalPanelManager extends EventEmitter {
         if (!emulator) continue;
 
         // The pushed screen is at most ~50 ms old, well inside this poll's cadence.
+        // The emulator only pushes a new object when the screen changed, so an
+        // idle panel reuses its last detection instead of rescanning.
         const screen = emulator.state;
-        const detection = detectAgentState(manifest, {
-          screen: screen.screenText,
-          oscTitle: screen.oscTitle,
-          oscProgress: screen.oscProgress,
-        });
+        let detection = terminal.lastStatusScan?.screen === screen ? terminal.lastStatusScan.detection : null;
+        if (!detection) {
+          detection = detectAgentState(manifest, {
+            screen: screen.screenText,
+            oscTitle: screen.oscTitle,
+            oscProgress: screen.oscProgress,
+          });
+          terminal.lastStatusScan = { screen, detection };
+        }
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
         if (next) {
           const reason = next === detection.state ? detection.matchedRuleId : 'pty_activity';

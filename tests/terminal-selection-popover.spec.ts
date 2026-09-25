@@ -184,6 +184,10 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
+  await expect(terminal).toBeVisible();
+  // Wait after xterm mounts: initial restore clears any earlier selection.
+  await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await expect(page.getByRole('tabpanel').getByTestId('terminal-activation-mask')).toHaveCount(0);
   await selectFirstLine(page, terminal);
   await terminal.locator('.xterm-helper-textarea').focus();
   await page.keyboard.press('Control+Shift+C');

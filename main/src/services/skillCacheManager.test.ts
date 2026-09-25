@@ -554,6 +554,30 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     await expect(fs.readFile(usersAgent, 'utf8')).resolves.toBe('# old\n');
   });
 
+  it('leaves an unchanged install alone on the next launch', async () => {
+    await new SkillCacheManager().start();
+    const installed = path.join(new SkillCacheManager().claudeProjectSkillsRoot, 'runpane', 'SKILL.md');
+    await fs.writeFile(installed, '# untouched marker\n', 'utf8');
+
+    const relaunched = new SkillCacheManager();
+    await relaunched.start();
+
+    await expect(fs.readFile(installed, 'utf8')).resolves.toBe('# untouched marker\n');
+    if (process.platform !== 'win32') {
+      expect(relaunched.launchCommand('codex')).toContain('agents.explorer.config_file=');
+    }
+  });
+
+  it('reinstalls when an installed skill folder has gone missing', async () => {
+    const first = new SkillCacheManager();
+    await first.start();
+    await fs.rm(path.join(first.codexProjectSkillsRoot, 'runpane'), { recursive: true, force: true });
+
+    await new SkillCacheManager().start();
+
+    await expect(fs.access(path.join(first.codexProjectSkillsRoot, 'runpane', 'SKILL.md'))).resolves.toBeUndefined();
+  });
+
   it('lets concurrent openers share one install', async () => {
     const manager = new SkillCacheManager();
 

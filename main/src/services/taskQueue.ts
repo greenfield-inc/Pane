@@ -1,4 +1,5 @@
-import Bull from 'bull';
+import type Bull from 'bull';
+import { createRequire } from 'node:module';
 import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { SimpleQueue } from './simpleTaskQueue';
 import type { Session } from '../types/session';
@@ -20,6 +21,8 @@ import { detectProjectConfig } from './projectConfigDetector';
 import { emitFolderCreatedEvent } from './folderEvents';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { withLock } from '../utils/mutex';
+
+const loadQueueDependency = createRequire(__filename);
 
 interface TaskQueueOptions {
   sessionManager: SessionManager;
@@ -128,6 +131,9 @@ export class TaskQueue {
       } : undefined;
       
       console.log('[TaskQueue] Using Bull with Redis:', process.env.REDIS_URL || 'default');
+      // Loaded only here: Bull and ioredis are ~75 modules that every launch
+      // without Redis would otherwise compile and run for nothing.
+      const Bull: typeof import('bull') = loadQueueDependency('bull');
 
       this.sessionQueue = new Bull('session-creation', redisOptions || {
         defaultJobOptions: {

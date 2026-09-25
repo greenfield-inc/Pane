@@ -3,13 +3,6 @@ import { expectNoAxeViolations } from './axeTest';
 import { installElectronApiMock } from './electronApiMock';
 import type { JsonValue } from '../shared/validation/boundaryDecoder';
 
-test.beforeEach(async ({ page }) => {
-  // Font CDN availability must not block loading the application stylesheet.
-  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({
-    contentType: 'text/css', body: '',
-  }));
-});
-
 const project = {
   id: 1,
   name: 'Accessibility fixture',

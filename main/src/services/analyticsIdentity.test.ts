@@ -4,11 +4,11 @@ import * as path from 'path';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { readWebAttribution, resolveAnalyticsIdentity } from './analyticsIdentity';
 
-const runCommand = vi.fn<(command: string, args: string[]) => string | undefined>();
+const runCommand = vi.fn<(command: string, args: string[]) => Promise<string | undefined>>();
 const dependencies = { runCommand };
 
 function mockCommandOutput(outputs: Record<string, string>): void {
-  runCommand.mockImplementation((command: string, args: string[]) => {
+  runCommand.mockImplementation(async (command: string, args: string[]) => {
     const key = `${command} ${args.join(' ')}`;
     if (key in outputs) {
       return outputs[key].trim() || undefined;
@@ -22,10 +22,10 @@ describe('resolveAnalyticsIdentity', () => {
     vi.resetAllMocks();
   });
 
-  it('uses the stable install ID when no git or GitHub identity is available', () => {
+  it('uses the stable install ID when no git or GitHub identity is available', async () => {
     mockCommandOutput({});
 
-    expect(resolveAnalyticsIdentity(undefined, 'install_123', dependencies)).toEqual({
+    expect(await resolveAnalyticsIdentity(undefined, 'install_123', dependencies)).toEqual({
       distinctId: 'install:install_123',
       identitySource: 'anonymous',
       installId: 'install_123',
@@ -37,34 +37,34 @@ describe('resolveAnalyticsIdentity', () => {
     });
   });
 
-  it('keeps an existing PostHog ID until a stronger identity is available', () => {
+  it('keeps an existing PostHog ID until a stronger identity is available', async () => {
     mockCommandOutput({});
 
-    expect(resolveAnalyticsIdentity('existing_distinct', 'install_123', dependencies)).toMatchObject({
+    expect(await resolveAnalyticsIdentity('existing_distinct', 'install_123', dependencies)).toMatchObject({
       distinctId: 'existing_distinct',
       identitySource: 'posthog',
       installId: 'install_123',
     });
   });
 
-  it('keeps the install-ID fallback classified as anonymous on later launches', () => {
+  it('keeps the install-ID fallback classified as anonymous on later launches', async () => {
     mockCommandOutput({});
 
-    expect(resolveAnalyticsIdentity('install:install_123', 'install_123', dependencies)).toMatchObject({
+    expect(await resolveAnalyticsIdentity('install:install_123', 'install_123', dependencies)).toMatchObject({
       distinctId: 'install:install_123',
       identitySource: 'anonymous',
       installId: 'install_123',
     });
   });
 
-  it('prefers email identity and hashes the normalized email', () => {
+  it('prefers email identity and hashes the normalized email', async () => {
     mockCommandOutput({
       'gh api user --jq .login': 'octocat\n',
       'git config --global user.email': 'Dev@Example.COM\n',
       'git config --global user.name': 'Dev User\n',
     });
 
-    const identity = resolveAnalyticsIdentity(undefined, 'install_123', dependencies);
+    const identity = await resolveAnalyticsIdentity(undefined, 'install_123', dependencies);
 
     expect(identity).toMatchObject({
       distinctId: 'email:dev@example.com',

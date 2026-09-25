@@ -223,24 +223,32 @@ const IDLE_FALLBACK: AgentDetectionResult = {
   matchedRuleId: null,
 };
 
+const rulesByPriority = new WeakMap<AgentManifest, ManifestRule[]>();
+
+/** Rules highest priority first; the stable sort keeps ties in manifest order. */
+function sortedRules(manifest: AgentManifest): ManifestRule[] {
+  let rules = rulesByPriority.get(manifest);
+  if (!rules) {
+    rules = [...manifest.rules].sort((a, b) => b.priority - a.priority);
+    rulesByPriority.set(manifest, rules);
+  }
+  return rules;
+}
+
 /**
  * Evaluate a manifest against a snapshot. Returns the highest-priority matching
  * rule's state (ties resolved to the earlier rule); with no match, a known agent
- * falls back to `idle`.
+ * falls back to `idle`. Rules are tried highest priority first and the first
+ * match wins, so a cheap OSC-title rule settles a busy agent without reading the
+ * screen.
  */
 export function detectAgentState(
   manifest: AgentManifest,
   input: AgentDetectionInput,
 ): AgentDetectionResult {
-  let winner: ManifestRule | null = null;
-  for (const rule of manifest.rules) {
-    if (!ruleMatches(rule, extractRegion(input, rule.region))) continue;
-    if (winner === null || rule.priority > winner.priority) {
-      winner = rule;
-    }
-  }
+  const winner = sortedRules(manifest).find((rule) => ruleMatches(rule, extractRegion(input, rule.region)));
 
-  if (winner === null) return { ...IDLE_FALLBACK };
+  if (winner === undefined) return { ...IDLE_FALLBACK };
 
   return {
     state: winner.state,

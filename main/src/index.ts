@@ -113,6 +113,7 @@ import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
+import { warmShellPath } from './utils/shellPath';
 
 export let mainWindow: BrowserWindow | null = null;
 
@@ -1058,7 +1059,7 @@ async function initializeServices() {
           ? analyticsLaunchContext.previousVersion
           : databaseService.getLastAppVersion();
       const isFirstLaunch = analyticsLaunchContext.isFirstLaunch ?? previousVersion === null;
-      const identity = resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId(), installId);
+      const identity = await resolveAnalyticsIdentity(configManager.getAnalyticsDistinctId(), installId);
       const webDistinctId = readWebAttribution(getAppDirectory());
       if (webDistinctId) {
         identity.webDistinctId = webDistinctId;
@@ -1156,6 +1157,9 @@ if (launchRemoteSetup) {
     appStartTime = Date.now();
 
     console.log('[Main] App is ready, initializing services...');
+    // Probe the login-shell PATH while services start, so the first command
+    // after the window opens reads the cache instead of blocking on the shell.
+    void warmShellPath();
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     console.log('[Main] Services initialized, creating window...');
@@ -1277,11 +1281,11 @@ if (launchRemoteSetup) {
     console.error('[Main] Failed to track app lifecycle events:', error);
   }
 
-  // Configure auto-updater
-  setupAutoUpdater(() => mainWindow);
-
-  // Check for updates after window is created
+  // Check for updates after window is created. The auto-updater is set up
+  // here too: loading electron-updater blocks the main thread, which would
+  // hold up the renderer's first requests if it ran as the window opens.
   setTimeout(async () => {
+    setupAutoUpdater(() => mainWindow);
     console.log('[Main] Performing startup version check...');
     await versionChecker.checkOnStartup();
   }, 1000); // Small delay to ensure window is fully ready

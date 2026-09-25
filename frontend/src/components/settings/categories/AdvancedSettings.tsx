@@ -5,6 +5,17 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
+import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
+import type { IPCResponse } from '../../../utils/api';
+
+const JOURNEY_LABELS = {
+  app_launch: 'App launch',
+  create_pane: 'Create a pane',
+  switch_pane: 'Open or switch a pane',
+  send_prompt: 'Send a prompt',
+} satisfies Record<Journey, string>;
+
+const formatDuration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 
 interface AdvancedSettingsProps {
   persistence: SettingsPersistence;
@@ -18,6 +29,13 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
   const persistedPathsKey = JSON.stringify(persistedPaths);
   const [pathsText, setPathsText] = useState(persistedPaths.join('\n'));
   const dirty = pathsText !== persistedPaths.join('\n');
+  const [journeyTimings, setJourneyTimings] = useState<JourneyTimingSummary[] | null>(null);
+
+  useEffect(() => {
+    void window.electronAPI.invoke('journeys:summary')
+      .then((response: IPCResponse<JourneyTimingSummary[]>) => setJourneyTimings(response.success ? response.data ?? [] : []))
+      .catch(() => setJourneyTimings([]));
+  }, []);
 
   // SAFETY: App-owned storage writes this value through the matching typed serializer.
   useEffect(() => setPathsText((JSON.parse(persistedPathsKey) as string[]).join('\n')), [persistedPathsKey]);
@@ -56,6 +74,37 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             value={config.devMode === true}
             onSave={(value) => persistence.saveConfig('developer-mode', { devMode: value })}
           />
+        </SettingRow>
+        <SettingRow
+          settingId="journey-timings"
+          label="Journey timings"
+          description="Time from your action to the result on screen, over the last 200 runs of each. Never leaves this device."
+          align="start"
+        >
+          {journeyTimings?.length ? (
+            <table className="text-xs text-text-secondary tabular-nums">
+              <thead className="text-text-tertiary">
+                <tr>
+                  <th className="pr-4 text-left font-medium">Journey</th>
+                  <th className="px-2 text-right font-medium">p50</th>
+                  <th className="px-2 text-right font-medium">p75</th>
+                  <th className="pl-2 text-right font-medium">Runs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {journeyTimings.map((timing) => (
+                  <tr key={timing.journey}>
+                    <td className="pr-4">{JOURNEY_LABELS[timing.journey]}</td>
+                    <td className="px-2 text-right">{formatDuration(timing.p50Ms)}</td>
+                    <td className="px-2 text-right">{formatDuration(timing.p75Ms)}</td>
+                    <td className="pl-2 text-right">{timing.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <span className="text-xs text-text-tertiary">{journeyTimings ? 'No timings yet' : 'Loading'}</span>
+          )}
         </SettingRow>
       </SettingsSection>
 
