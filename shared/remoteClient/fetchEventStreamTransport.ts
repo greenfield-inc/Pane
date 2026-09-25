@@ -12,8 +12,9 @@ import {
 
 /**
  * Sends the token only in the Authorization header and reads `/events` from
- * a streaming fetch body. React Native's built-in fetch cannot stream, so
- * pass `fetch` from `expo/fetch` there.
+ * a streaming fetch body. React Native's XHR-based fetch resolves only after
+ * the whole body arrives, so pass `fetch` from `expo/fetch` in the app (Expo
+ * SDK 57 also installs it as the global fetch).
  *
  * The client never sets Accept-Encoding. The platform HTTP stack adds it and
  * then inflates the gzip stream itself (browsers, NSURLSession, OkHttp);
@@ -69,7 +70,7 @@ export async function readEventStreamResponse(
   }
 }
 
-function authHeaders(context: RemoteRequestContext): Record<string, string> {
+function authHeaders(context: RemoteRequestContext) {
   return {
     Authorization: `Bearer ${context.token}`,
     'X-Pane-Remote-Runtime-Id': context.runtimeId,
@@ -81,7 +82,7 @@ function authHeaders(context: RemoteRequestContext): Record<string, string> {
  * URL and headers for the daemon's voice WebSocket. React Native's WebSocket
  * takes headers as its third argument: `new WebSocket(url, undefined, { headers })`.
  */
-export function createVoiceSocketRequest(context: RemoteRequestContext): { url: string; headers: Record<string, string> } {
+export function createVoiceSocketRequest(context: RemoteRequestContext) {
   return {
     url: `${context.baseUrl.replace(/^http/, 'ws')}/voice/deepgram-stream`,
     headers: authHeaders(context),

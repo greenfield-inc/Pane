@@ -12,6 +12,7 @@ import {
   type RemoteDaemonClientEvent,
   type RemoteKeyValueStorage,
 } from '../../../shared/remoteClient';
+import type { PaneRemoteConnectionImportPayload } from '../../../shared/types/remoteDaemon';
 
 const PROFILE = {
   id: 'profile-1',
@@ -300,7 +301,7 @@ describe('RemoteDaemonClient invoke errors', () => {
 });
 
 describe('decodeRemoteConnectionCode', () => {
-  function code(payload: object): string {
+  function code(payload: Partial<PaneRemoteConnectionImportPayload>): string {
     return `pane-remote://${Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')}`;
   }
 
