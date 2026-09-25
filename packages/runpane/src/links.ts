@@ -4,6 +4,12 @@ import type { ParsedArgs } from './commands';
 const LINK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const REPO_ID = /^[1-9][0-9]{0,15}$/;
 
+/** A numeric repository id, as app channels and repo links take it. */
+export function parseRepoId(repo: string): number {
+  if (!REPO_ID.test(repo)) throw new Error('--repo must be a numeric repository id. Run `runpane repos list` to find it.');
+  return Number(repo);
+}
+
 interface LinkTarget {
   kind: 'pane' | 'repo' | 'session';
   id: string;
@@ -37,10 +43,7 @@ function linkTargetFrom(parsed: ParsedArgs): LinkTarget {
     throw new Error('--panel needs --pane: a panel link opens the panel inside its Pane.');
   }
   if (parsed.repo) {
-    if (!REPO_ID.test(parsed.repo)) {
-      throw new Error(`--repo must be a numeric repository id. Run \`runpane repos list\` to find it.`);
-    }
-    return { kind: 'repo', id: parsed.repo };
+    return { kind: 'repo', id: String(parseRepoId(parsed.repo)) };
   }
   const kind = parsed.paneId ? 'pane' : 'session';
   const id = requireId(parsed.paneId ?? parsed.sessionId, kind === 'pane' ? '--pane' : '--session', kind === 'pane' ? 'runpane panes list' : 'runpane sessions list');

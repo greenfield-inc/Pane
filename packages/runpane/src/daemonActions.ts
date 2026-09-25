@@ -4,19 +4,21 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './bou
 import type { ParsedArgs } from './commands';
 import { invokeDaemon } from './daemonClient';
 import { RUNPANE_CONTRACT } from './generated/contract';
-import { buildPaneLink } from './links';
+import { buildPaneLink, parseRepoId } from './links';
 
 interface DaemonAction {
   channel: string;
   args: readonly string[];
 }
 
+function contractEntry(command: string) {
+  return RUNPANE_CONTRACT.commands.find((entry) => entry.name === command);
+}
+
 /** The contract command's `daemonAction`, when it has one. */
 export function daemonActionFor(command: string): DaemonAction | undefined {
-  for (const entry of RUNPANE_CONTRACT.commands) {
-    if (entry.name === command && 'daemonAction' in entry) return entry.daemonAction;
-  }
-  return undefined;
+  const entry = contractEntry(command);
+  return entry && 'daemonAction' in entry ? entry.daemonAction : undefined;
 }
 
 // The flags a daemonAction may pass, and where the parser stores each one.
@@ -27,15 +29,8 @@ const FLAG_VALUES = new Map<string, (parsed: ParsedArgs) => string | number | un
   ['--url', (parsed) => parsed.url],
   ['--name', (parsed) => parsed.name],
   ['--folder', (parsed) => parsed.folder],
-  ['--repo', (parsed) => repoId(parsed.repo)],
+  ['--repo', (parsed) => (parsed.repo === undefined ? undefined : parseRepoId(parsed.repo))],
 ]);
-
-/** App channels take the numeric repository id. */
-function repoId(repo: string | undefined): number | undefined {
-  if (repo === undefined) return undefined;
-  if (!/^[1-9][0-9]*$/.test(repo)) throw new Error('--repo must be a numeric repository id. Run `runpane repos list` to find it.');
-  return Number(repo);
-}
 
 /**
  * Runs a contract command that maps straight onto a Pane daemon channel (the same
@@ -47,11 +42,14 @@ export async function runDaemonAction(parsed: ParsedArgs, action: DaemonAction):
     if (value === undefined) throw new Error(`runpane ${parsed.command} requires ${flag}.`);
     return value;
   });
-  if (isMutating(parsed.command)) await confirmMutation(parsed);
+  const entry = contractEntry(parsed.command);
+  const mutates = entry !== undefined && 'mutates' in entry && entry.mutates === true;
+  const additive = entry !== undefined && 'additive' in entry && entry.additive === true;
+  if (mutates) await confirmMutation(parsed);
   const response = await invokeDaemon(action.channel, args, boundary.json, { paneDir: parsed.paneDir });
   const result = normalizeResponse(response);
   // A destructive change to a Pane comes back with a link the user can open to review it.
-  if (result.ok && parsed.paneId && isMutating(parsed.command) && !isAdditive(parsed.command)) {
+  if (result.ok && parsed.paneId && mutates && !additive) {
     result.link = buildPaneLink({ kind: 'pane', id: parsed.paneId });
   }
   if (parsed.json) {
@@ -87,13 +85,6 @@ function normalizeResponse(response: JsonValue): DaemonActionResult {
   return result;
 }
 
-function isMutating(command: string): boolean {
-  return RUNPANE_CONTRACT.commands.some((entry) => entry.name === command && 'mutates' in entry && entry.mutates === true);
-}
-
-function isAdditive(command: string): boolean {
-  return RUNPANE_CONTRACT.commands.some((entry) => entry.name === command && 'additive' in entry && entry.additive === true);
-}
 
 /** Mutating commands need --yes outside an interactive terminal, like every runpane mutation. */
 export async function confirmMutation(parsed: ParsedArgs): Promise<void> {

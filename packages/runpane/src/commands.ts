@@ -644,6 +644,8 @@ export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
 }
 
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
+  // Every command that maps to a daemon channel takes local flags.
+  if (RUNPANE_CONTRACT.commands.some((entry) => entry.name === command && 'daemonAction' in entry)) return true;
   return command === 'doctor'
     || command === 'daemon repair'
     || command === 'repos list'
@@ -679,24 +681,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'agents start'
     || command === 'agents status'
     || command === 'agents send'
-    || command === 'panes git-status'
-    || command === 'panes commit'
-    || command === 'panes push'
-    || command === 'panes pull'
-    || command === 'panes rebase-main'
-    || command === 'panes restore'
-    || command === 'panes squash-rebase'
-    || command === 'panes stash'
-    || command === 'panes stash-pop'
-    || command === 'panes soft-reset'
-    || command === 'panes fetch'
-    || command === 'panes run-script'
-    || command === 'panes stop-script'
-    || command === 'panes move'
-    || command === 'folders list'
-    || command === 'folders create'
     || command === 'links create'
-    || command === 'links open'
     || command === 'docs search'
     || command === 'docs read'
     || command === 'mcp';

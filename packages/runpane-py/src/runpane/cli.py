@@ -851,6 +851,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
 
 
 def is_runpane_local_command(command: str) -> bool:
+    # Every command that maps to a daemon channel takes local flags.
+    if any(entry["name"] == command and "daemonAction" in entry for entry in RUNPANE_CONTRACT["commands"]):
+        return True
     return command in {
         "doctor",
         "daemon repair",
@@ -886,24 +889,7 @@ def is_runpane_local_command(command: str) -> bool:
         "agents start",
         "agents status",
         "agents send",
-        "panes git-status",
-        "panes commit",
-        "panes push",
-        "panes pull",
-        "panes rebase-main",
-        "panes restore",
-        "panes squash-rebase",
-        "panes stash",
-        "panes stash-pop",
-        "panes soft-reset",
-        "panes fetch",
-        "panes run-script",
-        "panes stop-script",
-        "panes move",
-        "folders list",
-        "folders create",
         "links create",
-        "links open",
         "docs search",
         "docs read",
         "mcp",

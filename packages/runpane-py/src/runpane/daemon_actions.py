@@ -10,6 +10,19 @@ from urllib.parse import urlencode
 from .daemon_client import invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
 
+LINK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
+
+
+def repo_id(repo: Optional[str]) -> Optional[int]:
+    """A numeric repository id, as app channels and repo links take it."""
+    if repo is None:
+        return None
+    if not REPO_ID.match(repo):
+        raise ValueError("--repo must be a numeric repository id. Run `runpane repos list` to find it.")
+    return int(repo)
+
+
 FLAG_VALUES = {
     "--pane": lambda parsed: parsed.pane_id,
     "--panel": lambda parsed: parsed.panel_id,
@@ -19,17 +32,6 @@ FLAG_VALUES = {
     "--folder": lambda parsed: parsed.folder,
     "--repo": lambda parsed: repo_id(parsed.repo),
 }
-
-
-def repo_id(repo: Optional[str]) -> Optional[int]:
-    """App channels take the numeric repository id."""
-    if repo is None:
-        return None
-    if not REPO_ID.match(repo):
-        raise ValueError("--repo must be a numeric repository id. Run `runpane repos list` to find it.")
-    return int(repo)
-LINK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
 
 
 def contract_command(name: str) -> Dict[str, Any]:
@@ -43,13 +45,13 @@ def run_daemon_action(parsed: Any, action: Dict[str, Any]) -> int:
         if value is None:
             raise ValueError(f"runpane {parsed.command} requires {flag}.")
         args.append(value)
-    if contract_command(parsed.command).get("mutates") and not parsed.yes:
+    spec = contract_command(parsed.command)
+    if spec.get("mutates") and not parsed.yes:
         if parsed.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
             raise ValueError(f"runpane {parsed.command} mutates Pane state. Rerun with --yes in non-interactive shells.")
         if input(f"Run {parsed.command}? [y/N] ").strip().lower() not in {"y", "yes"}:
             raise ValueError("Cancelled.")
     result = normalize_response(invoke_daemon(action["channel"], args, pane_dir=parsed.pane_dir))
-    spec = contract_command(parsed.command)
     # A destructive change to a Pane comes back with a link the user can open to review it.
     if result["ok"] and parsed.pane_id and spec.get("mutates") and not spec.get("additive"):
         result["link"] = build_pane_link("pane", parsed.pane_id)
@@ -91,9 +93,7 @@ def run_links_create(parsed: Any) -> int:
         raise ValueError("--panel needs --pane: a panel link opens the panel inside its Pane.")
     target: Dict[str, str]
     if parsed.repo:
-        if not REPO_ID.match(parsed.repo):
-            raise ValueError("--repo must be a numeric repository id. Run `runpane repos list` to find it.")
-        target = {"kind": "repo", "id": parsed.repo}
+        target = {"kind": "repo", "id": str(repo_id(parsed.repo))}
     else:
         kind = "pane" if parsed.pane_id else "session"
         target = {"kind": kind, "id": require_id(parsed.pane_id or parsed.session_id, f"--{kind}", f"runpane {kind}s list")}
