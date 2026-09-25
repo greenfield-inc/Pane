@@ -265,6 +265,7 @@ export function PaneListScreen() {
             : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
             : <Notice testID="panes-empty" message="No remote panes found on this host." />
         }
+        ListFooterComponent={projects.isSuccess ? <ArchivedLink /> : null}
         renderItem={renderItem}
       />
     </View>
