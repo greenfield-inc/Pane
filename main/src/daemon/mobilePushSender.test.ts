@@ -142,6 +142,53 @@ describe('MobilePushSender', () => {
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt' });
     expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toBeTruthy();
   });
+
+  it('sends FCM as an impersonated sender using the operator\'s gcloud login, without a key file', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pane-mobile-push-'));
+    temporaryDirectories.push(directory);
+    const adcPath = path.join(directory, 'application_default_credentials.json');
+    await writeFile(adcPath, JSON.stringify({ type: 'authorized_user', client_id: 'client-id', client_secret: 'client-secret', refresh_token: 'refresh-token' }));
+    setEnvironment({});
+    vi.stubEnv('GOOGLE_APPLICATION_CREDENTIALS', adcPath);
+    vi.stubEnv('PANE_FCM_IMPERSONATE_SERVICE_ACCOUNT', 'sender@pane-project.iam.gserviceaccount.com');
+    vi.stubEnv('PANE_FCM_PROJECT_ID', 'pane-project');
+    const googleRequests: { url: string; authorization: string | null; body: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      googleRequests.push({ url, authorization: new Headers(init.headers).get('Authorization'), body: String(init.body) });
+      if (url === 'https://oauth2.googleapis.com/token') return new Response(JSON.stringify({ access_token: 'user-token' }), { status: 200 });
+      return new Response(JSON.stringify({ accessToken: 'sender-token', expireTime: '2026-09-25T01:00:00Z' }), { status: 200 });
+    }));
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [{ id: 'client-1', label: 'Phone', tokenHash: 'hash', createdAt: '2026-09-04T00:00:00.000Z' }];
+    const manager = new ConfigManagerStub(config);
+    const fcmRequests: Parameters<MobilePushTransport['fcm']>[0][] = [];
+    const transport: MobilePushTransport = { apns: async () => ({ status: 200, body: '' }), fcm: async request => { fcmRequests.push(request); return { status: 200, body: '' }; } };
+    const sender = new MobilePushSender(manager, transport);
+
+    await expect(sender.register('client-1', { platform: 'android', token: 'device-token', installationId: 'install-1', hostProfileId: 'profile-1' }))
+      .resolves.toMatchObject({ registration: 'registered', provider: 'ready' });
+    await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt' });
+
+    expect(fcmRequests).toEqual([expect.objectContaining({ token: 'device-token', accessToken: 'sender-token', projectId: 'pane-project' })]);
+    expect(new URLSearchParams(googleRequests[0]?.body)).toEqual(new URLSearchParams({
+      grant_type: 'refresh_token', client_id: 'client-id', client_secret: 'client-secret', refresh_token: 'refresh-token',
+    }));
+    expect(googleRequests[1]).toEqual({
+      url: 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/sender%40pane-project.iam.gserviceaccount.com:generateAccessToken',
+      authorization: 'Bearer user-token',
+      body: JSON.stringify({ scope: ['https://www.googleapis.com/auth/firebase.messaging'] }),
+    });
+  });
+
+  it('reports FCM as not configured when the impersonation setup has no gcloud login', async () => {
+    setEnvironment({});
+    vi.stubEnv('GOOGLE_APPLICATION_CREDENTIALS', path.join(os.tmpdir(), 'pane-missing-adc', 'application_default_credentials.json'));
+    vi.stubEnv('PANE_FCM_IMPERSONATE_SERVICE_ACCOUNT', 'sender@pane-project.iam.gserviceaccount.com');
+    vi.stubEnv('PANE_FCM_PROJECT_ID', 'pane-project');
+    const sender = new MobilePushSender(new ConfigManagerStub(createDefaultRemoteDaemonConfig()));
+    await expect(sender.register('client-1', { platform: 'android', token: 'device-token', installationId: 'install-1', hostProfileId: 'profile-1' }))
+      .resolves.toMatchObject({ registration: 'not-registered', provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED' });
+  });
 });
 
 class ConfigManagerStub {

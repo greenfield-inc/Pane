@@ -44,7 +44,32 @@ PANE_APNS_TEAM_ID=... PANE_APNS_KEY_ID=... PANE_APNS_KEY_PATH=/secure/path/AuthK
 
 Use `PANE_APNS_ENVIRONMENT=production` only for a production/TestFlight-signed build. The checked-in Debug entitlement uses the APNs sandbox and the Release entitlement uses production. Never place the `.p8` key in this repository, the app bundle, or a mobile build setting.
 
-For Android, create a Firebase Android app with the same application ID, download its real `google-services.json` to `mobile/android/app/google-services.json` (the checked-in `.example` is only a shape guide), and create a narrowly scoped service account with Firebase Cloud Messaging send permission. Set `PANE_FCM_SERVICE_ACCOUNT_PATH=/secure/path/service-account.json` in the host service environment. Do not commit either provider credential.
+For Android, create a Firebase Android app with the same application ID and download its real `google-services.json` (to `native/google-services.json` for the Expo app, or `mobile/android/app/google-services.json` for Capacitor; the checked-in `.example` is only a shape guide). The host then needs a way to call FCM as a sender service account. It supports two ways to do that:
+
+**Keyless (recommended).** The host impersonates a sender service account with the operator's own gcloud login, so no key file exists anywhere. This is the only option where the organization policy `iam.disableServiceAccountKeyCreation` is on. For the Pane project (`pane-pwa-preview`) the sender account already exists and has the Firebase Cloud Messaging API Admin role. Each operator needs two things:
+
+```bash
+SENDER=pane-push-sender@pane-pwa-preview.iam.gserviceaccount.com
+# Once, by a project owner: let this operator mint tokens for the sender, and nothing else.
+gcloud iam service-accounts add-iam-policy-binding "$SENDER" --project pane-pwa-preview \
+  --member=user:you@example.com --role=roles/iam.serviceAccountTokenCreator
+# On the host machine, as that operator: writes ~/.config/gcloud/application_default_credentials.json
+gcloud auth application-default login
+```
+
+Then set these in the host service environment:
+
+```bash
+PANE_FCM_IMPERSONATE_SERVICE_ACCOUNT=pane-push-sender@pane-pwa-preview.iam.gserviceaccount.com PANE_FCM_PROJECT_ID=pane-pwa-preview
+```
+
+For each send, the host exchanges the refresh token from that login for a user access token, then calls the IAM Credentials API `generateAccessToken` for the sender with the `firebase.messaging` scope. It sends the message with that one-hour token. The login file is read from `GOOGLE_APPLICATION_CREDENTIALS` if that is set, otherwise from gcloud's default location. It must be an `authorized_user` login. Revoking the Token Creator binding, or running `gcloud auth application-default revoke`, stops delivery. Pane reports FCM as not configured when the login file is missing or unreadable.
+
+For your own Firebase project, create a sender service account with `roles/firebasecloudmessaging.admin` on that project. Then grant Token Creator on that service account only, never at the project level.
+
+**Service-account key.** Where key creation is allowed, `PANE_FCM_SERVICE_ACCOUNT_PATH=/secure/path/service-account.json` still works and takes precedence over impersonation.
+
+Do not commit any provider credential. CI gets the Firebase app config from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` secret (see `native/README.md`); that file identifies the app and is not a sending credential.
 
 The app asks notification permission after a successful paired connection. Notification setup runs independently of the terminal connection, so permission or provider errors leave remote terminal use available. Registration renewals preserve the installation's alert preferences and deduplication history. OS token registration and each provider network request time out after 15 seconds.
 
@@ -54,4 +79,4 @@ The daemon sends generic APNs/FCM alert text for both a newly blocked turn and a
 
 The Expo app in `native/` uses the same host commands and payload. It registers the raw APNs/FCM device token, not an Expo push token, and routes taps and `pane-remote://` / `pane://pane/…` links as described in `native/README.md` (Notifications and links).
 
-Provider credentials, Apple signing, Firebase setup, and physical-device delivery cannot be validated by this repository alone. In Apple Developer, create an App ID matching the final bundle ID, enable Push Notifications, create an APNs auth key, and configure an App Store Connect record/signing team before TestFlight upload. In Google Play/Firebase, create the Android app and protect the service-account file outside the app build. iOS Simulator builds do not prove APNs delivery; Android emulators similarly do not prove a real FCM token path. Missing host delivery configuration produces an actionable registration error while ordinary remote terminal use continues.
+Provider credentials, Apple signing, Firebase setup, and physical-device delivery cannot be validated by this repository alone. In Apple Developer, create an App ID matching the final bundle ID, enable Push Notifications, create an APNs auth key, and configure an App Store Connect record/signing team before TestFlight upload. In Google Play/Firebase, create the Android app and give the host a sender identity as described above. iOS Simulator builds do not prove APNs delivery; A Google Play system image in the Android emulator does receive real FCM messages, so the Android path can be checked end to end without a device. Missing host delivery configuration produces an actionable registration error while ordinary remote terminal use continues.
