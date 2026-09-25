@@ -1,4 +1,5 @@
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
+import type { SessionStatus } from '../../../shared/types/sessionStatus';
 
 // Claude message content types
 interface TextContent {
@@ -77,7 +78,7 @@ export interface Session {
   name: string;
   worktreePath: string;
   prompt: string;
-  status: 'initializing' | 'ready' | 'running' | 'waiting' | 'stopped' | 'error';
+  status: SessionStatus;
   statusMessage?: string;
   pid?: number;
   createdAt: string;
