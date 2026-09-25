@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { decodeRemoteConnectionCode } from '../../../frontend/src/remote/runtime/remoteProfile';
+import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import {
   RemoteDaemonBrowserClient,
 } from '../../../frontend/src/remote/runtime/remoteDaemonBrowserClient';

@@ -1,0 +1,25 @@
+# Opens the dev build against the local Metro server with no saved hosts.
+# (plugins/withQuietDevMenu keeps the dev menu from opening over the app.)
+appId: com.dcouple.pane.mobile
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT || '8137'}
+# iOS asks before opening a link in the app.
+- extendedWaitUntil:
+    visible: "Open"
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+# Android's dev launcher can miss a link sent while it starts; pick the
+# server from its list instead.
+- runFlow:
+    when:
+      visible: "DEVELOPMENT SERVERS"
+    commands:
+      - tapOn: "http://.*:${METRO_PORT || '8137'}"

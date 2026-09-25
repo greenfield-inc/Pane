@@ -1,0 +1,90 @@
+# Create a pane, find it by search, pin it, archive it, then delete it
+# from Archived. Needs a dev host with at least one repository (README).
+appId: com.dcouple.pane.mobile
+name: Pane list journeys
+---
+- runFlow: subflows/signed-in.yaml
+- evalScript: ${output.pane = 'mae-' + Date.now().toString(36)}
+
+# Create from the header "+": repository and base branch default, pick an
+# agent, name the pane.
+- tapOn:
+    id: panes-new
+- extendedWaitUntil:
+    visible:
+      id: new-pane-branch
+    timeout: 15000
+# The sheet slides up to its detent; tapping mid-slide hits the wrong row.
+- waitForAnimationToEnd
+- tapOn:
+    id: new-pane-agent-claude
+- tapOn:
+    id: new-pane-name
+- eraseText: 60
+- inputText: ${output.pane}
+# Return submits the sheet (the keyboard covers the Create button).
+- pressKey: Enter
+# The new pane opens; come back to the list.
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 60000
+# Swipe back (`back` is Android-only); this also checks the full-screen gesture.
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible: "${output.pane}.*"
+    timeout: 15000
+- assertVisible: ".*Claude Code.*"
+
+# Search narrows the list to matching panes.
+- tapOn:
+    id: panes-search
+- inputText: ${output.pane}
+# Match the row by its status: the search field holds the name too.
+- assertVisible: "${output.pane}, .*Claude Code.*"
+- hideKeyboard
+
+# Pin it with the row's pin button; it then shows under Pinned as well.
+- tapOn:
+    id: "pane-pin-.*"
+    index: 0
+- extendedWaitUntil:
+    visible: "PINNED"
+    timeout: 10000
+
+# Archive it with the row's archive button and confirm.
+- tapOn:
+    id: "pane-archive-.*"
+    index: 0
+- tapOn:
+    text: "Archive"
+    below:
+      text: "Archive “.*”\\?"
+- extendedWaitUntil:
+    visible:
+      id: panes-no-results
+    timeout: 20000
+- tapOn:
+    id: panes-search-clear
+- waitForAnimationToEnd
+
+# Delete it for good from Archived.
+- scrollUntilVisible:
+    element:
+      id: panes-archived
+- tapOn:
+    id: panes-archived
+- extendedWaitUntil:
+    visible: "${output.pane}.*"
+    timeout: 15000
+- tapOn: "${output.pane}.*"
+- tapOn:
+    text: "Delete"
+    below:
+      text: "Delete “.*”\\?"
+- extendedWaitUntil:
+    notVisible: "${output.pane}.*"
+    timeout: 20000

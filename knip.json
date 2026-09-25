@@ -106,9 +106,14 @@
         "@capacitor/push-notifications"
       ]
     },
+    "native": {
+      "entry": ["src/app/**/*.tsx", "src/**/*.test.ts", "metro.config.js", "vitest.config.ts", "terminal-web/page.ts", "scripts/*.mjs"],
+      "project": ["src/**/*.{ts,tsx}", "metro.config.js", "vitest.config.ts", "terminal-web/*.ts", "scripts/*.mjs"],
+      "ignoreDependencies": ["expo-updates"]
+    },
     "shared": {
-      "entry": ["types/*.ts"],
-      "project": ["types/*.ts"]
+      "entry": ["types/*.ts", "remoteClient/index.ts"],
+      "project": ["types/*.ts", "remoteClient/*.ts"]
     }
   }
 }

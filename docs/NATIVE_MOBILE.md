@@ -44,6 +44,23 @@ PANE_APNS_TEAM_ID=... PANE_APNS_KEY_ID=... PANE_APNS_KEY_PATH=/secure/path/AuthK
 
 Use `PANE_APNS_ENVIRONMENT=production` only for a production/TestFlight-signed build. The checked-in Debug entitlement uses the APNs sandbox and the Release entitlement uses production. Never place the `.p8` key in this repository, the app bundle, or a mobile build setting.
 
+### Dcouple's credentials
+
+These are the provider credentials Dcouple uses for `com.dcouple.pane.mobile`. Only paths and IDs are listed here; the files stay outside git.
+
+- **APNs:** team `FBM5YSF467`, key ID `DGM25BV23X` (team scoped, sandbox and production). The key file is `AuthKey_DGM25BV23X.p8`, kept at `~/.config/pane/apns/` (mode 600) on the machine that created it. Copy it to each host outside the repo and set:
+
+  ```bash
+  PANE_APNS_TEAM_ID=FBM5YSF467
+  PANE_APNS_KEY_ID=DGM25BV23X
+  PANE_APNS_KEY_PATH=/secure/path/AuthKey_DGM25BV23X.p8
+  PANE_APNS_TOPIC=com.dcouple.pane.mobile
+  PANE_APNS_ENVIRONMENT=production   # TestFlight and App Store builds; use sandbox for Expo dev-client builds
+  ```
+
+  A host launched as a service reads these from its service environment (systemd unit, launchd plist, or the shell that runs `pnpm daemon:headless`). `mobile:push-status` reports `APNs delivery is configured.` once they're valid.
+- **FCM:** Firebase project `pane-pwa-preview`, Android app `com.dcouple.pane.mobile`. The Expo app reads its `google-services.json` from `native/google-services.json` (gitignored). The sender service account is `pane-push-sender@pane-pwa-preview.iam.gserviceaccount.com` with the Firebase Cloud Messaging Admin role. The org policy `iam.disableServiceAccountKeyCreation` currently blocks creating the key file that `PANE_FCM_SERVICE_ACCOUNT_PATH` needs.
+
 For Android, create a Firebase Android app with the same application ID, download its real `google-services.json` to `mobile/android/app/google-services.json` (the checked-in `.example` is only a shape guide), and create a narrowly scoped service account with Firebase Cloud Messaging send permission. Set `PANE_FCM_SERVICE_ACCOUNT_PATH=/secure/path/service-account.json` in the host service environment. Do not commit either provider credential.
 
 The app asks notification permission after a successful paired connection. Notification setup runs independently of the terminal connection, so permission or provider errors leave remote terminal use available. Registration renewals preserve the installation's alert preferences and deduplication history. OS token registration and each provider network request time out after 15 seconds.
@@ -51,5 +68,7 @@ The app asks notification permission after a successful paired connection. Notif
 Push-state writes merge with the latest host configuration inside the serialized config-write queue, so they cannot restore a concurrently revoked pairing. Hosts without registered mobile clients do not persist push state on every agent transition.
 
 The daemon sends generic APNs/FCM alert text for both a newly blocked turn and a `working → idle` completion. Tap metadata contains the client-local profile ID (including its host label, URL, and token suffix) and pane/panel IDs; no terminal output or full bearer token is sent. A tap is held in encrypted native storage until saved profiles load, then reconnects only to the matching saved profile, including when switching panels inside the selected pane. An unknown/deleted profile or pane produces an error without connecting to an unrecognized host. Push commands derive client identity from the authenticated request, ignoring caller-supplied identity arguments.
+
+The Expo app in `native/` uses the same host commands and payload. It registers the raw APNs/FCM device token, not an Expo push token, and routes taps and `pane-remote://` / `pane://pane/…` links as described in `native/README.md` (Notifications and links).
 
 Provider credentials, Apple signing, Firebase setup, and physical-device delivery cannot be validated by this repository alone. In Apple Developer, create an App ID matching the final bundle ID, enable Push Notifications, create an APNs auth key, and configure an App Store Connect record/signing team before TestFlight upload. In Google Play/Firebase, create the Android app and protect the service-account file outside the app build. iOS Simulator builds do not prove APNs delivery; Android emulators similarly do not prove a real FCM token path. Missing host delivery configuration produces an actionable registration error while ordinary remote terminal use continues.

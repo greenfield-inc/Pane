@@ -1,0 +1,38 @@
+# Pairs with the host in CONNECTION_CODE and waits for the pane list.
+appId: com.dcouple.pane.mobile
+---
+# The connect screen opens on the PWA's first-run menu.
+- extendedWaitUntil:
+    visible:
+      id: connect-open-form
+    timeout: 180000
+# iOS types the code, which covers the paste/type path.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: connect-open-form
+      - tapOn:
+          id: connect-code-input
+      - inputText: ${CONNECTION_CODE}
+      - tapOn:
+          id: connect-submit
+# Typing 500+ characters through Maestro's Android driver outlasts its 120 s
+# command deadline on a loaded machine, so Android pairs through the
+# pane-remote:// link instead, which covers the link path.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - openLink: ${CONNECTION_CODE}
+      - extendedWaitUntil:
+          visible:
+            id: connect-host
+          timeout: 30000
+      - tapOn:
+          id: connect-submit
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 30000

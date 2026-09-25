@@ -1,0 +1,33 @@
+# Opening a pane-remote:// link (e.g. a QR code scanned by the Camera app)
+# shows the pairing screen with the code filled in; Connect signs in.
+appId: com.dcouple.pane.mobile
+name: Pair from a pane-remote link
+env:
+  METRO_PORT: "8137"
+---
+- runFlow: subflows/launch-dev-client.yaml
+- extendedWaitUntil:
+    visible:
+      id: connect-open-form
+    timeout: 180000
+- openLink: ${CONNECTION_CODE}
+# iOS asks before opening a link in the app.
+- extendedWaitUntil:
+    visible: "Open"
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible: "Connect to host"
+    timeout: 10000
+- assertVisible: "pane-remote://.*"
+- tapOn:
+    id: connect-submit
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 30000

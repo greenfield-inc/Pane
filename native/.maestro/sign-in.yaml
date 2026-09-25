@@ -1,0 +1,26 @@
+# Sign in with a pane-remote:// code, check the host is connected, sign out.
+# Run: see native/README.md ("End-to-end tests").
+appId: com.dcouple.pane.mobile
+name: Sign in and sign out
+---
+- runFlow: subflows/launch-dev-client.yaml
+- runFlow: subflows/sign-in.yaml
+- tapOn:
+    id: open-settings
+- extendedWaitUntil:
+    visible:
+      id: connection-status-connected
+    timeout: 20000
+- assertVisible:
+    id: settings-current-host
+- tapOn:
+    id: settings-sign-out
+# Confirm in the alert (its button shares the row's label).
+- tapOn:
+    text: "Sign Out"
+    below:
+      text: "Sign out of .*"
+- extendedWaitUntil:
+    visible:
+      id: connect-open-form
+    timeout: 10000

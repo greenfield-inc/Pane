@@ -11,7 +11,7 @@ import {
   buildDeepgramListenUrl,
   parseDeepgramLiveMessage,
   readResultsMetadata,
-} from '../utils/deepgramLive';
+} from '../../../../shared/voice/deepgramLive';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 const MAX_RECORDING_MS = 60_000;

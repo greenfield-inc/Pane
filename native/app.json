@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "Pane",
+    "slug": "pane",
+    "version": "1.0",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": [
+      "pane",
+      "pane-remote"
+    ],
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#010409",
+    "ios": {
+      "bundleIdentifier": "com.dcouple.pane.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "3",
+      "appleTeamId": "FBM5YSF467"
+    },
+    "android": {
+      "package": "com.dcouple.pane.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#010409",
+        "foregroundImage": "./assets/images/adaptive-icon.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 3
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Pane uses the microphone to dictate prompts to your agents."
+        }
+      ],
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 96,
+          "dark": {
+            "backgroundColor": "#010409",
+            "image": "./assets/images/splash-icon.png"
+          }
+        }
+      ],
+      "./plugins/withQuietDevMenu"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

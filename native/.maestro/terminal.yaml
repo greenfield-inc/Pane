@@ -1,0 +1,131 @@
+# Opens a pane, runs a command in its shell tab through the input bar, stops a
+# running command with the Ctrl-C quick key, scrolls back with the joystick,
+# switches tabs, opens a new shell tab and swipes back. Needs a host whose
+# first pane has a "Terminal" tab and a "Claude Code" tab (see README: Test it).
+appId: com.dcouple.pane.mobile
+---
+- runFlow: subflows/signed-in.yaml
+- tapOn:
+    id: "pane-row-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: terminal-panel-tabs
+    timeout: 20000
+- tapOn:
+    text: "Terminal"
+    index: 0
+- extendedWaitUntil:
+    notVisible:
+      id: terminal-loading
+    timeout: 20000
+
+# Input bar: the command runs on the host and its output comes back.
+- tapOn:
+    id: terminal-input
+- inputText: "echo native-$((6*7))"
+- tapOn:
+    id: terminal-send
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*native-42.*"
+    timeout: 15000
+- tapOn:
+    id: terminal-screen
+- takeScreenshot: terminal-shell
+
+# Quick keys: Ctrl-C interrupts a running command.
+- tapOn:
+    id: terminal-input
+- inputText: "sleep 120"
+- tapOn:
+    id: terminal-send
+- tapOn:
+    id: quick-key-ctrl-c
+- inputText: "echo after-$((40+2))"
+- tapOn:
+    id: terminal-send
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*after-42.*"
+    timeout: 15000
+- tapOn:
+    id: terminal-screen
+
+# Scroll joystick: drag it up to read back, then jump to the latest output.
+- tapOn:
+    id: terminal-input
+- inputText: "seq 1 200"
+- tapOn:
+    id: terminal-send
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*\\n200\\n.*"
+    timeout: 15000
+- tapOn:
+    id: terminal-screen
+- swipe:
+    from:
+      id: terminal-scroll-joystick
+    direction: UP
+    duration: 1500
+- extendedWaitUntil:
+    visible:
+      id: terminal-scroll-bottom
+    timeout: 5000
+- takeScreenshot: terminal-scrolled-back
+- tapOn:
+    id: terminal-scroll-bottom
+- extendedWaitUntil:
+    notVisible:
+      id: terminal-scroll-bottom
+    timeout: 5000
+
+# Tabs: switch to the agent tab, then open a new shell tab.
+- tapOn: "Claude Code"
+- extendedWaitUntil:
+    notVisible:
+      id: terminal-loading
+    timeout: 20000
+- takeScreenshot: terminal-agent-tab
+- tapOn:
+    id: panel-tab-add
+- extendedWaitUntil:
+    visible:
+      id: new-panel-sheet
+    timeout: 10000
+- takeScreenshot: terminal-new-tab-sheet
+- tapOn:
+    id: new-panel-terminal
+- extendedWaitUntil:
+    notVisible:
+      id: new-panel-sheet
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*%.*"
+    timeout: 20000
+
+# iOS: swipe back from the middle of the terminal, not only the screen edge.
+# Android goes back with the system Back gesture.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - swipe:
+          start: 30%, 45%
+          end: 95%, 45%
+          duration: 500
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 5000

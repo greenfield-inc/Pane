@@ -34,3 +34,6 @@
 *.ttf binary
 *.eot binary
 *.node binary
+
+# Bundled xterm page for the native terminal (pnpm --filter @pane/native build:terminal-web)
+native/src/features/terminal/terminalHtml.generated.ts linguist-generated=true

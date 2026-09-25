@@ -1,0 +1,34 @@
+# Signing in to a host that can deliver alerts asks for permission once, then
+# Settings shows the alert switches. Needs CONNECTION_CODE for a host started
+# with PANE_APNS_* set (a throwaway key is enough; see README).
+appId: com.dcouple.pane.mobile
+env:
+  METRO_PORT: ${METRO_PORT || "8137"}
+---
+- runFlow: subflows/launch-dev-client.yaml
+- runFlow: subflows/sign-in.yaml
+# The system prompt shows only the first time on this device: clearing app
+# state does not reset notification permission on the iOS Simulator.
+- extendedWaitUntil:
+    visible: "Allow"
+    timeout: 20000
+    optional: true
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - takeScreenshot: screenshots/notifications-permission
+      - tapOn: "Allow"
+- tapOn:
+    id: open-settings
+- extendedWaitUntil:
+    visible:
+      id: notifications-needs-input
+    timeout: 60000
+- takeScreenshot: screenshots/notifications-settings
+- tapOn:
+    id: notifications-completed
+- extendedWaitUntil:
+    visible:
+      id: notifications-completed
+    timeout: 5000
