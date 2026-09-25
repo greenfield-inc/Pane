@@ -180,7 +180,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   // close, and Escape leaves through the unsaved-changes check.
   const pageRef = useRef<HTMLDivElement>(null);
   const requestCloseRef = useRef(requestClose);
-  requestCloseRef.current = requestClose;
+  useEffect(() => { requestCloseRef.current = requestClose; }, [requestClose]);
   // Settings mounts when it opens, so the first render still sees the opener
   // focused; hiding the workspace blurs it right after. Restore it on close.
   const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
