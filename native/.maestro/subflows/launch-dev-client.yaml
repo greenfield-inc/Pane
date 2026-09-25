@@ -1,4 +1,4 @@
-# Opens the dev build against the local Metro server and clears saved hosts.
+# Opens the dev build against the local Metro server with no saved hosts.
 appId: com.dcouple.pane.mobile
 ---
 - launchApp:
@@ -7,6 +7,25 @@ appId: com.dcouple.pane.mobile
 - openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT}
 - runFlow:
     when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+# clearState brings back the dev menu's first-run introduction; it opens
+# once the bundle loads, then shows the menu itself.
+- extendedWaitUntil:
+    visible: "Continue"
+    timeout: 180000
+    optional: true
+- runFlow:
+    when:
       visible: "Continue"
     commands:
       - tapOn: "Continue"
+      - tapOn:
+          id: xmark
+          optional: true
+# Drag the dev client's floating tools button off the header's right button.
+- swipe:
+    start: 90%, 12%
+    end: 8%, 60%
+    duration: 600

@@ -16,7 +16,11 @@ env:
     id: settings-current-host
 - tapOn:
     id: settings-sign-out
-- tapOn: "Sign Out"
+# Confirm in the alert (its button shares the row's label).
+- tapOn:
+    text: "Sign Out"
+    below:
+      text: "Sign out of .*"
 - extendedWaitUntil:
     visible:
       id: connect-code-input

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useEffect, useEffectEvent } from 'react';
 
 import type { RemoteDaemonEventEnvelope } from '@shared/types/remoteDaemon';
 
@@ -48,11 +48,8 @@ export function useInvokeMutation<TArgs extends unknown[], TResult = unknown>(
  * Subscribes to one daemon event channel (e.g. `panel:agentStatus`) while mounted. */
 export function useDaemonEvent(channel: string, handler: (event: RemoteDaemonEventEnvelope) => void): void {
   const { client } = useDaemon();
-  const latestHandler = useRef(handler);
-  useEffect(() => {
-    latestHandler.current = handler;
-  });
+  const onEvent = useEffectEvent(handler);
   useEffect(() => client.onEvent(event => {
-    if (event.type === 'daemon-event' && event.payload.channel === channel) latestHandler.current(event.payload);
+    if (event.type === 'daemon-event' && event.payload.channel === channel) onEvent(event.payload);
   }), [client, channel]);
 }

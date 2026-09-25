@@ -5,14 +5,13 @@ import {
   createFetchEventStreamTransport,
   getOrCreateRuntimeId,
   RemoteDaemonClient,
-  type RemoteFetch,
 } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { secureStore } from '@/auth/secureStore';
 
-// RN's built-in fetch cannot stream a response body; expo/fetch can.
-const streamingFetch = expoFetch as unknown as RemoteFetch;
+// expo/fetch streams response bodies, which the /events stream needs.
+const streamingFetch = expoFetch;
 
 const CLIENT_LABEL = Platform.OS === 'ios' ? 'Pane for iOS' : 'Pane for Android';
 

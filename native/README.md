@@ -52,7 +52,7 @@ export PATH=$JAVA_HOME/bin:$HOME/.maestro/bin:$PATH
 maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/connection-code.txt)" .maestro/sign-in.yaml
 ```
 
-`subflows/launch-dev-client.yaml` clears app state and the Keychain, then opens the dev client against `127.0.0.1:${METRO_PORT}`. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`; start new flows with both.
+`subflows/launch-dev-client.yaml` clears app state and the Keychain, opens the dev client against `127.0.0.1:${METRO_PORT}` and gets the dev menu out of the way. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`. Start a feature flow with `- runFlow: subflows/signed-in.yaml`, which runs both. Pressable rows merge their text for accessibility, so match rows by `testID` or a regex such as `"fix-login-bug.*"`.
 
 ## How the code is organised
 

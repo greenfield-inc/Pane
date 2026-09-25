@@ -31,8 +31,8 @@ export function ConnectForm({ onPaired }: { onPaired?: () => void }) {
         autoCorrect={false}
         spellCheck={false}
         mono
-        multiline
-        style={styles.codeInput}
+        returnKeyType="go"
+        onSubmitEditing={() => { if (code.trim()) pairing.mutate(code); }}
         error={pairing.error ? pairing.error.message : null}
         hint="Run `runpane install daemon` on your computer, or open Pane > Settings > Remote Pane, and copy the code."
       />
@@ -71,5 +71,4 @@ const styles = StyleSheet.create({
   container: { gap: 16 },
   row: { flexDirection: 'row', gap: 12 },
   flex: { flex: 1 },
-  codeInput: { minHeight: 96, textAlignVertical: 'top' },
 });
