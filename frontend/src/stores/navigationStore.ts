@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type SidebarNavigationScope = 'repositories' | 'pinned';
+export type SidebarNavigationScope = 'repositories' | 'pinned' | 'orchestration';
 
 // Tracks which project ids have already been seen so registerProjectIds only
 // auto-expands genuinely new projects (preserves user-collapsed state)

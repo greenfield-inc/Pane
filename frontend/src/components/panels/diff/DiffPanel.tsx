@@ -176,13 +176,13 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
 
   return (
     <div className="diff-panel h-full flex flex-col bg-bg-primary">
-      <div className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-border-primary bg-surface-secondary flex-shrink-0">
+      <div className="flex flex-shrink-0 items-center justify-between gap-3 px-3 py-1.5">
         <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
           <GitBranch className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
-          <span className="text-xs font-medium text-text-secondary truncate">Review</span>
-          <span className="text-xs text-text-muted truncate">{prLabel}</span>
+          <span className="truncate text-[12px] font-medium text-text-secondary">Review</span>
+          <span className="truncate text-[10px] text-text-tertiary">{prLabel}</span>
           {session?.gitStatus?.prTitle && (
-            <span className="text-xs text-text-tertiary truncate">{session.gitStatus.prTitle}</span>
+            <span className="truncate text-[10px] text-text-tertiary">{session.gitStatus.prTitle}</span>
           )}
         </div>
 
@@ -191,7 +191,7 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
           onClick={() => void handleOpenPullRequest()}
           disabled={!reviewUrl}
           title={reviewUrl ? 'Open pull request in Browser' : 'No pull request yet'}
-          className={`inline-flex flex-shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
+          className={`inline-flex flex-shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] transition-colors ${
             reviewUrl
               ? 'text-text-secondary hover:bg-surface-hover'
               : 'cursor-not-allowed text-text-muted'
