@@ -6,11 +6,13 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Kbd } from './Kbd';
 import { initialActiveIndex } from './dropdownNavigation';
 import { usePortalContainer } from '../../contexts/PortalContainerContext';
+import { Tooltip } from './Tooltip';
 
 export interface DropdownItem {
   id: string;
   label: ReactNode;
   description?: ReactNode;
+  descriptionInTooltip?: boolean;
   icon?: React.ComponentType<{ className?: string }>;
   iconColor?: string;
   onClick?: () => void;
@@ -36,6 +38,7 @@ export interface DropdownProps {
   
   // Behavior
   closeOnSelect?: boolean;
+  separateVariants?: boolean;
   onOpenChange?: (open: boolean) => void;
   
   // Optional footer content (e.g., settings button)
@@ -86,6 +89,7 @@ export function Dropdown({
   position = 'auto',
   width = 'md',
   closeOnSelect = true,
+  separateVariants = true,
   onOpenChange,
   footer,
   className,
@@ -367,24 +371,14 @@ export function Dropdown({
                 const isSelectable = selectedId !== undefined;
                 const isSelected = item.id === selectedId;
                 const variant = item.variant || 'default';
-
-                return (
-                  <React.Fragment key={item.id}>
-                    {index > 0 && items[index - 1].variant !== item.variant && (
-                      <div className="h-2" />
-                    )}
-
+                const menuButton = (
                     <button
                       type="button"
                       data-dropdown-item-index={index}
-                      // A `selectedId` menu is a single-select group: plain menuitem can't
-                      // tell a screen reader which option is currently active.
                       role={isSelectable ? 'menuitemradio' : 'menuitem'}
                       aria-checked={isSelectable ? isSelected : undefined}
                       tabIndex={index === activeIndex ? 0 : -1}
                       onClick={() => handleItemClick(item)}
-                      // Keeps pointer and keyboard on one item; otherwise the hovered and
-                      // the focused row are both highlighted.
                       onMouseEnter={() => !item.disabled && setActiveIndex(index)}
                       disabled={item.disabled}
                       className={cn(
@@ -400,46 +394,33 @@ export function Dropdown({
                     >
                       {Icon && (
                         <div className="flex items-center justify-center w-4 h-4 flex-shrink-0">
-                          <Icon className={cn(
-                            'w-3.5 h-3.5',
-                            'stroke-[1.5]',
-                            item.iconColor || 'text-current'
-                          )} />
+                          <Icon className={cn('w-3.5 h-3.5', 'stroke-[1.5]', item.iconColor || 'text-current')} />
                         </div>
                       )}
-
                       <div className="flex-1 min-w-0">
-                        <div className={cn(
-                          'text-[13px] leading-tight truncate',
-                          'group-hover:text-inherit'
-                        )}>
-                          {item.label}
-                        </div>
-                        {item.description && (
-                          <div className="text-[11px] text-text-tertiary mt-0.5 leading-tight">
-                            {item.description}
-                          </div>
+                        <div className={cn('text-[13px] leading-tight truncate', 'group-hover:text-inherit')}>{item.label}</div>
+                        {item.description && !item.descriptionInTooltip && (
+                          <div className="text-[11px] text-text-tertiary mt-0.5 leading-tight">{item.description}</div>
                         )}
                       </div>
-
-                      {item.shortcut && (
-                        <Kbd variant="inline" className="shrink-0 pl-3">
-                          {formatKeyDisplay(item.shortcut)}
-                        </Kbd>
-                      )}
-
+                      {item.shortcut && <Kbd variant="inline" className="shrink-0 pl-3">{formatKeyDisplay(item.shortcut)}</Kbd>}
                       {(isSelected || item.showDot) && (
                         <div className="flex items-center justify-center w-5 h-5 flex-shrink-0">
-                          <div
-                            className={cn(
-                              'w-2 h-2 rounded-full',
-                              isSelected && 'bg-interactive shadow-sm',
-                              item.showDot && !isSelected && item.dotColor
-                            )}
-                          />
+                          <div className={cn('w-2 h-2 rounded-full', isSelected && 'bg-interactive shadow-sm', item.showDot && !isSelected && item.dotColor)} />
                         </div>
                       )}
                     </button>
+                );
+
+                return (
+                  <React.Fragment key={item.id}>
+                    {separateVariants && index > 0 && items[index - 1].variant !== item.variant && (
+                      <div className="h-2" />
+                    )}
+
+                    {item.description && item.descriptionInTooltip
+                      ? <Tooltip content={item.description} side="right" delay={250}>{menuButton}</Tooltip>
+                      : menuButton}
                   </React.Fragment>
                 );
               })}

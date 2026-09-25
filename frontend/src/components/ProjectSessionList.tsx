@@ -1,5 +1,6 @@
+import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Home, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, BarChart3, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Monitor, MessageSquare, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -9,15 +10,14 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
-import { StatusAccentBar } from './ui/StatusAccentBar';
-import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
+import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
-import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
+import type { AgentDisplayStatus } from '../../../shared/types/agentStatus';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
@@ -33,12 +33,12 @@ import {
   groupSessionsByProject,
 } from '../utils/sessionOrdering';
 
-const SIDEBAR_ROW_BASE = 'flex w-full items-center text-left transition-colors';
-const SIDEBAR_ROW_PADDING = 'px-4';
+const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transition-colors';
+const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
 const SIDEBAR_ROW_GAP = 'gap-2';
-const SIDEBAR_SECTION_ROW = 'mt-1.5 flex w-full items-center justify-between gap-2 pl-3.5 pr-2 py-0.5';
-const SIDEBAR_SECTION_LABEL = 'truncate text-[11px] font-semibold uppercase tracking-wide leading-4 text-text-tertiary';
-const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 -my-1 flex min-h-6 min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left text-sm text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
+const SIDEBAR_SECTION_ROW = 'mt-3 flex w-full items-center justify-between gap-2 pl-4 pr-3 py-1';
+const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
+const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
 
 interface ProjectSessionListProps {
   projects: Project[];
@@ -49,7 +49,7 @@ interface ProjectSessionListProps {
   repositoriesSectionExpanded: boolean;
   onPinnedSectionExpandedChange: (expanded: boolean) => void;
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
-  /** Lets the sidebar footer's "Add repository" open this list's dialog. */
+  /** Lets the sidebar's "New project" button open this list's dialog. */
   onRegisterAddRepository?: (open: () => void) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
@@ -92,22 +92,20 @@ export function ProjectSessionList({
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const activeView = useNavigationStore(s => s.activeView);
+  const sidebarNavigationScope = useNavigationStore(s => s.sidebarNavigationScope);
+  const selectedOrchestrationSessionId = useOrchestrationSessionStore(s => s.selectedSessionId);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
-  const navigateToUsage = useNavigationStore(s => s.navigateToUsage);
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
   // Expansion state lives in the navigation store so the always-mounted
   // session hotkeys (useSessionNavigationHotkeys) see the same visible ordering
   const expandedProjects = useNavigationStore(s => s.expandedProjects);
   const toggleProjectExpanded = useNavigationStore(s => s.toggleProjectExpanded);
   const expandProject = useNavigationStore(s => s.expandProject);
-  const agentStatusByPanel = usePanelStore(s => s.agentStatus);
-  const agentPanelSessions = usePanelStore(s => s.agentStatusSession);
-  const unviewedBySession = usePanelStore(s => s.unviewedCompletedActivity);
 
   useEffect(() => {
     let cancelled = false;
@@ -331,7 +329,7 @@ export function ProjectSessionList({
     } catch {
       // The Pane remains navigable if the orchestration selection cannot refresh.
     }
-    handleSessionClick(paneId, 'repositories');
+    handleSessionClick(paneId, 'orchestration');
   }, [handleSessionClick, selectOrchestrationSession]);
 
   const renderManagedPane = useCallback((paneId: string, parentSessionId: string) => {
@@ -342,7 +340,7 @@ export function ProjectSessionList({
       <SessionRow
         key={`orchestration-${parentSessionId}-${pane.id}`}
         session={pane}
-        isActive={pane.id === activeSessionId}
+        isActive={activeView === 'sessions' && sidebarNavigationScope === 'orchestration' && parentSessionId === selectedOrchestrationSessionId && pane.id === activeSessionId}
         globalIndex={globalSessionIndex.get(pane.id) ?? -1}
         onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
         onArchive={() => void handleArchiveSession(pane.id)}
@@ -350,15 +348,15 @@ export function ProjectSessionList({
         rowLayout={sidebarPaneRowLayout}
       />
     );
-  }, [activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout]);
+  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout]);
 
   const pinnedPaneRows = pinnedSessions.length > 0 ? (
-    <div className="mt-0.5">
+    <div>
       {pinnedSessions.map(({ session, label }) => (
         <SessionRow
           key={`pinned-${session.id}`}
           session={session}
-          isActive={session.id === activeSessionId}
+          isActive={activeView === 'sessions' && sidebarNavigationScope === 'pinned' && session.id === activeSessionId}
           globalIndex={-1}
           displayName={label}
           onClick={() => handleSessionClick(session.id, 'pinned')}
@@ -372,21 +370,7 @@ export function ProjectSessionList({
 
   return (
     <>
-      <div className="flex flex-col py-1.5">
-        {/* Home */}
-        <button
-          type="button"
-          onClick={() => {
-            setSidebarNavigationScope('repositories');
-            setActiveSession(null);
-            navigateToSessions();
-          }}
-          className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-8 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
-        >
-          <Home className="w-4 h-4" />
-          <span>Home</span>
-        </button>
-
+      <div className="flex flex-col pb-2">
         {orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle' ? (
           <button
             type="button"
@@ -399,53 +383,30 @@ export function ProjectSessionList({
               SIDEBAR_ROW_BASE,
               SIDEBAR_ROW_GAP,
               SIDEBAR_ROW_PADDING,
-              'h-8 text-[13px] hover:bg-surface-hover hover:text-text-primary',
+              'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
               activeView === 'pane-chat'
                 ? 'bg-surface-hover text-text-primary'
                 : 'text-text-secondary',
             )}
           >
-            <MessageSquare className="w-4 h-4" />
+            <MessageSquare className="h-3.5 w-3.5" />
             <span>Pane Chat</span>
             <AgentStatusDot status={paneChatStatus} size="sm" className="ml-auto" />
           </button>
         ) : null}
-
-        <button
-          type="button"
-          data-testid="usage-nav"
-          onClick={() => {
-            setSidebarNavigationScope('repositories');
-            navigateToUsage();
-          }}
-          className={cn(
-            SIDEBAR_ROW_BASE,
-            SIDEBAR_ROW_GAP,
-            SIDEBAR_ROW_PADDING,
-            'py-2 text-sm hover:bg-surface-hover hover:text-text-primary',
-            activeView === 'usage'
-              ? 'bg-surface-hover text-text-primary'
-              : 'text-text-secondary',
-          )}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>Usage &amp; Limits</span>
-        </button>
 
         {showRemoteDesktopLink && onRemoteDesktopClick && (
           <Tooltip content={remoteDesktopTooltip} side="right" className="block w-full">
             <button
               type="button"
               onClick={onRemoteDesktopClick}
-              className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-8 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
+              className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-7 rounded-md text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary')}
             >
-              <Monitor className="w-4 h-4" />
+              <Monitor className="h-3.5 w-3.5" />
               <span>Remote Desktop</span>
             </button>
           </Tooltip>
         )}
-
-        <div className="mx-2 my-2 border-t border-border-primary" aria-hidden="true" />
 
         <OrchestrationSessionNav
           availablePaneIds={availablePaneIds}
@@ -461,7 +422,7 @@ export function ProjectSessionList({
             onClick={() => onRepositoriesSectionExpandedChange(!repositoriesSectionExpanded)}
             className={SIDEBAR_SECTION_TOGGLE}
           >
-            <span className={SIDEBAR_SECTION_LABEL}>Repositories</span>
+            <span className={SIDEBAR_SECTION_LABEL}>Projects</span>
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
               {repositoriesSectionExpanded ? (
                 <ChevronDown className="h-3.5 w-3.5 text-current" />
@@ -473,19 +434,9 @@ export function ProjectSessionList({
         </div>
 
         {/* Projects */}
-        {repositoriesSectionExpanded && projects.map((project, projectIndex) => {
+        {repositoriesSectionExpanded && projects.map((project) => {
           const isExpanded = expandedProjects.has(project.id);
           const projectSessions = sessionsByProject.get(project.id) || [];
-
-          // Display status rolled up across the project's sessions
-          // (blocked > working > done > idle), so unseen completion shows blue
-          // at the project level too.
-          const projectAgentState = rollupAgentDisplayStatus(
-            projectSessions.map(s => toAgentDisplayStatus(
-              rollupSessionAgentState(agentStatusByPanel, agentPanelSessions, s.id),
-              Boolean(unviewedBySession[s.id]),
-            ))
-          );
 
           const projectMenuItems: DropdownItem[] = [
             {
@@ -496,13 +447,13 @@ export function ProjectSessionList({
             },
             {
               id: 'project-settings',
-              label: 'Project Settings',
+              label: 'Project settings',
               icon: Settings,
               onClick: () => handleOpenProjectSettings(project),
             },
             {
               id: 'delete',
-              label: 'Delete Project',
+              label: 'Delete project',
               icon: Trash2,
               variant: 'danger',
               onClick: () => {
@@ -514,11 +465,11 @@ export function ProjectSessionList({
           ];
 
           return (
-            <div key={project.id} className={cn(projectIndex > 0 && "mt-1 border-t border-border-primary pt-1")}>
+            <div key={project.id}>
               {/* Project header */}
               <div
                 className={cn(
-                  "group/project relative flex items-center gap-1.5 pl-3 pr-2 py-1 hover:bg-surface-hover transition-colors",
+                  "group/project relative mx-2 flex min-h-7 items-center gap-1.5 rounded-md pl-2 pr-1 py-0.5 transition-colors hover:bg-surface-hover",
                   dragOverProjectId === project.id && dragProjectId !== project.id && "bg-interactive/20",
                   dragProjectId === project.id && "opacity-50"
                 )}
@@ -538,20 +489,14 @@ export function ProjectSessionList({
                     onClick={() => toggleProject(project.id)}
                     aria-expanded={isExpanded}
                     aria-controls={`project-sessions-${project.id}`}
-                    aria-label={`${isExpanded ? 'Collapse' : 'Expand'} repository ${project.name}`}
+                    aria-label={`${isExpanded ? 'Collapse' : 'Expand'} project ${project.name}`}
                     className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
                   />
                 </Tooltip>
-                <div className="relative z-10 pointer-events-none flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="min-w-0 truncate text-xs font-semibold text-text-primary">{project.name}</span>
-                    {projectAgentState === 'unknown' ? (
-                      <AgentActivityDot active={false} size="sm" className="flex-shrink-0" />
-                    ) : (
-                      <AgentStatusDot status={projectAgentState} size="sm" className="flex-shrink-0" />
-                    )}
-                  </div>
-                </div>
+                <span className="pointer-events-none relative z-10 flex h-4 w-3 flex-shrink-0 items-center text-text-tertiary">
+                  {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </span>
+                <span className="pointer-events-none relative z-10 min-w-0 flex-1 truncate text-[13px] font-semibold text-text-primary">{project.name}</span>
                 <div
                   className="relative z-10 flex-shrink-0 opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 transition-opacity ml-auto"
                 >
@@ -559,13 +504,14 @@ export function ProjectSessionList({
                     trigger={
                       <button
                         type="button"
-                        aria-label={`Repository actions for ${project.name}`}
+                        aria-label={`Project actions for ${project.name}`}
                         className="p-1 rounded text-text-muted hover:text-text-tertiary hover:bg-surface-hover transition-colors"
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>
                     }
                     items={projectMenuItems}
+                    separateVariants={false}
                     position="auto"
                     width="sm"
                   />
@@ -581,32 +527,21 @@ export function ProjectSessionList({
                 >
                   <Plus className="w-3.5 h-3.5" />
                 </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleProject(project.id);
-                  }}
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  className="relative z-10 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors"
-                >
-                  {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                </button>
               </div>
 
               {isExpanded && projectSessions.length > 0 && (
-                <div id={`project-sessions-${project.id}`} className="mt-0.5">
+                <div id={`project-sessions-${project.id}`}>
                   {projectSessions.map((session) => (
                     <SessionRow
                       key={session.id}
                       session={session}
-                      isActive={session.id === activeSessionId}
+                      isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                       globalIndex={globalSessionIndex.get(session.id) ?? -1}
                       onClick={() => handleSessionClick(session.id, 'repositories')}
                       onArchive={() => handleArchiveSession(session.id)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
                       rowLayout={sidebarPaneRowLayout}
+                      nested
                     />
                   ))}
                 </div>
@@ -665,6 +600,7 @@ function SessionRowContent({
   displayName,
   showActivity,
   showUnviewedCompleted,
+  agentDisplayStatus,
   rowLayout,
 }: {
   session: Session;
@@ -676,6 +612,7 @@ function SessionRowContent({
   displayName?: string;
   showActivity: boolean;
   showUnviewedCompleted: boolean;
+  agentDisplayStatus: AgentDisplayStatus;
   rowLayout: SidebarPaneRowLayout;
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
@@ -691,14 +628,14 @@ function SessionRowContent({
         ) : (
           <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         )}
+        <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
         <span className={cn(
-          'min-w-0 flex-1 truncate text-sm font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
+          'min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
           showActivity && 'animate-sidebar-active-label',
           showUnviewedCompleted && 'underline decoration-dashed'
         )}>
           {title}
         </span>
-
       </div>
     );
   }
@@ -710,9 +647,10 @@ function SessionRowContent({
       ) : (
         <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}
+      <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className={cn(
-          'min-w-0 truncate text-sm font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
+          'min-w-0 truncate text-[13px] font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
           showActivity && 'animate-sidebar-active-label',
           showUnviewedCompleted && 'underline decoration-dashed'
         )}>
@@ -750,6 +688,7 @@ interface SessionRowProps {
   onTogglePinned: () => void;
   displayName?: string;
   rowLayout: SidebarPaneRowLayout;
+  nested?: boolean;
 }
 
 interface GitStatusIPCResponse {
@@ -759,8 +698,9 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, displayName, rowLayout,
+  onArchive, onTogglePinned, displayName, rowLayout, nested = false,
 }: SessionRowProps) {
+  const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
   const initialGitStatusRequestRef = useRef<string | null>(null);
 
@@ -828,16 +768,16 @@ function SessionRow({
   const showActivity = agentDisplayStatus === 'working';
   const accessibleName = displayName || gs?.prTitle || session.name || 'Untitled';
 
-  return (
+  return (<>
     <div
+      onContextMenu={event => { event.preventDefault(); setContextMenu({ session, x: event.clientX, y: event.clientY }); }}
       className={cn(
-        'group/session relative w-full text-left pl-3 pr-2 transition-colors flex items-center gap-1',
+        'group/session relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md pr-2 text-left transition-colors',
+        nested ? 'pl-6' : 'pl-2',
         rowLayout === 'single' ? 'py-1' : 'py-1.5',
         isActive ? 'bg-surface-selected' : 'hover:bg-surface-hover'
       )}
     >
-      {/* Always-present left accent bar reflecting the agent status. */}
-      <StatusAccentBar status={agentDisplayStatus} />
       <Tooltip
         content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
         side="right"
@@ -862,37 +802,15 @@ function SessionRow({
           displayName={accessibleName}
           showActivity={showActivity}
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
+          agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
         />
-
-        <div className="relative z-10 pointer-events-auto flex flex-shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onArchive(); }}
-            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/session:opacity-100"
-            title="Archive"
-            aria-label={`Archive ${accessibleName}`}
-          >
-            <Archive className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
-            className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-all ${
-              session.isFavorite
-                ? 'text-text-muted hover:text-text-tertiary hover:bg-surface-hover opacity-100'
-                : 'text-text-muted hover:text-text-tertiary hover:bg-surface-hover opacity-0 group-hover/session:opacity-100'
-            }`}
-            title={session.isFavorite ? 'Unpin' : 'Pin'}
-            aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
-          >
-            <Pin className="w-3.5 h-3.5 rotate-45" />
-          </button>
-        </div>
       </div>
     </div>
-  );
+    <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
+      onArchive={() => { setContextMenu(null); onArchive(); }}
+      onTogglePinned={() => { setContextMenu(null); onTogglePinned(); }} />
+  </>);
 }
 
 // --- Archived Sessions panel (pinned to sidebar bottom) ---
@@ -945,14 +863,14 @@ export function ArchivedSessions() {
 
   const toggleArchived = useCallback(() => {
     const next = !showArchived;
-    if (next && !hasLoadedArchived) {
+    if (next) {
       void loadArchivedSessions();
     }
     if (next && orchestrationAvailability !== 'unavailable') {
       void refreshOrchestrationSessions();
     }
     setShowArchived(next);
-  }, [hasLoadedArchived, loadArchivedSessions, orchestrationAvailability, refreshOrchestrationSessions, showArchived]);
+  }, [loadArchivedSessions, orchestrationAvailability, refreshOrchestrationSessions, showArchived]);
 
   const toggleArchivedProject = (id: number) => {
     setExpandedArchivedProjects(prev => {
@@ -1044,14 +962,14 @@ export function ArchivedSessions() {
   };
 
   return (
-    <div className="border-t border-border-primary">
-      <div className="group/archived-header flex items-center hover:bg-surface-hover focus-within:bg-surface-hover transition-colors">
+    <div className="px-2 pb-2 pt-1">
+      <div className="group/archived-header flex items-center rounded-md transition-colors hover:bg-surface-hover focus-within:bg-surface-hover">
         <button
           type="button"
           onClick={toggleArchived}
           aria-expanded={showArchived}
           aria-controls={archivedContentId}
-          className="min-w-0 flex-1 flex h-10 items-center gap-2 pl-4 pr-1 text-[11px] font-semibold uppercase tracking-wider text-text-secondary hover:text-text-primary transition-colors"
+          className="min-w-0 flex-1 flex h-7 items-center gap-2 pl-2 pr-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary hover:text-text-primary transition-colors"
         >
           {showArchived ? (
             <ChevronDown className="w-3 h-3 flex-shrink-0" />
@@ -1090,38 +1008,35 @@ export function ArchivedSessions() {
                 <div key={i} className="h-7 bg-surface-tertiary rounded" />
               ))}
             </div>
-          ) : archivedProjects.length === 0 && archivedOrchestrationSessions.length === 0 ? (
-            <div className="px-5 py-3 text-xs text-text-tertiary">
-              No archived panes
-            </div>
           ) : (
             <>
-              {archivedOrchestrationSessions.length > 0 && (
-                <div data-testid="archived-orchestration-sessions" className="pb-1">
-                  <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Archived Sessions</p>
-                  {archivedOrchestrationSessions.map(session => (
-                    <div
-                      key={`archived-orchestration-${session.id}`}
-                      data-testid={`archived-orchestration-session-${session.id}`}
-                      className="group/archived relative flex items-center gap-2 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
+              <div data-testid="archived-orchestration-sessions" className="pb-1">
+                <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
+                {archivedOrchestrationSessions.length === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Sessions</p>}
+                {archivedOrchestrationSessions.map(session => (
+                  <div
+                    key={`archived-orchestration-${session.id}`}
+                    data-testid={`archived-orchestration-session-${session.id}`}
+                    className="group/archived relative flex items-center gap-2 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
+                  >
+                    <Archive className="h-3 w-3 flex-shrink-0 text-text-muted" />
+                    <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">
+                      {session.name || 'Untitled'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleRestoreOrchestrationSession(session.id)}
+                      className="relative z-10 flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-status-success transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                      title={`Restore Session ${session.name || 'Untitled'}`}
+                      aria-label={`Restore Session ${session.name || 'Untitled'}`}
                     >
-                      <Archive className="h-3 w-3 flex-shrink-0 text-text-muted" />
-                      <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">
-                        {session.name || 'Untitled'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void handleRestoreOrchestrationSession(session.id)}
-                        className="relative z-10 flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-status-success transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
-                        title={`Restore Session ${session.name || 'Untitled'}`}
-                        aria-label={`Restore Session ${session.name || 'Untitled'}`}
-                      >
-                        <ArchiveRestore className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                      <ArchiveRestore className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Worktrees</p>
+              {archivedPaneCount === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived worktrees</p>}
               {archivedProjects.map(project => {
                 const isExpanded = expandedArchivedProjects.has(project.id);
                 return (
