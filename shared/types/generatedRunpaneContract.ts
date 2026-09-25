@@ -1334,7 +1334,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane mcp",
         "",
-        "Runs the Pane MCP server over stdio. Each runpane command with a JSON result becomes a tool that returns the same JSON as `runpane <command> --json`; mutating tools need `yes: true`.",
+        "Runs the Pane MCP server over stdio. Each runpane command with a JSON result becomes a tool that returns the same JSON as `runpane <command> --json`. Commands that need --yes take `yes: true` instead.",
         "Pane registers this server with Claude Code and Codex automatically (Settings > AI & Agents). To register it by hand:",
         "  claude mcp add --scope user pane -- npx --yes runpane@latest mcp",
         "  codex mcp add pane -- npx --yes runpane@latest mcp",
@@ -6456,7 +6456,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Only the npm package and the Pane app include the MCP server; the Python package prints how to run it with Node.",
-          "Mutating tools take `yes: true`, the same confirmation as the CLI's --yes."
+          "Commands that need --yes in the CLI take `yes: true` as a tool input."
         ]
       },
       "repos list": {

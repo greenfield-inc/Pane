@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
 import { RUNPANE_CONTRACT } from './generated/contract';
-import { buildMcpTools, buildToolArgv, type McpTool } from './mcpTools';
+import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
 import { CallToolRequestSchema, ListToolsRequestSchema, Server, StdioServerTransport } from './mcpSdk';
 import { getWrapperVersion } from './version';
 
@@ -14,7 +14,7 @@ type ToolResult = {
 const INSTRUCTIONS = [
   RUNPANE_CONTRACT.agentContext.brief.summary,
   'Each tool runs the matching `runpane` command against the running Pane app and returns the same JSON as `runpane <command> --json`.',
-  'Start with `doctor`, then `agent_context` for rules and workflow. Mutating tools need `yes: true`, like the CLI\'s --yes.',
+  'Start with `doctor`, then `agent_context` for rules and workflow. Tools with a `yes` input change Pane state and need `yes: true`, like the CLI\'s --yes.',
   'Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) in `text` instead of `inputFile: "-"`.',
 ].join('\n');
 
@@ -68,7 +68,8 @@ async function callTool(tool: McpTool, input: JsonObject): Promise<ToolResult> {
   const { code, stdout, stderr } = await runCli(argv);
   const text = stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`;
   if (code === 0) return { content: [{ type: 'text', text }] };
-  return errorResult(input.yes !== true && text.includes('--yes') ? `${text}\nPass \`yes: true\` to confirm.` : text);
+  const unconfirmed = input.yes !== true && tool.parameters.some((parameter) => parameter.flag === CONFIRM_FLAG);
+  return errorResult(unconfirmed ? `${text}\nIf Pane refused the change, pass \`yes: true\` to confirm it.` : text);
 }
 
 /** Runs this same runpane entrypoint in a child so each call gets the CLI's exact behavior and output. */

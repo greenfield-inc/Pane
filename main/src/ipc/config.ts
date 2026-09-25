@@ -94,11 +94,11 @@ export function registerConfigHandlers(
       }
 
       if (registerMcpChanged) {
-        void syncPaneMcpForApp({
+        syncPaneMcpForApp({
           isPackaged: app.isPackaged,
           config: configManager.getConfig(),
-          projects: databaseService.getAllProjects(),
-        }).catch((error) => console.warn('[PaneMcp] Registration update failed:', error));
+          getProjects: () => databaseService.getAllProjects(),
+        });
       }
 
       // Apply UI scale live

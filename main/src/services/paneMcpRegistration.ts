@@ -8,7 +8,7 @@ import type { Project } from '../database/models';
 import type { AppConfig } from '../types/config';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getShellPath } from '../utils/shellPath';
-import { escapeForBash, linuxToUNCPath } from '../utils/wslUtils';
+import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/wslUtils';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);
@@ -139,7 +139,7 @@ function upsertCodexServer(toml: string, server: PaneMcpServerEntry): string {
     const lines = toml.split('\n');
     return [...lines.slice(0, table.start), ...block, ...lines.slice(table.end)].join('\n');
   }
-  if (toml.trim().length === 0) return `${block.join('\n')}`;
+  if (toml.trim().length === 0) return block.join('\n');
   const separator = toml.endsWith('\n') ? '\n' : '\n\n';
   return `${toml}${separator}${block.join('\n')}`;
 }
@@ -255,7 +255,7 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
 
   const target: McpRegistrationTarget = {
     label: `WSL (${distro})`,
-    server: { command: windowsToWslPath(host.executable), args: [host.scriptPath, 'mcp'], env: serverEnv(host.paneDir, true) },
+    server: { command: windowsPathToWSLMount(host.executable), args: [host.scriptPath, 'mcp'], env: serverEnv(host.paneDir, true) },
   };
   if (values.claude === '1' && values.claudeHome?.startsWith('/')) {
     target.claude = {
@@ -267,13 +267,6 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
     target.codex = { configPath: linuxToUNCPath(`${values.codexHome}/config.toml`, distro) };
   }
   return target;
-}
-
-/** `C:\Program Files\Pane\Pane.exe` → `/mnt/c/Program Files/Pane/Pane.exe` (default WSL automount root). */
-export function windowsToWslPath(windowsPath: string): string {
-  const match = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
-  if (!match) return windowsPath;
-  return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
 }
 
 /** Runs the Pane binary as Node; WSLENV carries the variables across WSL interop to Pane.exe. */
@@ -341,48 +334,58 @@ async function exists(filePath: string): Promise<boolean> {
 /** Where main's build puts the bundled runpane CLI (see main/build-runpane.js). */
 const BUNDLED_RUNPANE_DIR = path.join(__dirname, '..', '..', '..', 'runpane');
 
-interface PaneMcpSyncOptions {
-  enabled: boolean;
-  paneDir: string;
-  /** Distros of saved WSL repositories; only used on Windows. */
-  wslDistros: string[];
-  claudeExecutablePath?: string;
-}
+let syncQueue: Promise<void> = Promise.resolve();
 
 /**
- * Registers (or unregisters) the bundled MCP server with every installed Claude Code
- * and Codex on this machine. Copies the runpane entrypoint to `<paneDir>/mcp/runpane`
- * so the registered path survives app updates and AppImage remounts.
+ * Applies the "Register Pane tools" setting to every installed Claude Code and Codex on this
+ * machine, one sync at a time so a settings toggle cannot interleave with the launch sync.
+ * Only packaged builds register: a dev build would point every agent at a worktree.
  */
-async function syncPaneMcpRegistrations(options: PaneMcpSyncOptions): Promise<void> {
-  const scriptPath = options.enabled
-    ? await installRunpaneCopy(options.paneDir)
-    : path.join(options.paneDir, 'mcp', 'runpane', 'dist', 'cli.js');
+export function syncPaneMcpForApp(options: {
+  isPackaged: boolean;
+  config: Pick<AppConfig, 'agentContext' | 'claudeExecutablePath'>;
+  /** Saved repositories; their WSL distros get registrations on Windows. */
+  getProjects: () => Pick<Project, 'wsl_enabled' | 'wsl_distribution'>[];
+}): void {
+  if (!options.isPackaged) return;
+  syncQueue = syncQueue
+    .then(() => syncRegistrations(options.config.agentContext?.registerMcp !== false, options))
+    .catch((error) => console.warn('[PaneMcp] Registration sync failed:', error));
+}
+
+async function syncRegistrations(
+  enabled: boolean,
+  options: Pick<Parameters<typeof syncPaneMcpForApp>[0], 'config' | 'getProjects'>,
+): Promise<void> {
+  const paneDir = getAppDirectory();
+  // A stable copy outside the app bundle survives app updates and AppImage remounts.
+  const scriptPath = path.join(paneDir, 'mcp', 'runpane', 'dist', 'cli.js');
+  if (enabled) await installRunpaneCopy(path.join(paneDir, 'mcp', 'runpane'));
   const host: PaneMcpHost = {
     // An AppImage's execPath is a per-launch mount; APPIMAGE is the stable file.
     executable: process.env.APPIMAGE || process.execPath,
     scriptPath,
-    paneDir: options.paneDir,
-    claudeExecutablePath: options.claudeExecutablePath,
+    paneDir,
+    claudeExecutablePath: options.config.claudeExecutablePath,
   };
-  const targets: McpRegistrationTarget[] = [await buildHostTarget(host)];
-  if (process.platform === 'win32') {
-    for (const distro of new Set(options.wslDistros)) {
-      const target = await buildWslTarget(host, distro);
-      if (target) targets.push(target);
-    }
-  }
-  for (const target of targets) {
-    for (const outcome of await syncMcpRegistration(target, options.enabled)) {
+  const wslDistros = process.platform === 'win32'
+    ? new Set(options.getProjects().flatMap((project) => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []))
+    : new Set<string>();
+  const targets = await Promise.all([
+    buildHostTarget(host),
+    ...[...wslDistros].map((distro) => buildWslTarget(host, distro)),
+  ]);
+  await Promise.all(targets.map(async (target) => {
+    if (!target) return;
+    for (const outcome of await syncMcpRegistration(target, enabled)) {
       if (outcome.action === 'unchanged') continue;
       const detail = outcome.detail ? `: ${outcome.detail}` : '';
       console.log(`[PaneMcp] ${outcome.client} on ${target.label}: ${outcome.action} the "${PANE_MCP_SERVER_NAME}" MCP server${detail}`);
     }
-  }
+  }));
 }
 
-async function installRunpaneCopy(paneDir: string): Promise<string> {
-  const destination = path.join(paneDir, 'mcp', 'runpane');
+async function installRunpaneCopy(destination: string): Promise<void> {
   for (const file of ['package.json', path.join('dist', 'cli.js')]) {
     const source = await fs.readFile(path.join(BUNDLED_RUNPANE_DIR, file));
     const target = path.join(destination, file);
@@ -391,28 +394,4 @@ async function installRunpaneCopy(paneDir: string): Promise<string> {
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, source);
   }
-  return path.join(destination, 'dist', 'cli.js');
-}
-
-let syncQueue: Promise<void> = Promise.resolve();
-
-/**
- * Applies the "Register Pane tools" setting. Runs one sync at a time so a settings toggle
- * cannot interleave with the launch sync. Only packaged builds register: a dev build would
- * point every agent at a worktree.
- */
-export function syncPaneMcpForApp(options: {
-  isPackaged: boolean;
-  config: Pick<AppConfig, 'agentContext' | 'claudeExecutablePath'>;
-  projects: Pick<Project, 'wsl_enabled' | 'wsl_distribution'>[];
-}): Promise<void> {
-  if (!options.isPackaged) return Promise.resolve();
-  const run = syncQueue.then(() => syncPaneMcpRegistrations({
-    enabled: options.config.agentContext?.registerMcp !== false,
-    paneDir: getAppDirectory(),
-    wslDistros: options.projects.flatMap((project) => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
-    claudeExecutablePath: options.config.claudeExecutablePath,
-  }));
-  syncQueue = run.catch(() => undefined);
-  return run;
 }

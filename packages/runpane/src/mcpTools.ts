@@ -30,8 +30,6 @@ interface McpToolParameter {
   flag: string;
   property: string;
   takesValue: boolean;
-  required: boolean;
-  description: string;
 }
 
 export interface McpTool {
@@ -53,18 +51,25 @@ const OMITTED_FLAGS = new Set(['--json', '--follow', '--help']);
 const FLAG_PATTERN = /--[a-z][a-z0-9-]*/g;
 // Clients sometimes send numeric flags such as timeoutMs as JSON numbers.
 const flagValueSchema = boundary.union(boundary.string, boundary.number);
+export const CONFIRM_FLAG = '--yes';
 const CONFIRM_DESCRIPTION = 'Confirm this change (the CLI\'s --yes). Pane refuses mutating calls without it.';
 
+type ContractFlag = McpToolContract['flags'][string][number];
+
 export function buildMcpTools(contract: McpToolContract = RUNPANE_CONTRACT): McpTool[] {
+  const globalFlags = new Map(Object.values(contract.flags).flat().map((flag) => [flag.name, flag]));
   return contract.commands
     .filter((command) => command.jsonSchemas && command.jsonSchemas.length > 0)
-    .map((command) => buildTool(contract, command));
+    .map((command) => buildTool(contract, command, globalFlags));
 }
 
-function buildTool(contract: McpToolContract, command: McpToolContract['commands'][number]): McpTool {
+function buildTool(
+  contract: McpToolContract,
+  command: McpToolContract['commands'][number],
+  globalFlags: Map<string, ContractFlag>,
+): McpTool {
   const context = contract.agentContext.commands[command.name];
   const contextArgs = new Map((context?.arguments ?? []).map((arg) => [arg.name, arg]));
-  const globalFlags = new Map(Object.values(contract.flags).flat().map((flag) => [flag.name, flag]));
   const usage = command.usage.join(' ');
 
   const flagNames = new Set<string>();
@@ -76,36 +81,30 @@ function buildTool(contract: McpToolContract, command: McpToolContract['commands
   if (context?.requiresPaneDaemon) flagNames.add('--pane-dir');
 
   const parameters: McpToolParameter[] = [];
+  const properties: McpTool['inputSchema']['properties'] = {};
+  const required: string[] = [];
   for (const flag of flagNames) {
     if (OMITTED_FLAGS.has(flag)) continue;
     const contextArg = contextArgs.get(flag);
     const globalFlag = globalFlags.get(flag);
     const placeholder = contextArg?.value ?? globalFlag?.value ?? usagePlaceholder(usage, flag);
-    const isConfirm = flag === '--yes';
-    const required = !isConfirm
-      && command.usage.every((line) => requiredFlagsIn(line).has(flag))
-      && (contextArg === undefined || contextArg.required === true);
+    const isConfirm = flag === CONFIRM_FLAG;
     const baseDescription = isConfirm
       ? CONFIRM_DESCRIPTION
       : contextArg?.description ?? globalFlag?.description ?? '';
-    parameters.push({
-      flag,
-      property: toProperty(flag),
-      takesValue: placeholder !== undefined,
-      required,
-      description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
-    });
-  }
-
-  const properties: McpTool['inputSchema']['properties'] = {};
-  for (const parameter of parameters) {
+    const parameter = { flag, property: toProperty(flag), takesValue: placeholder !== undefined };
+    parameters.push(parameter);
     properties[parameter.property] = {
       type: parameter.takesValue ? 'string' : 'boolean',
-      description: parameter.description,
+      description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
     };
+    const isRequired = !isConfirm
+      && command.usage.every((line) => requiredFlagsIn(line).has(flag))
+      && (contextArg === undefined || contextArg.required === true);
+    if (isRequired) required.push(parameter.property);
   }
+
   const inputSchema: McpTool['inputSchema'] = { type: 'object', properties, additionalProperties: false };
-  const required = parameters.filter((parameter) => parameter.required).map((parameter) => parameter.property);
   if (required.length > 0) inputSchema.required = required;
 
   return {
@@ -125,7 +124,7 @@ function buildTool(contract: McpToolContract, command: McpToolContract['commands
 
 /** Builds the argv for one tool call; the result is `runpane <argv>` with `--json`. */
 export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
-  const argv = [...tool.command.split(' ')];
+  const argv = tool.command.split(' ');
   const known = new Set(tool.parameters.map((parameter) => parameter.property));
   const unknown = Object.keys(input).filter((key) => !known.has(key));
   if (unknown.length > 0) {
@@ -156,8 +155,7 @@ function requiredFlagsIn(usageLine: string): Set<string> {
 }
 
 function usagePlaceholder(usage: string, flag: string): string | undefined {
-  const escaped = flag.replace(/[-]/g, '\\-');
-  const match = new RegExp(`${escaped} (<[^>]+>|[a-z]+(?:\\|[a-z]+)+)`).exec(usage);
+  const match = new RegExp(`${flag} (<[^>]+>|[a-z]+(?:\\|[a-z]+)+)`).exec(usage);
   return match?.[1];
 }
 

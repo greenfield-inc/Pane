@@ -1163,13 +1163,11 @@ if (launchRemoteSetup) {
     void warmShellPath();
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
-    setTimeout(() => {
-      void syncPaneMcpForApp({
-        isPackaged: app.isPackaged,
-        config: configManager.getConfig(),
-        projects: databaseService.getAllProjects(),
-      }).catch((error) => console.warn('[PaneMcp] Registration failed:', error));
-    }, 5_000);
+    setTimeout(() => syncPaneMcpForApp({
+      isPackaged: app.isPackaged,
+      config: configManager.getConfig(),
+      getProjects: () => databaseService.getAllProjects(),
+    }), 5_000);
     console.log('[Main] Services initialized, creating window...');
 
   // Register before any renderer loads. useNotifications pulls this on mount

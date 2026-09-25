@@ -45,7 +45,7 @@ A few flags are left out. `--json` is always passed. `--follow` is omitted becau
 
 ## Confirmation
 
-Mutating commands keep the CLI's confirmation rule. Their tools have a `yes` input, the CLI's `--yes`. Without `yes: true`, the call fails with the CLI's own refusal and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input. Without `yes: true`, the call fails with the CLI's own refusal and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## AGENTS.md block
 

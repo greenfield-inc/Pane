@@ -4,7 +4,6 @@ import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   syncMcpRegistration,
-  windowsToWslPath,
   type McpRegistrationTarget,
   type PaneMcpServerEntry,
 } from './paneMcpRegistration';
@@ -154,12 +153,5 @@ describe('syncMcpRegistration', () => {
       { client: 'Claude Code', action: 'skipped', detail: 'claude: command failed' },
       { client: 'Codex', action: 'added' },
     ]);
-  });
-});
-
-describe('windowsToWslPath', () => {
-  it('maps a drive path to the default WSL mount', () => {
-    expect(windowsToWslPath('C:\\Users\\Ada\\AppData\\Local\\Programs\\Pane\\Pane.exe'))
-      .toBe('/mnt/c/Users/Ada/AppData/Local/Programs/Pane/Pane.exe');
   });
 });
