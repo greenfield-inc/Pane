@@ -323,7 +323,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
-    'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
+    'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), ['panes_commit', 'panes_git_status', 'panes_pull', 'panes_push', 'panes_rebase_main']);
@@ -463,12 +463,37 @@ test('agent tasks start, check on, and message an agent in one call each', async
         const sent = await client.callTool({ name: 'agents_send', arguments: { pane: 'pane-7', text: 'y', yes: true, paneDir } });
         assert.equal(sent.structuredContent.delivered, true);
         assert.match(sent.structuredContent.next, /`agents_status` with pane: pane-7/);
+
+        const keys = await client.callTool({ name: 'agents_send', arguments: { pane: 'pane-7', text: '\u001b[B', yes: true, paneDir } });
+        assert.equal(keys.isError, true);
+        assert.match(keys.content[0].text, /`panels_input`/);
       }, { args: [] });
       const create = requests.find((request) => request.channel === 'runpane:panes:create').args[0];
       assert.equal(create.source, 'agent');
       assert.equal(create.waitReady, true);
       assert.equal(create.noFocus, true);
-      assert.deepEqual(requests.find((request) => request.channel === 'runpane:panels:submit').args[0], { panelId: 'panel-8', input: 'y' });
+      const submits = requests.filter((request) => request.channel === 'runpane:panels:submit');
+      assert.deepEqual(submits.map((request) => request.args[0]), [{ panelId: 'panel-8', input: 'y' }]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('panels_input presses named keys, so a model can answer a menu without raw escape bytes', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panels:input': (args) => ({ ok: true, panelId: args[0].panelId, inputBytes: args[0].input.length, sentAt: '2026-09-25T00:00:00.000Z' }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const pressed = await client.callTool({ name: 'panels_input', arguments: { panel: 'panel-8', keys: 'down,enter', yes: true, paneDir } });
+        assert.equal(pressed.isError, undefined, pressed.content[0].text);
+        const unknown = await client.callTool({ name: 'panels_input', arguments: { panel: 'panel-8', keys: 'pagedown', yes: true, paneDir } });
+        assert.equal(unknown.isError, true);
+        assert.match(unknown.content[0].text, /Unknown key "pagedown"\. Use enter, escape/);
+      }, { args: [] });
+      assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-8', input: '\u001b[B\r' }]);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

@@ -223,6 +223,8 @@ export function useIPCEvents() {
 
     const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(({ paneId, panelId }) => {
       devLog.debug('[useIPCEvents] Pane focus requested:', { paneId, panelId });
+      // Same as clicking the Pane in the sidebar, which also leaves a repository or Sessions view.
+      useNavigationStore.getState().navigateToSessions();
       void useSessionStore.getState().setActiveSession(paneId).then(() => {
         if (panelId) {
           usePanelStore.getState().setActivePanel(paneId, panelId);

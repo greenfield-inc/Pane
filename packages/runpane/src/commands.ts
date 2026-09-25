@@ -87,6 +87,7 @@ export interface ParsedArgs {
   query?: string;
   doc?: string;
   url?: string;
+  keys?: string[];
   toolsets?: string[];
   readOnly?: boolean;
   remoteSetupArgs: string[];
@@ -615,6 +616,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--url') {
     parsed.url = value;
+    return;
+  }
+  if (flag === '--keys') {
+    parsed.keys = value.split(',').map((key) => key.trim()).filter(Boolean);
     return;
   }
   if (flag === '--toolsets') {

@@ -14,6 +14,14 @@ import {
 
 type AgentStatus = 'working' | 'ready' | 'blocked' | 'idle' | 'exited' | 'unknown';
 
+/** Terminal control bytes other than tab and newline are keystrokes, not message text. */
+function hasControlCharacters(text: string): boolean {
+  return [...text].some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return (code < 32 && code !== 9 && code !== 10) || code === 127;
+  });
+}
+
 const STATUS_BY_KIND = new Map<string, AgentStatus>([
   ['agent.busy', 'working'],
   ['agent.ready', 'ready'],
@@ -81,6 +89,10 @@ export async function runAgentsStatus(parsed: ParsedArgs): Promise<number> {
 
 /** `agents send`: submit a follow-up and report whether Pane saw it leave the composer. */
 export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
+  if (parsed.panelInput !== undefined && hasControlCharacters(parsed.panelInput)) {
+    throw new Error('runpane agents send types a message and presses Enter, so it cannot send keys such as arrows, Escape, or Ctrl-C. '
+      + `To answer a menu, press keys with \`runpane panels input --panel <panel-id> --keys down,enter --yes\`, then check the screen with \`runpane agents status\`.`);
+  }
   const { paneId, panelId } = await resolveAgentPanel(parsed);
   await confirmMutation(parsed);
   const request = buildPanelInputRequest({ ...parsed, panelId }, 'submit');

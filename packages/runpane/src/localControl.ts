@@ -2079,17 +2079,33 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
   if (!parsed.panelId) {
     throw new Error(`runpane panels ${command} requires --panel.`);
   }
-  if (parsed.panelInput !== undefined && parsed.panelInputFile) {
-    throw new Error('Use either --text or --input-file, not both.');
+  const sources = [parsed.panelInput !== undefined, Boolean(parsed.panelInputFile), parsed.keys !== undefined].filter(Boolean).length;
+  if (sources > 1) {
+    throw new Error('Use only one of --text, --keys, or --input-file.');
   }
-  if (parsed.panelInput === undefined && !parsed.panelInputFile) {
-    throw new Error(`runpane panels ${command} requires --text or --input-file.`);
+  if (sources === 0) {
+    throw new Error(`runpane panels ${command} requires --text, --keys, or --input-file.`);
+  }
+  if (parsed.keys !== undefined && command !== 'input') {
+    throw new Error('--keys is for panels input; panels submit sends text followed by Enter.');
   }
 
   return {
     panelId: parsed.panelId,
-    input: parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
+    input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
   };
+}
+
+/** `--keys down,enter`: named keys from the contract, or a single literal character each. */
+function keysToBytes(keys: string[]): string {
+  const named = new Map<string, string>(Object.entries(RUNPANE_CONTRACT.terminalKeys));
+  return keys.map((key) => {
+    const bytes = named.get(key.toLowerCase()) ?? ([...key].length === 1 ? key : undefined);
+    if (bytes === undefined) {
+      throw new Error(`Unknown key "${key}". Use ${[...named.keys()].join(', ')}, or a single character.`);
+    }
+    return bytes;
+  }).join('');
 }
 
 async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateRequest> {

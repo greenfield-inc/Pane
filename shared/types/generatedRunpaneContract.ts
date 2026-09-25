@@ -79,6 +79,19 @@ export const RUNPANE_CONTRACT = {
       "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent."
     }
   },
+  "terminalKeys": {
+    "enter": "\r",
+    "escape": "\u001b",
+    "tab": "\t",
+    "backspace": "",
+    "space": " ",
+    "up": "\u001b[A",
+    "down": "\u001b[B",
+    "right": "\u001b[C",
+    "left": "\u001b[D",
+    "ctrl-c": "\u0003",
+    "ctrl-d": "\u0004"
+  },
   "commands": [
     {
       "name": "help",
@@ -454,10 +467,11 @@ export const RUNPANE_CONTRACT = {
       "name": "panels input",
       "summary": "Send input bytes to a terminal panel.",
       "usage": [
-        "runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]"
+        "runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]"
       ],
       "mutates": true,
       "toolsets": [
+        "core",
         "panels"
       ],
       "jsonSchemas": [
@@ -1201,6 +1215,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--toolsets",
         "value": "<name,...>",
         "description": "MCP toolsets for runpane mcp."
+      },
+      {
+        "name": "--keys",
+        "value": "<name,...>",
+        "description": "Named keys for panels input, such as down,enter."
       }
     ],
     "localBoolean": [
@@ -1317,7 +1336,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
-        "  runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
+        "  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
@@ -1724,13 +1743,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels input": [
         "Usage:",
-        "  runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
+        "  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]",
         "",
         "Sends exact input bytes to a terminal panel. Include a newline in the input when you mean Enter.",
         "",
         "Options:",
         "  --panel <panel-id>             Terminal panel id",
         "  --text <text>                  Text bytes to send",
+        "  --keys <name,...>              Keys to press: enter, escape, tab, up, down, ctrl-c, ...",
         "  --input-file <path|->          Read input from a file or stdin",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
@@ -2140,7 +2160,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
-        "  runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
+        "  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
@@ -2536,13 +2556,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels input": [
         "Usage:",
-        "  runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
+        "  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]",
         "",
         "Sends exact input bytes to a terminal panel. Include a newline in the input when you mean Enter.",
         "",
         "Options:",
         "  --panel <panel-id>",
         "  --text <text>",
+        "  --keys <name,...>              Keys to press: enter, escape, tab, up, down, ctrl-c, ...",
         "  --input-file <path|->",
         "  --pane-dir <path>",
         "  --json",
@@ -3516,6 +3537,16 @@ export const RUNPANE_CONTRACT = {
         "pane-1",
         "--text=- [ ] item",
         "--yes"
+      ],
+      [
+        "panels",
+        "input",
+        "--panel",
+        "panel-1",
+        "--keys",
+        "down,enter",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -8273,6 +8304,12 @@ export const RUNPANE_CONTRACT = {
             "description": "Text bytes to send."
           },
           {
+            "name": "--keys",
+            "value": "<name,...>",
+            "required": false,
+            "description": "Comma-separated key names to press in order: enter, escape, tab, backspace, space, up, down, left, right, ctrl-c, ctrl-d, or any single character."
+          },
+          {
             "name": "--input-file",
             "value": "<path|->",
             "required": false,
@@ -8298,13 +8335,15 @@ export const RUNPANE_CONTRACT = {
         "examples": [
           "printf 'Continue\\n' | runpane panels input --panel <panel-id> --input-file - --yes",
           "printf '\\003' | runpane panels input --panel <panel-id> --input-file - --yes",
-          "runpane panels input --panel <panel-id> --text \"simple text\" --yes --json"
+          "runpane panels input --panel <panel-id> --text \"simple text\" --yes --json",
+          "runpane panels input --panel <panel-id> --keys down,enter --yes --json"
         ],
         "jsonSchemas": [
           "panelInputRequest",
           "panelInputResult"
         ],
         "notes": [
+          "To answer a menu or prompt, prefer `--keys` (for example `--keys down,enter`) over escape sequences in `--text`.",
           "Input is sent exactly as provided. Include a real newline byte when the terminal should receive Enter; across shells, `--input-file` is safer than `--text \"...\\n\"`.",
           "Use `--input-file -` or a temp file for multi-line input, quotes, Ctrl-C, or shell-sensitive text.",
           "If interrupting a running process, send Ctrl-C first, validate/read output, then send the next command in a separate `panels input` call so bytes are not dropped.",
@@ -9417,7 +9456,8 @@ export const RUNPANE_CONTRACT = {
           "agentSendResult"
         ],
         "notes": [
-          "`delivered` is true only when Pane saw the message leave the composer."
+          "`delivered` is true only when Pane saw the message leave the composer.",
+          "It types the text and presses Enter, so it is for messages, not keys. To answer a menu, use `runpane panels input --panel <panel-id> --keys down,enter --yes`, then check the screen with `runpane agents status`."
         ]
       },
       "sessions list": {

@@ -199,6 +199,14 @@
         "$ref": "#/$defs/agentTemplate"
       }
     },
+    "terminalKeys": {
+      "description": "Named keys for `panels input --keys`, mapped to the bytes a terminal receives.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "commands": {
       "type": "array",
       "items": {
@@ -348,15 +356,28 @@
         "wrappers": {
           "description": "Wrappers that implement the command; both when absent.",
           "type": "array",
-          "items": { "enum": ["npm", "pip"] }
+          "items": {
+            "enum": [
+              "npm",
+              "pip"
+            ]
+          }
         },
         "daemonAction": {
           "description": "Invoke this Pane daemon channel with the listed flags' values as positional arguments.",
           "type": "object",
-          "required": ["channel", "args"],
+          "required": [
+            "channel",
+            "args"
+          ],
           "properties": {
-            "channel": { "type": "string", "minLength": 1 },
-            "args": { "$ref": "#/$defs/stringList" }
+            "channel": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "$ref": "#/$defs/stringList"
+            }
           },
           "additionalProperties": false
         },

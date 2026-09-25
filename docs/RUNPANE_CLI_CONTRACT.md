@@ -384,6 +384,7 @@ These flags are consumed by local daemon-control commands:
 --doc <path>
 --url <pane-url>
 --toolsets <name,...>
+--keys <name,...>
 --json
 --wait-ready
 --no-focus

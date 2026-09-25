@@ -468,6 +468,16 @@
       "pane-1",
       "--text=- [ ] item",
       "--yes"
+    ],
+    [
+      "panels",
+      "input",
+      "--panel",
+      "panel-1",
+      "--keys",
+      "down,enter",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

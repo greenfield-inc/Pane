@@ -603,6 +603,7 @@ function compareParserParity() {
       query: parsed.query ?? null,
       doc: parsed.doc ?? null,
       url: parsed.url ?? null,
+      keys: parsed.keys ?? null,
       toolsets: parsed.toolsets ?? null,
       readOnly: parsed.readOnly ?? false,
       remoteSetupArgs: parsed.remoteSetupArgs
@@ -690,6 +691,7 @@ for args in samples:
         "query": parsed.query,
         "doc": parsed.doc,
         "url": parsed.url,
+        "keys": parsed.keys,
         "toolsets": parsed.toolsets,
         "readOnly": parsed.read_only,
         "remoteSetupArgs": parsed.remote_setup_args,
