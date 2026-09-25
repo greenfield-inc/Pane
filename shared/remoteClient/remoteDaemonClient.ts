@@ -11,7 +11,7 @@ import { boundary, decodeBoundary, type JsonValue } from '../validation/boundary
 import { RemoteInputQueue } from '../remoteInputQueue';
 
 // Structural fetch types, so browser fetch, Node fetch and `expo/fetch` all fit.
-interface RemoteFetchInit {
+export interface RemoteFetchInit {
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
   body?: string;
