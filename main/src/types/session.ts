@@ -1,9 +1,11 @@
+import type { SessionStatus } from '../../../shared/types/sessionStatus';
+
 export interface Session {
   id: string;
   name: string;
   worktreePath: string;
   prompt: string;
-  status: 'initializing' | 'ready' | 'running' | 'waiting' | 'stopped' | 'error';
+  status: SessionStatus;
   statusMessage?: string;
   pid?: number;
   createdAt: Date;
