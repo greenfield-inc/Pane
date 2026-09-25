@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TerminalSession, utf8ByteLength } from './terminalSession';
+import { TerminalSession } from './terminalSession';
 
 interface Call {
   channel: string;
@@ -103,6 +103,43 @@ describe('TerminalSession.restore', () => {
     expect(host.screen).toEqual(['[reset]one\r\ntwo\r\n']);
   });
 
+  it('sizes the PTY to the latest screen size when the screen resizes mid-restore', async () => {
+    let releaseCheck: (initialized: boolean) => void = () => undefined;
+    const host = fakeHost({
+      'panels:checkInitialized': () => new Promise(resolve => { releaseCheck = resolve; }),
+      'terminal:getState': () => ({ isAlternateScreen: true, serializedBuffer: 'frame' }),
+    });
+
+    const restoring = host.session.restore({ cols: 80, rows: 24 });
+    await tick();
+    host.session.resize({ cols: 40, rows: 60 });
+    releaseCheck(true);
+    await restoring;
+
+    const resizes = host.calls.filter(call => call.channel === 'terminal:resize').map(call => call.args.slice(1, 3));
+    expect(resizes.at(-1)).toEqual([40, 60]);
+    expect(resizes).not.toContainEqual([80, 24]);
+  });
+
+  it('reports a panel that fails to start', async () => {
+    const errors: unknown[] = [];
+    const session = new TerminalSession({
+      invoke: async channel => {
+        if (channel === 'panels:checkInitialized') return false;
+        if (channel === 'panels:initialize') throw new Error('Worktree is gone');
+      },
+      panelId: 'panel-1',
+      sessionId: 'pane-1',
+      viewerId: 'viewer-1',
+      sink: { reset: () => undefined, write: () => undefined },
+      onError: error => errors.push(error),
+    });
+
+    await session.restore({ cols: 80, rows: 24 });
+
+    expect(errors).toEqual([new Error('Worktree is gone')]);
+  });
+
   it('drops a restore that finishes after the screen detached', async () => {
     let releaseState: (state: unknown) => void = () => undefined;
     const host = fakeHost({
@@ -137,8 +174,9 @@ describe('TerminalSession output', () => {
     host.session.receiveOutput({ panelId: 'panel-2', output: 'other pane' });
 
     expect(host.screen).toEqual(['[reset]héllo', ' world']);
+    // The host counts output in UTF-16 code units (string length), not bytes.
     expect(host.calls.filter(call => call.channel === 'terminal:ack')).toEqual([
-      { channel: 'terminal:ack', args: ['panel-1', 6] },
+      { channel: 'terminal:ack', args: ['panel-1', 5] },
     ]);
   });
 
@@ -191,15 +229,5 @@ describe('TerminalSession.sendInput', () => {
     await host.session.sendInput('good');
 
     expect(host.calls.map(call => call.args[1])).toEqual(['bad', 'good']);
-  });
-});
-
-describe('utf8ByteLength', () => {
-  it('counts UTF-8 bytes, which is what the host counts for flow control', () => {
-    expect(utf8ByteLength('abc')).toBe(3);
-    expect(utf8ByteLength('é')).toBe(2);
-    expect(utf8ByteLength('€')).toBe(3);
-    expect(utf8ByteLength('😀')).toBe(4);
-    expect(utf8ByteLength('\x1b[31m✓\x1b[0m')).toBe(5 + 3 + 4);
   });
 });

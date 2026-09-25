@@ -22,8 +22,8 @@ export type TerminalPageEvent =
   | { type: 'resize'; cols: number; rows: number }
   /** Bytes xterm emitted on its own (focus and mouse reports, answers to terminal queries). */
   | { type: 'input'; data: string }
-  /** The page parsed this many UTF-8 bytes of `write` data; the host needs an ack for flow control. */
-  | { type: 'written'; bytes: number }
+  /** The page parsed a `write` of this many UTF-16 code units; the host needs an ack for flow control. */
+  | { type: 'written'; units: number }
   /** Whether the viewport is scrolled up from the bottom. */
   | { type: 'scrolled'; atBottom: boolean }
   /** The rows currently on screen, for VoiceOver and TalkBack. */
@@ -47,7 +47,7 @@ export function parsePageEvent(raw: string): TerminalPageEvent | null {
     case 'input':
       return typeof event.data === 'string' ? { type: 'input', data: event.data } : null;
     case 'written':
-      return isPositiveInt(event.bytes) ? { type: 'written', bytes: event.bytes } : null;
+      return isPositiveInt(event.units) ? { type: 'written', units: event.units } : null;
     case 'scrolled':
       return typeof event.atBottom === 'boolean' ? { type: 'scrolled', atBottom: event.atBottom } : null;
     case 'screen':

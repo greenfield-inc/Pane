@@ -13,7 +13,6 @@ declare global {
 }
 
 const post = (event: TerminalPageEvent) => window.ReactNativeWebView?.postMessage(JSON.stringify(event));
-const encoder = new TextEncoder();
 
 const terminal = new Terminal({
   allowProposedApi: true,
@@ -84,8 +83,7 @@ terminal.onScroll(() => {
 });
 
 function write(data: string): void {
-  const bytes = encoder.encode(data).byteLength;
-  terminal.write(data, () => post({ type: 'written', bytes }));
+  terminal.write(data, () => post({ type: 'written', units: data.length }));
 }
 
 window.paneTerminal = {

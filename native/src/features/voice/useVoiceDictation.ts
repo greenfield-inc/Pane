@@ -50,6 +50,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
   const sentHeader = useRef(false);
   const startedAt = useRef(0);
   const keepAlive = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mounted = useRef(true);
 
   const { stream } = useAudioStream({
     sampleRate: SAMPLE_RATE,
@@ -89,6 +90,11 @@ export function useVoiceDictation(onText: (text: string) => void) {
       serverError = live.receive(data, Date.now()) ?? serverError;
       setPreview(live.preview);
     });
+    if (!mounted.current) {
+      // The screen closed while the socket was opening.
+      ws.close();
+      return;
+    }
     socket.current = ws;
     // Finishing detaches the socket before closing it, so a close while it is
     // still attached means the host or Deepgram gave up.
@@ -194,11 +200,15 @@ export function useVoiceDictation(onText: (text: string) => void) {
   };
 
   // useAudioStream releases the microphone itself when the screen goes away.
-  useEffect(() => () => {
-    clearTimers();
-    const ws = socket.current;
-    socket.current = null;
-    ws?.close();
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      clearTimers();
+      const ws = socket.current;
+      socket.current = null;
+      ws?.close();
+    };
   }, []);
 
   return {

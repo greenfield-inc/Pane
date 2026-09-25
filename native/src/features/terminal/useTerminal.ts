@@ -51,6 +51,8 @@ export function useTerminal(panelId: string, sessionId: string) {
     viewerId: `pane-native-${Math.random().toString(36).slice(2)}`,
     sink: {
       reset: data => {
+        // Output buffered for the old screen is replaced, but the host still needs its ack.
+        if (pending.current) session.ack(pending.current.length);
         pending.current = '';
         send({ type: 'reset', data });
         setStatus('ready');
@@ -63,7 +65,7 @@ export function useTerminal(panelId: string, sessionId: string) {
     },
     onError: cause => {
       setError(cause);
-      setStatus(current => (current === 'ready' ? current : 'error'));
+      setStatus('error');
     },
   }));
 
@@ -83,9 +85,17 @@ export function useTerminal(panelId: string, sessionId: string) {
 
   useEffect(() => {
     const keepAlive = setInterval(() => session.keepAlive(), VISIBILITY_REFRESH_MS);
+    // Only a real trip to the background detaches. Notification Center, Face ID
+    // and permission prompts pass through 'inactive' and leave the screen live.
+    let backgrounded = false;
     const appState = AppState.addEventListener('change', state => {
-      if (state === 'active') restore();
-      else if (state === 'background') session.detach();
+      if (state === 'background') {
+        backgrounded = true;
+        session.detach();
+      } else if (state === 'active' && backgrounded) {
+        backgrounded = false;
+        restore();
+      }
     });
     return () => {
       clearInterval(keepAlive);
@@ -132,7 +142,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         void session.sendInput(message.data).catch(() => undefined);
         break;
       case 'written':
-        session.ack(message.bytes);
+        session.ack(message.units);
         break;
       case 'scrolled':
         setAtBottom(message.atBottom);
@@ -147,7 +157,10 @@ export function useTerminal(panelId: string, sessionId: string) {
     webView,
     onMessage,
     /** iOS may reclaim the page's process under memory pressure; load it again. */
-    reload: () => webView.current?.reload(),
+    reload: () => {
+      session.detach();
+      webView.current?.reload();
+    },
     status,
     error,
     atBottom,

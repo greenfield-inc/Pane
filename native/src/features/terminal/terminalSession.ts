@@ -28,6 +28,7 @@ export interface TerminalSessionOptions {
   /** Identifies this viewer to the host's visibility tracking. */
   viewerId: string;
   sink: TerminalSink;
+  /** A restore failed; the screen shows stale or no output until the next one. */
   onError?: (error: unknown) => void;
 }
 
@@ -41,7 +42,7 @@ export class TerminalSession {
   /** Bumped by every restore and by `detach`, so stale restores stop writing. */
   private generation = 0;
   private live = false;
-  private pendingAckBytes = 0;
+  private pendingAck = 0;
   private ackInFlight = false;
   private inputQueue: Promise<unknown> = Promise.resolve();
 
@@ -57,6 +58,9 @@ export class TerminalSession {
     this.size = size;
     this.live = false;
     const { invoke, panelId, sessionId, viewerId, sink } = this.options;
+    // The screen can resize while the restore awaits the host; use the latest size.
+    const cols = () => this.size?.cols ?? size.cols;
+    const rows = () => this.size?.rows ?? size.rows;
     try {
       const initialized = await invoke('panels:checkInitialized', [panelId]);
       if (generation !== this.generation) return;
@@ -66,12 +70,12 @@ export class TerminalSession {
         sink.reset('');
         this.live = true;
         await invoke('terminal:setVisibility', [panelId, true, viewerId]);
-        await invoke('panels:initialize', [panelId, { sessionId, cols: size.cols, rows: size.rows }]);
+        await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
         return;
       }
       // Size the PTY before reading the snapshot, so the host serializes it at
       // the width this screen shows.
-      await invoke('terminal:resize', [panelId, size.cols, size.rows]);
+      await invoke('terminal:resize', [panelId, cols(), rows()]);
       await invoke('terminal:setVisibility', [panelId, true, viewerId]);
       const state = await invoke('terminal:getState', [panelId]) as HostTerminalState | null;
       if (generation !== this.generation) return;
@@ -80,29 +84,38 @@ export class TerminalSession {
       if (state?.isAlternateScreen) {
         // A restored full-screen app frame can't be trusted at a new size; a
         // forced resize makes the app itself repaint.
-        await invoke('terminal:resize', [panelId, size.cols, size.rows, { force: true }]);
+        await invoke('terminal:resize', [panelId, cols(), rows(), { force: true }]);
       }
     } catch (error) {
       if (generation === this.generation) this.options.onError?.(error);
     }
   }
 
-  /** Handles one `terminal:output` event. Output that arrives mid-restore is already in the snapshot. */
+  /**
+   * Handles one `terminal:output` event. Output that arrives while a snapshot
+   * is in flight is acked but not drawn, as on the desktop: the snapshot
+   * usually contains it. Events and invoke responses travel on separate
+   * connections, so a chunk right at the boundary can be lost or drawn twice.
+   */
   receiveOutput(payload: unknown): void {
     if (!isOutputPayload(payload) || payload.panelId !== this.options.panelId) return;
     if (this.live) {
       this.options.sink.write(payload.output);
     } else {
-      this.ack(utf8ByteLength(payload.output));
+      this.ack(payload.output.length);
     }
   }
 
-  /** The screen parsed `bytes` of written output. Acks are sent one at a time and coalesced. */
-  ack(bytes: number): void {
-    this.pendingAckBytes += bytes;
-    if (this.ackInFlight || this.pendingAckBytes === 0) return;
-    const sending = this.pendingAckBytes;
-    this.pendingAckBytes = 0;
+  /**
+   * The screen is done with `units` of output, counted in UTF-16 code units
+   * (`string.length`) like the host's flow control. Acks are sent one at a
+   * time and coalesced.
+   */
+  ack(units: number): void {
+    this.pendingAck += units;
+    if (this.ackInFlight || this.pendingAck === 0) return;
+    const sending = this.pendingAck;
+    this.pendingAck = 0;
     this.ackInFlight = true;
     this.options.invoke('terminal:ack', [this.options.panelId, sending])
       .catch(() => undefined)
@@ -123,8 +136,9 @@ export class TerminalSession {
   resize(size: TerminalSize): void {
     if (this.size && this.size.cols === size.cols && this.size.rows === size.rows) return;
     this.size = size;
+    // A lost resize only leaves the PTY at the old size until the next one.
     void this.options.invoke('terminal:resize', [this.options.panelId, size.cols, size.rows])
-      .catch(error => this.options.onError?.(error));
+      .catch(() => undefined);
   }
 
   /** Tells the host nobody is watching, so it stops pacing the PTY to this screen. */
@@ -156,18 +170,4 @@ function isOutputPayload(value: unknown): value is { panelId: string; output: st
   if (typeof value !== 'object' || value === null) return false;
   const payload = value as Record<string, unknown>;
   return typeof payload.panelId === 'string' && typeof payload.output === 'string';
-}
-
-export function utf8ByteLength(text: string): number {
-  let bytes = 0;
-  for (let index = 0; index < text.length; index++) {
-    const code = text.charCodeAt(index);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
-      bytes += 4;
-      index++;
-    } else bytes += 3;
-  }
-  return bytes;
 }
