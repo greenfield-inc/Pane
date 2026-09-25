@@ -2,6 +2,7 @@ packages:
   - 'frontend'
   - 'main'
   - 'mobile'
+  - 'native'
   - 'packages/runpane'
   - 'shared'
 minimumReleaseAge: 10080

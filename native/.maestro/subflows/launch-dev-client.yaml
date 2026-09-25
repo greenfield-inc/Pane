@@ -1,0 +1,12 @@
+# Opens the dev build against the local Metro server and clears saved hosts.
+appId: com.dcouple.pane.mobile
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT}
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"

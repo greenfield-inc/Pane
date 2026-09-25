@@ -1,0 +1,16 @@
+# Pairs with the host in CONNECTION_CODE and waits for the pane list.
+appId: com.dcouple.pane.mobile
+---
+- extendedWaitUntil:
+    visible:
+      id: connect-code-input
+    timeout: 60000
+- tapOn:
+    id: connect-code-input
+- inputText: ${CONNECTION_CODE}
+- tapOn:
+    id: connect-submit
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 30000
