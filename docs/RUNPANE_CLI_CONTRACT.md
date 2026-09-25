@@ -125,6 +125,12 @@ runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--
 runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
 runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
+runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
+runpane agents status --pane <pane-id> --json
+runpane agents send --pane <pane-id> --text "Also add a test" --yes --json
+runpane docs search --query "archive a pane" --json
+runpane links create --pane <pane-id> --json
+runpane panes git-status --pane <pane-id> --json
 runpane help
 runpane <command> --help
 ```
@@ -200,6 +206,14 @@ When running from WSL while Pane is installed on Windows, the Linux wrapper may 
 `sessions detach` detach a Pane from a named Session.
 
 `sessions overview` read a live status, activity, git, and pull request overview for a named Session.
+
+`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.
+
+Commands with a contract `daemonAction` (`panes git-status`, `commit`, `push`, `pull`, `rebase-main`, `restore`, `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`.
+
+`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.
+
+`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
 ## Agent Context
 
@@ -365,6 +379,11 @@ These flags are consumed by local daemon-control commands:
 --min-interval <milliseconds>
 --body-file <path|->
 --session <id|name>
+--message <message>
+--query <text>
+--doc <path>
+--url <pane-url>
+--toolsets <name,...>
 --json
 --wait-ready
 --no-focus
@@ -383,6 +402,7 @@ These flags are consumed by local daemon-control commands:
 --self-test
 --idle-backoff
 --report
+--read-only
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. In a Pane repository checkout, if `runpane` is not on PATH, use the built local wrapper with Node 22, for example `PATH=/opt/homebrew/opt/node@22/bin:$PATH node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

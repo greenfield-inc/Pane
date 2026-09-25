@@ -1018,7 +1018,7 @@ const paneCostResultSchema: BoundarySchema<PaneCostResult> = boundary.object({
   unattributed: boundary.optional(paneCostSliceResultSchema),
   totals: boundary.optional(usageTotalsResultSchema),
 });
-const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object({
+export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object({
   ok: boundary.boolean,
   generation: boundary.optional(boundary.number),
   repo: repoSummarySchema,
@@ -1105,7 +1105,7 @@ const paneFocusResultSchema: BoundarySchema<PaneFocusResult> = boundary.object({
   panelId: boundary.optional(boundary.string),
   focused: boundary.literal(true),
 });
-const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
+export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
   paneId: boundary.string,
   panels: boundary.array(panelSummarySchema),
@@ -1150,7 +1150,7 @@ const panelInputResultSchema: BoundarySchema<PanelInputResult> = boundary.object
   sentAt: boundary.string,
   nextCommand: boundary.optional(boundary.string),
 });
-const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = boundary.object({
+export const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = boundary.object({
   ok: boundary.literal(true),
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
@@ -1166,7 +1166,7 @@ const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = boundary.obje
   }),
   nextCommand: boundary.optional(boundary.string),
 });
-const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = boundary.object({
+export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = boundary.object({
   ok: boundary.boolean,
   generation: boundary.optional(boundary.number),
   panelId: boundary.string,
@@ -1270,7 +1270,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   changedWhileAway: boundary.optional(boundary.boolean),
   panels: boundary.optional(boundary.array(workspacePanelSummarySchema)),
 });
-const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
+export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
   ok: boundary.literal(true),
   epoch: boundary.string,
   generation: boundary.number,
@@ -2075,7 +2075,7 @@ function buildRepoAddRequest(parsed: ParsedArgs): RepoAddRequest {
   };
 }
 
-function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 'submit' = 'input'): PanelInputRequest {
+export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 'submit' = 'input'): PanelInputRequest {
   if (!parsed.panelId) {
     throw new Error(`runpane panels ${command} requires --panel.`);
   }
@@ -2123,7 +2123,7 @@ function resolvePinnedOverride(parsed: ParsedArgs): boolean | undefined {
   return parsed.pinned ? true : undefined;
 }
 
-async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateRequest> {
+export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateRequest> {
   if (parsed.fromJson) {
     const payload = JSON.parse(stripUtf8Bom(readInputSource(parsed.fromJson)));
     const request = parsePaneCreateRequestPayload(payload);

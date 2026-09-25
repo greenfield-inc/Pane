@@ -16,6 +16,7 @@ export interface McpToolContract {
     additive?: boolean;
     idempotent?: boolean;
     openWorld?: boolean;
+    toolsets?: readonly string[];
     jsonSchemas?: readonly string[];
   }[];
   /** Named JSON Schemas; `#/jsonSchemas/...` refs inside them resolve against the contract root. */
@@ -41,6 +42,8 @@ export interface McpTool {
   name: string;
   title: string;
   command: string;
+  /** Contract toolsets that serve this tool (`runpane mcp --toolsets`). */
+  toolsets: readonly string[];
   description: string;
   parameters: McpToolParameter[];
   inputSchema: {
@@ -129,6 +132,7 @@ function buildTool(
     name: toToolName(command.name),
     title,
     command: command.name,
+    toolsets: command.toolsets ?? [],
     description: [
       command.summary,
       context?.details,

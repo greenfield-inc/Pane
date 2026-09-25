@@ -22,7 +22,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node scripts/bundle-mcp-sdk.js && node scripts/mark-executable.js",
+    "build": "tsc && node scripts/bundle-mcp-sdk.js && node scripts/build-docs-index.js && node scripts/mark-executable.js",
     "lint": "pnpm --dir ../.. run lint:ox:runpane && pnpm run lint:eslint",
     "lint:eslint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",

@@ -8,6 +8,7 @@ import sys
 from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from .agent_context import run_agent_context
+from .daemon_actions import contract_command, run_daemon_action, run_links_create
 from .doctor import run_doctor
 from .download import download_artifact
 from .generated_contract import RUNPANE_CONTRACT
@@ -166,6 +167,12 @@ class ParsedArgs:
     self_test: bool = False
     report: bool = False
     body_file: Optional[str] = None
+    message: Optional[str] = None
+    query: Optional[str] = None
+    doc: Optional[str] = None
+    url: Optional[str] = None
+    toolsets: Optional[List[str]] = None
+    read_only: bool = False
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -220,10 +227,15 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_daemon_repair(parsed)
     if parsed.command == "agent-context":
         return run_agent_context(parsed)
-    if parsed.command == "mcp":
-        # The MCP server needs the Node MCP SDK, so only the npm package and the Pane app ship it.
-        print(help_text("mcp"), file=sys.stderr)
+    command_spec = contract_command(parsed.command)
+    if "pip" not in command_spec.get("wrappers", ["npm", "pip"]):
+        # Contract-documented npm-only commands (the MCP server, docs search, agent tasks).
+        print(help_text(parsed.command), file=sys.stderr)
         return 2
+    if "daemonAction" in command_spec:
+        return run_daemon_action(parsed, command_spec["daemonAction"])
+    if parsed.command == "links create":
+        return run_links_create(parsed)
     if parsed.command == "repos list":
         return run_repos_list(parsed)
     if parsed.command == "repos add":
@@ -632,6 +644,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--report":
         parsed.report = True
         return
+    if flag == "--read-only":
+        parsed.read_only = True
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -809,6 +824,21 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--body-file":
         parsed.body_file = value
         return
+    if flag == "--message":
+        parsed.message = value
+        return
+    if flag == "--query":
+        parsed.query = value
+        return
+    if flag == "--doc":
+        parsed.doc = value
+        return
+    if flag == "--url":
+        parsed.url = value
+        return
+    if flag == "--toolsets":
+        parsed.toolsets = [name.strip() for name in value.split(",") if name.strip()]
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -845,6 +875,20 @@ def is_runpane_local_command(command: str) -> bool:
         "panels submit-composer",
         "panels wait",
         "agents doctor",
+        "agents start",
+        "agents status",
+        "agents send",
+        "panes git-status",
+        "panes commit",
+        "panes push",
+        "panes pull",
+        "panes rebase-main",
+        "panes restore",
+        "links create",
+        "links open",
+        "docs search",
+        "docs read",
+        "mcp",
     }
 
 

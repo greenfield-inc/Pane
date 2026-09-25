@@ -83,6 +83,12 @@ export interface ParsedArgs {
   selfTest?: boolean;
   report?: boolean;
   bodyFile?: string;
+  message?: string;
+  query?: string;
+  doc?: string;
+  url?: string;
+  toolsets?: string[];
+  readOnly?: boolean;
   remoteSetupArgs: string[];
 }
 
@@ -373,6 +379,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.report = true;
     return;
   }
+  if (flag === '--read-only') {
+    parsed.readOnly = true;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -591,6 +601,26 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.bodyFile = value;
     return;
   }
+  if (flag === '--message') {
+    parsed.message = value;
+    return;
+  }
+  if (flag === '--query') {
+    parsed.query = value;
+    return;
+  }
+  if (flag === '--doc') {
+    parsed.doc = value;
+    return;
+  }
+  if (flag === '--url') {
+    parsed.url = value;
+    return;
+  }
+  if (flag === '--toolsets') {
+    parsed.toolsets = value.split(',').map((name) => name.trim()).filter(Boolean);
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -640,7 +670,21 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panels wait'
     || command === 'workspace state'
     || command === 'watch'
-    || command === 'agents doctor';
+    || command === 'agents doctor'
+    || command === 'agents start'
+    || command === 'agents status'
+    || command === 'agents send'
+    || command === 'panes git-status'
+    || command === 'panes commit'
+    || command === 'panes push'
+    || command === 'panes pull'
+    || command === 'panes rebase-main'
+    || command === 'panes restore'
+    || command === 'links create'
+    || command === 'links open'
+    || command === 'docs search'
+    || command === 'docs read'
+    || command === 'mcp';
 }
 
 function appendRemoteArg(parsed: ParsedArgs, flag: string, value?: string): void {
