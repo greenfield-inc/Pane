@@ -6,6 +6,8 @@
 //   navStart, fcp             renderer navigation start and first contentful paint
 //   paneRow                   the --open-pane row is in the sidebar (window is usable)
 //   terminal                  after clicking that row, its xterm has mounted
+//   syncSpawnMs               main thread blocked in execSync/execFileSync/spawnSync
+//                             before the terminal mounted (--sync-spawns lists each call)
 // Seed the PANE_DIR once (a repo plus a few panes). Pass --home <empty dir> to
 // keep the usage scanner from indexing your real ~/.claude while measuring.
 //
@@ -26,6 +28,7 @@ const { values: args } = parseArgs({
     port: { type: 'string', default: '4171' },
     json: { type: 'string' },
     home: { type: 'string' },
+    'sync-spawns': { type: 'boolean', default: false },
   },
 });
 if (!args['pane-dir'] || !args['open-pane']) throw new Error('--pane-dir and --open-pane are required');
@@ -40,6 +43,23 @@ const MAIN_MARKS = {
   services: '[Main] Services initialized',
   window: '[Main] Window created successfully',
 };
+
+// Preloaded into the main process: time every synchronous child process call.
+const syncSpawnProbe = path.join(paneDir, 'bench-sync-spawn-probe.cjs');
+fs.writeFileSync(syncSpawnProbe, `
+delete process.env.NODE_OPTIONS; // keep it out of the app's own child processes
+const cp = require('child_process');
+for (const name of ['execSync', 'execFileSync', 'spawnSync']) {
+  const original = cp[name];
+  cp[name] = function (...args) {
+    const start = performance.now();
+    try { return original.apply(this, args); } finally {
+      const ms = (performance.now() - start).toFixed(1);
+      process.stdout.write('[bench-sync-spawn] ' + ms + ' ' + JSON.stringify(String(args[0]).slice(0, 80) + ' ' + (Array.isArray(args[1]) ? args[1].join(' ').slice(0, 60) : '')) + '\\n');
+    }
+  };
+}
+`);
 
 // Epoch times, so they compare with the spawn clock.
 const paneRowSelector = JSON.stringify(`[data-testid="sidebar"] button[aria-label=${JSON.stringify(args['open-pane'])}]`);
@@ -93,12 +113,13 @@ function cdp(wsUrl) {
 
 async function runOnce() {
   fs.rmSync(path.join(paneDir, '.running'), { force: true });
-  const env = { ...process.env, NODE_ENV: 'production', PANE_DIR: paneDir };
+  const env = { ...process.env, NODE_ENV: 'production', PANE_DIR: paneDir, NODE_OPTIONS: `--require ${syncSpawnProbe}` };
   if (args.home) env.HOME = args.home;
   const spawnedAt = Date.now();
-  const child = spawn(electron, ['.', `--remote-debugging-port=${port}`], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(electron, ['.', `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(paneDir, 'chromium-user-data')}`], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const t = {};
   let output = '';
+  let outputAtTerminal;
   child.stdout.on('data', (chunk) => {
     const at = Date.now() - spawnedAt;
     output += chunk;
@@ -120,11 +141,18 @@ async function runOnce() {
         t.navStart ??= rel(probe.navStart);
         if (probe.fcp !== null) t.fcp ??= rel(probe.fcp);
         if (probe.paneRow) t.paneRow ??= rel(probe.now);
-        if (probe.terminal) t.terminal ??= rel(probe.now);
+        if (probe.terminal) {
+          t.terminal ??= rel(probe.now);
+          outputAtTerminal ??= output;
+        }
       }
       await sleep(8);
     }
     client.close();
+    const syncSpawns = [...(outputAtTerminal ?? output).matchAll(/^\[bench-sync-spawn\] ([\d.]+) (.*)$/gm)]
+      .map(([, ms, command]) => [Number(ms), JSON.parse(command)]);
+    t.syncSpawnMs = Math.round(syncSpawns.reduce((sum, [ms]) => sum + ms, 0));
+    if (args['sync-spawns']) for (const [ms, command] of syncSpawns) console.error(`  ${String(ms).padStart(7)} ms  ${command}`);
   } finally {
     child.kill('SIGTERM');
     const killTimer = setTimeout(() => child.kill('SIGKILL'), 15_000);
@@ -143,7 +171,7 @@ for (let i = 0; i < Number(args.runs); i += 1) {
 
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 console.log(`milestone   p50    p75   (ms from spawn, n=${runs.length})`);
-for (const key of [...Object.keys(MAIN_MARKS), 'navStart', 'fcp', 'paneRow', 'terminal']) {
+for (const key of [...Object.keys(MAIN_MARKS), 'navStart', 'fcp', 'paneRow', 'terminal', 'syncSpawnMs']) {
   const vals = runs.map((r) => r[key]).filter((v) => v !== undefined).sort((a, b) => a - b);
   if (vals.length) console.log(`${key.padEnd(10)} ${String(pct(vals, 0.5)).padStart(5)}  ${String(pct(vals, 0.75)).padStart(5)}`);
 }
