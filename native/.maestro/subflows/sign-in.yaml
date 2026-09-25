@@ -7,17 +7,7 @@ appId: com.dcouple.pane.mobile
     timeout: 180000
 - tapOn:
     id: connect-code-input
-# Typed in chunks: Android's driver gives up on one command after 120 s.
-- inputText: ${CONNECTION_CODE.substring(0, 64)}
-- inputText: ${CONNECTION_CODE.substring(64, 128)}
-- inputText: ${CONNECTION_CODE.substring(128, 192)}
-- inputText: ${CONNECTION_CODE.substring(192, 256)}
-- inputText: ${CONNECTION_CODE.substring(256, 320)}
-- inputText: ${CONNECTION_CODE.substring(320, 384)}
-- inputText: ${CONNECTION_CODE.substring(384, 448)}
-- inputText: ${CONNECTION_CODE.substring(448, 512)}
-- inputText: ${CONNECTION_CODE.substring(512, 576)}
-- inputText: ${CONNECTION_CODE.substring(576, 640)}
+- inputText: ${CONNECTION_CODE}
 - hideKeyboard
 - tapOn:
     id: connect-submit

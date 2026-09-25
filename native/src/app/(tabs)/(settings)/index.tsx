@@ -4,12 +4,14 @@ import { Alert } from 'react-native';
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
+import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { revokePush } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, ListSection, Screen } from '@/ui';
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { profile, connection } = useDaemon();
+  const { client, profile, connection } = useDaemon();
   const profiles = useHostsStore(state => state.profiles);
   const setActive = useHostsStore(state => state.setActive);
   const remove = useHostsStore(state => state.remove);
@@ -20,7 +22,7 @@ export default function SettingsScreen() {
       'The connection code is deleted from this phone. Pair again to reconnect.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => void remove(profile.id) },
+        { text: 'Sign Out', style: 'destructive', onPress: () => void revokePush(client, profile.id).then(() => remove(profile.id)) },
       ],
     );
   };
@@ -36,6 +38,8 @@ export default function SettingsScreen() {
         />
         <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />
       </ListSection>
+
+      <NotificationSettings />
 
       <ListSection title="Hosts" footer="Pane keeps each host's connection code in the iOS Keychain or Android Keystore.">
         {profiles.map(host => (
