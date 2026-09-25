@@ -1,5 +1,7 @@
 import { createHash, createPrivateKey, createSign, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import { connect as connectHttp2 } from 'http2';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
@@ -31,7 +33,12 @@ export interface MobilePushTransport {
   apns(request: { token: string; jwt: string; topic: string; payload: JsonObject }): Promise<ProviderResponse>;
   fcm(request: { token: string; accessToken: string; projectId: string; payload: JsonObject }): Promise<ProviderResponse>;
 }
-interface FcmCredentials { project_id: string; client_email: string; private_key: string; token_uri?: string; }
+interface FcmServiceAccountKey { project_id: string; client_email: string; private_key: string; token_uri?: string; }
+interface GcloudUserCredentials { client_id: string; client_secret: string; refresh_token: string; }
+/** A service-account key file, or keyless impersonation of a sender account through the operator's gcloud login. */
+type FcmCredentials =
+  | { kind: 'key'; projectId: string; key: FcmServiceAccountKey }
+  | { kind: 'impersonation'; projectId: string; serviceAccount: string; user: GcloudUserCredentials };
 interface ApnsCredentials { teamId: string; keyId: string; keyPath: string; topic: string; environment: 'sandbox' | 'production'; }
 class ProviderDeliveryError extends Error {
   constructor(readonly status: number, readonly body: string, message: string) { super(message); }
@@ -195,7 +202,7 @@ export class MobilePushSender {
     const credentials = readFcmCredentials();
     if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
     const response = await this.transport.fcm({
-      token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.project_id,
+      token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId,
       payload: { message: { token: registration.token, notification: { title, body: 'Open Pane to continue.' }, data: { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId } } },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
@@ -257,7 +264,7 @@ function providerReadiness(platform: RemoteMobilePlatform): Pick<RemoteMobilePus
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };
   return readFcmCredentials()
     ? { provider: 'ready', code: 'PUSH_READY', message: 'FCM delivery is configured.' }
-    : { provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED', message: 'This host has no valid FCM service account.' };
+    : { provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED', message: 'This host has no valid FCM sender configuration.' };
 }
 
 function configWithRegistrations(config: RemoteDaemonConfig, registrations: RemoteMobilePushRegistration[]): RemoteDaemonConfig {
@@ -287,20 +294,54 @@ function createApnsJwt(credentials: ApnsCredentials): string {
   const signature = signer.sign({ key: createPrivateKey(readFileSync(credentials.keyPath, 'utf8')), dsaEncoding: 'ieee-p1363' });
   return `${header}.${claims}.${signature.toString('base64url')}`;
 }
-const fcmCredentialsSchema = boundary.object({ project_id: boundary.nonEmptyString, client_email: boundary.nonEmptyString, private_key: boundary.nonEmptyString, token_uri: boundary.optional(boundary.nonEmptyString) });
+const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+const fcmServiceAccountKeySchema = boundary.object({ project_id: boundary.nonEmptyString, client_email: boundary.nonEmptyString, private_key: boundary.nonEmptyString, token_uri: boundary.optional(boundary.nonEmptyString) });
+const gcloudUserCredentialsSchema = boundary.object({ type: boundary.literal('authorized_user'), client_id: boundary.nonEmptyString, client_secret: boundary.nonEmptyString, refresh_token: boundary.nonEmptyString });
 function readFcmCredentials(): FcmCredentials | null {
-  const path = process.env.PANE_FCM_SERVICE_ACCOUNT_PATH;
-  if (!path) return null;
-  try { return decodeBoundary(JSON.parse(readFileSync(path, 'utf8')), fcmCredentialsSchema); } catch { return null; }
+  const { PANE_FCM_SERVICE_ACCOUNT_PATH: keyPath, PANE_FCM_IMPERSONATE_SERVICE_ACCOUNT: serviceAccount, PANE_FCM_PROJECT_ID: projectId } = process.env;
+  try {
+    if (keyPath) {
+      const key = decodeBoundary(JSON.parse(readFileSync(keyPath, 'utf8')), fcmServiceAccountKeySchema);
+      return { kind: 'key', projectId: key.project_id, key };
+    }
+    if (serviceAccount && projectId) {
+      const user = decodeBoundary(JSON.parse(readFileSync(gcloudApplicationDefaultCredentialsPath(), 'utf8')), gcloudUserCredentialsSchema);
+      return { kind: 'impersonation', projectId, serviceAccount, user };
+    }
+  } catch { return null; }
+  return null;
+}
+/** Where `gcloud auth application-default login` writes the operator's user credentials. */
+function gcloudApplicationDefaultCredentialsPath(): string {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const configDirectory = process.platform === 'win32' ? path.join(process.env.APPDATA ?? '', 'gcloud') : path.join(os.homedir(), '.config', 'gcloud');
+  return path.join(configDirectory, 'application_default_credentials.json');
 }
 async function createFcmAccessToken(credentials: FcmCredentials): Promise<string> {
-  const tokenUri = credentials.token_uri ?? 'https://oauth2.googleapis.com/token';
+  if (credentials.kind === 'key') return createServiceAccountKeyAccessToken(credentials.key);
+  const userToken = await postOAuthToken('https://oauth2.googleapis.com/token', {
+    grant_type: 'refresh_token', client_id: credentials.user.client_id, client_secret: credentials.user.client_secret, refresh_token: credentials.user.refresh_token,
+  });
+  const response = await fetch(`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(credentials.serviceAccount)}:generateAccessToken`, {
+    method: 'POST', signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope: [FCM_SCOPE] }),
+  });
+  const payload = decodeOptionalBoundary(await response.json(), boundary.object({ accessToken: boundary.optional(boundary.nonEmptyString) }));
+  if (!response.ok || !payload?.accessToken) throw new ProviderDeliveryError(response.status, '', 'FCM sender impersonation failed');
+  return payload.accessToken;
+}
+function createServiceAccountKeyAccessToken(key: FcmServiceAccountKey): Promise<string> {
+  const tokenUri = key.token_uri ?? 'https://oauth2.googleapis.com/token';
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claims = base64url(JSON.stringify({ iss: credentials.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: tokenUri, iat: now, exp: now + 3600 }));
+  const claims = base64url(JSON.stringify({ iss: key.client_email, scope: FCM_SCOPE, aud: tokenUri, iat: now, exp: now + 3600 }));
   const signer = createSign('RSA-SHA256'); signer.update(`${header}.${claims}`); signer.end();
-  const assertion = `${header}.${claims}.${signer.sign(credentials.private_key).toString('base64url')}`;
-  const response = await fetch(tokenUri, { method: 'POST', signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }) });
+  const assertion = `${header}.${claims}.${signer.sign(key.private_key).toString('base64url')}`;
+  return postOAuthToken(tokenUri, { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion });
+}
+async function postOAuthToken(tokenUri: string, form: Record<string, string>): Promise<string> {
+  const response = await fetch(tokenUri, { method: 'POST', signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form) });
   const payload = decodeOptionalBoundary(await response.json(), boundary.object({ access_token: boundary.optional(boundary.nonEmptyString) }));
   if (!response.ok || !payload?.access_token) throw new ProviderDeliveryError(response.status, '', 'FCM OAuth exchange failed');
   return payload.access_token;
