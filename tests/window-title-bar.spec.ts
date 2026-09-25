@@ -95,6 +95,31 @@ test.describe('window chrome', () => {
     await testInfo.attach('top-tabs.png', { path: screenshot, contentType: 'image/png' });
   });
 
+  test('shows PR and merge pills in the title strip only while the sidebar is collapsed', async ({ page }) => {
+    await openDesktop(page);
+    await page.getByRole('button', { name: session.name, exact: true }).click();
+    await page.evaluate((update) => (
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      window as typeof window & {
+        __paneTestElectronMock: { emitGitStatusUpdated: (sessionId: string, gitStatus: typeof update.gitStatus) => void };
+      }
+    ).__paneTestElectronMock.emitGitStatusUpdated(update.id, update.gitStatus), {
+      id: session.id,
+      gitStatus: { state: 'ahead', ahead: 3, isReadyToMerge: true, prNumber: 472, prState: 'OPEN', prTitle: 'Scrub request bodies' },
+    });
+
+    const pills = page.getByTestId('window-title-bar-pills');
+    await expect(pills).toHaveCount(0);
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    await expect(pills).toHaveText('#472Ready to merge');
+    await expect(pills.getByTitle('Pull request #472 (open) — Scrub request bodies')).toBeVisible();
+    const [pillsBox, tabBarBox] = await Promise.all([pills.boundingBox(), page.locator('.panel-tab-bar').boundingBox()]);
+    expect(pillsBox && tabBarBox && pillsBox.y).toBeLessThan(tabBarBox!.y + tabBarBox!.height);
+
+    await page.getByRole('button', { name: 'Expand sidebar' }).click();
+    await expect(pills).toHaveCount(0);
+  });
+
   test('keeps window controls clickable and clears the macOS traffic lights', async ({ page }) => {
     await openDesktop(page);
     const controls = page.getByTestId('window-title-bar-controls');
