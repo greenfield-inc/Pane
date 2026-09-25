@@ -75,7 +75,7 @@ describe('CLAUDE_MANIFEST', () => {
       ' Security guide',
       '',
       ' ❯ No, exit',
-    '   Yes, I trust this folder',
+      '   Yes, I trust this folder',
       '',
       ' Enter to confirm · Esc to cancel',
     ].join('\n');
