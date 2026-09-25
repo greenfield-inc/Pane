@@ -9,9 +9,9 @@ import { useTheme } from '@/theme';
 import { usePairing } from './usePairing';
 
 /** Paste or scan a pane-remote:// code. Used on first launch and in "Add host". */
-export function ConnectForm({ onPaired }: { onPaired?: () => void }) {
+export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: string; onPaired?: () => void }) {
   const theme = useTheme();
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialCode);
   const pairing = usePairing(onPaired);
 
   const paste = async () => {

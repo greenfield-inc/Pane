@@ -11,6 +11,8 @@ import { useTheme } from '@/theme';
 
 void SplashScreen.preventAutoHideAsync();
 
+export { RouteErrorBoundary as ErrorBoundary } from '@/features/app/RouteErrorBoundary';
+
 export default function RootLayout() {
   const theme = useTheme();
   const hydrated = useHostsStore(state => state.hydrated);
@@ -75,6 +77,7 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add host' }} />
       </Stack.Protected>
       <Stack.Screen name="scan" options={{ presentation: 'fullScreenModal', headerShown: false }} />
+      <Stack.Screen name="pair" options={{ presentation: 'modal', title: 'Connect to host' }} />
     </Stack>
   );
 }

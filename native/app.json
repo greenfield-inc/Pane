@@ -5,7 +5,10 @@
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "pane",
+    "scheme": [
+      "pane",
+      "pane-remote"
+    ],
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#010409",
     "ios": {
