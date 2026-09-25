@@ -2,6 +2,11 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import path from 'path';
 
+/** False when Pane cannot see Claude's transcripts (WSL, or a config dir set only in the user's shell). */
+export function canReadClaudeTranscripts(configDirectory = process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), '.claude')): boolean {
+  return existsSync(path.join(configDirectory, 'projects'));
+}
+
 /** Resolve by ID without copying vendor-owned transcripts into a new project. */
 export function findClaudeSessionTranscript(sessionId: string, configDirectory = process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), '.claude')): string | undefined {
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return undefined;

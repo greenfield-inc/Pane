@@ -63,8 +63,6 @@ export interface TerminalPanelState {
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
-  /** Wrapper/custom commands own their flags and resume behavior. */
-  preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;
   customResumeStarted?: boolean;
 
