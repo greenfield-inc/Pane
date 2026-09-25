@@ -54,6 +54,8 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 `subflows/launch-dev-client.yaml` clears app state and the Keychain, opens the dev client against `127.0.0.1:${METRO_PORT}` and gets the dev menu out of the way. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`. Start a feature flow with `- runFlow: subflows/signed-in.yaml`, which runs both. Pressable rows merge their text for accessibility, so match rows by `testID` or a regex such as `"fix-login-bug.*"`.
 
+`panes.yaml` creates a pane, searches, favorites, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
+
 ## How the code is organised
 
 | Path | What goes there |

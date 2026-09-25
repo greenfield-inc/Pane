@@ -3,8 +3,6 @@
 # (see native/README.md).
 appId: com.dcouple.pane.mobile
 name: Approve a permission request
-env:
-  METRO_PORT: "8137"
 ---
 - runFlow: subflows/signed-in.yaml
 - extendedWaitUntil:

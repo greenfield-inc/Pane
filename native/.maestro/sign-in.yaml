@@ -2,8 +2,6 @@
 # Run: see native/README.md ("End-to-end tests").
 appId: com.dcouple.pane.mobile
 name: Sign in and sign out
-env:
-  METRO_PORT: "8137"
 ---
 - runFlow: subflows/launch-dev-client.yaml
 - runFlow: subflows/sign-in.yaml

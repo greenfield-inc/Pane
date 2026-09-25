@@ -2,8 +2,6 @@
 # from Archived. Needs a dev host with at least one repository (README).
 appId: com.dcouple.pane.mobile
 name: Pane list journeys
-env:
-  METRO_PORT: "8137"
 ---
 - runFlow: subflows/signed-in.yaml
 - evalScript: ${output.pane = 'mae-' + Date.now().toString(36)}

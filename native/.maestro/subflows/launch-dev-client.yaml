@@ -4,7 +4,7 @@ appId: com.dcouple.pane.mobile
 - launchApp:
     clearState: true
     clearKeychain: true
-- openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT}
+- openLink: exp+pane://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${METRO_PORT || '8137'}
 # iOS asks before opening a link in the app.
 - extendedWaitUntil:
     visible: "Open"
@@ -21,7 +21,7 @@ appId: com.dcouple.pane.mobile
     when:
       visible: "DEVELOPMENT SERVERS"
     commands:
-      - tapOn: "http://.*:${METRO_PORT}"
+      - tapOn: "http://.*:${METRO_PORT || '8137'}"
 # clearState brings back the dev menu's first-run introduction; it opens
 # once the bundle loads, then shows the menu itself.
 - extendedWaitUntil:
