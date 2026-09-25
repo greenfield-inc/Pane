@@ -15,6 +15,8 @@ interface DaemonContextValue {
 
 const DaemonContext = createContext<DaemonContextValue | null>(null);
 
+const OFFLINE_RETRY_MS = 15_000;
+
 /**
  * Owns the connection to the active host. Render it with `key={profile.id}` so
  * switching hosts tears down the old client and its event stream.
@@ -43,6 +45,17 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
       client.disconnect();
     };
   }, [client, profile.id, queryClient]);
+
+  // The client gives up after its reconnect backoff (about 30 s). A phone
+  // changing networks or waking a sleeping Mac needs longer, so keep trying
+  // while the app is open.
+  useEffect(() => {
+    if (connection.status !== 'error') return;
+    const timer = setTimeout(() => {
+      if (AppState.currentState === 'active') void client.connect().catch(() => undefined);
+    }, OFFLINE_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [client, connection]);
 
   return <DaemonContext value={{ client, profile, connection }}>{children}</DaemonContext>;
 }

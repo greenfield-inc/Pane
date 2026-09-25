@@ -3,9 +3,10 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
-import { Button, Icon, TextField } from '@/ui';
+import { Button, Icon, Text, TextField } from '@/ui';
 import { useTheme } from '@/theme';
 
+import { describeConnectionCode } from './describeCode';
 import { usePairing } from './usePairing';
 
 /** Paste or scan a pane-remote:// code. Used on first launch and in "Add host". */
@@ -13,6 +14,7 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
   const theme = useTheme();
   const [code, setCode] = useState(initialCode);
   const pairing = usePairing(onPaired);
+  const host = describeConnectionCode(code);
 
   const paste = async () => {
     const text = (await Clipboard.getStringAsync()).trim();
@@ -61,6 +63,13 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
           />
         </View>
       </View>
+      {host ? (
+        <View testID="connect-host" style={[styles.host, { backgroundColor: theme.colors.surfaceRaised, borderRadius: theme.radius.md }]}>
+          <Text variant="footnote" tone="muted">Connects to</Text>
+          <Text variant="headline" numberOfLines={1}>{host.label}</Text>
+          <Text variant="footnote" tone="secondary" numberOfLines={1}>{host.baseUrl}</Text>
+        </View>
+      ) : null}
       <Button
         testID="connect-submit"
         title="Connect"
@@ -76,4 +85,5 @@ const styles = StyleSheet.create({
   container: { gap: 16 },
   row: { flexDirection: 'row', gap: 12 },
   flex: { flex: 1 },
+  host: { padding: 12, gap: 2 },
 });

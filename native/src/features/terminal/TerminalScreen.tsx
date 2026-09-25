@@ -1,7 +1,7 @@
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -12,6 +12,7 @@ import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
+import { useMarkPaneSeen } from '../panes/hooks';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
 import { pickPanel, terminalPanels } from './panels';
 import { PanelTabs } from './PanelTabs';
@@ -48,6 +49,15 @@ export function TerminalScreen() {
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:list', paneId] });
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive', paneId] });
   }), [client, paneId, profile.id, queryClient]);
+
+  // Watching a pane counts as seeing it: clear its Ready badge on the way in
+  // and out, however the screen was opened (list, notification or link).
+  const markSeen = useMarkPaneSeen();
+  const markThisPaneSeen = useEffectEvent(() => markSeen(paneId));
+  useEffect(() => {
+    markThisPaneSeen();
+    return () => markThisPaneSeen();
+  }, [paneId]);
 
   const panels = terminalPanels(panelList.data ?? []);
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);

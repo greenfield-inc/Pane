@@ -138,6 +138,10 @@ const RETRYABLE_READ_CHANNELS = new Set([
   'projects:detect-branch',
   'remote:pwa-affordances',
   'mobile:push-status',
+  'runpane:workspace:state',
+  'permission:getPending',
+  'sessions:get-archived-with-projects',
+  'terminal:getState',
 ]);
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
@@ -192,8 +196,17 @@ export class RemoteDaemonClient {
     this.reconnectAttempt = 0;
     this.setState({ status: 'connecting', lastError: null });
 
-    await this.checkHealth(this.abortController.signal);
-    void this.openEventStream(this.abortController.signal);
+    const { signal } = this.abortController;
+    try {
+      await this.checkHealth(signal);
+    } catch (error) {
+      // Leave 'connecting' so callers can see the failure and try again.
+      if (!signal.aborted) {
+        this.setState({ status: 'error', lastError: error instanceof Error ? error.message : String(error) });
+      }
+      throw error;
+    }
+    void this.openEventStream(signal);
   }
 
   disconnect(): void {

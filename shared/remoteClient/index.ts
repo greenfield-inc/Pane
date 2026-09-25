@@ -10,7 +10,7 @@ export {
   type RemoteFetch,
   type RemoteRequestContext,
 } from './remoteDaemonClient';
-export { createFetchEventStreamTransport, createVoiceSocketRequest } from './fetchEventStreamTransport';
+export { createFetchEventStreamTransport } from './fetchEventStreamTransport';
 export { decodeRemoteConnectionCode } from './pairing';
 export {
   getOrCreateRuntimeId,

@@ -33,12 +33,14 @@ function createFakeHost() {
   const streams: Array<ReadableStreamDefaultController<Uint8Array>> = [];
   let eventsStatus = 200;
   let hangEvents = false;
+  let hostDown = false;
   let invokeHandler: (body: { channel: string; args: unknown[] }) => Response = () =>
     Response.json({ ok: true, result: null });
 
   const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     requests.push({ url, init });
     const path = new URL(url).pathname;
+    if (hostDown) throw new TypeError('Network request failed');
     if (path === '/health') return Response.json({ ok: true });
     if (path === '/invoke') return invokeHandler(JSON.parse(String(init?.body)));
     if (path === '/events') {
@@ -65,6 +67,7 @@ function createFakeHost() {
     end() { streams.at(-1)?.close(); },
     rejectEvents(status: number) { eventsStatus = status; },
     hangEvents(hang: boolean) { hangEvents = hang; },
+    goDown(down: boolean) { hostDown = down; },
     onInvoke(handler: typeof invokeHandler) { invokeHandler = handler; },
   };
 }
@@ -269,6 +272,22 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
       lastError: 'input.channel: expected string',
     });
     client.disconnect();
+  });
+
+  it('reports an error when the host cannot be reached, so a later connect can retry', async () => {
+    const host = createFakeHost();
+    host.goDown(true);
+    const client = createClient(host);
+    const connecting = client.connect();
+    const rejected = expect(connecting).rejects.toThrow('Network request failed');
+    await vi.runAllTimersAsync();
+    await rejected;
+    expect(client.getState()).toMatchObject({ status: 'error', lastError: 'Network request failed' });
+
+    host.goDown(false);
+    await client.connect();
+    await flush();
+    expect(client.getState().status).toBe('connected');
   });
 
   it('stops the stream and returns to local on disconnect', async () => {
