@@ -127,6 +127,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "doctor",
       "summary": "Run platform, release, installed Pane, daemon reachability, and remote setup diagnostics.",
+      "openWorld": true,
       "usage": [
         "runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <format>] [--verbose]",
         "runpane doctor --report [--title <text>] --body-file <path|-> [--yes] [--json]"
@@ -192,6 +193,8 @@ export const RUNPANE_CONTRACT = {
         "runpane repos add --path <path> [--name <name>] [--json] [--yes]"
       ],
       "mutates": true,
+      "additive": true,
+      "idempotent": true,
       "jsonSchemas": [
         "repoAddRequest",
         "repoAddResult"
@@ -247,6 +250,7 @@ export const RUNPANE_CONTRACT = {
         "runpane panes create --from-json <path|-> [--yes] [--json]"
       ],
       "mutates": true,
+      "additive": true,
       "jsonSchemas": [
         "paneCreateRequest",
         "paneCreateResult"
@@ -259,6 +263,7 @@ export const RUNPANE_CONTRACT = {
         "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch] [--no-pinned] [--dry-run] [--yes] [--json]"
       ],
       "mutates": true,
+      "additive": true,
       "jsonSchemas": [
         "paneCreateResult"
       ]
@@ -282,6 +287,7 @@ export const RUNPANE_CONTRACT = {
         "runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]"
       ],
       "mutates": true,
+      "idempotent": true,
       "jsonSchemas": [
         "panePinRequest",
         "panePinResult"
@@ -294,6 +300,7 @@ export const RUNPANE_CONTRACT = {
         "runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]"
       ],
       "mutates": true,
+      "idempotent": true,
       "jsonSchemas": [
         "panePinRequest",
         "panePinResult"
@@ -306,6 +313,7 @@ export const RUNPANE_CONTRACT = {
         "runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]"
       ],
       "mutates": true,
+      "idempotent": true,
       "jsonSchemas": [
         "paneRenameRequest",
         "paneRenameResult"
@@ -318,6 +326,8 @@ export const RUNPANE_CONTRACT = {
         "runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json]"
       ],
       "mutates": true,
+      "additive": true,
+      "idempotent": true,
       "jsonSchemas": [
         "paneFocusRequest",
         "paneFocusResult"
@@ -331,6 +341,7 @@ export const RUNPANE_CONTRACT = {
         "runpane panels create --pane <pane-id> --tool-command <command> [--title <title>] [--focus|--no-focus] --yes [--json]"
       ],
       "mutates": true,
+      "additive": true,
       "jsonSchemas": [
         "panelCreateRequest",
         "panelCreateResult"
@@ -429,6 +440,7 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
+      "additive": true,
       "jsonSchemas": [
         "sessionResult"
       ]
@@ -450,6 +462,7 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
+      "idempotent": true,
       "jsonSchemas": [
         "sessionResult"
       ]
@@ -461,6 +474,7 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
+      "idempotent": true,
       "jsonSchemas": [
         "sessionResult"
       ]
@@ -472,6 +486,8 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
+      "additive": true,
+      "idempotent": true,
       "jsonSchemas": [
         "sessionResult"
       ]
@@ -483,6 +499,7 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
+      "idempotent": true,
       "jsonSchemas": [
         "sessionResult"
       ]

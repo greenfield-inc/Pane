@@ -180,7 +180,8 @@ function parseTomlConfig(text: string): { paneEntry: JsonValue | undefined; rest
   const servers = decodeOptionalBoundary(config.mcp_servers, boundary.jsonObject);
   const paneEntry = servers?.[PANE_MCP_SERVER_NAME];
   if (servers) {
-    const { [PANE_MCP_SERVER_NAME]: _pane, ...others } = servers;
+    const others = { ...servers };
+    delete others[PANE_MCP_SERVER_NAME];
     if (Object.keys(others).length > 0) config.mcp_servers = others;
     else delete config.mcp_servers;
   }

@@ -1,11 +1,11 @@
-import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { RUNPANE_CONTRACT } from './generated/contract';
 
 /**
  * The slice of the runpane contract that MCP tools are generated from. Every
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
- * `--pane-dir` for daemon commands.
+ * `--pane-dir` for daemon commands. Its output schema is the command's `*Result` schema.
  */
 export interface McpToolContract {
   commands: readonly {
@@ -13,8 +13,13 @@ export interface McpToolContract {
     summary: string;
     usage: readonly string[];
     mutates?: boolean;
+    additive?: boolean;
+    idempotent?: boolean;
+    openWorld?: boolean;
     jsonSchemas?: readonly string[];
   }[];
+  /** Named JSON Schemas; `#/jsonSchemas/...` refs inside them resolve against the contract root. */
+  jsonSchemas: unknown;
   flags: Readonly<Record<string, readonly { name: string; value?: string; description?: string }[]>>;
   agentContext: {
     commands: Readonly<Record<string, {
@@ -34,15 +39,24 @@ interface McpToolParameter {
 
 export interface McpTool {
   name: string;
+  title: string;
   command: string;
   description: string;
-  mutates: boolean;
   parameters: McpToolParameter[];
   inputSchema: {
     type: 'object';
     properties: Record<string, { type: 'string' | 'boolean'; description: string }>;
     required?: string[];
     additionalProperties: false;
+  };
+  outputSchema: JsonObject;
+  /** MCP tool annotations; see the `additive`, `idempotent`, and `openWorld` contract fields. */
+  annotations: {
+    title: string;
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+    idempotentHint: boolean;
+    openWorldHint: boolean;
   };
 }
 
@@ -58,15 +72,17 @@ type ContractFlag = McpToolContract['flags'][string][number];
 
 export function buildMcpTools(contract: McpToolContract = RUNPANE_CONTRACT): McpTool[] {
   const globalFlags = new Map(Object.values(contract.flags).flat().map((flag) => [flag.name, flag]));
+  const schemas = decodeBoundary(JSON.parse(JSON.stringify(contract.jsonSchemas)), boundary.jsonObject);
   return contract.commands
     .filter((command) => command.jsonSchemas && command.jsonSchemas.length > 0)
-    .map((command) => buildTool(contract, command, globalFlags));
+    .map((command) => buildTool(contract, command, globalFlags, schemas));
 }
 
 function buildTool(
   contract: McpToolContract,
   command: McpToolContract['commands'][number],
   globalFlags: Map<string, ContractFlag>,
+  schemas: JsonObject,
 ): McpTool {
   const context = contract.agentContext.commands[command.name];
   const contextArgs = new Map((context?.arguments ?? []).map((arg) => [arg.name, arg]));
@@ -107,8 +123,11 @@ function buildTool(
   const inputSchema: McpTool['inputSchema'] = { type: 'object', properties, additionalProperties: false };
   if (required.length > 0) inputSchema.required = required;
 
+  const mutates = command.mutates === true;
+  const title = `runpane ${command.name}`;
   return {
     name: toToolName(command.name),
+    title,
     command: command.name,
     description: [
       command.summary,
@@ -116,10 +135,77 @@ function buildTool(
       ...(context?.notes ?? []),
       `Returns the JSON of \`runpane ${command.name} --json\`.`,
     ].filter(Boolean).join('\n'),
-    mutates: command.mutates === true,
     parameters,
     inputSchema,
+    outputSchema: buildOutputSchema(command.jsonSchemas ?? [], schemas),
+    annotations: {
+      title,
+      readOnlyHint: !mutates,
+      // The MCP default for a tool that changes state is destructive; the contract marks the additive ones.
+      destructiveHint: mutates && command.additive !== true,
+      idempotentHint: command.idempotent === true,
+      openWorldHint: command.openWorld === true,
+    },
   };
+}
+
+/**
+ * An object schema accepting any of the command's `*Result` schemas, with contract-root refs
+ * (`#/jsonSchemas/...`) inlined so the schema stands alone. Refs local to a result schema
+ * (`#/$defs/...`) keep working because its `$defs` move to the root with it.
+ */
+function buildOutputSchema(names: readonly string[], schemas: JsonObject): JsonObject {
+  const results = names.filter((name) => name.endsWith('Result')).map((name) => inlineContractRefs(schemas[name], schemas));
+  const defs: JsonObject = {};
+  const variants = results.map((result) => {
+    const variant = decodeBoundary(result, boundary.jsonObject);
+    const { $defs, ...rest } = variant;
+    Object.assign(defs, decodeBoundary($defs ?? {}, boundary.jsonObject));
+    return rest;
+  });
+  const outputSchema: JsonObject = variants.length === 1 ? { ...variants[0], type: 'object' } : { type: 'object', oneOf: variants };
+  if (Object.keys(defs).length > 0) outputSchema.$defs = defs;
+  return outputSchema;
+}
+
+const CONTRACT_REF_PREFIX = '#/jsonSchemas/';
+
+const refSchema = boundary.object({ $ref: boundary.string });
+
+function inlineContractRefs(node: JsonValue | undefined, schemas: JsonObject, depth = 0): JsonValue {
+  if (depth > 32) throw new Error('runpane contract schema refs nest too deeply');
+  if (node === undefined) throw new Error('runpane contract names a JSON schema that does not exist');
+  if (Array.isArray(node)) return node.map((item) => inlineContractRefs(item, schemas, depth + 1));
+  const object = asObject(node);
+  if (!object) return node;
+  const ref = asRef(object);
+  if (ref?.startsWith(CONTRACT_REF_PREFIX)) {
+    const target = ref.slice(CONTRACT_REF_PREFIX.length).split('/')
+      .reduce<JsonValue | undefined>((current, segment) => (Array.isArray(current) ? current[Number(segment)] : asObject(current)?.[segment]), schemas);
+    return inlineContractRefs(target, schemas, depth + 1);
+  }
+  const inlined = Object.fromEntries(Object.entries(object).map(([key, value]) => [key, inlineContractRefs(value, schemas, depth + 1)]));
+  // Several MCP clients read `type` as one string, so `type: ["string", "null"]` becomes an equivalent `anyOf`.
+  const { type, ...rest } = inlined;
+  if (!Array.isArray(type) || rest.anyOf !== undefined) return inlined;
+  return { ...rest, anyOf: type.map((member) => ({ type: member })) };
+}
+
+function asObject(value: JsonValue | undefined): JsonObject | undefined {
+  if (value === undefined || value === null || Array.isArray(value)) return undefined;
+  try {
+    return decodeBoundary(value, boundary.jsonObject);
+  } catch {
+    return undefined;
+  }
+}
+
+function asRef(value: JsonObject): string | undefined {
+  try {
+    return decodeBoundary(value, refSchema).$ref;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Builds the argv for one tool call; the result is `runpane <argv>` with `--json`. */

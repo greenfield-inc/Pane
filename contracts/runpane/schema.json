@@ -329,6 +329,18 @@
         "mutates": {
           "type": "boolean"
         },
+        "additive": {
+          "description": "A mutating command that only adds state, never changes or removes it (MCP destructiveHint false).",
+          "type": "boolean"
+        },
+        "idempotent": {
+          "description": "Repeating the command with the same arguments has no further effect (MCP idempotentHint).",
+          "type": "boolean"
+        },
+        "openWorld": {
+          "description": "The command can reach services outside the local Pane app (MCP openWorldHint).",
+          "type": "boolean"
+        },
         "jsonSchemas": {
           "$ref": "#/$defs/stringList"
         }

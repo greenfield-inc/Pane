@@ -671,7 +671,13 @@ function appendUnknownRemoteArg(args: string[], index: number, parsed: ParsedArg
  * Splits `--flag=value` for the value flags runpane parses itself. A value given this way is taken
  * literally, even when it starts with "-" (for example `--text=- [ ] item`).
  */
-function splitInlineValues(rawArgs: string[]): { args: string[]; literalValues: Set<number> } {
+interface SplitArgs {
+  args: string[];
+  /** Indexes of values given as `--flag=value`, which are taken literally. */
+  literalValues: Set<number>;
+}
+
+function splitInlineValues(rawArgs: string[]): SplitArgs {
   const args: string[] = [];
   const literalValues = new Set<number>();
   for (const arg of rawArgs) {
