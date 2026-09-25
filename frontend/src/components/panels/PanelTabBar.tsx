@@ -20,6 +20,8 @@ import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
 import { PaneStatusPills } from '../PaneStatusPills';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { COLLAPSED_SIDEBAR_PX, titleStripContentLeft } from '../../utils/titleBarOverlay';
+import { isMac } from '../../utils/platformUtils';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
@@ -523,6 +525,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       {/* Flex container */}
       <div
         className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2")}
+        // Beside the collapsed rail, keep tabs clear of the window controls and sidebar toggle.
+        style={trailingSlot && sidebarCollapsed ? { paddingLeft: titleStripContentLeft(COLLAPSED_SIDEBAR_PX, isMac()) - COLLAPSED_SIDEBAR_PX } : undefined}
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >

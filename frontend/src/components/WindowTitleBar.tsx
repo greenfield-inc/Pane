@@ -6,7 +6,7 @@ import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import type { Project } from '../types/project';
 import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
-import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
+import { COLLAPSED_SIDEBAR_PX, isWindowControlsOverlayEnabled, titleStripContentLeft } from '../utils/titleBarOverlay';
 
 const TITLE_BAR_HEIGHT = 38;
 const GUTTER = 8;
@@ -48,7 +48,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
 
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
 
-  const sessionTabsLeft = Math.max(sidebarCollapsed ? 48 : sidebarWidth, isMac() ? 136 : 72);
+  const sessionTabsLeft = titleStripContentLeft(sidebarCollapsed ? COLLAPSED_SIDEBAR_PX : sidebarWidth, isMac());
   const sessionTabsRight = isMac()
     ? '116px'
     : `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 116px)`;
