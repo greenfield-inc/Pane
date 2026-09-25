@@ -297,7 +297,7 @@ test('Night Owl recent-pane metadata remains axe-clean', async ({ page }) => {
 test('seeded Create Pane dialog is keyboard reachable and axe-clean', async ({ page }) => {
   await openDesktop(page);
 
-  await page.getByRole('button', { name: /^Expand repository Accessibility fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Accessibility fixture$/ }).click();
   const newPaneButton = page.getByRole('button', { name: /New (workspace|pane)/i }).first();
   await expect(newPaneButton).toBeVisible();
   await newPaneButton.click();
@@ -341,32 +341,36 @@ test('queued pane creation failures show a dismissible accessible error', async 
   await expect(dialog).toBeHidden();
 });
 
-test('seeded pane exposes separate compound actions and arrow-keyed panel tabs', async ({ page }) => {
+test('seeded pane exposes right-click actions and arrow-keyed panel tabs', async ({ page }) => {
   await openDesktop(page);
 
-  await page.getByRole('button', { name: /^Expand repository Accessibility fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Accessibility fixture$/ }).click();
   const paneButton = page.getByRole('button', { name: 'Accessibility pane', exact: true });
   await expect(paneButton).toBeVisible();
-  const archiveButton = page.getByRole('button', { name: /Archive Accessibility pane/i });
-  const pinButton = page.getByRole('button', { name: /Pin Accessibility pane/i });
-  await expect(archiveButton).toBeAttached();
-  await expect(pinButton).toBeAttached();
+  await expect(page.getByRole('button', { name: /Archive Accessibility pane/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Pin Accessibility pane/i })).toHaveCount(0);
   await expect(paneButton.locator('button, a, [role="button"]')).toHaveCount(0);
-  await archiveButton.click();
-  // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
-  await expect.poll(() => page.evaluate(() => (
-    window as typeof window & {
-      __paneTestElectronMock: { getSessionDeleteCalls: () => string[] };
-    }
-  ).__paneTestElectronMock.getSessionDeleteCalls())).toEqual([session.id]);
-  await expect(paneButton).not.toHaveAttribute('aria-current', 'page');
-  await pinButton.click();
+  await paneButton.click({ button: 'right' });
+  let menu = page.getByRole('menu', { name: 'Pane actions for Accessibility pane' });
+  await expect(menu.getByRole('menuitem', { name: 'Pin', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Pin', exact: true }).click();
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & {
       __paneTestElectronMock: { getSessionFavoriteToggleCalls: () => string[] };
     }
   ).__paneTestElectronMock.getSessionFavoriteToggleCalls())).toEqual([session.id]);
+  await expect(paneButton).not.toHaveAttribute('aria-current', 'page');
+  await paneButton.click({ button: 'right' });
+  menu = page.getByRole('menu', { name: 'Pane actions for Accessibility pane' });
+  await menu.getByRole('menuitem', { name: 'Archive', exact: true }).click();
+  // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & {
+      __paneTestElectronMock: { getSessionDeleteCalls: () => string[] };
+    }
+  ).__paneTestElectronMock.getSessionDeleteCalls())).toEqual([session.id]);
   await expect(paneButton).not.toHaveAttribute('aria-current', 'page');
   await paneButton.click();
 

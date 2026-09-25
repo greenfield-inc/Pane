@@ -67,7 +67,7 @@ async function computedVar(page: Page, cssProp: string, value: string): Promise<
   }, { cssProp, value });
 }
 
-test('a split pane keeps its tabs in the group strips and collapses the top row', async ({ page }, testInfo) => {
+test('a split pane keeps its tabs in the group strips and a draggable top row', async ({ page }, testInfo) => {
   await installElectronApiMock(page, {
     platform: 'darwin',
     initialProjects: [project],
@@ -77,7 +77,7 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Split fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
   await page.getByRole('button', { name: 'Split pane', exact: true }).click();
 
   const alpha = page.getByRole('tab', { name: 'Alpha', exact: true });
@@ -85,8 +85,10 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
   await expect(alpha).toBeVisible();
   await expect(beta).toBeVisible();
 
-  // The top row has nothing to show while every tab is in a group strip.
-  await expect(page.locator('.panel-tab-bar')).toBeHidden();
+  // The top row stays at the window edge for dragging and global controls.
+  const topBar = page.locator('.panel-tab-bar');
+  await expect(topBar).toBeVisible();
+  await expect(topBar.getByRole('tab')).toHaveCount(0);
 
   const groupRows = page.locator('.panel-group-tab-bar');
   await expect(groupRows).toHaveCount(2);

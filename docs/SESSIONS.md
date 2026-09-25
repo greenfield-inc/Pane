@@ -100,14 +100,21 @@ Pinned is the first sidebar category and can contain both Session chats and
 Panes. Right-click a Session to pin or unpin it. The pin preference survives
 restarts; an archived Session stays out of Pinned until it is restored.
 
-Click a Session row to open its chat and expand or collapse its associated
-Panes. Child Pane rows are indented beyond the Session chat icon and keep the
-ordinary Pane actions.
+Only the selected sidebar location is highlighted: opening a child Pane does not also highlight its repository row, and opening an orchestrator chat clears Pane-row selection.
+
+Click a Session name to open its chat. The left chevron always appears and
+expands or collapses associated Panes without switching conversations. Empty
+Sessions start collapsed and show “No child sessions” when expanded. Child
+Pane rows are indented beneath the Session and keep ordinary Pane actions.
+Single-line Pane rows show the title and status indicator without change counts
+or PR numbers. The optional two-row layout shows those details below the title.
+Session and Pane context menus use compact widths.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
 Panes and activity. Files browses the Session workspace. Changes summarizes
 linked worktrees and opens a Pane for detailed review. The upper-right sidebar
-button shows or hides the selected tab.
+button shows or hides the selected tab. The title strip can be dragged between
+controls; its drag area leaves both sidebar toggle buttons clickable.
 
 Right-click a Session to archive it. Archiving hides the chat from the active
 Sessions list while retaining its identity, conversation history, and Pane
@@ -300,6 +307,10 @@ contract. The legacy shared Cursor rule is not always applied; Session-specific
 instructions belong to the Session's working directory. User-selected profiles
 and workflows determine behavior after the user supplies a task.
 
+The sidebar’s **Archived** list separates **Sessions** from **Worktrees**.
+Each section stays visible when empty; worktrees are grouped by repository.
+Opening the list refreshes both collections.
+
 ## Terminal and Files
 
 Each Session has a collapsible **Terminal** dock and a **Files** button beside
@@ -356,4 +367,9 @@ A durable Session record allows reopening to complete an interrupted transfer
 without copying the conversation. Terminal, Files, and experimental progress
 capabilities are the same as for a newly created Session.
 
-Promotion defaults to the worktree's current name.
+Promotion defaults to the worktree's current name. Rename an existing Session
+with **Rename Session…** in its right-click menu, or from its overview. Renaming
+keeps the same Session ID, conversation, private folder, and child associations.
+
+Worktree rows also offer **Rename worktree…**. This changes their displayed Pane
+name; it leaves the Git branch, directory path, files, and conversations in place.

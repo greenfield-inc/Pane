@@ -152,7 +152,11 @@ body.understory {
 
 /* Tab indicator — default fill mode */
 .panel-tab-bar [aria-selected="true"] {
-  background-color: var(--color-surface-hover);
+  background-color: var(--color-bg-primary);
+}
+
+:root.haar .panel-tab-bar [aria-selected="true"] {
+  background-color: var(--color-bg-editor);
 }
 
 /* Tab indicator — Forge underline mode */
@@ -263,14 +267,44 @@ body.understory {
    shadows. Theme personality lives in colour tokens, not in the frame. */
 .pane-sidebar-shell {
   border-right: var(--border-hairline) solid var(--color-border-primary);
+  user-select: none;
+}
+
+.pane-sidebar-shell :is(input, textarea, [contenteditable="true"]) {
+  user-select: text;
+}
+
+/* Sidebar selection is indicated by row shading, without a focus outline. */
+.pane-sidebar-shell :is(button, a, [role="button"]):focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .panel-tab-bar {
   border-bottom: var(--border-hairline) solid var(--color-border-primary);
+  -webkit-app-region: drag;
+}
+
+.panel-tab-bar-with-title-controls {
+  -webkit-app-region: no-drag;
+}
+
+.panel-tab-bar-with-title-controls > div {
+  -webkit-app-region: drag;
+  margin-right: 48px;
 }
 
 .pane-drag-area {
   -webkit-app-region: drag;
+}
+
+.pane-window-title-bar :is(button, [role="button"]) {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+
+.panel-tab-bar :is(button, input, [role="tab"], [role="menuitem"]) {
+  -webkit-app-region: no-drag;
 }
 
 /* Hide scrollbar completely */
@@ -1112,21 +1146,23 @@ body.understory {
   grid-template-columns: 16px minmax(0, 1fr) auto 18px;
   align-items: center;
   column-gap: 6px;
-  height: 32px;
-  padding: 0 10px 0 8px;
+  height: 28px;
+  margin: 2px 8px;
+  padding: 0 8px;
+  border-radius: 6px;
   color: var(--color-text-primary);
   cursor: default;
 }
 .pane-changes-list-row:hover { background: var(--color-surface-hover); }
+.pane-changes-list-row.is-active { background: var(--color-surface-hover); }
 .pane-changes-list-row.is-selected { background: var(--color-surface-selected); }
-.pane-changes-list-row.is-active { box-shadow: inset 0 0 0 2px var(--color-interactive); }
 
 /* The dir prefix absorbs all truncation; the basename always renders in full. */
 .pane-changes-list-path {
   display: flex;
   align-items: baseline;
   min-width: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-family: theme('fontFamily.mono');
 }
 .pane-changes-list-dir {
@@ -1135,12 +1171,12 @@ body.understory {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 .pane-changes-list-name { flex: 0 0 auto; white-space: nowrap; color: var(--color-text-primary); }
 
-.pane-changes-list-stats { color: var(--color-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pane-changes-list-status { color: var(--color-text-secondary); font-size: 11px; font-weight: 600; }
+.pane-changes-list-stats { color: var(--color-text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pane-changes-list-status { color: var(--color-text-secondary); font-size: 10px; font-weight: 600; }
 
 @container (max-width: 320px) {
   .pane-changes-list-stats { display: none; }

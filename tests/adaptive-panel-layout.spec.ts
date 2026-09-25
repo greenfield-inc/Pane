@@ -78,7 +78,7 @@ async function installFixture(
 }
 
 async function openWorktree(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /^Expand repository Adaptive layout fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Adaptive layout fixture$/ }).click();
   await page.getByRole('button', { name: 'Adaptive pane', exact: true }).click();
   await expect(page.locator('.pane-session-content')).toBeVisible();
 }
@@ -851,7 +851,7 @@ test('worktree and main-repository inspectors restore separate v2 preferences', 
   await openWorktree(page);
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '440px');
 
-  await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   const projectInspector = page.locator('.pane-detail-panel-vertical');
   await expect(projectInspector).toHaveCSS('width', '520px');
@@ -871,7 +871,7 @@ test('worktree and main-repository inspectors restore separate v2 preferences', 
   await page.evaluate(() => localStorage.setItem('pane-project-detail-panel-width:v2', '{"version":2,"preferredPx":520}'));
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '520px');
 });

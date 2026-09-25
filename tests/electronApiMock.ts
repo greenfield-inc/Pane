@@ -352,6 +352,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPanelCreated') {
           return (callback: MockEventCallback) => subscribe('panel:created', callback);
         }
+        if (prop === 'onPanelAgentStatus') {
+          return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
+        }
         if (prop === 'onPanelUpdated') {
           return (callback: MockEventCallback) => subscribe('panel:updated', callback);
         }
@@ -1100,6 +1103,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             mockPanels.push(clone(panel));
           }
           emit('panel:created', clone(panel));
+        },
+        emitPanelAgentStatus(panelId: string, sessionId: string, state: string) {
+          emit('panel:agent-status', { panelId, sessionId, state });
         },
         emitGitStatusUpdated(sessionId: string, gitStatus: JsonObject) {
           emit('git-status-updated', { sessionId, gitStatus: clone(gitStatus) });

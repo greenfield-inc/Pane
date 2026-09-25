@@ -157,11 +157,11 @@ test.describe('Smoke Tests', () => {
 
     await dismissStartupDialogs(page);
 
-    const repoActionsButton = page.getByRole('button', { name: 'Repository actions for Mock Repo' });
+    const repoActionsButton = page.getByRole('button', { name: 'Project actions for Mock Repo' });
     await expect(repoActionsButton).toBeVisible({ timeout: 5000 });
     await clickDomNode(repoActionsButton);
 
-    await clickDomNode(page.getByRole('menuitem', { name: 'Project Settings' }));
+    await clickDomNode(page.getByRole('menuitem', { name: 'Project settings' }));
 
     await expect(page.getByText('Project Settings')).toBeVisible({ timeout: 5000 });
     await expect(page.getByText('Worktree Folder')).toBeVisible();

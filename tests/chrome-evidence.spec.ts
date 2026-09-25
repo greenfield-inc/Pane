@@ -115,7 +115,7 @@ async function bootChromeFixture(page: Page, opts: BootOptions = {}) {
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Pane$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
   await page.getByRole('button', { name: 'Flat chrome', exact: true }).click();
   if (opts.theme) {
     await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${opts.theme}\\b`));
@@ -202,8 +202,16 @@ test('inspector and add-tool surfaces remain reachable', async ({ page }, testIn
 
 for (const theme of ['light-rounded', 'dark']) {
   test(`tab row paints on the chrome plane (${theme})`, async ({ page }) => {
-    await bootChromeFixture(page, { theme });
-    await expectTabRowChrome(page, page.locator('.panel-tab-bar'));
+    await bootChromeFixture(page, { theme, mountTerminal: true });
+    const row = page.locator('.panel-tab-bar');
+    await expectTabRowChrome(page, row);
+    const activeTab = row.getByRole('tab', { selected: true });
+    await expect(activeTab).toHaveCSS('border-top-left-radius', '6px');
+    const tabBox = await activeTab.boundingBox();
+    const rowBox = await row.boundingBox();
+    if (!tabBox || !rowBox) throw new Error('Tab row is missing');
+    expect(tabBox.y).toBeLessThanOrEqual(rowBox.y + 1);
+    expect(tabBox.y + tabBox.height).toBeGreaterThanOrEqual(rowBox.y + rowBox.height - 1);
   });
 }
 
