@@ -1685,7 +1685,10 @@ async function createPaneItem(
       toolType: 'none',
       startPinned: item.pinned,
       activateOnCreate: options.activate !== false,
-    }, { timeoutMs: options.timeoutMs });
+    }, {
+      timeoutMs: options.timeoutMs,
+      onSessionCreated: (sessionId) => { createdSessionId = sessionId; },
+    });
 
     createdSessionId = sessionResult.sessionId;
 
@@ -2202,7 +2205,10 @@ async function verifyComposerSubmitted(
 
   }
 
-  if (beforeHadComposerPrompt && (latestScreen.composer.hasUndeliveredText || looksLikePendingComposer(latestScreen.text))) {
+  // Claude can take longer to echo staged text than Pane waits, so a held
+  // composer after Enter fails even when the earlier screen never showed it.
+  const checksHeldComposer = beforeHadComposerPrompt || beforeScreen.state.agentType === 'claude';
+  if (checksHeldComposer && (latestScreen.composer.hasUndeliveredText || looksLikePendingComposer(latestScreen.text))) {
     return {
       ok: false,
       verifiedSubmitted: false,

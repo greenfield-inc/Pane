@@ -103,6 +103,9 @@ export class TaskQueue {
   private inputQueue: Bull.Queue<SendInputJob> | SimpleQueue<SendInputJob>;
   private continueQueue: Bull.Queue<ContinueSessionJob> | SimpleQueue<ContinueSessionJob>;
   private useSimpleQueue: boolean;
+  // Lets a waiter learn the session id as soon as the session exists, so a
+  // setup timeout can still report the created session.
+  private readonly sessionCreatedListeners = new Map<string, (sessionId: string) => void>();
 
   constructor(private options: TaskQueueOptions) {
     console.log('[TaskQueue] Initializing task queue...');
@@ -323,6 +326,7 @@ export class TaskQueue {
         });
 
         sessionCreatedEmitted = true;
+        this.sessionCreatedListeners.get(String(job.id))?.(session.id);
 
         // Worktree file sync — copy gitignored files in background, then run install
         // Fire-and-forget: copies first, then writes install command to the terminal
@@ -555,10 +559,18 @@ export class TaskQueue {
 
   async createSessionAndWait(
     data: CreateSessionJob,
-    options: { timeoutMs?: number } = {},
+    options: { timeoutMs?: number; onSessionCreated?: (sessionId: string) => void } = {},
   ): Promise<CreateSessionQueueResult> {
     const job = await this.createSession(data);
-    return this.waitForSessionCreationJob(job, options.timeoutMs ?? 120_000);
+    const jobId = String(job.id);
+    if (options.onSessionCreated) {
+      this.sessionCreatedListeners.set(jobId, options.onSessionCreated);
+    }
+    try {
+      return await this.waitForSessionCreationJob(job, options.timeoutMs ?? 120_000);
+    } finally {
+      this.sessionCreatedListeners.delete(jobId);
+    }
   }
 
   private async waitForSessionCreationJob(
