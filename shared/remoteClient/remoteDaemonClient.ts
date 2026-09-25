@@ -10,7 +10,7 @@ import {
 import { boundary, decodeBoundary, type JsonValue } from '../validation/boundaryDecoder';
 
 // Structural fetch types, so browser fetch, Node fetch and `expo/fetch` all fit.
-export interface RemoteFetchInit {
+interface RemoteFetchInit {
   method?: 'GET' | 'POST';
   headers?: Record<string, string>;
   body?: string;
@@ -219,25 +219,26 @@ export class RemoteDaemonClient {
 
         const response = await this.fetch(this.endpoint('invoke'), request);
 
-        const payload = decodeBoundary(await response.json().catch((cause: Error) => {
+        const payload = decodeInvokeResponse(await response.json().catch((cause: Error) => {
           if (isAuthFailureResponse(response.status)) {
             throw new RemoteAuthError(getRemoteAuthFailureMessage());
           }
           throw cause;
-        }), invokeResponseSchema);
+        }));
+        const failure = payload?.ok === false ? payload.error : undefined;
         if (isAuthFailureResponse(response.status)) {
-          throw new RemoteAuthError(getRemoteAuthFailureMessage(!payload?.ok ? payload?.error?.message : undefined));
+          throw new RemoteAuthError(getRemoteAuthFailureMessage(failure?.message));
         }
-        if (response.ok && payload.ok) {
+        if (response.ok && payload?.ok) {
           // SAFETY: The named IPC/API channel contract establishes this response payload type.
           return payload.result as T;
         }
 
-        const message = payload.ok
+        const message = payload?.ok
           ? `Remote request failed with ${response.status}`
-          : payload.error?.message ?? 'Remote request failed';
+          : failure?.message ?? 'Remote request failed';
         if (!isRetryableResponse(response.status)) {
-          throw new RemoteRequestError(message, response.status, payload.ok ? null : payload.error?.code ?? null);
+          throw new RemoteRequestError(message, response.status, failure?.code ?? null);
         }
         lastError = new Error(message);
       } catch (error) {
@@ -306,14 +307,18 @@ export class RemoteDaemonClient {
       if (this.staleStreamTimeoutMs === undefined) return;
       if (staleTimer !== null) clearTimeout(staleTimer);
       staleTimer = setTimeout(() => {
+        if (stream.signal.aborted) return;
         stream.abort();
         this.scheduleReconnect('Remote event stream stopped responding');
       }, this.staleStreamTimeoutMs);
     };
 
     try {
+      const context = await this.requestContext();
+      // Armed before the request too, so a fetch that hangs before headers is cut.
+      armStaleTimer();
       await this.transport.openEventStream({
-        ...await this.requestContext(),
+        ...context,
         signal: stream.signal,
         onOpen: () => {
           if (stream.signal.aborted) return;
@@ -426,6 +431,15 @@ export function getRemoteAuthFailureMessage(serverMessage?: string): string {
     ? ` (${serverMessage})`
     : '';
   return `This connection code is not accepted by the remote host${detail}. Create and copy a new code from Pane Settings > Remote Pane, then reconnect.`;
+}
+
+/** Returns null for a body that is not an invoke envelope, such as a proxy's error page JSON. */
+function decodeInvokeResponse(body: JsonValue) {
+  try {
+    return decodeBoundary(body, invokeResponseSchema);
+  } catch {
+    return null;
+  }
 }
 
 function isRetryableResponse(status: number): boolean {
