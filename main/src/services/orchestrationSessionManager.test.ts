@@ -23,6 +23,7 @@ import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestra
 import { getPaneChatPanelId, PANE_CHAT_SESSION_ID, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { terminalPanelManager } from './terminalPanelManager';
+import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspace';
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
 
 const liveStates = new Map<string, AgentState>();
@@ -126,6 +127,7 @@ function createFixture(
   ensureDatabaseSession(legacySession);
 
   const sessionManager = serviceStub<SessionManager>({
+    emit: vi.fn(),
     getSession: vi.fn((sessionId: string) => sessions.get(sessionId)),
     createSessionWithId: vi.fn((id: string, name: string, worktreePath: string, prompt: string): Session => {
       const session = createSession(id, name, { worktreePath, prompt, isHidden: true });
@@ -143,6 +145,7 @@ function createFixture(
 
   const configState = { defaultOrchestratorAgent: configuredAgent };
   const configManager = serviceStub<ConfigManager>({
+    on: vi.fn(),
     getConfig: vi.fn(() => configState),
     updateConfig: vi.fn(async updates => {
       Object.assign(configState, updates);
@@ -212,6 +215,9 @@ async function seedLegacyPanel(agent: PaneChatAgent, agentSessionId: string): Pr
   };
   const existing = panelManager.getPanel(panel.id);
   if (existing) {
+    if (existing.sessionId !== PANE_CHAT_SESSION_ID) {
+      await panelManager.movePanel(existing.id, existing.sessionId, PANE_CHAT_SESSION_ID);
+    }
     await panelManager.updatePanel(panel.id, { title: panel.title, state: panel.state });
     return panelManager.getPanel(panel.id) ?? existing;
   }
@@ -267,10 +273,166 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('points migrated Pane Chat file tools at its private Session directory', async () => {
+    const fixture = createFixture();
+    const view = await fixture.manager.getView({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID });
+    expect(view.internalSession.worktreePath).toBe(view.cwd);
+    expect(databaseService.getSession(view.internalSession.id)?.worktree_path).toBe(view.cwd);
+  });
+
+  it('promotes a saved conversation without moving project files or losing panel identity', async () => {
+    const fixture = createFixture();
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-promote-worktree-'));
+    temporaryDirectories.push(directory);
+    fs.writeFileSync(path.join(directory, 'unfinished.txt'), 'Uncommitted user work');
+    const pane = paneFixture(fixture, 'promote-child', { worktreePath: directory, isFavorite: true });
+    const source = createPanel('promote-chat', pane.id);
+    source.state.customState = { agentType: 'codex', agentSessionId: 'saved-conversation', initialCommand: 'codex --yolo --model example', scrollbackBuffer: 'Existing conversation' };
+    await seedPanel(source);
+    const moved = await fixture.manager.create({ name: 'Promoted chat' }, source.id);
+    expect(moved.panel.id).toBe(source.id);
+    expect(moved.panel.sessionId).toBe(moved.session.internalSessionId);
+    expect(moved.panel.state.customState).toMatchObject({ agentSessionId: 'saved-conversation', initialCommand: 'codex --yolo --model example' });
+    expect(databaseService.getPanelBuffers(source.id)?.scrollback).toBe('Existing conversation');
+    expect(panelManager.getPanelsForSession(pane.id)).toHaveLength(0);
+    expect(moved.session.associations[0].paneId).toBe(pane.id);
+    expect(pane.isFavorite).toBe(false);
+    expect(fs.readFileSync(path.join(directory, 'unfinished.txt'), 'utf8')).toBe('Uncommitted user work');
+    expect(fs.readdirSync(directory)).toEqual(['unfinished.txt']);
+    await expect(fixture.manager.create({ name: 'Duplicate move' }, source.id)).rejects.toThrow('active worktree');
+  });
+
+  it('leaves chats in place when resume information is unavailable or stopping fails', async () => {
+    const fixture = createFixture();
+    const pane = paneFixture(fixture, 'promotion-failure');
+    const source = createPanel('promotion-failure-chat', pane.id);
+    await seedPanel(source);
+    await expect(fixture.manager.create({ name: 'No history' }, source.id)).rejects.toThrow('conversation ID');
+    await panelManager.updatePanel(source.id, { state: { ...source.state, customState: { agentType: 'codex', agentSessionId: 'saved', initialCommand: 'codex --yolo' } } });
+    vi.spyOn(terminalPanelManager, 'stopForPromotion').mockRejectedValue(new Error('Agent is busy'));
+    await expect(fixture.manager.create({ name: 'Busy chat' }, source.id)).rejects.toThrow('Agent is busy');
+    expect(panelManager.getPanel(source.id)?.sessionId).toBe(pane.id);
+    expect((await fixture.manager.list()).sessions.some(item => item.name === 'Busy chat')).toBe(false);
+  });
+
+  it('recovers promotion after the durable record is saved but panel transfer fails', async () => {
+    const fixture = createFixture();
+    const pane = paneFixture(fixture, 'promotion-recovery');
+    const source = createPanel('promotion-recovery-chat', pane.id);
+    source.state.customState = { agentType: 'codex', agentSessionId: 'saved', initialCommand: 'codex --yolo' };
+    await seedPanel(source);
+    const move = vi.spyOn(panelManager, 'movePanel').mockRejectedValueOnce(new Error('Transfer failed'));
+    await expect(fixture.manager.create({ name: 'Recoverable chat' }, source.id)).rejects.toThrow('saved but could not be opened');
+    expect(panelManager.getPanel(source.id)?.sessionId).toBe(pane.id);
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await restarted.initialize();
+    const view = await restarted.getView({ name: 'Recoverable chat' });
+    expect(move).toHaveBeenCalledTimes(2);
+    expect(view.panel.id).toBe(source.id);
+    expect(view.panel.sessionId).toBe(view.session.internalSessionId);
+  });
+
+  it('unpins first-time Session children and preserves later manual pins', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Coordinator' });
+    const pane = paneFixture(fixture, 'pin-child', { isFavorite: true });
+    databaseService.setSessionFavorite(pane.id, true);
+    await fixture.manager.associate({ sessionId: created.session.id }, { paneId: pane.id });
+    expect(pane.isFavorite).toBe(false);
+    expect(Boolean(databaseService.getSession(pane.id)?.is_favorite)).toBe(false);
+    pane.isFavorite = true;
+    databaseService.setSessionFavorite(pane.id, true);
+    await fixture.manager.associate({ sessionId: created.session.id }, { paneId: pane.id });
+    expect(pane.isFavorite).toBe(true);
+    expect(Boolean(databaseService.getSession(pane.id)?.is_favorite)).toBe(true);
+  });
+
   beforeEach(() => {
     vi.spyOn(terminalPanelManager, 'getAgentStatus').mockImplementation(panelId => liveStates.get(panelId));
     vi.spyOn(terminalPanelManager, 'getTerminalSnapshot').mockReturnValue(null);
     vi.spyOn(terminalPanelManager, 'isTerminalInitialized').mockReturnValue(false);
+  });
+
+  it('persists custom resume configuration into Session panels and clears it explicitly', async () => {
+    const fixture = createFixture();
+    const customResume = { mode: 'generated', initialTemplate: '{command} --id {sessionId}', resumeTemplate: '{command} --continue {sessionId}' } as const;
+    const created = await fixture.manager.create({ name: 'Custom CLI', launchCommand: 'my-wrapper profile', customResume });
+    expect(created.panel.state.customState).toMatchObject({ customResume });
+    const reloaded = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    const reopened = await reloaded.getView({ sessionId: created.session.id });
+    expect(reopened.session.customResume).toEqual(customResume);
+    expect(reopened.panel.state.customState).toMatchObject({ customResume });
+    await reloaded.update({ sessionId: created.session.id }, { customResume: null });
+    expect((await reloaded.getView({ sessionId: created.session.id })).panel.state.customState).toMatchObject({ customResume: null });
+  });
+
+  it('starts idle in distinct persistent workspaces with profile context and literal launch arguments', async () => {
+    const fixture = createFixture();
+    const first = await fixture.manager.create({ name: 'First', launchCommand: 'claude --model "my model"', profile: 'Discuss before delegating.' });
+    const second = await fixture.manager.create({ name: 'Second', agent: 'codex' });
+    expect(first.cwd).not.toBe(second.cwd);
+    expect(first.internalSession.worktreePath).toBe(first.cwd);
+    expect(first.panel.state.customState).toMatchObject({ initialCommand: 'claude --model "my model"', orchestrationWorkspace: first.cwd });
+    expect(first.panel.state.customState?.initialInput).toBeUndefined();
+    expect(second.panel.state.customState?.initialInput).toBeUndefined();
+    const instructions = fs.readFileSync(path.join(first.cwd, 'AGENTS.md'), 'utf8');
+    expect(instructions).toContain(first.session.id);
+    expect(instructions).toContain('Discuss before delegating.');
+    expect(instructions).toContain('runpane agent-context');
+    fs.writeFileSync(path.join(first.cwd, 'notes.md'), 'Keep these notes');
+    await fixture.manager.update({ sessionId: first.session.id }, { name: 'Renamed', archived: true });
+    await fixture.manager.update({ sessionId: first.session.id }, { archived: false });
+    const reopened = await fixture.manager.getView({ sessionId: first.session.id });
+    expect(reopened.cwd).toBe(first.cwd);
+    expect(fs.readFileSync(path.join(reopened.cwd, 'notes.md'), 'utf8')).toBe('Keep these notes');
+    expect(reopened.session.launchCommand).toBe(first.session.launchCommand);
+    expect(reopened.session.profile).toBe(first.session.profile);
+  });
+
+  it('repairs historical bootstrap metadata without clearing a live conversation', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Old bootstrap' });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState,
+      initialInput: 'Initialize and begin working', initialInputDeliveryVersion: 1,
+      agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+    } } });
+    vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+    const destroy = vi.spyOn(terminalPanelManager, 'destroyTerminal');
+    const reopened = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(reopened.panel.state.customState?.initialInput).toBeUndefined();
+    expect(reopened.panel.state.customState?.agentSessionId).toBe('22222222-2222-4222-8222-222222222222');
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it('routes native custom commands to the right agent slot and preserves inactive histories', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Switch commands', agent: 'claude' });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState, agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+    } } });
+    const changed = await fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'codex --model test' });
+    expect(changed.agent).toBe('codex');
+    const codex = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(codex.panel.id).toBe(changed.panelIds.codex);
+    expect(codex.panel.state.customState?.agentSessionId).toBeUndefined();
+    expect(panelManager.getPanel(created.panel.id)?.state.customState?.agentSessionId).toBe('22222222-2222-4222-8222-222222222222');
+    const restored = await fixture.manager.setAgent({ sessionId: created.session.id }, 'claude');
+    expect(restored.panel.state.customState?.agentSessionId).toBe('22222222-2222-4222-8222-222222222222');
+    expect(restored.panel.state.customState?.initialCommand).toContain('claude');
+  });
+
+  it('stages profile changes while the Session is running', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Profile change', profile: 'Original profile' });
+    vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+    await fixture.manager.update({ sessionId: created.session.id }, { profile: 'New profile' });
+    expect(fs.readFileSync(path.join(created.cwd, 'AGENTS.md'), 'utf8')).toContain('Original profile');
+    expect(panelManager.getPanel(created.panel.id)?.state.customState?.orchestrationProfile).toBe('New profile');
+    vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+    await fixture.manager.getView({ sessionId: created.session.id });
+    expect(fs.readFileSync(path.join(created.cwd, 'AGENTS.md'), 'utf8')).toContain('New profile');
   });
 
   it('imports legacy Pane Chat with the existing terminal identity and history, then preserves it on reload', async () => {
@@ -375,135 +537,119 @@ describe('OrchestrationSessionManager', () => {
     }
   });
 
-  it('imports each existing legacy agent history into an addressable Session without duplicating ownership', async () => {
-    const existing = orchestrationRecord('existing-session', 'Pane Chat · Claude');
-    const fixture = createFixture('codex', { version: 1, sessions: [existing], selectedSessionId: existing.id });
-    const configBefore = fixture.configManager.getConfig();
-    const claudePanel = await seedLegacyPanel('claude', 'claude-resume-id');
-    const codexPanel = await seedLegacyPanel('codex', 'codex-resume-id');
-
+  it('keeps all existing agent histories in one Pane Chat Session across switches and restart', async () => {
+    const fixture = createFixture('codex');
+    const owner = fixture.sessions.get(PANE_CHAT_SESSION_ID);
+    if (!owner) throw new Error('Missing legacy owner');
+    owner.name = 'My existing chat';
+    const claude = await seedLegacyPanel('claude', 'claude-resume-id');
+    const codex = await seedLegacyPanel('codex', 'codex-resume-id');
     await fixture.manager.initialize();
-    const first = await fixture.manager.list();
-    const legacy = first.sessions.find(session => session.id === LEGACY_ORCHESTRATION_SESSION_ID);
-    const claude = first.sessions.find(session => session.id === `${LEGACY_ORCHESTRATION_SESSION_ID}-claude`);
-    expect(legacy).toBeDefined();
-    expect(claude).toBeDefined();
-    if (!legacy || !claude) throw new Error('Legacy migration did not create expected Sessions');
-
-    expect(first.selectedSessionId).toBe(existing.id);
-    expect(fixture.configManager.getConfig()).toEqual(configBefore);
-    expect(first.sessions.find(session => session.id === existing.id)).toMatchObject({
-      name: existing.name,
-      goal: existing.goal,
-      context: existing.context,
-      report: existing.report,
-      revision: existing.revision,
-    });
-    expect(claude.name).toBe('Pane Chat · Claude 2');
-    expect(claude.agent).toBe('claude');
-    expect(claude.internalSessionId).toBe('__pane_chat_session__');
-    expect(claude.panelIds.claude).toBe(claudePanel.id);
-    expect(claude.goal).toBe('');
-    expect(claude.context).toBe('');
-    expect(claude.evidence).toEqual([]);
-    expect(claude.outputs).toEqual([]);
-    expect(claude.associations).toEqual([]);
-    expect(claude.report).toBeUndefined();
-    expect(claude.activity).toHaveLength(1);
-    expect(claude.activity[0]).toMatchObject({ kind: 'created', source: 'system' });
-
-    expect(legacy.agent).toBe('codex');
-    expect(legacy.panelIds.codex).toBe(codexPanel.id);
-    expect(legacy.panelIds.claude).not.toBe(claudePanel.id);
-    expect(first.sessions.some(session => session.id === `${LEGACY_ORCHESTRATION_SESSION_ID}-codex`)).toBe(false);
-    expect(first.sessions.some(session => session.id === `${LEGACY_ORCHESTRATION_SESSION_ID}-cursor`)).toBe(false);
-    const panelOwners = first.sessions.flatMap(session => Object.values(session.panelIds));
-    expect(new Set(panelOwners).size).toBe(panelOwners.length);
-
-    const claudeView = await fixture.manager.getView({ sessionId: claude.id });
-    expect(claudeView.panel.id).toBe(claudePanel.id);
-    expect(claudeView.panel.state.customState).toMatchObject({ agentSessionId: 'claude-resume-id' });
-    expect(databaseService.getPanelBuffers(claudePanel.id)?.scrollback).toBe('claude historical terminal output');
-    const legacyView = await fixture.manager.getView({ sessionId: legacy.id });
-    expect(legacyView.panel.id).toBe(codexPanel.id);
-    expect(legacyView.panel.state.customState).toMatchObject({ agentSessionId: 'codex-resume-id' });
-
-    await fixture.manager.notifyLiveActivity(claudePanel.id, 'working');
-    const afterActivity = await fixture.manager.list();
-    expect(afterActivity.sessions.find(session => session.id === claude.id)?.activity.at(-1)?.panelId).toBe(claudePanel.id);
-    expect(afterActivity.sessions.find(session => session.id === legacy.id)?.activity.some(activity => activity.panelId === claudePanel.id)).toBe(false);
-
-    const reloaded = new OrchestrationSessionManager(
-      fixture.configManager,
-      fixture.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
-      serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('rerun migration must not create Pane Chat state'); }) }),
-      undefined,
-      fixture.store,
-    );
+    const listed = await fixture.manager.list();
+    expect(listed.sessions).toHaveLength(1);
+    expect(listed.sessions[0]).toMatchObject({ name: 'My existing chat', agent: 'codex',
+      panelIds: { claude: claude.id, codex: codex.id } });
+    const first = await fixture.manager.getView({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID });
+    const switched = await fixture.manager.setAgent({ sessionId: first.session.id }, 'claude');
+    expect(switched.panel.id).toBe(claude.id);
+    expect(switched.cwd).toBe(first.cwd);
+    expect(switched.internalSession.worktreePath).toBe(first.cwd);
+    expect(switched.panel.state.customState).toMatchObject({ agentSessionId: 'claude-resume-id' });
+    expect(switched.panel.state.customState).not.toHaveProperty('initialInput');
+    const reloaded = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
     await reloaded.initialize();
-    const second = await reloaded.list();
-    expect(second.selectedSessionId).toBe(existing.id);
-    expect(second.sessions.filter(session => session.id === claude.id)).toHaveLength(1);
-    expect(second.sessions.filter(session => session.id === `${LEGACY_ORCHESTRATION_SESSION_ID}-codex`)).toHaveLength(0);
-    expect(second.sessions).toHaveLength(first.sessions.length);
-    expect(panelManager.getPanel(getPaneChatPanelId('cursor'))).toBeUndefined();
+    expect((await reloaded.list()).sessions).toHaveLength(1);
+    const restored = await reloaded.setAgent({ sessionId: first.session.id }, 'codex');
+    expect(restored.panel.id).toBe(codex.id);
+    expect(restored.panel.state.customState).toMatchObject({ agentSessionId: 'codex-resume-id' });
+    expect(restored.panel.state.customState).not.toHaveProperty('initialInput');
+    expect(databaseService.getPanelBuffers(claude.id)?.scrollback).toBe('claude historical terminal output');
+    expect(databaseService.getPanelBuffers(codex.id)?.scrollback).toBe('codex historical terminal output');
   });
 
-  it('preserves legacy panel ownership when primary and imported Sessions switch agents before restart', async () => {
-    const fixture = createFixture('claude');
-    const claudePanel = await seedLegacyPanel('claude', 'claude-original-resume');
-    const codexPanel = await seedLegacyPanel('codex', 'codex-original-resume');
+  function splitLegacyRecords(): [OrchestrationSessionRecord, OrchestrationSessionRecord] {
+    const primary: OrchestrationSessionRecord = {
+      ...orchestrationRecord(LEGACY_ORCHESTRATION_SESSION_ID, 'Pane Chat'),
+      internalSessionId: PANE_CHAT_SESSION_ID, agent: 'claude', archived: false, isPinned: false,
+      panelIds: { claude: getPaneChatPanelId('claude'), codex: 'primary-new-codex', cursor: getPaneChatPanelId('cursor') },
+    };
+    const supplemental: OrchestrationSessionRecord = {
+      ...orchestrationRecord(`${LEGACY_ORCHESTRATION_SESSION_ID}-codex`, 'Pane Chat · Codex'),
+      internalSessionId: PANE_CHAT_SESSION_ID, agent: 'codex', archived: false, isPinned: false,
+      panelIds: { claude: 'supplemental-new-claude', codex: getPaneChatPanelId('codex'), cursor: 'supplemental-new-cursor' },
+      revision: 1, goal: '', context: '', nextAction: '', decisions: [], blockers: [], evidence: [], outputs: [],
+      report: undefined, reportActivityId: undefined, reportAcceptedAt: undefined,
+    };
+    return [primary, supplemental];
+  }
 
+  it('reunites untouched supplemental imports and redirects their selection without replacing history', async () => {
+    const [primary, supplemental] = splitLegacyRecords();
+    const fixture = createFixture('claude', { version: 1, sessions: [primary, supplemental], selectedSessionId: supplemental.id });
+    await seedLegacyPanel('claude', 'primary-resume');
+    const codex = await seedLegacyPanel('codex', 'imported-resume');
+    prepareSessionWorkspace(supplemental.id, undefined, supplemental);
     await fixture.manager.initialize();
-    const initial = await fixture.manager.list();
-    const legacy = initial.sessions.find(session => session.id === LEGACY_ORCHESTRATION_SESSION_ID);
-    const imported = initial.sessions.find(session => session.id === `${LEGACY_ORCHESTRATION_SESSION_ID}-codex`);
-    expect(legacy).toBeDefined();
-    expect(imported).toBeDefined();
-    if (!legacy || !imported) throw new Error('Legacy ownership fixtures were not migrated');
-    expect(legacy.agent).toBe('claude');
-    expect(legacy.panelIds.claude).toBe(claudePanel.id);
-    expect(legacy.panelIds.codex).not.toBe(codexPanel.id);
-    expect(imported.panelIds.codex).toBe(codexPanel.id);
+    const listed = await fixture.manager.list();
+    expect(listed.sessions).toHaveLength(1);
+    expect(listed.selectedSessionId).toBe(primary.id);
+    expect(listed.sessions[0].panelIds.codex).toBe(codex.id);
+    const view = await fixture.manager.setAgent({ sessionId: primary.id }, 'codex');
+    expect(view.panel.state.customState).toMatchObject({ agentSessionId: 'imported-resume' });
+    expect(databaseService.getPanelBuffers(codex.id)?.scrollback).toBe('codex historical terminal output');
+  });
 
-    await fixture.manager.setAgent({ sessionId: legacy.id }, 'codex');
-    await fixture.manager.setAgent({ sessionId: imported.id }, 'claude');
-    const beforeReload = await fixture.manager.list();
-    const primaryBeforeReload = beforeReload.sessions.find(session => session.id === legacy.id);
-    const importedBeforeReload = beforeReload.sessions.find(session => session.id === imported.id);
-    expect(primaryBeforeReload).toBeDefined();
-    expect(importedBeforeReload).toBeDefined();
-    if (!primaryBeforeReload || !importedBeforeReload) throw new Error('Agent switches did not persist');
-    expect(primaryBeforeReload.agent).toBe('codex');
-    expect(primaryBeforeReload.panelIds.codex).not.toBe(codexPanel.id);
-    expect(importedBeforeReload.agent).toBe('claude');
-    expect(importedBeforeReload.panelIds.codex).toBe(codexPanel.id);
-    expect(importedBeforeReload.panelIds.claude).not.toBe(claudePanel.id);
-
-    const reloaded = new OrchestrationSessionManager(
-      fixture.configManager,
-      fixture.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
-      serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('restart must preserve migrated ownership'); }) }),
-      undefined,
-      fixture.store,
-    );
+  it('recovers an interrupted import ownership move from the persisted target without losing buffers', async () => {
+    const [primary, supplemental] = splitLegacyRecords();
+    supplemental.revision = 2;
+    const fixture = createFixture('claude', { version: 1, sessions: [primary, supplemental] });
+    const codex = await seedLegacyPanel('codex', 'recovery-resume');
+    const move = vi.spyOn(panelManager, 'movePanel').mockRejectedValueOnce(new Error('Interrupted move'));
+    await expect(fixture.manager.initialize()).rejects.toThrow('Interrupted move');
+    const target = fixture.store.read().sessions.find(session => session.id === supplemental.id)?.internalSessionId;
+    expect(target).not.toBe(PANE_CHAT_SESSION_ID);
+    expect(panelManager.getPanel(codex.id)?.sessionId).toBe(PANE_CHAT_SESSION_ID);
+    move.mockRestore();
+    const reloaded = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
     await reloaded.initialize();
-    const afterReload = await reloaded.list();
-    expect(afterReload.sessions).toHaveLength(beforeReload.sessions.length);
-    expect(afterReload.sessions.filter(session => session.id === `${LEGACY_ORCHESTRATION_SESSION_ID}-claude`)).toHaveLength(0);
-    const primaryAfterReload = afterReload.sessions.find(session => session.id === legacy.id);
-    const importedAfterReload = afterReload.sessions.find(session => session.id === imported.id);
-    expect(primaryAfterReload).toMatchObject({ agent: 'codex', panelIds: primaryBeforeReload.panelIds });
-    expect(importedAfterReload).toMatchObject({ agent: 'claude', panelIds: importedBeforeReload.panelIds });
-    const panelOwners = afterReload.sessions.flatMap(session => Object.values(session.panelIds));
-    expect(new Set(panelOwners).size).toBe(panelOwners.length);
+    expect(panelManager.getPanel(codex.id)?.sessionId).toBe(target);
+    expect(panelManager.getPanel(codex.id)?.state.customState).toMatchObject({ agentSessionId: 'recovery-resume' });
+    expect(databaseService.getPanelBuffers(codex.id)?.scrollback).toBe('codex historical terminal output');
+  });
 
-    const primaryView = await reloaded.getView({ sessionId: legacy.id });
-    expect(primaryView.panel.id).toBe(primaryBeforeReload.panelIds.codex);
-    const importedView = await reloaded.getView({ sessionId: imported.id });
-    expect(importedView.panel.id).toBe(importedBeforeReload.panelIds.claude);
+  it('isolates previously used imports while preserving their files, settings, and histories across restart', async () => {
+    const [primary, supplemental] = splitLegacyRecords();
+    supplemental.name = 'Independent investigation';
+    supplemental.context = 'Keep my context';
+    const workspace = sessionWorkspacePath(supplemental.id);
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.writeFileSync(path.join(workspace, 'notes.txt'), 'Keep my notes');
+    const fixture = createFixture('claude', { version: 1, sessions: [primary, supplemental], selectedSessionId: supplemental.id });
+    const claude = await seedLegacyPanel('claude', 'primary-resume');
+    const codex = await seedLegacyPanel('codex', 'imported-resume');
+    await fixture.manager.initialize();
+    const imported = await fixture.manager.getView({ sessionId: supplemental.id });
+    const main = await fixture.manager.getView({ sessionId: primary.id });
+    expect(imported.internalSession.id).not.toBe(main.internalSession.id);
+    expect(imported.internalSession.worktreePath).toBe(workspace);
+    expect(main.internalSession.worktreePath).toBe(main.cwd);
+    expect(panelManager.getPanel(codex.id)?.sessionId).toBe(imported.internalSession.id);
+    expect(panelManager.getPanel(claude.id)?.sessionId).toBe(main.internalSession.id);
+    await panelManager.createPanel({ id: 'imported-files', sessionId: imported.internalSession.id, type: 'explorer', title: 'Files' });
+    await panelManager.createPanel({ id: 'imported-terminal', sessionId: imported.internalSession.id, type: 'terminal', title: 'Terminal' });
+    const reloaded = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await reloaded.initialize();
+    const restored = await reloaded.getView({ sessionId: supplemental.id });
+    await reloaded.getView({ sessionId: primary.id });
+    expect(restored.internalSession.worktreePath).toBe(workspace);
+    expect(restored.session).toMatchObject({ name: supplemental.name, context: supplemental.context, panelIds: supplemental.panelIds });
+    expect(fs.readFileSync(path.join(workspace, 'notes.txt'), 'utf8')).toBe('Keep my notes');
+    expect(panelManager.getPanelsForSession(main.internalSession.id).map(panel => panel.id)).not.toContain('imported-files');
+    expect(panelManager.getPanelsForSession(restored.internalSession.id).map(panel => panel.id)).toEqual(expect.arrayContaining(['imported-files', 'imported-terminal', codex.id]));
+    expect(databaseService.getPanelBuffers(codex.id)?.scrollback).toBe('codex historical terminal output');
   });
 
   it('gives each named Session stable hidden terminal identities while switching agent conversations', async () => {
@@ -553,7 +699,6 @@ describe('OrchestrationSessionManager', () => {
     const changedEvents: Array<{ sessionId: string; kind: string }> = [];
     fixture.manager.on('changed', event => changedEvents.push(event));
     vi.mocked(fixture.skillCacheManager.ensurePaneChatGuide)
-      .mockResolvedValueOnce('/tmp/issue-653/guide.md')
       .mockRejectedValueOnce(new Error('guide publication failed'));
 
     await expect(fixture.manager.create({ name: 'Published Session' })).rejects.toThrow('Reopen it from the Sessions list');
@@ -570,12 +715,12 @@ describe('OrchestrationSessionManager', () => {
     const created = await fixture.manager.create({ name: 'Agent Retry', agent: 'claude' });
     const changedEvents: string[] = [];
     fixture.manager.on('changed', event => changedEvents.push(event.kind));
-    vi.mocked(fixture.skillCacheManager.ensurePaneChatGuide).mockRejectedValueOnce(new Error('guide unavailable'));
+    vi.spyOn(panelManager, 'createPanel').mockRejectedValueOnce(new Error('panel unavailable'));
 
     await expect(fixture.manager.update(
       { sessionId: created.session.id },
       { agent: 'codex', expectedRevision: created.session.revision },
-    )).rejects.toThrow('guide unavailable');
+    )).rejects.toThrow('panel unavailable');
 
     const afterFailure = await fixture.manager.get({ sessionId: created.session.id });
     expect(afterFailure.agent).toBe('claude');
@@ -823,7 +968,7 @@ describe('OrchestrationSessionManager', () => {
     await fixture.manager.initialize();
     const listed = await fixture.manager.list();
     expect(listed.sessions.find(session => session.id === legacy.id)?.archived).toBe(true);
-    expect(listed.sessions.find(session => session.id === `${legacy.id}-claude`)).toMatchObject({ archived: true });
+    expect(listed.sessions).toHaveLength(1);
     expect(listed.selectedSessionId).toBeUndefined();
     expect(fixture.paneChatManager.getOrCreate).not.toHaveBeenCalled();
   });

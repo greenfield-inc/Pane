@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ChevronDown, ChevronRight, MessageSquare, Pin, PinOff, Plus, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -19,6 +20,9 @@ import { Tooltip } from './ui/Tooltip';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
+import { SessionLaunchFields } from './SessionLaunchFields';
+import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
+import type { AppConfig } from '../types/config';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -115,10 +119,10 @@ export function OrchestrationSessionNav({
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
 
-  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string) => {
+  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => {
     await load();
     const name = requestedName?.trim() || nextSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ name, agent });
+    await create({ name, agent, launchCommand, profile, customResume });
     setShowCreate(false);
     setActiveSession(null);
     navigateToPaneChat();
@@ -474,12 +478,16 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
 interface CreateOrchestrationSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (agent: PaneChatAgent, name?: string) => Promise<void>;
+  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => Promise<void>;
 }
 
 function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateOrchestrationSessionDialogProps) {
   const [agent, setAgent] = useState<PaneChatAgent>(DEFAULT_PANE_CHAT_AGENT);
   const [name, setName] = useState('');
+  const [launchCommand, setLaunchCommand] = useState('');
+  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(null);
+  const [profile, setProfile] = useState(DEFAULT_SESSION_PROFILE);
+  const userEditedLaunch = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
@@ -490,13 +498,22 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   useEffect(() => {
     if (!isOpen) return;
     userSelectedAgent.current = false;
+    userEditedLaunch.current = false;
     const savedConfig = useConfigStore.getState().config;
     setAgent(supportedSessionAgent(savedConfig?.defaultOrchestratorAgent));
     setName('');
+    setLaunchCommand(savedConfig?.defaultSessionCommand ?? '');
+    setCustomResume(savedConfig?.defaultSessionResume ?? null);
+    setProfile(savedConfig?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
     setError(null);
     if (!savedConfig) {
       void fetchConfig().then(nextConfig => {
         if (!userSelectedAgent.current) setAgent(supportedSessionAgent(nextConfig.defaultOrchestratorAgent));
+        if (!userEditedLaunch.current) {
+          setLaunchCommand(nextConfig.defaultSessionCommand ?? '');
+          setCustomResume(nextConfig.defaultSessionResume ?? null);
+          setProfile(nextConfig.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
+        }
       }).catch(() => undefined);
     }
   }, [fetchConfig, isOpen]);
@@ -506,10 +523,12 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
     setIsSubmitting(true);
     setError(null);
     try {
-      if (config?.defaultOrchestratorAgent !== agent) {
-        await updateConfig({ defaultOrchestratorAgent: agent });
-      }
-      await onCreate(agent, name.trim() || undefined);
+      const defaults: Partial<AppConfig> = {};
+      if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
+      if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
+      if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
+      if (Object.keys(defaults).length > 0) await updateConfig(defaults);
+      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to create Session');
     } finally {
@@ -518,10 +537,10 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="sm" ariaLabel="Create Session">
-      <form onSubmit={submit}>
+    <Modal isOpen={isOpen} onClose={onClose} size="md" ariaLabel="Create Session">
+      <form onSubmit={submit} className="flex min-h-0 flex-col">
         <ModalHeader title="Create Session" />
-        <ModalBody>
+        <ModalBody className="min-h-0 space-y-4">
           <Input label="Name your chat (optional)" value={name} onChange={event => setName(event.target.value)} placeholder="New chat" autoFocus fullWidth />
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
@@ -559,9 +578,21 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
               })}
             </div>
           </fieldset>
+          <details className="space-y-3">
+            <summary className="cursor-pointer text-sm font-medium text-text-secondary">Launch command and behavior</summary>
+            <SessionLaunchFields
+              resume={customResume}
+              onResumeChange={value => { userEditedLaunch.current = true; setCustomResume(value); }}
+              command={launchCommand}
+              profile={profile}
+              customCommands={config?.customCommands}
+              onCommandChange={value => { userEditedLaunch.current = true; setLaunchCommand(value); }}
+              onProfileChange={value => { userEditedLaunch.current = true; setProfile(value); }}
+            />
+          </details>
           {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
         </ModalBody>
-        <ModalFooter>
+        <ModalFooter className="shrink-0">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={isSubmitting} loadingText="Creating…">Create Session</Button>
         </ModalFooter>

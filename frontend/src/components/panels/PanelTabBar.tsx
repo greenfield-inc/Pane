@@ -16,6 +16,7 @@ import { Kbd } from '../ui/Kbd';
 import { CLI_BRAND_ICONS, getCliBrandIcon } from '../ui/brandIconRegistry';
 import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
+import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
@@ -440,6 +441,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+          {activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
           {/* Run Dev Server button */}
           {session && (
             <Tooltip content={

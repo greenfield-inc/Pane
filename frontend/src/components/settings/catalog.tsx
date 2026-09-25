@@ -55,7 +55,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'AI & Agents',
     description: 'Agent defaults, context, and CLI installations.',
     icon: Bot,
-    settingIds: ['default-pane-chat-agent', 'agent-context', 'claude-executable'],
+    settingIds: ['default-pane-chat-agent', 'agent-context', 'session-defaults', 'claude-executable'],
     aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md'],
   },
   {
@@ -119,7 +119,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Advanced',
     description: 'Diagnostics, terminal backend, and environment paths.',
     icon: SlidersHorizontal,
-    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths'],
+    settingIds: ['session-progress', 'verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths'],
     aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path'],
   },
 ] as const;

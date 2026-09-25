@@ -35,6 +35,7 @@ export type SettingsSettingId =
   | 'terminal-shell'
   | 'default-pane-chat-agent'
   | 'agent-context'
+  | 'session-defaults'
   | 'claude-executable'
   | 'commit-footer'
   | 'git-attribution'
@@ -60,6 +61,7 @@ export type SettingsSettingId =
   | 'verbose-logging'
   | 'developer-mode'
   | 'journey-timings'
+  | 'session-progress'
   | 'pty-host'
   | 'additional-paths';
 
