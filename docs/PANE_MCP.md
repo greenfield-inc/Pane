@@ -9,7 +9,14 @@ The Pane desktop app registers the server for you. On launch, Pane adds a `pane`
 - **Claude Code**: via `claude mcp add pane --scope user …`, which writes `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`).
 - **Codex**: a `[mcp_servers.pane]` table in `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`).
 
-Pane registers only with the CLIs that are installed. It leaves other MCP servers and settings alone, never writes a second `pane` entry, and rewrites its own entry when the app moves or updates. On Windows, Pane also registers inside each WSL distro that has a saved WSL repository. Agents there run the Windows Pane binary through WSL interop.
+Pane registers only with the CLIs that are installed, and it manages only the entry it wrote:
+
+- It leaves other MCP servers and settings alone and never writes a second `pane` entry.
+- It rewrites its own entry when the app moves or updates.
+- A `pane` entry you added yourself (for example with `npx runpane mcp`) is left untouched, including when you turn the setting off. For Claude Code, Pane's entry is the one that runs `<Pane data dir>/mcp/runpane/dist/cli.js`. For Codex, it's the `[mcp_servers.pane]` table carrying the `# Managed by Pane` comment.
+- Pane edits `config.toml` as text, so your comments and formatting survive. It then parses the result and writes nothing unless the only change is Pane's own entry. Writes are atomic and follow a symlinked config.
+
+On Windows, Pane also registers inside each WSL distro that has a saved WSL repository. Agents there run the Windows Pane binary through WSL interop.
 
 The registered command is the Pane executable in Node mode (`ELECTRON_RUN_AS_NODE=1`) running a copy of the runpane CLI at `<Pane data dir>/mcp/runpane/dist/cli.js`. No Node.js or npm install is needed. Only packaged builds register; a development build never touches your agent config.
 
@@ -30,14 +37,23 @@ Any MCP client that can launch a stdio server can use the same command: `npx --y
 
 The Python package (`pipx run runpane`) does not include the MCP server, because it needs the Node MCP SDK. `runpane mcp` from Python prints the npm command and exits with status 2.
 
+## Protocol
+
+The server uses the MCP TypeScript SDK v2 over stdio. It speaks MCP revision 2026-07-28, which has no handshake: `server/discover`, with the version and client capabilities carried on each request. It also accepts the 2025 `initialize` handshake that current Claude Code and Codex releases send, negotiating down to 2025-11-25.
+
+Only JSON-RPC goes to stdout, and the server exits when stdin closes. Cancelling a call (`notifications/cancelled`) stops the `runpane` process running it.
+
 ## Tools
 
 Tools are generated from [`contracts/runpane/contract.json`](../contracts/runpane/contract.json) when the server starts:
 
 - Every command that has result `jsonSchemas` becomes a tool. Spaces and hyphens in the name become underscores: `repos list` → `repos_list`, `panels submit-composer` → `panels_submit_composer`.
 - The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings; flags without one are booleans. Daemon commands also accept `paneDir`.
-- The description combines the command's summary, details, and notes from `agentContext`.
-- Every call runs `runpane <command> … --json` and returns its JSON output unchanged. A non-zero exit returns the output as a tool error.
+- The description combines the command's summary, details, and notes from `agentContext`. The title is `runpane <command>`.
+- The output schema is the command's `*Result` JSON schema. Every call runs `runpane <command> … --json` and returns its JSON output unchanged, both as `structuredContent` and as a text block for older clients.
+- A non-zero exit returns the output as a tool error (`isError: true`), and so do bad arguments, so the model can correct them. An unknown tool name is a JSON-RPC Invalid Params error (`-32602`).
+- Annotations come from the contract. `readOnlyHint` is the inverse of `mutates`. A mutating tool is `destructiveHint: true` unless the command is marked `additive`. `idempotentHint` and `openWorldHint` follow the `idempotent` and `openWorld` fields.
+- Values are passed as `--flag=value`, so a value may start with `-` (for example `- [ ] item`).
 
 Adding or changing a command in the contract changes its tool. There is no per-tool code.
 
