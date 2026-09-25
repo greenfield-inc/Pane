@@ -30,6 +30,7 @@ from .local_control import (
     run_panels_submit,
     run_panels_submit_composer,
     run_panels_wait,
+    run_panes_adopt,
     run_panes_archive,
     run_panes_create,
     run_panes_focus,
@@ -114,6 +115,9 @@ class ParsedArgs:
     name: Optional[str] = None
     worktree_name: Optional[str] = None
     base_branch: Optional[str] = None
+    folder: Optional[str] = None
+    resume: Optional[str] = None
+    launch: bool = False
     agent: Optional[str] = None
     tool_command: Optional[str] = None
     title: Optional[str] = None
@@ -245,6 +249,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_watch(parsed)
     if parsed.command == "panes create":
         return run_panes_create(parsed)
+    if parsed.command == "panes adopt":
+        return run_panes_adopt(parsed)
     if parsed.command == "panes archive":
         return run_panes_archive(parsed)
     if parsed.command == "panes pin":
@@ -571,6 +577,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--pinned":
         parsed.pinned = True
         return
+    if flag == "--launch":
+        parsed.launch = True
+        return
     if flag == "--no-pinned":
         parsed.no_pinned = True
         return
@@ -634,6 +643,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--path":
         parsed.repo_path = value
+        return
+    if flag == "--folder":
+        parsed.folder = value
+        return
+    if flag == "--resume":
+        parsed.resume = value
         return
     if flag == "--name":
         parsed.name = value
@@ -806,6 +821,7 @@ def is_runpane_local_command(command: str) -> bool:
         "panes list",
         "panes cost",
         "panes create",
+        "panes adopt",
         "panes archive",
         "panes pin",
         "panes unpin",

@@ -206,6 +206,28 @@ describe('pane creation name reuse', () => {
     expect(send).not.toHaveBeenCalledWith('session:creation-failed', expect.anything());
   });
 
+  it('reports the created session id while setup is still running', async () => {
+    let finishBuild: (result: { success: boolean }) => void = () => {};
+    project.build_script = 'npm install';
+    Object.assign(queueOptions.sessionManager, {
+      updateSessionStatus: vi.fn(),
+      addSessionOutput: vi.fn(async () => {}),
+      runBuildScript: vi.fn(() => new Promise(resolve => { finishBuild = resolve; })),
+    });
+    let reportSessionId: (sessionId: string) => void = () => {};
+    const reported = new Promise<string>(resolve => { reportSessionId = resolve; });
+
+    const pending = queue.createSessionAndWait({
+      projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none', baseBranch: 'main',
+    }, { onSessionCreated: reportSessionId });
+    const reportedId = await reported;
+
+    expect(database.getSession(reportedId)?.name).toBe('Feature');
+    await vi.waitFor(() => expect(queueOptions.sessionManager.runBuildScript).toHaveBeenCalledOnce());
+    finishBuild({ success: true });
+    expect((await pending).sessionId).toBe(reportedId);
+  });
+
   it('reuses archived names for panes in the project directory without reserving a branch', async () => {
     const original = await createPane('Feature', true);
     database.archiveSession(original.id);

@@ -352,6 +352,17 @@ function renderMarkdown(contract) {
     lines.push(description, '');
   }
 
+  lines.push(
+    '## Command reference',
+    '',
+    'Every command and its options, from `commands` in `contracts/runpane/contract.json`.',
+    '',
+  );
+  for (const command of contract.commands) {
+    lines.push(`- \`${command.name}\`: ${command.summary}`);
+  }
+  lines.push('', fenced(contract.commands.flatMap((command) => command.usage)), '');
+
   lines.push('## Agent Context', '');
   lines.push(contract.agentContext.brief.summary, '');
   lines.push('Doctor-first environment discovery:', '', fenced(['runpane doctor --json']), '');

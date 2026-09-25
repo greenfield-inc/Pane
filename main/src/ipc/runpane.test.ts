@@ -21,6 +21,7 @@ import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { registerRunpaneHandlers } from './runpane';
+import type { TaskQueue } from '../services/taskQueue';
 
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
@@ -1738,6 +1739,36 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('fails when Claude holds the text in its composer after Enter even if the echo never showed before it', async () => {
+    vi.useFakeTimers();
+    const rule = '─'.repeat(40);
+    let enters = 0;
+    vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, data) => {
+      if (data === '\r') enters += 1;
+    });
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => (
+      enters === 0
+        ? terminalSnapshot(`${rule}\n❯\n${rule}\n`, 'active', 'claude')
+        : terminalSnapshot(`${rule}\n❯ Read and follow brief.md\n${rule}\n`, 'idle', 'claude')
+    ));
+    const registry = createRegistry();
+
+    const pendingResult = registry.invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id,
+      input: 'Read and follow brief.md',
+    }]);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    const result = await pendingResult;
+
+    expect(enters).toBe(1);
+    expect(result).toMatchObject({
+      ok: false,
+      verifiedSubmitted: false,
+      blocked: { kind: 'agent-prompt' },
+    });
+  });
+
   it('waits for a starting Claude to draw its composer and echo the text before pressing Enter', async () => {
     vi.useFakeTimers();
     const rule = '─'.repeat(40);
@@ -2437,7 +2468,7 @@ describe('runpane IPC handlers', () => {
       toolType: 'none',
       startPinned: true,
       activateOnCreate: false,
-    }, { timeoutMs: 1234 });
+    }, expect.objectContaining({ timeoutMs: 1234 }));
     expect(panelManager.createPanel).toHaveBeenCalledWith({
       sessionId: session.id,
       type: 'terminal',
@@ -2521,6 +2552,34 @@ describe('runpane IPC handlers', () => {
     });
     expect(databaseRow.is_favorite).toBe(1);
     expect(databaseRow.favorite_pinned_at).not.toBeNull();
+  });
+
+  it('returns the created pane id when session setup times out after the session was created', async () => {
+    const services = createServices({
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async (...[, options]: Parameters<TaskQueue['createSessionAndWait']>) => {
+          options?.onSessionCreated?.('session-created-early');
+          throw new Error('Timed out waiting for session creation job 7');
+        }),
+      } as never,
+    });
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panes:create', [{
+      repo: 'active',
+      panes: [{ name: 'slow-setup-pane', tool: { agent: 'claude' } }],
+    }]);
+
+    expect(result).toMatchObject({
+      ok: false,
+      items: [{
+        ok: false,
+        paneId: 'session-created-early',
+        sessionId: 'session-created-early',
+        error: { code: 'ERR_RUNPANE_PANE_CREATE_FAILED' },
+      }],
+    });
   });
 
   it('pins created panes by default and honours an explicit pinned false', async () => {

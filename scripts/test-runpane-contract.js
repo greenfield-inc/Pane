@@ -99,6 +99,14 @@ function checkGeneratedContractFresh() {
   });
 }
 
+function checkContractDocListsEveryCommand() {
+  const doc = fs.readFileSync(path.join(rootDir, 'docs', 'RUNPANE_CLI_CONTRACT.md'), 'utf8');
+  const missing = contract.commands
+    .flatMap((command) => command.usage)
+    .filter((usage) => !doc.includes(usage));
+  assert.deepStrictEqual(missing, [], 'docs/RUNPANE_CLI_CONTRACT.md is missing command usages');
+}
+
 function findPython() {
   for (const command of [process.env.PYTHON, 'python3', 'python'].filter(Boolean)) {
     try {
@@ -370,6 +378,71 @@ function runWatchCli(runtime, args, paneDir, until, timeoutMs = 8_000) {
       resolve({ stdout, stderr, code, signal });
     });
   });
+}
+
+function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000) {
+  const command = runtime === 'npm' ? process.execPath : findPython();
+  const commandArgs = runtime === 'npm' ? [npmCli, ...args] : ['-m', 'runpane', ...args];
+  const env = {
+    ...process.env,
+    PANE_DIR: paneDir,
+    PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONPATH: pythonSource,
+    RUNPANE_TELEMETRY_DISABLED: '1',
+  };
+  delete env.PANE_PANEL_ID;
+  return new Promise((resolve, reject) => {
+    const child = childProcess.spawn(command, commandArgs, { cwd: rootDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`${runtime} ${args.join(' ')} timed out. stdout=${stdout} stderr=${stderr}`));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+async function checkPanesAdoptCliParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-adopt-'));
+  const args = [
+    'panes', 'adopt', '--repo', 'active', '--path', path.join(paneDir, 'existing-worktree'),
+    '--name', 'adopted', '--agent', 'claude', '--resume', 'agent-session-1', '--folder', 'Imported',
+    '--launch', '--yes', '--json',
+  ];
+  const daemonResult = {
+    ok: true,
+    repo: { id: 1, name: 'Pane', path: '/repo', active: true, sessionCount: 1 },
+    items: [{ ok: true, index: 0, name: 'adopted', pinned: true, sessionId: 'session-1' }],
+  };
+  const frames = {};
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      const run = await withFakeDaemon(
+        paneDir,
+        (frame) => {
+          frames[runtime] = frame;
+          return { result: daemonResult };
+        },
+        () => runCliOnce(runtime, args, paneDir),
+      );
+      assert.strictEqual(run.code, 0, `${runtime} panes adopt exited ${run.code}. stdout=${run.stdout} stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout), daemonResult, `${runtime} panes adopt printed the wrong result`);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+  assert.strictEqual(frames.npm.channel, 'runpane:panes:adopt');
+  assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node panes adopt sent different daemon requests');
 }
 
 async function checkWatchStreamParity() {
@@ -2500,6 +2573,8 @@ async function runChecks() {
   await checkPanePinParity();
   await checkPanesCostParity();
   await checkPaneRenameParity();
+  await checkPanesAdoptCliParity();
+  checkContractDocListsEveryCommand();
   await checkAgentTemplateParity();
   checkHelpOutput();
   compareAgentContextParity();
