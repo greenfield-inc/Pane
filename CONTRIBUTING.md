@@ -10,8 +10,8 @@ Pane is an open source project created by [Dcouple Inc](https://dcouple.ai). Dco
 
 ## Getting Started
 
-You need Node 22.18 or newer and pnpm 10. `corepack enable` picks up the pnpm
-version pinned in `package.json`.
+You need Node 22.18 or newer (`.nvmrc` pins 22.18.0) and pnpm 10. If you don't
+have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
 
 1. Fork the repository on GitHub and clone your fork.
 2. Install dependencies, rebuild native modules for Electron, and build the
@@ -31,9 +31,12 @@ PANE_DIR=~/.pane_test pnpm dev
 ```
 
 `pnpm dev` starts Vite, the main-process TypeScript watcher and Electron. It
-re-bundles the preload script whenever the watcher overwrites it and rebuilds
-native modules for Electron when needed. Use it rather than
-`pnpm electron-dev`, which does neither and exists for Playwright's web server.
+re-bundles the preload script whenever the watcher overwrites it. Use it rather
+than `pnpm electron-dev`, which doesn't and exists for Playwright's web server.
+
+To try the `runpane` CLI against your dev build, build it with
+`pnpm --filter runpane build` and run `node packages/runpane/dist/cli.js doctor --json`
+with the same `PANE_DIR`.
 
 Development runs write renderer and main-process output to `frontend-debug.log`
 and `backend-debug.log` in the repository root. Both are reset at startup.
@@ -77,9 +80,12 @@ npm rebuild better-sqlite3-multiple-ciphers   # before main unit tests
 pnpm electron:rebuild                         # before running the app again
 ```
 
-`pnpm dev` does the Electron rebuild for you when it's needed. A batch of main
-tests failing with `NODE_MODULE_VERSION` means the module is built for the wrong
-runtime, not that your change broke something.
+`pnpm run setup` leaves the module built for Electron, so run the `npm rebuild`
+before your first main test run. `pnpm dev` rebuilds for Electron only on its
+first run or after `package.json` changes; it doesn't notice an `npm rebuild`, so
+run `pnpm electron:rebuild` yourself before starting the app again. A batch of
+main tests failing with `NODE_MODULE_VERSION` means the module is built for the
+wrong runtime, not that your change broke something.
 
 ## Tests
 
@@ -95,7 +101,8 @@ pnpm test:ci:minimal
   for a single pass, as CI does. Main tests live next to the code as
   `*.test.ts`.
 - Vitest points `PANE_DIR` at a temporary directory, so unit tests never touch
-  your real data.
+  your real data. They do still see your shell environment: with
+  `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
   CI runs: smoke, health check, accessibility and settings.
@@ -124,8 +131,8 @@ pnpm test:ci:minimal
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`
   with narrowing).
-- `pnpm lint` runs Oxlint, Knip, the remaining ESLint rules and the advisory
-  anti-slop scan. Blocking lint is the floor for new code. See
+- `pnpm lint` runs Oxlint, the remaining ESLint rules, the advisory anti-slop
+  scan, the boundary-decoder conformance check and Knip. Blocking lint is the floor for new code. See
   [docs/lint/anti-slop.md](docs/lint/anti-slop.md) and
   [docs/lint/oxlint-overlap.md](docs/lint/oxlint-overlap.md).
 - Two-space indentation. `camelCase` for variables and functions, `PascalCase`

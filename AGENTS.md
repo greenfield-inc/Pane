@@ -14,12 +14,16 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 
 ## Commands
 
-- Node >= 22.18, pnpm 10 (corepack). Setup `pnpm run setup`; run `pnpm dev`
-  (never `electron-dev`: it skips the preload bundle and the native rebuild).
-- Before a PR: `pnpm typecheck && pnpm lint`.
-- Tests: `pnpm --filter frontend test`, `pnpm --filter main exec vitest run`
-  (run `npm rebuild better-sqlite3-multiple-ciphers` first if you ran the app),
-  `pnpm test:ci:minimal` (once: `pnpm exec playwright install chromium`).
+- Node >= 22.18 (`.nvmrc`), pnpm 10. Setup `pnpm run setup`; run
+  `PANE_DIR=~/.pane_test pnpm dev` (never `electron-dev`: it skips the preload
+  bundle). Build the local CLI with `pnpm --filter runpane build`.
+- Before a PR: `pnpm typecheck && pnpm lint`, plus the tests your change touches.
+- Tests: `pnpm --filter frontend test`. Main: `npm rebuild
+  better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then
+  `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch
+  mode); run `pnpm electron:rebuild` before starting the app again.
+  `pnpm test:ci:minimal` launches the app, so set `PANE_DIR` (once:
+  `pnpm exec playwright install chromium`).
 
 ## Rules
 
@@ -31,10 +35,13 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   ([docs/lint/anti-slop.md](docs/lint/anti-slop.md)).
 - Dependencies changed: run `pnpm run generate-notices` and commit `NOTICES`.
 - Don't change build targets without discussion.
-- `runpane` CLI defaults stay responsive; orchestrator throttles are opt-in
-  flags whose values live in the Liveness Contract in `skillCacheManager.ts`.
+- `runpane` CLI defaults stay responsive. Anything that makes output quieter or
+  slower for the Pane Chat orchestrator (e.g. `watch --settle`, `--min-interval`)
+  is an opt-in flag; the orchestrator's values live in the "Liveness Contract"
+  text in `main/src/services/skillCacheManager.ts`.
 - The full terminal refresh on panel activation is load-bearing: read the
-  comment above `TerminalPanel` first, and keep refits behind the overlay.
+  comment above `TerminalPanel` (`frontend/src/components/panels/TerminalPanel.tsx`)
+  first, and keep refits hidden behind its loading overlay (`isRefreshing`).
 - UI: theme tokens only; swapping indicators share a fixed-size box; animations
   on one surface share a period.
 - Commits: present tense, focused, reference issues.
@@ -46,6 +53,11 @@ CONTRIBUTING.md, docs/), update or delete that doc in the same PR. A doc that
 describes code which no longer exists is deleted, not annotated. Plans, briefs
 and debug handoffs don't live in the repo: put them in the PR description or
 the tracker.
+
+The block below, between the `pane-agent-context` markers, is written by Pane
+itself for any repo it manages (`main/src/services/agentContextManager.ts`). It
+tells agents how to *use* Pane. To change it, change that code; don't edit it by
+hand here.
 
 <!-- pane-agent-context:start -->
 ## Pane

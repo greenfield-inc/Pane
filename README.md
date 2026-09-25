@@ -184,7 +184,7 @@ Windows PowerShell:
 & ([scriptblock]::Create((irm https://runpane.com/install-remote.ps1))) -Label "My Server"
 ```
 
-The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model.
+The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model, or [docs/SELF_HOSTED_REMOTE_DAEMON.md](docs/SELF_HOSTED_REMOTE_DAEMON.md) in this repo.
 
 ---
 
@@ -411,12 +411,13 @@ Pane uses xterm.js, the same terminal engine that powers VS Code's integrated te
 git clone https://github.com/greenfield-inc/Pane.git
 cd Pane
 pnpm run setup
-pnpm dev
+PANE_DIR=~/.pane_test pnpm dev
 ```
 
-`pnpm dev` uses your real `~/.pane` data unless you set `PANE_DIR`. Read
-[Running a dev build safely](CONTRIBUTING.md#running-a-dev-build-safely) before
-you run a dev build next to an installed Pane.
+You need Node 22.18 or newer and pnpm 10 (`corepack enable`). `PANE_DIR` keeps
+the dev build away from an installed Pane's data in `~/.pane`. It doesn't
+isolate Electron's browser profile; see
+[Running a dev build safely](CONTRIBUTING.md#running-a-dev-build-safely).
 
 ### Production Builds
 
