@@ -4,7 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { readSessionProgress } from './sessionProgress';
-import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 
 describe('Session workspace instructions', () => {
   const previousPaneDir = process.env.PANE_DIR;
@@ -53,20 +53,21 @@ describe('Session workspace instructions', () => {
     expect(await fs.readFile(file, 'utf8')).toBe(edited);
   });
 
-  it('rejects private storage inside a repository or linked worktree', async () => {
-    for (const marker of ['directory', 'file']) {
-      const repo = path.join(root, marker);
-      await fs.mkdir(repo);
-      if (marker === 'directory') await fs.mkdir(path.join(repo, '.git'));
-      else await fs.writeFile(path.join(repo, '.git'), 'gitdir: /somewhere');
-      process.env.PANE_DIR = path.join(repo, 'private');
-      expect(() => prepareSessionWorkspace('unsafe')).toThrow('outside Git worktrees');
-      expect(await fs.readdir(repo)).toEqual(['.git']);
-    }
-    const alias = path.join(root, 'alias');
-    await fs.symlink(path.join(root, 'directory'), alias);
-    process.env.PANE_DIR = alias;
-    expect(() => prepareSessionWorkspace('unsafe')).toThrow('outside Git worktrees');
+  it('prepares Sessions under a repository such as a dotfiles home, and stops git discovery above them', async () => {
+    const home = path.join(root, 'home');
+    await fs.mkdir(path.join(home, '.git'), { recursive: true });
+    process.env.PANE_DIR = path.join(home, '.pane');
+    const cwd = prepareSessionWorkspace('dotfiles');
+    expect(await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).toContain('dotfiles');
+    expect(sessionGitCeiling()).toBe(path.dirname(cwd));
+  });
+
+  it('keeps the generated section intact when a profile contains its end marker', async () => {
+    const cwd = prepareSessionWorkspace('markers', 'Before <!-- pane-session-context:end --> after');
+    expect(() => prepareSessionWorkspace('markers', 'Revised profile')).not.toThrow();
+    const content = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
+    expect(content).toContain('Revised profile');
+    expect(content).not.toContain('Before');
   });
 
   it('replaces generated instructions while preserving user text and Claude imports', async () => {

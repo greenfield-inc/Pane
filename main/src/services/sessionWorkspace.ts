@@ -12,23 +12,18 @@ export function sessionWorkspacePath(sessionId: string): string {
   return path.join(getAppDirectory(), 'sessions', encodeURIComponent(sessionId).replace(/\./g, '%2E'));
 }
 
-/** Check real ancestors too: PANE_DIR may itself be a symlink into a worktree. */
-function assertOutsideGitWorktree(directory: string): void {
-  let existing = path.resolve(directory);
-  while (!fs.existsSync(existing)) {
-    const parent = path.dirname(existing);
-    if (parent === existing) break;
-    existing = parent;
-  }
-  let current = fs.realpathSync(existing);
-  while (true) {
-    if (fs.existsSync(path.join(current, '.git'))) {
-      throw new Error('Session storage must be outside Git worktrees. Set PANE_DIR to a private directory such as ~/.pane.');
-    }
-    const parent = path.dirname(current);
-    if (parent === current) return;
-    current = parent;
-  }
+/**
+ * Git must not find a repository above a Session folder (for example a home
+ * directory tracked as a dotfiles repo). Session terminals get this as
+ * GIT_CEILING_DIRECTORIES.
+ */
+export function sessionGitCeiling(): string {
+  return path.join(getAppDirectory(), 'sessions');
+}
+
+/** Text that would otherwise end or restart the generated section early. */
+function escapeMarkers(content: string): string {
+  return content.split(START).join('<!-- pane-session-context start -->').split(END).join('<!-- pane-session-context end -->');
 }
 
 /** Only the marked generated section is replaced; user instructions survive. */
@@ -42,7 +37,7 @@ function writeManagedInstructions(filePath: string, content: string): void {
   if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) {
     throw new Error(`Session instruction markers are incomplete: ${filePath}`);
   }
-  const block = `${START}\n${content}\n${END}`;
+  const block = `${START}\n${escapeMarkers(content)}\n${END}`;
   const next = start === -1
     ? `${previous}${previous ? '\n\n' : ''}${block}\n`
     : `${previous.slice(0, start)}${block}${previous.slice(end + END.length)}`;
@@ -56,7 +51,6 @@ export function prepareSessionWorkspace(
   progressEnabled = false,
 ): string {
   const cwd = sessionWorkspacePath(sessionId);
-  assertOutsideGitWorktree(cwd);
   fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
   if (fs.lstatSync(cwd).isSymbolicLink()) throw new Error(`Session workspace must not be a symbolic link: ${cwd}`);
   const progressStatusPath = path.join(cwd, '.pane-progress.json');

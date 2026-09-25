@@ -351,6 +351,51 @@ describe('OrchestrationSessionManager', () => {
     expect(failed?.activity.at(-1)?.message).toBe('Session could not be restored: Promoted chat is missing; refusing to replace its history');
   });
 
+  it('keeps opening other Sessions when one Session owner cannot be prepared', async () => {
+    const fixture = createFixture();
+    const healthy = await fixture.manager.create({ name: 'Healthy owner' });
+    const broken = await fixture.manager.create({ name: 'Edited instructions' });
+    const instructions = path.join(broken.cwd, 'AGENTS.md');
+    fs.writeFileSync(instructions, fs.readFileSync(instructions, 'utf8').replace('<!-- pane-session-context:end -->', ''));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await restarted.initialize();
+
+    expect((await restarted.getView({ sessionId: healthy.session.id })).panel.id).toBe(healthy.panel.id);
+    expect(fixture.store.read().sessions.find(record => record.id === broken.session.id)?.activity.at(-1)?.message)
+      .toMatch(/^Session could not be restored: Session instruction markers are incomplete/);
+  });
+
+  it('keeps an inactive agent conversation across restart when the active agent has custom resume', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Two agents', agent: 'codex' });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState, agentSessionId: 'codex-thread',
+    } } });
+    await fixture.manager.update({ sessionId: created.session.id }, {
+      agent: 'claude', launchCommand: 'my-launcher run',
+      customResume: { mode: 'claude', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}' },
+    });
+
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await restarted.initialize();
+    const codex = await restarted.setAgent({ sessionId: created.session.id }, 'codex');
+
+    expect(codex.panel.id).toBe(created.panel.id);
+    expect(codex.panel.state.customState).toMatchObject({ agentSessionId: 'codex-thread' });
+    expect(codex.panel.state.customState?.customResume).toBeFalsy();
+  });
+
+  it('uses the requested agent over a default command for another agent and rejects a conflicting command', async () => {
+    const fixture = createFixture();
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'claude --model default' });
+    const created = await fixture.manager.create({ name: 'Codex requested', agent: 'codex' });
+    expect(created.session).toMatchObject({ agent: 'codex', launchCommand: '' });
+    await expect(fixture.manager.create({ name: 'Mismatch', agent: 'codex', launchCommand: 'claude --model x' }))
+      .rejects.toThrow('The launch command runs claude, but the Session agent is codex');
+  });
+
   it('unpins first-time Session children and preserves later manual pins', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Coordinator' });
@@ -625,7 +670,10 @@ describe('OrchestrationSessionManager', () => {
     const fixture = createFixture('claude', { version: 1, sessions: [primary, supplemental] });
     const codex = await seedLegacyPanel('codex', 'recovery-resume');
     const move = vi.spyOn(panelManager, 'movePanel').mockRejectedValueOnce(new Error('Interrupted move'));
-    await expect(fixture.manager.initialize()).rejects.toThrow('Interrupted move');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await fixture.manager.initialize();
+    expect(fixture.store.read().sessions.find(session => session.id === supplemental.id)?.activity.at(-1)?.message)
+      .toBe('Session could not be restored: Interrupted move');
     const target = fixture.store.read().sessions.find(session => session.id === supplemental.id)?.internalSessionId;
     expect(target).not.toBe(PANE_CHAT_SESSION_ID);
     expect(panelManager.getPanel(codex.id)?.sessionId).toBe(PANE_CHAT_SESSION_ID);
