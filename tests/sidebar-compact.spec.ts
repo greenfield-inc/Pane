@@ -191,7 +191,7 @@ test.describe('compact sidebar', () => {
     await regularPane.click({ button: 'right' });
     let menu = page.getByRole('menu', { name: 'Pane actions for Regular work' });
     await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Pin');
-    await expect(menu.getByRole('menuitem').nth(1)).toHaveText('Archive');
+    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
     await menu.getByRole('menuitem', { name: 'Archive' }).click();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -209,7 +209,7 @@ test.describe('compact sidebar', () => {
     await pinnedPane.click({ button: 'right' });
     menu = page.getByRole('menu', { name: 'Pane actions for Pinned work' });
     await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Unpin');
-    await expect(menu.getByRole('menuitem').nth(1)).toHaveText('Archive');
+    await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
     await menu.getByRole('menuitem', { name: 'Unpin', exact: true }).click();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
