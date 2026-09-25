@@ -79,14 +79,3 @@ function authHeaders(context: RemoteRequestContext) {
     'X-Pane-Client-Label': context.clientLabel,
   };
 }
-
-/**
- * URL and headers for the daemon's voice WebSocket. React Native's WebSocket
- * takes headers as its third argument: `new WebSocket(url, undefined, { headers })`.
- */
-export function createVoiceSocketRequest(context: RemoteRequestContext) {
-  return {
-    url: `${context.baseUrl.replace(/^http/, 'ws')}/voice/deepgram-stream`,
-    headers: authHeaders(context),
-  };
-}
