@@ -38,14 +38,6 @@ name: Pane list journeys
     timeout: 15000
 - assertVisible: ".*Claude Code.*"
 
-# Search narrows the list to matching panes.
-- tapOn: "Search panes"
-- inputText: ${output.pane}
-- assertVisible: "${output.pane}.*"
-# iOS 26 shows the search bar's cancel as a close button.
-- tapOn: "Close|Cancel"
-- waitForAnimationToEnd
-
 # Favorite from the long-press actions, then check the Favorites section.
 - longPressOn: "${output.pane}.*"
 # The action sheet is titled with the pane it acts on.
@@ -55,9 +47,15 @@ name: Pane list journeys
     visible: "FAVORITES"
     timeout: 10000
 
-# Archive with a swipe and confirm.
+# Search narrows the list to matching panes.
+- tapOn: "Search panes"
+- inputText: ${output.pane}
+# Match the row by its subtitle: the search field holds the name too.
+- assertVisible: "${output.pane}, .*Claude Code.*"
+
+# Archive with a swipe and confirm, while search shows only this pane.
 - swipe:
-    from: "${output.pane}.*"
+    from: "${output.pane}, .*"
     direction: LEFT
 - tapOn:
     id: "pane-archive-.*"
@@ -66,14 +64,22 @@ name: Pane list journeys
     below:
       text: "Archive “.*”\\?"
 - extendedWaitUntil:
-    notVisible: "${output.pane}.*"
+    visible:
+      id: panes-no-results
     timeout: 20000
+# iOS 26 shows the search bar's cancel as a close button.
+- tapOn: "Close|Cancel"
+- waitForAnimationToEnd
 
 # Delete it for good from Archived.
 - scrollUntilVisible:
     element:
       id: panes-archived
-    centerElement: true
+# One more swipe so the row clears the floating tab bar.
+- swipe:
+    start: 50%, 70%
+    end: 50%, 30%
+- waitForAnimationToEnd
 - tapOn:
     id: panes-archived
 - extendedWaitUntil:
