@@ -176,11 +176,36 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     }
   };
 
+  // Keyboard parity with the old modal: focus moves in on open and returns on
+  // close, and Escape leaves through the unsaved-changes check.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+  // Settings mounts when it opens, so the first render still sees the opener
+  // focused; hiding the workspace blurs it right after. Restore it on close.
+  const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  useEffect(() => {
+    if (!isOpen) return;
+    pageRef.current?.querySelector<HTMLElement>('[data-testid="settings-content"], button')?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [isOpen, opener]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog above Settings handles it
+      event.preventDefault();
+      requestCloseRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <>
-      <div data-testid="settings-page" className="flex h-full min-h-0 w-full flex-col bg-bg-primary">
+      <div ref={pageRef} data-testid="settings-page" data-hotkey-scope="modal" className="flex h-full min-h-0 w-full flex-col bg-bg-primary">
         <div className="pane-drag-area h-[38px] flex-shrink-0 bg-surface-secondary" />
         {!persistence.config && (persistence.isLoading || persistence.configError) ? (
           <div className="relative flex min-h-0 flex-1 items-center justify-center">

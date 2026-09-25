@@ -495,6 +495,40 @@ test.describe('Settings', () => {
     await page.screenshot({ path: 'test-results/settings-dark.png' });
   });
 
+  test('keeps workspace shortcuts off while Settings is open', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByTestId('settings-content').click();
+    await page.keyboard.press('ControlOrMeta+b');
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    // bootSettings collapsed the sidebar; the ignored shortcut left it collapsed.
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+  });
+
+  test('moves focus in on open and back to the opener when Escape closes it', async ({ page }) => {
+    const opener = await bootSettings(page);
+    await expect(page.getByTestId('settings-page').locator(':focus')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+
+  test('asks before Escape discards unsaved changes', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByRole('button', { name: 'Worktrees & Git', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Entry' }).click();
+    await page.getByTestId('settings-content').getByRole('textbox').last().fill('.env.local');
+    await expect(page.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
+    await page.keyboard.press('Escape');
+    const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: 'Stay' }).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByTestId('settings-page')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await confirm.getByRole('button', { name: 'Discard Changes' }).click();
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
+  });
+
   test('returns to the workspace with Back', async ({ page }) => {
     await bootSettings(page);
     await expect(page.getByTestId('sidebar')).toBeHidden();
