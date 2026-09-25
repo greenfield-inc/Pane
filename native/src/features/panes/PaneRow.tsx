@@ -72,11 +72,11 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive }: Pane
           <View style={styles.actions}>
             <IconButton testID={`pane-pin-${pane.id}`} label={pinLabel} onPress={onTogglePinned}>
               <View style={styles.pinTilt}>
-                <Icon ios="pin" android="keep" size={14} color={pane.isFavorite ? theme.colors.textSecondary : theme.colors.textMuted} />
+                <Icon ios="pin" android="keep" size={16} color={pane.isFavorite ? theme.colors.textSecondary : theme.colors.textMuted} />
               </View>
             </IconButton>
             <IconButton testID={`pane-archive-${pane.id}`} label="Archive pane" onPress={onArchive}>
-              <Icon ios="archivebox" android="archive" size={14} />
+              <Icon ios="archivebox" android="archive" size={16} />
             </IconButton>
           </View>
         </View>

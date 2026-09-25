@@ -67,13 +67,6 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
           <Text variant="subhead" tone="danger">{error}</Text>
         </View>
       ) : null}
-      {host ? (
-        <View testID="connect-host" style={[styles.host, { backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, borderRadius: theme.radius.md }]}>
-          <Text variant="footnote" tone="muted">Connects to</Text>
-          <Text variant="callout" numberOfLines={1} style={styles.semibold}>{host.label}</Text>
-          <Text variant="footnote" tone="secondary" numberOfLines={1}>{host.baseUrl}</Text>
-        </View>
-      ) : null}
       <Button
         testID="connect-submit"
         title={pairing.isPending ? 'Connecting...' : trimmed ? 'Import & Connect' : 'Paste & Connect'}
@@ -88,6 +81,13 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
         icon={<Icon ios="qrcode.viewfinder" android="qr_code_scanner" size={16} color={theme.colors.text} />}
         onPress={() => router.push('/scan')}
       />
+      {host ? (
+        <View testID="connect-host" style={[styles.host, { backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, borderRadius: theme.radius.md }]}>
+          <Text variant="footnote" tone="muted">Connects to</Text>
+          <Text variant="callout" numberOfLines={1} style={styles.semibold}>{host.label}</Text>
+          <Text variant="footnote" tone="secondary" numberOfLines={1}>{host.baseUrl}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

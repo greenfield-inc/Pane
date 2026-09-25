@@ -16,7 +16,6 @@ appId: com.dcouple.pane.mobile
       - tapOn:
           id: connect-code-input
       - inputText: ${CONNECTION_CODE}
-      - hideKeyboard
       - tapOn:
           id: connect-submit
 # Typing 500+ characters through Maestro's Android driver outlasts its 120 s
@@ -33,8 +32,6 @@ appId: com.dcouple.pane.mobile
           timeout: 30000
       - tapOn:
           id: connect-submit
-          below:
-            id: connect-host
 - extendedWaitUntil:
     visible:
       id: panes-list

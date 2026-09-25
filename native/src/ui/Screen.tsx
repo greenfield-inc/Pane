@@ -30,6 +30,8 @@ export function Screen({ children, scroll, edges = ['bottom'], padded = true, st
         style={{ backgroundColor: theme.colors.background }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={[{ padding, gap: theme.spacing.lg }, style]}
       >
         {children}

@@ -1,6 +1,6 @@
 import * as Linking from 'expo-linking';
 import { useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConnectForm } from '@/features/pairing/ConnectForm';
@@ -17,8 +17,9 @@ export default function ConnectScreen() {
 
   return (
     <SafeAreaView style={[styles.fill, { backgroundColor: theme.colors.background }]}>
-      <KeyboardAvoidingView style={styles.fill} behavior="padding">
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      {/* iOS insets the scroll view for the keyboard itself; Android (edge-to-edge) needs padding. */}
+      <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'android' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={[styles.content, mode === 'connect' && styles.contentTop]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
           <View style={styles.header}>
             <IconTile ios="desktopcomputer" android="desktop_windows" />
             <View style={styles.headerText}>
@@ -110,6 +111,8 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   // px-4 py-6, centered like the PWA's min-h-dvh flex column
   content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 24 },
+  // Keep Connect above the keyboard while typing a code.
+  contentTop: { justifyContent: 'flex-start' },
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 24 },
   headerText: { flex: 1 },
   tile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
