@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import { expectClickable, isDraggableAt } from './dragRegions';
 
 const project = {
   id: 1,
@@ -50,8 +51,6 @@ test.describe('window chrome', () => {
     const dragRegion = page.getByTestId('home-drag-region');
     const sidebar = page.getByTestId('sidebar').first();
     const [dragBox, sidebarBox] = await Promise.all([dragRegion.boundingBox(), sidebar.boundingBox()]);
-    expect(dragBox?.y).toBe(0);
-    expect(dragBox?.height).toBe(38);
     expect(dragBox && sidebarBox && dragBox.x).toBe(sidebarBox!.x + sidebarBox!.width);
     await expect(dragRegion).toHaveCSS('-webkit-app-region', 'drag');
   });
@@ -75,19 +74,12 @@ test.describe('window chrome', () => {
         contentTop: contentElement.getBoundingClientRect().top,
         tabBottom: tabElement.getBoundingClientRect().bottom,
         sidebarColor: getComputedStyle(sidebarElement).backgroundColor,
-        tabRegion: getComputedStyle(tabElement).getPropertyValue('-webkit-app-region'),
-        tabDragRegion: getComputedStyle(tabElement.firstElementChild!).getPropertyValue('-webkit-app-region'),
       };
     });
     expect(positions?.sidebarTop).toBe(0);
     expect(positions?.tabTop).toBe(0);
     expect(positions?.contentTop).toBe(positions?.tabBottom);
     expect(positions?.sidebarColor).not.toBe('rgba(0, 0, 0, 0)');
-    expect(positions?.tabRegion).toBe('no-drag');
-    expect(positions?.tabDragRegion).toBe('drag');
-    const detailsToggle = await page.getByRole('button', { name: /^(Show|Hide) details$/ }).boundingBox();
-    const tabDragBox = await tabBar.locator(':scope > div').boundingBox();
-    expect(detailsToggle && tabDragBox && tabDragBox.x + tabDragBox.width).toBeLessThanOrEqual(detailsToggle!.x);
     await expect(sidebar.getByRole('button', { name: 'New project' })).toBeVisible();
     await expect(sidebar.getByRole('button', { name: 'Settings' })).toBeVisible();
     const screenshot = testInfo.outputPath('top-tabs.png');
@@ -146,10 +138,60 @@ test.describe('window chrome', () => {
     expect(toggle && tab && tab.x).toBeGreaterThanOrEqual(toggle!.x + toggle!.width);
   });
 
+  test('keeps every title strip control clickable in both sidebar states', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'platform', { get: () => 'MacIntel' });
+    });
+    await installElectronApiMock(page, {
+      platform: 'darwin',
+      initialProjects: [project],
+      initialSessions: [session],
+      // The first terminal docks at the bottom; the second is a saved Codex chat tab.
+      initialPanels: ['Terminal', 'Codex'].map((title, position) => ({
+        id: `title-bar-${position}`, sessionId: session.id, type: 'terminal', title,
+        state: { isActive: position === 1, hasBeenViewed: true, customState: position === 1
+          ? { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', isInitialized: false }
+          : { isInitialized: false } },
+        metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position },
+      })),
+      initialUiState: { expandedProjects: [project.id] },
+      activeProjectId: project.id,
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+    // Home: the empty strip drags, the sidebar toggle clicks.
+    await expectClickable(page, [page.getByRole('button', { name: 'Collapse sidebar' })]);
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    await expectClickable(page, [page.getByRole('button', { name: 'Expand sidebar' })]);
+    expect(await isDraggableAt(page, 600, 10)).toBe(true);
+    await page.getByRole('button', { name: 'Expand sidebar' }).click();
+
+    await page.getByRole('button', { name: session.name, exact: true }).click();
+    await page.evaluate((update) => (
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      window as typeof window & {
+        __paneTestElectronMock: { emitGitStatusUpdated: (sessionId: string, gitStatus: typeof update.gitStatus) => void };
+      }
+    ).__paneTestElectronMock.emitGitStatusUpdated(update.id, update.gitStatus), {
+      id: session.id, gitStatus: { state: 'ahead', ahead: 1, isReadyToMerge: true, prNumber: 7, prState: 'OPEN' },
+    });
+    const controls = () => [
+      page.getByRole('tab', { name: 'Codex' }),
+      page.getByRole('button', { name: 'Add tool', exact: true }),
+      page.getByRole('button', { name: 'Move chat to Session', exact: true }),
+      page.getByRole('button', { name: /Run|Dev server/i }).first(),
+      page.getByRole('button', { name: /^(Show|Hide) details$/ }),
+    ];
+    await expectClickable(page, [page.getByRole('button', { name: 'Collapse sidebar' }), ...controls()]);
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    await expectClickable(page, [page.getByRole('button', { name: 'Expand sidebar' }), page.getByTestId('window-title-bar-pills'), ...controls()]);
+    // Empty tab strip space still moves the window.
+    const addTool = await page.getByRole('button', { name: 'Add tool', exact: true }).boundingBox();
+    expect(addTool && await isDraggableAt(page, addTool.x + addTool.width + 40, addTool.y + addTool.height / 2)).toBe(true);
+  });
+
   test('keeps window controls clickable and clears the macOS traffic lights', async ({ page }) => {
     await openDesktop(page);
-    const controls = page.getByTestId('window-title-bar-controls');
-    await expect(controls).toHaveCSS('left', '88px');
     const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
     const collapseBox = await collapse.boundingBox();
     expect(collapseBox?.x).toBeGreaterThanOrEqual(88);

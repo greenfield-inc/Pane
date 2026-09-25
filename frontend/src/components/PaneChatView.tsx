@@ -448,10 +448,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
     <div className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
       <LiveRegion>{statusAnnouncement}</LiveRegion>
       {sessionTabsSlot && (
-        <div className="flex h-[38px] flex-shrink-0 bg-bg-chrome">
-          <div className="pane-drag-area min-w-0 flex-1" />
-          <div className="w-12 flex-shrink-0" />
-        </div>
+        <div className="h-[38px] flex-shrink-0 bg-bg-chrome" />
       )}
       <div className={sessionTabsSlot ? "sr-only" : "flex min-h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5"}>
         <div className="flex min-w-0 items-center gap-2">

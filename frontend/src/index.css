@@ -274,8 +274,8 @@ body.understory {
   user-select: text;
 }
 
-/* Sidebar selection is indicated by row shading, without a focus outline. */
-.pane-sidebar-shell :is(button, a, [role="button"]):focus {
+/* Sidebar selection is indicated by row shading; keyboard focus keeps its ring. */
+.pane-sidebar-shell :is(button, a, [role="button"]):focus:not(:focus-visible) {
   outline: none;
   box-shadow: none;
 }
@@ -289,16 +289,23 @@ body.understory {
   -webkit-app-region: no-drag;
 }
 
+/* Only the explicit spacer drags, so title controls above the row stay clickable. */
 .panel-tab-bar-with-title-controls > div {
-  -webkit-app-region: drag;
-  margin-right: 48px;
+  -webkit-app-region: no-drag;
 }
 
 .pane-drag-area {
   -webkit-app-region: drag;
 }
 
-.pane-window-title-bar :is(button, [role="button"]) {
+/* app-region is inherited and later boxes win, so each Session tab (the element
+   holding its role=tab button) is no-drag as a whole; otherwise its labels would
+   re-add drag over it. The empty slot around the tabs still drags. */
+[data-testid="window-title-bar-session-tabs"] :has(> [role="tab"]) {
+  -webkit-app-region: no-drag;
+}
+
+.pane-window-title-bar :is(button, [role="button"], [role="tab"]) {
   -webkit-app-region: no-drag;
   pointer-events: auto;
 }

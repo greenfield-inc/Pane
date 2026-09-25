@@ -157,10 +157,10 @@ test.describe('compact sidebar', () => {
     await expect(fullSidebarPane.locator('..')).toHaveClass(/bg-surface-selected/);
     await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
     await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
+    // Keyboard focus still shows a ring.
     await page.keyboard.press('Tab');
     await fullSidebarPane.focus();
-    await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
-    await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
+    await expect(fullSidebarPane).not.toHaveCSS('box-shadow', 'none');
     await fullSidebarPane.evaluate(element => element.blur());
     await page.mouse.move(640, 360);
     await page.screenshot({
