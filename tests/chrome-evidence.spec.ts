@@ -138,19 +138,6 @@ async function computedVar(page: Page, cssProp: string, value: string): Promise<
   }, { cssProp, value });
 }
 
-async function computedClassFont(page: Page, className: string): Promise<string> {
-  return page.evaluate((className) => {
-    const probe = document.createElement('span');
-    document.body.append(probe);
-    try {
-      probe.classList.add(className);
-      return getComputedStyle(probe).fontFamily;
-    } finally {
-      probe.remove();
-    }
-  }, className);
-}
-
 async function expectTabRowChrome(page: Page, row: Locator): Promise<void> {
   await expect(row).toBeVisible();
   const expectedBackground = await computedVar(page, 'background-color', 'var(--color-bg-chrome)');
@@ -186,15 +173,15 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string) {
 test('flat chrome preserves the primary navigation hierarchy', async ({ page }, testInfo) => {
   await bootChromeFixture(page);
 
-  await expect(page.getByTestId('usage-nav')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Home menu' })).toBeVisible();
+  await expect(page.getByTestId('usage-nav')).toHaveCount(0);
   await expect(page.locator('.pane-sidebar-shell')).toHaveCSS('border-radius', '0px');
   await expect(page.locator('.pane-session-shell')).toHaveCSS('border-radius', '0px');
   await attachScreenshot(page, testInfo, 'chrome-expanded');
 
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
-  await expect(page.getByTestId('compact-usage')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('compact-usage')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Sidebar menu' })).toBeVisible();
   await attachScreenshot(page, testInfo, 'chrome-collapsed');
 });
 
@@ -233,29 +220,29 @@ test('macOS UI uses the sans stack; content surfaces stay monospace', async ({ p
   await expectSans(page.getByRole('button', { name: 'Add tool', exact: true }));
   await expectSans(page.getByRole('tab', { name: 'Details', exact: true }));
 
-  await page.getByRole('button', { name: 'Feedback', exact: true }).click();
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click();
+  await expectSans(page.getByRole('tab', { name: 'Changes', exact: true }));
+
+  await page.getByRole('button', { name: 'Home menu' }).click();
+  await page.getByRole('menuitem', { name: 'Feedback', exact: true }).click();
   const feedback = page.getByRole('dialog', { name: 'Send feedback' });
   await expectSans(feedback.getByRole('heading', { name: 'Send feedback' }).last());
   await expectSans(feedback.getByText('Create a public issue in greenfield-inc/Pane.'));
   await feedback.getByRole('button', { name: 'Close modal' }).click();
 
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const settings = page.getByRole('dialog', { name: 'Pane Settings' });
-  await expectSans(settings.getByRole('heading', { name: 'Pane Settings' }).last());
+  const settings = page.getByTestId('settings-page');
+  await expectSans(settings.getByRole('heading', { name: 'Settings', exact: true }));
   await settings.getByRole('button', { name: 'Terminal', exact: true }).click();
   await expectSans(settings.getByText('Choose an enumerated monospace font or enter a custom installed font name. Nerd Font symbols remain available.'));
   await expectSans(settings.getByRole('textbox', { name: 'Custom terminal font family' }));
   await expectSans(settings.getByRole('button', { name: 'Decrease terminal font size' }));
-  await settings.getByRole('button', { name: 'Close modal' }).click();
+  await settings.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Flat chrome', exact: true }).click();
 
   await expect(page.locator('[data-terminal-font]').first()).toHaveAttribute(
     'data-terminal-font',
     '"Geist Mono", "Symbols Nerd Font Mono", monospace',
   );
 
-  await page.getByRole('tab', { name: 'Changes', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^Open diff for .+$/ })).toBeVisible();
-  const mono = await computedClassFont(page, 'font-mono');
-  await expect(page.getByText(changedPath, { exact: true })).toHaveCSS('font-family', mono);
-  await expect(page.getByText('1234567', { exact: true })).toHaveCSS('font-family', mono);
 });

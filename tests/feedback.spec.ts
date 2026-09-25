@@ -46,23 +46,23 @@ async function collapseSidebar(page: Page) {
 }
 
 async function openSettings(page: Page) {
-  // Settings lives in the sidebar overflow menu while expanded; the compact rail exposes it
-  // directly, which is how tests/settings.spec.ts reaches it as well.
+  // The compact rail exposes Settings directly.
   await collapseSidebar(page);
 
   const settingsButton = page.getByRole('button', { name: 'Settings' }).first();
   await expect(settingsButton).toBeVisible();
   await settingsButton.click();
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   return settingsButton;
 }
 
 test.describe('Feedback entry points', () => {
-  test('expanded sidebar button opens the dialog and submits the happy path', async ({ page }, testInfo) => {
+  test('expanded sidebar menu opens feedback and submits the happy path', async ({ page }, testInfo) => {
     await bootApp(page);
     await shot(page, testInfo, '01-expanded-sidebar');
 
-    await page.getByRole('button', { name: 'Feedback', exact: true }).click();
+    await page.getByRole('button', { name: 'Home menu' }).click();
+    await page.getByRole('menuitem', { name: 'Feedback', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Send feedback' });
     await expect(dialog).toBeVisible();
     // The header owns the only close control; Modal's own corner button stays off so the
@@ -91,12 +91,12 @@ test.describe('Feedback entry points', () => {
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Home menu' })).toBeFocused();
   });
 
   test('failure keeps the text and offers the prefilled fallback', async ({ page }, testInfo) => {
     await bootApp(page, { feedbackOutcome: 'failure' });
-    await page.getByRole('button', { name: 'Sidebar menu' }).click();
+    await page.getByRole('button', { name: 'Home menu' }).click();
     await page.getByRole('menuitem', { name: 'Feedback', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Send feedback' });
     await dialog.locator('textarea').fill('Pane will not start after the update.');
@@ -119,7 +119,7 @@ test.describe('Feedback entry points', () => {
     await shot(page, testInfo, '05-compact-sidebar');
 
     await openSettings(page);
-    const settingsDialog = page.getByRole('dialog', { name: 'Pane Settings' });
+    const settingsDialog = page.getByTestId('settings-page');
     await settingsDialog.getByRole('navigation', { name: 'Settings categories' })
       .getByRole('button', { name: 'General', exact: true }).click();
 
@@ -131,9 +131,8 @@ test.describe('Feedback entry points', () => {
     await entry.click();
     const dialog = page.getByRole('dialog', { name: 'Send feedback' });
     await expect(dialog).toBeVisible();
-    // Settings stays mounted underneath. Radix marks the layer below the stacked dialog
-    // aria-hidden, so it is matched by text here rather than by its dialog role.
-    await expect(page.getByText('Pane Settings', { exact: true })).toBeVisible();
+    // The settings screen remains beneath the feedback dialog.
+    await expect(page.getByTestId('settings-page')).toBeVisible();
     await shot(page, testInfo, '08-settings-dialog-open');
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();

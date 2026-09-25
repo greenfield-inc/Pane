@@ -20,8 +20,9 @@ export interface RemoteExecutableHealthPresentation {
 }
 
 export function getRemoteExecutableHealthPresentation(
-  health: RemoteDaemonExecutableHealth,
+  health: RemoteDaemonExecutableHealth | undefined,
 ): RemoteExecutableHealthPresentation | null {
+  if (!health) return null;
   if (
     health.diagnosticCode === 'PANE_REMOTE_DAEMON_EXECUTABLE_DELETED'
     && health.processImage.status === 'deleted'

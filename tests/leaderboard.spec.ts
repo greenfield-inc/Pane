@@ -36,7 +36,8 @@ test('leaderboard tab shows join banner and table before opt-in', async ({ page 
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Usage & Limits', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
 
   // Click the Leaderboard tab
@@ -86,7 +87,8 @@ test('leaderboard tab shows joined banner when opted in', async ({ page }, testI
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Usage & Limits', exact: true }).click();
   await page.getByRole('tab', { name: 'Leaderboard' }).click();
 
   // Joined banner — sendNow auto-fires on tab visit and the mock returns rank 1
@@ -115,7 +117,8 @@ test('tab navigation switches between My usage and Leaderboard', async ({ page }
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Usage & Limits', exact: true }).click();
 
   // Default is My usage tab
   const myUsageTab = page.getByRole('tab', { name: 'My usage' });
@@ -149,7 +152,8 @@ test('DO_NOT_TRACK disables join button', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Usage & Limits', exact: true }).click();
   await page.getByRole('tab', { name: 'Leaderboard' }).click();
 
   // Join button is disabled

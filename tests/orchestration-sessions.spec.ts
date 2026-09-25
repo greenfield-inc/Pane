@@ -755,7 +755,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await dismissStartupDialogs(page);
 
   await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('usage-nav')).toBeVisible();
+  await expect(page.getByTestId('usage-nav')).toHaveCount(0);
   const sessionsToggle = page.getByTestId('sessions-section-header').getByRole('button', { name: 'Sessions', exact: true });
   await expect(sessionsToggle).toHaveAttribute('aria-expanded', 'true');
   await sessionsToggle.click();
@@ -1238,7 +1238,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const appSettings = page.getByRole('dialog', { name: 'Pane Settings' });
+  const appSettings = page.getByTestId('settings-page');
   await appSettings.getByRole('button', { name: 'AI & Agents', exact: true }).click();
   await appSettings.getByLabel('Custom command and arguments').fill('af run coordinator --quiet');
   await appSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
@@ -1246,7 +1246,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
   await appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true }).click();
   await expect(appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true })).toBeDisabled();
-  await appSettings.getByRole('button', { name: 'Close modal' }).click();
+  await appSettings.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(appSettings).not.toBeVisible();
   await page.getByTestId('new-orchestration-session').click();
   const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
@@ -1400,11 +1400,11 @@ test('experimental progress opens, refreshes, stays isolated and can be disabled
   await page.getByRole('button', { name: 'Hide details', exact: true }).click();
   await expect(brief).toBeVisible();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const settings = page.getByRole('dialog', { name: 'Pane Settings' });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByTestId('settings-page');
   await settings.getByRole('button', { name: 'Advanced', exact: true }).click();
   await settings.getByRole('switch', { name: 'Session progress view (Experimental)' }).click();
-  await settings.getByRole('button', { name: 'Close modal' }).click();
+  await settings.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Session progress view' })).toHaveCount(0);
   await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
 });
