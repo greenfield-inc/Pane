@@ -240,6 +240,9 @@ test('Add Tool keeps long custom commands inside a narrow viewport', async ({ pa
     },
   });
 
+  // Tabs share the title strip with the window controls, so a narrow window
+  // needs the collapsed sidebar to leave room for them.
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click();
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
   const menu = page.getByRole('menu');
   const commandLabel = menu.getByText(expectedLabel, { exact: true });
