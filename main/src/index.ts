@@ -704,11 +704,9 @@ async function createWindow() {
   // Set the app title based on development mode and worktree
   setAppTitle();
 
-  // Apply persisted UI scale
-  const uiScale = configManager.getConfig().uiScale;
-  if (uiScale && uiScale !== 1.0) {
-    mainWindow.webContents.setZoomFactor(uiScale);
-  }
+  // Always apply the configured scale. Chromium can retain a zoom level for
+  // this origin across windows, including when the configured scale is 1x.
+  mainWindow.webContents.setZoomFactor(configManager.getConfig().uiScale ?? 1);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('about:')) {
@@ -1154,6 +1152,9 @@ if (launchRemoteSetup) {
 } else {
   app.whenReady().then(async () => {
     appStartTime = Date.now();
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
+    }
 
     console.log('[Main] App is ready, initializing services...');
     await initializeServices();

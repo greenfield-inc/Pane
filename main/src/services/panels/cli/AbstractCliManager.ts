@@ -13,7 +13,7 @@ import type { ConversationMessage } from '../../../database/models';
 import { getShellPath } from '../../../utils/shellPath';
 import { findNodeExecutable } from '../../../utils/nodeFinder';
 import { getGitAttributionEnv } from '../../../utils/attribution';
-import { inheritedProcessEnv } from '../../../utils/inheritedProcessEnv';
+import { interactiveTerminalEnv } from '../../../utils/inheritedProcessEnv';
 
 const LAST_OUTPUT_TAIL_BYTES = 16 * 1024;
 
@@ -646,7 +646,7 @@ export abstract class AbstractCliManager extends EventEmitter {
     const pathWithNode = nodeDir + pathSeparator + shellPath;
 
     return {
-      ...inheritedProcessEnv(),
+      ...interactiveTerminalEnv(),
       ...getGitAttributionEnv(this.configManager?.getConfig()),
       PATH: pathWithNode
     };

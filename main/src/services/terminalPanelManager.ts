@@ -14,7 +14,7 @@ import { ShellDetector } from '../utils/shellDetector';
 import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
-import { inheritedProcessEnv } from '../utils/inheritedProcessEnv';
+import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -941,7 +941,7 @@ export class TerminalPanelManager extends EventEmitter {
     // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
     // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
     const baseSpawnEnv = {
-      ...inheritedProcessEnv(),
+      ...interactiveTerminalEnv(),
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: enhancedPath,
       TERM: 'xterm-256color',
