@@ -74,6 +74,14 @@ function requiresAttribution(licenseType) {
   return !NO_ATTRIBUTION_LICENSES.some(license => license.toUpperCase() === licenseType.toUpperCase().trim());
 }
 
+const STANDARD_LICENSE_IDS = new Set(['MIT', 'ISC', 'BSD-2-Clause', 'Apache-2.0', 'LGPL-3.0-or-later']);
+
+function standardLicenseText(licenseType) {
+  if (!STANDARD_LICENSE_IDS.has(licenseType)) return `License: ${licenseType}\nPackage license text unavailable; no standard fallback is bundled for this declaration.`;
+  const text = fs.readFileSync(path.join(__dirname, 'license-texts', `${licenseType}.txt`), 'utf8').trim();
+  return `Standard SPDX license terms for ${licenseType} (package license text unavailable).\nTemplate copyright placeholders do not identify this package's copyright holders.\nSource: https://github.com/spdx/license-list-data/tree/31ba1a50e5397e00a304dbadc76531740e89ee48/text\n\n${text}`;
+}
+
 function getLicenseInfo(packagePath) {
   const licenseFiles = [
     'LICENSE',
@@ -117,9 +125,9 @@ function getLicenseInfo(packagePath) {
         licenseText = packageJson.licenseText;
       }
       
-      // If no license text found, use the license field
+      // Preserve the declared terms without borrowing another package copyright.
       if (!licenseText && licenseType) {
-        licenseText = `License: ${licenseType}`;
+        licenseText = standardLicenseText(licenseType);
       }
     } catch (e) {
       console.warn(`Error reading package.json for ${packagePath}: ${e.message}`);
@@ -138,6 +146,8 @@ function getPackageInfo(packagePath) {
         name: packageJson.name,
         version: packageJson.version,
         author: packageJson.author,
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate optional package.json metadata at the file boundary.
+        copyright: typeof packageJson.copyright === 'string' ? packageJson.copyright.trim() : null,
         homepage: packageJson.homepage,
         repository: packageJson.repository,
         license: packageJson.license
@@ -234,6 +244,7 @@ function processPackage(packagePath, packageName, licenses, processedPaths) {
       name: packageInfo.name,
       version: packageInfo.version,
       author: packageInfo.author,
+      copyright: packageInfo.copyright,
       homepage: packageInfo.homepage,
       repository: packageInfo.repository,
       licenseText: licenseText,
@@ -278,6 +289,10 @@ function formatLicenseEntry(info) {
     if (author) entry += `Author: ${author}\n`;
   }
   
+  if (info.copyright) {
+    entry += `Copyright notice: ${info.copyright}\n`;
+  }
+
   if (info.homepage) {
     entry += `Homepage: ${info.homepage}\n`;
   } else if (info.repository) {
