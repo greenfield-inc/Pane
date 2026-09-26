@@ -814,7 +814,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result.commandToRun).toBe(
-      'claude --resume 22222222-2222-4222-8222-222222222222 --dangerously-skip-permissions',
+      'claude --resume "22222222-2222-4222-8222-222222222222" --dangerously-skip-permissions',
     );
     expect(result.customState).not.toHaveProperty('initialInputSentAt');
   });
@@ -922,7 +922,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
 
     expect(result).toMatchObject({
-      commandToRun: `codex resume --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' thread-1`,
+      commandToRun: `codex resume --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' "thread-1"`,
       isCliCommand: true,
     });
   });
@@ -936,7 +936,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       agentSessionId: 'thread-1',
     });
 
-    expect(result).toMatchObject({ commandToRun: 'codex resume --yolo thread-1' });
+    expect(result).toMatchObject({ commandToRun: 'codex resume --yolo "thread-1"' });
   });
 
   it('keeps Enter as the default initial input submit strategy', async () => {

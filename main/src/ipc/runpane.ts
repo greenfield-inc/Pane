@@ -721,11 +721,8 @@ export function registerRunpaneHandlers(
             panelManager.ensureDiffPanel(session.id),
           ]);
 
-          const resumeCommand = item.resume && tool.agent
-            ? buildAdoptResumeCommand(tool.agent, item.resume)
-            : tool.command;
           const initialState: TerminalPanelState = {
-            initialCommand: item.launch ? resumeCommand : undefined,
+            initialCommand: item.launch ? tool.command : undefined,
             agentType: tool.agent,
             agentSessionId: item.resume,
             hasClaudeSessionId: tool.agent === 'claude' && Boolean(item.resume),
@@ -741,7 +738,7 @@ export function registerRunpaneHandlers(
           const context = sessionManager.getProjectContext(session.id);
           await terminalPanelManager.initializeTerminal(panel, storedWorktreePath, context?.commandRunner.wslContext ?? null);
           if (!item.launch) {
-            terminalPanelManager.writeToTerminal(panel.id, resumeCommand);
+            await terminalPanelManager.stageInitialCommand(panel.id, tool.command);
           }
           sessionManager.emitSessionCreated(stoppedSession, {
             activateOnCreate: normalized.focus === true,
@@ -2767,13 +2764,6 @@ function findSessionByWorktreeIdentity<T extends { worktree_path: string }>(
       return false;
     }
   });
-}
-
-function buildAdoptResumeCommand(agent: RunpaneAgentId, sessionId: string): string {
-  const id = escapeShellArg(sessionId);
-  if (agent === 'claude') return `claude --resume ${id} --dangerously-skip-permissions`;
-  if (agent === 'codex') return `codex resume --yolo ${id}`;
-  return `cursor-agent --force --trust --resume ${id}`;
 }
 
 function resolveOrCreateAdoptFolder(

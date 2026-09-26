@@ -288,7 +288,9 @@ export class TerminalPanelManager extends EventEmitter {
       ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState)
       : agentType === 'codex'
         ? this.resolveCodexLaunch(panelId, initialCommand, customState, nextState)
-        : this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType);
+        : agentType === 'cursor'
+          ? this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType)
+          : undefined;
 
     return resolution ?? { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
   }
@@ -303,11 +305,13 @@ export class TerminalPanelManager extends EventEmitter {
       !initialCommand.includes('--session-id') &&
       !initialCommand.includes('--resume')
     ) {
-      const existingClaudeSessionId = isValidUuid(customState.agentSessionId)
+      const existingClaudeSessionId = customState.hasClaudeSessionId && customState.agentSessionId
         ? customState.agentSessionId
-        : isValidUuid(panelId)
-          ? panelId
-          : undefined;
+        : isValidUuid(customState.agentSessionId)
+          ? customState.agentSessionId
+          : isValidUuid(panelId)
+            ? panelId
+            : undefined;
       const claudeSessionId = existingClaudeSessionId ?? randomUUID();
       const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId);
       const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
@@ -324,7 +328,7 @@ export class TerminalPanelManager extends EventEmitter {
 
       return {
         commandToRun: canResumeClaudeSession
-          ? `claude --resume ${claudeSessionId} --dangerously-skip-permissions`
+          ? `claude --resume ${this.quoteCommandArgument(claudeSessionId)} --dangerously-skip-permissions`
           : `${initialCommand} --session-id ${claudeSessionId}${initialPromptArg}`,
         customState: nextState,
         isCliCommand: true,
@@ -345,13 +349,13 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
   ): CliLaunchResolution | undefined {
-    if (customState.wasInterrupted) {
+    if (customState.wasInterrupted || customState.agentSessionId) {
       nextState.wasInterrupted = undefined;
       // Keep Pane Chat's helper-subagent flags (`-c 'agents.…'`) on resume;
       // other options, such as a prompt in a custom command, don't apply.
       const launchOptions = (initialCommand.match(/ -c 'agents\.(?:[^']|'\\'')*'/g) ?? []).join('');
       const commandToRun = customState.agentSessionId
-        ? `codex resume --yolo${launchOptions} ${customState.agentSessionId}`
+        ? `codex resume --yolo${launchOptions} ${this.quoteCommandArgument(customState.agentSessionId)}`
         : `codex resume --yolo${launchOptions}`;
 
       if (customState.agentSessionId) {
@@ -391,8 +395,12 @@ export class TerminalPanelManager extends EventEmitter {
     nextState: TerminalPanelState,
     shellType?: string,
   ): CliLaunchResolution | undefined {
-    if (customState.wasInterrupted) {
+    if (customState.wasInterrupted || customState.agentSessionId) {
       nextState.wasInterrupted = undefined;
+      // Older adopted panels stored an already-expanded resume command.
+      if (/--resume\b|--continue\b/.test(initialCommand)) {
+        return { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
+      }
       const commandToRun = customState.agentSessionId
         ? buildCursorLaunchCommand({ baseCommand: initialCommand, resumeChatId: customState.agentSessionId })
         : `${initialCommand} --continue`;
@@ -856,6 +864,16 @@ export class TerminalPanelManager extends EventEmitter {
     if (wasPaused) {
       this.resumePty(terminal);
     }
+  }
+
+  async stageInitialCommand(panelId: string, initialCommand: string): Promise<void> {
+    const panel = panelManager.getPanel(panelId);
+    if (!panel) throw new Error(`Panel ${panelId} not found`);
+    const state = terminalCustomState(panel.state);
+    const launch = this.resolveCliLaunchCommand(panelId, initialCommand, state, state.shellType);
+    panel.state.customState = launch.customState;
+    await panelManager.updatePanel(panelId, { state: panel.state });
+    this.writeToTerminal(panelId, launch.commandToRun);
   }
 
   async initializeTerminal(panel: ToolPanel, cwd: string, wslContext?: WSLContext | null, priority: number = 1, initialDimensions?: { cols: number; rows: number }): Promise<void> {

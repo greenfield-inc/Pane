@@ -12,6 +12,7 @@ import type { RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration
 
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { panelManager } from '../services/panelManager';
+import { panelManager as terminalPanelStore } from '../test/setup';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
@@ -416,29 +417,31 @@ describe('runpane IPC handlers', () => {
       expect(duplicate).toMatchObject({ ok: false, items: [{ error: { message: expect.stringContaining('already registered') } }] });
     });
 
-    it('emits the stopped pane, creates one configured terminal, and stages resume input', async () => {
+    it.each([false, true])('adopts a pane with stored identity and launch=%s', async (launch) => {
       const repoPath = createTempGitRepo('create-adopt-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
       const worktreePath = path.join(path.dirname(repoPath), 'create-adopt-worktree');
       execFileSync('git', ['worktree', 'add', '-b', 'create-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const services = adoptionServices(repoPath, worktreePath);
-      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const adoptedPanel = { ...terminalPanel, state: { ...terminalPanel.state, customState: { agentType: 'codex' as const, agentSessionId: 'thread-1' } } };
+      vi.mocked(panelManager.createPanel).mockResolvedValue(adoptedPanel);
+      vi.mocked(panelManager.getPanel).mockReturnValue(adoptedPanel);
+      terminalPanelStore.getPanel.mockReturnValue(adoptedPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
 
       const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
         repo: { id: project.id },
-        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' }, resume: 'thread-1' }],
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' }, resume: 'thread-1', launch }],
       }]);
 
-      expect(result).toMatchObject({ ok: true, items: [{ ok: true, sessionId: session.id }] });
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true, sessionId: session.id }] });
       expect(panelManager.createPanel).toHaveBeenCalledTimes(1);
       expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-        initialState: expect.objectContaining({ agentSessionId: 'thread-1', initialCommand: undefined }),
+        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined }),
       }));
-      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(
-        terminalPanel.id,
-        expect.stringMatching(/^codex resume --yolo ["']thread-1["']$/u),
-      );
+      if (!launch) {
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex resume --yolo "thread-1"');
+      }
       expect(services.sessionManager.emitSessionCreated).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'stopped' }),
         expect.objectContaining({ createDefaultTerminalOnCreate: false }),
