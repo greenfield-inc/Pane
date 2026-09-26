@@ -2495,7 +2495,8 @@ function stripUtf8Bom(value: string): string {
   return value.replace(/^\uFEFF+/, '');
 }
 
-function printJson<Value>(value: Value): void {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- The CLI JSON output boundary serializes command results without interpreting their fields.
+function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 

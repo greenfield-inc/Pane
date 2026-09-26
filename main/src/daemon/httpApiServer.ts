@@ -696,10 +696,11 @@ export class PaneRemoteHttpApiServer {
 
   }
 
-  private writeJson<Payload>(
+  private writeJson(
     response: ServerResponse,
     statusCode: number,
-    payload: Payload,
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- This HTTP output boundary serializes heterogeneous command and protocol responses as JSON.
+    payload: unknown,
     request?: IncomingMessage,
   ): void {
     const body = JSON.stringify(payload);
