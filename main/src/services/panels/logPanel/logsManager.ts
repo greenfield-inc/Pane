@@ -3,7 +3,7 @@ import * as os from 'os';
 import { ToolPanel, LogsPanelState } from '../../../../../shared/types/panels';
 import { getPaneEventSink } from '../../../core/runtime';
 import { panelManager } from '../../panelManager';
-import { addSessionLog, cleanupSessionLogs } from '../../session-logs';
+import { addSessionLog, clearSessionLogs } from '../../session-logs';
 import { getShellPath } from '../../../utils/shellPath';
 import type { AnalyticsManager } from '../../analyticsManager';
 import type { PaneEventArgument } from '../../../core/eventSink';
@@ -76,7 +76,7 @@ export class LogsManager {
     if (!panel) return;
     
     // Clear session logs
-    cleanupSessionLogs(panel.sessionId);
+    clearSessionLogs(panel.sessionId);
     
     // Reset panel state
     await panelManager.updatePanel(panelId, {
