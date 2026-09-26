@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import * as path from 'path';
 import type { PathResolver } from '../utils/pathResolver';
 import type { CommandRunner } from '../utils/commandRunner';
-import { escapeShellArg } from '../utils/shellEscape';
 import { forceRemoveWorktree } from './gitPerformanceConfig';
 
 interface ReserveWorktree {
@@ -73,11 +72,11 @@ class WorktreePoolManager {
     const reservePath = pathResolver.join(baseDir, reserveName);
 
     // Non-blocking fetch — ignore errors (user may be offline)
-    commandRunner.execAsync(`git fetch`, projectPath, { timeout: 15000 }).catch(() => {});
+    commandRunner.execFile('git', ['fetch'], projectPath, { timeout: 15000 }).catch(() => {});
 
     try {
-      await commandRunner.execAsync(
-        `git worktree add -b ${escapeShellArg(branchName)} --no-track ${escapeShellArg(reservePath)} ${escapeShellArg(baseRef)}`,
+      await commandRunner.execFile(
+        'git', ['worktree', 'add', '-b', branchName, '--no-track', '--', reservePath, baseRef],
         projectPath,
         { timeout: 60000 }
       );
@@ -89,8 +88,8 @@ class WorktreePoolManager {
     // Capture the resolved commit hash so we can detect if base advances later
     let baseCommit = '';
     try {
-      const { stdout } = await commandRunner.execAsync(
-        `git rev-parse ${escapeShellArg(baseRef)}`,
+      const { stdout } = await commandRunner.execFile(
+        'git', ['rev-parse', '--verify', '--end-of-options', baseRef],
         projectPath,
         { timeout: 10000 }
       );
@@ -141,8 +140,8 @@ class WorktreePoolManager {
 
     // Check that the base ref hasn't advanced since the reserve was created
     try {
-      const { stdout: currentHead } = await commandRunner.execAsync(
-        `git rev-parse ${escapeShellArg(baseRef)}`,
+      const { stdout: currentHead } = await commandRunner.execFile(
+        'git', ['rev-parse', '--verify', '--end-of-options', baseRef],
         projectPath,
         { timeout: 10000 }
       );
@@ -166,16 +165,18 @@ class WorktreePoolManager {
     const targetPath = pathResolver.join(baseDir, targetName);
 
     try {
+      await commandRunner.execFile('git', ['check-ref-format', '--branch', targetBranch], projectPath);
+
       // Rename the worktree directory
-      await commandRunner.execAsync(
-        `git worktree move ${escapeShellArg(reserve.reservePath)} ${escapeShellArg(targetPath)}`,
+      await commandRunner.execFile(
+        'git', ['worktree', 'move', '--', reserve.reservePath, targetPath],
         projectPath,
         { timeout: 30000 }
       );
 
       // Rename the branch
-      await commandRunner.execAsync(
-        `git branch -m ${escapeShellArg(reserve.branchName)} ${escapeShellArg(targetBranch)}`,
+      await commandRunner.execFile(
+        'git', ['branch', '-m', '--', reserve.branchName, targetBranch],
         projectPath,
         { timeout: 15000 }
       );
@@ -211,8 +212,8 @@ class WorktreePoolManager {
     }
 
     try {
-      await commandRunner.execAsync(
-        `git branch -D ${escapeShellArg(reserve.branchName)}`,
+      await commandRunner.execFile(
+        'git', ['branch', '-D', '--', reserve.branchName],
         projectPath,
         { timeout: 15000 }
       );
@@ -232,8 +233,8 @@ class WorktreePoolManager {
   async cleanupOrphanedReserves(projectPath: string, commandRunner: CommandRunner): Promise<void> {
     let worktreeListOutput: string;
     try {
-      const { stdout } = await commandRunner.execAsync(
-        `git worktree list --porcelain`,
+      const { stdout } = await commandRunner.execFile(
+        'git', ['worktree', 'list', '--porcelain'],
         projectPath,
         { timeout: 30000 }
       );
@@ -269,8 +270,8 @@ class WorktreePoolManager {
     // Clean up orphaned reserve branches
     let branchListOutput: string;
     try {
-      const { stdout } = await commandRunner.execAsync(
-        `git branch -l`,
+      const { stdout } = await commandRunner.execFile(
+        'git', ['branch', '-l'],
         projectPath,
         { timeout: 15000 }
       );
@@ -290,8 +291,8 @@ class WorktreePoolManager {
     for (const branch of orphanBranches) {
       console.log(`[WorktreePool] Removing orphaned reserve branch: ${branch}`);
       try {
-        await commandRunner.execAsync(
-          `git branch -D ${escapeShellArg(branch)}`,
+        await commandRunner.execFile(
+          'git', ['branch', '-D', '--', branch],
           projectPath,
           { timeout: 15000 }
         );

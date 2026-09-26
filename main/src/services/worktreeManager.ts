@@ -1,6 +1,5 @@
 import { mkdir } from 'fs/promises';
 import { withLock } from '../utils/mutex';
-import { escapeShellArg } from '../utils/shellEscape';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
@@ -104,6 +103,7 @@ export async function detectGitBase(
       }
 
       const branchName = isRemoteBranch ? baseBranch.slice(remotePrefix.length) : baseBranch;
+      await commandRunner.execFile('git', ['check-ref-format', '--branch', branchName], projectPath);
       try {
         await commandRunner.execFile('git', ['checkout', branchName], projectPath);
       } catch {
@@ -156,14 +156,14 @@ export async function resolveDefaultWorktreeBase(
   commandRunner: CommandRunner,
 ): Promise<string> {
   try {
-    const { stdout } = await commandRunner.execAsync(
-      'git symbolic-ref --quiet --short refs/remotes/origin/HEAD',
+    const { stdout } = await commandRunner.execFile(
+      'git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
       projectPath,
     );
     const remoteDefault = stdout.trim();
     if (remoteDefault) {
-      await commandRunner.execAsync(
-        `git rev-parse --verify ${escapeShellArg(`${remoteDefault}^{commit}`)}`,
+      await commandRunner.execFile(
+        'git', ['rev-parse', '--verify', '--end-of-options', `${remoteDefault}^{commit}`],
         projectPath,
       );
       return remoteDefault;
@@ -174,8 +174,8 @@ export async function resolveDefaultWorktreeBase(
 
   for (const candidate of ['origin/main', 'origin/master', 'main', 'master']) {
     try {
-      await commandRunner.execAsync(
-        `git rev-parse --verify ${escapeShellArg(`${candidate}^{commit}`)}`,
+      await commandRunner.execFile(
+        'git', ['rev-parse', '--verify', '--end-of-options', `${candidate}^{commit}`],
         projectPath,
       );
       return candidate;
@@ -737,7 +737,7 @@ export class WorktreeManager {
       // Use cross-platform approach
       let stdout = '0';
       try {
-        const result = await commandRunner.execAsync(`git rev-list --count HEAD..${mainBranch}`, worktreePath);
+        const result = await commandRunner.execFile('git', ['rev-list', '--count', `HEAD..${mainBranch}`, '--'], worktreePath);
         stdout = result.stdout;
       } catch {
         // Error checking, assume no changes
@@ -1333,8 +1333,8 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
 
   async gitSoftReset(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<{ output: string; previousCommitMessage: string }> {
     // Live safety check — count commits ahead of main branch
-    const { stdout: aheadOutput } = await commandRunner.execAsync(
-      `git log --oneline HEAD ^${escapeShellArg(mainBranch)}`,
+    const { stdout: aheadOutput } = await commandRunner.execFile(
+      'git', ['log', '--oneline', 'HEAD', `^${mainBranch}`, '--'],
       worktreePath,
       { timeout: 30000 }
     );
@@ -1344,15 +1344,15 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
     }
 
     // Capture current HEAD commit message before resetting
-    const { stdout: commitMessage } = await commandRunner.execAsync(
-      'git log -1 --pretty=%B',
+    const { stdout: commitMessage } = await commandRunner.execFile(
+      'git', ['log', '-1', '--pretty=%B'],
       worktreePath,
       { timeout: 10000 }
     );
 
     // Perform soft reset
-    const { stdout: output } = await commandRunner.execAsync(
-      'git reset --soft HEAD~1',
+    const { stdout: output } = await commandRunner.execFile(
+      'git', ['reset', '--soft', 'HEAD~1'],
       worktreePath,
       { timeout: 30000 }
     );
@@ -1365,9 +1365,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
 
   async setUpstream(worktreePath: string, remoteBranch: string, commandRunner: CommandRunner): Promise<{ output: string }> {
     try {
-      // Escape the remote branch name to prevent shell injection
-      const escapedBranch = escapeShellArg(remoteBranch);
-      const { stdout, stderr } = await commandRunner.execAsync(`git branch --set-upstream-to=${escapedBranch}`, worktreePath);
+      const { stdout, stderr } = await commandRunner.execFile('git', ['branch', `--set-upstream-to=${remoteBranch}`], worktreePath);
       const output = stdout || stderr || `Tracking set to ${remoteBranch}`;
       return { output };
     } catch (error: unknown) {
@@ -1479,7 +1477,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
 
   async getOriginBranch(worktreePath: string, branch: string, commandRunner: CommandRunner): Promise<string | null> {
     try {
-      await commandRunner.execAsync(`git rev-parse --verify origin/${branch}`, worktreePath);
+      await commandRunner.execFile('git', ['rev-parse', '--verify', '--end-of-options', `origin/${branch}`], worktreePath);
       return `origin/${branch}`;
     } catch {
       return null;

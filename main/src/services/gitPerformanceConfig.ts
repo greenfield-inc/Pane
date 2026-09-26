@@ -1,5 +1,4 @@
 import type { CommandRunner } from '../utils/commandRunner';
-import { escapeShellArg } from '../utils/shellEscape';
 
 const configuredRepositories = new Map<string, Promise<void>>();
 const fsmonitorSupport = new Map<string, Promise<boolean>>();
@@ -76,5 +75,5 @@ export async function forceRemoveWorktree(
   options?: { timeout?: number },
 ): Promise<void> {
   await stopFsmonitorDaemon(worktreePath, commandRunner);
-  await commandRunner.execAsync(`git worktree remove --force ${escapeShellArg(worktreePath)}`, projectPath, options);
+  await commandRunner.execFile('git', ['worktree', 'remove', '--force', '--', worktreePath], projectPath, options);
 }

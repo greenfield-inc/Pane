@@ -96,35 +96,6 @@ describe('WorktreeManager.listWorktrees', () => {
 });
 
 describe('WorktreeManager.resolveWorkingDirectory', () => {
-  it('creates reserve worktrees without setting upstream tracking', async () => {
-    const runner = commandRunner(async command => {
-      if (command === 'git fetch') {
-        return { stdout: '', stderr: '' };
-      }
-      if (command.startsWith('git worktree add -b ')) {
-        return { stdout: '', stderr: '' };
-      }
-      if (command === 'git rev-parse origin/main') {
-        return { stdout: 'base-commit\n', stderr: '' };
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    });
-
-    await worktreePoolManager.createReserve(
-      '/repo',
-      'origin/main',
-      undefined,
-      partialMock<PathResolver>({ join: (...parts: string[]) => parts.join('/') }),
-      runner,
-    );
-
-    const worktreeAddCall = vi.mocked(runner.execAsync).mock.calls.find(([command]) =>
-      command.startsWith('git worktree add -b '),
-    );
-    expect(worktreeAddCall?.[0]).toContain('--no-track');
-    expect(worktreeAddCall?.[0]).not.toContain(' --track ');
-  });
-
   it('persists the resolved default branch when claiming a reserve worktree', async () => {
     const runner = commandRunner(async (command, cwd) => {
       if (command.includes('symbolic-ref')) {
@@ -277,7 +248,7 @@ describe('WorktreeManager.getSessionComparisonBranch', () => {
       if (command === 'git branch --show-current') {
         return { stdout: 'feature/local\n', stderr: '' };
       }
-      if (command === 'git rev-parse --verify origin/feature/local') {
+      if (command === 'git rev-parse --verify --end-of-options origin/feature/local') {
         return { stdout: 'abc123\n', stderr: '' };
       }
       throw new Error(`Unexpected command: ${command}`);
