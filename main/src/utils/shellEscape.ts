@@ -24,31 +24,3 @@ export function escapeShellArg(arg: string): string {
   // by ending the quote, adding an escaped single quote, and starting a new quote
   return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
-
-/**
- * Build a safe git commit command with proper escaping
- * @param message The commit message
- * @param enableCommitFooter If true (default), add the Pane footer
- * @returns The safe commit command
- */
-export function buildGitCommitCommand(message: string, enableCommitFooter: boolean = true): string {
-  // Create the full commit message with signature
-  const fullMessage = enableCommitFooter ? `${message}
-
-Co-Authored-By: Pane <runpane@users.noreply.github.com>` : message;
-  
-  // For Windows, use a different approach
-  if (process.platform === 'win32') {
-    // Write to a temporary file or use -F - with stdin
-    // For now, escape for direct use
-    const escaped = fullMessage
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n');
-    return `git commit -m "${escaped}"`;
-  }
-  
-  // For Unix-like systems, use proper shell escaping
-  const escapedMessage = escapeShellArg(fullMessage);
-  return `git commit -m ${escapedMessage}`;
-}
