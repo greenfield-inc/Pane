@@ -28,6 +28,7 @@ beforeEach(() => {
   worktree = join(root, 'worktree $literal;path&name');
   mkdirSync(project);
   git(project, 'init', '-b', base);
+  git(project, 'config', 'core.autocrlf', 'false');
   git(project, 'config', 'user.name', 'Fixture');
   git(project, 'config', 'user.email', 'fixture@example.invalid');
   git(project, 'config', 'commit.gpgsign', 'false');
