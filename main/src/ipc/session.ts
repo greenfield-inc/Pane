@@ -393,7 +393,7 @@ export function registerSessionHandlers(
       for (const panel of panels) {
         try {
           if (panel.type === 'terminal') {
-            terminalPanelManager.destroyTerminal(panel.id);
+            await terminalPanelManager.destroyTerminal(panel.id);
           }
         } catch (panelError) {
           console.error(`[Session IPC] Failed to cleanup panel ${panel.id} (${panel.type}):`, panelError);

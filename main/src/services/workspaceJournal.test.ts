@@ -156,6 +156,16 @@ describe('WorkspaceJournal', () => {
     ]);
   });
 
+  it('records exits for successive lifetimes even when the new terminal exits before its first poll', () => {
+    const journal = new WorkspaceJournal({ resolvePane: paneId => ({ paneId, paneName: 'Pane' }) });
+    const exit = { type: 'terminal:exit', source: { panelId: 'p', sessionId: 's' }, data: { exitCode: 0 } };
+    journal.send('panel:event', exit);
+    journal.send('panel:event', exit);
+    journal.send('panel:agentStatus', { panelId: 'p', sessionId: 's', state: 'unknown', reason: 'terminal_start' });
+    journal.send('panel:event', exit);
+    expect(journal.readAfter(0).entries.map(entry => entry.kind)).toEqual(['panel.exited', 'panel.exited']);
+  });
+
   it('ignores agent-status events from ordinary shell panels', () => {
     let isCliPanel = false;
     const journal = new WorkspaceJournal({

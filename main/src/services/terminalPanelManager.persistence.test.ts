@@ -144,9 +144,9 @@ describe('terminal panel persistence', () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const manager of managers) {
-      for (const panelId of manager.getActiveTerminals()) manager.destroyTerminal(panelId);
+      for (const panelId of manager.getActiveTerminals()) await manager.destroyTerminal(panelId);
     }
     panelManagerMock.updatePanel.mockReset();
     panelManagerMock.getPanel.mockReset();
@@ -230,7 +230,7 @@ describe('terminal panel persistence', () => {
     // routes the same write into panel_buffers.
     expect(lastPersisted).not.toBeNull();
     expect(databaseService.updatePanel(panel.id, { state: lastPersisted ?? { isActive: false } })).toBe(true);
-    first.destroyTerminal(panel.id);
+    await first.destroyTerminal(panel.id);
 
     const second = new TerminalPanelManager(inProcessEmulatorHost);
     managers.push(second);

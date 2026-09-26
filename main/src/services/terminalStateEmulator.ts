@@ -212,9 +212,8 @@ export class TerminalStateEmulator {
   dispose(): void {
     if (this.disposed) return;
     this.finalIsAlternateScreen = this.isAlternateScreen;
-    // Capture WITH scrollback: destroyTerminal fires saveTerminalState without
-    // awaiting it, so the save usually reads this snapshot after disposal — a
-    // viewport-only capture would silently drop the session's history.
+    // Preserve scrollback for reads that resume after natural exit or shutdown.
+    // Explicit destruction drains and saves the model before disposal.
     this.finalSerializedBuffer = this.serializeForRestore(true);
     restoreCache.delete(this);
     this.finalScreenText = this.getScreenText();

@@ -110,6 +110,7 @@ const PANEL_CHANNELS = [
   'panels:set-active',
   'panels:getActive',
   'panels:initialize',
+  'panels:agent-statuses',
   'panels:checkInitialized',
   'panels:emitEvent',
   'panels:resize-terminal',

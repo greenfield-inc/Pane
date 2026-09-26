@@ -238,7 +238,11 @@ export function useNotifications() {
     // detected on their next transition — and an agent already sitting blocked
     // when the app opens doesn't re-ping.
     prevAgentStatusRef.current = { ...usePanelStore.getState().agentStatus };
-    const unsubscribe = usePanelStore.subscribe((state) => {
+    const unsubscribe = usePanelStore.subscribe((state, previousState) => {
+      if (state.agentStatusSnapshotVersion !== previousState.agentStatusSnapshotVersion) {
+        prevAgentStatusRef.current = { ...state.agentStatus };
+        return;
+      }
       const agentStatus = state.agentStatus;
       const prev = prevAgentStatusRef.current;
       for (const [panelId, status] of Object.entries(agentStatus)) {
