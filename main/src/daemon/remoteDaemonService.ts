@@ -1,3 +1,4 @@
+import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remoteSetupCommand';
 import { spawnSync } from 'child_process';
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'fs';
 import fs from 'fs/promises';
@@ -27,14 +28,15 @@ export interface RemoteDaemonServiceDependencies {
   executablePath?: string;
   sourceRoot?: string | null;
   executableCandidates?: string[];
+  asyncCommandRunner?: RemoteSetupCommandRunner;
   commandExists?: (command: string) => boolean;
   runCommand?: (command: string, args: string[]) => CommandResult;
 }
 
-export function assertRemoteDaemonServiceCanBeInstalled(
+export async function assertRemoteDaemonServiceCanBeInstalled(
   dependencies: RemoteDaemonServiceDependencies = {},
-): void {
-  assertPackagedExecutableDiscoverable(createContext(dependencies));
+): Promise<void> {
+  await assertPackagedExecutableDiscoverable(createContext(dependencies));
 }
 
 interface ServiceContext {
@@ -43,8 +45,8 @@ interface ServiceContext {
   executablePath: string;
   sourceRoot: string | null;
   executableCandidates: string[];
-  commandExists: (command: string) => boolean;
-  runCommand: (command: string, args: string[]) => CommandResult;
+  commandExists: (command: string) => boolean | Promise<boolean>;
+  runCommand: (command: string, args: string[]) => CommandResult | Promise<CommandResult>;
 }
 
 export async function installRemoteDaemonService(
@@ -52,7 +54,7 @@ export async function installRemoteDaemonService(
   dependencies: RemoteDaemonServiceDependencies = {},
 ): Promise<RemoteHostSetupServiceResult> {
   const context = createContext(dependencies);
-  assertPackagedExecutableDiscoverable(context);
+  await assertPackagedExecutableDiscoverable(context);
   return installForContext(path.resolve(paneDir), context, false);
 }
 
@@ -79,7 +81,7 @@ export async function repairRemoteDaemonService(
 ): Promise<RemoteDaemonServiceRepairResult> {
   const resolvedPaneDir = path.resolve(paneDir);
   const context = createContext(dependencies);
-  assertPackagedExecutableDiscoverable(context);
+  await assertPackagedExecutableDiscoverable(context);
   const before = await inspectRemoteDaemonService(resolvedPaneDir, dependencies);
   const service = await installForContext(resolvedPaneDir, context, true);
   const after = await inspectRemoteDaemonService(resolvedPaneDir, dependencies);
@@ -111,7 +113,7 @@ async function inspectRemoteDaemonService(
     }
   }
 
-  const resolvedPath = resolveRemoteDaemonExecutablePath(
+  const resolvedPath = await resolveRemoteDaemonExecutablePathAsync(
     context.platform,
     context.executableCandidates,
     (command) => resolveCommandPath(command, context),
@@ -244,6 +246,7 @@ export function renderWindowsRemoteDaemonLauncher(options: {
 }
 
 function createContext(dependencies: RemoteDaemonServiceDependencies): ServiceContext {
+  const asyncRun = dependencies.asyncCommandRunner;
   const platform = dependencies.platform ?? process.platform;
   const homeDir = dependencies.homeDir ?? os.homedir();
   return {
@@ -252,19 +255,27 @@ function createContext(dependencies: RemoteDaemonServiceDependencies): ServiceCo
     executablePath: dependencies.executablePath ?? process.execPath,
     sourceRoot: dependencies.sourceRoot === undefined ? findPaneSourceRoot(process.cwd()) : dependencies.sourceRoot,
     executableCandidates: dependencies.executableCandidates ?? getRemoteDaemonExecutableCandidates(platform, homeDir),
-    commandExists: dependencies.commandExists ?? commandExists,
-    runCommand: dependencies.runCommand ?? runCommand,
+    commandExists: dependencies.commandExists ?? (asyncRun
+      ? async (command) => (await asyncRun(
+        platform === 'win32' ? 'where' : 'sh',
+        platform === 'win32' ? [command] : ['-lc', `command -v ${quoteForPosix(command)}`],
+        { timeoutMs: 5000 },
+      )).ok
+      : commandExists),
+    runCommand: asyncRun
+      ? (command, args) => asyncRun(command, args, { timeoutMs: 5000 })
+      : dependencies.runCommand ?? runCommand,
   };
 }
 
-function assertPackagedExecutableDiscoverable(context: ServiceContext): void {
+async function assertPackagedExecutableDiscoverable(context: ServiceContext): Promise<void> {
   if (context.sourceRoot) {
     return;
   }
   const current = safeRealpath(context.executablePath);
   const discoverable = context.executableCandidates.some((candidate) => safeRealpath(candidate) === current)
-    || resolveCommandPath(context.platform === 'win32' ? 'pane.exe' : 'pane', context) === current
-    || resolveCommandPath(context.platform === 'win32' ? 'Pane.exe' : 'Pane', context) === current;
+    || (await resolveCommandPath(context.platform === 'win32' ? 'pane.exe' : 'pane', context)) === current
+    || (await resolveCommandPath(context.platform === 'win32' ? 'Pane.exe' : 'Pane', context)) === current;
   if (!discoverable) {
     throw new Error(
       `Pane remote daemon setup cannot persist the current executable safely: ${context.executablePath}. `
@@ -278,13 +289,13 @@ async function installForContext(
   context: ServiceContext,
   restart: boolean,
 ): Promise<RemoteHostSetupServiceResult> {
-  if (context.platform === 'linux' && context.commandExists('systemctl')) {
+  if (context.platform === 'linux' && await context.commandExists('systemctl')) {
     return installSystemdUserService(paneDir, context, restart);
   }
-  if (context.platform === 'darwin' && context.commandExists('launchctl')) {
+  if (context.platform === 'darwin' && await context.commandExists('launchctl')) {
     return installLaunchAgent(paneDir, context);
   }
-  if (context.platform === 'win32' && context.commandExists('schtasks')) {
+  if (context.platform === 'win32' && await context.commandExists('schtasks')) {
     return installWindowsScheduledTask(paneDir, context);
   }
   return {
@@ -320,12 +331,12 @@ async function installSystemdUserService(
     '',
   ].join('\n');
   await writeFileAtomically(servicePath, serviceFile, 0o644);
-  const reload = context.runCommand('systemctl', ['--user', 'daemon-reload']);
+  const reload = await context.runCommand('systemctl', ['--user', 'daemon-reload']);
   const enable = reload.ok
-    ? context.runCommand('systemctl', ['--user', 'enable', '--now', SYSTEMD_UNIT_NAME])
+    ? await context.runCommand('systemctl', ['--user', 'enable', '--now', SYSTEMD_UNIT_NAME])
     : reload;
   const restartResult = enable.ok && restart
-    ? context.runCommand('systemctl', ['--user', 'restart', SYSTEMD_UNIT_NAME])
+    ? await context.runCommand('systemctl', ['--user', 'restart', SYSTEMD_UNIT_NAME])
     : enable;
   const started = enable.ok && restartResult.ok;
   return {
@@ -333,7 +344,7 @@ async function installSystemdUserService(
     installed: enable.ok,
     started,
     message: started
-      ? `${restart ? 'Repaired and restarted the user systemd service.' : 'Installed and started a user systemd service.'}${enableLinger(context)}`
+      ? `${restart ? 'Repaired and restarted the user systemd service.' : 'Installed and started a user systemd service.'}${await enableLinger(context)}`
       : `Wrote ${servicePath}, but systemctl failed: ${firstNonEmpty(restartResult.stderr, restartResult.stdout, 'unknown error')}`,
   };
 }
@@ -342,11 +353,11 @@ async function installSystemdUserService(
 // which on a cloud VM means as soon as the SSH connection closes. Polkit usually
 // denies this to SSH users, so fall back to sudo -n, which cloud images allow
 // without a password and which fails fast instead of prompting everywhere else.
-function enableLinger(context: ServiceContext): string {
+async function enableLinger(context: ServiceContext): Promise<string> {
   const args = ['enable-linger', '--no-ask-password', os.userInfo().username];
-  const enabled = context.commandExists('loginctl') && (
-    context.runCommand('loginctl', args).ok
-    || (context.commandExists('sudo') && context.runCommand('sudo', ['-n', 'loginctl', ...args]).ok)
+  const enabled = await context.commandExists('loginctl') && (
+    (await context.runCommand('loginctl', args)).ok
+    || (await context.commandExists('sudo') && (await context.runCommand('sudo', ['-n', 'loginctl', ...args])).ok)
   );
   return enabled ? '' : ' It will stop when you log out until you run: sudo loginctl enable-linger "$USER"';
 }
@@ -380,8 +391,8 @@ async function installLaunchAgent(paneDir: string, context: ServiceContext): Pro
     '',
   ].join('\n');
   await writeFileAtomically(plistPath, plist, 0o644);
-  context.runCommand('launchctl', ['unload', '-w', plistPath]);
-  const load = context.runCommand('launchctl', ['load', '-w', plistPath]);
+  await context.runCommand('launchctl', ['unload', '-w', plistPath]);
+  const load = await context.runCommand('launchctl', ['load', '-w', plistPath]);
   return {
     strategy: 'launch-agent',
     installed: load.ok,
@@ -392,10 +403,10 @@ async function installLaunchAgent(paneDir: string, context: ServiceContext): Pro
 
 async function installWindowsScheduledTask(paneDir: string, context: ServiceContext): Promise<RemoteHostSetupServiceResult> {
   const launcherPath = await writeLauncher(paneDir, context);
-  const create = context.runCommand('schtasks', [
+  const create = await context.runCommand('schtasks', [
     '/Create', '/TN', WINDOWS_TASK_NAME, '/TR', `cmd.exe /d /c ${quoteForWindows(launcherPath)}`, '/SC', 'ONLOGON', '/F',
   ]);
-  const run = create.ok ? context.runCommand('schtasks', ['/Run', '/TN', WINDOWS_TASK_NAME]) : create;
+  const run = create.ok ? await context.runCommand('schtasks', ['/Run', '/TN', WINDOWS_TASK_NAME]) : create;
   return {
     strategy: 'scheduled-task',
     installed: create.ok,
@@ -471,10 +482,34 @@ export function resolveRemoteDaemonExecutablePath(
     ?? null;
 }
 
-function resolveCommandPath(command: string, context: ServiceContext): string | null {
+export async function resolveRemoteDaemonExecutablePathAsync(
+  platform: NodeJS.Platform,
+  candidates: string[],
+  resolveCommand?: (command: string) => string | null | Promise<string | null>,
+): Promise<string | null> {
+  const fixed = resolveFirstExecutable(candidates);
+  if (fixed) return fixed;
+  for (const command of platform === 'win32' ? ['pane.exe', 'Pane.exe'] : ['pane', 'Pane']) {
+    let candidate: string | null;
+    if (resolveCommand) candidate = await resolveCommand(command);
+    else {
+      const result = await runRemoteSetupCommand(
+        platform === 'win32' ? 'where' : 'sh',
+        platform === 'win32' ? [command] : ['-lc', `command -v ${quoteForPosix(command)}`],
+        { timeoutMs: 5000 },
+      );
+      const line = result.ok ? result.stdout.split(/\r?\n/).map(line => line.trim()).find(Boolean) : null;
+      candidate = line ? safeRealpath(line) : null;
+    }
+    if (candidate && isExecutableFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+async function resolveCommandPath(command: string, context: ServiceContext): Promise<string | null> {
   const result = context.platform === 'win32'
-    ? context.runCommand('where', [command])
-    : context.runCommand('sh', ['-lc', `command -v ${quoteForPosix(command)}`]);
+    ? await context.runCommand('where', [command])
+    : await context.runCommand('sh', ['-lc', `command -v ${quoteForPosix(command)}`]);
   const firstLine = result.ok ? result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean) : undefined;
   return firstLine ? safeRealpath(firstLine) : null;
 }

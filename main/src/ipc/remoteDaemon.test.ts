@@ -881,7 +881,7 @@ describe('remote daemon IPC', () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config.enabled = true;
     initialConfig.host.config.listenPort = 42138;
-    vi.mocked(readConfiguredTailscaleServeAccess).mockReturnValue({
+    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
       baseUrl: 'https://wsl.tailnet.ts.net',
       tunnel: {
         kind: 'tailscale',
@@ -914,7 +914,7 @@ describe('remote daemon IPC', () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config.enabled = true;
     initialConfig.host.config.listenPort = 42138;
-    vi.mocked(readConfiguredTailscaleServeAccess).mockReturnValue({
+    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
       baseUrl: 'https://wsl.tailnet.ts.net',
       tunnel: {
         kind: 'tailscale',
