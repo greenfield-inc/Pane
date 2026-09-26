@@ -152,3 +152,83 @@ test('project checkout shortcuts follow the same visible tab order', async ({ pa
   await page.keyboard.press('Meta+Shift+1');
   await expect(page.getByRole('tab', { name: 'Web', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
+
+for (const addBrowser of [false, true]) {
+  test(`numbered shortcuts retain ${addBrowser ? 'an appended browser' : 'persisted Shell then Web'} tab order`, async ({ page }, testInfo) => {
+    await installElectronApiMock(page, {
+      platform: 'darwin', initialProjects: [project], initialSessions: [session], activeProjectId: project.id,
+      initialPanels: [panel('Dock', 'terminal', 0), panel('Shell', 'terminal', 1, true), ...(!addBrowser ? [panel('Web', 'browser', 2)] : [])],
+      initialLayout: { version: 1, root: { type: 'group', id: 'saved', panelIds: addBrowser ? ['Shell'] : ['Shell', 'Web'], activePanelId: 'Shell' }, focusedGroupId: 'saved' },
+      initialUiState: { expandedProjects: [project.id] },
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Pane A', exact: true }).click();
+    const shell = page.getByRole('tab', { name: 'Shell', exact: true });
+    await expect(shell).toHaveAttribute('aria-selected', 'true');
+    if (addBrowser) {
+      await page.getByRole('button', { name: 'Add tool', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Browser', exact: true }).click();
+    } else {
+      await page.getByRole('tab', { name: 'Web', exact: true }).click();
+    }
+    await shell.hover();
+    await expect(page.getByRole('tooltip')).toContainText('⌘⇧1');
+    await page.keyboard.press('Meta+Shift+1');
+    await expect(shell).toHaveAttribute('aria-selected', 'true');
+    await page.screenshot({ path: testInfo.outputPath('layout-shortcut-order.png') });
+  });
+}
+
+test('closing the fallback stage panel preserves the pinned terminal', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session], activeProjectId: project.id,
+    initialPanels: [panel('Files', 'explorer', 0), panel('Dock', 'terminal', 1), panel('Shell', 'terminal', 2)],
+    initialUiState: { expandedProjects: [project.id] },
+  });
+  await page.goto('/');
+  await page.evaluate(() => {
+    const remove = window.electronAPI.panels.deletePanel;
+    window.electronAPI.panels.deletePanel = async id => {
+      document.body.dataset.closedPanel = id;
+      return remove(id);
+    };
+  });
+  await page.getByRole('button', { name: 'Pane A', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Shell', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Meta+w');
+  await expect(page.locator('body')).toHaveAttribute('data-closed-panel', 'Shell');
+  await expect(page.getByRole('tab', { name: 'Shell', exact: true })).toBeHidden();
+});
+
+test('returning to a pane shares its pending terminal creation', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session, { ...session, id: 'navigation-b', name: 'Pane B' }],
+    activeProjectId: project.id, initialPanels: [], initialUiState: { expandedProjects: [project.id] },
+  });
+  await page.goto('/');
+  await page.evaluate(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => channel === 'panels:shouldAutoCreate' ? true : invoke(channel, ...args);
+    const create = window.electronAPI.panels.createPanel;
+    window.electronAPI.panels.createPanel = async (...args) => {
+      if (args[0] === 'navigation-a') {
+        document.body.dataset.aTerminalRequests = String(Number(document.body.dataset.aTerminalRequests ?? 0) + 1);
+        await new Promise<void>(resolve => document.addEventListener('release-terminal', () => resolve(), { once: true }));
+      } else {
+        document.body.dataset.bTerminalRequested = 'true';
+      }
+      const result = await create(...args);
+      if (args[0] === 'navigation-a') document.body.dataset.aTerminalFinished = 'true';
+      return result;
+    };
+  });
+  await page.getByRole('button', { name: 'Pane A', exact: true }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-a-terminal-requests', '1');
+  await page.getByRole('button', { name: 'Pane B', exact: true }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-b-terminal-requested', 'true');
+  await page.getByRole('button', { name: 'Pane A', exact: true }).click();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.locator('body')).toHaveAttribute('data-a-terminal-requests', '1');
+  await page.evaluate(() => document.dispatchEvent(new Event('release-terminal')));
+  await expect(page.locator('body')).toHaveAttribute('data-a-terminal-finished', 'true');
+});
