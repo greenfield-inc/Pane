@@ -246,6 +246,13 @@ test('opens Usage & Limits from Settings with the sidebar expanded and compact',
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
   await openUsageAndLimits(page);
+  const providerFilters = page.getByRole('group', { name: 'Provider', exact: true });
+  for (const label of ['All', 'Claude', 'Codex']) {
+    await expect(providerFilters.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  const limits = page.getByRole('region', { name: 'Provider limits' });
+  await expect(limits).toContainText('OpenAI');
+  await expect(limits.getByText('58% left', { exact: true })).toBeVisible();
   await expect(page.getByText('6.1M', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('gpt-5.6-sol', { exact: true })).toBeVisible();
   await expect(page.getByTestId('settings-content').getByText('Usage fixture', { exact: true }).last()).toBeVisible();

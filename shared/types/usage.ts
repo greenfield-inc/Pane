@@ -7,7 +7,13 @@
  * Pane reads read-only and indexes incrementally.
  */
 
-export type UsageProvider = 'claude' | 'codex';
+/** Agent names identify filters; vendor names identify reported usage and limits. */
+export const USAGE_PROVIDER_CATALOG = {
+  claude: { value: 'claude', label: 'Claude', vendorLabel: 'Anthropic', color: '#e0913a' },
+  codex: { value: 'codex', label: 'Codex', vendorLabel: 'OpenAI', color: '#37b877' },
+} as const;
+
+export type UsageProvider = keyof typeof USAGE_PROVIDER_CATALOG;
 
 /** One assistant message's token accounting, normalised across providers. */
 export interface UsageEvent {
