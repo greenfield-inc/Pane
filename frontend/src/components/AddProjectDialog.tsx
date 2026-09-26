@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FolderPlus, GitBranch } from 'lucide-react';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -16,13 +16,17 @@ interface AddProjectDialogProps {
 
 export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
   const [newProject, setNewProject] = useState<CreateProjectRequest>({ name: '', path: '', buildScript: '', runScript: '' });
+  const branchRequestGeneration = useRef(0);
+  const createRequestGeneration = useRef(0);
   const [detectedBranch, setDetectedBranch] = useState<string | null>(null);
   const [branchDetectionFailed, setBranchDetectionFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
 
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
 
   const detectCurrentBranch = async (path: string) => {
+    const generation = ++branchRequestGeneration.current;
     if (!path) {
       setDetectedBranch(null);
       setBranchDetectionFailed(false);
@@ -32,6 +36,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
     setBranchDetectionFailed(false);
     try {
       const response = await API.projects.detectBranch(path);
+      if (generation !== branchRequestGeneration.current) return;
       if (response.success && response.data) {
         setDetectedBranch(response.data);
         setBranchDetectionFailed(false);
@@ -40,12 +45,15 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
         setBranchDetectionFailed(true);
       }
     } catch {
+      if (generation !== branchRequestGeneration.current) return;
       setDetectedBranch(null);
       setBranchDetectionFailed(true);
     }
   };
 
   const handleCreateProject = async () => {
+    const generation = ++createRequestGeneration.current;
+    setError(null);
     if (!newProject.name || !newProject.path) {
       setShowValidationErrors(true);
       return;
@@ -57,8 +65,14 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       };
 
       const response = await API.projects.create(projectToCreate);
+      if (generation !== createRequestGeneration.current) {
+        // A completed creation still belongs in the sidebar, but must not
+        // close or navigate away from a newer dialog.
+        if (response.success && response.data) window.dispatchEvent(new Event('project-changed'));
+        return;
+      }
       if (!response.success || !response.data) {
-        console.error('Failed to create project:', response.error);
+        setError(response.error || 'Failed to create project');
         return;
       }
 
@@ -73,15 +87,19 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       // Navigate to the new project
       navigateToProject(newProjectId);
     } catch (e) {
-      console.error('Failed to create project:', e);
+      if (generation !== createRequestGeneration.current) return;
+      setError(e instanceof Error ? e.message : 'Failed to create project');
     }
   };
 
   const resetAndClose = () => {
+    branchRequestGeneration.current += 1;
+    createRequestGeneration.current += 1;
     setNewProject({ name: '', path: '', buildScript: '', runScript: '' });
     setDetectedBranch(null);
     setBranchDetectionFailed(false);
     setShowValidationErrors(false);
+    setError(null);
     onClose();
   };
 
@@ -94,6 +112,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       <ModalHeader title="Add New Repository" icon={<FolderPlus className="w-5 h-5" />} />
       <ModalBody>
         <div className="space-y-6">
+          {error && <div role="alert" className="text-sm text-status-error">{error}</div>}
           <FieldWithTooltip
             label="Project Name"
             tooltip="A display name for this project in the sidebar"
