@@ -1,3 +1,4 @@
+import { withRunpaneOnPath } from './runpaneShim';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
@@ -984,9 +985,14 @@ export class TerminalPanelManager extends EventEmitter {
       PANE_WORKSPACE_PATH: cwd,
       ...wslEnvVars,
     } satisfies Record<string, string>;
-    const spawnEnv = panelCustomState.orchestrationSessionId
+    const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
       ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId }
       : baseSpawnEnv;
+    // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
+    // cannot run the Windows Electron binary, so they keep their own PATH.
+    const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
+    shellArgs = launch.args;
+    const spawnEnv = launch.env;
 
     // Read the setting once per spawn so we don't scatter config reads.
     // `getPtyHostRuntime()` returns null when the setting is off or when

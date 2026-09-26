@@ -1,3 +1,4 @@
+import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { startupPanelBufferMigration, startupRetentionResult } from '../services/database';
@@ -199,6 +200,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
   const versionChecker = new VersionChecker(configManager, logger);
+  // Terminals launched below find this build's runpane first on PATH.
+  installRunpaneShimBestEffort(getAppDirectory());
   const skillCacheManager = new SkillCacheManager();
   await skillCacheManager.start().catch(error => {
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
