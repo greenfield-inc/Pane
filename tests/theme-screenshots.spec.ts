@@ -267,7 +267,7 @@ async function openSession(page: Page, theme: string, opts: { highContrast?: boo
   await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
   if (highContrast) await expect(page.locator('html')).toHaveClass(/\bhigh-contrast\b/);
 
-  const expandRepo = page.getByRole('button', { name: /^Expand repository pane$/ });
+  const expandRepo = page.getByRole('button', { name: /^Expand project pane$/ });
   if (await expandRepo.isVisible().catch(() => false)) await expandRepo.click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Changes', exact: true })).toBeVisible();

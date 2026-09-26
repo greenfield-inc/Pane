@@ -159,7 +159,7 @@ async function bootFixture(
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal blur fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal blur fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: primaryPanel.title });
   await expect(panel.locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });

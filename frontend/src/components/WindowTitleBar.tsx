@@ -1,209 +1,85 @@
-import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
-import { useEffect, useState, type CSSProperties } from 'react';
-
+import { useEffect, type CSSProperties } from 'react';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import type { Project } from '../types/project';
-import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
+import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
-import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
-import { Badge } from './ui/Badge';
+import { COLLAPSED_SIDEBAR_PX, isWindowControlsOverlayEnabled, titleStripContentLeft } from '../utils/titleBarOverlay';
 
-// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits the vendor property.
-const TITLE_BAR_STYLE = { height: 38, WebkitAppRegion: 'drag' } as CSSProperties;
-// Breathing room between the window controls and the title, on both sides.
-const GUTTER_PX = 8;
-// Traffic lights sit at x=10 with ~70px of width (see `trafficLightPosition` in
-// main/src/index.ts); padding both sides equally keeps the title centered on the
-// window while clearing them.
-const MAC_INSET_STYLE: CSSProperties = { paddingLeft: 88, paddingRight: 88 };
-// Windows and Linux put the controls on the right, and on the left under an RTL
-// system layout, so the inset cannot be symmetric or hardcoded. `titlebar-area-x`
-// is where the page's share of the strip starts and `titlebar-area-width` how far
-// it runs, both in CSS pixels, so the leftover on the far side is everything the
-// two do not cover. Chromium recomputes them on DPI, RTL and maximise changes,
-// which is why the numbers never appear here.
-//
-// The `100%` resolves against this element's containing block — the full-width
-// `pane-app-shell` column in App.tsx — which is the same coordinate space the
-// env() values are reported in.
-//
-// With the env() fallbacks — the shape a window that somehow lost the overlay
-// would compute — this collapses to a symmetric gutter rather than to nothing.
-// `max()` keeps a mis-reported rect from producing a negative padding, which CSS
-// would drop on the floor.
-const OVERLAY_INSET_STYLE: CSSProperties = {
-  paddingLeft: `calc(env(titlebar-area-x, 0px) + ${GUTTER_PX}px)`,
-  paddingRight: `max(${GUTTER_PX}px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER_PX}px))`,
+const TITLE_BAR_HEIGHT = 38;
+const GUTTER = 8;
+const MAC_CONTROLS_LEFT: CSSProperties = { left: 80 + GUTTER };
+const OVERLAY_CONTROLS_LEFT: CSSProperties = { left: `calc(env(titlebar-area-x, 0px) + ${GUTTER}px)` };
+const MAC_CONTROLS_RIGHT: CSSProperties = { right: GUTTER };
+const OVERLAY_CONTROLS_RIGHT: CSSProperties = {
+  right: `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER}px)`,
 };
-// An rtl line box overflows at its left edge, so the ellipsis lands on the head
-// and the end of a long pane name ("… (TM-622)") survives. The inner ltr embed
-// keeps the name itself a single left-to-right run — without it, trailing
-// punctuation is reordered to the clipped end and lost.
-const HEAD_ELLIPSIS_STYLE: CSSProperties = { direction: 'rtl' };
-const LTR_RUN_STYLE: CSSProperties = { direction: 'ltr', unicodeBidi: 'embed' };
-
-/**
- * Which of `keys` appeared just now, as opposed to being here all along.
- *
- * The distinction is the whole point of animating these at all. A pill that
- * arrives while you are watching the pane — the PR opened, the branch became
- * mergeable — is a state change, and motion is how a state change stops being a
- * thing you have to notice. A pill that is simply present because you switched
- * to a pane that already had one is not news, and animating it would put motion
- * on pane switching, which is the one thing this must not do.
- *
- * Keyed by `scope` (the pane): when that changes, everything counts as
- * pre-existing.
- */
-function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
-  const signature = keys.join('\u0000');
-  const [seen, setSeen] = useState({ scope, signature, arrived: new Set<string>() });
-
-  if (seen.scope !== scope || seen.signature !== signature) {
-    // Render-phase update: React re-renders immediately with the value below,
-    // so the commit that first paints a new pill already carries its class.
-    setSeen({
-      scope,
-      signature,
-      arrived: seen.scope === scope
-        ? new Set(keys.filter(key => !seen.signature.split('\u0000').includes(key)))
-        : new Set(),
-    });
-  }
-
-  return seen.scope === scope && seen.signature === signature ? seen.arrived : new Set();
-}
+// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits it.
+const NO_DRAG = { WebkitAppRegion: 'no-drag' } as CSSProperties;
 
 interface WindowTitleBarProps {
   projects: Project[];
-  /**
-   * Receives the element that app-level controls (the sidebar toggle and its
-   * menu) portal into. The slot sits beside the window controls and is the one
-   * `no-drag` island in the strip; everything else keeps dragging.
-   */
+  sidebarWidth: number;
+  sidebarCollapsed: boolean;
   controlsSlotRef?: (element: HTMLDivElement | null) => void;
 }
 
-// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits the vendor property.
-const CONTROLS_SLOT_STYLE = { WebkitAppRegion: 'no-drag' } as CSSProperties;
-// Traffic lights end around x=80; keep the shared gutter before app controls.
-const MAC_CONTROLS_LEFT: CSSProperties = { left: 80 + GUTTER_PX };
-const OVERLAY_CONTROLS_LEFT: CSSProperties = { left: `calc(env(titlebar-area-x, 0px) + ${GUTTER_PX}px)` };
-// The trailing slot hugs the end of the page's share of the strip: the window
-// edge on macOS, the overlay's caption buttons on Windows and Linux.
-const MAC_CONTROLS_RIGHT: CSSProperties = { right: GUTTER_PX };
-const OVERLAY_CONTROLS_RIGHT: CSSProperties = {
-  right: `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER_PX}px)`,
-};
-
-/**
- * The title bar strip above the tool tabs: a window drag region that also names
- * the pane you are looking at. Passive text only — no pointer handlers, so the
- * whole strip keeps dragging and double-click-to-zoom.
- *
- * It renders wherever the app owns the title bar: macOS via `hiddenInset`, and
- * Windows and Linux via the Window Controls Overlay. A Linux desktop that failed
- * the overlay gate in main keeps its native frame and gets no strip — there it
- * is `document.title`, which this also owns, that carries the pane name. That is
- * true on every platform for the taskbar and task switcher.
- */
-export function WindowTitleBar({ projects, controlsSlotRef }: WindowTitleBarProps) {
-  const setTrailingSlot = useTitleBarSlotStore((state) => state.setTrailingSlot);
+/** Positions window controls over the sidebar and tabs without consuming a layout row. */
+export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, controlsSlotRef }: WindowTitleBarProps) {
+  const setTrailingSlot = useTitleBarSlotStore(state => state.setTrailingSlot);
+  const setSessionTabsSlot = useTitleBarSlotStore(state => state.setSessionTabsSlot);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
-    if (state.activeMainRepoSession?.id === state.activeSessionId) {
-      return state.activeMainRepoSession;
-    }
+    if (state.activeMainRepoSession?.id === state.activeSessionId) return state.activeMainRepoSession;
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
-
-  // Project dashboard and Pane Chat are not panes; leave the bar empty there.
-  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) : null;
+  const orchestrationName = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId)?.name);
+  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects)
+    : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
 
-  // Runs before the platform gate below: naming the window is the part of this
-  // that a native-framed Windows or Linux window still uses.
   useEffect(() => {
     document.title = windowTitle;
-    return () => {
-      document.title = APP_WINDOW_TITLE;
-    };
+    return () => { document.title = APP_WINDOW_TITLE; };
   }, [windowTitle]);
 
-  const pills = title ? resolvePaneStatusPills(activeSession) : [];
-  const arrived = useArrivedKeys(activeSession?.id ?? null, pills.map(pill => pill.key));
-
-  // macOS owns the strip through `hiddenInset`; Windows and Linux own it when
-  // main enabled the overlay. Deliberately not gated on
-  // `navigator.windowControlsOverlay.visible`: that reads false in plenty of
-  // contexts the API is merely present in, and this element carries the window's
-  // only drag region once the native title bar is gone. It stays put in
-  // fullscreen for the same reason the macOS strip always has.
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
+
+  const sessionTabsLeft = titleStripContentLeft(sidebarCollapsed ? COLLAPSED_SIDEBAR_PX : sidebarWidth, isMac());
+  const sessionTabsRight = isMac()
+    ? '116px'
+    : `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 116px)`;
 
   return (
     <div
-      className="relative flex-shrink-0 flex items-center justify-center overflow-hidden bg-surface-primary select-none"
-      style={{ ...TITLE_BAR_STYLE, ...(isMac() ? MAC_INSET_STYLE : OVERLAY_INSET_STYLE) }}
+      className="pane-window-title-bar pointer-events-none absolute inset-x-0 top-0 z-30 select-none"
+      style={{ height: TITLE_BAR_HEIGHT, ...NO_DRAG }}
       data-testid="window-title-bar"
     >
       <div
         ref={controlsSlotRef}
-        className="absolute top-0 bottom-0 flex items-center gap-0.5"
-        style={{ ...CONTROLS_SLOT_STYLE, ...(isMac() ? MAC_CONTROLS_LEFT : OVERLAY_CONTROLS_LEFT) }}
+        className="pointer-events-auto absolute inset-y-0 flex items-center gap-0.5"
+        style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_LEFT : OVERLAY_CONTROLS_LEFT) }}
         data-testid="window-title-bar-controls"
       />
       <div
         ref={setTrailingSlot}
-        className="absolute top-0 bottom-0 flex items-center gap-0.5"
-        style={{ ...CONTROLS_SLOT_STYLE, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
+        className="pointer-events-auto absolute inset-y-0 flex items-center gap-0.5"
+        style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
       />
-      {title && (
-        <div className="relative flex min-w-0 items-center">
-          <div
-            className="flex min-w-0 items-center gap-1.5 text-xs"
-            data-testid="window-title-bar-label"
-            title={windowTitle}
-          >
-            <span className="truncate text-text-tertiary">{title.project}</span>
-            {title.pane && (
-              <>
-                <span className="flex-shrink-0 text-text-tertiary" aria-hidden="true">·</span>
-                <span
-                  className="truncate font-medium text-text-secondary"
-                  style={HEAD_ELLIPSIS_STYLE}
-                >
-                  <span style={LTR_RUN_STYLE}>{title.pane}</span>
-                </span>
-              </>
-            )}
-          </div>
-          {pills.length > 0 && (
-            // Anchored past the end of the title rather than laid out after it, so a
-            // pill appearing or clearing never nudges the centered name sideways.
-            <div
-              className="absolute left-full top-1/2 flex -translate-y-1/2 items-center gap-1 pl-2"
-              data-testid="window-title-bar-pills"
-            >
-              {pills.map(pill => (
-                <Badge
-                  key={pill.key}
-                  variant={pill.variant}
-                  size="sm"
-                  className={`whitespace-nowrap px-1.5 py-0 text-[10px] leading-4${
-                    arrived.has(pill.key) ? ' origin-left animate-title-pill-enter' : ''
-                  }`}
-                  title={pill.tooltip}
-                >
-                  {pill.label}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
+      {activeView === 'pane-chat' && (
+        <div
+          ref={setSessionTabsSlot}
+          // The slot itself drags; its tabs are no-drag (index.css), so nothing
+          // later in the page has to draw a drag strip under them.
+          className="pane-drag-area pointer-events-auto absolute inset-y-0 flex min-w-0 items-center overflow-hidden transition-[left] duration-reveal ease-out-strong"
+          style={{ left: sessionTabsLeft, right: sessionTabsRight }}
+          data-testid="window-title-bar-session-tabs"
+        />
       )}
     </div>
   );

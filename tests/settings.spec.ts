@@ -134,7 +134,7 @@ test.describe('Settings', () => {
     // The default terminal font ships with the app: it must load with no network.
     await page.route(url => !['localhost', '127.0.0.1'].includes(url.hostname), route => route.abort());
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page.getByRole('button', { name: /^Expand repository Terminal font fixture$/ }).click();
+    await page.getByRole('button', { name: /^Expand project Terminal font fixture$/ }).click();
     await page.getByRole('button', { name: session.name, exact: true }).click();
     await expect(page.locator('.xterm-screen')).toHaveCount(1, { timeout: 15_000 });
     await expect.poll(() => page.evaluate(() => [...document.fonts].some(

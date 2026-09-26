@@ -339,6 +339,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           id: 'remote',
           label: 'Remote',
           description: remoteFooterStatus.title,
+          descriptionInTooltip: true,
           icon: Monitor,
           showDot: true,
           dotColor: remoteFooterStatus.dotClassName,
@@ -364,15 +365,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         },
         {
           id: 'about',
-          label: version ? `About Pane · v${version}` : 'About Pane',
-          description: [worktreeName, gitCommit].filter(Boolean).join(' · ') || undefined,
+          label: 'About Pane',
+          description: [version ? `v${version}` : undefined, worktreeName, gitCommit].filter(Boolean).join(' · ') || undefined,
+          descriptionInTooltip: true,
           icon: Info,
           onClick: onAboutClick
         }
   ] satisfies DropdownItem[];
 
   // The sidebar toggle stays beside the window controls; the menu lives in
-  // the sidebar footer's Home button.
+  // the sidebar footer so tabs can use the title strip.
   const headerControls = (
     <>
       {onToggleCollapse && (
@@ -394,10 +396,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       <>
         <div
           data-testid="sidebar"
-          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-primary text-text-primary h-full flex flex-col flex-shrink-0"
+          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
           {titleBarControlsSlot && createPortal(headerControls, titleBarControlsSlot)}
+          {titleBarControlsSlot && <div className="h-[38px] flex-shrink-0" />}
 
           <div className="flex shrink-0 flex-col items-center gap-1 border-b border-border-primary py-2">
             <Tooltip content="Home" side="right">
@@ -508,14 +511,14 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </div>
             )}
 
-            <div role="group" aria-label="Repositories" className="flex w-full shrink-0 flex-col items-center gap-0.5">
-              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} repositories`} side="right">
+            <div role="group" aria-label="Projects" className="flex w-full shrink-0 flex-col items-center gap-0.5">
+              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`} side="right">
                 <button
                   type="button"
                   data-testid="compact-repositories-toggle"
                   data-compact-rail-item
                   onClick={() => handleRepositoriesSectionExpandedChange(!sidebarSectionExpansion.repositories)}
-                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} repositories`}
+                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`}
                   aria-expanded={sidebarSectionExpansion.repositories}
                   className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
                 >
@@ -682,7 +685,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     <>
       <div
         data-testid="sidebar"
-        className="pane-sidebar-shell bg-surface-primary text-text-primary h-full flex flex-col relative flex-shrink-0"
+        className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: `${width}px` }}
       >
         {/* Resize handle */}
@@ -698,10 +701,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         {titleBarControlsSlot
           ? createPortal(headerControls, titleBarControlsSlot)
           : (
-            <div className="flex h-8 items-center justify-end gap-0.5 border-b border-border-primary px-1.5">
+            <div className="flex h-8 items-center justify-end gap-0.5 px-1.5">
               {headerControls}
             </div>
           )}
+        {titleBarControlsSlot && (
+          <div className="flex h-[38px] flex-shrink-0">
+            <div className="w-[136px] flex-shrink-0" />
+            <div className="pane-drag-area min-w-0 flex-1" />
+          </div>
+        )}
 
         <button
           type="button"

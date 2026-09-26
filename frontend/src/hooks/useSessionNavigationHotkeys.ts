@@ -86,9 +86,10 @@ export function useSessionNavigationHotkeys({
     const nextIndex = cycleIndex(currentIndex, sessions.length, direction);
     if (nextIndex === -1) return;
 
+    if (sidebarNavigationScopeRef.current === 'orchestration') setSidebarNavigationScopeRef.current('repositories');
     setActiveSessionRef.current(sessions[nextIndex].id);
     navigateToSessionsRef.current();
-  }, [activeSessionIdRef, allActiveSessionsRef, navigateToSessionsRef, setActiveSessionRef]);
+  }, [activeSessionIdRef, allActiveSessionsRef, navigateToSessionsRef, setActiveSessionRef, sidebarNavigationScopeRef, setSidebarNavigationScopeRef]);
 
   const cycleVisibleOrAllSessions = useCallback((direction: 'next' | 'prev') => {
     const currentId = activeSessionIdRef.current;
@@ -105,6 +106,7 @@ export function useSessionNavigationHotkeys({
     const nextIndex = cycleIndex(currentIndex, sessions.length, direction);
     if (nextIndex === -1) return;
 
+    if (sidebarNavigationScopeRef.current === 'orchestration') setSidebarNavigationScopeRef.current('repositories');
     setActiveSessionRef.current(sessions[nextIndex].id);
     navigateToSessionsRef.current();
   }, [
@@ -114,6 +116,7 @@ export function useSessionNavigationHotkeys({
     pinnedSessionsRef,
     setActiveSessionRef,
     sidebarNavigationScopeRef,
+    setSidebarNavigationScopeRef,
     visibleSessionsRef,
   ]);
 

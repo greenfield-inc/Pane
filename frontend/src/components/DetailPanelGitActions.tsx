@@ -28,7 +28,7 @@ type ActionRow =
   | { type: 'single'; action: GitBranchAction }
   | { type: 'pair'; left: GitBranchAction; right: GitBranchAction };
 
-const sidebarButtonClass = 'w-full justify-start text-sm !px-2';
+const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0 focus-visible:!ring-2';
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -94,13 +94,13 @@ function ActionPair({
   const isRebaseMerge = left.id === 'rebase-from-main';
   const mainBranchName = (gitCommands?.comparisonBaseBranch || 'main').split('/').pop() || 'main';
   const mainBranch = mainBranchName.length > 12 ? `${mainBranchName.slice(0, 12)}…` : mainBranchName;
-  const pairButtonClass = isRebaseMerge ? 'flex-1 justify-start text-xs !px-2' : 'flex-1 justify-start text-sm !px-2';
-  const pairIconClass = isRebaseMerge ? 'w-3.5 h-3.5 mr-1 flex-shrink-0' : 'w-4 h-4 mr-2 flex-shrink-0';
+  const pairButtonClass = 'flex-1 !min-h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0 focus-visible:!ring-2';
+  const pairIconClass = 'mr-1.5 h-3.5 w-3.5 flex-shrink-0';
   const branchName = gitCommands?.currentBranch?.trim() || 'branch';
   const shortBranch = branchName.length > 6 ? `${branchName.slice(0, 6)}…` : branchName;
 
   return (
-    <div className="flex gap-0.5 [&>*]:min-w-[90px]">
+    <div className="flex gap-0.5 [&>*]:min-w-0 [&>*]:flex-1">
       <Tooltip content={actionTooltip(left, left.disabled || !!isMerging)} side="left">
         <Button variant="ghost" size="sm" className={pairButtonClass} onClick={left.onClick} disabled={left.disabled || isMerging}>
           <left.icon className={pairIconClass} />
@@ -158,8 +158,8 @@ function ActionPair({
 export function DetailPanelGitActions({ actions = [], isMerging, gitCommands, gitStatus }: DetailPanelGitActionsProps) {
   const fetchedAgo = gitStatus?.lastChecked ? formatTimeAgo(gitStatus.lastChecked) : null;
   return (
-    <div className="px-2 py-2 border-b border-border-primary">
-      <h3 className="text-xs uppercase text-text-tertiary font-medium mb-2 px-1">Actions</h3>
+    <div className="px-2 pt-3 pb-1">
+      <h3 className="mb-1 px-2 text-[10px] font-semibold uppercase leading-4 tracking-wider text-text-tertiary">Actions</h3>
       <div className="space-y-0.5">
         {buildRows(actions).map(row => row.type === 'pair' ? (
           <ActionPair
@@ -180,11 +180,11 @@ export function DetailPanelGitActions({ actions = [], isMerging, gitCommands, gi
               onClick={row.action.onClick}
               disabled={row.action.disabled || isMerging}
             >
-              <row.action.icon className="w-4 h-4 mr-2 flex-shrink-0" />
+              <row.action.icon className="mr-2 h-3.5 w-3.5 flex-shrink-0" />
               {row.action.id === 'fetch' && fetchedAgo ? (
                 <span className="flex flex-col items-start leading-tight min-w-0">
                   <span>{row.action.label}</span>
-                  <span className="text-xs text-text-tertiary">{fetchedAgo}</span>
+                  <span className="text-[10px] text-text-tertiary">{fetchedAgo}</span>
                 </span>
               ) : <span className="truncate">{row.action.label}</span>}
             </Button>

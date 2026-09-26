@@ -771,36 +771,36 @@ function HeadlessFileTree({
       onDrop={handleDrop}
     >
       <LiveRegion>{uploadStatus ?? ''}</LiveRegion>
-      <div className="flex items-center justify-between p-2 border-b border-border-primary">
-        <span className="text-sm font-medium text-text-primary">Files</span>
+      <div className="flex min-h-8 items-center justify-between px-3 py-1">
+        <span className="text-[10px] font-semibold uppercase leading-4 tracking-wider text-text-tertiary">Files</span>
         <div className="flex gap-1">
           <button
             onClick={() => setShowSearch(prev => !prev)}
             className={`p-1 rounded text-text-tertiary hover:text-text-primary ${showSearch ? 'bg-surface-tertiary' : 'hover:bg-surface-hover'}`}
             title={`Search files (${formatKeyDisplay('mod+f')})`}
           >
-            <Search className="w-4 h-4" />
+            <Search className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => { setShowNewItemDialog('file'); setNewItemName(''); setNewItemParentPath(''); }}
             className="p-1 hover:bg-surface-hover rounded text-text-tertiary hover:text-text-primary"
             title="New file"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => { setShowNewItemDialog('folder'); setNewItemName(''); setNewItemParentPath(''); }}
             className="p-1 hover:bg-surface-hover rounded text-text-tertiary hover:text-text-primary"
             title="New folder"
           >
-            <FolderPlus className="w-4 h-4" />
+            <FolderPlus className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={handleRefreshAll}
             className="p-1 hover:bg-surface-hover rounded text-text-tertiary hover:text-text-primary"
             title="Refresh all"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -878,8 +878,8 @@ function HeadlessFileTree({
           {getFilteredFiles().map(file => (
             <div
               key={file.path}
-              className={`flex w-full items-center hover:bg-surface-hover group ${
-                selectedPath === file.path ? 'bg-interactive' : ''
+              className={`group mx-2 flex w-[calc(100%-1rem)] items-center rounded-md hover:bg-surface-hover ${
+                selectedPath === file.path ? 'bg-surface-selected' : ''
               }`}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -890,19 +890,19 @@ function HeadlessFileTree({
               <button
                 type="button"
                 disabled={file.isDirectory}
-                className="flex min-w-0 flex-1 items-center px-2 py-1 text-left disabled:cursor-default"
+                className="flex min-h-7 min-w-0 flex-1 items-center px-2 py-1 text-left disabled:cursor-default"
                 onClick={() => onFileSelect(file)}
                 onDoubleClick={() => onFileOpen?.(file)}
               >
                 {file.isDirectory ? (
-                  <Folder className="w-4 h-4 mr-2 text-interactive flex-shrink-0" />
+                  <Folder className="mr-2 h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
                 ) : (
-                  <File className="w-4 h-4 mr-2 text-text-tertiary flex-shrink-0" />
+                  <File className="mr-2 h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
                 )}
-                <span className="flex-1 text-sm truncate text-text-primary">
+                <span className="flex-1 truncate text-[12px] text-text-primary">
                   {highlightText(file.name, searchQuery)}
                 </span>
-                <span className="text-xs text-text-tertiary ml-2 truncate max-w-[120px]">
+                <span className="ml-2 max-w-[120px] truncate text-[10px] text-text-tertiary">
                   {file.path}
                 </span>
               </button>
@@ -920,7 +920,7 @@ function HeadlessFileTree({
             </div>
           ))}
           {getFilteredFiles().length === 0 && (
-            <div className="p-4 text-text-secondary text-sm">No matching files</div>
+            <div className="p-4 text-[12px] text-text-secondary">No matching files</div>
           )}
         </div>
       )}
@@ -963,8 +963,8 @@ function HeadlessFileTree({
                 if (element) itemElementRefs.current.set(data.path, element);
                 else itemElementRefs.current.delete(data.path);
               }}
-              className={`flex items-center px-2 py-1 hover:bg-surface-hover cursor-pointer group ${
-                isItemSelected ? 'bg-interactive' : ''
+              className={`group mx-2 flex min-h-7 w-[calc(100%-1rem)] cursor-pointer items-center rounded-md px-2 py-1 hover:bg-surface-hover ${
+                isItemSelected ? 'bg-surface-selected' : ''
               } ${
                 isOpenFile && !isItemSelected ? 'bg-surface-hover/60' : ''
               } ${
@@ -1033,16 +1033,16 @@ function HeadlessFileTree({
               {isFolder ? (
                 <>
                   {isExpanded ? (
-                    <ChevronDown className="w-4 h-4 mr-1 text-text-tertiary" />
+                    <ChevronDown className="mr-1 h-3.5 w-3.5 text-text-tertiary" />
                   ) : (
-                    <ChevronRight className="w-4 h-4 mr-1 text-text-tertiary" />
+                    <ChevronRight className="mr-1 h-3.5 w-3.5 text-text-tertiary" />
                   )}
-                  <Folder className="w-4 h-4 mr-2 text-interactive" />
+                  <Folder className="mr-2 h-3.5 w-3.5 text-text-tertiary" />
                 </>
               ) : (
                 <>
-                  <div className="w-4 h-4 mr-1" />
-                  <File className="w-4 h-4 mr-2 text-text-tertiary" />
+                  <div className="mr-1 h-3.5 w-3.5" />
+                  <File className="mr-2 h-3.5 w-3.5 text-text-tertiary" />
                 </>
               )}
               {renamingPath === data.path ? (
@@ -1068,10 +1068,10 @@ function HeadlessFileTree({
                     }
                     commitRename(data, renamingValue);
                   }}
-                  className="flex-1 min-w-0 px-1 py-0.5 bg-surface-primary border border-interactive rounded text-sm text-text-primary focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-border-primary bg-surface-primary px-1 py-0.5 text-[12px] text-text-primary focus:outline-none"
                 />
               ) : (
-                <span className="flex-1 text-sm truncate text-text-primary">{data.name}</span>
+                <span className="flex-1 truncate text-[12px] text-text-primary">{data.name}</span>
               )}
               {isFolder && (
                 <button
@@ -1119,6 +1119,7 @@ function HeadlessFileTree({
         x={contextMenu?.x ?? 0}
         y={contextMenu?.y ?? 0}
         onClose={() => setContextMenu(null)}
+        className="w-60"
       >
         <PopoverButton onClick={() => openCreateDialog('file', contextMenu?.file ?? null)}>
           <span className="flex items-center gap-2">

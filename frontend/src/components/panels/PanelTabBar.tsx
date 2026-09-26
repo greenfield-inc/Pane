@@ -18,9 +18,16 @@ import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
 import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
+import { PaneStatusPills } from '../PaneStatusPills';
+import { useNavigationStore } from '../../stores/navigationStore';
+import { COLLAPSED_SIDEBAR_PX, titleStripContentLeft } from '../../utils/titleBarOverlay';
+import { isMac } from '../../utils/platformUtils';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
+// Trailing title controls: 116px of app controls past the end of the page's
+// share of the strip (the window edge on macOS, the caption buttons elsewhere).
+const TITLE_CONTROLS_RESERVE = 'calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 116px)';
 const ADD_TOOL_MENU_VIEWPORT_MARGIN = 8;
 const MAX_CUSTOM_COMMAND_LABEL_LENGTH = 18;
 
@@ -136,6 +143,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   // A group strip's "+" opens this same menu, anchored to that button instead.
   const externalAnchorRef = useRef<DOMRect | null>(null);
   const trailingSlot = useTitleBarSlotStore((state) => state.trailingSlot);
+  // PR and merge pills show in the title strip only while the sidebar is collapsed.
+  const sidebarCollapsed = useNavigationStore((state) => state.sidebarCollapsed);
   // Rename state moved to PanelTabStrip
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null);
@@ -515,10 +524,17 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   return (
     <>
-    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", barCollapsed && "hidden")}>
+    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls")}>
       {/* Flex container */}
       <div
-        className="relative flex items-center min-h-[var(--panel-tab-height)] pr-2"
+        className={cn("relative flex min-h-[38px] items-center", !trailingSlot && "pr-2")}
+        // Leave room for the title bar controls on both sides: beside the collapsed
+        // rail on the left, and the overlay's controls (plus Windows/Linux caption
+        // buttons) on the right.
+        style={trailingSlot ? {
+          paddingLeft: sidebarCollapsed ? titleStripContentLeft(COLLAPSED_SIDEBAR_PX, isMac()) - COLLAPSED_SIDEBAR_PX : undefined,
+          paddingRight: TITLE_CONTROLS_RESERVE,
+        } : undefined}
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
@@ -543,7 +559,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             here (working tabs live in the group strips); shortcut hints are
             disabled then because the strip shows a subset and the 1-9 indexes
             would lie. */}
-        <PanelTabStrip
+        {!barCollapsed && <PanelTabStrip
           idNamespace="top"
           panels={primaryGroupPanels ?? sortedPanels}
           activePanelId={primaryGroupActivePanelId !== undefined ? primaryGroupActivePanelId : (activePanel?.id ?? null)}
@@ -558,7 +574,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           isTabDragging={isTabDragging}
           draggedPanelId={draggedPanelId}
           getPanelTabPresentation={getPanelTabPresentation}
-        />
+        />}
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>
@@ -801,6 +817,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             );
           })()}
         </div>
+
+        {trailingSlot && <div aria-hidden="true" className="pane-drag-area min-w-0 flex-1 self-stretch" />}
+
+        {sidebarCollapsed && trailingSlot && session && <PaneStatusPills sessionId={session.id} />}
 
         {/* Run / inspector controls live on the title plane when the
             window owns its title bar; otherwise they stay at the bar's end. */}
