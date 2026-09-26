@@ -277,7 +277,7 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
   }
 }
 
-function matchCommand(args: string[]): { name: string; tokens: string[] } | undefined {
+export function matchCommand(args: string[]): { name: RunpaneCommand; tokens: string[] } | undefined {
   return COMMAND_MATCHERS.find((command) =>
     command.tokens.every((token, index) => args[index] === token)
   );
@@ -602,39 +602,12 @@ export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
   return [parsed.settleMs, parsed.blockedSettleMs, parsed.minIntervalMs].some(value => value !== undefined);
 }
 
+const LOCAL_COMMANDS = new Set<string>(RUNPANE_CONTRACT.commands
+  .filter(command => command.localControl)
+  .map(command => command.name));
+
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
-  return command === 'doctor'
-    || command === 'daemon repair'
-    || command === 'repos list'
-    || command === 'repos add'
-    || command === 'panes list'
-    || command === 'panes cost'
-    || command === 'panes create'
-    || command === 'panes adopt'
-    || command === 'panes archive'
-    || command === 'panes pin'
-    || command === 'panes unpin'
-    || command === 'panes rename'
-    || command === 'panes focus'
-    || command === 'sessions list'
-    || command === 'sessions create'
-    || command === 'sessions get'
-    || command === 'sessions update'
-    || command === 'sessions set-agent'
-    || command === 'sessions associate'
-    || command === 'sessions detach'
-    || command === 'sessions overview'
-    || command === 'panels create'
-    || command === 'panels list'
-    || command === 'panels output'
-    || command === 'panels input'
-    || command === 'panels screen'
-    || command === 'panels submit'
-    || command === 'panels submit-composer'
-    || command === 'panels wait'
-    || command === 'workspace state'
-    || command === 'watch'
-    || command === 'agents doctor';
+  return LOCAL_COMMANDS.has(command);
 }
 
 function appendRemoteArg(parsed: ParsedArgs, flag: string, value?: string): void {

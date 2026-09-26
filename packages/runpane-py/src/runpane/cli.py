@@ -5,9 +5,10 @@ import json
 import os
 import socket
 import sys
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Callable, Dict, List, Optional, TypeVar
 
 from .agent_context import run_agent_context
+from .command_matching import is_runpane_local_command, match_command
 from .doctor import run_doctor
 from .download import download_artifact
 from .generated_contract import RUNPANE_CONTRACT
@@ -64,11 +65,6 @@ from .version import print_version
 
 SOURCE = "pip"
 
-COMMAND_MATCHERS = sorted(
-    ((command["name"], command["name"].split(" ")) for command in RUNPANE_CONTRACT["commands"]),
-    key=lambda item: len(item[1]),
-    reverse=True,
-)
 TARGETS = set(RUNPANE_CONTRACT["enums"]["installTargets"])
 FORMATS = set(RUNPANE_CONTRACT["enums"]["artifactFormats"])
 CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
@@ -202,81 +198,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTelemetryContext) -> int:
-    if parsed.command == "help":
-        print(help_text(parsed.help_topic))
-        return 0
-    if parsed.command == "setup":
-        return run_no_args_entrypoint(telemetry_context)
-    if parsed.command == "version":
-        return print_version(parsed.pane_path)
-    if parsed.command == "doctor":
-        return run_doctor(parsed, SOURCE)
-    if parsed.command == "daemon repair":
-        return run_daemon_repair(parsed)
-    if parsed.command == "agent-context":
-        return run_agent_context(parsed)
-    if parsed.command == "repos list":
-        return run_repos_list(parsed)
-    if parsed.command == "repos add":
-        return run_repos_add(parsed)
-    if parsed.command == "sessions list":
-        return run_sessions_list(parsed)
-    if parsed.command == "sessions create":
-        return run_sessions_create(parsed)
-    if parsed.command == "sessions get":
-        return run_sessions_get(parsed)
-    if parsed.command == "sessions update":
-        return run_sessions_update(parsed)
-    if parsed.command == "sessions set-agent":
-        return run_sessions_set_agent(parsed)
-    if parsed.command == "sessions associate":
-        return run_sessions_associate(parsed)
-    if parsed.command == "sessions detach":
-        return run_sessions_detach(parsed)
-    if parsed.command == "sessions overview":
-        return run_sessions_overview(parsed)
-    if parsed.command == "panes list":
-        return run_panes_list(parsed)
-    if parsed.command == "panes cost":
-        return run_panes_cost(parsed)
-    if parsed.command == "workspace state":
-        return run_workspace_state(parsed)
-    if parsed.command == "watch":
-        return run_watch(parsed)
-    if parsed.command == "panes create":
-        return run_panes_create(parsed)
-    if parsed.command == "panes archive":
-        return run_panes_archive(parsed)
-    if parsed.command == "panes pin":
-        return run_panes_pin(parsed, True)
-    if parsed.command == "panes unpin":
-        return run_panes_pin(parsed, False)
-    if parsed.command == "panes rename":
-        return run_panes_rename(parsed)
-    if parsed.command == "panes focus":
-        return run_panes_focus(parsed)
-    if parsed.command == "panels list":
-        return run_panels_list(parsed)
-    if parsed.command == "panels create":
-        return run_panels_create(parsed)
-    if parsed.command == "panels output":
-        return run_panels_output(parsed)
-    if parsed.command == "panels input":
-        return run_panels_input(parsed)
-    if parsed.command == "panels screen":
-        return run_panels_screen(parsed)
-    if parsed.command == "panels submit":
-        return run_panels_submit(parsed)
-    if parsed.command == "panels submit-composer":
-        return run_panels_submit_composer(parsed)
-    if parsed.command == "panels wait":
-        return run_panels_wait(parsed)
-    if parsed.command == "agents doctor":
-        return run_agents_doctor(parsed)
-    if parsed.command in {"install", "update"}:
-        return install_or_update(parsed, telemetry_context)
-    print(help_text(None))
-    return 0
+    handler = COMMAND_HANDLERS.get(parsed.command)
+    if handler is None:
+        raise ValueError(f"Unsupported command: {parsed.command}")
+    return handler(parsed, telemetry_context)
 
 
 def run_tracked_command(telemetry_context: WrapperTelemetryContext, execute: Callable[[], int]) -> int:
@@ -542,13 +467,6 @@ def parse_flags(args: List[str], parsed: ParsedArgs) -> None:
         index += 1
 
 
-def match_command(args: List[str]) -> Optional[Tuple[str, List[str]]]:
-    for command, tokens in COMMAND_MATCHERS:
-        if args[:len(tokens)] == tokens:
-            return command, tokens
-    return None
-
-
 def match_command_group_help(args: List[str]) -> Optional[str]:
     if len(args) != 2 or args[1] not in {"-h", "--help"}:
         return None
@@ -787,42 +705,6 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
-def is_runpane_local_command(command: str) -> bool:
-    return command in {
-        "doctor",
-        "daemon repair",
-        "repos list",
-        "repos add",
-        "sessions list",
-        "sessions create",
-        "sessions get",
-        "sessions update",
-        "sessions set-agent",
-        "sessions associate",
-        "sessions detach",
-        "sessions overview",
-        "workspace state",
-        "watch",
-        "panes list",
-        "panes cost",
-        "panes create",
-        "panes archive",
-        "panes pin",
-        "panes unpin",
-        "panes rename",
-        "panes focus",
-        "panels create",
-        "panels list",
-        "panels output",
-        "panels input",
-        "panels screen",
-        "panels submit",
-        "panels submit-composer",
-        "panels wait",
-        "agents doctor",
-    }
-
-
 def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None) -> None:
     if parsed.command == "install" and parsed.target == "daemon":
         parsed.remote_setup_args.append(flag)
@@ -1023,3 +905,56 @@ def create_install_telemetry_context(parsed: ParsedArgs, target: str) -> Wrapper
 def help_text(topic: Optional[str]) -> str:
     help_topics = RUNPANE_CONTRACT["help"]["pip"]
     return "\n".join(help_topics.get(topic or "default", help_topics["default"]))
+
+
+def run_unsupported_adopt(parsed: ParsedArgs, context: WrapperTelemetryContext) -> int:
+    raise ValueError("panes adopt is not supported by the Python wrapper. Use the npm runpane wrapper for this command.")
+
+
+COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]] = {
+    "help": lambda parsed, context: print(help_text(parsed.help_topic)) or 0,
+    "setup": lambda parsed, context: run_no_args_entrypoint(context),
+    "version": lambda parsed, context: print_version(parsed.pane_path),
+    "doctor": lambda parsed, context: run_doctor(parsed, SOURCE),
+    "daemon repair": lambda parsed, context: run_daemon_repair(parsed),
+    "agent-context": lambda parsed, context: run_agent_context(parsed),
+    "repos list": lambda parsed, context: run_repos_list(parsed),
+    "repos add": lambda parsed, context: run_repos_add(parsed),
+    "sessions list": lambda parsed, context: run_sessions_list(parsed),
+    "sessions create": lambda parsed, context: run_sessions_create(parsed),
+    "sessions get": lambda parsed, context: run_sessions_get(parsed),
+    "sessions update": lambda parsed, context: run_sessions_update(parsed),
+    "sessions set-agent": lambda parsed, context: run_sessions_set_agent(parsed),
+    "sessions associate": lambda parsed, context: run_sessions_associate(parsed),
+    "sessions detach": lambda parsed, context: run_sessions_detach(parsed),
+    "sessions overview": lambda parsed, context: run_sessions_overview(parsed),
+    "panes list": lambda parsed, context: run_panes_list(parsed),
+    "panes cost": lambda parsed, context: run_panes_cost(parsed),
+    "workspace state": lambda parsed, context: run_workspace_state(parsed),
+    "watch": lambda parsed, context: run_watch(parsed),
+    "panes create": lambda parsed, context: run_panes_create(parsed),
+    "panes archive": lambda parsed, context: run_panes_archive(parsed),
+    "panes pin": lambda parsed, context: run_panes_pin(parsed, True),
+    "panes unpin": lambda parsed, context: run_panes_pin(parsed, False),
+    "panes rename": lambda parsed, context: run_panes_rename(parsed),
+    "panes focus": lambda parsed, context: run_panes_focus(parsed),
+    "panels list": lambda parsed, context: run_panels_list(parsed),
+    "panels create": lambda parsed, context: run_panels_create(parsed),
+    "panels output": lambda parsed, context: run_panels_output(parsed),
+    "panels input": lambda parsed, context: run_panels_input(parsed),
+    "panels screen": lambda parsed, context: run_panels_screen(parsed),
+    "panels submit": lambda parsed, context: run_panels_submit(parsed),
+    "panels submit-composer": lambda parsed, context: run_panels_submit_composer(parsed),
+    "panels wait": lambda parsed, context: run_panels_wait(parsed),
+    "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
+    "panes adopt": run_unsupported_adopt,
+    "install": install_or_update,
+    "update": install_or_update,
+}
+_contract_commands = {command["name"] for command in RUNPANE_CONTRACT["commands"]}
+_missing_handlers = _contract_commands - COMMAND_HANDLERS.keys()
+_unexpected_handlers = COMMAND_HANDLERS.keys() - _contract_commands
+if _missing_handlers:
+    raise RuntimeError(f"Missing command handlers: {', '.join(sorted(_missing_handlers))}")
+if _unexpected_handlers:
+    raise RuntimeError(f"Unexpected command handlers: {', '.join(sorted(_unexpected_handlers))}")
