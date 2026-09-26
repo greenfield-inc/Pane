@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { setupRemoteHost } from './setupRemoteHost';
-import type { RemoteSetupCommandRunner } from './remoteSetupCommand';
+import type { RemoteSetupCommandRunner } from './remote-setup-command';
 import type { TailscaleSetupDependencies } from './tailscaleSetup';
 
 const forbidSync: TailscaleSetupDependencies = {

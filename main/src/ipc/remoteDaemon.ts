@@ -1,4 +1,4 @@
-import { runRemoteSetupCommand } from '../daemon/remoteSetupCommand';
+import { runRemoteSetupCommand } from '../daemon/remote-setup-command';
 import {
   decodePaneRemoteConnection,
   encodePaneRemoteConnection,

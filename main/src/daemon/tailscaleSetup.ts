@@ -1,4 +1,4 @@
-import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remoteSetupCommand';
+import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_process';
 import { existsSync, readSync } from 'fs';
 import os from 'os';

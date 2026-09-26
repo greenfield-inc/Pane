@@ -22,6 +22,7 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
 
   private healthRefresh: Promise<RemoteDaemonHostRuntimeState> | null = null;
   private generation = 0;
+  private healthInitialized = false;
 
   getState(): RemoteDaemonHostRuntimeState {
     return { ...this.state };
@@ -29,6 +30,7 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
 
   refreshExecutableHealth(): Promise<RemoteDaemonHostRuntimeState> {
     if (this.healthRefresh) return this.healthRefresh;
+    this.healthInitialized = true;
     const generation = this.generation;
     this.healthRefresh = this.collectHealth(getAppDirectory()).then(executableHealth => {
       if (generation === this.generation) {
@@ -95,13 +97,14 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
 
   resetForTests(): void {
     this.generation += 1;
+    this.healthInitialized = false;
     this.healthRefresh = null;
     this.state = createDefaultRemoteDaemonHostRuntimeState();
   }
 
   private setState(state: RemoteDaemonHostRuntimeState): void {
     this.state = { ...state };
-    if (!state.executableHealth) {
+    if (!this.healthInitialized) {
       void this.refreshExecutableHealth().catch(error => console.error('Failed to inspect remote executable health:', error));
     }
     this.emit('state-changed', this.getState());

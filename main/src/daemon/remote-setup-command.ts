@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 
-export interface RemoteSetupCommandResult {
+interface RemoteSetupCommandResult {
   ok: boolean;
   stdout: string;
   stderr: string;

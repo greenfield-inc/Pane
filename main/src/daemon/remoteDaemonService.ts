@@ -1,4 +1,4 @@
-import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remoteSetupCommand';
+import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
 import { spawnSync } from 'child_process';
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'fs';
 import fs from 'fs/promises';

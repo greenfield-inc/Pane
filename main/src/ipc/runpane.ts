@@ -107,7 +107,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getAppDirectory } from '../utils/appDirectory';
-import { collectRemoteDaemonExecutableHealth } from '../daemon/remoteDaemonExecutableHealth';
+import { collectRemoteDaemonExecutableHealthAsync } from '../daemon/remoteDaemonExecutableHealth';
 import {
   WorkspaceJournal,
   matchesFilter,
@@ -261,7 +261,7 @@ export function registerRunpaneHandlers(
   services.workspaceCursorStore = workspaceCursorStore;
 
   commandRegistry.register('runpane:doctor', async (): Promise<RunpaneDoctorResult> => {
-    return withRunpaneAction(services, 'doctor', {}, () => {
+    return withRunpaneAction(services, 'doctor', {}, async () => {
       const repos = databaseService.getAllProjects().map((project) =>
         projectToRepoSummary(project, sessionManager.getSessionsForProject(project.id).length)
       );
@@ -276,7 +276,7 @@ export function registerRunpaneHandlers(
         },
         daemon: {
           channels: [...runpaneDaemonChannels()],
-          executableHealth: collectRemoteDaemonExecutableHealth(getAppDirectory()),
+          executableHealth: await collectRemoteDaemonExecutableHealthAsync(getAppDirectory()),
         },
         repos: {
           count: repos.length,

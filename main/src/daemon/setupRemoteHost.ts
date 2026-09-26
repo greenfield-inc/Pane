@@ -1,4 +1,4 @@
-import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remoteSetupCommand';
+import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
 import fs from 'fs/promises';
 import net from 'net';
 import os from 'os';
