@@ -12,7 +12,7 @@ export interface DaemonHostServices extends CoreServices {
   getMainWindow: () => BrowserWindow | null;
   analyticsManager?: AnalyticsManager;
   spotlightManager: SpotlightManager;
-  workspaceJournal?: WorkspaceJournal;
+  workspaceJournal: WorkspaceJournal;
   workspaceStateReader?: WorkspaceStateReader;
   workspaceCursorStore?: WorkspaceCursorStore;
 }

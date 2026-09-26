@@ -72,33 +72,29 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry: PaneCommandRegistry,
 ): void {
   const manager = services.orchestrationSessionManager;
-  const requireManager = () => {
-    if (!manager) throw new Error('Sessions manager is not initialized');
-    return manager;
-  };
 
   commandRegistry.register('orchestration-sessions:list', async () => {
-    return invokeSafely(() => requireManager().list());
+    return invokeSafely(() => manager.list());
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:list');
 
   commandRegistry.register('orchestration-sessions:select', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().select(decodeSelector(value)));
+    return invokeSafely(() => manager.select(decodeSelector(value)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:select');
 
   commandRegistry.register('orchestration-sessions:create', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().create(decodeBoundary(value, createSchema)));
+    return invokeSafely(() => manager.create(decodeBoundary(value, createSchema)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:create');
 
   commandRegistry.register('orchestration-sessions:get', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().getView(decodeSelector(value)));
+    return invokeSafely(() => manager.getView(decodeSelector(value)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:get');
 
   commandRegistry.register('orchestration-sessions:update', async (value: PaneCommandValue, update?: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().update(
+    return invokeSafely(() => manager.update(
       decodeSelector(value),
       decodeBoundary(update, updateSchema),
     ));
@@ -109,7 +105,7 @@ export function registerOrchestrationSessionHandlers(
     const decoded = agent === undefined
       ? decodeBoundary(value, agentSchema)
       : { ...decodeSelector(value), agent: decodeBoundary(agent, boundary.enumeration('claude', 'codex', 'cursor')) };
-    return invokeSafely(() => requireManager().setAgent(
+    return invokeSafely(() => manager.setAgent(
       { sessionId: decoded.sessionId, name: decoded.name },
       decoded.agent,
     ));
@@ -123,7 +119,7 @@ export function registerOrchestrationSessionHandlers(
         paneId: boundary.nonEmptyString,
         panelIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
       })) };
-    return invokeSafely(() => requireManager().associate(
+    return invokeSafely(() => manager.associate(
       { sessionId: decoded.sessionId, name: decoded.name },
       { paneId: decoded.paneId, panelIds: decoded.panelIds } satisfies OrchestrationAssociationInput,
     ));
@@ -134,7 +130,7 @@ export function registerOrchestrationSessionHandlers(
     const decoded = paneId === undefined
       ? decodeBoundary(value, detachSchema)
       : { ...decodeSelector(value), paneId: decodeBoundary(paneId, boundary.optional(boundary.nonEmptyString)) };
-    return invokeSafely(() => requireManager().detach(
+    return invokeSafely(() => manager.detach(
       { sessionId: decoded.sessionId, name: decoded.name },
       decoded.paneId,
     ));
@@ -142,7 +138,7 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:detach');
 
   commandRegistry.register('orchestration-sessions:overview', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().overview(decodeSelector(value)));
+    return invokeSafely(() => manager.overview(decodeSelector(value)));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:overview');
 }

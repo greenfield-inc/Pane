@@ -463,9 +463,7 @@ export function registerSessionHandlers(
                 }
                 if (archiveScript) {
                   try {
-                    if (archiveProgressManager) {
-                      archiveProgressManager.updateTaskStatus(sessionId, 'running-archive-script');
-                    }
+                    archiveProgressManager.updateTaskStatus(sessionId, 'running-archive-script');
                     const commands = archiveScript.split('\n').filter((cmd: string) => cmd.trim());
                     const archiveResult = await sessionManager.runArchiveScript(
                       sessionId, commands, dbSession.worktree_path, ctx.commandRunner
@@ -482,9 +480,7 @@ export function registerSessionHandlers(
                 }
 
                 // Update progress: removing worktree
-                if (archiveProgressManager) {
-                  archiveProgressManager.updateTaskStatus(sessionId, 'removing-worktree');
-                }
+                archiveProgressManager.updateTaskStatus(sessionId, 'removing-worktree');
 
                 // Pass session creation date for analytics tracking
                 const sessionCreatedAt = dbSession.created_at ? new Date(dbSession.created_at) : undefined;
@@ -503,9 +499,7 @@ export function registerSessionHandlers(
                 cleanupMessage += `\x1b[33m⚠ Failed to remove worktree (manual cleanup may be needed)\x1b[0m\r\n`;
 
                 // Update progress: failed
-                if (archiveProgressManager) {
-                  archiveProgressManager.updateTaskStatus(sessionId, 'failed', 'Failed to remove worktree');
-                }
+                archiveProgressManager.updateTaskStatus(sessionId, 'failed', 'Failed to remove worktree');
               }
             } else {
               console.warn(`[WorktreeAudit] remove_skipped source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} worktreeName=${JSON.stringify(dbSession.worktree_name)} reason="missing_project_context"`);
@@ -522,9 +516,7 @@ export function registerSessionHandlers(
         if (existsSync(artifactsDir)) {
           try {
             // Update progress: cleaning artifacts
-            if (archiveProgressManager) {
-              archiveProgressManager.updateTaskStatus(sessionId, 'cleaning-artifacts');
-            }
+            archiveProgressManager.updateTaskStatus(sessionId, 'cleaning-artifacts');
             
             await fs.rm(artifactsDir, { recursive: true, force: true });
             
@@ -578,7 +570,7 @@ export function registerSessionHandlers(
       // Queue the cleanup task if we have worktree cleanup to do
       if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external') {
         const project = databaseService.getProject(dbSession.project_id);
-        if (project && archiveProgressManager) {
+        if (project) {
           console.log(`[ArchiveCleanup] archive_queued sessionId=${sessionId} sessionName=${JSON.stringify(dbSession.name)} worktreeName=${JSON.stringify(dbSession.worktree_name)} projectName=${JSON.stringify(project.name)}`);
           console.log(`[WorktreeAudit] remove_queued source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(dbSession.worktree_name)} worktreePath=${JSON.stringify(dbSession.worktree_path || '')}`);
           archiveProgressManager.addTask(
@@ -589,7 +581,7 @@ export function registerSessionHandlers(
             cleanupCallback
           );
         } else {
-          console.warn(`[ArchiveCleanup] archive_queue_skipped sessionId=${sessionId} reason=${archiveProgressManager ? '"missing_project"' : '"missing_archive_progress_manager"'}`);
+          console.warn(`[ArchiveCleanup] archive_queue_skipped sessionId=${sessionId} reason="missing_project"`);
           setImmediate(() => cleanupCallback());
         }
       } else {
@@ -1659,10 +1651,6 @@ export function registerSessionHandlers(
   // Archive progress handler
   ipcMain.handle('archive:get-progress', async () => {
     try {
-      if (!archiveProgressManager) {
-        return { success: true, data: { tasks: [], activeCount: 0, totalCount: 0 } };
-      }
-      
       const tasks = archiveProgressManager.getActiveTasks();
       const activeCount = tasks.filter((t: SerializedArchiveTask) => 
         t.status !== 'completed' && t.status !== 'failed'
