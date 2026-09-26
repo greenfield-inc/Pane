@@ -7,7 +7,7 @@ export function registerLeaderboardHandlers(
 ): void {
   ipcMain.handle('leaderboard:get-status', async () => {
     try {
-      return { success: true, data: leaderboardService.getStatus() };
+      return { success: true, data: await leaderboardService.getStatus() };
     } catch (error) {
       return {
         success: false,
