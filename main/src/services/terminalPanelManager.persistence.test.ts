@@ -165,6 +165,64 @@ describe('terminal panel persistence', () => {
     return { manager, handle: ptyHost.latest() };
   }
 
+  it.each([
+    { agentType: 'claude', initialCommand: 'claude --dangerously-skip-permissions', agentSessionId: '22222222-2222-4222-8222-222222222222', expected: 'claude --resume "22222222-2222-4222-8222-222222222222" --dangerously-skip-permissions' },
+    { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', expected: 'codex resume --yolo "thread-1"' },
+    { agentType: 'cursor', initialCommand: 'cursor-agent --force --trust', agentSessionId: 'chat-1', expected: 'cursor-agent --force --trust --resume "chat-1"' },
+  ] as const)('launches and stages an adopted $agentType conversation through the same resolver', async ({ expected, ...identity }) => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel(`adopt-${identity.agentType}`);
+      panel.state.customState = { ...identity, hasClaudeSessionId: identity.agentType === 'claude' };
+      const { manager, handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handle.written).toContain(`${expected}\r`);
+      handle.written.length = 0;
+      await manager.stageInitialCommand(panel.id, identity.initialCommand);
+      expect(handle.written).toEqual([expected]);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel('explicit-adopt-claude');
+      panel.state.customState = {
+        agentType: 'claude', agentSessionId: 'session$1', hasClaudeSessionId: true,
+        initialCommand: 'claude --dangerously-skip-permissions',
+      };
+      const { handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handle.written).toContain('claude --resume "session\\$1" --dangerously-skip-permissions\r');
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not append a second resume argument to an existing adopted Cursor command', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel('legacy-adopt-cursor');
+      panel.state.customState = {
+        agentType: 'cursor', agentSessionId: 'chat-1', wasInterrupted: true,
+        initialCommand: 'cursor-agent --force --trust --resume "chat-1"',
+      };
+      const { handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handle.written).toContain('cursor-agent --force --trust --resume "chat-1"\r');
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('streams 50 MB of newline-free alternate-screen frames without growing the persisted state', async () => {
     const panel = makePanel('panel-frames');
     const { manager, handle } = await startTerminal(panel);
