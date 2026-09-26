@@ -2055,6 +2055,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   return (
     <div
       ref={terminalScrollSurfaceRef}
+      data-terminal-panel-id={panel.id}
       className="h-full w-full relative group/terminal"
       onMouseMove={onMouseMove}
       onKeyDown={handleTerminalKeyDown}
