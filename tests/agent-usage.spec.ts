@@ -189,7 +189,7 @@ test('Settings shows the Usage tab when Codex limits exist in transcripts', asyn
 
   await usageTab.click();
   await expect(page.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
-  const widget = page.getByRole('region', { name: 'Codex usage' });
+  const widget = page.getByRole('region', { name: 'Provider limits' });
   await expect(widget).toBeVisible();
   await expect(widget.getByText('· pro_lite', { exact: true })).toBeVisible();
   await expect(widget.getByText('58% left', { exact: true })).toBeVisible();
@@ -215,7 +215,7 @@ test('Settings hides the Usage tab when no Codex limits exist', async ({ page })
   await expect(navigation.getByRole('button', { name: 'AI & Agents', exact: true })).toBeVisible();
   await expect(navigation.getByRole('button')).toHaveCount(SETTINGS_CATEGORY_COUNT_WITHOUT_USAGE);
   await expect(navigation.getByRole('button', { name: 'Usage', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Codex usage' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Provider limits' })).toHaveCount(0);
 
   await page.setViewportSize({ width: 640, height: 760 });
   await expect(navigation).toBeHidden();
@@ -238,7 +238,7 @@ test('Settings Usage tab shows limits from transcript-parsed data', async ({ pag
   await page.getByRole('navigation', { name: 'Settings categories' })
     .getByRole('button', { name: 'Usage', exact: true }).click();
 
-  const widget = page.getByRole('region', { name: 'Codex usage' });
+  const widget = page.getByRole('region', { name: 'Provider limits' });
   await expect(widget.getByText('58% left', { exact: true })).toBeVisible();
   await expect(widget.getByRole('button', { name: 'Refresh usage', exact: true })).toBeVisible();
 });
@@ -250,7 +250,7 @@ test('Settings manual refresh waits for transcript indexing before reloading quo
   });
   await page.getByRole('navigation', { name: 'Settings categories' })
     .getByRole('button', { name: 'Usage', exact: true }).click();
-  const widget = page.getByRole('region', { name: 'Codex usage' });
+  const widget = page.getByRole('region', { name: 'Provider limits' });
   await expect(widget.getByText('58% left', { exact: true })).toBeVisible();
   await page.evaluate(() => {
     const usage = window.electronAPI.usage;

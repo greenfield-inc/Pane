@@ -1,10 +1,5 @@
 import { RefreshCw } from 'lucide-react';
-import type { UsageProvider, UsageRateLimitSample } from '../../../../shared/types/usage';
-
-const PROVIDER_META = {
-  claude: { label: 'Anthropic' },
-  codex: { label: 'OpenAI' },
-} satisfies Record<UsageProvider, { label: string }>;
+import { USAGE_PROVIDER_CATALOG, type UsageRateLimitSample } from '../../../../shared/types/usage';
 
 function formatWindow(minutes: number): string {
   if (minutes % (60 * 24) === 0) return `${minutes / (60 * 24)}d window`;
@@ -37,7 +32,7 @@ function limitBarColor(usedPercent: number): string {
   return 'var(--color-status-success, #37b877)';
 }
 
-export function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] }) {
+function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] }) {
   const blocked = limits.find(l => l.rateLimitReachedType !== null);
   const spendControl = limits.find(l => l.spendControlReached === true);
 
@@ -62,7 +57,7 @@ export function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] 
   );
 }
 
-export function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
+function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
   const withCredits = limits.find(l => l.creditsHas !== null);
   if (!withCredits) return null;
 
@@ -81,13 +76,13 @@ export function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
   return null;
 }
 
-export function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
+function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
   const remaining = Math.max(0, Math.round(100 - limit.usedPercent));
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2 text-[11px]">
         <span className="truncate text-text-secondary">
-          {PROVIDER_META[limit.provider].label}
+          {USAGE_PROVIDER_CATALOG[limit.provider].vendorLabel}
           {limit.planType && (
             <span className="ml-1 text-text-muted">· {limit.planType}</span>
           )}
@@ -134,13 +129,15 @@ export function ProviderLimitsPanel({
   limits,
   refreshing,
   onRefresh,
+  className = '',
 }: {
   limits: UsageRateLimitSample[];
   refreshing?: boolean;
   onRefresh?: () => void;
+  className?: string;
 }) {
   return (
-    <section aria-label="Codex usage" className="space-y-2">
+    <section aria-label="Provider limits" className={`space-y-2 ${className}`}>
       <div className="flex items-center justify-between">
         <h2 className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
           Provider limits
