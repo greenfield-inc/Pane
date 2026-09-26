@@ -1,3 +1,4 @@
+import { sortTabBarPanels } from '../../utils/sort-tab-bar-panels';
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Terminal, GitBranch, FileCode, FileDiff, FileText, BarChart3, PanelRight, FolderTree, TerminalSquare, Play, Globe } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -433,20 +434,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     if (!isTabDragging) setDragOverBar(false);
   }, [isTabDragging]);
 
-  // Sort panels: explorer first, diff second, then by position
-  const sortedPanels = useMemo(() => {
-    const typeOrder = (type: string) => {
-      if (type === 'explorer') return 0;
-      if (type === 'diff') return 1;
-      if (type === 'browser') return 2;
-      return 3;
-    };
-    return [...panels].sort((a, b) => {
-      const orderDiff = typeOrder(a.type) - typeOrder(b.type);
-      if (orderDiff !== 0) return orderDiff;
-      return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
-    });
-  }, [panels]);
+  const sortedPanels = useMemo(() => sortTabBarPanels(panels), [panels]);
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">

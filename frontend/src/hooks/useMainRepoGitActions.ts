@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Archive, ArchiveRestore, Download, GitCommitHorizontal, RefreshCw, Undo2, Upload } from 'lucide-react';
 import { API } from '../utils/api';
 import type { GitCommands, Session } from '../types/session';
+import { useCommittedRef } from './useCommittedRef';
 import { useConfigStore } from '../stores/configStore';
 import { useErrorStore } from '../stores/errorStore';
 
@@ -11,6 +12,7 @@ interface GitOperationResponse {
 }
 
 export function useMainRepoGitActions(sessionId: string | null, session: Session | null) {
+  const sessionIdRef = useCommittedRef(sessionId);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gitCommands, setGitCommands] = useState<GitCommands | null>(null);
@@ -25,10 +27,15 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
   const refreshStashState = useCallback(async () => {
     if (!sessionId) return;
     const response = await API.sessions.hasStash(sessionId);
-    if (response.success) setHasStash(response.data);
-  }, [sessionId]);
+    if (sessionIdRef.current === sessionId && response.success) setHasStash(response.data);
+  }, [sessionId, sessionIdRef]);
 
   useEffect(() => {
+    setShowSetTrackingDialog(false);
+    setShowCommitDialog(false);
+    setRemoteBranches([]);
+    setError(null);
+    setIsRunning(false);
     if (!sessionId) {
       setGitCommands(null);
       setHasStash(false);
@@ -56,7 +63,7 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
     });
 
     return () => { cancelled = true; };
-  }, [sessionId]);
+  }, [sessionId, sessionIdRef]);
 
   const runOperation = useCallback(async (
     operation: (activeSessionId: string) => Promise<GitOperationResponse>,
@@ -67,18 +74,20 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
     setError(null);
     try {
       const response = await operation(sessionId);
+      if (sessionIdRef.current !== sessionId) return false;
       if (!response.success) {
         setError(response.error || failureMessage);
         return false;
       }
       return true;
     } catch (operationError) {
+      if (sessionIdRef.current !== sessionId) return false;
       setError(operationError instanceof Error ? operationError.message : failureMessage);
       return false;
     } finally {
-      setIsRunning(false);
+      if (sessionIdRef.current === sessionId) setIsRunning(false);
     }
-  }, [sessionId]);
+  }, [sessionId, sessionIdRef]);
 
   const handleFetch = useCallback(() => {
     void runOperation(API.sessions.gitFetch, 'Failed to fetch from remote');
@@ -117,13 +126,15 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
         API.sessions.getRemoteBranches(sessionId),
         API.sessions.getUpstream(sessionId),
       ]);
+      if (sessionIdRef.current !== sessionId) return;
       if (branchesResponse.success) setRemoteBranches(branchesResponse.data || []);
       if (upstreamResponse.success) setCurrentUpstream(upstreamResponse.data);
       setShowSetTrackingDialog(true);
     } catch (loadError) {
+      if (sessionIdRef.current !== sessionId) return;
       setError(loadError instanceof Error ? loadError.message : 'Failed to load remote branches');
     }
-  }, [sessionId]);
+  }, [sessionId, sessionIdRef]);
 
   const handleSelectUpstream = useCallback((branch: string) => {
     setShowSetTrackingDialog(false);
@@ -131,9 +142,9 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
       (activeSessionId) => API.sessions.setUpstream(activeSessionId, branch),
       'Failed to set tracking branch',
     ).then((success) => {
-      if (success) setCurrentUpstream(branch);
+      if (success && sessionIdRef.current === sessionId) setCurrentUpstream(branch);
     });
-  }, [runOperation]);
+  }, [runOperation, sessionId, sessionIdRef]);
 
   const handleOpenIDE = useCallback(async (ideKey?: string) => {
     if (!sessionId || isRemoteMode) return;

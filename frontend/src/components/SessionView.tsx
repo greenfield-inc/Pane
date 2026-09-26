@@ -3,15 +3,18 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionHistoryStore } from '../stores/sessionHistoryStore';
 import { useHotkey } from '../hooks/useHotkey';
+import { sortTabBarPanels } from '../utils/sort-tab-bar-panels';
 import { useCommittedRef } from '../hooks/useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
 import { LiveRegion } from './ui/LiveRegion';
 import '@xterm/xterm/css/xterm.css';
+import { useMainRepoGitActions } from '../hooks/useMainRepoGitActions';
 import { useSessionView } from '../hooks/useSessionView';
 import { DetailPanel } from './DetailPanel';
 import { GitErrorDialog } from './session/GitErrorDialog';
+import { SetTrackingBranchDialog } from './session/SetTrackingBranchDialog';
 import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -65,13 +68,6 @@ import type { InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 
-function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
-  return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
-    || panelList.find(p => p.type === 'explorer')
-    || panelList.find(p => p.type !== 'diff')
-    || panelList[0];
-}
-
 /** Explorer and Review render in the inspector rail, never on the stage. */
 function isInspectorPanelType(type: ToolPanel['type']): boolean {
   return type === 'explorer' || type === 'diff';
@@ -106,6 +102,11 @@ export const SessionView = memo(() => {
     // Otherwise look in regular sessions
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
+  const activeSessionIdRef = useCommittedRef(activeSession?.id);
+  useEffect(() => {
+    setShowSetTrackingDialog(false);
+    setRemoteBranches([]);
+  }, [activeSession?.id]);
   const activeProjectEnvironment = sessionProject && sessionProject.id === activeSession?.projectId
     ? sessionProject.environment
     : undefined;
@@ -237,18 +238,13 @@ export const SessionView = memo(() => {
       // Always reload panels from database when switching sessions
       panelApi.loadPanelsForSession(sid).then(async loadedPanels => {
         devLog.debug('[SessionView] Loaded panels:', loadedPanels);
-        const sessionState = useSessionStore.getState();
-        const loadedSession = sessionState.activeMainRepoSession?.id === sid
-          ? sessionState.activeMainRepoSession
-          : sessionState.sessions.find(session => session.id === sid);
-        const hasReviewPr = !!loadedSession?.gitStatus?.prUrl;
         const inFlight = (usePanelStore.getState().panels[sid] || []).filter(
           p => !preLoadIds.has(p.id) && !loadedPanels.some(lp => lp.id === p.id)
         );
         setPanels(sid, inFlight.length > 0 ? [...loadedPanels, ...inFlight] : loadedPanels);
 
-        // Preserve the existing startup preference without blocking Review.
-        const fallback = pickDefaultPanel(loadedPanels, hasReviewPr);
+        // Inspector selection is independent of the active stage panel.
+        const fallback = loadedPanels.find(panel => !isInspectorPanelType(panel.type));
 
         const activePanelResult = await panelApi.getActivePanel(sid);
         const effectiveActivePanel = activePanelResult ?? fallback;
@@ -268,17 +264,7 @@ export const SessionView = memo(() => {
         const pinned = loadedPanels.find(p => p.type === 'terminal');
         const livePanels = loadedPanels.filter(p => p.id !== pinned?.id && !isInspectorPanelType(p.type));
 
-        // Sort for initial layout creation (explorer first, diff second, then position)
-        const typeOrder = (type: string) => {
-          if (type === 'explorer') return 0;
-          if (type === 'diff') return 1;
-          return 2;
-        };
-        const sortedLive = [...livePanels].sort((a, b) => {
-          const orderDiff = typeOrder(a.type) - typeOrder(b.type);
-          if (orderDiff !== 0) return orderDiff;
-          return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
-        });
+        const sortedLive = sortTabBarPanels(livePanels);
 
         try {
           const stored = await panelApi.getLayout(sid);
@@ -434,19 +420,7 @@ export const SessionView = memo(() => {
     [sessionPanels, defaultTerminalPanel, isInspectorPanel]
   );
 
-  // Sort tab bar panels same as PanelTabBar: explorer first, diff second, then by position
-  const sortedSessionPanels = useMemo(() => {
-    const typeOrder = (type: string) => {
-      if (type === 'explorer') return 0;
-      if (type === 'diff') return 1;
-      return 2;
-    };
-    return [...tabBarPanels].sort((a, b) => {
-      const orderDiff = typeOrder(a.type) - typeOrder(b.type);
-      if (orderDiff !== 0) return orderDiff;
-      return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
-    });
-  }, [tabBarPanels]);
+  const sortedSessionPanels = useMemo(() => sortTabBarPanels(tabBarPanels), [tabBarPanels]);
 
   const currentActivePanel = useMemo(
     () => sessionPanels.find(p => p.id === activePanels[activeSession?.id || '']),
@@ -470,8 +444,9 @@ export const SessionView = memo(() => {
   const focusedGroupPanels = useMemo(() => {
     if (!focusedGroup) return sortedSessionPanels;
     const panelMap = new Map(tabBarPanels.map(p => [p.id, p]));
-    return focusedGroup.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
-  }, [focusedGroup, tabBarPanels, sortedSessionPanels]);
+    const groupPanels = focusedGroup.panelIds.map(id => panelMap.get(id)).filter((p): p is ToolPanel => !!p);
+    return sessionLayout?.root.type === 'group' ? sortTabBarPanels(groupPanels) : groupPanels;
+  }, [focusedGroup, tabBarPanels, sortedSessionPanels, sessionLayout]);
   /** Primary group panels (for PanelTabBar tab strip). */
   const primaryGroupNode = useMemo(
     () => sessionLayout ? primaryGroup(sessionLayout.root) : null,
@@ -1369,6 +1344,8 @@ export const SessionView = memo(() => {
   }, [activeView, activeProjectId]);
 
   const hook = useSessionView(activeSession);
+  const mainRepoSession = activeView === 'sessions' && activeSession?.isMainRepo ? activeSession : null;
+  const mainRepoGit = useMainRepoGitActions(mainRepoSession?.id ?? null, mainRepoSession);
 
   // Handler to open set tracking dialog
   const handleOpenSetTracking = async () => {
@@ -1380,7 +1357,7 @@ export const SessionView = memo(() => {
         API.sessions.getUpstream(activeSession.id)
       ]);
       // Guard against stale responses if session changed during async call
-      if (activeSession.id !== sessionIdAtStart) return;
+      if (activeSessionIdRef.current !== sessionIdAtStart) return;
       if (branchesResponse.success && branchesResponse.data) {
         setRemoteBranches(branchesResponse.data);
       }
@@ -1395,9 +1372,10 @@ export const SessionView = memo(() => {
 
   const handleSelectUpstream = async (branch: string) => {
     if (!activeSession) return;
+    const sessionIdAtStart = activeSession.id;
     setShowSetTrackingDialog(false);
     const success = await hook.handleSetUpstream(branch);
-    if (success) {
+    if (success && activeSessionIdRef.current === sessionIdAtStart) {
       setCurrentUpstream(branch);
     }
   };
@@ -1491,33 +1469,24 @@ export const SessionView = memo(() => {
 
   // Auto-create terminal panel for existing sessions that don't have one
   // Unless the user has explicitly closed it previously
-  const hasTriedCreatingTerminal = useRef(false);
+  const lastTerminalAttemptSessionId = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeSession?.id || defaultTerminalPanel || hasTriedCreatingTerminal.current) return;
-    // Only attempt once per session to avoid loops
-    hasTriedCreatingTerminal.current = true;
+    const sessionId = activeSession?.id;
+    if (!sessionId || !activeSessionPanelsLoaded || defaultTerminalPanel || lastTerminalAttemptSessionId.current === sessionId) return;
+    lastTerminalAttemptSessionId.current = sessionId;
 
-    // Check if user has previously closed terminal panel for this session
-    window.electronAPI?.invoke('panels:shouldAutoCreate', activeSession.id, 'terminal').then(shouldCreate => {
-      if (!shouldCreate) {
-        return;
-      }
-      panelApi.createPanel({
-        sessionId: activeSession.id,
-        type: 'terminal',
-        title: 'Terminal',
-      }).then(panel => {
+    const ensureTerminal = async () => {
+      try {
+        const shouldCreate = await window.electronAPI.invoke('panels:shouldAutoCreate', sessionId, 'terminal');
+        if (!shouldCreate) return;
+        const panel = await panelApi.createPanel({ sessionId, type: 'terminal', title: 'Terminal' });
         addPanel(panel);
-      }).catch(err => {
-        console.error('[SessionView] Failed to auto-create terminal panel:', err);
-      });
-    });
-  }, [activeSession?.id, defaultTerminalPanel, addPanel]);
-
-  // Reset the flag when session changes
-  useEffect(() => {
-    hasTriedCreatingTerminal.current = false;
-  }, [activeSession?.id]);
+      } catch (error) {
+        console.error('[SessionView] Failed to auto-create terminal panel:', error);
+      }
+    };
+    void ensureTerminal();
+  }, [activeSession?.id, activeSessionPanelsLoaded, defaultTerminalPanel, addPanel]);
 
   const toggleDetailCollapse = useCallback(() => {
     setIsDetailCollapsed(prev => !prev);
@@ -1608,28 +1577,8 @@ export const SessionView = memo(() => {
         ? 'Session is currently running'
         : undefined;
     
-    return activeSession.isMainRepo ? [
-      {
-        id: 'pull',
-        label: 'Pull from Remote',
-        icon: Download,
-        onClick: hook.handleGitPull,
-        disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
-        variant: 'default' as const,
-        description: hook.gitCommands?.getPullCommand ? `git ${hook.gitCommands.getPullCommand()}` : 'git pull',
-        disabledReason: busyReason,
-      },
-      {
-        id: 'push',
-        label: 'Push to Remote', 
-        icon: Upload,
-        onClick: hook.handleGitPush,
-        disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
-        variant: 'success' as const,
-        description: hook.gitCommands?.getPushCommand ? `git ${hook.gitCommands.getPushCommand()}` : 'git push',
-        disabledReason: busyReason,
-      }
-    ] : [
+    if (activeSession.isMainRepo) return mainRepoGit.actions;
+    return [
       // --- Sync ---
       {
         id: 'fetch',
@@ -1810,7 +1759,7 @@ export const SessionView = memo(() => {
         {sessionStatusAnnouncement}
       </LiveRegion>
       {/* SINGLE SessionProvider wraps everything */}
-      <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
+      <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={isMainRepoPane ? mainRepoGit.actionsBusy : hook.isMerging} gitCommands={isMainRepoPane ? mainRepoGit.gitCommands : hook.gitCommands} onOpenIDEWithCommand={isMainRepoPane ? mainRepoGit.handleOpenIDE : handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={isMainRepoPane ? mainRepoGit.handleOpenSetTracking : handleOpenSetTracking} trackingBranch={isMainRepoPane ? mainRepoGit.currentUpstream : currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
 
         {/* Tab bar at top */}
         <PanelTabBar
@@ -1864,7 +1813,7 @@ export const SessionView = memo(() => {
                     maximum: bottomDetailResize.cap,
                     ...bottomDetailResize.separatorHandlers,
                   } : undefined}
-                  mergeError={hook.mergeError}
+                  mergeError={isMainRepoPane ? mainRepoGit.error : hook.mergeError}
                   orientation="horizontal"
                   isCollapsed={isDetailCollapsed}
                   onToggleCollapse={toggleDetailCollapse}
@@ -2010,7 +1959,7 @@ export const SessionView = memo(() => {
                   maximum: detailResize.cap,
                   ...detailResize.separatorHandlers,
                 } : undefined}
-                mergeError={hook.mergeError}
+                mergeError={isMainRepoPane ? mainRepoGit.error : hook.mergeError}
                 onSwapLayout={toggleLayoutSwap}
                 onCommitClick={handleCommitClick}
                 inspectorTab={inspectorTab}
@@ -2025,6 +1974,17 @@ export const SessionView = memo(() => {
         </div>
 
       </SessionProvider>
+
+      <CommitMessageDialog
+        isOpen={mainRepoGit.showCommitDialog}
+        onClose={() => mainRepoGit.setShowCommitDialog(false)}
+        dialogType="commit"
+        gitCommands={mainRepoGit.gitCommands}
+        shouldSquash={false}
+        setShouldSquash={() => {}}
+        onConfirm={mainRepoGit.handleCommit}
+        isMerging={mainRepoGit.isRunning}
+      />
 
       <CommitMessageDialog
         isOpen={hook.showCommitMessageDialog}
@@ -2095,44 +2055,14 @@ export const SessionView = memo(() => {
         />
       )}
 
-      {/* Set Tracking Dialog */}
-      {showSetTrackingDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-bg-primary border border-border-primary rounded-lg shadow-lg p-4 w-80 max-h-96 overflow-hidden flex flex-col">
-            <h3 className="text-lg font-medium text-text-primary mb-2">Set Tracking Branch</h3>
-            {currentUpstream && (
-              <p className="text-sm text-text-secondary mb-3">
-                Currently tracking: <span className="text-text-primary font-mono">{currentUpstream}</span>
-              </p>
-            )}
-            <p className="text-sm text-text-secondary mb-3">Select a remote branch to track:</p>
-            <div className="flex-1 overflow-y-auto space-y-1 mb-4">
-              {remoteBranches.length === 0 ? (
-                <p className="text-sm text-text-tertiary italic">No remote branches found</p>
-              ) : (
-                remoteBranches.map((branch) => (
-                  <button
-                    key={branch}
-                    onClick={() => handleSelectUpstream(branch)}
-                    className={`w-full text-left px-3 py-2 rounded text-sm font-mono hover:bg-bg-secondary transition-colors ${
-                      branch === currentUpstream ? 'bg-bg-secondary text-accent-primary' : 'text-text-primary'
-                    }`}
-                  >
-                    {branch}
-                    {branch === currentUpstream && <span className="ml-2 text-xs">(current)</span>}
-                  </button>
-                ))
-              )}
-            </div>
-            <button
-              onClick={() => setShowSetTrackingDialog(false)}
-              className="w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary border border-border-primary rounded hover:bg-bg-secondary transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <SetTrackingBranchDialog
+        isOpen={isMainRepoPane ? mainRepoGit.showSetTrackingDialog : showSetTrackingDialog}
+        currentUpstream={isMainRepoPane ? mainRepoGit.currentUpstream : currentUpstream}
+        remoteBranches={isMainRepoPane ? mainRepoGit.remoteBranches : remoteBranches}
+        checkoutLabel={isMainRepoPane ? 'the primary checkout' : 'this checkout'}
+        onSelect={isMainRepoPane ? mainRepoGit.handleSelectUpstream : handleSelectUpstream}
+        onClose={() => isMainRepoPane ? mainRepoGit.setShowSetTrackingDialog(false) : setShowSetTrackingDialog(false)}
+      />
 
     </div>
   );

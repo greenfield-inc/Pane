@@ -78,7 +78,7 @@ test('main repository commit dialog submits title and description with Ctrl+Ente
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details', exact: true }).click();
   await page.locator('.pane-detail-panel-vertical').getByRole('button', { name: 'Commit 1 file', exact: true }).click();
 
   const dialog = page.getByRole('dialog');
@@ -143,7 +143,7 @@ test('review commit dialog keeps its default title and submits the composed mess
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: session.name, exact: true }).click();
-  await page.getByRole('tab', { name: 'Review', exact: true }).click();
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   await page.getByRole('button', { name: 'Commit', exact: true }).click();
 
   const dialog = page.getByRole('dialog');
