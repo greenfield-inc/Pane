@@ -744,8 +744,7 @@ function App() {
         `🚀 Update Available - Pane v${versionInfo.latest}`,
         'A new version of Pane is available!',
         '/favicon.ico',
-        'version_update',
-        `update:${versionInfo.latest}` // Deduplicate by version - only track once per version
+        `pane:update:${versionInfo.latest}` // Replace an existing OS notification for this version.
       );
     };
 
