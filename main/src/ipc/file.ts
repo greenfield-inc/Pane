@@ -7,7 +7,7 @@ import { glob } from 'glob';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
-import type { Session } from '../types/session';
+import type { PathResolver } from '../utils/pathResolver';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { commandExecutor } from '../utils/commandExecutor';
 import { buildGitCommitCommand } from '../utils/shellEscape';
@@ -110,37 +110,34 @@ export function registerFileHandlers(
   ipcMain: IpcMain,
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
+  reveal: typeof revealInFileManager = revealInFileManager,
 ): void {
   const { sessionManager, gitStatusManager, configManager } = services;
 
-  async function resolveWorktreePath(sessionId: string, relativePath = ''): Promise<{
-    session: Session;
-    basePath: string;
-    fullPath: string;
-    normalizedPath: string;
-  }> {
-    const session = sessionManager.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    const ctx = sessionManager.getProjectContext(sessionId);
-    if (!ctx) throw new Error('Project not found for session');
-    const { pathResolver } = ctx;
-
+  async function resolveRootPath(pathResolver: PathResolver, storedRoot: string, relativePath = '') {
     const normalizedPath = relativePath ? path.normalize(relativePath) : '';
-    if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
+    if (normalizedPath === '..' || normalizedPath.startsWith(`..${path.sep}`) || path.isAbsolute(normalizedPath)) {
       throw new Error('Invalid path');
     }
-
-    const basePath = pathResolver.toFileSystem(session.worktreePath);
+    const basePath = pathResolver.toFileSystem(storedRoot);
     const fullPath = normalizedPath ? path.join(basePath, normalizedPath) : basePath;
+    if (!await pathResolver.isWithin(basePath, fullPath)) throw new Error('File path is outside selected root');
+    return { basePath, fullPath, normalizedPath, pathResolver };
+  }
 
-    if (!await pathResolver.isWithin(basePath, fullPath)) {
-      throw new Error('File path is outside worktree');
-    }
+  async function resolveWorktreePath(sessionId: string, relativePath = '') {
+    const session = sessionManager.getSession(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    if (!session.worktreePath) throw new Error(`Session worktree path is undefined for session: ${sessionId}`);
+    const ctx = sessionManager.getProjectContext(sessionId);
+    if (!ctx) throw new Error('Project not found for session');
+    return { session, ...await resolveRootPath(ctx.pathResolver, session.worktreePath, relativePath) };
+  }
 
-    return { session, basePath, fullPath, normalizedPath };
+  async function resolveProjectPath(projectId: number, relativePath: string) {
+    const ctx = sessionManager.getProjectContextByProjectId(projectId);
+    if (!ctx) throw new Error(`Project not found: ${projectId}`);
+    return resolveRootPath(ctx.pathResolver, ctx.project.path, relativePath);
   }
 
   function validateSimpleName(name: string): string {
@@ -174,28 +171,7 @@ export function registerFileHandlers(
   // Read file contents from a session's worktree
   commandRegistry.register('file:read', async (request: FileReadRequest) => {
     try {
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) {
-        throw new Error(`Session not found: ${request.sessionId}`);
-      }
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
-
-      // Ensure the file path is relative and safe
-      const normalizedPath = path.normalize(request.filePath);
-      if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-        throw new Error('Invalid file path');
-      }
-
-      const basePath = pathResolver.toFileSystem(session.worktreePath);
-      const fullPath = path.join(basePath, normalizedPath);
-
-      // Verify the file is within the worktree using PathResolver
-      if (!await pathResolver.isWithin(basePath, fullPath)) {
-        throw new Error('File path is outside worktree');
-      }
+      const { fullPath } = await resolveWorktreePath(request.sessionId, request.filePath);
 
       const content = await fs.readFile(fullPath, 'utf-8');
       return { success: true, content };
@@ -212,26 +188,7 @@ export function registerFileHandlers(
   // Read a file as binary (base64-encoded) — used for image/PDF preview
   commandRegistry.register('file:read-binary', async (request: FileReadRequest) => {
     try {
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) {
-        throw new Error(`Session not found: ${request.sessionId}`);
-      }
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
-
-      const normalizedPath = path.normalize(request.filePath);
-      if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-        throw new Error('Invalid file path');
-      }
-
-      const basePath = pathResolver.toFileSystem(session.worktreePath);
-      const fullPath = path.join(basePath, normalizedPath);
-
-      if (!await pathResolver.isWithin(basePath, fullPath)) {
-        throw new Error('File path is outside worktree');
-      }
+      const { fullPath } = await resolveWorktreePath(request.sessionId, request.filePath);
 
       const buffer = await fs.readFile(fullPath);
       return { success: true, contentBase64: buffer.toString('base64') };
@@ -247,30 +204,9 @@ export function registerFileHandlers(
   // Check if a file exists in a session's worktree
   commandRegistry.register('file:exists', async (request: FilePathRequest) => {
     try {
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) {
-        return false;
-      }
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) return false;
-      const { pathResolver } = ctx;
-
-      // Ensure the file path is relative and safe
-      const normalizedPath = path.normalize(request.filePath);
-      if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-        return false;
-      }
-
-      const basePath = pathResolver.toFileSystem(session.worktreePath);
-      const fullPath = path.join(basePath, normalizedPath);
-
-      try {
-        await fs.access(fullPath);
-        return true;
-      } catch {
-        return false;
-      }
+      const { fullPath } = await resolveWorktreePath(request.sessionId, request.filePath);
+      await fs.access(fullPath);
+      return true;
     } catch {
       return false;
     }
@@ -285,32 +221,7 @@ export function registerFileHandlers(
         throw new Error('File path is required');
       }
 
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) {
-        throw new Error(`Session not found: ${request.sessionId}`);
-      }
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
-
-      if (!session.worktreePath) {
-        throw new Error(`Session worktree path is undefined for session: ${request.sessionId}`);
-      }
-
-      // Ensure the file path is relative and safe
-      const normalizedPath = path.normalize(request.filePath);
-      if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-        throw new Error('Invalid file path');
-      }
-
-      const basePath = pathResolver.toFileSystem(session.worktreePath);
-      const fullPath = path.join(basePath, normalizedPath);
-
-      // Verify the file is within the worktree using PathResolver
-      if (!await pathResolver.isWithin(basePath, fullPath)) {
-        throw new Error('File path is outside worktree');
-      }
+      const { fullPath } = await resolveWorktreePath(request.sessionId, request.filePath);
 
       // Create directory if it doesn't exist
       const dirPath = path.dirname(fullPath);
@@ -346,27 +257,8 @@ export function registerFileHandlers(
         throw new Error('File name is required');
       }
 
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) {
-        throw new Error(`Session not found: ${request.sessionId}`);
-      }
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
-
-      if (!session.worktreePath) {
-        throw new Error(`Session worktree path is undefined for session: ${request.sessionId}`);
-      }
-
-      const basePath = pathResolver.toFileSystem(session.worktreePath);
       const targetDir = request.targetDir || '';
-      if (targetDir) {
-        const normalizedTargetDir = path.normalize(targetDir);
-        if (normalizedTargetDir.startsWith('..') || path.isAbsolute(normalizedTargetDir)) {
-          throw new Error('Invalid target directory');
-        }
-      }
+      const { fullPath: targetDirPath } = await resolveWorktreePath(request.sessionId, targetDir);
 
       // Validate fileName: must be a simple filename, no slashes or ..
       const sanitized = path.basename(request.fileName);
@@ -376,17 +268,8 @@ export function registerFileHandlers(
 
       // Resolve full path and verify it's within worktree
       let finalName = sanitized;
-      const targetDirPath = targetDir ? path.join(basePath, targetDir) : basePath;
-      if (!await pathResolver.isWithin(basePath, targetDirPath)) {
-        throw new Error('Target directory is outside worktree');
-      }
+      let { fullPath } = await resolveWorktreePath(request.sessionId, path.join(targetDir, finalName));
       await fs.mkdir(targetDirPath, { recursive: true });
-
-      let fullPath = path.join(targetDirPath, finalName);
-
-      if (!await pathResolver.isWithin(basePath, fullPath)) {
-        throw new Error('File path is outside worktree');
-      }
 
       // Auto-rename if file already exists
       if (await fileExists(fullPath)) {
@@ -399,6 +282,8 @@ export function registerFileHandlers(
           counter++;
         }
       }
+
+      ({ fullPath } = await resolveWorktreePath(request.sessionId, path.join(targetDir, finalName)));
 
       // Write binary content
       const buffer = Buffer.from(request.contentBase64, 'base64');
@@ -628,33 +513,8 @@ export function registerFileHandlers(
   // List files and directories in a session's worktree
   commandRegistry.register('file:list', async (request: FileListRequest) => {
     try {
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) {
-        throw new Error(`Session not found: ${request.sessionId}`);
-      }
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
-
-      // Check if session is archived - worktree won't exist
-      if (session.archived) {
-        return { success: false, error: 'Cannot list files for archived session' };
-      }
-
-      // Use the provided path or default to root
-      const relativePath = request.path || '';
-
-      // Ensure the path is relative and safe
-      if (relativePath) {
-        const normalizedPath = path.normalize(relativePath);
-        if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-          throw new Error('Invalid path');
-        }
-      }
-
-      const basePath = pathResolver.toFileSystem(session.worktreePath);
-      const targetPath = relativePath ? path.join(basePath, relativePath) : basePath;
+      const { session, basePath, fullPath: targetPath, pathResolver } = await resolveWorktreePath(request.sessionId, request.path);
+      if (session.archived) return { success: false, error: 'Cannot list files for archived session' };
 
       // Read directory contents
       const entries = await fs.readdir(targetPath, { withFileTypes: true });
@@ -668,7 +528,8 @@ export function registerFileHandlers(
             const relativePath = pathResolver.relative(basePath, fullPath);
 
             try {
-              const stats = await fs.stat(fullPath);
+              // Read entry metadata without following links outside the root.
+              const stats = await fs.lstat(fullPath);
               return {
                 name: entry.name,
                 path: relativePath,
@@ -1035,24 +896,7 @@ export function registerFileHandlers(
   commandRegistry.register('file:read-project', async (request: { projectId: number; filePath: string }) => {
     console.log('[file:read-project] Request:', request);
     try {
-      const ctx = sessionManager.getProjectContextByProjectId(request.projectId);
-      if (!ctx) {
-        console.error('[file:read-project] Project not found:', request.projectId);
-        throw new Error(`Project not found: ${request.projectId}`);
-      }
-      const { project, pathResolver } = ctx;
-
-      console.log('[file:read-project] Project path:', project.path);
-
-      // Ensure the file path is relative and safe
-      const normalizedPath = path.normalize(request.filePath);
-      if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-        throw new Error('Invalid file path');
-      }
-
-      const storedPath = pathResolver.join(project.path, normalizedPath);
-      const fullPath = pathResolver.toFileSystem(storedPath);
-      console.log('[file:read-project] Full path:', fullPath);
+      const { fullPath } = await resolveProjectPath(request.projectId, request.filePath);
 
       // Check if file exists
       try {
@@ -1081,24 +925,7 @@ export function registerFileHandlers(
   commandRegistry.register('file:write-project', async (request: { projectId: number; filePath: string; content: string }) => {
     console.log('[file:write-project] Request:', { projectId: request.projectId, filePath: request.filePath, contentLength: request.content.length });
     try {
-      const ctx = sessionManager.getProjectContextByProjectId(request.projectId);
-      if (!ctx) {
-        console.error('[file:write-project] Project not found:', request.projectId);
-        throw new Error(`Project not found: ${request.projectId}`);
-      }
-      const { project, pathResolver } = ctx;
-
-      console.log('[file:write-project] Project path:', project.path);
-
-      // Ensure the file path is relative and safe
-      const normalizedPath = path.normalize(request.filePath);
-      if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-        throw new Error('Invalid file path');
-      }
-
-      const storedPath = pathResolver.join(project.path, normalizedPath);
-      const fullPath = pathResolver.toFileSystem(storedPath);
-      console.log('[file:write-project] Full path:', fullPath);
+      const { fullPath } = await resolveProjectPath(request.projectId, request.filePath);
 
       // Ensure directory exists
       const dir = path.dirname(fullPath);
@@ -1166,22 +993,7 @@ export function registerFileHandlers(
   // Resolve an absolute filesystem path for a file in a session's worktree
   commandRegistry.register('file:resolveAbsolutePath', async (request: { sessionId: string; path?: string }) => {
     try {
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) throw new Error(`Session not found: ${request.sessionId}`);
-
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-
-      const relativePath = request.path || '';
-      if (relativePath) {
-        const normalizedPath = path.normalize(relativePath);
-        if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-          throw new Error('Invalid path');
-        }
-      }
-
-      const basePath = ctx.pathResolver.toFileSystem(session.worktreePath);
-      const absolutePath = relativePath ? path.join(basePath, relativePath) : basePath;
+      const { fullPath: absolutePath } = await resolveWorktreePath(request.sessionId, request.path);
 
       return { success: true, path: absolutePath };
     } catch (error) {
@@ -1194,24 +1006,9 @@ export function registerFileHandlers(
   // Show a file/folder from a session's worktree in the native file manager
   ipcMain.handle('file:showInFolder', async (_, request: { sessionId: string; path?: string }) => {
     try {
-      const session = sessionManager.getSession(request.sessionId);
-      if (!session) throw new Error(`Session not found: ${request.sessionId}`);
+      const { fullPath: targetPath } = await resolveWorktreePath(request.sessionId, request.path);
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-
-      const relativePath = request.path || '';
-      if (relativePath) {
-        const normalizedPath = path.normalize(relativePath);
-        if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
-          throw new Error('Invalid path');
-        }
-      }
-
-      const basePath = ctx.pathResolver.toFileSystem(session.worktreePath);
-      const targetPath = relativePath ? path.join(basePath, relativePath) : basePath;
-
-      await revealInFileManager(targetPath);
+      await reveal(targetPath);
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to show in folder' };
