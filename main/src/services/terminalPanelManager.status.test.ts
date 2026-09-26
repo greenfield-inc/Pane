@@ -168,7 +168,11 @@ describe('terminal status events', () => {
     expect(fixture.terminal.pty.write).not.toHaveBeenCalled();
     await destroying;
     expect(panelManager.updatePanel).toHaveBeenCalledWith('p', { state: expect.objectContaining({
-      customState: expect.objectContaining({ scrollbackBuffer: expect.stringContaining('last output before archive') }),
+      customState: expect.objectContaining({
+        // Pane reads a live process cwd only off Windows.
+        cwd: process.platform === 'win32' ? '/old' : '/live',
+        scrollbackBuffer: expect.stringContaining('last output before archive'),
+      }),
     }) });
     if (exit) expect(fixture.terminal.pty.kill).not.toHaveBeenCalled();
     else expect(fixture.terminal.pty.kill).toHaveBeenCalledOnce();
