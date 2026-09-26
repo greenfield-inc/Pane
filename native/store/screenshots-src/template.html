@@ -211,7 +211,10 @@ window.renderShot = async function (shot, device, index) {
     island.style.display = "none";
   }
 
-  await document.fonts.ready;
+  // Wait for the map background too, or a fast screenshot can miss it.
+  const mapImage = new Image();
+  mapImage.src = "assets/world-map.svg";
+  await Promise.all([document.fonts.ready, mapImage.decode()]);
   drawRain($("rain"), L, 7919 * (index + 1));
 };
 </script>
