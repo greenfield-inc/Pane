@@ -66,6 +66,10 @@ export class RemoteRuntimeAdapter {
     });
   }
 
+  onReady(listener: () => void): () => void {
+    return this.client.onEvent(event => { if (event.type === 'ready') listener(); });
+  }
+
   async invoke<T>(channel: string, args: unknown[] = []): Promise<T> {
     const response = await this.client.invoke<IpcLikeResponse<T> | T>(channel, args);
     if (isIpcResponse<T>(response)) {
