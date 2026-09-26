@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openConnectedRemotePwa } from './remotePwaMock';
+import { dropRemoteConnection, openConnectedRemotePwa } from './remotePwaMock';
 
 test('remote terminal creation errors survive healthy connection heartbeats', async ({ page }, testInfo) => {
   await openConnectedRemotePwa(page);
@@ -24,6 +24,48 @@ test('remote terminal creation errors survive healthy connection heartbeats', as
   await expect(page.getByText(/seen 1m ago/)).toBeVisible();
   await expect(error).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('action-error-after-heartbeat.png') });
+  await dropRemoteConnection(page);
+  await expect(page.getByText('Remote event stream failed', { exact: false })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('connection-error-over-action-error.png') });
+});
+
+test('action errors survive background refreshes and clear on a successful terminal retry', async ({ page }, testInfo) => {
+  const projectsResponse = page.waitForResponse(response => response.request().postDataJSON()?.channel === 'sessions:get-all-with-projects');
+  const panelsResponse = page.waitForResponse(response => response.request().postDataJSON()?.channel === 'panels:list');
+  await openConnectedRemotePwa(page);
+  const projects = await (await projectsResponse).json();
+  const panels = await (await panelsResponse).json();
+  projects.result[0].sessions[0].name = 'Background update applied';
+  panels.result[0].title = 'Refreshed terminal';
+  let allowCreate = false;
+  await page.route('http://anim-pane.test/**', async route => {
+    const channel = route.request().postDataJSON()?.channel;
+    const body = channel === 'panels:create'
+      ? allowCreate
+        ? { ok: true, result: { ...panels.result[0], title: 'Retry terminal', sessionId: 'anim-remote-1' } }
+        : { ok: false, error: { message: 'Terminal creation denied.' } }
+      : channel === 'sessions:get-all-with-projects' ? projects
+      : channel === 'panels:list' ? panels : null;
+    if (!body) { await route.fallback(); return; }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.getByRole('button', { name: 'Add tool' }).click();
+  await page.getByRole('menuitem', { name: /Terminal Start a shell/ }).click();
+  const error = page.getByText('Terminal creation denied.', { exact: false });
+  await expect(error).toBeVisible();
+  await page.evaluate(() => window.__paneRemoteEvent?.('session:updated'));
+  await expect(page.getByText('Background update applied', { exact: true })).toBeVisible();
+  await expect(error).toBeVisible();
+  await page.getByText('server-side funnel events', { exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Refreshed terminal' })).toBeVisible();
+  await expect(error).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('error-after-background-refresh.png') });
+  allowCreate = true;
+  await page.getByRole('button', { name: 'Add tool' }).click();
+  await page.getByRole('menuitem', { name: /Terminal Start a shell/ }).click();
+  await expect(page.getByRole('tab', { name: 'Retry terminal' })).toBeVisible();
+  await expect(error).not.toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('successful-terminal-retry.png') });
 });
 
 for (const scenario of [
