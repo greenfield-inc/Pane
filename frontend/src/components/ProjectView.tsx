@@ -1,3 +1,4 @@
+import { sortTabBarPanels } from '../utils/sort-tab-bar-panels';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API } from '../utils/api';
 import { useSessionStore } from '../stores/sessionStore';
@@ -125,7 +126,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const filesPanel = useMemo(() => sessionPanels.find(p => p.type === 'explorer'), [sessionPanels]);
   const changesPanel = useMemo(() => sessionPanels.find(p => p.type === 'diff'), [sessionPanels]);
   const workingPanels = useMemo(
-    () => sessionPanels.filter(p => p.type !== 'explorer' && p.type !== 'diff'),
+    () => sortTabBarPanels(sessionPanels.filter(p => p.type !== 'explorer' && p.type !== 'diff')),
     [sessionPanels]
   );
 
