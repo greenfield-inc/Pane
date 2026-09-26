@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -26,21 +25,6 @@ export function ConfirmDialog({
   variant = 'danger',
   icon
 }: ConfirmDialogProps) {
-  // Enter key handler only (no Escape - Modal handles it)
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        onConfirm();
-        onClose();
-      }
-    };
-    if (isOpen) {
-      document.addEventListener('keydown', handleKeyDown);
-      return () => document.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isOpen, onConfirm, onClose]);
-
   if (!isOpen) return null;
 
   const handleConfirm = () => {
