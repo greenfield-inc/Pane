@@ -195,8 +195,8 @@ export function createAtTerminalHandler(
         }
 
         case '\x1b': {
-          // Bare Escape
-          return { type: 'cancel' };
+          // Escape closes our picker, so it must not become a shell Meta prefix.
+          return { type: 'cancel', consumeInput: true };
         }
 
         case ' ': {

@@ -1002,6 +1002,15 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
           const ctrlOrMeta = e.ctrlKey || e.metaKey;
 
+          // On macOS Control+Backslash is SIGQUIT; Command owns Pane splitting.
+          // Stop bubbling so the app's Ctrl/Cmd-normalized registry cannot split.
+          if (isMac() && e.ctrlKey && !e.metaKey && !e.altKey
+            && (e.code === 'Backslash' || e.code === 'IntlBackslash')) {
+            e.stopPropagation();
+            return true;
+          }
+
+
           // Pane owns focused-surface scrolling before xterm encodes the key.
           // Managed CLI panels (Claude, Codex, Cursor, etc.) reserve the exact
           // Shift+Arrow chords for Pane; ordinary alternate-screen TUIs keep them.

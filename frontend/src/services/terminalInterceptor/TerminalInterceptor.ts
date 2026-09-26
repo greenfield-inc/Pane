@@ -119,12 +119,12 @@ export class TerminalInterceptor {
         return { consumed: true };
 
       case 'cancel': {
-        // Replay the held prefix; the caller forwards the original cancelling
-        // input (including paste, IME commits and encoded control keys).
+        // Replay the held prefix. Unless this is a picker-owned cancellation
+        // key, let the caller forward the original paste, IME or control input.
         const toFlush = this.buffer;
         this.deactivate();
         this._onFlush(toFlush);
-        return { consumed: false };
+        return { consumed: action.consumeInput ?? false };
       }
 
       case 'dismiss':
