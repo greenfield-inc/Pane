@@ -206,7 +206,3 @@ export interface OrchestrationAssociationInput {
   paneId: string;
   panelIds?: string[];
 }
-
-export type SessionProgress =
-  | { state: 'disabled' | 'empty' }
-  | { state: 'ready'; html: string; revision: string };

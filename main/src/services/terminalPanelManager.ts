@@ -948,7 +948,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (sessionState.orchestrationSessionId) {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
         .read().sessions.find(item => item.id === sessionState.orchestrationSessionId);
-      cwd = prepareSessionWorkspace(sessionState.orchestrationSessionId, record?.profile ?? sessionState.orchestrationProfile, record, getRuntimeConfigManager().getConfig().experimentalSessionProgress === true);
+      cwd = prepareSessionWorkspace(sessionState.orchestrationSessionId, record?.profile ?? sessionState.orchestrationProfile, record);
     }
 
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)

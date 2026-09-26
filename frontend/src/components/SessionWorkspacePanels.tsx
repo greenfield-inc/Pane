@@ -1,33 +1,23 @@
 import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChartNoAxesCombined, ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
-import { useConfigStore } from '../stores/configStore';
-import { useSessionProgress } from '../hooks/useSessionProgress';
-import { SessionProgressView } from './SessionProgressView';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
-import { Tooltip } from './ui/Tooltip';
-import { OUTER_PANEL_CONFIGS, type OuterPanelConfig } from '../utils/outerPanelSizing';
+import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 
 const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
 
-const PROGRESS_SIZE: OuterPanelConfig = {
-  axis: 'width', storageKey: 'pane-session-brief-split-width:v2', legacyKey: 'pane-session-brief-split-width',
-  legacyMin: 240, legacyMax: 1000, legacyDefault: 480,
-  defaultPx: width => width / 2,
-  bounds: width => ({ floor: Math.min(240, Math.max(0, width - 240)), cap: Math.max(0, width - 240) }),
-};
 
-export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestrationSessionId, overviewContent, changesContent, toolbarActions }: {
-  agentPanel: ToolPanel; agentPanelIds: string[]; orchestrationSessionId: string;
+export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewContent, changesContent, toolbarActions }: {
+  agentPanel: ToolPanel; agentPanelIds: string[];
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
 }) {
   const trailingSlot = useTitleBarSlotStore(state => state.trailingSlot);
@@ -35,22 +25,12 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestratio
   const panels = usePanelStore(state => state.panels[sessionId] ?? EMPTY_PANELS);
   const activePanelId = usePanelStore(state => state.activePanels[sessionId]);
   const [showTerminal, setShowTerminal] = useState(false);
-  const [progressVisible, setProgressVisible] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SessionInspectorTab>('overview');
-  const progressEnabled = useConfigStore(state => state.config?.experimentalSessionProgress === true);
-  const progress = useSessionProgress(orchestrationSessionId, progressEnabled);
-  const autoOpened = useRef(false);
-  useEffect(() => {
-    if (!progressEnabled) setProgressVisible(false);
-  }, [progressEnabled]);
   const showSidebar = sidebarVisible;
-  const showProgress = progressEnabled && progressVisible;
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
   const filesResize = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.worktreeInspector, containerPx: width, enabled: showSidebar });
-  const mainWidth = Math.max(0, width - (showSidebar ? filesResize.renderedPx : 0));
-  const resize = useOuterPanelResize({ config: PROGRESS_SIZE, containerPx: mainWidth, enabled: showProgress });
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -58,15 +38,6 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestratio
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => {
-    if (!progressEnabled) {
-      autoOpened.current = false;
-    }
-    if (progress.document && !autoOpened.current) {
-      autoOpened.current = true;
-      setProgressVisible(true);
-    }
-  }, [progress.document, progressEnabled]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const creating = useRef(false);
@@ -152,13 +123,6 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestratio
   const titleBarActions = (
     <>
       {toolbarActions}
-      {progressEnabled && <Tooltip content={showProgress ? 'Hide progress brief' : 'Show progress brief'} side="bottom">
-        <button type="button" aria-label={showProgress ? 'Hide progress brief' : 'Show progress brief'}
-          aria-expanded={showProgress} onClick={() => setProgressVisible(value => !value)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
-          <ChartNoAxesCombined className="h-4 w-4" aria-hidden="true" />
-        </button>
-      </Tooltip>}
       {sidebarToggle}
     </>
   );
@@ -194,13 +158,6 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, orchestratio
             </div>}
           </div>
         </div>
-        {showProgress && <aside aria-label="Session progress view"
-          className="relative flex min-w-0 flex-shrink-0 flex-col border-l border-border-primary" style={{ width: resize.renderedPx }}>
-          <OuterResizeSeparator label="Resize progress brief" orientation="vertical" value={resize.effectivePx}
-            minimum={resize.floor} maximum={resize.cap} {...resize.separatorHandlers} />
-          {progress.document ? <SessionProgressView html={progress.document.html} error={progress.error} />
-            : <p className="p-3 text-sm text-text-secondary" role={progress.error ? 'alert' : undefined}>{progress.error || 'Progress will appear when the agent creates progress.html during your task.'}</p>}
-        </aside>}
         {showSidebar && <aside aria-label={sidebarTab === 'overview' ? 'Session overview' : sidebarTab === 'files' ? 'Session files' : 'Session changes'}
           className="relative flex min-w-0 flex-shrink-0 flex-col border-l border-border-primary" style={{ width: filesResize.renderedPx }}>
           <OuterResizeSeparator label="Resize Session sidebar" orientation="vertical" value={filesResize.effectivePx}

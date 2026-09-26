@@ -138,7 +138,6 @@ export interface AppConfig {
   };
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
-  experimentalSessionProgress?: boolean;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -221,7 +220,6 @@ export interface UpdateConfigRequest {
   analytics?: AppConfig['analytics'];
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
-  experimentalSessionProgress?: boolean;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts

@@ -92,10 +92,6 @@ export function registerOrchestrationSessionHandlers(
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:promote');
 
-  commandRegistry.register('orchestration-sessions:progress', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().progress(decodeSelector(value)));
-  });
-  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:progress');
 
   commandRegistry.register('orchestration-sessions:list', async () => {
     return invokeSafely(() => requireManager().list());

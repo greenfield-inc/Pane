@@ -54,7 +54,7 @@ export class PaneChatManager {
     this.assertAgentSupported(agent);
     const guidePath = await this.ensureGuidePath();
     const config = this.configManager.getConfig();
-    const cwd = prepareSessionWorkspace('legacy-pane-chat', config.defaultSessionProfile, undefined, config.experimentalSessionProgress === true);
+    const cwd = prepareSessionWorkspace('legacy-pane-chat', config.defaultSessionProfile, undefined);
     const session = this.ensureSession(cwd);
     const panel = await this.ensurePanel(session.id, agent);
     await panelManager.setActivePanel(session.id, panel.id);

@@ -3,7 +3,6 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { readSessionProgress } from './sessionProgress';
 import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 
 describe('Session workspace instructions', () => {
@@ -101,32 +100,25 @@ describe('Session workspace instructions', () => {
     expect(() => prepareSessionWorkspace('session-a')).toThrow('markers are incomplete');
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(broken);
   });
-  it('updates progress guidance and status without deleting the document', async () => {
-    const cwd = prepareSessionWorkspace('progress', undefined, undefined, true);
-    await fs.writeFile(path.join(cwd, 'progress.html'), '<h1>Working</h1>');
-    expect(await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).toContain('Experimental progress view');
-    prepareSessionWorkspace('progress', 'Custom profile', undefined, false);
-    expect(await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).not.toContain('Experimental progress view');
-    expect(await fs.readFile(path.join(cwd, '.pane-progress.json'), 'utf8')).toBe('{"enabled":false}');
-    await expect(readSessionProgress('progress', false)).resolves.toEqual({ state: 'disabled' });
-    await expect(readSessionProgress('progress', true)).resolves.toMatchObject({ state: 'ready', html: '<h1>Working</h1>' });
+  it('requires Pane delegation instead of silent fallbacks', async () => {
+    const cwd = prepareSessionWorkspace('delegation');
+    const agents = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain(`runpane doctor --json --pane-dir "${root}"`);
+    expect(agents).toContain('$PANE_RUNPANE_BIN');
+    expect(agents).toContain('associated with this Session automatically');
+    expect(agents).toContain('runpane sessions overview --session delegation --json');
+    expect(agents).toContain('Never substitute plain git worktrees');
+    expect(agents).toContain(path.join(root, 'skills', 'pane-chat', 'pane-orchestrator', 'SKILL.md'));
   });
 
-  it('handles missing progress, atomic replacement, oversized files and symlinks', async () => {
-    const cwd = prepareSessionWorkspace('read-progress');
-    const file = path.join(cwd, 'progress.html');
-    await expect(readSessionProgress('read-progress', true)).resolves.toEqual({ state: 'empty' });
-    await fs.writeFile(file, '<h1>First</h1>');
-    const first = await readSessionProgress('read-progress', true);
-    await fs.writeFile(path.join(cwd, 'next.html'), '<h1>Next</h1>');
-    await fs.rename(path.join(cwd, 'next.html'), file);
-    const second = await readSessionProgress('read-progress', true);
-    expect(second).not.toEqual(first);
-    await fs.writeFile(file, 'x'.repeat(1024 * 1024 + 1));
-    await expect(readSessionProgress('read-progress', true)).rejects.toThrow('exceeds');
-    await fs.unlink(file);
-    await fs.symlink(path.join(cwd, 'AGENTS.md'), file);
-    await expect(readSessionProgress('read-progress', true)).rejects.toThrow();
+  it('removes the legacy progress switch but keeps user documents', async () => {
+    const cwd = sessionWorkspacePath('legacy-progress');
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.writeFile(path.join(cwd, '.pane-progress.json'), '{"enabled":true}');
+    await fs.writeFile(path.join(cwd, 'progress.html'), '<h1>Working</h1>');
+    prepareSessionWorkspace('legacy-progress');
+    await expect(fs.access(path.join(cwd, '.pane-progress.json'))).rejects.toThrow();
+    await expect(fs.readFile(path.join(cwd, 'progress.html'), 'utf8')).resolves.toBe('<h1>Working</h1>');
   });
 
 });

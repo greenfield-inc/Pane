@@ -458,7 +458,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
-            orchestrationSessionId={view.session.id} toolbarActions={sessionControls}
+            toolbarActions={sessionControls}
             overviewContent={<SessionOverviewPanel
             record={view.session}
             overview={overview}

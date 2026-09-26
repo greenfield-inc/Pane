@@ -50,7 +50,6 @@ export class ConfigManager extends EventEmitter {
       gitRepoPath: defaultGitPath || '',
       usePtyHost: process.platform === 'win32',
       verbose: false,
-      experimentalSessionProgress: false,
       anthropicApiKey: undefined,
       falApiKey: undefined,
       openRouterApiKey: undefined,
@@ -370,8 +369,12 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
-      if ('experimentalSessionProgress' in updates) {
-        decodeBoundary(updates.experimentalSessionProgress, boundary.boolean);
+      if (updates.agentContext !== undefined) {
+        decodeBoundary(updates.agentContext, boundary.object({
+          managedAgentsMd: boundary.optional(boundary.boolean),
+          homeSkill: boundary.optional(boundary.boolean),
+          defaultsVersion: boundary.optional(boundary.number),
+        }));
       }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);

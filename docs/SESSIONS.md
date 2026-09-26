@@ -312,24 +312,18 @@ Selecting a file opens an editor tab alongside the agent conversation. Panels
 are saved with the Session and reused when you reopen the tools; switching
 Sessions keeps their shells and files separate.
 
-## Experimental progress view
+## Reaching Pane and delegating work
 
-Off by default. Turn it on in **Settings → Advanced → Session progress view (Experimental)**.
-When an agent writes `progress.html` in its Session folder, Pane opens a resizable
-split beside the conversation, initially dividing the main area equally, and
-refreshes it during work. The icon-only Progress button independently hides or shows the
-brief. Files stays in its own resizable right sidebar, controlled by the top-bar
-sidebar toggle; both views can be open together. Session Settings and Progress
-sit as icon buttons on the right side of the top tab bar, with tooltips.
-The agent badge does not appear in the Session toolbar. Documents support self-contained HTML,
-inline CSS/SVG and data images, without scripts, navigation or network requests.
+The generated Session instructions tell the orchestrator how to reach
+`runpane` (PATH, then `$PANE_RUNPANE_BIN`, then the runtime context) and forbid
+substituting plain git worktrees or built-in subagents for delegated work; if
+`runpane` is unreachable the agent stops and reports it. Worktrees the
+orchestrator creates or adopts with `runpane panes create` or `panes adopt`
+become the Session's children in the same call.
 
-Generated Session instructions ask the agent to update progress after meaningful
-changes and before yielding, and to check `.pane-progress.json` before each update.
-Disabling the setting hides the view, stops refreshes and removes the maintenance
-instruction; existing HTML remains. Running agents may retain prior instructions
-until their next normal context reload. Opening a Session never submits a prompt
-or starts work just to create a progress page.
+Earlier development builds had an experimental progress view that rendered
+`progress.html` in a fixed side panel. It never shipped; Pane deletes its old
+`.pane-progress.json` switch and leaves any HTML files in place.
 
 New worktrees launched from a Session default to unpinned. First association also
 clears a worktree's previous pin so it appears as a Session child. You can pin it
@@ -338,7 +332,7 @@ worktree defaults and existing historical pins are unchanged.
 
 ### Generated instructions and Git
 
-Session instructions and progress pages live under `<PANE_DIR>/sessions/<id>/`,
+Session instructions and documents live under `<PANE_DIR>/sessions/<id>/`,
 outside the project. Session terminals set `GIT_CEILING_DIRECTORIES` to
 `<PANE_DIR>/sessions`, so git run in a Session folder never picks up a repository
 above it, such as a home directory tracked as a dotfiles repo. Do not configure
@@ -357,7 +351,7 @@ its branch, files, and uncommitted changes remain in place. Other tabs stay ther
 Cursor and custom launch wrappers are not yet supported for promotion. Missing
 history, conflicting ownership, and active work are rejected before transfer.
 A durable Session record allows reopening to complete an interrupted transfer
-without copying the conversation. Terminal, Files, and experimental progress
+without copying the conversation. Terminal and Files
 capabilities are the same as for a newly created Session.
 
 Promotion defaults to the worktree's current name.

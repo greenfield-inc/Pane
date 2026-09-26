@@ -149,8 +149,7 @@ async function installSessionsFixture(
   fixtureOptions: SessionFixtureOptions = {},
 ): Promise<void> {
   await installElectronApiMock(page, {
-    // The progress view is off by default; these fixtures cover it switched on.
-    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', experimentalSessionProgress: true, ...fixtureOptions.initialConfig },
+    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', ...fixtureOptions.initialConfig },
     initialProjects: [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
     initialSessions: paneSessions,
   });
@@ -1297,7 +1296,6 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
   const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
   await expect(titleBarControls.getByRole('button', { name: 'Session settings' })).toBeVisible();
-  await expect(titleBarControls.getByRole('button', { name: 'Show progress brief' })).toBeVisible();
   await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
@@ -1308,26 +1306,15 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
   await expect(page.getByTestId('window-title-bar').getByRole('button', { name: 'Hide details', exact: true })).toBeVisible();
   const sessionSettingsButton = page.getByRole('button', { name: 'Session settings', exact: true });
-  const progressButton = page.getByRole('button', { name: 'Show progress brief', exact: true });
-  const [settingsBox, progressBox, workspaceBox] = await Promise.all([
-    sessionSettingsButton.boundingBox(), progressButton.boundingBox(), page.locator('.pane-chat-shell').boundingBox(),
+  const [settingsBox, workspaceBox] = await Promise.all([
+    sessionSettingsButton.boundingBox(), page.locator('.pane-chat-shell').boundingBox(),
   ]);
-  expect(settingsBox && progressBox && workspaceBox && settingsBox.x).toBeGreaterThan(workspaceBox!.x + workspaceBox!.width / 2);
-  expect(progressBox && settingsBox && progressBox.x).toBeGreaterThan(settingsBox!.x);
+  expect(settingsBox && workspaceBox && settingsBox.x).toBeGreaterThan(workspaceBox!.x + workspaceBox!.width / 2);
   expect(settingsBox?.y).toBe(3);
-  expect(progressBox?.y).toBe(3);
-  await expect(progressButton.locator('svg')).toHaveClass(/lucide-chart-no-axes-combined/);
   await expect(sessionSettingsButton).toHaveText('');
-  await expect(progressButton).toHaveText('');
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   await sessionSettingsButton.hover();
   await expect(page.getByRole('tooltip')).toContainText('Session settings');
-  await progressButton.hover();
-  await expect(page.getByRole('tooltip')).toContainText('Show progress brief');
-  await page.getByRole('button', { name: 'Show progress brief', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
-  await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
-  await page.getByRole('button', { name: 'Hide progress brief', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
   const readPanels = () => page.evaluate(async () => {
     const response = await window.electronAPI.panels.getSessionPanels('__orchestration_session_toolsterminal__');
@@ -1337,13 +1324,10 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
     { id: 'mock-panel-1', type: 'terminal', title: 'Terminal' },
     { id: 'mock-panel-2', type: 'explorer', title: 'Files' },
   ]);
-  await page.getByRole('button', { name: 'Show progress brief', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
   const fileTab = sessionTabs.getByRole('tab', { name: 'notes.txt', exact: true });
   await expect(fileTab).toBeVisible();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
   const closeFile = sessionTabs.getByRole('button', { name: 'Close notes.txt' });
   await expect(closeFile).toHaveCSS('opacity', '1');
   await activeTab.click();
@@ -1357,7 +1341,6 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await closeFile.click();
   await expect(fileTab).toHaveCount(0);
   await expect(activeTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toBeVisible();
   await expect.poll(readPanels).toHaveLength(2);
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
@@ -1378,61 +1361,4 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect.poll(readPanels).toHaveLength(3);
-});
-
-test('experimental progress opens, refreshes, stays isolated and can be disabled', async ({ page }, testInfo) => {
-  await installSessionsFixture(page, [sessionFixture('progress', 'Progress demo', '', '', new Date(0).toISOString())]);
-  await page.addInitScript(() => {
-    const originalInvoke = window.electronAPI.invoke;
-    Object.assign(window.electronAPI, {
-      invoke: (channel: string, ...args: unknown[]) => {
-        if (channel === 'orchestration-sessions:progress') {
-          const html = localStorage.getItem('test-progress-html');
-          return Promise.resolve({ success: true, data: html ? { state: 'ready', html, revision: html } : { state: 'empty' } });
-        }
-        return originalInvoke(channel, ...args);
-      },
-    });
-  });
-  await page.goto('/');
-  await page.getByTestId('orchestration-session-progress').click();
-  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toHaveCount(0);
-  await page.evaluate(() => localStorage.setItem('test-progress-html', '<h1>Investigating</h1><script>parent.document.body.textContent="unsafe"</script><a href="https://example.com">Link</a>'));
-  const frame = page.frameLocator('iframe[title="Session progress"]');
-  await expect(frame.getByRole('heading', { name: 'Investigating' })).toBeVisible();
-  await expect(page.locator('iframe[title="Session progress"]')).toHaveAttribute('sandbox', '');
-  await expect(frame.locator('a')).not.toHaveAttribute('href');
-  await page.evaluate(() => localStorage.setItem('test-progress-html', '<h1>Complete</h1><p>All checks passed.</p>'));
-  await expect(frame.getByRole('heading', { name: 'Complete' })).toBeVisible();
-  const screenshot = testInfo.outputPath('session-progress.png');
-  await page.screenshot({ path: screenshot });
-  await testInfo.attach('session-progress.png', { path: screenshot, contentType: 'image/png' });
-  await page.getByRole('button', { name: 'Hide progress brief', exact: true }).click();
-  await page.evaluate(() => localStorage.setItem('test-progress-html', '<h1>Next task</h1>'));
-  await expect(page.getByRole('button', { name: 'Show progress brief', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  await page.getByRole('button', { name: 'Show progress brief', exact: true }).click();
-  await expect(frame.getByRole('heading', { name: 'Next task' })).toBeVisible();
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  await page.getByRole('tab', { name: 'Files', exact: true }).click();
-  const files = page.getByRole('complementary', { name: 'Session files' });
-  const brief = page.getByRole('complementary', { name: 'Session progress view' });
-  await expect(files).toBeVisible();
-  await expect(brief).toBeVisible();
-  const filesBox = await files.boundingBox();
-  const briefBox = await brief.boundingBox();
-  expect(filesBox).not.toBeNull();
-  expect(briefBox).not.toBeNull();
-  if (!filesBox || !briefBox) throw new Error('Missing independent panel bounds');
-  expect(filesBox.x).toBeGreaterThanOrEqual(briefBox.x + briefBox.width - 1);
-  await page.screenshot({ path: testInfo.outputPath('session-brief-and-files.png') });
-  await page.getByRole('button', { name: 'Hide details', exact: true }).click();
-  await expect(brief).toBeVisible();
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const settings = page.getByRole('dialog', { name: 'Pane Settings' });
-  await settings.getByRole('button', { name: 'Advanced', exact: true }).click();
-  await settings.getByRole('switch', { name: 'Session progress view (Experimental)' }).click();
-  await settings.getByRole('button', { name: 'Close modal' }).click();
-  await expect(page.getByRole('complementary', { name: 'Session progress view' })).toHaveCount(0);
-  await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
 });
