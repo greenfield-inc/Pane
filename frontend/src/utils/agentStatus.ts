@@ -2,8 +2,8 @@ import type { AgentDisplayStatus, AgentState } from '../../../shared/types/agent
 
 /**
  * Roll several panel {@link AgentState}s up into one, with precedence
- * blocked > working > idle. Returns `unknown` when no agent panel is tracked
- * (e.g. a session with only plain-shell panels), so callers can hide the badge.
+ * blocked > working > idle. Returns `unknown` before any terminal status is
+ * available. Plain shells participate through generic activity detection.
  */
 export function rollupAgentState(states: Array<AgentState | undefined>): AgentState {
   let sawWorking = false;

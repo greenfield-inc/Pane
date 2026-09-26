@@ -3,15 +3,10 @@
  *
  * Owns per-panel status trackers and arbitrates a published {@link AgentState}
  * from three signals: the screen/OSC {@link AgentDetectionResult}, recent PTY
- * byte-activity (the "working" authority), and elapsed time. It is deliberately
- * timer-free and clock-injectable — the caller re-evaluates on PTY output and on
- * a short poll, so debounce/grace windows resolve purely from timestamps, which
- * keeps the machine fully unit-testable.
- *
- * Arbitration precedence: a visible blocker wins immediately; otherwise recent
- * activity (or a working detection) means working; otherwise idle. PTY activity
- * stays authoritative for a measured settle window, and a single trailing chunk
- * cannot wake an already-idle panel unless working chrome is visible.
+ * byte-activity, and elapsed time. It is timer-free and clock-injectable.
+ * Explicit blockers and working chrome win first, then reliable idle evidence.
+ * Activity is a fallback when there is no live chrome, or extends existing work
+ * behind a weak prompt (Claude keeps its composer visible during a turn).
  */
 
 import type { AgentDetectionResult, AgentState } from '../../../../shared/types/agentStatus';
@@ -19,7 +14,7 @@ import type { AgentDetectionResult, AgentState } from '../../../../shared/types/
 export interface AgentStatusMonitorOptions {
   /** How long PTY activity keeps a panel working before it may settle idle. */
   idleSettleMs?: number;
-  /** Idle is suppressed for this long after a panel registers. */
+  /** Ignore unclassified boot output for this long after registration. */
   startupGraceMs?: number;
 }
 
@@ -28,6 +23,7 @@ interface PanelTracker {
   lastActivityAt: number | undefined;
   activityChunksInBurst: number;
   published: AgentState | undefined;
+  startupGraceMs: number;
 }
 
 const AGENT_IDLE_SETTLE_MS = 10_000;
@@ -46,12 +42,13 @@ export class AgentStatusMonitor {
   }
 
   /** Begin tracking an agent panel. Only registered panels ever emit. */
-  register(panelId: string, now: number): void {
+  register(panelId: string, now: number, startupGraceMs = this.options.startupGraceMs): void {
     this.trackers.set(panelId, {
       startedAt: now,
       lastActivityAt: undefined,
       activityChunksInBurst: 0,
       published: undefined,
+      startupGraceMs,
     });
   }
 
@@ -72,6 +69,10 @@ export class AgentStatusMonitor {
   noteActivity(panelId: string, now: number): void {
     const tracker = this.trackers.get(panelId);
     if (!tracker) return;
+
+    // Boot banners and shell prompt setup are not evidence of a task. Explicit
+    // agent working chrome still takes effect immediately, including at startup.
+    if (now - tracker.startedAt < tracker.startupGraceMs && tracker.published !== 'working') return;
 
     const startsNewBurst =
       tracker.lastActivityAt === undefined || now - tracker.lastActivityAt >= this.options.idleSettleMs;
@@ -94,24 +95,34 @@ export class AgentStatusMonitor {
     // Agent-owned viewer (transcript/model picker): hold the known state.
     if (detection.skipStateUpdate) return null;
 
-    const { idleSettleMs, startupGraceMs } = this.options;
+    const { idleSettleMs } = this.options;
     const recentlyActive =
       tracker.lastActivityAt !== undefined && now - tracker.lastActivityAt < idleSettleMs;
     const activityCanPublishWorking =
-      tracker.published !== 'idle' || tracker.activityChunksInBurst >= 2;
+      (tracker.published === 'working' || detection.matchedRuleId === null) &&
+      (tracker.published !== 'idle' || tracker.activityChunksInBurst >= 2);
+
+    // A blank boot screen is not yet an idle agent. Keep the initial unknown
+    // state until live chrome appears or the startup grace expires.
+    if (now - tracker.startedAt < tracker.startupGraceMs &&
+        detection.matchedRuleId === null && !recentlyActive &&
+        !detection.visibleWorking && !detection.visibleIdle && detection.state !== 'blocked') return null;
 
     let candidate: AgentState;
     if (detection.state === 'blocked') {
       candidate = 'blocked';
-    } else if (detection.visibleWorking || (recentlyActive && activityCanPublishWorking)) {
+    } else if (detection.visibleWorking) {
+      candidate = 'working';
+      // Visible work is activity evidence too, even before boot output is trusted.
+      tracker.lastActivityAt = now;
+    } else if (detection.visibleIdle) {
+      candidate = 'idle';
+      tracker.lastActivityAt = undefined;
+      tracker.activityChunksInBurst = 0;
+    } else if (recentlyActive && activityCanPublishWorking) {
       candidate = 'working';
     } else {
       candidate = 'idle';
-    }
-
-    // Startup grace: a freshly launched agent shouldn't flash idle before it boots.
-    if (candidate === 'idle' && now - tracker.startedAt < startupGraceMs) {
-      candidate = tracker.published ?? 'working';
     }
 
     if (tracker.published === candidate) return null;
