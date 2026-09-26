@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Globe, ArrowLeft, ArrowRight, RotateCw, Loader2 } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
@@ -29,7 +29,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const panelRef = useRef(panel);
-  panelRef.current = panel;
+  useLayoutEffect(() => {
+    panelRef.current = panel;
+  }, [panel]);
   const lastPersistedUrlRef = useRef(currentUrlFromPanelState);
 
   // Track the page webContentsId for DevTools IPC calls
