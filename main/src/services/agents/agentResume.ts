@@ -10,11 +10,12 @@ import { CliAgentType } from './agentIdentity';
 export function resolveResumeId(
   agentType: CliAgentType | undefined,
   panelId: string,
-  state: Pick<TerminalPanelState, 'agentSessionId'>,
+  state: Pick<TerminalPanelState, 'agentSessionId' | 'customResume'>,
 ): string | undefined {
+  if (state.customResume) return state.agentSessionId;
   switch (agentType) {
     case 'claude':
-      return panelId;
+      return state.agentSessionId ?? panelId;
     case 'codex':
       return state.agentSessionId ?? 'interactive';
     case 'cursor':

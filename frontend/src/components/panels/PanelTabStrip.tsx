@@ -39,6 +39,8 @@ export interface PanelTabStripProps {
   isFocused?: boolean;
   /** Show shortcut hints (only for primary group in PanelTabBar). */
   showShortcutHints?: boolean;
+  /** Keep close buttons visible when the strip lives in window chrome. */
+  alwaysShowClose?: boolean;
   /**
    * Visual variant: 'bar' is the full-size strip used by the primary tab bar;
    * 'compact' is the slim treatment used by the group strip rows on split
@@ -105,6 +107,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   isPrimary = false,
   isFocused = false,
   showShortcutHints = false,
+  alwaysShowClose = false,
   variant = 'bar',
   onDragStart,
   onDragEnd,
@@ -460,7 +463,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 type="button"
                 aria-label={`Close ${displayTitle}`}
                 className={cn(
-                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                   compact ? "right-1" : "right-1.5",
                 )}
                 onClick={(e) => handlePanelClose(e, panel)}

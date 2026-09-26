@@ -7,6 +7,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { boundary, decodeBoundary } from '../../shared/validation/boundaryDecoder';
 import type { PaneEventArgument } from './core/eventSink';
+import { customCommandResumeSchema } from '../../shared/types/customCommandResume';
 
 const launchHeadlessDaemon = hasHeadlessDaemonLaunchArg();
 const launchRemoteSetup = hasRemoteSetupLaunchArg();
@@ -1464,10 +1465,11 @@ if (launchRemoteSetup) {
       const resumeState = decodeBoundary(customState, boundary.object({
         agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
         initialCommand: boundary.optional(boundary.string),
+        customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
       }));
       const agentType = resumeState.agentType ?? resolveAgentTypeFromCommand(resumeState.initialCommand);
 
-      if (isCliAgentType(agentType)) {
+      if (isCliAgentType(agentType) || resumeState.customResume) {
         panel.state.customState = { ...customState, wasInterrupted: true, agentType };
         await panelManager.updatePanel(panelId, { state: panel.state });
 

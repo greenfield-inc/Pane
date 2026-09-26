@@ -272,6 +272,17 @@ class PanelManager {
     });
   }
   
+  async movePanel(panelId: string, sourceId: string, targetId: string): Promise<void> {
+    await withLock(`panel-update-${panelId}`, async () => {
+      const panel = this.getPanel(panelId);
+      if (!panel || panel.sessionId !== sourceId) throw new Error('Chat ownership changed');
+      databaseService.movePanel(panelId, sourceId, targetId);
+      panel.sessionId = targetId;
+      this.sendRendererEvent('panel:deleted', { panelId, sessionId: sourceId });
+      this.sendRendererEvent('panel:created', panel);
+    });
+  }
+
   async updatePanel(panelId: string, updates: Partial<ToolPanel>): Promise<void> {
     return await withLock(`panel-update-${panelId}`, async () => {
       const panel = this.getPanel(panelId);

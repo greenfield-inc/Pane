@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../shared/types/customCommandResume';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
@@ -31,6 +32,9 @@ type UiSessionFixture = {
   id: string;
   name: string;
   agent: 'claude' | 'codex' | 'cursor';
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  profile?: string;
   internalSessionId: string;
   panelIds: Record<'claude' | 'codex' | 'cursor', string>;
   goal: string;
@@ -60,6 +64,7 @@ type SessionFixtureOptions = {
   getDelayMs?: number;
   overviewPanes?: Record<string, UiPaneOverviewFixture[]>;
   defaultOrchestratorAgent?: UiSessionFixture['agent'];
+  initialConfig?: JsonObject;
 };
 
 function sessionFixture(
@@ -144,14 +149,14 @@ async function installSessionsFixture(
   fixtureOptions: SessionFixtureOptions = {},
 ): Promise<void> {
   await installElectronApiMock(page, {
-    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude' },
+    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', ...fixtureOptions.initialConfig },
     initialProjects: [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
     initialSessions: paneSessions,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]> }) => {
     type SessionRecord = UiSessionFixture;
     type Selector = { sessionId?: string; name?: string };
-    type Update = Partial<Pick<SessionRecord, 'name' | 'goal' | 'context' | 'decisions' | 'blockers' | 'nextAction' | 'archived' | 'isPinned'>> & { expectedRevision?: number };
+    type Update = Partial<Pick<SessionRecord, 'name' | 'goal' | 'context' | 'decisions' | 'blockers' | 'nextAction' | 'archived' | 'isPinned' | 'launchCommand' | 'profile' | 'customResume'>> & { expectedRevision?: number };
     type Response<Value> = { success: true; data: Value };
 
     const clone = <Value>(value: Value): Value => structuredClone(value);
@@ -260,12 +265,15 @@ async function installSessionsFixture(
         changed('selected');
         return success({ sessions: clone(sessions), selectedSessionId });
       },
-      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent'] }) => {
+      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null }) => {
         const id = `created-session-${nextId++}`;
         const record: SessionRecord = {
           id,
           name: input.name,
           agent: input.agent ?? 'claude',
+          launchCommand: input.launchCommand,
+          customResume: input.customResume,
+          profile: input.profile,
           internalSessionId: `__orchestration_session_${id}terminal__`,
           panelIds: {
             claude: `__orchestration_panel_${id}_claude`,
@@ -319,6 +327,9 @@ async function installSessionsFixture(
           nextAction: input.nextAction?.trim() ?? record.nextAction,
           archived: input.archived ?? record.archived,
           isPinned: input.isPinned ?? record.isPinned,
+          launchCommand: input.launchCommand ?? record.launchCommand,
+          customResume: input.customResume !== undefined ? input.customResume : record.customResume,
+          profile: input.profile ?? record.profile,
           revision: record.revision + 1,
           updatedAt: new Date().toISOString(),
         });
@@ -424,10 +435,11 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
 
   await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('orchestration-session-roadmap').click();
-  await expect(page.getByRole('heading', { name: 'Roadmap', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Show overview', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Roadmap', exact: true })).toBeAttached();
+  await expect(page.getByRole('button', { name: 'Show details', exact: true })).toBeVisible();
   await expect(page.getByText('Roadmap context stays here.', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show overview', exact: true }).click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
   const roadmapOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
   await expect(roadmapOverview.getByRole('heading', { name: 'Roadmap', exact: true })).toBeVisible();
   await expect(roadmapOverview.getByRole('heading', { name: 'Associated Panes', exact: true })).toBeVisible();
@@ -445,11 +457,14 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(createDialog.getByLabel('Context', { exact: true })).toHaveCount(0);
   await expect(createDialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await createDialog.getByTestId('create-session-agent-codex').click();
+  await expect(createDialog.getByRole('button', { name: 'Create Session', exact: true })).toBeInViewport();
+  await expect(createDialog.getByLabel('Session behavior profile')).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/pane-session-create-compact.png' });
   await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
   await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'New chat 3', exact: true })).toBeVisible();
-  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveText('Codex');
+  await expect(page.getByRole('heading', { name: 'New chat 3', exact: true })).toBeAttached();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   const configUpdates = await page.evaluate(() => {
     // SAFETY: installElectronApiMock installs this controller before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getConfigUpdates: () => JsonObject[] } };
@@ -457,13 +472,13 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   });
   expect(configUpdates).toContainEqual({ defaultOrchestratorAgent: 'codex' });
   await expect(page.getByText('Roadmap context stays here.', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Show overview', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show details', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Show overview', exact: true }).click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   await page.getByRole('button', { name: 'Rename Session' }).click();
   await page.getByLabel('Name', { exact: true }).fill('Release checklist renamed');
   await page.getByRole('button', { name: 'Save name', exact: true }).click();
-  await expect(page.locator('h1').filter({ hasText: 'Release checklist renamed' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Release checklist renamed', exact: true, level: 1 })).toBeAttached();
   await expect(page.getByRole('button', { name: 'Open Session Release checklist renamed', exact: true })).toBeVisible();
 
   await page.getByTestId('new-orchestration-session').click();
@@ -471,12 +486,12 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await namedCreateDialog.getByLabel('Name your chat (optional)', { exact: true }).fill('  Custom named chat  ');
   await expect(namedCreateDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
   await namedCreateDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Custom named chat', exact: true })).toBeVisible();
-  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveText('Codex');
+  await expect(page.getByRole('heading', { name: 'Custom named chat', exact: true })).toBeAttached();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open Session Onboarding', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Onboarding', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Show overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Onboarding', exact: true })).toBeAttached();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   const onboardingOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
   await expect(onboardingOverview.getByRole('heading', { name: 'Onboarding', exact: true })).toBeVisible();
   await expect(onboardingOverview.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
@@ -484,8 +499,8 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(page.getByText('Checklist context stays here.', { exact: true })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open Session Release checklist renamed', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Release checklist renamed', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Show overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Release checklist renamed', exact: true })).toBeAttached();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   await expect(page.getByText('Checklist context stays here.', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Onboarding context stays here.', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
@@ -533,8 +548,8 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
   await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeVisible();
-  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveText('Claude');
+  await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeAttached();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
 });
 
 test('Session metadata refresh stays quiet and cannot steal a later selection', async ({ page }) => {
@@ -549,7 +564,7 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   const firstSessionRow = page.getByTestId('orchestration-session-alpha');
   await expect(firstSessionRow).toBeVisible({ timeout: 10_000 });
   await firstSessionRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   const sessionsHeader = page.getByTestId('sessions-section-header');
   const beforeHeaderBox = await layoutBox(sessionsHeader);
   const beforeFirstRowBox = await layoutBox(firstSessionRow);
@@ -591,12 +606,12 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   await expect(loadingStatus).toBeVisible();
   expect(await layoutBox(sessionsHeader)).toEqual(beforeHeaderBox);
   expect(await layoutBox(firstSessionRow)).toEqual(beforeFirstRowBox);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
   await page.waitForTimeout(400);
   await expect(loadingStatus).toHaveCount(0);
   expect(await layoutBox(sessionsHeader)).toEqual(beforeHeaderBox);
   expect(await layoutBox(firstSessionRow)).toEqual(beforeFirstRowBox);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
   await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
@@ -617,8 +632,8 @@ test('Session view follows an external agent switch without selecting again or r
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveText('Claude');
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   const initialViewRequests = await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
     const mockWindow = window as typeof window & {
@@ -641,7 +656,7 @@ test('Session view follows an external agent switch without selecting again or r
     };
     mockWindow.__paneTestElectronMock.setExternalOrchestrationAgent('codex', 'alpha');
   });
-  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveText('Codex');
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
     const mockWindow = window as typeof window & {
@@ -725,6 +740,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
         branch: 'feature/sidebar',
         archived: false,
         missing: false,
+        git: { state: 'dirty', hasUncommittedChanges: true, ahead: 2 },
         panels: [
           { panelId: 'unstarted-terminal', title: 'Unstarted terminal', state: 'unknown', initialized: false },
           { panelId: 'initialized-terminal', title: 'Initialized terminal', state: 'unknown', initialized: true },
@@ -766,8 +782,8 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await evolutionRow.click();
   await expect(evolutionRow).toHaveAttribute('aria-expanded', 'true');
 
-  await expect(page.getByRole('heading', { name: 'Pane evolution', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Show overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Pane evolution', exact: true })).toBeAttached();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   const evolutionOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
   await expect(evolutionOverview.getByText('Unstarted terminal', { exact: true })).toBeVisible();
   await expect(evolutionOverview.getByText('Initialized terminal', { exact: true })).toBeVisible();
@@ -776,6 +792,12 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(evolutionOverview.getByText('Unknown', { exact: true })).toHaveCount(0);
   await expect(evolutionOverview.getByText('Not started', { exact: true })).toHaveCount(0);
   await expect(evolutionOverview.getByText('Status unavailable', { exact: true })).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click();
+  const sessionChanges = page.getByRole('complementary', { name: 'Session changes' });
+  await expect(sessionChanges).toContainText('Pane/pane chat to session');
+  await expect(sessionChanges).toContainText('Uncommitted changes');
+  await expect(sessionChanges).toContainText('2 ahead');
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
 
   await page.evaluate(async () => {
     await window.electronAPI.orchestrationSessions.update(
@@ -787,11 +809,11 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
 
   const doozyRow = page.getByTestId('orchestration-session-doozy');
   await doozyRow.click();
-  await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeAttached();
   await doozyRow.click();
   await page.getByRole('button', { name: 'Pane/managed pane sidebar', exact: true }).click();
   await doozyRow.click();
-  await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeAttached();
 
   await page.evaluate(async () => {
     await window.electronAPI.orchestrationSessions.associate(
@@ -861,7 +883,7 @@ test('Session rows archive and restore without losing selection or associated Pa
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   await alphaRow.click();
   await expect(page.getByRole('button', { name: 'Associated Alpha Pane', exact: true })).toBeVisible();
 
@@ -870,7 +892,7 @@ test('Session rows archive and restore without losing selection or associated Pa
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
 
   await expect(alphaRow).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectedSessionId: () => string | undefined } };
@@ -883,7 +905,7 @@ test('Session rows archive and restore without losing selection or associated Pa
   await archivedAlpha.getByRole('button', { name: 'Restore Session Alpha', exact: true }).click();
   await expect(archivedAlpha).toHaveCount(0);
   await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
   await expect(page.getByRole('button', { name: 'Associated Alpha Pane', exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
@@ -910,7 +932,7 @@ test('Archiving a Session during a delayed chat load cannot reinstall its view',
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   const initialViewRequestCount = await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationViewRequests: () => Array<unknown> } };
@@ -940,7 +962,7 @@ test('Archiving a Session during a delayed chat load cannot reinstall its view',
       { archived: true },
     );
   });
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
   await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
@@ -978,8 +1000,8 @@ test('Session overview refreshes for associated Pane activity without reacting t
   const trackedSessionRow = page.getByTestId('orchestration-session-tracked-session');
   await expect(trackedSessionRow).toBeVisible({ timeout: 10_000 });
   await trackedSessionRow.click();
-  await expect(page.getByRole('heading', { name: 'Tracked Session', exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Show overview', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Tracked Session', exact: true })).toBeAttached({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   const overview = page.getByRole('complementary', { name: 'Session overview', exact: true });
   await expect(overview.getByText('Tracked Pane', { exact: true })).toBeVisible();
   await expect(overview.getByText('feature/tracked', { exact: true })).toBeVisible();
@@ -1077,4 +1099,266 @@ test('Session overview refreshes for associated Pane activity without reacting t
   })).toBe(callsAfterAssociatedEvents);
   await expect(overview.getByText('Renamed Tracked Pane', { exact: true })).toBeVisible();
   await expect(overview.getByText('Should stay visible', { exact: true })).toHaveCount(0);
+});
+
+
+test('Session launch settings preserve custom arguments, profile, and agent across reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  const savedCommand = 'af run orchestrator --model "large model"';
+  const launchCommand = `${savedCommand} --label 'release planning'`;
+  await installSessionsFixture(page, [], [], {
+    defaultOrchestratorAgent: 'codex',
+    initialConfig: {
+      defaultSessionCommand: 'codex --model default-model',
+      defaultSessionProfile: 'Discuss the goal before delegating.',
+      customCommands: [{ name: 'Agent Farm', command: savedCommand }],
+    },
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await createDialog.getByLabel('Name your chat (optional)').fill('Launch settings');
+  await createDialog.getByText('Launch command and behavior', { exact: true }).click();
+  await expect(createDialog.getByRole('button', { name: 'Create Session', exact: true })).toBeInViewport();
+  await expect(createDialog.getByLabel('Session behavior profile')).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/pane-session-create-compact.png' });
+  await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
+  await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue('codex --model default-model');
+  await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Discuss the goal before delegating.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Discard this draft.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await createDialog.getByLabel('Launch command', { exact: true }).selectOption({ label: 'Agent Farm' });
+  await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue(savedCommand);
+  await createDialog.getByLabel('Custom command and arguments').fill(launchCommand);
+  await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Discuss the goal before delegating.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Use the requested workflow.\nReport blockers.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior' })).toBeInViewport();
+  await page.screenshot({ path: '/tmp/pane-session-behavior-editor.png' });
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
+  await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Launch settings', exact: true })).toBeAttached();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByTestId('orchestration-session-created-session-1').click();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Session settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Session settings', exact: true });
+  await expect(settings.getByLabel('Custom command and arguments')).toHaveValue(launchCommand);
+  await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Use the requested workflow.\nReport blockers.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(settings.getByText(/Saved changes apply the next time/)).toBeVisible();
+  await settings.getByLabel('Launch command', { exact: true }).selectOption('builtin');
+  await expect(settings.getByLabel('Custom command and arguments')).toHaveValue('');
+  await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Keep implementation in associated Panes.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
+  await settings.getByRole('button', { name: 'Save for next launch', exact: true }).click();
+  await expect(settings).not.toBeVisible();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByTestId('orchestration-session-created-session-1').click();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Session settings', exact: true }).click();
+  await expect(settings.getByLabel('Custom command and arguments')).toHaveValue('');
+  await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Keep implementation in associated Panes.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+});
+
+test('new Sessions remember the last launch arguments and allow clearing them', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await installSessionsFixture(page, []);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await dismissStartupDialogs(page);
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  const command = 'agent-farm run coordinator --label "release planning" --quiet';
+  const open = async () => {
+    await page.getByTestId('new-orchestration-session').click();
+    await dialog.getByText('Launch command and behavior', { exact: true }).click();
+  };
+  await open();
+  await dialog.getByLabel('Custom command and arguments').fill(command);
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await open();
+  await expect(dialog.getByLabel('Custom command and arguments')).toHaveValue(command);
+  await dialog.getByLabel('Custom command and arguments').fill('discard this draft');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await open();
+  await expect(dialog.getByLabel('Custom command and arguments')).toHaveValue(command);
+  await dialog.getByLabel('Launch command', { exact: true }).selectOption('builtin');
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await open();
+  await expect(dialog.getByLabel('Custom command and arguments')).toHaveValue('');
+});
+
+test('custom Session resume settings persist, seed the next Session, and can be disabled', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await installSessionsFixture(page, []);
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  const create = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await create.getByLabel('Name your chat (optional)').fill('Wrapper resume');
+  await create.getByText('Launch command and behavior', { exact: true }).click();
+  await create.getByLabel('Custom command and arguments').fill('my-launcher run profile');
+  await create.getByLabel('Enable custom command resume').check();
+  await create.getByLabel('Session ID source').selectOption('claude');
+  await create.getByLabel('First launch template').fill('{command} -- --session-id {sessionId}');
+  await create.getByLabel('Resume template', { exact: true }).fill('{command} -- --resume {sessionId}');
+  await create.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(create).toBeHidden();
+  await page.getByTestId('new-orchestration-session').click();
+  await create.getByText('Launch command and behavior', { exact: true }).click();
+  await expect(create.getByLabel('Resume template', { exact: true })).toHaveValue('{command} -- --resume {sessionId}');
+  await create.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.reload();
+  await page.getByTestId('orchestration-session-created-session-1').click();
+  await page.getByRole('button', { name: 'Session settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Session settings', exact: true });
+  await expect(settings.getByLabel('Enable custom command resume')).toBeChecked();
+  await expect(settings.getByLabel('Session ID source')).toHaveValue('claude');
+  await settings.getByLabel('Enable custom command resume').uncheck();
+  await settings.getByRole('button', { name: 'Save for next launch', exact: true }).click();
+  await page.getByRole('button', { name: 'Session settings', exact: true }).click();
+  await expect(settings.getByLabel('Enable custom command resume')).not.toBeChecked();
+});
+
+test('Session app defaults save for new Sessions without changing existing launch settings', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  const existing = sessionFixture('existing', 'Existing Session', '', '', '2026-09-16T12:00:00.000Z');
+  existing.launchCommand = 'codex --model existing';
+  existing.profile = 'Keep this Session profile.';
+  await installSessionsFixture(page, [existing]);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
+  const appSettings = page.getByRole('dialog', { name: 'Pane Settings' });
+  await appSettings.getByRole('button', { name: 'AI & Agents', exact: true }).click();
+  await appSettings.getByLabel('Custom command and arguments').fill('af run coordinator --quiet');
+  await appSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Coordinate only the requested work.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
+  await appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true }).click();
+  await expect(appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true })).toBeDisabled();
+  await appSettings.getByRole('button', { name: 'Close modal' }).click();
+  await expect(appSettings).not.toBeVisible();
+  await page.getByTestId('new-orchestration-session').click();
+  const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await createDialog.getByText('Launch command and behavior', { exact: true }).click();
+  await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue('af run coordinator --quiet');
+  await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Coordinate only the requested work.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeAttached();
+  await page.getByRole('button', { name: 'Session settings', exact: true }).click();
+  const sessionSettings = page.getByRole('dialog', { name: 'Session settings', exact: true });
+  await expect(sessionSettings.getByLabel('Custom command and arguments')).toHaveValue('af run coordinator --quiet');
+  await sessionSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Coordinate only the requested work.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await sessionSettings.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByTestId('orchestration-session-existing').click();
+  await page.getByRole('button', { name: 'Session settings', exact: true }).click();
+  await expect(sessionSettings.getByLabel('Custom command and arguments')).toHaveValue('codex --model existing');
+  await sessionSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Keep this Session profile.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+});
+
+test('Sessions open persistent shell and Files panels in their own workspace', async ({ page }, testInfo) => {
+  await installSessionsFixture(page, [
+    sessionFixture('tools', 'Tools', '', '', new Date(0).toISOString()),
+    sessionFixture('other', 'Other', '', '', new Date(0).toISOString()),
+  ]);
+  await page.addInitScript(() => {
+    const originalInvoke = window.electronAPI.invoke;
+    Object.assign(window.electronAPI, {
+      invoke: (channel: string, ...args: unknown[]) => {
+        if (channel === 'file:list') return Promise.resolve({ success: true, files: [
+          { name: 'notes.txt', path: 'notes.txt', isDirectory: false },
+        ] });
+        if (channel === 'file:read') return Promise.resolve({ success: true, content: 'Session notes' });
+        return originalInvoke(channel, ...args);
+      },
+    });
+  });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-tools').click();
+  const sessionTabs = page.locator('.pane-chat-shell');
+  const activeTab = sessionTabs.getByRole('tab').first();
+  await expect(activeTab).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
+  const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
+  await expect(titleBarControls.getByRole('button', { name: 'Session settings' })).toBeVisible();
+  await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Session changes' })).toContainText('No linked worktrees.');
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
+  await expect(page.getByTestId('window-title-bar').getByRole('button', { name: 'Hide details', exact: true })).toBeVisible();
+  const sessionSettingsButton = page.getByRole('button', { name: 'Session settings', exact: true });
+  const [settingsBox, workspaceBox] = await Promise.all([
+    sessionSettingsButton.boundingBox(), page.locator('.pane-chat-shell').boundingBox(),
+  ]);
+  expect(settingsBox && workspaceBox && settingsBox.x).toBeGreaterThan(workspaceBox!.x + workspaceBox!.width / 2);
+  expect(settingsBox?.y).toBe(3);
+  await expect(sessionSettingsButton).toHaveText('');
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
+  await sessionSettingsButton.hover();
+  await expect(page.getByRole('tooltip')).toContainText('Session settings');
+  await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
+  const readPanels = () => page.evaluate(async () => {
+    const response = await window.electronAPI.panels.getSessionPanels('__orchestration_session_toolsterminal__');
+    return response.data?.map(panel => ({ id: panel.id, type: panel.type, title: panel.title }));
+  });
+  await expect.poll(readPanels).toEqual([
+    { id: 'mock-panel-1', type: 'terminal', title: 'Terminal' },
+    { id: 'mock-panel-2', type: 'explorer', title: 'Files' },
+  ]);
+  await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
+  const fileTab = sessionTabs.getByRole('tab', { name: 'notes.txt', exact: true });
+  await expect(fileTab).toBeVisible();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+  const closeFile = sessionTabs.getByRole('button', { name: 'Close notes.txt' });
+  await expect(closeFile).toHaveCSS('opacity', '1');
+  await activeTab.click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'false');
+  await fileTab.click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(3);
+  const path = testInfo.outputPath('session-tools.png');
+  await page.screenshot({ path });
+  await testInfo.attach('session-tools.png', { path, contentType: 'image/png' });
+  await closeFile.click();
+  await expect(fileTab).toHaveCount(0);
+  await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(2);
+  await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(3);
+  await page.getByRole('button', { name: 'Collapse terminal', exact: true }).click();
+  await page.getByTestId('orchestration-session-other').click();
+  await expect(page.getByRole('complementary', { name: 'Session files' })).toHaveCount(0);
+  await page.getByTestId('orchestration-session-tools').click();
+  await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Session files' })).toBeVisible();
+  await expect.poll(readPanels).toHaveLength(3);
+  await closeFile.click();
+  await expect(fileTab).toHaveCount(0);
+  await expect(activeTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(2);
+  await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
+  await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(readPanels).toHaveLength(3);
 });

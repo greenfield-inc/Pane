@@ -55,7 +55,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'AI & Agents',
     description: 'Agent defaults, context, and CLI installations.',
     icon: Bot,
-    settingIds: ['default-pane-chat-agent', 'agent-context', 'claude-executable'],
+    settingIds: ['default-pane-chat-agent', 'agent-context', 'session-defaults', 'claude-executable'],
     aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md'],
   },
   {

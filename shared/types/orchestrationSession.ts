@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
 import type { ToolPanel } from './panels';
@@ -61,6 +62,8 @@ export interface OrchestrationActivity {
 }
 
 export interface OrchestrationSessionRecord {
+  /** Durable recovery anchor for an in-place conversation transfer. */
+  promotedFrom?: { paneId: string; panelId: string };
   id: string;
   name: string;
   /** Durable UI archive marker. Older records omit this field and read as active. */
@@ -68,6 +71,11 @@ export interface OrchestrationSessionRecord {
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
   isPinned?: boolean;
   agent: PaneChatAgent;
+  /** Empty uses the selected built-in agent command. */
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  /** Snapshot of the behavior profile, independent of app defaults. */
+  profile?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
   internalSessionId: string;
   /** Deterministic terminal panel for each supported agent. */
@@ -157,6 +165,9 @@ export interface OrchestrationSessionOverview {
 export interface OrchestrationSessionCreateInput {
   name: string;
   agent?: PaneChatAgent;
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  profile?: string;
   goal?: string;
   context?: string;
   decisions?: string[];
@@ -171,6 +182,9 @@ export interface OrchestrationSessionUpdateInput {
   archived?: boolean;
   isPinned?: boolean;
   agent?: PaneChatAgent;
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  profile?: string;
   goal?: string;
   context?: string;
   decisions?: string[];
