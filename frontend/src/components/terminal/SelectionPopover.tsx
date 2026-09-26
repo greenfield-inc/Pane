@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Copy, ExternalLink, FolderOpen, Globe } from 'lucide-react';
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
 import { InterceptorToast } from './InterceptorToast';
-import { isWindows } from '../../utils/platformUtils';
+import { resolveTerminalPath } from './resolveTerminalPath';
 import { copyTerminalText } from '../../utils/terminalClipboard';
 
 export interface SelectionPopoverProps {
@@ -12,6 +12,7 @@ export interface SelectionPopoverProps {
   y: number;
   text: string;
   workingDirectory?: string;
+  homeDirectory?: string;
   sessionId?: string;
   isRemoteMode?: boolean;
   onOpenInBrowser?: (url: string) => void | Promise<void>;
@@ -32,34 +33,13 @@ function isFilePath(text: string): boolean {
   return FILE_PATH_PATTERNS.some(pattern => pattern.test(trimmed));
 }
 
-function resolveFilePath(text: string, workingDirectory?: string): string {
-  const trimmed = text.trim();
-  // Remove line:col suffix if present
-  const pathOnly = trimmed.replace(/:\d+(:\d+)?$/, '');
-
-  // If it's an absolute path, return as-is
-  if (pathOnly.startsWith('/') || /^[A-Za-z]:/.test(pathOnly)) {
-    return pathOnly;
-  }
-
-  // Resolve relative to working directory
-  if (workingDirectory) {
-    const separator = isWindows() ? '\\' : '/';
-    // Normalize path separators to the platform's separator
-    const normalizedPath = pathOnly.replace(/[/\\]/g, separator);
-    const normalizedDir = workingDirectory.replace(/[/\\]/g, separator);
-    return `${normalizedDir}${separator}${normalizedPath}`;
-  }
-
-  return pathOnly;
-}
-
 export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   visible,
   x,
   y,
   text,
   workingDirectory,
+  homeDirectory,
   sessionId,
   isRemoteMode = false,
   onOpenInBrowser,
@@ -73,6 +53,8 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   const urlMatch = visible ? trimmedText.match(URL_PATTERN) : null;
   const isUrl = urlMatch !== null;
   const isFile = visible && !isUrl && isFilePath(trimmedText);
+
+  const filePath = isFile ? resolveTerminalPath(trimmedText, workingDirectory ?? '', homeDirectory) : null;
 
   const handleCopy = async () => {
     try {
@@ -118,7 +100,8 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         return;
       }
 
-      const resolvedPath = resolveFilePath(trimmedText, workingDirectory);
+      const resolvedPath = filePath?.absolutePath;
+      if (!resolvedPath) return;
       try {
         const result: { success: boolean; error?: string } = await window.electronAPI.invoke(
           'app:showItemInFolder',
@@ -164,8 +147,8 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
       {isFile && (
         <PopoverButton
           onClick={handleShowInExplorer}
-          disabled={isRemoteMode}
-          title={isRemoteMode ? 'Only available in local mode' : undefined}
+          disabled={isRemoteMode || !filePath?.absolutePath}
+          title={isRemoteMode ? 'Only available in local mode' : !filePath?.absolutePath ? 'Home directory unavailable' : undefined}
         >
           <span className="flex items-center gap-2">
             <FolderOpen className="w-4 h-4" />
