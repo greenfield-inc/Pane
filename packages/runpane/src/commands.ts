@@ -663,7 +663,8 @@ function appendUnknownRemoteArg(args: string[], index: number, parsed: ParsedArg
 
 function readValue(args: string[], index: number, flag: string): string {
   const value = args[index];
-  if (!value || (value.startsWith('-') && value !== '-')) {
+  const freeText = ['--text', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }
   return value;

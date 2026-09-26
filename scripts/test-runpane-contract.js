@@ -2473,9 +2473,141 @@ async function checkAgentTemplateParity() {
   });
 }
 
+function runControlProcess(runtime, args, paneDir) {
+  return new Promise((resolve, reject) => {
+    childProcess.execFile(runtime === 'npm' ? process.execPath : findPython(),
+      runtime === 'npm' ? [npmCli, ...args] : args,
+      {
+        cwd: rootDir, encoding: 'utf8', timeout: 10_000,
+        env: { ...process.env, PANE_DIR: paneDir, PYTHONPATH: pythonSource, PYTHONDONTWRITEBYTECODE: '1' },
+      },
+      (error, stdout, stderr) => error ? reject(new Error(`${error.message}\n${stderr}`)) : resolve(stdout.trim()));
+  });
+}
+
+async function checkPythonDaemonTimeouts() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-timeout-'));
+  try {
+    let requests = 0;
+    const output = await withFakeDaemon(paneDir, () => ({
+      result: { recovered: true }, delayMs: ++requests === 1 ? 250 : 0,
+    }), () => runControlProcess('pip', ['-c', `
+import json
+from runpane.daemon_client import invoke_daemon
+try:
+    invoke_daemon("test:timeout", timeout_ms=50)
+    code = None
+except Exception as error:
+    code = getattr(error, "code", type(error).__name__)
+result = invoke_daemon("test:recovery", timeout_ms=1000)
+print(json.dumps({"code": code, "recovered": result["recovered"]}))
+`], paneDir));
+    assert.deepStrictEqual(JSON.parse(output), { code: 'ERR_RUNPANE_DAEMON_TIMEOUT', recovered: true });
+
+    requests = 0;
+    const follow = await withFakeDaemon(paneDir, () => ({
+      result: watchResult(9), delayMs: ++requests === 1 ? 6500 : 0,
+    }), () => runWatchCli('pip', ['watch', '--follow', '--timeout-ms', '1', '--heartbeat', '0'], paneDir,
+      stdout => stdout.includes('WATCH RECONNECTED gen 9'), 12_000));
+    assertIncludes(follow.stdout, 'WATCH ERROR ERR_RUNPANE_DAEMON_TIMEOUT:');
+    assertIncludes(follow.stdout, 'WATCH RECONNECTED gen 9');
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
+function checkLeadingDashTextArguments() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const cases = [
+    ['--text', 'panelInput', 'panel_input'], ['--prompt', 'initialInput', 'initial_input'],
+    ['--initial-input', 'initialInput', 'initial_input'], ['--title', 'title', 'title'],
+    ['--name', 'name', 'name'], ['--name-contains', 'nameContains', 'name_contains'],
+  ];
+  for (const [flag, nodeKey] of cases) {
+    assert.strictEqual(parseRunpaneArgs(['panels', 'submit', flag, '- fix the tests'])[nodeKey], '- fix the tests');
+    assert.strictEqual(parseRunpaneArgs(['panels', 'submit', flag, '--yes'])[nodeKey], '--yes');
+    assert.throws(() => parseRunpaneArgs(['panels', 'submit', flag]), /requires a value/);
+  }
+  assert.throws(() => parseRunpaneArgs(['watch', '--timeout-ms', '--json']), /requires a value/);
+  const python = JSON.parse(runPythonSnippet(`
+import json
+import sys
+from runpane.cli import parse_args
+results = []
+for flag, _node_key, key in json.loads(sys.stdin.read()):
+    results.append([getattr(parse_args(["panels", "submit", flag, value]), key) for value in ["- fix the tests", "--yes"]])
+    try:
+        parse_args(["panels", "submit", flag])
+        raise AssertionError("Missing value was accepted")
+    except ValueError:
+        pass
+try:
+    parse_args(["watch", "--timeout-ms", "--json"])
+    raise AssertionError("Missing timeout was accepted")
+except ValueError:
+    pass
+print(json.dumps(results))
+`, JSON.stringify(cases)));
+  assert.deepStrictEqual(python, cases.map(() => ['- fix the tests', '--yes']));
+}
+
+async function checkDryRunMessages() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-dry-run-messages-'));
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const command of ['pin', 'unpin', 'create', ...(runtime === 'npm' ? ['adopt'] : [])]) {
+        const args = ['panes', command, '--dry-run'];
+        if (command === 'pin' || command === 'unpin') args.push('--pane', 's1');
+        else args.push('--repo', 'active', '--name', 'Work', '--agent', 'codex');
+        if (command === 'adopt') args.push('--path', '/work/tree');
+        const output = await withFakeDaemon(paneDir, () => ({ result: command === 'pin' || command === 'unpin'
+          ? { ok: true, dryRun: true, paneId: 's1', pinned: command === 'pin' }
+          : { ok: true, repo: { id: 1, name: 'Example', path: '/repo', active: true, sessionCount: 0 },
+            items: [{ ok: true, index: 0, name: 'Work', pinned: true }] },
+        }), () => runControlProcess(runtime, runtime === 'npm' ? args : ['-m', 'runpane', ...args], paneDir));
+        assert.strictEqual(output, `Would ${command} ${command === 'pin' || command === 'unpin' ? 's1' : 'Work'}`);
+      }
+      const inputPath = path.join(paneDir, 'create.json');
+      fs.writeFileSync(inputPath, JSON.stringify({ repo: 'active', dryRun: true,
+        panes: [{ name: 'Preview', tool: { agent: 'codex' } }] }));
+      const args = ['panes', 'create', '--from-json', inputPath, '--yes'];
+      const output = await withFakeDaemon(paneDir, () => ({ result: {
+        ok: true, repo: { id: 1, name: 'Example', path: '/repo', active: true, sessionCount: 0 },
+        items: [{ ok: true, index: 0, name: 'Preview', pinned: true }],
+      } }), () => runControlProcess(runtime, runtime === 'npm' ? args : ['-m', 'runpane', ...args], paneDir));
+      assert.strictEqual(output, 'Would create Preview', 'JSON dryRun requests must also print as previews');
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
+async function checkPaneCreateResultFields() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-result-fields-'));
+  const result = {
+    ok: true, repo: { id: 1, name: 'Example', path: '/repo', active: true, sessionCount: 1 },
+    items: [{ ok: true, index: 0, name: 'Work', pinned: false, sessionId: 's1', paneId: 's1', panelId: 'p1',
+      tool: { title: 'Codex', command: 'codex --yolo', agent: 'codex' }, active: false, focused: true }],
+  };
+  try {
+    for (const command of ['create', 'adopt']) {
+      const args = ['panes', command, '--repo', 'active', '--name', 'Work', '--agent', 'codex', '--yes', '--json'];
+      if (command === 'adopt') args.push('--path', '/work/tree');
+      const output = await withFakeDaemon(paneDir, () => ({ result }), () => runControlProcess('npm', args, paneDir));
+      assert.deepStrictEqual(JSON.parse(output), result, `${command} JSON must preserve documented result fields`);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
+  await checkPaneCreateResultFields();
+  await checkDryRunMessages();
+  checkLeadingDashTextArguments();
+  await checkPythonDaemonTimeouts();
   compareParserParity();
   checkWatchFormatterGoldens();
   await checkWatchStreamParity();
