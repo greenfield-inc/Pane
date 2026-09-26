@@ -3162,7 +3162,7 @@ async function handoffPane(
   // Step 5: write, commit, and push the note. The report is captured before any panel is touched.
   const reportPanel = latestCliPanel(panelManager.getPanelsForSession(pane.id));
   const limit = normalized.limit ?? DEFAULT_HANDOFF_REPORT_LINES;
-  const report = reportPanel ? collectAgentReport(services, reportPanel, limit) : '';
+  const report = reportPanel ? await collectAgentReport(services, reportPanel, limit) : '';
   const agent: RunpaneAgentId | 'unknown' = reportPanel ? (getTerminalCustomState(reportPanel).agentType ?? 'unknown') : 'unknown';
   const pr = await services.gitStatusManager.fetchPrForSession(branch, project.path, runner);
   const handedOffAt = new Date().toISOString();
@@ -3613,8 +3613,8 @@ function latestCliPanel(panels: readonly ToolPanel[]): ToolPanel | undefined {
   return candidates.sort((left, right) => activeAt(right) - activeAt(left))[0];
 }
 
-function collectAgentReport(services: AppServices, panel: ToolPanel, limit: number): string {
-  const scrollback = panelScrollbackOutput(panel, limit);
+async function collectAgentReport(services: AppServices, panel: ToolPanel, limit: number): Promise<string> {
+  const scrollback = await panelScrollbackOutput(panel, limit);
   if (scrollback?.text) return scrollback.text;
   const outputs = services.sessionManager.getPanelOutputs(panel.id, limit);
   return boundSanitizedLines(outputs.map(outputToText).join(''), limit).text;
