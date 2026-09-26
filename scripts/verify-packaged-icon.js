@@ -177,6 +177,7 @@ function checkRuntimeIcon(asarPath, failures) {
 function checkMacBundle(appPath, failures) {
   const plistPath = path.join(appPath, 'Contents', 'Info.plist');
   const icnsPath = path.join(appPath, 'Contents', 'Resources', 'icon.icns');
+  const asarPath = path.join(appPath, 'Contents', 'Resources', 'app.asar');
   const before = failures.length;
 
   if (!fs.existsSync(icnsPath)) {
@@ -188,6 +189,15 @@ function checkMacBundle(appPath, failures) {
   const plist = fs.existsSync(plistPath) ? fs.readFileSync(plistPath, 'utf8') : '';
   if (!/<key>CFBundleIconFile<\/key>\s*<string>icon(\.icns)?<\/string>/.test(plist)) {
     failures.push(`${appPath} does not declare CFBundleIconFile=icon.icns in Info.plist`);
+  }
+
+  if (fs.existsSync(asarPath)) {
+    const segments = ['main', 'dist', 'main', 'assets', 'icon-macos.png'];
+    const entry = readAsarEntry(asarPath, segments);
+    const expected = fs.readFileSync(path.join(ASSETS_DIR, 'icon-macos.png'));
+    if (!entry || (entry.integrity?.hash ? entry.integrity.hash !== sha256(expected) : entry.size !== expected.length)) {
+      failures.push(`${asarPath} is missing the current macOS Dock icon`);
+    }
   }
 
   if (failures.length === before) {

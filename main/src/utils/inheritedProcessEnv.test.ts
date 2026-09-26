@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inheritedProcessEnv } from './inheritedProcessEnv';
+import { inheritedProcessEnv, interactiveTerminalEnv } from './inheritedProcessEnv';
 
 describe('inheritedProcessEnv', () => {
   it('drops parent Claude Code session markers and undefined values', () => {
@@ -26,6 +26,15 @@ describe('inheritedProcessEnv', () => {
       CLAUDE_CODE_USE_BEDROCK: '1',
       CLAUDE_CODE_GIT_BASH_PATH: 'C:\\Program Files\\Git\\bin\\bash.exe',
       NO_COLOR: '1',
+    });
+  });
+});
+
+describe('interactiveTerminalEnv', () => {
+  it('does not pass the launcher’s monochrome preference to a color terminal', () => {
+    expect(interactiveTerminalEnv({ NO_COLOR: '1', TERM: 'xterm-256color', COLORTERM: 'truecolor' })).toEqual({
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
     });
   });
 });

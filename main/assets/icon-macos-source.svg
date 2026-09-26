@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">Pane landscape Dock icon</title>
+  <desc id="desc">A cream P and white dot over green rolling fields and a black sky.</desc>
+  <defs>
+    <clipPath id="icon"><rect width="1254" height="1254" rx="242"/></clipPath>
+    <linearGradient id="left-field" x1=".13" y1=".77" x2=".52" y2="1">
+      <stop stop-color="#385948"/>
+      <stop offset="1" stop-color="#0b2928"/>
+    </linearGradient>
+    <linearGradient id="back-field" x1=".26" y1="1" x2=".8" y2=".74">
+      <stop stop-color="#224b3e"/>
+      <stop offset="1" stop-color="#122f2c"/>
+    </linearGradient>
+    <linearGradient id="front-field" x1=".47" y1=".93" x2=".95" y2="1">
+      <stop stop-color="#899349"/>
+      <stop offset=".45" stop-color="#4c633c"/>
+      <stop offset="1" stop-color="#1c382d"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#icon)">
+    <rect width="1254" height="1254" fill="#000"/>
+    <path d="M0 806C254 809 531 883 782 944L1254 1136V1254H0Z" fill="url(#left-field)"/>
+    <path d="M0 1254C225 1102 494 1018 782 944C932 917 1085 896 1254 894V1254Z" fill="url(#back-field)"/>
+    <path d="M202 1254C482 1113 785 1015 1254 976V1254Z" fill="url(#front-field)"/>
+    <rect x="316" y="262" width="139" height="660" rx="69.5" fill="#fffef8"/>
+    <path d="M495 263H707C817 263 904 345 904 450S817 638 707 638H495Q478 638 478 621V531Q478 514 495 514H707C749 514 777 488 777 450S749 389 707 389H495Q478 389 478 372V280Q478 263 495 263Z" fill="#fffef8"/>
+    <circle cx="864" cy="776" r="105" fill="#fffef8"/>
+  </g>
+</svg>

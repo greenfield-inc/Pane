@@ -7,7 +7,7 @@ import * as os from 'os';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { getGitAttributionEnv } from '../utils/attribution';
-import { inheritedProcessEnv } from '../utils/inheritedProcessEnv';
+import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
 
 /**
  * IPty-compatible shim over a ptyHost `PtyHandle`.
@@ -127,7 +127,7 @@ export class TerminalSessionManager extends EventEmitter {
     
     // Build spawn env once so both paths see identical values.
     const rawEnv = {
-      ...inheritedProcessEnv(),
+      ...interactiveTerminalEnv(),
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: shellPath,
       WORKTREE_PATH: worktreePath,
