@@ -13,14 +13,14 @@
     "backgroundColor": "#010409",
     "ios": {
       "bundleIdentifier": "com.dcouple.pane.mobile",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "3",
+      "buildNumber": "4",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
