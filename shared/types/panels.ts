@@ -239,27 +239,9 @@ export interface PanelEvent {
   timestamp: string;
 }
 
-// ⚠️ IMPORTANT: Event Types Implementation Status
-// ================================================
-// For Phase 1-2, ONLY terminal events will be implemented.
-// The full list below shows the FUTURE event system design to demonstrate
-// how different panel types will communicate once migrated.
-//
-// IMPLEMENTED IN PHASE 1-2:
-//   - terminal:command_executed
-//   - terminal:exit  
-//   - files:changed (emitted by terminal when file operations detected)
-//
-// NOT IMPLEMENTED (shown for future reference only):
-//   - All claude:* events
-//   - All diff:* events
-//   - All git:* events
-
 export type PanelEventType = 
-  // Terminal panel events (✅ IMPLEMENTED IN PHASE 1-2)
-  | 'terminal:command_executed'  // When a command is run in terminal
+  // Terminal panel events
   | 'terminal:exit'              // When terminal process exits
-  | 'files:changed'              // When terminal detects file system changes
   | 'diff:refreshed'             // When diff panel refreshes its content
   // Explorer panel events
   | 'explorer:file_saved'        // When a file is saved in explorer
@@ -303,7 +285,7 @@ interface PanelCapabilityRegistry {
 // Panel Registry - Currently only terminal is implemented
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   terminal: {
-    canEmit: ['terminal:command_executed', 'terminal:exit', 'files:changed'],
+    canEmit: ['terminal:exit'],
     canConsume: [], // Terminal doesn't consume events in Phase 1-2
     requiresProcess: true,
     singleton: false,
@@ -312,7 +294,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   diff: {
     canEmit: ['diff:refreshed'],
-    canConsume: ['files:changed', 'terminal:command_executed'],
+    canConsume: ['git:operation_completed'],
     requiresProcess: false,           // No background process
     singleton: true,                  // Only one diff panel
     permanent: true,                  // Cannot be closed
@@ -321,7 +303,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   explorer: {
     canEmit: ['explorer:file_saved', 'explorer:file_changed'],
-    canConsume: ['files:changed'],  // React to file system changes
+    canConsume: [],
     requiresProcess: false,          // No background process needed
     singleton: false,                // Multiple explorers allowed
     canAppearInProjects: true,       // Explorer can appear in projects
@@ -329,7 +311,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   editor: {
     canEmit: ['explorer:file_saved', 'explorer:file_changed'],
-    canConsume: ['files:changed'],
+    canConsume: ['git:operation_completed', 'diff:refreshed'],
     requiresProcess: false,
     singleton: false,                // One tab per open file
     canAppearInProjects: true,
@@ -345,7 +327,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   dashboard: {
     canEmit: [],                     // Dashboard doesn't emit events
-    canConsume: ['files:changed'],   // Refresh on file changes
+    canConsume: [],
     requiresProcess: false,          // No background process
     singleton: true,                 // Only one dashboard panel
     permanent: true,                 // Cannot be closed (like diff panel)
@@ -354,7 +336,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   'setup-tasks': {
     canEmit: [],                     // Setup tasks doesn't emit events
-    canConsume: ['files:changed'],   // Refresh when files change (e.g., gitignore)
+    canConsume: [],
     requiresProcess: false,          // No background process
     singleton: true,                 // Only one setup tasks panel
     permanent: true,                 // Cannot be closed (like dashboard)

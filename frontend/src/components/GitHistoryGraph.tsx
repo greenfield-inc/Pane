@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, memo } from 'react';
 import { API } from '../utils/api';
+import { subscribeToSessionGitChanges } from '../utils/session-git-events';
 import { Loader2, GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
 import { CopyableField } from './ui/CopyableField';
@@ -222,37 +223,7 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
     fetchGraph();
   }, [fetchGraph]);
 
-  // Listen for git status updates to refresh the graph
-  useEffect(() => {
-    const handler = (event: Event) => {
-      // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
-      const customEvent = event as CustomEvent;
-      // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-      const detail = customEvent.detail as { sessionId?: string } | undefined;
-      if (detail?.sessionId === sessionId) {
-        fetchGraph();
-      }
-    };
-
-    window.addEventListener('git-status-updated', handler);
-    return () => window.removeEventListener('git-status-updated', handler);
-  }, [sessionId, fetchGraph]);
-
-  // Also listen for panel events (git operations)
-  useEffect(() => {
-    const handler = (event: Event) => {
-      // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
-      const customEvent = event as CustomEvent;
-      // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-      const detail = customEvent.detail as { type?: string; sessionId?: string } | undefined;
-      if (detail?.type === 'git:operation_completed' && (!detail.sessionId || detail.sessionId === sessionId)) {
-        fetchGraph();
-      }
-    };
-
-    window.addEventListener('panel:event', handler);
-    return () => window.removeEventListener('panel:event', handler);
-  }, [sessionId, fetchGraph]);
+  useEffect(() => subscribeToSessionGitChanges(sessionId, fetchGraph, ['git:operation_completed']), [sessionId, fetchGraph]);
 
   if (loading) {
     return (
