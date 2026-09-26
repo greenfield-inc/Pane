@@ -28,7 +28,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const panelIdRef = useRef(panel.id);
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
+  const lastPersistedUrlRef = useRef(currentUrlFromPanelState);
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);
@@ -85,9 +87,16 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const persistState = useCallback((newUrl: string) => {
     clearTimeout(persistTimeoutRef.current);
     persistTimeoutRef.current = setTimeout(() => {
-      window.electron?.invoke('panels:update', panelIdRef.current, {
-        state: { customState: { currentUrl: newUrl } }
-      });
+      const currentPanel = panelRef.current;
+      // The panel:updated echo records the guest's location; it must not set
+      // webview.src again and reload an in-page navigation or redirect.
+      lastPersistedUrlRef.current = newUrl;
+      void panelApi.updatePanel(currentPanel.id, {
+        state: {
+          ...currentPanel.state,
+          customState: { ...currentPanel.state.customState, currentUrl: newUrl }
+        }
+      }).catch(error => console.error('[BrowserPanel] Failed to persist URL:', error));
     }, 2000);
   }, []);
 
@@ -111,9 +120,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [persistState]);
 
   useEffect(() => {
-    if (!currentUrlFromPanelState || currentUrlFromPanelState === url) return;
+    if (!currentUrlFromPanelState || currentUrlFromPanelState === lastPersistedUrlRef.current) return;
+    lastPersistedUrlRef.current = currentUrlFromPanelState;
     navigateTo(currentUrlFromPanelState);
-  }, [currentUrlFromPanelState, navigateTo, url]);
+  }, [currentUrlFromPanelState, navigateTo]);
 
   const handleBack = () => {
     webviewRef.current?.goBack();

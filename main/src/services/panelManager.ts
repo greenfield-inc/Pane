@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { ToolPanel, CreatePanelRequest, PanelEventType, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
-import { splitPanelBufferState } from '../database/panelBuffers';
 import { panelEventBus } from './panelEventBus';
 import { withLock } from '../utils/mutex';
 import type { AnalyticsManager } from './analyticsManager';
@@ -290,11 +289,11 @@ class PanelManager {
       });
       if (!written) return;
       
-      // Update in cache. Terminal bytes are stored in panel_buffers, so the
-      // cached state (and the panel:updated payload) never carries them.
-      if (updates.title !== undefined) panel.title = updates.title;
-      if (updates.state !== undefined) panel.state = splitPanelBufferState(updates.state).state;
-      if (updates.metadata !== undefined) panel.metadata = updates.metadata;
+      // Read the accepted merge back so cache and events share the database's
+      // key-removal and buffer-separation semantics. Keep existing references live.
+      const persisted = databaseService.getPanel(panelId);
+      if (!persisted) return;
+      Object.assign(panel, persisted);
       
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:updated', panel);
@@ -383,9 +382,15 @@ class PanelManager {
     const shouldCache = !this.archivedSessionIds.has(sessionId);
 
     if (shouldCache) {
-      for (const panel of panels) {
+      return panels.map(panel => {
+        const cached = this.panels.get(panel.id);
+        if (cached) {
+          Object.assign(cached, panel);
+          return cached;
+        }
         this.panels.set(panel.id, panel);
-      }
+        return panel;
+      });
     }
 
     return panels;
