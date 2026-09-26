@@ -3,7 +3,7 @@ import * as os from 'os';
 import { ToolPanel, LogsPanelState } from '../../../../../shared/types/panels';
 import { getPaneEventSink } from '../../../core/runtime';
 import { panelManager } from '../../panelManager';
-import { addSessionLog, cleanupSessionLogs } from '../../../ipc/logs';
+import { addSessionLog, cleanupSessionLogs } from '../../session-logs';
 import { getShellPath } from '../../../utils/shellPath';
 import type { AnalyticsManager } from '../../analyticsManager';
 import type { PaneEventArgument } from '../../../core/eventSink';
@@ -15,7 +15,9 @@ function getLogsPanelState(panel: ToolPanel): LogsPanelState {
   return panel.state.customState as LogsPanelState;
 }
 
-class LogsManager {
+export class LogsManager {
+  constructor(private readonly spawnProcess: typeof spawn = spawn) {}
+
   private static instance: LogsManager;
   private activeProcesses = new Map<string, ChildProcess>(); // panelId -> process
   private scriptStartTimes = new Map<string, number>(); // panelId -> start timestamp
@@ -87,7 +89,6 @@ class LogsManager {
           startTime: undefined,
           endTime: undefined,
           exitCode: undefined,
-          outputBuffer: [],
           errorCount: 0,
           warningCount: 0,
           lastActivityTime: undefined
@@ -125,7 +126,6 @@ class LogsManager {
           isRunning: true,
           command,
           startTime,
-          outputBuffer: [],
           errorCount: 0,
           warningCount: 0,
           lastActivityTime: startTime
@@ -165,7 +165,7 @@ class LogsManager {
     if (wslContext) {
       // Env vars set on the wsl.exe Windows process do not cross into the distro shell;
       // WSLENV tells WSL to copy the listed vars into the Linux env (see buildWSLENV docs)
-      childProcess = spawn('wsl.exe', ['-d', wslContext.distribution, '--', 'bash', '-c', `cd '${cwd}' && ${command}`], {
+      childProcess = this.spawnProcess('wsl.exe', ['-d', wslContext.distribution, '--', 'bash', '-c', `cd '${cwd}' && ${command}`], {
         env: {
           ...process.env,
           PATH: shellPath,
@@ -175,7 +175,7 @@ class LogsManager {
         }
       });
     } else {
-      childProcess = spawn(command, [], {
+      childProcess = this.spawnProcess(command, [], {
         cwd,
         shell: true,
         env: {
@@ -389,7 +389,7 @@ class LogsManager {
   /**
    * Handle process output
    */
-  private async handleOutput(panelId: string, sessionId: string, content: string, type: 'stdout' | 'stderr'): Promise<void> {
+  private handleOutput(panelId: string, sessionId: string, content: string, type: 'stdout' | 'stderr'): void {
     // Add to session logs
     const level = type === 'stderr' ? 'error' : 'info';
     addSessionLog(sessionId, level, content, 'Script');
@@ -412,43 +412,6 @@ class LogsManager {
       content,
       type
     });
-    
-    // Update panel state
-    const panel = await panelManager.getPanel(panelId);
-    if (panel) {
-      const currentState = getLogsPanelState(panel);
-      const outputBuffer = currentState.outputBuffer || [];
-      outputBuffer.push(content);
-      
-      // Keep only last 1000 lines in buffer
-      if (outputBuffer.length > 1000) {
-        outputBuffer.splice(0, outputBuffer.length - 1000);
-      }
-      
-      // Count errors and warnings
-      let errorCount = currentState.errorCount || 0;
-      let warningCount = currentState.warningCount || 0;
-      
-      if (type === 'stderr' || content.toLowerCase().includes('error')) {
-        errorCount++;
-      }
-      if (content.toLowerCase().includes('warning')) {
-        warningCount++;
-      }
-      
-      await panelManager.updatePanel(panelId, {
-        state: {
-          ...panel.state,
-          customState: {
-            ...currentState,
-            outputBuffer,
-            errorCount,
-            warningCount,
-            lastActivityTime: new Date().toISOString()
-          }
-        }
-      });
-    }
   }
   
   /**
