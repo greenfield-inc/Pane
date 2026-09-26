@@ -70,7 +70,16 @@ async function waitFor(predicate, timeoutMs = 3000) {
   return false;
 }
 function alive(pid) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try {
+    process.kill(pid, 0);
+    if (process.platform === 'linux') {
+      // kill(0) also succeeds for exited children awaiting reaping by their parent.
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+      return state !== 'Z' && state !== 'X';
+    }
+    return true;
+  } catch { return false; }
 }
 function terminate(pid) {
   try { process.kill(pid, 'SIGKILL'); } catch { /* Fixture may already have exited. */ }
