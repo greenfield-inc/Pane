@@ -526,6 +526,7 @@ async function main() {
   // Register cleanup handlers
   process.on('SIGINT', cleanup);  // Ctrl+C
   process.on('SIGTERM', cleanup); // Kill command
+  process.on('SIGHUP', cleanup);  // Terminal or Pane panel closed
 
   // If any critical process exits, shut everything down
   vite.on('exit', (code) => {

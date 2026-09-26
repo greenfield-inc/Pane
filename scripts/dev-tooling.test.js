@@ -121,7 +121,7 @@ async function availablePort() {
   return port;
 }
 
-for (const shutdown of ['SIGTERM', 'electron-exit']) {
+for (const shutdown of ['SIGTERM', 'SIGHUP', 'electron-exit']) {
   test(`dev launcher stops watchers and descendants on ${shutdown}`, { skip: process.platform === 'win32', timeout: 12000 }, async () => {
     const directory = launcherFixture();
     const pidFile = path.join(directory, 'pids.jsonl');
@@ -141,7 +141,7 @@ for (const shutdown of ['SIGTERM', 'electron-exit']) {
     try {
       assert.ok(await waitFor(() => records().length === 6), `Fixture children did not start: ${output}`);
       if (requestedPort) assert.equal(records().find(record => record.role === 'vite').port, requestedPort, 'explicit VITE_PORT must reach the dev server');
-      if (shutdown === 'SIGTERM') launcher.kill('SIGTERM');
+      if (shutdown !== 'electron-exit') launcher.kill(shutdown);
       else fs.writeFileSync(path.join(directory, 'close-electron'), 'close');
       assert.equal(await exited, 0, output);
       assert.ok(await waitFor(() => records().every(record => !alive(record.pid))),
@@ -149,6 +149,53 @@ for (const shutdown of ['SIGTERM', 'electron-exit']) {
     } finally {
       terminate(launcher.pid);
       terminate(-launcher.pid);
+      for (const record of records()) terminate(record.pid);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const configName of ['playwright.config.ts', 'playwright.ci.config.ts', 'playwright.ci.minimal.config.ts']) {
+  test(`${configName} shuts down the dev process groups after its tests finish`, { skip: process.platform === 'win32', timeout: 15000 }, async () => {
+    const directory = launcherFixture();
+    const pidFile = path.join(directory, 'pids.jsonl');
+    const records = () => fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+    const port = await availablePort();
+    const launcherPidFile = path.join(directory, 'launcher.pid');
+    const entry = `require('node:fs').writeFileSync(${JSON.stringify(launcherPidFile)}, String(process.pid)); require(${JSON.stringify(path.join(root, 'scripts/pane-run-script.js'))});`;
+    fs.writeFileSync(path.join(directory, 'playwright.config.cjs'), `
+const base = require(${JSON.stringify(path.join(root, configName))}).default;
+module.exports = {
+  ...base, testDir: __dirname, testMatch: 'fixture.spec.cjs', outputDir: 'results',
+  reporter: 'line', retries: 0, workers: 1,
+  webServer: { ...base.webServer, cwd: __dirname, port: ${port}, reuseExistingServer: false,
+    command: ${JSON.stringify(`${quoteShell(process.execPath)} -e ${quoteShell(entry)}`)},
+    env: { VITE_PORT: '${port}', PORT: '${port}' }, timeout: 5000 },
+};
+`);
+    fs.writeFileSync(path.join(directory, 'fixture.spec.cjs'), `
+const { test, expect } = require(${JSON.stringify(require.resolve('@playwright/test'))});
+const fs = require('node:fs');
+test('fixture services are ready', async () => {
+  await expect.poll(() => fs.existsSync(${JSON.stringify(pidFile)}) ? fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8').trim().split('\\n').length : 0).toBe(6);
+});
+`);
+    const runner = spawn(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', path.join(directory, 'playwright.config.cjs')], {
+      cwd: directory, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PATH: `${path.join(directory, 'bin')}${path.delimiter}${process.env.PATH}` },
+    });
+    let output = '';
+    runner.stdout.on('data', data => { output += data; });
+    runner.stderr.on('data', data => { output += data; });
+    try {
+      assert.ok(await waitFor(() => runner.exitCode !== null || runner.signalCode !== null, 10000), `Playwright teardown did not finish: ${output}`);
+      assert.equal(runner.exitCode, 0, output);
+      assert.equal(records().length, 6, 'the fixture must exercise every dev process and descendant');
+      assert.ok(await waitFor(() => records().every(record => !alive(record.pid))), 'Playwright must leave no dev process behind');
+    } finally {
+      terminate(runner.pid);
+      terminate(-runner.pid);
+      if (fs.existsSync(launcherPidFile)) terminate(Number(fs.readFileSync(launcherPidFile, 'utf8')));
       for (const record of records()) terminate(record.pid);
       fs.rmSync(directory, { recursive: true, force: true });
     }

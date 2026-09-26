@@ -58,6 +58,7 @@ export default defineConfig({
   // Run your local dev server before starting the tests
   webServer: {
     command: 'pnpm electron-dev',
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
     port: devServerPort,
     reuseExistingServer: false,
     timeout: 60 * 1000, // Reduce from 120s to 60s
