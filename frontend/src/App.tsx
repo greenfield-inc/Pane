@@ -276,16 +276,18 @@ function App() {
     fetchConfig();
   }, [fetchConfig]);
 
-  // Detect unclean shutdown from previous session and notify user
+  // Pull after mount: the page may already have loaded before it can subscribe.
   useEffect(() => {
-    if (!window.electronAPI?.events?.onUncleanShutdownDetected) return;
-
-    return window.electronAPI.events.onUncleanShutdownDetected(() => {
-      showNotification(
-        'Pane didn\'t shut down cleanly',
-        'Your OS may have been overloaded. Check RAM usage if this keeps happening.'
-      );
-    });
+    const consume = window.electronAPI?.window?.consumeUncleanShutdown;
+    if (!consume) return;
+    void consume().then(detected => {
+      if (detected) {
+        showNotification(
+          'Pane didn\'t shut down cleanly',
+          'Your OS may have been overloaded. Check RAM usage if this keeps happening.'
+        );
+      }
+    }).catch(error => console.error('Failed to read startup notice:', error));
   }, [showNotification]);
 
   // Fetch projects for global shortcuts

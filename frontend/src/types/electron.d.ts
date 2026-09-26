@@ -447,7 +447,6 @@ interface ElectronAPI {
      * Re-fires on auto-reattach after a supervisor restart with a new ptyId.
      */
     onTerminalPtyReady: (callback: (data: { sessionId: string; panelId: string; ptyId: string }) => void) => () => void;
-    onUncleanShutdownDetected: (callback: () => void) => () => void;
     onMainLog: (callback: (level: string, message: string) => void) => () => void;
     onVersionUpdateAvailable: (callback: (versionInfo: VersionUpdateInfo) => void) => () => void;
     
@@ -588,6 +587,7 @@ interface ElectronAPI {
 
   // Window state queries (invoke, not event subscriptions)
   window: {
+    consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
   };
 

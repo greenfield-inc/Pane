@@ -26,6 +26,7 @@ type ElectronApiMockOptions = {
   analyticsIdentity?: JsonObject;
   initialConfig?: JsonObject;
   initialWindowFocused?: boolean;
+  uncleanShutdown?: boolean;
   initialPreferences?: Record<string, string>;
   platform?: 'darwin' | 'linux' | 'win32';
   /** Whether main handed the title bar to the page (Window Controls Overlay). */
@@ -409,10 +410,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       return success();
     };
 
+    let uncleanShutdownPending = mockOptions.uncleanShutdown === true;
     const electronAPI = {
       invoke,
       events,
       window: {
+        consumeUncleanShutdown: () => {
+          const detected = uncleanShutdownPending;
+          uncleanShutdownPending = false;
+          return Promise.resolve(detected);
+        },
         isFocused: () => Promise.resolve(mockOptions.initialWindowFocused !== false),
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
