@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useConfigStore } from '../stores/configStore';
 import { useHotkeyStore } from '../stores/hotkeyStore';
+import type { HotkeyId } from '../../../shared/constants/keyboardShortcuts';
 
 export function useTerminalShortcuts(): void {
   const config = useConfigStore((s) => s.config);
@@ -18,7 +19,8 @@ export function useTerminalShortcuts(): void {
     const shortcuts = config?.terminalShortcuts ?? [];
     for (const shortcut of shortcuts) {
       if (!shortcut.enabled) continue;
-      const hotkeyId = `terminal-shortcut-${shortcut.id}`;
+      // SAFETY: Dynamic terminal shortcut ids are defined by this exact prefix family.
+      const hotkeyId = `terminal-shortcut-${shortcut.id}` as HotkeyId;
       register({
         id: hotkeyId,
         label: shortcut.label || `Shortcut (${shortcut.key})`,

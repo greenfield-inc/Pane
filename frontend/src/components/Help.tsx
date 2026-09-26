@@ -1,26 +1,34 @@
 import { useMemo } from 'react';
 import { GitBranch, Terminal, Folder, Zap, MessageSquare, Settings, Bell, History } from 'lucide-react';
 import { Modal, ModalHeader, ModalBody } from './ui/Modal';
-import { useHotkeyStore, type HotkeyDefinition } from '../stores/hotkeyStore';
-import { formatKeyDisplay, CATEGORY_LABELS } from '../utils/hotkeyUtils';
+import type { ShortcutCategory } from '../../../shared/constants/keyboardShortcuts';
+import { useConfigStore } from '../stores/configStore';
+import { CATEGORY_LABELS, CATEGORY_ORDER, formatKeyDisplay } from '../utils/hotkeyUtils';
+import { rendererPlatform } from '../utils/platformUtils';
+import { buildShortcutMap, REFERENCE_ROWS, type ShortcutMapRow } from '../utils/shortcutMap';
 import { Kbd } from './ui/Kbd';
 
 function KeyboardShortcutsSection() {
-  const hotkeys = useHotkeyStore((s) => s.hotkeys);
-  const allHotkeys = useMemo(
-    () =>
-      Array.from(hotkeys.values())
-        .filter((def) => !def.devOnly || process.env.NODE_ENV === 'development')
-        .filter((def) => def.showInPalette !== false)
-        .filter((h) => !h.enabled || h.enabled()),
-    [hotkeys]
-  );
+  const config = useConfigStore((s) => s.config);
+  const { rows } = useMemo(() => buildShortcutMap({
+    overridesRaw: config?.keyboardShortcutOverrides,
+    terminalShortcuts: config?.terminalShortcuts,
+    customCommands: config?.customCommands,
+    environment: rendererPlatform(),
+  }), [config?.keyboardShortcutOverrides, config?.terminalShortcuts, config?.customCommands]);
 
-  const grouped = allHotkeys.reduce<Record<string, HotkeyDefinition[]>>((acc, def) => {
-    if (!acc[def.category]) acc[def.category] = [];
-    acc[def.category].push(def);
-    return acc;
-  }, {});
+  const grouped = useMemo(() => {
+    const byCategory = new Map<ShortcutCategory, ShortcutMapRow[]>();
+    for (const row of rows) {
+      const group = byCategory.get(row.category) ?? [];
+      group.push(row);
+      byCategory.set(row.category, group);
+    }
+    return CATEGORY_ORDER.flatMap((category) => {
+      const group = byCategory.get(category);
+      return group ? [{ category, rows: group }] : [];
+    });
+  }, [rows]);
 
   return (
     <section>
@@ -28,37 +36,41 @@ function KeyboardShortcutsSection() {
         Keyboard Shortcuts
       </h3>
       <div className="space-y-4">
-        {/* Static shortcut not in registry (scoped input handler) */}
-        <div className="space-y-2">
-          <div className="flex justify-between items-center">
-            <span className="text-text-secondary">Send Input / Continue Conversation</span>
-            <Kbd size="md">{formatKeyDisplay('mod+enter')}</Kbd>
-          </div>
-        </div>
-        {/* Dynamic shortcuts from registry */}
-        {Object.entries(grouped).map(([category, hotkeys]) => {
-          // SAFETY: grouped is keyed by HotkeyDefinition category values.
-          const hotkeyCategory = category as HotkeyDefinition['category'];
-          return <div key={category}>
+        {grouped.map(({ category, rows: groupRows }) => (
+          <div key={category}>
             <h4 className="text-sm font-medium text-text-tertiary mb-2">
-              {CATEGORY_LABELS[hotkeyCategory] ?? category}
+              {CATEGORY_LABELS[category]}
             </h4>
             <div className="space-y-2">
-              {hotkeys.map((hotkey) => (
-                <div key={hotkey.id} className="flex justify-between items-center">
-                  <span className="text-text-secondary">{hotkey.label}</span>
-                  {hotkey.keys ? (
-                    <Kbd size="md">
-                      {formatKeyDisplay(hotkey.keys)}
-                    </Kbd>
+              {groupRows.map((row) => (
+                <div key={row.id} className="flex justify-between items-center gap-3">
+                  <span className="text-text-secondary">
+                    {row.label}
+                    {row.availability === 'unavailable-platform' && (
+                      <span className="ml-2 text-xs text-text-muted">unavailable on this platform</span>
+                    )}
+                  </span>
+                  {row.effectiveChord ? (
+                    <Kbd size="md">{formatKeyDisplay(row.effectiveChord)}</Kbd>
                   ) : (
-                    <span className="text-xs text-text-muted italic">palette only</span>
+                    <span className="text-xs text-text-muted italic">unassigned</span>
                   )}
                 </div>
               ))}
             </div>
-          </div>;
-        })}
+          </div>
+        ))}
+        <div>
+          <h4 className="text-sm font-medium text-text-tertiary mb-2">Terminal / native — not remappable</h4>
+          <div className="space-y-2">
+            {REFERENCE_ROWS.map((reference) => (
+              <div key={reference.id} className="flex justify-between items-center">
+                <span className="text-text-secondary">{reference.label}</span>
+                <Kbd size="md">{formatKeyDisplay(reference.chord)}</Kbd>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   );

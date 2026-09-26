@@ -1,3 +1,5 @@
+import { normalizeEnvironmentPlatform, type KeyboardShortcutId } from './keyboardShortcuts';
+
 export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor';
 
 export interface AgentLaunchPreset {
@@ -5,8 +7,7 @@ export interface AgentLaunchPreset {
   title: string;
   command: string;
   iconKey: string;
-  hotkeyId: string;
-  hotkey: string;
+  hotkeyId: KeyboardShortcutId;
   platforms?: readonly string[];
 }
 
@@ -22,7 +23,6 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
     command: 'claude --dangerously-skip-permissions',
     iconKey: 'claude',
     hotkeyId: 'add-tool-terminal-claude',
-    hotkey: 'mod+alt+3',
   },
   {
     id: 'codex',
@@ -30,7 +30,6 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
     command: 'codex --yolo',
     iconKey: 'codex',
     hotkeyId: 'add-tool-terminal-codex',
-    hotkey: 'mod+alt+4',
   },
   {
     id: 'cursor',
@@ -38,7 +37,6 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
     command: 'cursor-agent --force --trust',
     iconKey: 'cursor',
     hotkeyId: 'add-tool-terminal-cursor',
-    hotkey: 'mod+alt+5',
     platforms: ['darwin', 'linux', 'wsl'],
   },
 ];
@@ -48,9 +46,7 @@ export function agentPresetsForPlatform(platform: string): readonly AgentLaunchP
 }
 
 export function isAgentSupportedOnPlatform(agent: AgentLaunchPresetId, platform: string): boolean {
-  const normalizedPlatform = platform === 'macos'
-    ? 'darwin'
-    : platform === 'windows' ? 'win32' : platform;
+  const normalizedPlatform = normalizeEnvironmentPlatform(platform);
   const preset = AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent);
   return Boolean(preset && (!preset.platforms || preset.platforms.includes(normalizedPlatform)));
 }

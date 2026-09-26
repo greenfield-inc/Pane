@@ -285,6 +285,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       toggleDetail: () => setDetailVisible((v) => !v),
       showInspector: (tab) => { setInspectorTab(tab); setDetailVisible(true); },
       addTerminal: () => { void handlePanelCreate('terminal'); },
+      addTerminalWithOptions: (options) => { void handlePanelCreate('terminal', options); },
       tabCount: () => workingPanels.length,
       selectTab: (index) => { const panel = workingPanels[index]; if (panel) handlePanelSelect(panel); },
       cycleTab: (direction) => {

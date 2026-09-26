@@ -94,8 +94,10 @@ export function createFileLinkProvider(config: LinkProviderConfig): ILinkProvide
   }
 
   return {
+    // xterm passes a 1-based buffer line; buffer.getLine is 0-based and link
+    // ranges are 1-based, so the range y is the line number as given.
     provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void) {
-      const line = config.terminal.buffer.active.getLine(lineNumber);
+      const line = config.terminal.buffer.active.getLine(lineNumber - 1);
       if (!line) {
         callback(undefined);
         return;
@@ -118,8 +120,8 @@ export function createFileLinkProvider(config: LinkProviderConfig): ILinkProvide
 
           links.push({
             range: {
-              start: { x: match.index + 1, y: lineNumber + 1 },
-              end: { x: match.index + match[0].length + 1, y: lineNumber + 1 },
+              start: { x: match.index + 1, y: lineNumber },
+              end: { x: match.index + match[0].length + 1, y: lineNumber },
             },
             text: rawPath,
             activate: (event: MouseEvent) => {

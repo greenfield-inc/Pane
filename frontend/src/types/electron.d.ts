@@ -474,6 +474,7 @@ interface ElectronAPI {
     // Terminal font config events
     onTerminalFontUpdated: (callback: (data: { terminalFontFamily: string; terminalFontSize: number }) => void) => () => void;
     onNativeAppearanceUpdated: (callback: (data: { prefersDark: boolean }) => void) => () => void;
+    onConfigUpdated: (callback: (config: AppConfig) => void) => () => void;
 
     removeAllListeners: (channel: string) => void;
   };

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { areKeyboardShortcutsEnabled, isCommandPaletteShortcutEnabled, useConfigStore } from './configStore';
-import { useHotkeyStore } from './hotkeyStore';
+import {
+  isBoundChordForEvent,
+  isTuiReleasableChordForEvent,
+  useHotkeyStore,
+} from './hotkeyStore';
 
 interface HotkeyTestTarget {
   tagName: string;
@@ -52,8 +56,9 @@ describe('hotkeyStore keyboard shortcut preference', () => {
   });
 
   afterEach(() => {
-    useHotkeyStore.getState().unregister('test-shortcut');
-    useHotkeyStore.getState().unregister('open-command-palette');
+    for (const id of useHotkeyStore.getState().hotkeys.keys()) {
+      useHotkeyStore.getState().unregister(id);
+    }
     useConfigStore.setState({ config: null });
     vi.unstubAllGlobals();
   });
@@ -63,7 +68,7 @@ describe('hotkeyStore keyboard shortcut preference', () => {
     const preventDefault = vi.fn();
     useConfigStore.setState({ config: { keyboardShortcutsEnabled: false } });
     useHotkeyStore.getState().register({
-      id: 'test-shortcut',
+      id: 'terminal-shortcut-test',
       label: 'Test shortcut',
       keys: 'mod+w',
       category: 'tabs',
@@ -138,7 +143,7 @@ describe('hotkeyStore keyboard shortcut preference', () => {
     const preventDefault = vi.fn();
     useConfigStore.setState({ config: {} });
     useHotkeyStore.getState().register({
-      id: 'test-shortcut',
+      id: 'terminal-shortcut-test',
       label: 'Scroll terminal',
       keys: 'shift+ArrowDown',
       category: 'view',
@@ -182,7 +187,7 @@ describe('hotkeyStore keyboard shortcut preference', () => {
     const preventDefault = vi.fn();
     useConfigStore.setState({ config: {} });
     const definition = {
-      id: 'test-shortcut',
+      id: 'terminal-shortcut-test' as const,
       label: 'Scroll modal',
       keys: 'shift+ArrowUp',
       category: 'view' as const,
@@ -208,5 +213,110 @@ describe('hotkeyStore keyboard shortcut preference', () => {
 
     expect(action).toHaveBeenCalledOnce();
     expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it('remaps dispatch immediately and unassigns without removing the command', () => {
+    const action = vi.fn();
+    const target = { tagName: 'DIV', isContentEditable: false, closest: () => null };
+    useConfigStore.setState({
+      config: { keyboardShortcutOverrides: { 'open-settings': 'mod+alt+7' } },
+    });
+    useHotkeyStore.getState().register({
+      id: 'open-settings', label: 'Open Settings', category: 'navigation', action,
+    });
+    const oldEvent = keyboardEvent({ key: ',', code: 'Comma', ctrlKey: true }, target, vi.fn());
+    const newEvent = keyboardEvent({ key: '7', code: 'Digit7', ctrlKey: true, altKey: true }, target, vi.fn());
+    keydownListener?.(oldEvent);
+    keydownListener?.(newEvent);
+    expect(action).toHaveBeenCalledOnce();
+    expect(useHotkeyStore.getState().hotkeys.get('open-settings')?.keys).toBe('mod+alt+7');
+
+    useConfigStore.setState({
+      config: { keyboardShortcutOverrides: { 'open-settings': null } },
+    });
+    keydownListener?.(newEvent);
+    expect(action).toHaveBeenCalledOnce();
+    expect(useHotkeyStore.getState().hotkeys.get('open-settings')?.keys).toBe('');
+  });
+
+  it('runs neither command when enabled candidates share a chord', () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const preventDefault = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    useConfigStore.setState({ config: { keyboardShortcutOverrides: {
+      'open-settings': 'mod+x', 'new-session': 'mod+x',
+    } } });
+    useHotkeyStore.getState().register({ id: 'open-settings', label: 'Settings', category: 'navigation', action: first });
+    useHotkeyStore.getState().register({ id: 'new-session', label: 'New Pane', category: 'session', action: second });
+    keydownListener?.(keyboardEvent(
+      { key: 'x', code: 'KeyX', ctrlKey: true },
+      { tagName: 'DIV', isContentEditable: false, closest: () => null },
+      preventDefault,
+    ));
+    expect(first).not.toHaveBeenCalled();
+    expect(second).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('[hotkeyStore] Ambiguous chord', 'mod+x', ['open-settings', 'new-session']);
+  });
+
+  it('keeps terminal interception mount-independent and follows remaps', () => {
+    useConfigStore.setState({ config: { keyboardShortcutOverrides: {
+      'add-tool-terminal-claude': 'mod+alt+j', 'git-push': 'mod+alt+g',
+    } } });
+    const event = (keyName: string, code: string) => keyboardEvent(
+      { key: keyName, code, ctrlKey: true, altKey: true },
+      { tagName: 'DIV', isContentEditable: false, closest: () => null },
+      vi.fn(),
+    );
+    expect(isBoundChordForEvent(event('7', 'Digit7'))).toBe(true);
+    expect(isBoundChordForEvent(event('5', 'Digit5'))).toBe(true);
+    expect(isTuiReleasableChordForEvent(event('j', 'KeyJ'))).toBe(true);
+    expect(isTuiReleasableChordForEvent(event('g', 'KeyG'))).toBe(false);
+    expect(isBoundChordForEvent(event('y', 'KeyY'))).toBe(false);
+  });
+
+  it.each([
+    ['mod+shift+Tab', { key: 'Tab', code: 'Tab', ctrlKey: true, shiftKey: true }, true, true],
+    ['mod+Tab', { key: 'Tab', code: 'Tab', ctrlKey: true }, true, true],
+    ['mod+shift+3', { key: '#', code: 'Digit3', ctrlKey: true, shiftKey: true }, true, true],
+    ['mod+shift+z', { key: 'Z', code: 'KeyZ', ctrlKey: true, shiftKey: true }, true, true],
+    ['mod+\\', { key: '\\', code: 'Backslash', ctrlKey: true }, true, true],
+    ['mod+alt+ArrowLeft', { key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: true, altKey: true }, true, true],
+    ['mod+alt+/', { key: '/', code: 'Slash', ctrlKey: true, altKey: true }, false, true],
+    ['mod+alt+3', { key: '3', code: 'Digit3', ctrlKey: true, altKey: true }, true, true],
+    ['mod+`', { key: '`', code: 'Backquote', ctrlKey: true }, false, true],
+    ['mod+shift+u', { key: 'U', code: 'KeyU', ctrlKey: true, shiftKey: true }, false, true],
+    ['mod+shift+s', { key: 'S', code: 'KeyS', ctrlKey: true, shiftKey: true }, false, false],
+  ] satisfies readonly [string, KeyboardEventInit, boolean, boolean][])(
+    'joins the %s event to catalog interception sets',
+    (_chord, init, expectedTuiReleasable, expectedBound) => {
+      useConfigStore.setState({ config: {} });
+      const event = keyboardEvent(
+        init,
+        { tagName: 'DIV', isContentEditable: false, closest: () => null },
+        vi.fn(),
+      );
+
+      expect(isTuiReleasableChordForEvent(event)).toBe(expectedTuiReleasable);
+      expect(isBoundChordForEvent(event)).toBe(expectedBound);
+    },
+  );
+
+  it('keeps the palette exception attached to its remapped id', () => {
+    const action = vi.fn();
+    useConfigStore.setState({ config: {
+      keyboardShortcutsEnabled: false,
+      keyboardShortcutOverrides: { 'open-command-palette': 'mod+alt+p' },
+    } });
+    useHotkeyStore.getState().register({
+      id: 'open-command-palette', label: 'Palette', category: 'navigation', action,
+    });
+    keydownListener?.(keyboardEvent(
+      { key: 'p', code: 'KeyP', ctrlKey: true, altKey: true },
+      { tagName: 'DIV', isContentEditable: false, closest: () => null },
+      vi.fn(),
+    ));
+    expect(action).toHaveBeenCalledOnce();
   });
 });

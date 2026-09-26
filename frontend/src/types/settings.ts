@@ -56,6 +56,7 @@ export type SettingsSettingId =
   | 'command-palette-shortcut'
   | 'kitty-keyboard'
   | 'terminal-shortcuts'
+  | 'keyboard-shortcut-map'
   | 'analytics'
   | 'verbose-logging'
   | 'developer-mode'

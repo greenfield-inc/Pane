@@ -240,26 +240,22 @@ try {
     }
   });
 
-  // Bridge synthetic keydown events from main process (used for Ctrl+W interception
-  // and forwarding app hotkeys from webview panels whose keyboard events don't reach
-  // the renderer's window listener).
-  ipcRenderer.on('synthetic-keydown', (_event: Electron.IpcRendererEvent, data: { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }) => {
-    try {
-      const target = document.activeElement || document.body;
-      target.dispatchEvent(new KeyboardEvent('keydown', {
-        key: data.key,
-        code: data.code,
-        ctrlKey: data.ctrlKey,
-        metaKey: data.metaKey,
-        shiftKey: data.shiftKey,
-        altKey: data.altKey,
-        bubbles: true,
-        cancelable: true,
-      }));
-    } catch (e) {
-      console.error('Failed to dispatch synthetic-keydown to window:', e);
-    }
-  });
+  // Webview keyboard events do not bubble into the renderer. Relay presses
+  // and releases so held actions (continuous scrolling) end on keyup too.
+  for (const type of ['keydown', 'keyup'] as const) {
+    ipcRenderer.on(`synthetic-${type}`, (_event: Electron.IpcRendererEvent, data: { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }) => {
+      try {
+        const target = document.activeElement || document.body;
+        target.dispatchEvent(new KeyboardEvent(type, {
+          ...data,
+          bubbles: true,
+          cancelable: true,
+        }));
+      } catch (error) {
+        console.error(`Failed to dispatch synthetic-${type} to window:`, error);
+      }
+    });
+  }
   ipcRenderer.on('browser-panel:popup-requested', (_event: Electron.IpcRendererEvent, data: { url: string; sourceSessionId: string; sourcePanelId: string }) => {
     try {
       window.dispatchEvent(new CustomEvent('browser-panel:popup-requested', { detail: data }));
@@ -984,6 +980,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { prefersDark: boolean }) => callback(data);
       ipcRenderer.on('window:appearance-native-updated', wrappedCallback);
       return () => ipcRenderer.removeListener('window:appearance-native-updated', wrappedCallback);
+    },
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
     },
 
     // Process management events

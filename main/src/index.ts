@@ -66,7 +66,11 @@ import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './services/agents/agentIdentity';
 import type { ConfigManager } from './services/configManager';
-import { areKeyboardShortcutsEnabled, shouldForwardCommandPaletteShortcut } from './utils/keyboardShortcuts';
+import {
+  areKeyboardShortcutsEnabled,
+  buildWebviewForwardSet,
+  shouldForwardWebviewInput,
+} from './utils/keyboardShortcuts';
 import {
   parseStoredOverlayColors,
   shouldEnableWindowControlsOverlay,
@@ -125,6 +129,8 @@ export const webviewContextMap = new Map<number, { panelId: string; sessionId: s
 const activeDevToolsViews = new Map<number, Electron.WebContentsView>();
 let devToolsHandlersRegistered = false;
 let appearanceConfigSyncRegistered = false;
+let webviewForwardSet = new Set<string>();
+let webviewForwardConfigListenerRegistered = false;
 
 // Track partitions that already have the localhost header-stripping hook registered,
 // so we don't add duplicate listeners when multiple webviews share the same partition.
@@ -319,6 +325,13 @@ function readStoredBackgroundColors() {
 }
 
 async function createWindow() {
+  webviewForwardSet = buildWebviewForwardSet(configManager.getConfig());
+  if (!webviewForwardConfigListenerRegistered) {
+    webviewForwardConfigListenerRegistered = true;
+    configManager.on('config-updated', (config) => {
+      webviewForwardSet = buildWebviewForwardSet(config);
+    });
+  }
   // Strip iframe-blocking headers for localhost URLs (enables embedded browser panel)
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: [
@@ -500,57 +513,21 @@ async function createWindow() {
     // Forward app hotkeys from webview to renderer.
     // Webviews are separate processes — keyboard events inside them never reach
     // the renderer's window listener where the hotkey system lives. Only intercept
-    // the specific Ctrl/Cmd+key combos that Pane actually handles, so that normal
+    // the exact configured chords that Pane handles, so that normal
     // browser shortcuts (Ctrl+F, Ctrl+R, Ctrl+A in inputs, etc.) still work
     // inside embedded browser panels.
-    // Whitelist of Pane hotkeys that should be forwarded from webviews.
-    // mod+key (no extra modifiers):
-    const paneHotkeys: ReadonlySet<string> = new Set([
-      'b', ',', 'n', 'a', 'd', 'w', 't', '`',
-      // mod+1..9 switch session, mod+Tab/ArrowDown cycle next
-      '1', '2', '3', '4', '5', '6', '7', '8', '9',
-      'tab', 'arrowdown', 'arrowup',
-    ]);
-    // mod+shift+key — matched by physical key code (Digit/Key) because
-    // input.key reports the shifted symbol (e.g. '!' for Shift+1) which
-    // varies by keyboard layout.
-    const paneShiftCodes: ReadonlySet<string> = new Set([
-      'KeyE', 'KeyN', 'KeyK', 'KeyP', 'KeyZ', 'KeyL', 'KeyR', 'KeyM', 'KeyU',
-      'KeyB', 'KeyW', 'KeyD',
-      'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
-      'Digit6', 'Digit7', 'Digit8', 'Digit9',
-      'Tab', // mod+shift+Tab cycles prev session
-    ]);
     wvContents.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown') return;
-      const mod = input.control || input.meta;
-      if (!mod) return;
-
-      const key = input.key.toLowerCase();
-      const code = input.code;
+      // Releases must reach held actions even if bindings changed while held.
+      // Do not preventDefault: the embedded page retains its own keyup events.
+      if (input.type === 'keyUp') {
+        mainWindow?.webContents.send('synthetic-keyup', {
+          key: input.key, code: input.code, ctrlKey: input.control,
+          metaKey: input.meta, shiftKey: input.shift, altKey: input.alt,
+        });
+        return;
+      }
       const config = configManager.getConfig();
-      if (
-        !areKeyboardShortcutsEnabled(config)
-        && !shouldForwardCommandPaletteShortcut(config, input)
-      ) return;
-
-      // Skip AltGr: on Windows/Linux international layouts, AltGr reports
-      // control+alt simultaneously. We detect this as control+alt without
-      // meta, and only forward when the physical key is a letter, digit,
-      // or slash (the patterns used by Pane's mod+alt shortcuts). This
-      // prevents blocking character input like @, €, or \ on those layouts.
-      const isAltGr = input.control && input.alt && !input.meta
-        && !/^(Key[A-Z]|Digit[0-9]|Slash)$/.test(code);
-
-      // Determine if this combo matches a registered Pane hotkey.
-      // mod+alt combos are forwarded (user-configurable terminal shortcuts
-      // use mod+alt+<key>), but AltGr character input is excluded above.
-      const isPaneHotkey =
-        (input.alt && !isAltGr) ||
-        (input.shift && !input.alt && paneShiftCodes.has(code)) ||
-        (!input.shift && !input.alt && paneHotkeys.has(key));
-
-      if (!isPaneHotkey) return;
+      if (!shouldForwardWebviewInput(input, webviewForwardSet, config)) return;
 
       event.preventDefault();
       mainWindow?.webContents.send('synthetic-keydown', {
