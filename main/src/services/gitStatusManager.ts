@@ -682,7 +682,7 @@ export class GitStatusManager extends EventEmitter {
 
   private async getCurrentBranchName(worktreePath: string, commandRunner: CommandRunner): Promise<string | null> {
     try {
-      const branchName = (await commandRunner.execAsync('git branch --show-current', worktreePath, { silent: true })).stdout.trim();
+      const branchName = (await commandRunner.execFile('git', ['branch', '--show-current'], worktreePath, { silent: true })).stdout.trim();
       if (branchName) return branchName;
     } catch {
       // Fall back to the worktree folder name below.
@@ -957,7 +957,7 @@ export class GitStatusManager extends EventEmitter {
       if (ahead > 0) {
         // Use git diff --shortstat for commit statistics
         try {
-          const statLine = (await ctx.commandRunner.execAsync(`git diff --shortstat ${comparisonBranch}...HEAD`, session.worktreePath, { silent: true })).stdout.trim();
+          const statLine = (await ctx.commandRunner.execFile('git', ['diff', '--shortstat', `${comparisonBranch}...HEAD`, '--'], session.worktreePath, { silent: true })).stdout.trim();
           if (statLine) {
             const filesMatch = statLine.match(/(\d+) files? changed/);
             const additionsMatch = statLine.match(/(\d+) insertions?\(\+\)/);
@@ -1005,7 +1005,7 @@ export class GitStatusManager extends EventEmitter {
       // Get total number of commits in the branch
       let totalCommits = ahead;
       try {
-        const countStr = (await ctx.commandRunner.execAsync(`git rev-list --count ${comparisonBranch}..HEAD`, session.worktreePath, { silent: true })).stdout.trim();
+        const countStr = (await ctx.commandRunner.execFile('git', ['rev-list', '--count', `${comparisonBranch}..HEAD`, '--'], session.worktreePath, { silent: true })).stdout.trim();
         totalCommits = parseInt(countStr, 10) || ahead;
       } catch {
         // Keep default of ahead if command fails

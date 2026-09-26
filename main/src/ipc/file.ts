@@ -603,8 +603,8 @@ export function registerFileHandlers(
         // Use git show to get file content at specific revision
         // Use forward slashes for git pathspec (path.normalize uses backslashes on Windows)
         const posixPath = normalizedPath.replace(/\\/g, '/');
-        const { stdout } = await commandRunner.execAsync(
-          `git show ${revision}:${posixPath}`,
+        const { stdout } = await commandRunner.execFile(
+          'git', ['show', '--end-of-options', `${revision}:${posixPath}`, '--'],
           session.worktreePath
         );
 

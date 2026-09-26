@@ -498,14 +498,14 @@ export function registerGitHandlers(
       if (!ctx) return { success: false, error: 'No project context' };
 
       // Check working tree + staged changes for this specific file
-      const modified = (await ctx.commandRunner.execAsync(
-        `git diff --name-only HEAD -- "${filePath}"`,
+      const modified = (await ctx.commandRunner.execFile(
+        'git', ['diff', '--name-only', 'HEAD', '--', filePath],
         session.worktreePath
       )).stdout.trim();
 
       // Check if file is untracked
-      const untracked = (await ctx.commandRunner.execAsync(
-        `git ls-files --others --exclude-standard -- "${filePath}"`,
+      const untracked = (await ctx.commandRunner.execFile(
+        'git', ['ls-files', '--others', '--exclude-standard', '--', filePath],
         session.worktreePath
       )).stdout.trim();
 
