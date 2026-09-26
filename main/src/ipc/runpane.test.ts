@@ -22,6 +22,13 @@ import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { registerRunpaneHandlers } from './runpane';
 
+const persistentPanels = {
+  createPanel: panelManager.createPanel.bind(panelManager),
+  getPanel: panelManager.getPanel.bind(panelManager),
+  getPanelsForSession: panelManager.getPanelsForSession.bind(panelManager),
+  updatePanel: panelManager.updatePanel.bind(panelManager),
+};
+
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
 vi.spyOn(panelManager, 'getPanelsForSession');
@@ -3220,39 +3227,14 @@ describe('runpane IPC handlers', () => {
   });
 
   it('clears the composer premark when wait-ready times out before staging initial input', async () => {
-    const createdPanel: ToolPanel = {
-      ...terminalPanel,
-      state: {
-        isActive: false,
-        customState: {
-          agentType: 'codex',
-          isCliPanel: true,
-          initialInput: '/do TM-x',
-          initialInputSentAt: '2026-01-01T00:02:00.000Z',
-          initialInputSubmitStrategy: 'codex-ctrl-enter',
-        },
-      },
-    };
-    vi.mocked(panelManager.createPanel).mockImplementation(async (request) => ({
-      ...createdPanel,
-      state: {
-        isActive: false,
-        customState: {
-          ...createdPanel.state.customState,
-          ...request.initialState,
-        },
-      },
-    }));
-    vi.mocked(panelManager.getPanel).mockImplementation(() => ({
-      ...createdPanel,
-      state: {
-        isActive: false,
-        customState: {
-          ...createdPanel.state.customState,
-          initialInputSentAt: '2026-01-01T00:02:00.000Z',
-        },
-      },
-    }));
+    panelDatabase.createSession({
+      id: session.id, name: session.name, initial_prompt: '', worktree_name: 'premark-timeout',
+      worktree_path: process.env.PANE_DIR!, project_id: null, tool_type: 'none',
+    });
+    vi.mocked(panelManager.createPanel).mockImplementation(persistentPanels.createPanel);
+    vi.mocked(panelManager.getPanel).mockImplementation(persistentPanels.getPanel);
+    vi.mocked(panelManager.getPanelsForSession).mockImplementation(persistentPanels.getPanelsForSession);
+    vi.mocked(panelManager.updatePanel).mockImplementation(persistentPanels.updatePanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       ...terminalSnapshot('codex booting', 'idle'),
       isCliReady: false,
@@ -3265,15 +3247,11 @@ describe('runpane IPC handlers', () => {
       panes: [{ name: 'issue-358', tool: { agent: 'codex', initialInput: '/do TM-x' } }],
     }]);
 
+    const createdPanel = panelManager.getPanelsForSession(session.id)[0];
     expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
     expect(terminalPanelManager.deliverPendingInitialInput).toHaveBeenCalledWith(createdPanel.id);
-    expect(panelManager.updatePanel).toHaveBeenCalledWith(createdPanel.id, {
-      state: expect.objectContaining({
-        customState: expect.not.objectContaining({
-          initialInputSentAt: expect.any(String),
-        }),
-      }),
-    });
+    expect(panelManager.getPanel(createdPanel.id)?.state.customState).toMatchObject({ initialInput: '/do TM-x' });
+    expect(panelManager.getPanel(createdPanel.id)?.state.customState).not.toHaveProperty('initialInputSentAt');
     expect(result).toMatchObject({
       ok: false,
       items: [{
