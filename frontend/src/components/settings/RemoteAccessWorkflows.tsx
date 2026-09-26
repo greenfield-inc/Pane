@@ -1,3 +1,4 @@
+import { DEFAULT_REMOTE_BASE_URL } from '../../utils/remote-base-url';
 import { useEffect } from 'react';
 import { ArrowLeft, Copy, ExternalLink, Plus, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/Button';
@@ -8,7 +9,7 @@ import { SegmentedControl } from './SettingsControls';
 import { SecretField } from './SecretField';
 import type { RemoteAccessSubviewId } from '../../types/settings';
 import type { RemoteAccessController } from './useRemoteAccessSettings';
-import type { RemoteSetupTunnelPreference } from '../../../../shared/types/remoteDaemon';
+import { DEFAULT_REMOTE_DAEMON_HOST_CONFIG, type RemoteSetupTunnelPreference } from '../../../../shared/types/remoteDaemon';
 import { getRemoteExecutableHealthPresentation } from '../../utils/remoteRuntimePresentation';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 
@@ -21,18 +22,11 @@ interface RemoteAccessWorkflowsProps {
 
 export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChange }: RemoteAccessWorkflowsProps) {
   const resetDraftRef = useCommittedRef(controller.resetSubviewDraft);
-  const configuredBaseUrl = formatRemoteBaseUrl(
-    controller.config.host.config.listenHost,
-    controller.config.host.config.listenPort,
-  );
   const dirty = subview === 'host-setup'
     ? controller.setupDirty
     : subview === 'connections'
       ? Boolean(controller.connectionCode)
-      : JSON.stringify(controller.hostDraft) !== JSON.stringify(controller.config.host.config)
-        || Boolean(controller.pairLabel || controller.profileLabel || controller.profileToken)
-        || controller.pairBaseUrl !== configuredBaseUrl
-        || controller.profileBaseUrl !== configuredBaseUrl;
+      : controller.advancedDirty;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => {
@@ -54,12 +48,6 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
       </div>
     </div>
   );
-}
-
-function formatRemoteBaseUrl(host: string, port: number): string {
-  const trimmedHost = host.trim();
-  const normalizedHost = trimmedHost.includes(':') && !trimmedHost.startsWith('[') ? `[${trimmedHost}]` : trimmedHost;
-  return `http://${normalizedHost}:${port}`;
 }
 
 function HostSetup({ controller }: { controller: RemoteAccessController }) {
@@ -235,7 +223,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
           <div className="w-full space-y-3 sm:w-[460px]">
             <Checkbox label="Enable remote daemon listener" checked={controller.hostDraft.enabled} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, enabled: event.target.checked })} />
             <div className="grid gap-3 sm:grid-cols-2">
-              <Input label="Listen Host" value={controller.hostDraft.listenHost} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, listenHost: event.target.value })} placeholder="127.0.0.1" fullWidth />
+              <Input label="Listen Host" value={controller.hostDraft.listenHost} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, listenHost: event.target.value })} placeholder={DEFAULT_REMOTE_DAEMON_HOST_CONFIG.listenHost} fullWidth />
               <Input label="Listen Port" type="number" value={String(controller.hostDraft.listenPort)} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, listenPort: Number.parseInt(event.target.value, 10) })} error={controller.validation.hostPort ? undefined : 'Port must be between 1 and 65535'} fullWidth />
             </div>
             <Checkbox label="Require pairing / saved bearer tokens" checked={controller.hostDraft.pairingRequired} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, pairingRequired: event.target.checked })} />
@@ -249,7 +237,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
         <SettingRow settingId="remote-paired-connection" label="Create paired connection" description="Mint a host token and save a matching local client profile." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Connection Label" value={controller.pairLabel} onChange={(event) => controller.setPairLabel(event.target.value)} placeholder="Office Mac mini" fullWidth />
-            <Input label="Remote Base URL" value={controller.pairBaseUrl} onChange={(event) => controller.setPairBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" error={controller.pairBaseUrl && !controller.validation.pair ? 'Enter a label and valid HTTP(S) URL' : undefined} fullWidth />
+            <Input label="Remote Base URL" value={controller.pairBaseUrl} onChange={(event) => controller.setPairBaseUrl(event.target.value)} placeholder={DEFAULT_REMOTE_BASE_URL} error={controller.pairBaseUrl && !controller.validation.pair ? 'Enter a label and valid HTTP(S) URL' : undefined} fullWidth />
             <div className="flex justify-end"><Button type="button" size="sm" icon={<Plus className="h-4 w-4" />} disabled={!controller.validation.pair} onClick={controller.createPair}>Create Paired Profile</Button></div>
             {controller.createdToken && (
               <SecretField label="Latest generated remote token" value={controller.createdToken} readOnly />
@@ -259,7 +247,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
         <SettingRow settingId="remote-existing-profile" label="Save existing remote profile" description="Save a bearer token that was created on another host." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Existing Profile Label" value={controller.profileLabel} onChange={(event) => controller.setProfileLabel(event.target.value)} placeholder="Office Mac mini tunnel" fullWidth />
-            <Input label="Existing Remote Base URL" value={controller.profileBaseUrl} onChange={(event) => controller.setProfileBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" fullWidth />
+            <Input label="Existing Remote Base URL" value={controller.profileBaseUrl} onChange={(event) => controller.setProfileBaseUrl(event.target.value)} placeholder={DEFAULT_REMOTE_BASE_URL} fullWidth />
             <SecretField label="Existing Remote Token" value={controller.profileToken} onChange={controller.setProfileToken} onRemove={() => controller.setProfileToken('')} />
             <div className="flex justify-end"><Button type="button" size="sm" disabled={!controller.validation.profile} onClick={controller.saveProfile}>Save Remote Profile</Button></div>
           </div>
