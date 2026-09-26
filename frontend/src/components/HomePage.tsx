@@ -12,6 +12,7 @@ import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
 import { getThemeLabel, themeOptionsForSlot } from '../utils/themeOptions';
+import { useProjectStore } from '../stores/project-store';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import { capture } from '../services/posthog';
@@ -235,7 +236,7 @@ export function HomePage() {
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
 
-  const [projects, setProjects] = useState<Project[]>([]);
+  const projects = useProjectStore(s => s.projects);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [platform, setPlatform] = useState<string>('');
@@ -243,18 +244,6 @@ export function HomePage() {
   const [preferredShell, setPreferredShell] = useState<string>('auto');
 
   const uiScale = config?.uiScale ?? 1.0;
-
-  const loadProjects = useCallback(async () => {
-    try {
-      const result = await API.projects.getAll();
-      if (result.success && result.data) {
-        // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-        setProjects(result.data as Project[]);
-      }
-    } catch {
-      // Ignore transient IPC failures on home page
-    }
-  }, []);
 
   useEffect(() => {
     void window.electronAPI
@@ -277,16 +266,6 @@ export function HomePage() {
     }
   }, [config?.preferredShell]);
 
-  useEffect(() => {
-    void loadProjects();
-    const handler = () => void loadProjects();
-    window.addEventListener('project-changed', handler);
-    window.addEventListener('project-sessions-refresh', handler);
-    return () => {
-      window.removeEventListener('project-changed', handler);
-      window.removeEventListener('project-sessions-refresh', handler);
-    };
-  }, [loadProjects]);
 
   const recentSessions = useMemo(() => {
     return sessions

@@ -12,6 +12,7 @@ import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 import { Dropdown } from './ui/Dropdown';
 import type { DropdownItem } from './ui/Dropdown';
+import { useProjectStore } from '../stores/project-store';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { SessionStatusBadge } from './SessionStatusBadge';
@@ -197,7 +198,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   }, []);
 
   // State for collapsed sidebar
-  const [projects, setProjects] = useState<Project[]>([]);
+  const projects = useProjectStore(s => s.projects);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
@@ -229,28 +230,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       console.error('Failed to refresh git status:', error);
     }
   };
-
-  const loadProjects = useCallback(async () => {
-    try {
-      const response = await API.projects.getAll();
-      if (response.success && response.data) {
-        setProjects(response.data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch projects:', error);
-    }
-  }, []);
-
-  // Fetch projects for collapsed sidebar rendering and always-mounted session hotkeys.
-  useEffect(() => {
-    loadProjects();
-    window.addEventListener('project-changed', loadProjects);
-    window.addEventListener('project-sessions-refresh', loadProjects);
-    return () => {
-      window.removeEventListener('project-changed', loadProjects);
-      window.removeEventListener('project-sessions-refresh', loadProjects);
-    };
-  }, [loadProjects]);
 
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
@@ -727,8 +706,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
           <ProjectSessionList
             projects={projects}
-            onProjectsChange={setProjects}
-            onProjectsRefresh={loadProjects}
             sessionSortAscending={sessionSortAscending}
             pinnedSectionExpanded={sidebarSectionExpansion.pinned}
             repositoriesSectionExpanded={sidebarSectionExpansion.repositories}

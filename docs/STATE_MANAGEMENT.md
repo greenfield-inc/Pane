@@ -6,7 +6,7 @@
 
 Pane uses a combination of Zustand stores, IPC events, and targeted updates to manage application state efficiently. The application prioritizes specific, targeted updates over global refreshes to improve performance and user experience.
 
-Session and project lists live in Zustand (`frontend/src/stores/sessionStore.ts` and related stores). Do not keep a parallel `projectsWithSessions` array in a tree component; `DraggableProjectTreeView` was removed.
+Session and project lists live in Zustand (`frontend/src/stores/sessionStore.ts` and `frontend/src/stores/project-store.ts`). Do not keep a parallel `projectsWithSessions` array in a tree component; `DraggableProjectTreeView` was removed.
 
 ## Key Principles
 
@@ -35,17 +35,11 @@ IPC handlers in `useIPCEvents` already call `addSession` / `updateSession` / `de
 
 ### Project Updates
 
-```typescript
-// ❌ BAD: Reload all projects
-const handleProjectDeleted = () => {
-  fetchProjects(); // Network request for all projects
-};
+App, Sidebar, HomePage, and notifications share `project-store.ts`. Read the list with `useProjectStore(s => s.projects)`; event handlers can read the latest value through `getState()`. Do not copy project lists into component state or notification caches.
 
-// ✅ GOOD: Remove from local state
-const handleProjectDeleted = () => {
-  setProjects(prev => prev.filter(p => p.id !== deletedId));
-};
-```
+`useIPCEvents` starts the initial load and subscribes once to `project:updated`, which calls the store's `upsert` action. Updates arriving during a list request take precedence over that request's older snapshot. The existing `project-changed` and `project-sessions-refresh` window events use one shared refresh path for additions, deletions, and reconnect recovery; concurrent initial reads share a request, and an invalidation during a pending request queues a fresh read. Failed reads retain the last usable list and expose `error`.
+
+Use `ensureLoaded()` for startup decisions and `refresh()` when fresh server data is needed. Reordering uses `reorder(projectId, targetProjectId)`: it computes and persists an explicit order independently of React state updater timing, publishes the optimistic order to every subscriber, and rolls back on either an unsuccessful response or a rejected request. Rollback preserves project field updates received during the save. Only one reorder runs at a time; refreshes wait for its result.
 
 ## IPC Event Handling
 
@@ -57,11 +51,10 @@ The application uses IPC events to synchronize state between the main process an
 - `session:updated` - Update specific session properties
 - `session:deleted` - Remove session from project list
 
-### Project Events (if implemented)
+### Project Events
 
-- `project:created` - Add new project to list
-- `project:updated` - Update specific project properties
-- `project:deleted` - Remove project from list
+- `project:updated` patches the shared project store.
+- Project creation/deletion currently use the legacy window refresh events described above; there are no dedicated preload events for them.
 
 ## When Global Refreshes Are Acceptable
 
