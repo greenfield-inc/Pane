@@ -750,21 +750,17 @@ export function registerGitHandlers(
 
       const comparisonBranch = await worktreeManager.getSessionComparisonBranch(session, ctx);
 
-      // Check if we're actually in a rebase state (could have been pre-detected conflicts)
-      // Try to abort any existing rebase, but don't fail if there isn't one
+      // Porcelain status lists files, not whether a rebase is in progress.
       try {
-        const statusOutput = (await ctx.commandRunner.execAsync('git status --porcelain=v1', session.worktreePath)).stdout;
-        if (statusOutput.includes('rebase')) {
-          await worktreeManager.abortRebase(session.worktreePath, ctx.commandRunner);
-
-          // Emit git operation event about aborting the rebase
-          const abortMessage = `🔄 GIT OPERATION\nAborted rebase successfully`;
-          emitGitOperationToProject(sessionId, 'git:operation_completed', abortMessage, {
-            operation: 'abort_rebase'
-          });
+        await worktreeManager.abortRebase(session.worktreePath, ctx.commandRunner);
+        emitGitOperationToProject(sessionId, 'git:operation_completed', '🔄 GIT OPERATION\nAborted rebase successfully', {
+          operation: 'abort_rebase'
+        });
+      } catch (error) {
+        // Pre-detected conflicts can reach this action before a rebase starts.
+        if (!(error instanceof Error) || !/^(?:fatal: )?no rebase in progress\??\s*$/im.test(error.message)) {
+          throw error;
         }
-      } catch {
-        // Not in a rebase state or already clean - that's fine
       }
 
       // Use session-based Claude to handle the rebase and conflicts
