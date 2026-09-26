@@ -19,6 +19,7 @@ beforeEach(async () => {
   await runner.execFile('git', ['config', 'user.name', 'Test User'], repo);
   await runner.execFile('git', ['config', 'user.email', 'test@example.com'], repo);
   await runner.execFile('git', ['config', 'commit.gpgsign', 'false'], repo);
+  await runner.execFile('git', ['config', 'core.autocrlf', 'false'], repo);
   await writeFile(join(repo, 'example.txt'), 'base\n');
   await runner.execFile('git', ['add', '-A'], repo);
   await runner.execFile('git', ['commit', '-m', 'Base'], repo);
