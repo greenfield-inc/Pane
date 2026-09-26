@@ -5,6 +5,8 @@ import './polyfills/readablestream';
 import { agentChatManager } from './services/agentChat/agentChatManager';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
+import { registerStartupNotice } from './ipc/startup-notice';
+
 import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg } from './utils/runtimeMode';
 import { getAppDirectory } from './utils/appDirectory';
 import { readFileSync } from 'fs';
@@ -1314,6 +1316,7 @@ if (launchRemoteSetup) {
     showMainWindow();
     openPaneLink(decodeBoundary(link, boundary.string));
   });
+  registerStartupNotice(ipcMain, path.join(getAppDirectory(), '.running'));
 
   // Start the ptyHost supervisor before the window opens so the renderer's
   // preload listener for 'ptyHost-port' has a port to receive when the window
@@ -1368,24 +1371,6 @@ if (launchRemoteSetup) {
   console.log('[Main] Window created successfully');
   paneLinksReady = true;
   if (pendingPaneLink) openPaneLink(pendingPaneLink);
-
-  // Crash sentinel: detect if the previous session ended uncleanly.
-  // We write a file on startup and delete it on clean shutdown.
-  // If it exists at startup, the app crashed or the OS killed it.
-  const crashSentinelPath = path.join(getAppDirectory(), '.running');
-  try {
-    if (fs.existsSync(crashSentinelPath)) {
-      console.warn('[Main] Unclean shutdown detected — crash sentinel was still present');
-      // Notify the renderer once it's ready
-      mainWindow?.webContents.once('did-finish-load', () => {
-        mainWindow?.webContents.send('app:unclean-shutdown-detected');
-      });
-    }
-    // Write the sentinel for this session
-    fs.writeFileSync(crashSentinelPath, `${process.pid}\n${new Date().toISOString()}`);
-  } catch (err) {
-    console.warn('[Main] Failed to manage crash sentinel:', err);
-  }
 
   analyticsManager.startHeartbeat();
 
