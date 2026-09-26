@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { API } from '../../utils/api';
 import type { UpdateConfigRequest } from '../../types/config';
 import {
   DEFAULT_SETTINGS_PREFERENCES,
@@ -50,14 +51,7 @@ export function useSettingsPersistence(isOpen: boolean) {
   const loadPreferences = useCallback(async () => {
     setPreferencesLoading(true);
     try {
-      // SAFETY: The named IPC/API channel contract establishes this response payload type.
-      const response = await window.electron?.invoke('preferences:get-all') as {
-        success?: boolean;
-        data?: Record<string, string>;
-        error?: string;
-      } | undefined;
-      if (!response?.success) throw new Error(response?.error || 'Failed to load preferences');
-      setPreferences(parseSettingsPreferences(response.data ?? {}));
+      setPreferences(parseSettingsPreferences(await API.preferences.getAll()));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load preferences';
       for (const settingId of Object.values(PREFERENCE_SETTING_ID)) {
@@ -123,13 +117,7 @@ export function useSettingsPersistence(isOpen: boolean) {
     const settingId = PREFERENCE_SETTING_ID[name];
     setSaveState(settingId, { state: 'saving' });
     try {
-      // SAFETY: The named IPC/API channel contract establishes this response payload type.
-      const response = await window.electron?.invoke(
-        'preferences:set',
-        PREFERENCE_KEY_BY_NAME[name],
-        serializeSettingPreference(name, value),
-      ) as { success?: boolean; error?: string } | undefined;
-      if (!response?.success) throw new Error(response?.error || 'Failed to save preference');
+      await API.preferences.set(PREFERENCE_KEY_BY_NAME[name], serializeSettingPreference(name, value));
       setPreferences((current) => ({ ...current, [name]: value }));
       if (name === 'sidebarPaneRowLayout') {
         window.dispatchEvent(new CustomEvent('sidebar-pane-row-layout-changed', { detail: { layout: value } }));

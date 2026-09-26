@@ -114,13 +114,9 @@ export function ProjectSessionList({
 
     const loadSidebarPaneRowLayout = async () => {
       try {
-        // SAFETY: The named IPC/API channel contract establishes this response payload type.
-        const result = await window.electron?.invoke(
-          'preferences:get',
-          SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout
-        ) as { success?: boolean; data?: string } | undefined;
+        const value = await API.preferences.get(SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout);
         if (!cancelled) {
-          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(result?.data));
+          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(value));
         }
       } catch {
         if (!cancelled) setSidebarPaneRowLayout('single');

@@ -6,6 +6,10 @@ The filename is historical (the product was once called Crystal). There is no Ex
 
 Pane is an Electron desktop application that manages multiple agent CLI processes (Claude Code, Codex, Cursor, and custom tools) in git worktrees. This document visualizes the architecture using Mermaid diagrams.
 
+## Renderer preference boundary
+
+Use `API.preferences.get(key)`, `getAll()`, and `set(key, value)` instead of generic IPC invokes. The preload's `preferences` methods validate host responses through `shared/types/preferences.ts` before returning values. A missing key returns `null`, an empty value remains `''`, and all preference values are strings. Failed or malformed responses reject; callers retain their existing loading/error handling. The frontend API forwards these typed values without parsing IPC envelopes again.
+
 ## High-Level Architecture
 
 ```mermaid

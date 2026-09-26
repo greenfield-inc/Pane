@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { API } from '../utils/api';
 import { GitFork, AlertCircle, Star, ExternalLink, Loader2 } from 'lucide-react';
 import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalBody, ModalFooter } from './ui/Modal';
@@ -35,12 +36,6 @@ export const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
 export const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
 const ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE = 'onboarding_gh_status_at_first_launch';
 
-interface IPCResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
-
 function fallbackEnvironment(): EnvironmentInfo {
   return {
     gitInstalled: false,
@@ -76,17 +71,13 @@ function getEnvironmentStatus(env: EnvironmentInfo | null): OnboardingEnvironmen
   return 'gh_not_ready';
 }
 
-async function getPreference(key: string): Promise<string | undefined> {
-  if (!window.electron?.invoke) return undefined;
-  // SAFETY: The named IPC/API channel contract establishes this response payload type.
-  const result = await window.electron.invoke('preferences:get', key) as IPCResponse<string>;
-  return result.success ? result.data : undefined;
+async function getPreference(key: string): Promise<string | null> {
+  if (!window.electronAPI?.preferences) return null;
+  return API.preferences.get(key);
 }
 
 async function setPreference(key: string, value: string): Promise<void> {
-  if (window.electron?.invoke) {
-    await window.electron.invoke('preferences:set', key, value);
-  }
+  if (window.electronAPI?.preferences) await API.preferences.set(key, value);
 }
 
 async function markSupportPromptShown(): Promise<void> {
