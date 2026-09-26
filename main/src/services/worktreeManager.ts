@@ -6,6 +6,7 @@ import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { commitGitMessage } from '../utils/gitCommit';
+import { getGitAttributionEnv } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -294,7 +295,7 @@ export class WorktreeManager {
         } catch {
           // Ignore add errors (no files to add)
         }
-        await commitGitMessage(commandRunner, projectPath, 'Initial commit', this.configManager?.getConfig(), { allowEmpty: true });
+        await commandRunner.execFile('git', ['commit', '-m', 'Initial commit', '--allow-empty'], projectPath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
       }
 
       await ensureFastGitConfig(projectPath, commandRunner);

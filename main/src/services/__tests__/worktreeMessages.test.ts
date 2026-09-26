@@ -76,5 +76,4 @@ describe('worktree Git messages', () => {
       await rm(worktree, { recursive: true, force: true });
     }
   });
-
 });
