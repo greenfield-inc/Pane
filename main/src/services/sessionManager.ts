@@ -130,7 +130,7 @@ function normalizeDbOutputType(type: DbSessionOutputType): SessionOutput['type']
 type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 
 // Interface for panel state with custom state that can hold any AI-specific data
-import { addSessionLog, cleanupSessionLogs } from './session-logs';
+import { addSessionLog, cleanupSessionLogs, clearSessionLogs, startSessionLogs } from './session-logs';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { withLock } from '../utils/mutex';
@@ -279,6 +279,9 @@ export class SessionManager extends EventEmitter {
     // Hidden sessions are included for crash recovery, but not emitted to the
     // normal renderer session list.
     const dbSessions = this.db.getAllSessions(undefined, { includeHidden: true });
+    for (const session of dbSessions) {
+      if (!session.archived) startSessionLogs(session.id);
+    }
     const visibleDbSessions = dbSessions.filter(s => !s.is_hidden);
 
     // Partition sessions by status
@@ -444,9 +447,6 @@ export class SessionManager extends EventEmitter {
       throw new Error(`Session with ID ${id} already exists`);
     }
     
-    // Add log entry for session creation
-    addSessionLog(id, 'info', `Creating session: ${name}`, 'SessionManager');
-    
     let targetProject: Project | null = null;
     const isDetached = options?.detached === true;
     
@@ -487,6 +487,8 @@ export class SessionManager extends EventEmitter {
     };
 
     const dbSession = this.db.createSession(sessionData);
+    startSessionLogs(id);
+    addSessionLog(id, 'info', `Creating session: ${name}`, 'SessionManager');
     
     const session = this.convertDbSessionToSession(dbSession);
     session.toolType = toolType || session.toolType;
@@ -1223,7 +1225,7 @@ export class SessionManager extends EventEmitter {
     await this.stopRunningScript();
 
     // Clear previous logs when starting a new run
-    cleanupSessionLogs(sessionId);
+    clearSessionLogs(sessionId);
 
     // Mark session as running
     this.setSessionRunning(sessionId, true);

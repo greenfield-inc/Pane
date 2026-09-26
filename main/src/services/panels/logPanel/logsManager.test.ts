@@ -3,7 +3,7 @@ import { PassThrough } from 'stream';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../../shared/types/panels';
 import { panelManager } from '../../panelManager';
-import { cleanupSessionLogs, getSessionLogs } from '../../session-logs';
+import { cleanupSessionLogs, getSessionLogs, startSessionLogs } from '../../session-logs';
 import { LogsManager } from './logsManager';
 
 afterEach(() => {
@@ -12,6 +12,7 @@ afterEach(() => {
 });
 
 it('streams script output without persisting panel state for every chunk', async () => {
+  startSessionLogs('script-test');
   const panel: ToolPanel = {
     id: 'logs-panel', sessionId: 'script-test', type: 'logs', title: 'Logs',
     state: { isActive: true, customState: {} },

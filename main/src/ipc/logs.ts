@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { SessionManager } from '../services/sessionManager';
-import { getSessionLogs, cleanupSessionLogs } from '../services/session-logs';
+import { getSessionLogs, clearSessionLogs } from '../services/session-logs';
 
 const DAEMON_LOG_CHANNELS = ['sessions:get-logs', 'sessions:clear-logs'] as const;
 
@@ -27,7 +27,7 @@ export function setupLogHandlers(
   // Clear logs for a session
   commandRegistry.register('sessions:clear-logs', async (sessionId: string) => {
     try {
-      cleanupSessionLogs(sessionId);
+      clearSessionLogs(sessionId);
       return { success: true };
     } catch (error) {
       console.error('Failed to clear logs:', error);

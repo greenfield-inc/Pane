@@ -1,5 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { addSessionLog, cleanupSessionLogs, getSessionLogs } from './session-logs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { addSessionLog, cleanupSessionLogs, clearSessionLogs, startSessionLogs, getSessionLogs } from './session-logs';
+
+beforeEach(() => {
+  startSessionLogs('logs-test');
+  startSessionLogs('other-test');
+});
 
 afterEach(() => {
   cleanupSessionLogs('logs-test');
@@ -32,10 +37,10 @@ describe('session log retention', () => {
     expect(getSessionLogs('other-test')[0].source).toHaveLength(1024);
   });
 
-  it('clears only the deleted session and permits fresh output', () => {
+  it('clears only the selected session and permits fresh output', () => {
     addSessionLog('logs-test', 'info', 'old');
     addSessionLog('other-test', 'info', 'keep');
-    cleanupSessionLogs('logs-test');
+    clearSessionLogs('logs-test');
     expect(getSessionLogs('logs-test')).toEqual([]);
     expect(getSessionLogs('other-test')[0].message).toBe('keep');
     addSessionLog('logs-test', 'warn', 'new');
