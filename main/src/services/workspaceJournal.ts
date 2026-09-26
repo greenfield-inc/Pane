@@ -221,7 +221,14 @@ export class WorkspaceJournal implements PaneEventSink {
 
     if (channel === 'panel:event') {
       const payload = decodeOptionalBoundary(args[0], panelExitEventSchema);
-      if (!payload || payload.type !== 'terminal:exit') return;
+      if (!payload) return;
+      if (payload.type === 'terminal:started') {
+        this.exitedPanels.delete(payload.source.panelId);
+        this.stateByPanel.delete(payload.source.panelId);
+        this.readySinceByPanel.delete(payload.source.panelId);
+        return;
+      }
+      if (payload.type !== 'terminal:exit') return;
       const { panelId, sessionId: paneId } = payload.source;
       if (this.exitedPanels.has(panelId)) return;
       this.exitedPanels.add(panelId);
