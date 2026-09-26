@@ -122,17 +122,6 @@ Navigation markers for prompts within session output.
 
 **Purpose**: Enables quick navigation to specific prompts within long session outputs and tracks execution duration.
 
-### 7. `migrations` Table
-
-Tracks applied database migrations.
-
-| Column | Type | Description | Constraints |
-|--------|------|-------------|-------------|
-| `id` | INTEGER | Migration version number | PRIMARY KEY |
-| `applied_at` | DATETIME | When migration was applied | DEFAULT CURRENT_TIMESTAMP |
-
-**Purpose**: Ensures database schema can be safely evolved over time by tracking which migrations have been applied.
-
 ## Database Indexes
 
 The database includes several indexes for performance optimization:
@@ -217,9 +206,9 @@ projects (1) ─────┬──── (∞) sessions
 
 ## Migration System
 
-The application uses a simple migration system located in `main/src/database/migrations/`. Each migration is a SQL file numbered sequentially (e.g., `001_initial_schema.sql`, `002_add_prompt_markers.sql`).
+`DatabaseService.initializeSchema()` loads `main/src/database/schema.sql`. Startup then calls `DatabaseService.runMigrations()` in `main/src/database/database.ts` to upgrade existing databases. The steps inspect the current schema with queries such as `PRAGMA table_info(...)` and `sqlite_master` before adding or rebuilding structures. There is no migration-version table or numbered SQL-file runner.
 
-Migrations are applied automatically on application startup if the database version is behind the latest migration.
+For a schema change, update the initial schema for fresh installations and add the appropriate guarded upgrade in `runMigrations()` for existing installations. Check ordering carefully: older table rebuilds can remove columns added earlier. Verify both a fresh database and a representative older schema with isolated database tests. Adding a standalone SQL file does not run an upgrade.
 
 ## Backup Recommendations
 
