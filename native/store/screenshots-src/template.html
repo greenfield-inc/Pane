@@ -88,13 +88,6 @@ const LAYOUTS = {
     island: { width: 290, height: 84, top: 26 },
     map: { top: 60, width: 1500 },
   },
-  ipad: {
-    width: 2064, height: 2752,
-    copyTop: 170, brand: 76, eyebrow: 44, eyebrowGap: 76, headline: 136, headlineWidth: 1700, sub: 50, subGap: 44, subWidth: 1800,
-    deviceTop: 980, screenWidth: 1640, bezel: 44, screenRadius: 64,
-    island: null,
-    map: { top: 40, width: 2300 },
-  },
 };
 
 // Deterministic PRNG so every render of a shot draws the same rain.
@@ -177,10 +170,9 @@ window.renderShot = async function (shot, device, index) {
   map.style.width = `${L.map.width}px`;
   map.style.height = `${Math.round(L.map.width * 458.627 / 784.077)}px`;
 
-  // "flip" lists the devices where the phone bleeds off the top and the copy
-  // sits at the bottom, for screens whose key control is at the bottom.
-  const flip = (shot.flip || []).includes(device);
-  if (flip) {
+  // "flip": the phone bleeds off the top and the copy sits at the bottom,
+  // for screens whose key control is at the bottom.
+  if (shot.flip) {
     copy.style.top = "auto";
     copy.style.bottom = `${L.copyTop}px`;
     brand.style.display = "none";
@@ -191,7 +183,7 @@ window.renderShot = async function (shot, device, index) {
   await img.decode();
   const screenHeight = Math.round(L.screenWidth * img.naturalHeight / img.naturalWidth);
   const deviceEl = $("device");
-  deviceEl.style.top = flip
+  deviceEl.style.top = shot.flip
     ? `${L.height - L.deviceTop - (screenHeight + L.bezel * 2) + L.copyTop}px`
     : `${L.deviceTop}px`;
   deviceEl.style.width = `${L.screenWidth + L.bezel * 2}px`;
@@ -202,14 +194,9 @@ window.renderShot = async function (shot, device, index) {
     left: `${L.bezel}px`, top: `${L.bezel}px`, width: `${L.screenWidth}px`, height: `${screenHeight}px`,
     borderRadius: `${L.screenRadius}px`,
   });
-  const island = $("island");
-  if (L.island) {
-    Object.assign(island.style, {
-      display: "block", width: `${L.island.width}px`, height: `${L.island.height}px`, top: `${L.bezel + L.island.top}px`,
-    });
-  } else {
-    island.style.display = "none";
-  }
+  Object.assign($("island").style, {
+    width: `${L.island.width}px`, height: `${L.island.height}px`, top: `${L.bezel + L.island.top}px`,
+  });
 
   // Wait for the map background and logo too, or a fast screenshot can miss them.
   const mapImage = new Image();

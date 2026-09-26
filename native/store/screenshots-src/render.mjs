@@ -14,7 +14,6 @@ const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf
 
 const DEVICES = {
   iphone: { width: 1320, height: 2868 },
-  ipad: { width: 2064, height: 2752 },
 };
 
 const exists = file => access(file).then(() => true, () => false);
@@ -36,7 +35,7 @@ const browser = await chromium.launch(process.env.PANE_STORE_CHROMIUM
   : { channel: 'chrome' });
 await mkdir(outDir, { recursive: true });
 
-const rendered = { iphone: [], ipad: [] };
+const rendered = { iphone: [] };
 for (const [device, size] of Object.entries(DEVICES)) {
   const page = await browser.newPage({ viewport: size, deviceScaleFactor: 1 });
   for (const [index, shot] of shots.entries()) {
@@ -60,8 +59,8 @@ for (const [device, size] of Object.entries(DEVICES)) {
 if (!only) {
   const rows = Object.entries(rendered).filter(([, files]) => files.length);
   const html = `<body style="margin:0;padding:40px;width:max-content;background:#18181b;font:600 28px system-ui;color:#fafafa">${rows.map(([device, files]) => `
-    <div style="margin-bottom:16px">${device === 'iphone' ? 'iPhone 6.9" (1320x2868)' : 'iPad 13" (2064x2752)'}</div>
-    <div style="display:flex;gap:24px;margin-bottom:48px">${files.map(f => `<img src="${pathToFileURL(f).href}" style="height:${device === 'iphone' ? 900 : 700}px;flex-shrink:0;border-radius:12px">`).join('')}</div>`).join('')}</body>`;
+    <div style="margin-bottom:16px">iPhone 6.9" (1320x2868)</div>
+    <div style="display:flex;gap:24px;margin-bottom:48px">${files.map(f => `<img src="${pathToFileURL(f).href}" style="height:900px;flex-shrink:0;border-radius:12px">`).join('')}</div>`).join('')}</body>`;
   // Chrome loads file:// images only into a file:// page, so the sheet goes through a temp file.
   const sheetHtml = path.join(here, '.contact-sheet.html');
   await writeFile(sheetHtml, html);

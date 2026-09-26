@@ -19,7 +19,7 @@
     "headline": "Answer and unblock in one tap",
     "subhead": "Allow or deny a command from anywhere.",
     "capture": "03-approve.png",
-    "flip": ["iphone"]
+    "flip": true
   },
   {
     "id": "04-panes",
