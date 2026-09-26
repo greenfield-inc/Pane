@@ -132,6 +132,7 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
 ] as const;
 
 export const ELECTRON_ADAPTER_ONLY_CHANNELS = [
+  'app:consume-unclean-shutdown',
   'file:showInFolder',
   'sessions:open-ide',
   'terminal:clipboard-paste-image',
