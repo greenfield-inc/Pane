@@ -41,9 +41,9 @@ async function conflictingRebase(): Promise<void> {
   await expect(runner.execFile('git', ['rebase', 'main'], repo)).rejects.toThrow();
 }
 
-function registeredHandler(baseBranch = 'main') {
+function registeredHandler(baseBranch = 'main', projectPath = repo) {
   const session = { id: 'test-session', worktreePath: repo, baseBranch };
-  const project = { id: 1, path: repo, name: 'Test' };
+  const project = { id: 1, path: projectPath, name: 'Test' };
   const launchedFiles: string[] = [];
   const prompts: string[] = [];
   const startSession = async (_id: string, _cwd: string, prompt: string) => {
@@ -96,7 +96,9 @@ it('reports an abort failure and leaves the agent stopped', async () => {
 
 it('resolves the main comparison branch after restoring an existing feature branch', async () => {
   await conflictingRebase();
-  const { registry, prompts } = registeredHandler('feature');
+  const baseWorktree = join(repo, 'base-worktree');
+  await runner.execFile('git', ['worktree', 'add', baseWorktree, 'main'], repo);
+  const { registry, prompts } = registeredHandler('feature', baseWorktree);
   await expect(registry.invoke('sessions:abort-rebase-and-use-claude', ['test-session'])).resolves.toMatchObject({ success: true });
   expect(prompts).toEqual(['Please rebase main into this branch and resolve all conflicts']);
 });
