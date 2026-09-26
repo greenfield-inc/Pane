@@ -21,7 +21,7 @@
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] I have run `pnpm typecheck` and `pnpm lint` locally
-- [ ] I have tested the Electron app locally with `pnpm electron-dev`
+- [ ] I have tested the Electron app locally with `pnpm dev`
 
 ## Critical Areas Modified
 <!-- Check if you modified any of these critical areas -->
