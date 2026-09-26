@@ -70,26 +70,8 @@ function isDevOnlyPackage(packageName) {
 function requiresAttribution(licenseType) {
   if (!licenseType) return true; // Include if unknown
   
-  const normalizedLicense = licenseType.toUpperCase();
-  
-  // Check for no-attribution licenses
-  for (const noAttrLicense of NO_ATTRIBUTION_LICENSES) {
-    if (normalizedLicense.includes(noAttrLicense)) {
-      return false;
-    }
-  }
-  
-  // For dual licenses (e.g., "WTFPL OR MIT"), check if ANY requires attribution
-  if (normalizedLicense.includes(' OR ')) {
-    const licenses = normalizedLicense.split(' OR ');
-    return licenses.some(license => {
-      const trimmed = license.trim();
-      return !NO_ATTRIBUTION_LICENSES.includes(trimmed) && 
-             !NO_ATTRIBUTION_LICENSES.some(noAttr => trimmed.includes(noAttr));
-    });
-  }
-  
-  return true;
+  // Only exclude an exact no-attribution identifier; retain compound/unknown licenses.
+  return !NO_ATTRIBUTION_LICENSES.some(license => license.toUpperCase() === licenseType.toUpperCase().trim());
 }
 
 function getLicenseInfo(packagePath) {
@@ -303,7 +285,6 @@ function formatLicenseEntry(info) {
     if (repo) entry += `Repository: ${repo}\n`;
   }
   
-  entry += `\n${info.licenseText}\n`;
   
   return entry;
 }
@@ -349,35 +330,18 @@ function generateNotices() {
     // Sort packages within each license type alphabetically
     packages.sort((a, b) => a.info.name.toLowerCase().localeCompare(b.info.name.toLowerCase()));
     
-    // For common licenses, list all packages first, then include the license text once
-    if (licenseType === 'MIT' || licenseType === 'ISC' || licenseType === 'BSD-2-Clause' || licenseType === 'Apache-2.0') {
-      notices += `The following packages are licensed under the ${licenseType} license:\n\n`;
-      
-      for (const { info } of packages) {
-        notices += `  - ${info.name} (${info.version})`;
-        if (info.author) {
-          const author = isPlainObject(info.author) ? info.author.name : info.author;
-          if (author) notices += ` - ${author}`;
-        }
-        notices += '\n';
-      }
-      
-      notices += '\n';
-      
-      // Include the license text once (from the first package)
-      const firstPackage = packages[0];
-      if (firstPackage && firstPackage.info.licenseText && !firstPackage.info.licenseText.startsWith('License:')) {
-        notices += firstPackage.info.licenseText;
-        notices += '\n\n';
-      }
-    } else {
-      // For less common licenses, include full details for each package
-      for (const { info } of packages) {
-        notices += formatLicenseEntry(info);
-        notices += '\n--------------------------------------------------------------------------------\n\n';
-      }
+    // Copyright notices are part of the license text, even when the SPDX type matches.
+    const byText = new Map();
+    for (const { info } of packages) {
+      const group = byText.get(info.licenseText) || [];
+      group.push(info);
+      byText.set(info.licenseText, group);
     }
-    
+    for (const [text, group] of byText) {
+      for (const info of group) notices += `${formatLicenseEntry(info)}\n`;
+      notices += `${text}\n\n--------------------------------------------------------------------------------\n\n`;
+    }
+
     totalPackages += packages.length;
   }
   
@@ -388,7 +352,7 @@ function generateNotices() {
   notices += `================================================================================\n\n`;
   notices += `Package: Pane\n`;
   notices += `Version: ${panePackageJson.version}\n`;
-  notices += `Author: ${panePackageJson.author}\n`;
+  notices += `Author: ${isPlainObject(panePackageJson.author) ? panePackageJson.author.name : panePackageJson.author}\n`;
   notices += `License: ${panePackageJson.license}\n`;
   notices += `\n${fs.readFileSync(path.join(__dirname, '..', 'LICENSE'), 'utf8')}\n`;
   
