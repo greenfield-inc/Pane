@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -14,6 +15,7 @@ interface TerminalShortcut {
 }
 
 interface CustomCommand {
+  resume?: CustomCommandResume | null;
   name: string;
   command: string;
 }

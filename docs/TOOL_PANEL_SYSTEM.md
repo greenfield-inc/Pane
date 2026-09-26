@@ -105,3 +105,13 @@ Each panel type has specific capabilities defined in `PANEL_CAPABILITIES`:
 - **canConsume**: Events this panel listens to
 
 Example: Diff panels are singleton + permanent + worktree-only, consuming `files:changed` and `terminal:command_executed` events to auto-refresh.
+
+### Named custom launch profiles
+
+In a worktree's **Add Tool (+)** menu, choose **Add custom command…** and enter
+an optional **Name** alongside the command. **Save & launch** saves the profile
+and opens a terminal tab with that name. Leaving the name blank uses the first
+three words of the command. Saved profiles are shared through app configuration.
+Use the pencil beside a saved profile to rename it; the menu and future tabs use
+the new name. Existing tabs keep their titles. Hover a profile to see its full
+name and command.

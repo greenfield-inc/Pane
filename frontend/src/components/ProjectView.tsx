@@ -6,7 +6,7 @@ import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
-import type { ToolPanel, ToolPanelType } from '../../../shared/types/panels';
+import type { ToolPanel, ToolPanelType, TerminalPanelState } from '../../../shared/types/panels';
 import type { PanelCreateOptions } from '../types/panelComponents';
 import { SessionProvider } from '../contexts/SessionContext';
 import { DetailPanel } from './DetailPanel';
@@ -225,11 +225,11 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
       let initialState = options?.initialState;
       if (type === 'terminal' && options?.initialCommand) {
-        initialState = {
-          customState: {
-            initialCommand: options.initialCommand
-          }
+        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = {
+          initialCommand: options.initialCommand,
         };
+        if (options.customResume !== undefined) customState.customResume = options.customResume;
+        initialState = { customState };
       }
 
       const newPanel = await panelApi.createPanel({
