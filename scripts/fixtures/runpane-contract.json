@@ -393,6 +393,120 @@
       "demo",
       "--from-json",
       "-"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel=panel-1",
+      "--text=- [ ] item",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "commit",
+      "--pane",
+      "pane-1",
+      "--message",
+      "fix: title\n\nbody",
+      "--yes",
+      "--json"
+    ],
+    [
+      "links",
+      "create",
+      "--pane",
+      "pane-1",
+      "--panel",
+      "panel-1",
+      "--json"
+    ],
+    [
+      "links",
+      "open",
+      "--url=pane://open?pane=pane-1",
+      "--yes"
+    ],
+    [
+      "mcp",
+      "--toolsets",
+      "core,git",
+      "--read-only"
+    ],
+    [
+      "docs",
+      "search",
+      "--query",
+      "archive a pane",
+      "--limit",
+      "3"
+    ],
+    [
+      "docs",
+      "read",
+      "--doc",
+      "docs/PANE_MCP.md"
+    ],
+    [
+      "agents",
+      "start",
+      "--repo",
+      "active",
+      "--name",
+      "fix-login",
+      "--agent",
+      "claude",
+      "--prompt",
+      "Fix the login redirect",
+      "--yes",
+      "--json"
+    ],
+    [
+      "agents",
+      "send",
+      "--pane",
+      "pane-1",
+      "--text=- [ ] item",
+      "--yes"
+    ],
+    [
+      "panels",
+      "input",
+      "--panel",
+      "panel-1",
+      "--keys",
+      "down,enter",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "squash-rebase",
+      "--pane",
+      "pane-1",
+      "--message",
+      "feat: land it",
+      "--yes",
+      "--json"
+    ],
+    [
+      "folders",
+      "create",
+      "--repo",
+      "3",
+      "--name",
+      "Reviews",
+      "--yes"
+    ],
+    [
+      "panes",
+      "move",
+      "--pane",
+      "pane-1",
+      "--folder",
+      "folder-9",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

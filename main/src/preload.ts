@@ -35,6 +35,7 @@ import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
+import type { PaneLinkNavigation } from '../../shared/types/paneLinks';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -745,6 +746,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, session: Session) => callback(session);
       ipcRenderer.on('session:updated', wrappedCallback);
       return () => ipcRenderer.removeListener('session:updated', wrappedCallback);
+    },
+    onPaneOpenLink: (callback: (target: PaneLinkNavigation) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkNavigation) => callback(target);
+      ipcRenderer.on('pane:open-link', wrappedCallback);
+      return () => ipcRenderer.removeListener('pane:open-link', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);

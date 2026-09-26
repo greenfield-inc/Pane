@@ -99,6 +99,16 @@ export function linuxToUNCPath(linuxPath: string, distro: string): string {
 }
 
 /**
+ * Convert a Windows drive path to its default WSL mount path.
+ * Example: 'C:\\Users\\me\\file.png' → '/mnt/c/Users/me/file.png'
+ */
+export function windowsPathToWSLMount(windowsPath: string): string {
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
+  if (!match) return windowsPath;
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
+}
+
+/**
  * Join path segments with forward slashes (for Linux paths on Windows).
  * NEVER use Node's path.join() for WSL Linux paths.
  */

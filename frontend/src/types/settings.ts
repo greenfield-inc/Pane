@@ -34,6 +34,8 @@ export type SettingsSettingId =
   | 'terminal-reference-line-count'
   | 'terminal-shell'
   | 'default-pane-chat-agent'
+  | 'mcp-registration'
+  | 'mcp-toolsets'
   | 'agent-context'
   | 'claude-executable'
   | 'commit-footer'

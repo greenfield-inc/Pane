@@ -23,6 +23,12 @@ python -m runpane setup
 The wizard can install Pane on this machine, configure this machine as a remote
 host, update Pane, or run diagnostics.
 
+## MCP Server
+
+The Pane MCP server (`runpane mcp`) ships in the npm package and inside the
+Pane desktop app, not in this package. Run it with Node:
+`npx --yes runpane@latest mcp`.
+
 ## Advanced
 
 ### Explicit Commands

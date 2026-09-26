@@ -38,6 +38,7 @@ jobs:
             - 'scripts/generate-runpane-contract.js'
             - 'scripts/sync-runpane-package-versions.js'
             - 'scripts/test-runpane-contract.js'
+            - 'scripts/test-runpane-mcp.js'
             - 'scripts/test-runpane-package-smoke.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
@@ -184,6 +185,9 @@ jobs:
 
     - name: Run wrapper contract tests
       run: node scripts/test-runpane-contract.js
+
+    - name: Run MCP server tests
+      run: node --test scripts/test-runpane-mcp.js
 
     - name: Run package manager smoke tests
       run: node scripts/test-runpane-package-smoke.js

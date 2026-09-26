@@ -83,6 +83,13 @@ export interface ParsedArgs {
   selfTest?: boolean;
   report?: boolean;
   bodyFile?: string;
+  message?: string;
+  query?: string;
+  doc?: string;
+  url?: string;
+  keys?: string[];
+  toolsets?: string[];
+  readOnly?: boolean;
   remoteSetupArgs: string[];
 }
 
@@ -104,6 +111,11 @@ const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.ma
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
+const INLINE_VALUE_FLAGS = new Set<string>([
+  ...LOCAL_VALUE_FLAGS,
+  ...RUNPANE_CONTRACT.flags.wrapper.filter((flag) => 'value' in flag).map((flag) => flag.name),
+  '--command',
+]);
 
 const DEFAULTS: Omit<ParsedArgs, 'command'> = {
   target: RUNPANE_CONTRACT.defaults.target,
@@ -189,7 +201,8 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   return parsed;
 }
 
-function parseFlags(args: string[], parsed: ParsedArgs): void {
+function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
+  const { args, literalValues } = splitInlineValues(rawArgs);
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     const isAgentContextCommand = parsed.command === 'agent-context';
@@ -218,7 +231,7 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
       continue;
     }
     if (isAgentContextCommand && arg === '--command') {
-      parsed.contextCommand = readValue(args, ++index, arg);
+      parsed.contextCommand = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
@@ -226,24 +239,24 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
       continue;
     }
     if (isLocalCommand && LOCAL_VALUE_FLAGS.has(arg)) {
-      const value = readValue(args, ++index, arg);
+      const value = readValue(args, ++index, arg, literalValues);
       parseLocalValueFlag(arg, value, parsed);
       continue;
     }
     if (arg === '--version') {
-      parsed.paneVersion = readValue(args, ++index, arg);
+      parsed.paneVersion = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (arg === '--download-dir') {
-      parsed.downloadDir = readValue(args, ++index, arg);
+      parsed.downloadDir = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (arg === '--pane-path') {
-      parsed.panePath = readValue(args, ++index, arg);
+      parsed.panePath = readValue(args, ++index, arg, literalValues);
       continue;
     }
     if (arg === '--format') {
-      const value = readValue(args, ++index, arg);
+      const value = readValue(args, ++index, arg, literalValues);
       if (!FORMATS.has(value)) {
         throw new Error(`Invalid --format "${value}". Expected one of: ${[...FORMATS].join(', ')}`);
       }
@@ -252,7 +265,7 @@ function parseFlags(args: string[], parsed: ParsedArgs): void {
     }
 
     if (REMOTE_VALUE_FLAGS.has(arg)) {
-      const value = readValue(args, ++index, arg);
+      const value = readValue(args, ++index, arg, literalValues);
       if (arg === '--channel') {
         if (!CHANNELS.has(value)) {
           throw new Error(`Invalid --channel "${value}". Expected stable or nightly.`);
@@ -365,6 +378,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--report') {
     parsed.report = true;
+    return;
+  }
+  if (flag === '--read-only') {
+    parsed.readOnly = true;
     return;
   }
 
@@ -585,6 +602,30 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.bodyFile = value;
     return;
   }
+  if (flag === '--message') {
+    parsed.message = value;
+    return;
+  }
+  if (flag === '--query') {
+    parsed.query = value;
+    return;
+  }
+  if (flag === '--doc') {
+    parsed.doc = value;
+    return;
+  }
+  if (flag === '--url') {
+    parsed.url = value;
+    return;
+  }
+  if (flag === '--keys') {
+    parsed.keys = value.split(',').map((key) => key.trim()).filter(Boolean);
+    return;
+  }
+  if (flag === '--toolsets') {
+    parsed.toolsets = value.split(',').map((name) => name.trim()).filter(Boolean);
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -603,6 +644,8 @@ export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
 }
 
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
+  // Every command that maps to a daemon channel takes local flags.
+  if (RUNPANE_CONTRACT.commands.some((entry) => entry.name === command && 'daemonAction' in entry)) return true;
   return command === 'doctor'
     || command === 'daemon repair'
     || command === 'repos list'
@@ -634,7 +677,14 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panels wait'
     || command === 'workspace state'
     || command === 'watch'
-    || command === 'agents doctor';
+    || command === 'agents doctor'
+    || command === 'agents start'
+    || command === 'agents status'
+    || command === 'agents send'
+    || command === 'links create'
+    || command === 'docs search'
+    || command === 'docs read'
+    || command === 'mcp';
 }
 
 function appendRemoteArg(parsed: ParsedArgs, flag: string, value?: string): void {
@@ -661,8 +711,36 @@ function appendUnknownRemoteArg(args: string[], index: number, parsed: ParsedArg
   return index;
 }
 
-function readValue(args: string[], index: number, flag: string): string {
+/**
+ * Splits `--flag=value` for the value flags runpane parses itself. A value given this way is taken
+ * literally, even when it starts with "-" (for example `--text=- [ ] item`).
+ */
+interface SplitArgs {
+  args: string[];
+  /** Indexes of values given as `--flag=value`, which are taken literally. */
+  literalValues: Set<number>;
+}
+
+function splitInlineValues(rawArgs: string[]): SplitArgs {
+  const args: string[] = [];
+  const literalValues = new Set<number>();
+  for (const arg of rawArgs) {
+    const separator = arg.indexOf('=');
+    const flag = separator === -1 ? '' : arg.slice(0, separator);
+    if (INLINE_VALUE_FLAGS.has(flag)) {
+      args.push(flag);
+      literalValues.add(args.length);
+      args.push(arg.slice(separator + 1));
+    } else {
+      args.push(arg);
+    }
+  }
+  return { args, literalValues };
+}
+
+function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
+  if (literalValues.has(index)) return value;
   if (!value || (value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }
