@@ -120,7 +120,7 @@ for delivery in json.load(sys.stdin):
       })().catch(error => { console.error(error); process.exitCode = 1; });
     `], { cwd: root, encoding: 'utf8', timeout: 10000, env: {...process.env, RUNPANE_TELEMETRY_DISABLED: '1'} });
     assert.equal(nodeResult.status, 0, nodeResult.stderr);
-    assert.equal(output, nodeResult.stdout.trim());
+    assert.equal(output.replace(/\r\n/g, '\n'), nodeResult.stdout.trim().replace(/\r\n/g, '\n'));
     const lines = output.split('\n').filter(line => line.includes('Initial input')).map(line => line.trim());
     assert.deepEqual(lines, [
       'Initial input: not delivered after 0 attempts; staged: no',
