@@ -53,3 +53,33 @@ describe('RemoteTerminalEmulator', () => {
     await expect(emulator.refresh()).resolves.toMatchObject({ screenText: '' });
   });
 });
+
+it('recovers an existing handle with retained history and its latest dimensions after host exit', async () => {
+  const deadHost = Object.assign(new EventEmitter(), { postMessage: vi.fn(), unref: vi.fn() });
+  const replacement = inProcessEmulatorHost();
+  const reconnect = vi.fn(() => replacement);
+  const emulator = new TerminalEmulatorHostConnection(deadHost).createEmulator(20, 3, {
+    reconnect,
+    replay: () => 'retained\r\n123456789',
+  });
+  emulator.write('discarded old history\r\nretained\r\n123456789');
+  emulator.resize(5, 4);
+  deadHost.emit('exit');
+
+  expect((await emulator.refresh()).screenText).toBe('retai\nned\n12345\n6789');
+  emulator.write('\r\nlive');
+  expect((await emulator.refresh()).screenText).toBe('ned\n12345\n6789\nlive');
+  expect(await emulator.readScrollback(100)).not.toContain('discarded old history');
+  expect(reconnect).toHaveBeenCalledOnce();
+  emulator.dispose();
+});
+
+it('does not recreate a disposed terminal when its old host exits', async () => {
+  const host = Object.assign(new EventEmitter(), { postMessage: vi.fn(), unref: vi.fn() });
+  const reconnect = vi.fn(inProcessEmulatorHost);
+  const emulator = new TerminalEmulatorHostConnection(host).createEmulator(20, 3, { reconnect, replay: () => 'finished' });
+  emulator.dispose();
+  host.emit('exit');
+  await expect(emulator.restoreSnapshot()).resolves.toBeNull();
+  expect(reconnect).not.toHaveBeenCalled();
+});

@@ -8,6 +8,12 @@ import {
   type ScreenState,
 } from './terminalEmulatorHost';
 
+interface EmulatorRecovery {
+  reconnect: () => TerminalEmulatorHostConnection;
+  /** The owner's bounded replay buffer, read only when a host is replaced. */
+  replay: () => string;
+}
+
 type Reply = ScreenState | RestoreSnapshot | string | null;
 
 const EMPTY_STATE: ScreenState = { screenText: '', inputScreenText: '', isAlternateScreen: false, oscTitle: '', oscProgress: '' };
@@ -17,6 +23,7 @@ export class TerminalEmulatorHostConnection {
   private nextId = 1;
   private nextReq = 1;
   private closed = false;
+  private readonly closeListeners = new Set<() => void>();
   private readonly pending = new Map<number, (reply: Reply) => void>();
   private readonly stateListeners = new Map<number, (state: ScreenState) => void>();
 
@@ -34,8 +41,13 @@ export class TerminalEmulatorHostConnection {
     return this.closed;
   }
 
-  createEmulator(cols: number, rows: number): RemoteTerminalEmulator {
-    return new RemoteTerminalEmulator(this, cols, rows);
+  createEmulator(cols: number, rows: number, recovery?: EmulatorRecovery): RemoteTerminalEmulator {
+    return new RemoteTerminalEmulator(this, cols, rows, recovery);
+  }
+
+  onClose(listener: () => void): () => void {
+    this.closeListeners.add(listener);
+    return () => { this.closeListeners.delete(listener); };
   }
 
   register(cols: number, rows: number, onState: (state: ScreenState) => void): number {
@@ -83,6 +95,7 @@ export class TerminalEmulatorHostConnection {
   }
 
   private onMessage(message: EmulatorReply): void {
+    if (this.closed) return;
     if (message.op === 'screen') {
       this.stateListeners.get(message.id)?.(message.state);
       return;
@@ -97,6 +110,10 @@ export class TerminalEmulatorHostConnection {
     for (const resolve of this.pending.values()) resolve(null);
     this.pending.clear();
     this.stateListeners.clear();
+    for (const listener of this.closeListeners) {
+      try { listener(); } catch (error) { console.error('[TerminalEmulatorHost] recovery failed:', error); }
+    }
+    this.closeListeners.clear();
   }
 }
 
@@ -114,18 +131,28 @@ export function sharedEmulatorThread(): TerminalEmulatorHostConnection {
  * Main-process handle to a TerminalStateEmulator that lives on an emulator
  * host. Writes are fire-and-forget; `state` is the last screen the host
  * reported (at most ~50 ms old), and `refresh()` / `restoreSnapshot()` wait
- * for every write sent so far to be parsed. If the host dies, reads settle to
- * the cached state and restore snapshots to null.
+ * for every write sent so far to be parsed. A recovery source reconnects live
+ * handles after host death; pending reads still settle instead of hanging.
  */
 export class RemoteTerminalEmulator {
-  private readonly id: number;
+  private id: number;
+  private removeCloseListener: (() => void) | undefined;
   private cached: ScreenState = EMPTY_STATE;
   private final: Promise<RestoreSnapshot | null> | null = null;
 
-  constructor(private readonly host: TerminalEmulatorHostConnection, cols: number, rows: number) {
-    this.id = host.register(cols, rows, (state) => {
-      this.cached = state;
+  constructor(private host: TerminalEmulatorHostConnection, private cols: number, private rows: number, private readonly recovery?: EmulatorRecovery) {
+    this.id = this.register();
+  }
+
+  private register(): number {
+    const id = this.host.register(this.cols, this.rows, (state) => { this.cached = state; });
+    this.removeCloseListener = this.host.onClose(() => {
+      if (this.final || !this.recovery) return;
+      this.host = this.recovery.reconnect();
+      this.id = this.register();
+      this.write(this.recovery.replay());
     });
+    return id;
   }
 
   get state(): ScreenState {
@@ -137,7 +164,10 @@ export class RemoteTerminalEmulator {
   }
 
   resize(cols: number, rows: number): void {
-    if (!this.final) this.host.post({ op: 'resize', id: this.id, cols, rows });
+    if (this.final) return;
+    this.cols = cols;
+    this.rows = rows;
+    this.host.post({ op: 'resize', id: this.id, cols, rows });
   }
 
   clearScrollback(): void {
@@ -163,6 +193,7 @@ export class RemoteTerminalEmulator {
 
   /** Stop the model; later reads return its final capture, scrollback included. */
   dispose(): void {
+    this.removeCloseListener?.();
     this.final ??= this.host.release(this.id);
   }
 }

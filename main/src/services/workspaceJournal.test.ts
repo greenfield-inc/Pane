@@ -190,3 +190,15 @@ describe('WorkspaceJournal', () => {
     vi.useRealTimers();
   });
 });
+
+it('records one exit per PTY lifetime when the same panel is restarted', () => {
+  const journal = new WorkspaceJournal();
+  journal.send('session:created', { id: 'pane', name: 'Pane' });
+  const source = { panelId: 'panel', sessionId: 'pane' };
+  const exit = { type: 'terminal:exit', source, data: { exitCode: 0 } };
+  journal.send('panel:event', exit);
+  journal.send('panel:event', exit);
+  journal.send('panel:event', { type: 'terminal:started', source, data: {} });
+  journal.send('panel:event', { ...exit, data: { exitCode: 1 } });
+  expect(journal.readAfter(0, { kinds: ['panel.exited'] }).entries.map(entry => entry.exitCode)).toEqual([0, 1]);
+});
