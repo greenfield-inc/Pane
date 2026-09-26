@@ -915,6 +915,11 @@ export function ArchivedSessions() {
   const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<number>>(new Set());
   const [isLoadingArchived, setIsLoadingArchived] = useState(false);
   const [hasLoadedArchived, setHasLoadedArchived] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [isDeletingArchived, setIsDeletingArchived] = useState(false);
+  const archiveRequestRef = useRef(0);
+  useEffect(() => () => { archiveRequestRef.current += 1; }, []);
+
   const [orchestrationRestoreError, setOrchestrationRestoreError] = useState<string | null>(null);
 
   const setActiveSession = useSessionStore(s => s.setActiveSession);
@@ -939,31 +944,53 @@ export function ArchivedSessions() {
   const hasLoadedAnyArchived = hasLoadedArchived || orchestrationAvailability === 'ready';
 
   const loadArchivedSessions = useCallback(async () => {
+    const request = ++archiveRequestRef.current;
     try {
       setIsLoadingArchived(true);
       const response = await API.sessions.getArchivedWithProjects();
-      if (response.success && response.data) {
-        // SAFETY: The named IPC/API channel contract establishes this response payload type.
-        setArchivedProjects(response.data as Array<Project & { sessions: Session[] }>);
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'Failed to load archived panes');
       }
-    } catch (e) {
-      console.error('Failed to load archived sessions:', e);
+      // SAFETY: The named IPC/API channel contract establishes this response payload type.
+      const projects = response.data as Array<Project & { sessions: Session[] }>;
+      if (request === archiveRequestRef.current) setArchivedProjects(projects);
+      return projects;
+    } catch (cause) {
+      if (request === archiveRequestRef.current) {
+        setArchiveError(cause instanceof Error ? cause.message : 'Failed to load archived panes');
+      }
+      return null;
     } finally {
-      setIsLoadingArchived(false);
-      setHasLoadedArchived(true);
+      if (request === archiveRequestRef.current) {
+        setIsLoadingArchived(false);
+        setHasLoadedArchived(true);
+      }
     }
   }, []);
 
+  useEffect(() => {
+    if (!hasLoadedArchived) return;
+    const refresh = () => { void loadArchivedSessions(); };
+    const unsubscribeDeleted = window.electronAPI.events.onSessionDeleted(refresh);
+    const unsubscribeUpdated = window.electronAPI.events.onSessionUpdated(session => {
+      if (session.archived || archivedProjects.some(project => project.sessions.some(pane => pane.id === session.id))) {
+        refresh();
+      }
+    });
+    return () => { unsubscribeDeleted(); unsubscribeUpdated(); };
+  }, [hasLoadedArchived, archivedProjects, loadArchivedSessions]);
+
   const toggleArchived = useCallback(() => {
     const next = !showArchived;
-    if (next && !hasLoadedArchived) {
+    if (next) {
+      setArchiveError(null);
       void loadArchivedSessions();
     }
     if (next && orchestrationAvailability !== 'unavailable') {
       void refreshOrchestrationSessions();
     }
     setShowArchived(next);
-  }, [hasLoadedArchived, loadArchivedSessions, orchestrationAvailability, refreshOrchestrationSessions, showArchived]);
+  }, [loadArchivedSessions, orchestrationAvailability, refreshOrchestrationSessions, showArchived]);
 
   const toggleArchivedProject = (id: number) => {
     setExpandedArchivedProjects(prev => {
@@ -1023,29 +1050,34 @@ export function ArchivedSessions() {
   };
 
   const handlePermanentDeleteAllArchived = async () => {
-    if (archivedPaneCount === 0) return;
-
-    const confirmed = window.confirm(
-      `Permanently delete all ${archivedPaneCount} archived panes?\n\nThis removes them from Pane history and cannot be undone.`,
-    );
-    if (!confirmed) return;
-
+    if (isDeletingArchived) return;
+    setIsDeletingArchived(true);
+    setArchiveError(null);
     try {
-      const response = await API.sessions.permanentDeleteArchived();
-      if (!response.success) {
-        console.error('Failed to permanently delete archived sessions:', response.error);
-        return;
-      }
-      const deletedActiveSession = archivedProjects.some(project =>
-        project.sessions.some(session => session.id === activeSessionId),
+      const projects = await loadArchivedSessions();
+      if (!projects) return;
+      const sessionIds = projects.flatMap(project => project.sessions.map(session => session.id));
+      if (sessionIds.length === 0) return;
+      const confirmed = window.confirm(
+        `Permanently delete all ${sessionIds.length} archived panes?\n\nThis removes them from Pane history and cannot be undone.`,
       );
-      if (deletedActiveSession) {
-        await setActiveSession(null);
-        navigateToSessions();
+      if (!confirmed) return;
+
+      // Only delete the snapshot the user confirmed. A newly archived pane
+      // belongs to the next batch; the server rejects panes restored meanwhile.
+      for (const sessionId of sessionIds) {
+        const response = await API.sessions.permanentDelete(sessionId);
+        if (!response.success) throw new Error(response.error || 'Failed to permanently delete archived panes');
+        if (activeSessionId === sessionId) {
+          await setActiveSession(null);
+          navigateToSessions();
+        }
       }
-      loadArchivedSessions();
-    } catch (e) {
-      console.error('Failed to permanently delete archived sessions:', e);
+    } catch (cause) {
+      setArchiveError(cause instanceof Error ? cause.message : 'Failed to permanently delete archived panes');
+    } finally {
+      await loadArchivedSessions();
+      setIsDeletingArchived(false);
     }
   };
 
@@ -1076,6 +1108,7 @@ export function ArchivedSessions() {
           <button
             type="button"
             onClick={handlePermanentDeleteAllArchived}
+            disabled={isDeletingArchived}
             className="flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived-header:opacity-100 group-focus-within/archived-header:opacity-100"
             title="Permanently delete all archived panes"
             aria-label="Permanently delete all archived panes"
@@ -1089,6 +1122,9 @@ export function ArchivedSessions() {
           </span>
         )}
       </div>
+      {archiveError && (
+        <p role="alert" className="mx-4 py-1 text-xs text-status-error">{archiveError}</p>
+      )}
       {orchestrationRestoreError && (
         <p role="alert" className="mx-4 py-1 text-xs text-status-error">{orchestrationRestoreError}</p>
       )}
