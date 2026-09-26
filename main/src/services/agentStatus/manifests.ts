@@ -262,6 +262,8 @@ export const CODEX_MANIFEST: AgentManifest = {
         { contains: ['allow command?'] },
         // Folder-trust prompt footer.
         { contains: ['enter continue', 'esc quit'] },
+        // Update prompt footer ("Update now / Skip / Skip until next version").
+        { contains: ['enter continue', 'esc skip'] },
       ],
     },
     {

@@ -199,6 +199,20 @@ describe('terminal panel persistence', () => {
     await vi.waitFor(() => expect(manager.getAgentStatus(panel.id)).toBe('working'), { timeout: 1500 });
   });
 
+  it('counts a plain command\'s first output as work', async () => {
+    const panel = makePanel('panel-plain-command');
+    panel.state.customState = { initialCommand: 'pnpm build' };
+    const { manager, handle } = await startTerminal(panel);
+    handle.emit('user@host:~/project$ ');
+    await vi.waitFor(() => expect(handle.written.some(data => data.includes('pnpm build'))).toBe(true), { timeout: 1500 });
+    handle.emit('building...\r\n');
+    handle.emit('compiling 120 modules\r\n');
+    // The command then runs quietly past the agent startup grace.
+    await new Promise(resolve => setTimeout(resolve, 3500));
+    expect(manager.getAgentStatus(panel.id)).toBe('working');
+    expect(manager.getTerminalSnapshot(panel.id)?.activityStatus).toBe('active');
+  }, 10_000);
+
   it('streams 50 MB of newline-free alternate-screen frames without growing the persisted state', async () => {
     const panel = makePanel('panel-frames');
     const { manager, handle } = await startTerminal(panel);

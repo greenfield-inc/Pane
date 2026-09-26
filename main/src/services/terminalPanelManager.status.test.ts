@@ -496,4 +496,24 @@ describe('terminal status events', () => {
     expect(manager.getAgentStatus('p')).toBe('idle');
     await vi.waitFor(() => expect(fixture.terminal.pty.write).toHaveBeenCalledWith('/review\r'));
   });
+  it('holds typed initial input while Codex shows its update prompt', async () => {
+    const fixture = attach('codex', 20_000);
+    panelManager.getPanel.mockReturnValue({
+      id: 'p', sessionId: 's', type: 'terminal', title: 'Codex',
+      state: { isActive: true, customState: { isCliReady: true, initialInput: '/review' } },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    });
+    fixture.data('Update available · 0.156.1 → 0.157.1\r\n\r\n› 1. Update now\r\n  2. Skip\r\n  3. Skip until next version\r\n\r\nenter continue · esc skip');
+    manager.deliverPendingInitialInput('p');
+    await pollAgentStatus();
+    vi.setSystemTime(Date.now() + 15_000);
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('blocked');
+    expect(fixture.terminal.pty.write).not.toHaveBeenCalled();
+
+    fixture.data('\x1b[2J\x1b[H\x1b]2;Codex\x07› ');
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('idle');
+    await vi.waitFor(() => expect(fixture.terminal.pty.write).toHaveBeenCalledWith(expect.stringContaining('/review')));
+  });
 });

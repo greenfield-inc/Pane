@@ -251,6 +251,13 @@ describe('CODEX_MANIFEST', () => {
     expect(detectAgentState(CODEX_MANIFEST, screen(text, 'Codex')).state).toBe('idle');
   });
 
+  it.each([1, 2, 3])('treats the update prompt as blocked with option %i selected', (selected) => {
+    const options = ['1. Update now (runs `sh -c \'curl -fsSL https://chatgpt.com/codex/install.sh | sh\'`)', '2. Skip', '3. Skip until next version'];
+    const menu = options.map((option, index) => `${index + 1 === selected ? '›' : ' '} ${option}`).join('\n');
+    const text = `Update available · 0.156.1 → 0.157.1\nRelease notes: https://github.com/openai/codex/releases/latest\n\n${menu}\n\nenter continue · esc skip`;
+    expect(detectAgentState(CODEX_MANIFEST, screen(text)).state).toBe('blocked');
+  });
+
   it('recognizes wrapped working chrome', () => {
     expect(detectAgentState(CODEX_MANIFEST, screen('• Working (5s • esc to\n  interrupt)\n› ')).state).toBe('working');
   });

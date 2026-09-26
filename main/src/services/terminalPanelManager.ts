@@ -1132,7 +1132,8 @@ export class TerminalPanelManager extends EventEmitter {
           terminalProcess.screenEmulator?.write('\x1b]2;\x07');
         }
         terminalProcess.pendingInitialCommand = false;
-        this.agentStatusMonitor.register(panelId, Date.now());
+        // Only an agent's boot output is noise; a plain command's first output is real work.
+        this.agentStatusMonitor.register(panelId, Date.now(), isCliCommand ? undefined : 0);
         this.writeToTerminal(panelId, commandToRun! + '\r');
 
         // For CLI tool terminals, signal the frontend when the CLI responds

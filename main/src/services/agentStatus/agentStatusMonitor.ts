@@ -23,6 +23,7 @@ interface PanelTracker {
   lastActivityAt: number | undefined;
   activityChunksInBurst: number;
   published: AgentState | undefined;
+  startupGraceMs: number;
 }
 
 const AGENT_IDLE_SETTLE_MS = 10_000;
@@ -41,12 +42,13 @@ export class AgentStatusMonitor {
   }
 
   /** Begin tracking an agent panel. Only registered panels ever emit. */
-  register(panelId: string, now: number): void {
+  register(panelId: string, now: number, startupGraceMs = this.options.startupGraceMs): void {
     this.trackers.set(panelId, {
       startedAt: now,
       lastActivityAt: undefined,
       activityChunksInBurst: 0,
       published: undefined,
+      startupGraceMs,
     });
   }
 
@@ -70,7 +72,7 @@ export class AgentStatusMonitor {
 
     // Boot banners and shell prompt setup are not evidence of a task. Explicit
     // agent working chrome still takes effect immediately, including at startup.
-    if (now - tracker.startedAt < this.options.startupGraceMs && tracker.published !== 'working') return;
+    if (now - tracker.startedAt < tracker.startupGraceMs && tracker.published !== 'working') return;
 
     const startsNewBurst =
       tracker.lastActivityAt === undefined || now - tracker.lastActivityAt >= this.options.idleSettleMs;
@@ -102,7 +104,7 @@ export class AgentStatusMonitor {
 
     // A blank boot screen is not yet an idle agent. Keep the initial unknown
     // state until live chrome appears or the startup grace expires.
-    if (now - tracker.startedAt < this.options.startupGraceMs &&
+    if (now - tracker.startedAt < tracker.startupGraceMs &&
         detection.matchedRuleId === null && !recentlyActive &&
         !detection.visibleWorking && !detection.visibleIdle && detection.state !== 'blocked') return null;
 
