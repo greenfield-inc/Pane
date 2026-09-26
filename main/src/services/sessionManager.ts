@@ -339,7 +339,8 @@ export class SessionManager extends EventEmitter {
       isHidden: !!dbSession.is_hidden,
       baseCommit: dbSession.base_commit,
       baseBranch: dbSession.base_branch,
-      pr_renamed: !!dbSession.pr_renamed
+      pr_renamed: !!dbSession.pr_renamed,
+      handedOffAt: dbSession.handed_off_at ?? undefined
     };
   }
 

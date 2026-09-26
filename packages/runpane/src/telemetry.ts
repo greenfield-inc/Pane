@@ -120,6 +120,8 @@ export function createInitialTelemetryContext(argv: string[]): WrapperTelemetryC
     if (argv[1] === 'list') return { command: 'panes list' };
     if (argv[1] === 'cost') return { command: 'panes cost' };
     if (argv[1] === 'adopt') return { command: 'panes adopt' };
+    if (argv[1] === 'handoff') return { command: 'panes handoff' };
+    if (argv[1] === 'receive') return { command: 'panes receive' };
     return { command: 'panes create' };
   }
   if (first === 'panels') {

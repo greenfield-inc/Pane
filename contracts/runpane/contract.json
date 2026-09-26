@@ -267,6 +267,30 @@
       ]
     },
     {
+      "name": "panes handoff",
+      "summary": "Hand a Pane's work to another runtime: push the branch, commit a HANDOFF.md note, then park or archive the pane.",
+      "usage": [
+        "runpane panes handoff --pane <pane-id> --to <local|remote:<label>> [--park|--archive] [--include-dirty] [--force] [--limit <count>] [--dry-run] --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "paneHandoffRequest",
+        "paneHandoffResult"
+      ]
+    },
+    {
+      "name": "panes receive",
+      "summary": "Receive a handed-off branch: fetch it, open a Pane on that exact branch, and start the agent from HANDOFF.md.",
+      "usage": [
+        "runpane panes receive --repo <selector> --branch <branch> --agent <codex|claude|cursor> [--name <name>] [--remote <name>] [--no-focus|--focus] [--source user|agent] [--ready-timeout-ms <ms>] [--dry-run] --yes [--json]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "paneReceiveRequest",
+        "paneReceiveResult"
+      ]
+    },
+    {
       "name": "panes pin",
       "summary": "Declaratively pin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.",
       "usage": [
@@ -683,6 +707,21 @@
         "description": "Maximum recent output lines or records to read."
       },
       {
+        "name": "--to",
+        "value": "<local|remote:<label>>",
+        "description": "Handoff target runtime label: local, or remote:<Remote Pane profile label>."
+      },
+      {
+        "name": "--branch",
+        "value": "<branch>",
+        "description": "panes receive: the handed-off branch to fetch and open."
+      },
+      {
+        "name": "--remote",
+        "value": "<name>",
+        "description": "panes receive: git remote to fetch from (default origin)."
+      },
+      {
         "name": "--for",
         "value": "<initialized|ready|idle|text>",
         "description": "Panel wait condition."
@@ -815,7 +854,19 @@
       },
       {
         "name": "--force",
-        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
+        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes; for panes handoff, hand off a pane that is already parked."
+      },
+      {
+        "name": "--park",
+        "description": "panes handoff: keep the pane, mark it handed off, and stop its agent (default)."
+      },
+      {
+        "name": "--archive",
+        "description": "panes handoff: archive the pane after the note is pushed instead of parking it."
+      },
+      {
+        "name": "--include-dirty",
+        "description": "panes handoff: commit uncommitted and untracked files as \"handoff: work in progress\" before pushing."
       },
       {
         "name": "--launch",
@@ -1056,6 +1107,8 @@
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
         "  runpane panes archive --pane <pane-id> [--force] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes handoff --pane <pane-id> --to <local|remote:<label>> [--park|--archive] [--include-dirty] [--force] [--limit <count>] [--dry-run] --yes [--json]",
+        "  runpane panes receive --repo <selector> --branch <branch> --agent <codex|claude|cursor> [--name <name>] [--remote <name>] [--no-focus|--focus] [--source user|agent] [--ready-timeout-ms <ms>] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]",
@@ -1500,6 +1553,50 @@
         "  runpane sessions <list|create|get|update|set-agent|associate|detach|overview> [options]",
         "",
         "Use a named Session to keep context, activity, and evidence attached to one orchestration thread."
+      ],
+      "panes handoff": [
+        "Usage:",
+        "  runpane panes handoff --pane <pane-id> --to <local|remote:<label>> [--park|--archive] [--include-dirty] [--force] [--limit <count>] [--dry-run] --yes [--json]",
+        "",
+        "Hands a Pane's work to another runtime. Refuses a dirty worktree (listing the files) unless --include-dirty commits everything as \"handoff: work in progress\"; refuses a non-fast-forward push and names the remote head; pushes the branch; writes HANDOFF.md at the worktree root (pane, branch, head sha, agent, open PR url, timestamp, and the last N lines of the CLI panel output) and pushes it; then parks the pane (default: keeps it, marks it handed off, stops its agent) or archives it. Prints the runpane panes receive command to run on the target runtime.",
+        "",
+        "Runs on the runtime that owns the pane. --to only labels the target and shapes the printed receive command; use Settings > Remote Pane to switch runtimes before receiving.",
+        "",
+        "Options:",
+        "  --pane <pane-id>               Pane/session id to hand off",
+        "  --to <local|remote:<label>>    Target runtime label recorded in HANDOFF.md",
+        "  --park                         Keep the pane, mark it handed off, stop its agent (default)",
+        "  --archive                      Archive the pane instead (existing archive semantics)",
+        "  --include-dirty                Commit uncommitted and untracked files first",
+        "  --force                        Hand off a pane that is already parked",
+        "  --limit <count>                CLI panel lines captured into HANDOFF.md (default 80)",
+        "  --source <user|agent>          Mark mutation source",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "  --dry-run                      Report what would be refused or done without mutating anything",
+        "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "panes receive": [
+        "Usage:",
+        "  runpane panes receive --repo <selector> --branch <branch> --agent <codex|claude|cursor> [--name <name>] [--remote <name>] [--no-focus|--focus] [--source user|agent] [--ready-timeout-ms <ms>] [--dry-run] --yes [--json]",
+        "",
+        "Receives a branch handed off with runpane panes handoff. Fetches <remote>/<branch>, reads HANDOFF.md from it (refuses when missing), then either resumes this runtime's parked pane for that branch (fast-forward pull, clears the handed-off state), reuses a registered worktree that has no pane, or creates a local tracking branch plus a Pane-managed worktree named after the source pane. The chosen agent starts with one instruction: read HANDOFF.md, confirm the branch and head sha, continue, delete HANDOFF.md before opening a PR, and do not push until asked. Prints the pane id and the HANDOFF.md path.",
+        "",
+        "Run this on the runtime you switched to (Settings > Remote Pane), not on the runtime that handed off.",
+        "",
+        "Options:",
+        "  --repo <selector>              Saved repository selector (active, id, path, or name)",
+        "  --branch <branch>              Branch that was handed off",
+        "  --agent <codex|claude|cursor>  Agent to start from the note",
+        "  --name <name>                  Pane name (default: the source pane name from HANDOFF.md)",
+        "  --remote <name>                Git remote to fetch from (default origin)",
+        "  --no-focus / --focus           Background (default for agents) or focus the new pane",
+        "  --source <user|agent>          Mark mutation source",
+        "  --ready-timeout-ms <ms>        How long to wait for the agent prompt before reporting",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "  --dry-run                      Validate, fetch, and report which path would run without mutating Pane state",
+        "  --yes                          Skip confirmation for mutating commands"
       ]
     },
     "pip": {
@@ -1675,6 +1772,8 @@
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
         "  runpane panes archive --pane <pane-id> [--force] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes handoff --pane <pane-id> --to <local|remote:<label>> [--park|--archive] [--include-dirty] [--force] [--limit <count>] [--dry-run] --yes [--json]",
+        "  runpane panes receive --repo <selector> --branch <branch> --agent <codex|claude|cursor> [--name <name>] [--remote <name>] [--no-focus|--focus] [--source user|agent] [--ready-timeout-ms <ms>] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]",
@@ -2119,6 +2218,51 @@
         "  runpane sessions <list|create|get|update|set-agent|associate|detach|overview> [options]",
         "",
         "Use a named Session to keep context, activity, and evidence attached to one orchestration thread."
+      ],
+      "panes handoff": [
+        "Usage:",
+        "  runpane panes handoff --pane <pane-id> --to <local|remote:<label>> [--park|--archive] [--include-dirty] [--force] [--limit <count>] [--dry-run] --yes [--json]",
+        "",
+        "Hands a Pane's work to another runtime by pushing the branch, committing a HANDOFF.md note, and parking or archiving the pane.",
+        "",
+        "Available in the npm wrapper only; the Python wrapper does not dispatch this command yet. Run it with npx --yes runpane@latest panes handoff ...",
+        "",
+        "Options:",
+        "  --pane <pane-id>",
+        "  --to <local|remote:<label>>",
+        "  --park",
+        "  --archive",
+        "  --include-dirty",
+        "  --force",
+        "  --limit <count>",
+        "  --source <user|agent>",
+        "  --pane-dir <path>",
+        "  --json",
+        "  --dry-run",
+        "  --yes"
+      ],
+      "panes receive": [
+        "Usage:",
+        "  runpane panes receive --repo <selector> --branch <branch> --agent <codex|claude|cursor> [--name <name>] [--remote <name>] [--no-focus|--focus] [--source user|agent] [--ready-timeout-ms <ms>] [--dry-run] --yes [--json]",
+        "",
+        "Receives a branch handed off with runpane panes handoff: fetches it, opens a Pane on that exact branch, and starts the agent from HANDOFF.md.",
+        "",
+        "Available in the npm wrapper only; the Python wrapper does not dispatch this command yet. Run it with npx --yes runpane@latest panes receive ...",
+        "",
+        "Options:",
+        "  --repo <selector>",
+        "  --branch <branch>",
+        "  --agent <codex|claude|cursor>",
+        "  --name <name>",
+        "  --remote <name>",
+        "  --no-focus",
+        "  --focus",
+        "  --source <user|agent>",
+        "  --ready-timeout-ms <ms>",
+        "  --pane-dir <path>",
+        "  --json",
+        "  --dry-run",
+        "  --yes"
       ]
     }
   },
@@ -2195,6 +2339,8 @@
       "runpane panes create --repo active --name issue-252 --agent <agent> --prompt \"Kick off the discussion skill for issue 252\" --source agent --no-focus --wait-ready --yes --json",
       "runpane panes create --from-json panes.json --yes --json",
       "runpane panes archive --pane <pane-id> --source agent --yes --json",
+      "runpane panes handoff --pane <pane-id> --to local --yes --json",
+      "runpane panes receive --repo Pane --branch feat/x --agent codex --yes --json",
       "runpane panes rename --pane <pane-id> --name issue-393 --yes --json",
       "runpane panels list --pane <pane-id> --json",
       "runpane panels output --panel <panel-id> --limit 200 --json",
@@ -2232,6 +2378,8 @@
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected.",
       "For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. Add `--dry-run` to inspect the same evidence without archiving. Successful archives wait for worktree removal and report `worktreeCleanup`.",
+      "`runpane panes handoff` moves a Pane's work to another runtime: it refuses a dirty worktree unless `--include-dirty` commits it, refuses a non-fast-forward push and names the remote head, pushes the branch, commits and pushes `HANDOFF.md` at the worktree root (pane, branch, head sha, agent, open PR url, timestamp, last `--limit` lines of the CLI panel output), then parks the pane (default; `handedOffAt` appears in `panes list --json`) or archives it with `--archive`. It prints the `runpane panes receive` command for the target. It runs on the runtime that owns the pane and is available in the npm wrapper only.",
+      "`runpane panes receive` completes a handoff on the target runtime: it fetches the branch, refuses when the remote ref has no `HANDOFF.md`, then resumes this runtime's parked pane for that branch, reuses a registered worktree without a pane, or creates a tracking branch plus a Pane-managed worktree named after the source pane, and starts the chosen agent with one instruction that begins from the note. It reports `readiness` and `initialInput` like `panes create` and prints the pane id and `HANDOFF.md` path. Available in the npm wrapper only.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels list` lists tool panels inside one Pane session.",
@@ -3786,6 +3934,9 @@
                   "pane",
                   "external"
                 ]
+              },
+              "handedOffAt": {
+                "type": "string"
               }
             },
             "additionalProperties": false
@@ -5859,6 +6010,546 @@
         }
       },
       "additionalProperties": false
+    },
+    "paneHandoffRequest": {
+      "type": "object",
+      "required": [
+        "paneId",
+        "to"
+      ],
+      "properties": {
+        "paneId": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "park",
+            "archive"
+          ]
+        },
+        "includeDirty": {
+          "type": "boolean"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "paneHandoffResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "paneId",
+            "branch",
+            "headSha",
+            "handoffPath",
+            "target",
+            "agent",
+            "pushed",
+            "mode",
+            "receiveCommand"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "generation": {
+              "type": "number"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            },
+            "headSha": {
+              "type": "string"
+            },
+            "handoffPath": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "agent": {
+              "enum": [
+                "codex",
+                "claude",
+                "cursor",
+                "unknown"
+              ]
+            },
+            "pushed": {
+              "type": "object",
+              "required": [
+                "upstream"
+              ],
+              "properties": {
+                "upstream": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "mode": {
+              "enum": [
+                "parked",
+                "archived"
+              ]
+            },
+            "archive": {
+              "$ref": "#/jsonSchemas/paneArchiveResult"
+            },
+            "receiveCommand": {
+              "type": "string"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "paneId",
+            "dryRun",
+            "wouldHandoff",
+            "mode",
+            "files"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "dryRun": {
+              "const": true
+            },
+            "wouldHandoff": {
+              "type": "boolean"
+            },
+            "mode": {
+              "enum": [
+                "park",
+                "archive"
+              ]
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "upstream": {
+              "type": "string"
+            },
+            "blocked": {
+              "type": "object",
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "uncommitted-changes",
+                    "non-fast-forward",
+                    "already-handed-off",
+                    "push-failed",
+                    "commit-failed"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "upstream": {
+                  "type": "string"
+                },
+                "remoteHead": {
+                  "type": "string"
+                },
+                "gitOutput": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "paneId",
+            "blocked"
+          ],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "generation": {
+              "type": "number"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "blocked": {
+              "type": "object",
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "uncommitted-changes",
+                    "non-fast-forward",
+                    "already-handed-off",
+                    "push-failed",
+                    "commit-failed"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "upstream": {
+                  "type": "string"
+                },
+                "remoteHead": {
+                  "type": "string"
+                },
+                "gitOutput": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "nextCommand": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "paneReceiveRequest": {
+      "type": "object",
+      "required": [
+        "repo",
+        "branch",
+        "tool"
+      ],
+      "properties": {
+        "repo": {
+          "$ref": "#/jsonSchemas/paneCreateRequest/properties/repo"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "tool": {
+          "$ref": "#/jsonSchemas/paneCreateRequest/properties/panes/items/properties/tool"
+        },
+        "name": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "noFocus": {
+          "type": "boolean"
+        },
+        "focus": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "readyTimeoutMs": {
+          "type": "number"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "paneReceiveResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "paneId",
+            "panelId",
+            "worktreePath",
+            "handoffPath",
+            "path",
+            "note",
+            "nextCommand"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "generation": {
+              "type": "number"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "worktreePath": {
+              "type": "string"
+            },
+            "handoffPath": {
+              "type": "string"
+            },
+            "path": {
+              "enum": [
+                "resume",
+                "adopt-orphan",
+                "create"
+              ]
+            },
+            "note": {
+              "type": "object",
+              "required": [
+                "pane",
+                "branch",
+                "head",
+                "agent",
+                "target",
+                "handedOffAt"
+              ],
+              "properties": {
+                "pane": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "head": {
+                  "type": "string"
+                },
+                "agent": {
+                  "enum": [
+                    "codex",
+                    "claude",
+                    "cursor",
+                    "unknown"
+                  ]
+                },
+                "target": {
+                  "type": "string"
+                },
+                "handedOffAt": {
+                  "type": "string"
+                },
+                "pr": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "readiness": {
+              "type": "object"
+            },
+            "initialInput": {
+              "type": "object"
+            },
+            "nextCommand": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "dryRun",
+            "branch",
+            "path",
+            "name",
+            "note"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "dryRun": {
+              "const": true
+            },
+            "branch": {
+              "type": "string"
+            },
+            "path": {
+              "enum": [
+                "resume",
+                "adopt-orphan",
+                "create"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "note": {
+              "type": "object",
+              "required": [
+                "pane",
+                "branch",
+                "head",
+                "agent",
+                "target",
+                "handedOffAt"
+              ],
+              "properties": {
+                "pane": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "head": {
+                  "type": "string"
+                },
+                "agent": {
+                  "enum": [
+                    "codex",
+                    "claude",
+                    "cursor",
+                    "unknown"
+                  ]
+                },
+                "target": {
+                  "type": "string"
+                },
+                "handedOffAt": {
+                  "type": "string"
+                },
+                "pr": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "branch",
+            "blocked"
+          ],
+          "properties": {
+            "ok": {
+              "const": false
+            },
+            "generation": {
+              "type": "number"
+            },
+            "branch": {
+              "type": "string"
+            },
+            "blocked": {
+              "type": "object",
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "invalid-branch",
+                    "branch-not-found",
+                    "missing-handoff-note",
+                    "branch-in-use",
+                    "path-in-use",
+                    "diverged"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "paneId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "localSha": {
+                  "type": "string"
+                },
+                "remoteSha": {
+                  "type": "string"
+                },
+                "gitOutput": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "nextCommand": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "agentContext": {
@@ -5985,6 +6676,40 @@
             "--pane <pane-id>",
             "--source <user|agent>",
             "--force",
+            "--dry-run",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
+          "name": "panes handoff",
+          "summary": "Hand a Pane's work to another runtime: push the branch, commit a HANDOFF.md note, then park or archive the pane.",
+          "arguments": [
+            "--pane <pane-id>",
+            "--to <local|remote:<label>>",
+            "--park",
+            "--archive",
+            "--include-dirty",
+            "--force",
+            "--limit <count>",
+            "--dry-run",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
+          "name": "panes receive",
+          "summary": "Receive a handed-off branch: fetch it, open a Pane on that exact branch, and start the agent from HANDOFF.md.",
+          "arguments": [
+            "--repo <selector>",
+            "--branch <branch>",
+            "--agent <codex|claude|cursor>",
+            "--name <name>",
+            "--remote <name>",
+            "--no-focus",
+            "--focus",
+            "--source <user|agent>",
+            "--ready-timeout-ms <ms>",
             "--dry-run",
             "--yes",
             "--json"
@@ -7827,6 +8552,184 @@
           "sessionOverviewResult"
         ],
         "notes": []
+      },
+      "panes handoff": {
+        "name": "panes handoff",
+        "summary": "Hand a Pane's work to another runtime: push the branch, commit a HANDOFF.md note, then park or archive the pane.",
+        "details": "Run this on the runtime that owns the pane (for a remote host: over SSH or in a Pane terminal there). Step order: refuse a dirty worktree unless --include-dirty commits it; fetch the upstream and refuse when it is not an ancestor of HEAD; push the branch; write HANDOFF.md at the worktree root and commit+push it; then park (default) or archive. Every refusal is ok:false with blocked.code and, when a retry makes sense, nextCommand. --to is a label: it is recorded in the note and used to phrase the printed receive command; it does not contact another runtime.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": true,
+            "description": "Pane/session id to hand off."
+          },
+          {
+            "name": "--to",
+            "value": "<local|remote:<label>>",
+            "required": true,
+            "description": "Target runtime label: local, or remote:<Remote Pane profile label>."
+          },
+          {
+            "name": "--park",
+            "required": false,
+            "description": "Keep the pane, mark it handed off, and stop its agent (default)."
+          },
+          {
+            "name": "--archive",
+            "required": false,
+            "description": "Archive the pane after the note is pushed, with the existing archive safety semantics."
+          },
+          {
+            "name": "--include-dirty",
+            "required": false,
+            "description": "Commit all uncommitted and untracked files as \"handoff: work in progress\" before pushing."
+          },
+          {
+            "name": "--force",
+            "required": false,
+            "description": "Hand off a pane that is already parked (rewrites HANDOFF.md)."
+          },
+          {
+            "name": "--limit",
+            "value": "<count>",
+            "required": false,
+            "description": "Number of sanitized CLI panel lines written into HANDOFF.md (default 80)."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source; does not change handoff behavior."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Run the read-only checks and report wouldHandoff plus any blocked reason without mutating anything."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panes handoff --pane <pane-id> --to local --yes --json",
+          "runpane panes handoff --pane <pane-id> --to remote:VM --include-dirty --yes --json",
+          "runpane panes handoff --pane <pane-id> --to local --archive --yes --json",
+          "runpane panes handoff --pane <pane-id> --to local --dry-run --json"
+        ],
+        "jsonSchemas": [
+          "paneHandoffRequest",
+          "paneHandoffResult"
+        ],
+        "notes": [
+          "ok:false with blocked.code uncommitted-changes lists blocked.files; rerun with --include-dirty (nextCommand) to commit them.",
+          "ok:false with blocked.code non-fast-forward names blocked.upstream and blocked.remoteHead; nothing was committed or pushed. Pull or rebase first.",
+          "push-failed and commit-failed carry gitOutput; the WIP commit and note commit stay in the worktree, and nextCommand retries the handoff.",
+          "The note embeds the last --limit lines of the CLI panel output (ANSI-stripped, not secret-scrubbed) and --include-dirty stages untracked files; review before handing off from a shared repository.",
+          "A parked pane reports handedOffAt in panes list --json and shows Handed off in the sidebar; panes archive still works on it. Receiving the same branch on this runtime resumes it.",
+          "receiveCommand is the exact runpane panes receive command for the target runtime; run it there after switching runtimes in Settings > Remote Pane.",
+          "Available in the npm wrapper only; the Python wrapper does not dispatch this command yet."
+        ]
+      },
+      "panes receive": {
+        "name": "panes receive",
+        "summary": "Receive a handed-off branch: fetch it, open a Pane on that exact branch, and start the agent from HANDOFF.md.",
+        "details": "Run on the target runtime after switching to it. Validates --branch, fetches refs/heads/<branch> into refs/remotes/<remote>/<branch>, reads HANDOFF.md from that ref, then picks one path: resume (this runtime already has a parked pane on the branch: fast-forward pull, clear handedOffAt), adopt-orphan (a registered worktree on the branch has no pane: reuse it), or create (git branch --track plus a Pane-managed worktree whose directory is the branch with / replaced by -; the session's base branch is the repo's default base so diffs show the handed-off work). Then it creates one agent terminal whose initial input is the handoff instruction and reports readiness and initialInput like panes create. Refusals are ok:false with blocked.code.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": true,
+            "description": "Saved repository selector."
+          },
+          {
+            "name": "--branch",
+            "value": "<branch>",
+            "required": true,
+            "description": "Handed-off branch name; must pass git check-ref-format and contain only [A-Za-z0-9._/-]."
+          },
+          {
+            "name": "--agent",
+            "value": "<codex|claude|cursor>",
+            "required": true,
+            "description": "Agent to start from the note."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": false,
+            "description": "Pane name; defaults to the pane name recorded in HANDOFF.md."
+          },
+          {
+            "name": "--remote",
+            "value": "<name>",
+            "required": false,
+            "description": "Git remote to fetch from (default origin)."
+          },
+          {
+            "name": "--no-focus",
+            "required": false,
+            "description": "Create the pane in the background (default for agent tools)."
+          },
+          {
+            "name": "--focus",
+            "required": false,
+            "description": "Focus the created pane."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source; agent implies no focus."
+          },
+          {
+            "name": "--ready-timeout-ms",
+            "value": "<ms>",
+            "required": false,
+            "description": "How long to wait for the agent prompt before reporting readiness."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Fetch and read the note, report path (resume|adopt-orphan|create) and name, mutate nothing."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane panes receive --repo Pane --branch feat/x --agent codex --yes --json",
+          "runpane panes receive --repo active --branch feat/x --agent claude --dry-run --json"
+        ],
+        "jsonSchemas": [
+          "paneReceiveRequest",
+          "paneReceiveResult"
+        ],
+        "notes": [
+          "Use the receiveCommand printed by panes handoff; it already names the repo, branch, and source agent.",
+          "blocked.code missing-handoff-note means the branch was not handed off with runpane (no HANDOFF.md on the remote ref); branch-in-use names the pane already working on it; path-in-use names a worktree directory that already exists; diverged carries localSha/remoteSha or gitOutput.",
+          "ok:false without blocked means the pane exists but the instruction was not verified as submitted; readiness/initialInput explain why and nextCommand submits it.",
+          "Receiving on the runtime that handed off resumes the parked pane instead of creating a second one (path: resume).",
+          "Available in the npm wrapper only; the Python wrapper does not dispatch this command yet."
+        ]
       }
     },
     "managedBlock": [

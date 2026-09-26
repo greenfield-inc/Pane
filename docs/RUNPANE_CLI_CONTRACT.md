@@ -109,6 +109,8 @@ runpane panes cost --pane <pane-id> --json
 runpane panes create --repo active --name issue-252 --agent <agent> --prompt "Kick off the discussion skill for issue 252" --source agent --no-focus --wait-ready --yes --json
 runpane panes create --from-json panes.json --yes --json
 runpane panes archive --pane <pane-id> --source agent --yes --json
+runpane panes handoff --pane <pane-id> --to local --yes --json
+runpane panes receive --repo Pane --branch feat/x --agent codex --yes --json
 runpane panes rename --pane <pane-id> --name issue-393 --yes --json
 runpane panels list --pane <pane-id> --json
 runpane panels output --panel <panel-id> --limit 200 --json
@@ -163,6 +165,10 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.
 
 `runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. Add `--dry-run` to inspect the same evidence without archiving. Successful archives wait for worktree removal and report `worktreeCleanup`.
+
+`runpane panes handoff` moves a Pane's work to another runtime: it refuses a dirty worktree unless `--include-dirty` commits it, refuses a non-fast-forward push and names the remote head, pushes the branch, commits and pushes `HANDOFF.md` at the worktree root (pane, branch, head sha, agent, open PR url, timestamp, last `--limit` lines of the CLI panel output), then parks the pane (default; `handedOffAt` appears in `panes list --json`) or archives it with `--archive`. It prints the `runpane panes receive` command for the target. It runs on the runtime that owns the pane and is available in the npm wrapper only.
+
+`runpane panes receive` completes a handoff on the target runtime: it fetches the branch, refuses when the remote ref has no `HANDOFF.md`, then resumes this runtime's parked pane for that branch, reuses a registered worktree without a pane, or creates a tracking branch plus a Pane-managed worktree named after the source pane, and starts the chosen agent with one instruction that begins from the note. It reports `readiness` and `initialInput` like `panes create` and prints the pane id and `HANDOFF.md` path. Available in the npm wrapper only.
 
 `runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.
 
@@ -232,6 +238,8 @@ Brief tools:
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
 - `panes archive`: Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.
+- `panes handoff`: Hand a Pane's work to another runtime: push the branch, commit a HANDOFF.md note, then park or archive the pane.
+- `panes receive`: Receive a handed-off branch: fetch it, open a Pane on that exact branch, and start the agent from HANDOFF.md.
 - `panes pin`: Declaratively pin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes unpin`: Declaratively unpin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
@@ -341,6 +349,9 @@ These flags are consumed by local daemon-control commands:
 --ready-timeout-ms <milliseconds>
 --concurrency <count>
 --limit <count>
+--to <local|remote:<label>>
+--branch <branch>
+--remote <name>
 --for <initialized|ready|idle|text>
 --contains <text>
 --interval-ms <milliseconds>
@@ -369,6 +380,9 @@ These flags are consumed by local daemon-control commands:
 --pinned
 --no-pinned
 --force
+--park
+--archive
+--include-dirty
 --launch
 --follow
 --ack-now

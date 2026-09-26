@@ -7,17 +7,32 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import { PathResolver, ProjectEnvironment, expandUserRepoPath } from '../utils/pathResolver';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { escapeShellArg } from '../utils/shellEscape';
+import { getGitAttributionEnv } from '../utils/attribution';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import type { PanelBuffers } from '../database/panelBuffers';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
+import { resolveDefaultWorktreeBase } from '../services/worktreeManager';
 import { assessComposerEvidence, isSlashCommandInput } from './runpaneComposerEvidence';
+import {
+  DEFAULT_HANDOFF_REPORT_LINES,
+  HANDOFF_NOTE_FILENAME,
+  isSafeBranchName,
+  parseHandoffNote,
+  parseHandoffTarget,
+  receiveCommandFor,
+  receiveInstruction,
+  renderHandoffNote,
+  worktreeDirectoryForBranch,
+  type HandoffTarget,
+} from './runpaneHandoff';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/archiveProgressManager';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
+import type { AppConfig } from '../types/config';
 import type { Session, SessionOutput } from '../types/session';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
@@ -57,7 +72,16 @@ import type {
   RunpanePaneCreateRequest,
   RunpanePaneCreateResult,
   RunpanePaneCreateResultItem,
+  RunpanePaneHandoffBlockReason,
+  RunpanePaneHandoffMode,
+  RunpanePaneHandoffRequest,
+  RunpanePaneHandoffResult,
   RunpanePaneReadiness,
+  RunpanePaneReceiveBlockCode,
+  RunpanePaneReceiveBlockReason,
+  RunpanePaneReceivePath,
+  RunpanePaneReceiveRequest,
+  RunpanePaneReceiveResult,
   RunpanePaneSummary,
   RunpanePanelActivityStatus,
   RunpanePanelBlockedState,
@@ -146,6 +170,8 @@ const RUNPANE_CHANNELS = [
   'runpane:panes:rename',
   'runpane:panes:focus',
   'runpane:panes:archive',
+  'runpane:panes:handoff',
+  'runpane:panes:receive',
   'runpane:panels:create',
   'runpane:panels:list',
   'runpane:panels:output',
@@ -182,6 +208,8 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:create',
   'panes:adopt',
   'panes:archive',
+  'panes:handoff',
+  'panes:receive',
   'panes:pin',
   'panes:rename',
   'panels:create',
@@ -782,91 +810,33 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panes:archive', async (request: PaneCommandValue): Promise<RunpanePaneArchiveResult> => {
-    return withRunpaneAction(services, 'panes:archive', {}, async () => {
-      const normalized = parsePaneArchiveRequest(request);
-      const pane = resolvePane(sessionManager, normalized.paneId);
+    return withRunpaneAction(
+      services,
+      'panes:archive',
+      {},
+      () => archivePane(services, commandRegistry, parsePaneArchiveRequest(request)),
+      result => ({ paneId: result.paneId, ok: result.ok }),
+    );
+  });
 
-      if (pane.archived) {
-        throw new Error(`Pane ${normalized.paneId} is already archived`);
-      }
+  commandRegistry.register('runpane:panes:handoff', async (request: PaneCommandValue): Promise<RunpanePaneHandoffResult> => {
+    return withRunpaneAction(
+      services,
+      'panes:handoff',
+      {},
+      () => handoffPane(services, commandRegistry, parsePaneHandoffRequest(request)),
+      result => ({ paneId: result.paneId, ok: result.ok }),
+    );
+  });
 
-      const worktreeCleanupApplicable = Boolean(pane.projectId)
-        && !pane.isMainRepo
-        && pane.worktreeOwnership !== 'external';
-      const safetyCheck = worktreeCleanupApplicable
-        ? await computeArchiveSafety(services, pane)
-        : { performed: false };
-
-      const blockCode = classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable);
-      if (normalized.dryRun) {
-        return {
-          ok: true,
-          paneId: normalized.paneId,
-          dryRun: true,
-          wouldArchive: Boolean(normalized.force) || !blockCode,
-          forced: Boolean(normalized.force),
-          safetyCheck: toPublicSafetyCheck(safetyCheck),
-          blocked: blockCode
-            ? {
-                code: blockCode,
-                message: describeArchiveBlock(blockCode, safetyCheck),
-                safetyCheck: toPublicSafetyCheck(safetyCheck),
-              }
-            : undefined,
-        };
-      }
-
-      if (!normalized.force) {
-        if (blockCode) {
-          const blocked: RunpanePaneArchiveBlockedResult = {
-            ok: false,
-            paneId: normalized.paneId,
-            blocked: {
-              code: blockCode,
-              message: describeArchiveBlock(blockCode, safetyCheck),
-              safetyCheck: toPublicSafetyCheck(safetyCheck),
-            },
-            nextCommand: `runpane panes archive --pane ${normalized.paneId} --force --yes --json`,
-          };
-          return blocked;
-        }
-      }
-
-      const cleanupWait = worktreeCleanupApplicable && services.archiveProgressManager
-        ? waitForArchiveProgressCompletion(services.archiveProgressManager, normalized.paneId, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
-        : null;
-
-      const deleteResult = decodeBoundary(
-        await commandRegistry.invoke('sessions:delete', [normalized.paneId]),
-        boundary.object({
-          success: boundary.boolean,
-          error: boundary.optional(boundary.string),
-        }),
-      );
-      if (!deleteResult.success) {
-        throw new Error(deleteResult.error ?? `Failed to archive pane ${normalized.paneId}`);
-      }
-
-      let worktreeCleanup: RunpaneWorktreeCleanupState;
-      if (!worktreeCleanupApplicable) {
-        worktreeCleanup = 'not-applicable';
-      } else if (cleanupWait) {
-        worktreeCleanup = await cleanupWait;
-      } else {
-        worktreeCleanup = await waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
-      }
-
-      const success: RunpanePaneArchiveSuccessResult = {
-        ok: worktreeCleanup === 'completed' || worktreeCleanup === 'not-applicable',
-        paneId: normalized.paneId,
-        archived: true,
-        forced: Boolean(normalized.force),
-        worktreeCleanup,
-        worktreePath: pane.worktreePath,
-        safetyCheck: toPublicSafetyCheck(safetyCheck),
-      };
-      return success;
-    }, result => ({ paneId: result.paneId, ok: result.ok }));
+  commandRegistry.register('runpane:panes:receive', async (request: PaneCommandValue): Promise<RunpanePaneReceiveResult> => {
+    return withRunpaneAction(
+      services,
+      'panes:receive',
+      {},
+      () => receivePane(services, parsePaneReceiveRequest(request)),
+      result => ({ paneId: 'paneId' in result ? result.paneId : undefined, ok: result.ok }),
+    );
   });
 
   commandRegistry.register('runpane:panels:list', async (request: PaneCommandValue): Promise<RunpanePanelListResult> => {
@@ -1355,6 +1325,7 @@ function sessionToPaneSummary(session: Session, project: Project): RunpanePaneSu
     lastActivity: toIsoString(session.lastActivity),
     archived: session.archived || undefined,
     ownership: session.worktreeOwnership ?? 'pane',
+    handedOffAt: session.handedOffAt,
   };
 }
 
@@ -3007,6 +2978,658 @@ function resolvePane(sessionManager: AppServices['sessionManager'], paneId: stri
     throw new Error(`No Pane pane found with id ${paneId}`);
   }
   return session;
+}
+
+/**
+ * Body of `runpane:panes:archive`, shared with `panes handoff --archive` so the
+ * archive safety check and worktree cleanup wait run exactly once, unchanged.
+ */
+async function archivePane(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  normalized: RunpanePaneArchiveRequest,
+): Promise<RunpanePaneArchiveResult> {
+  const { sessionManager } = services;
+  const pane = resolvePane(sessionManager, normalized.paneId);
+
+  if (pane.archived) {
+    throw new Error(`Pane ${normalized.paneId} is already archived`);
+  }
+
+  const worktreeCleanupApplicable = Boolean(pane.projectId)
+    && !pane.isMainRepo
+    && pane.worktreeOwnership !== 'external';
+  const safetyCheck = worktreeCleanupApplicable
+    ? await computeArchiveSafety(services, pane)
+    : { performed: false };
+
+  const blockCode = classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable);
+  if (normalized.dryRun) {
+    return {
+      ok: true,
+      paneId: normalized.paneId,
+      dryRun: true,
+      wouldArchive: Boolean(normalized.force) || !blockCode,
+      forced: Boolean(normalized.force),
+      safetyCheck: toPublicSafetyCheck(safetyCheck),
+      blocked: blockCode
+        ? {
+            code: blockCode,
+            message: describeArchiveBlock(blockCode, safetyCheck),
+            safetyCheck: toPublicSafetyCheck(safetyCheck),
+          }
+        : undefined,
+    };
+  }
+
+  if (!normalized.force) {
+    if (blockCode) {
+      const blocked: RunpanePaneArchiveBlockedResult = {
+        ok: false,
+        paneId: normalized.paneId,
+        blocked: {
+          code: blockCode,
+          message: describeArchiveBlock(blockCode, safetyCheck),
+          safetyCheck: toPublicSafetyCheck(safetyCheck),
+        },
+        nextCommand: `runpane panes archive --pane ${normalized.paneId} --force --yes --json`,
+      };
+      return blocked;
+    }
+  }
+
+  const cleanupWait = worktreeCleanupApplicable && services.archiveProgressManager
+    ? waitForArchiveProgressCompletion(services.archiveProgressManager, normalized.paneId, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
+    : null;
+
+  const deleteResult = decodeBoundary(
+    await commandRegistry.invoke('sessions:delete', [normalized.paneId]),
+    boundary.object({
+      success: boundary.boolean,
+      error: boundary.optional(boundary.string),
+    }),
+  );
+  if (!deleteResult.success) {
+    throw new Error(deleteResult.error ?? `Failed to archive pane ${normalized.paneId}`);
+  }
+
+  let worktreeCleanup: RunpaneWorktreeCleanupState;
+  if (!worktreeCleanupApplicable) {
+    worktreeCleanup = 'not-applicable';
+  } else if (cleanupWait) {
+    worktreeCleanup = await cleanupWait;
+  } else {
+    worktreeCleanup = await waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
+  }
+
+  const success: RunpanePaneArchiveSuccessResult = {
+    ok: worktreeCleanup === 'completed' || worktreeCleanup === 'not-applicable',
+    paneId: normalized.paneId,
+    archived: true,
+    forced: Boolean(normalized.force),
+    worktreeCleanup,
+    worktreePath: pane.worktreePath,
+    safetyCheck: toPublicSafetyCheck(safetyCheck),
+  };
+  return success;
+}
+
+async function handoffPane(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  normalized: RunpanePaneHandoffRequest,
+): Promise<RunpanePaneHandoffResult> {
+  const { sessionManager, databaseService, configManager } = services;
+  const pane = resolvePane(sessionManager, normalized.paneId);
+  if (pane.archived) {
+    throw new Error(`Pane ${normalized.paneId} is already archived`);
+  }
+  const target = parseHandoffTarget(normalized.to);
+  const to = normalized.to.trim();
+  const mode: RunpanePaneHandoffMode = normalized.mode ?? 'park';
+  const ctx = sessionManager.getProjectContext(pane.id);
+  if (!ctx) {
+    throw new Error(`Project context is unavailable for pane ${pane.id}`);
+  }
+  const project = sessionManager.getProjectForSession(pane.id);
+  if (!project) {
+    throw new Error(`No Pane repo found for pane ${pane.id}`);
+  }
+  const runner = ctx.commandRunner;
+  const cwd = pane.worktreePath;
+  const warnings = handoffTargetWarnings(configManager.getConfig(), target);
+
+  // Steps 1-3 are read-only so a dry run can report exactly what a real run would refuse.
+  let blocked: RunpanePaneHandoffBlockReason | undefined;
+  if (pane.handedOffAt && !normalized.force) {
+    blocked = {
+      code: 'already-handed-off',
+      message: `Pane ${pane.id} was already handed off at ${pane.handedOffAt}; rerun with --force to hand it off again`,
+    };
+  }
+  const files = blocked
+    ? []
+    : parsePorcelainFiles((await runner.execAsync('git status --porcelain=v1', cwd, { silent: true })).stdout);
+  if (!blocked && files.length > 0 && !normalized.includeDirty) {
+    blocked = {
+      code: 'uncommitted-changes',
+      message: `Worktree has ${files.length} uncommitted change(s); rerun with --include-dirty to commit them as "handoff: work in progress"`,
+      files,
+    };
+  }
+  const upstream = await services.worktreeManager.getUpstream(cwd, runner);
+  if (!blocked && upstream) {
+    blocked = await checkFastForward(cwd, upstream, runner);
+  }
+
+  if (normalized.dryRun) {
+    return {
+      ok: true,
+      paneId: pane.id,
+      dryRun: true,
+      wouldHandoff: !blocked,
+      mode,
+      files,
+      upstream: upstream ?? undefined,
+      blocked,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+  }
+  if (blocked) {
+    return { ok: false, paneId: pane.id, blocked, nextCommand: handoffNextCommand(normalized, blocked) };
+  }
+
+  // Step 4: commit the work if asked, then push it before anything else changes.
+  if (files.length > 0) {
+    try {
+      await services.worktreeManager.gitStageAllAndCommit(cwd, 'handoff: work in progress', runner);
+    } catch (error) {
+      return {
+        ok: false,
+        paneId: pane.id,
+        blocked: { code: 'commit-failed', message: `Could not commit the working tree: ${errorMessage(error)}`, gitOutput: gitErrorOutput(error) },
+      };
+    }
+  }
+  const workPush = await pushClassified(services, cwd, runner);
+  if (!workPush.ok) {
+    return { ok: false, paneId: pane.id, blocked: workPush.blocked, nextCommand: handoffRetryCommand(normalized) };
+  }
+
+  const branch = (await runner.execFile('git', ['rev-parse', '--abbrev-ref', 'HEAD'], cwd, { silent: true })).stdout.trim();
+  const head = (await runner.execFile('git', ['rev-parse', 'HEAD'], cwd, { silent: true })).stdout.trim();
+
+  // Step 5: write, commit, and push the note. The report is captured before any panel is touched.
+  const reportPanel = latestCliPanel(panelManager.getPanelsForSession(pane.id));
+  const limit = normalized.limit ?? DEFAULT_HANDOFF_REPORT_LINES;
+  const report = reportPanel ? await collectAgentReport(services, reportPanel, limit) : '';
+  const agent: RunpaneAgentId | 'unknown' = reportPanel ? (getTerminalCustomState(reportPanel).agentType ?? 'unknown') : 'unknown';
+  const pr = await services.gitStatusManager.fetchPrForSession(branch, project.path, runner);
+  const handedOffAt = new Date().toISOString();
+  const noteText = renderHandoffNote({
+    pane: pane.name,
+    branch,
+    head,
+    agent,
+    target: to,
+    pr: pr.prState === 'OPEN' ? pr.prUrl : undefined,
+    handedOffAt,
+    report,
+  });
+  const handoffPath = ctx.pathResolver.join(cwd, HANDOFF_NOTE_FILENAME);
+  try {
+    await fs.promises.writeFile(ctx.pathResolver.toFileSystem(handoffPath), noteText, 'utf8');
+    await runner.execFile('git', ['add', '--', HANDOFF_NOTE_FILENAME], cwd, { silent: true });
+    const staged = await runner.execFile('git', ['diff', '--cached', '--quiet', '--', HANDOFF_NOTE_FILENAME], cwd, { okExitCodes: [1], silent: true });
+    if (staged.exitCode === 1) {
+      await runner.execFile(
+        'git',
+        ['commit', '-m', `handoff: ${pane.name} to ${to}`, '--', HANDOFF_NOTE_FILENAME],
+        cwd,
+        { env: getGitAttributionEnv(configManager.getConfig()), silent: true },
+      );
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      paneId: pane.id,
+      blocked: { code: 'commit-failed', message: `Could not commit ${HANDOFF_NOTE_FILENAME}: ${errorMessage(error)}`, gitOutput: gitErrorOutput(error) },
+    };
+  }
+  const notePush = await pushClassified(services, cwd, runner);
+  if (!notePush.ok) {
+    return { ok: false, paneId: pane.id, blocked: notePush.blocked, nextCommand: handoffRetryCommand(normalized) };
+  }
+
+  const receiveCommand = receiveCommandFor({ repoName: project.name, branch, agent });
+  const common = {
+    paneId: pane.id,
+    branch,
+    headSha: head,
+    handoffPath,
+    target: to,
+    agent,
+    pushed: { upstream: notePush.upstream },
+    receiveCommand,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+
+  // Step 6: park (default) or archive. The note is already on the branch upstream.
+  if (mode === 'archive') {
+    const archive = await archivePane(services, commandRegistry, { paneId: pane.id, source: normalized.source });
+    return { ok: archive.ok, ...common, mode: 'archived', archive };
+  }
+  for (const panel of panelManager.getPanelsForSession(pane.id)) {
+    if (panel.type !== 'terminal' || !getTerminalCustomState(panel).isCliPanel) continue;
+    // Killing the PTY alone is not enough: re-viewing the panel re-runs its launch command.
+    terminalPanelManager.destroyTerminal(panel.id);
+    await panelManager.deletePanel(panel.id);
+  }
+  databaseService.updateSession(pane.id, { handed_off_at: handedOffAt });
+  sessionManager.updateSession(pane.id, { status: 'stopped' });
+  return { ok: true, ...common, mode: 'parked' };
+}
+
+async function receivePane(
+  services: AppServices,
+  normalized: RunpanePaneReceiveRequest,
+): Promise<RunpanePaneReceiveResult> {
+  const { sessionManager, databaseService } = services;
+  const branch = normalized.branch;
+  const refuse = (code: RunpanePaneReceiveBlockCode, message: string, extra: Partial<RunpanePaneReceiveBlockReason> = {}): RunpanePaneReceiveResult => ({
+    ok: false,
+    branch,
+    blocked: { code, message, ...extra },
+  });
+
+  if (!isSafeBranchName(branch)) {
+    return refuse('invalid-branch', `"${branch}" is not a plain branch name (letters, digits, ., _, -, / only; no leading -, no ..)`);
+  }
+  const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
+  const ctx = sessionManager.getProjectContextByProjectId(repo.id);
+  if (!ctx) {
+    throw new Error(`Project context is unavailable for ${repo.name}`);
+  }
+  const runner = ctx.commandRunner;
+  const refFormat = await runner.execFile('git', ['check-ref-format', '--branch', branch], repo.path, { okExitCodes: [1], silent: true });
+  if (refFormat.exitCode !== 0) {
+    return refuse('invalid-branch', `git rejects "${branch}" as a branch name`);
+  }
+
+  const remote = normalized.remote ?? 'origin';
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const fetch = await runner.execFile('git', ['fetch', '--no-tags', remote, `+refs/heads/${branch}:${remoteRef}`], repo.path, { okExitCodes: [128], timeout: 60000, silent: true });
+  if (fetch.exitCode !== 0) {
+    return refuse('branch-not-found', `Could not fetch ${branch} from ${remote}`, { gitOutput: fetch.stderr || fetch.stdout });
+  }
+  const remoteShaResult = await runner.execFile('git', ['rev-parse', '--verify', '--quiet', remoteRef], repo.path, { okExitCodes: [1], silent: true });
+  if (remoteShaResult.exitCode !== 0) {
+    return refuse('branch-not-found', `${remote} has no branch named ${branch}`);
+  }
+  const remoteSha = remoteShaResult.stdout.trim();
+  const noteResult = await runner.execFile('git', ['show', `${remoteRef}:${HANDOFF_NOTE_FILENAME}`], repo.path, { okExitCodes: [128], silent: true });
+  if (noteResult.exitCode !== 0) {
+    return refuse('missing-handoff-note', `${remote}/${branch} has no ${HANDOFF_NOTE_FILENAME}; hand the branch off with runpane panes handoff first`);
+  }
+  const note = parseHandoffNote(noteResult.stdout);
+  const name = normalized.name?.trim() || note.pane;
+
+  // Classify: resume this runtime's parked pane, reuse an orphaned worktree, or create.
+  const worktrees = await services.worktreeManager.listWorktrees(repo.path, runner);
+  const onBranch = worktrees.find(entry => entry.branch === branch);
+  const liveSessions = databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).filter(row => !row.archived);
+  let existing: (typeof liveSessions)[number] | undefined;
+  if (onBranch) {
+    try {
+      existing = findSessionByWorktreeIdentity(liveSessions, resolvePathIdentity(onBranch.path, ctx.pathResolver), ctx.pathResolver);
+    } catch {
+      existing = undefined;
+    }
+  }
+  if (existing && !existing.handed_off_at) {
+    return refuse('branch-in-use', `Pane "${existing.name}" (${existing.id}) is already working on ${branch}`, { paneId: existing.id, name: existing.name });
+  }
+  const directory = worktreeDirectoryForBranch(branch);
+  const targetPath = services.worktreeManager.resolveWorktreePath(repo.path, directory, repo.worktree_folder ?? undefined, ctx.pathResolver);
+  const mode: RunpanePaneReceivePath = existing ? 'resume' : onBranch ? 'adopt-orphan' : 'create';
+  if (mode === 'create') {
+    const registered = worktrees.some(entry => pathsHaveSameIdentity(entry.path, targetPath));
+    if (registered || fs.existsSync(ctx.pathResolver.toFileSystem(targetPath))) {
+      return refuse('path-in-use', `Worktree directory ${targetPath} already exists`, { path: targetPath });
+    }
+  }
+  if (normalized.dryRun) {
+    return { ok: true, dryRun: true, branch, path: mode, name, note };
+  }
+
+  const created: ReceiveRollbackState = {};
+  try {
+    let session: Session;
+    if (mode === 'resume' && existing) {
+      const pull = await runner.execFile('git', ['pull', '--ff-only', remote, branch], existing.worktree_path, { okExitCodes: [1, 128], timeout: 60000, silent: true });
+      if (pull.exitCode !== 0) {
+        return refuse('diverged', `Parked pane "${existing.name}" cannot fast-forward to ${remote}/${branch}`, { paneId: existing.id, gitOutput: pull.stderr || pull.stdout });
+      }
+      session = resolvePane(sessionManager, existing.id);
+    } else {
+      let worktreePath = onBranch?.path;
+      if (mode === 'create') {
+        const hasLocal = await runner.execFile('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], repo.path, { okExitCodes: [1], silent: true });
+        if (hasLocal.exitCode === 1) {
+          await runner.execFile('git', ['branch', '--track', branch, remoteRef], repo.path, { silent: true });
+          created.branch = true;
+        } else {
+          const localSha = (await runner.execFile('git', ['rev-parse', branch], repo.path, { silent: true })).stdout.trim();
+          if (localSha !== remoteSha) {
+            return refuse('diverged', `Local branch ${branch} (${localSha}) differs from ${remote}/${branch} (${remoteSha})`, { localSha, remoteSha });
+          }
+        }
+        const createdWorktree = await services.worktreeManager.createWorktree(
+          repo.path,
+          directory,
+          branch,
+          undefined,
+          repo.worktree_folder ?? undefined,
+          ctx.pathResolver,
+          runner,
+        );
+        worktreePath = createdWorktree.worktreePath;
+        created.worktree = directory;
+      }
+      if (!worktreePath) {
+        throw new Error(`No worktree path resolved for ${branch}`);
+      }
+      const base = await resolveDefaultWorktreeBase(repo.path, runner);
+      const mergeBase = await runner.execFile('git', ['merge-base', base, branch], repo.path, { okExitCodes: [1, 128], silent: true });
+      const baseCommit = mergeBase.exitCode === 0 ? mergeBase.stdout.trim() : undefined;
+      session = await sessionManager.createSession(
+        name,
+        worktreePath,
+        '',
+        path.basename(worktreePath),
+        'ignore',
+        repo.id,
+        false,
+        undefined,
+        'none',
+        baseCommit,
+        base,
+        true,
+      );
+      created.sessionId = session.id;
+      sessionManager.updateSession(session.id, { status: 'stopped' });
+      await Promise.all([
+        panelManager.ensureExplorerPanel(session.id),
+        panelManager.ensureDiffPanel(session.id),
+      ]);
+    }
+
+    const tool = resolveToolSpec({ ...normalized.tool, initialInput: receiveInstruction(note) }, ctx.pathResolver.environment);
+    const activate = resolveReceiveActivation(normalized, tool);
+    const { panel, readiness, initialInput } = await createTerminalPanelForSession(services, session, tool, {
+      activate,
+      waitReady: true,
+      readyTimeoutMs: normalized.readyTimeoutMs,
+    });
+
+    if (mode === 'resume') {
+      databaseService.updateSession(session.id, { handed_off_at: null });
+      sessionManager.updateSession(session.id, { status: 'stopped' });
+    } else {
+      const fresh = sessionManager.getSession(session.id);
+      if (!fresh) throw new Error(`Created session ${session.id} was not found after setup`);
+      sessionManager.emitSessionCreated(fresh, {
+        activateOnCreate: activate,
+        createDefaultTerminalOnCreate: false,
+      });
+    }
+
+    const ok = Boolean((!readiness || readiness.ok) && (!initialInput || initialInput.submitted));
+    return {
+      ok,
+      paneId: session.id,
+      panelId: panel.id,
+      worktreePath: session.worktreePath,
+      handoffPath: ctx.pathResolver.join(session.worktreePath, HANDOFF_NOTE_FILENAME),
+      path: mode,
+      note,
+      readiness,
+      initialInput,
+      nextCommand: ok
+        ? panelOutputCommand(panel.id)
+        : initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
+    };
+  } catch (error) {
+    // Reverse-order rollback of everything this call created; the resume path created nothing.
+    if (created.sessionId) {
+      try {
+        await sessionManager.archiveSession(created.sessionId);
+        databaseService.deleteArchivedSessionPermanently(created.sessionId);
+      } catch (rollbackError) {
+        console.error(`[Runpane] Failed to roll back received pane ${created.sessionId}:`, rollbackError);
+      }
+    }
+    if (created.worktree) {
+      try {
+        await services.worktreeManager.removeWorktree(repo.path, created.worktree, repo.worktree_folder ?? undefined, undefined, ctx.pathResolver, runner);
+      } catch (rollbackError) {
+        console.error(`[Runpane] Failed to remove received worktree ${created.worktree}:`, rollbackError);
+      }
+    }
+    if (created.branch) {
+      try {
+        await runner.execFile('git', ['branch', '-D', branch], repo.path, { silent: true });
+      } catch (rollbackError) {
+        console.error(`[Runpane] Failed to delete received branch ${branch}:`, rollbackError);
+      }
+    }
+    throw error;
+  }
+}
+
+/** What a receive call has created so far, so a failure can undo it in reverse order. */
+interface ReceiveRollbackState {
+  branch?: boolean;
+  worktree?: string;
+  sessionId?: string;
+}
+
+function resolveReceiveActivation(request: RunpanePaneReceiveRequest, tool: RunpaneResolvedTool): boolean {
+  if (request.focus === true) return true;
+  if (request.noFocus === true || request.source === 'agent') return false;
+  return !tool.agent;
+}
+
+function parsePaneReceiveRequest(value: PaneCommandValue): RunpanePaneReceiveRequest {
+  if (!isRecord(value)) {
+    throw new Error('Pane receive request must be an object');
+  }
+  const branch = optionalString(value.branch)?.trim();
+  if (!branch) {
+    throw new Error('Pane receive request must include a branch');
+  }
+  if (value.noFocus === true && value.focus === true) {
+    throw new Error('Pane receive request cannot include both noFocus and focus');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Pane receive source must be user or agent');
+  }
+  const readyTimeoutMs = optionalNumber(value.readyTimeoutMs);
+  if (readyTimeoutMs !== undefined && (!Number.isFinite(readyTimeoutMs) || readyTimeoutMs <= 0)) {
+    throw new Error('Pane receive readyTimeoutMs must be a positive number');
+  }
+  const tool = parseRunpaneToolSpec(value.tool, 'Pane receive request');
+  if (tool.initialInput) {
+    throw new Error('Pane receive request sets the initial instruction itself; omit tool.initialInput');
+  }
+  return {
+    repo: parseRepoSelector(value.repo),
+    branch,
+    tool,
+    name: optionalString(value.name),
+    remote: optionalString(value.remote)?.trim() || undefined,
+    noFocus: optionalBoolean(value.noFocus),
+    focus: optionalBoolean(value.focus),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    readyTimeoutMs,
+    dryRun: optionalBoolean(value.dryRun),
+  };
+}
+
+function parsePaneHandoffRequest(value: PaneCommandValue): RunpanePaneHandoffRequest {
+  if (!isRecord(value)) {
+    throw new Error('Pane handoff request must be an object');
+  }
+  const paneId = optionalString(value.paneId)?.trim();
+  if (!paneId) {
+    throw new Error('Pane handoff request must include a paneId');
+  }
+  const to = optionalString(value.to)?.trim();
+  if (!to) {
+    throw new Error('Pane handoff request must include "to" (local or remote:<profile label>)');
+  }
+  parseHandoffTarget(to);
+  if (value.mode !== undefined && value.mode !== 'park' && value.mode !== 'archive') {
+    throw new Error('Pane handoff mode must be park or archive');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Pane handoff source must be user or agent');
+  }
+  const limit = optionalNumber(value.limit);
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+    throw new Error('Pane handoff limit must be a positive integer');
+  }
+  return {
+    paneId,
+    to,
+    mode: value.mode === 'archive' ? 'archive' : value.mode === 'park' ? 'park' : undefined,
+    includeDirty: optionalBoolean(value.includeDirty),
+    force: optionalBoolean(value.force),
+    limit,
+    dryRun: optionalBoolean(value.dryRun),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+  };
+}
+
+function handoffTargetWarnings(config: AppConfig | null | undefined, target: HandoffTarget): string[] {
+  if (target.kind !== 'remote') return [];
+  const profiles = config?.remoteDaemon?.client?.profiles ?? [];
+  if (profiles.length === 0) return [];
+  if (profiles.some(profile => profile.label === target.label)) return [];
+  return [`No saved Remote Pane profile on this runtime is labeled "${target.label}"; the label is recorded as given.`];
+}
+
+function handoffBaseCommand(request: RunpanePaneHandoffRequest): string[] {
+  const parts = ['runpane panes handoff', `--pane ${request.paneId}`, `--to ${request.to}`];
+  if ((request.mode ?? 'park') === 'archive') parts.push('--archive');
+  if (request.includeDirty) parts.push('--include-dirty');
+  if (request.force) parts.push('--force');
+  if (request.limit !== undefined) parts.push(`--limit ${request.limit}`);
+  return parts;
+}
+
+function handoffNextCommand(request: RunpanePaneHandoffRequest, blocked: RunpanePaneHandoffBlockReason): string | undefined {
+  const parts = handoffBaseCommand(request);
+  if (blocked.code === 'uncommitted-changes') {
+    if (!request.includeDirty) parts.push('--include-dirty');
+  } else if (blocked.code === 'already-handed-off') {
+    if (!request.force) parts.push('--force');
+  } else {
+    return undefined;
+  }
+  return [...parts, '--yes', '--json'].join(' ');
+}
+
+function handoffRetryCommand(request: RunpanePaneHandoffRequest): string {
+  return [...handoffBaseCommand(request), '--yes', '--json'].join(' ');
+}
+
+function parsePorcelainFiles(stdout: string): string[] {
+  return stdout
+    .split('\n')
+    .filter(line => line.length > 3)
+    .map(line => line.slice(3).trim())
+    .filter(Boolean);
+}
+
+async function checkFastForward(
+  cwd: string,
+  upstream: string,
+  runner: CommandRunner,
+): Promise<RunpanePaneHandoffBlockReason | undefined> {
+  const remote = await resolveUpstreamRemote(cwd, upstream, runner);
+  await runner.execAsync(`git fetch --no-tags --prune ${escapeShellArg(remote)}`, cwd, { timeout: 30000 });
+  const remoteHead = (await runner.execFile('git', ['rev-parse', upstream], cwd, { silent: true })).stdout.trim();
+  const ancestor = await runner.execFile('git', ['merge-base', '--is-ancestor', upstream, 'HEAD'], cwd, { okExitCodes: [1], silent: true });
+  if (ancestor.exitCode === 1) {
+    return {
+      code: 'non-fast-forward',
+      message: `Upstream ${upstream} is at ${remoteHead}, which is not an ancestor of HEAD; pull or rebase before handing off`,
+      upstream,
+      remoteHead,
+    };
+  }
+  return undefined;
+}
+
+type PushOutcome =
+  | { ok: true; upstream: string }
+  | { ok: false; blocked: RunpanePaneHandoffBlockReason };
+
+async function pushClassified(services: AppServices, cwd: string, runner: CommandRunner): Promise<PushOutcome> {
+  try {
+    await services.worktreeManager.gitPush(cwd, runner);
+    const upstream = await services.worktreeManager.getUpstream(cwd, runner);
+    return { ok: true, upstream: upstream ?? 'origin' };
+  } catch (error) {
+    const gitOutput = gitErrorOutput(error);
+    const upstream = await services.worktreeManager.getUpstream(cwd, runner);
+    if (upstream) {
+      try {
+        const nonFastForward = await checkFastForward(cwd, upstream, runner);
+        if (nonFastForward) return { ok: false, blocked: { ...nonFastForward, gitOutput } };
+      } catch {
+        // Fall through to the generic push failure below.
+      }
+    }
+    return {
+      ok: false,
+      blocked: {
+        code: 'push-failed',
+        message: `git push failed: ${errorMessage(error)}`,
+        upstream: upstream ?? undefined,
+        gitOutput,
+      },
+    };
+  }
+}
+
+function latestCliPanel(panels: readonly ToolPanel[]): ToolPanel | undefined {
+  const candidates = panels.filter(panel => panel.type === 'terminal' && getTerminalCustomState(panel).isCliPanel);
+  const activeAt = (panel: ToolPanel): number => {
+    const parsed = Date.parse(toIsoString(panel.metadata.lastActiveAt) ?? '');
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return candidates.sort((left, right) => activeAt(right) - activeAt(left))[0];
+}
+
+async function collectAgentReport(services: AppServices, panel: ToolPanel, limit: number): Promise<string> {
+  const scrollback = await panelScrollbackOutput(panel, limit);
+  if (scrollback?.text) return scrollback.text;
+  const outputs = services.sessionManager.getPanelOutputs(panel.id, limit);
+  return boundSanitizedLines(outputs.map(outputToText).join(''), limit).text;
+}
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+function gitErrorOutput(cause: unknown): string | undefined {
+  try {
+    return decodeBoundary(cause, boundary.object({ gitOutput: boundary.optional(boundary.string) })).gitOutput;
+  } catch {
+    return undefined;
+  }
 }
 
 interface ArchiveSafetyCheck extends RunpanePaneArchiveSafetyCheck {
