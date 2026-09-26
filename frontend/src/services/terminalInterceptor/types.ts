@@ -1,3 +1,4 @@
+import type { SettingsPreferenceValues } from '../../types/settings';
 /** Result of feeding input data to the interceptor */
 export interface InterceptResult {
   consumed: boolean; // true = interceptor handled it, don't send to PTY
@@ -38,10 +39,8 @@ interface InterceptPayload {
   data: JsonObject;
 }
 
-/** Preset line count options for the line count selector */
-export const LINE_COUNT_PRESETS = [100, 300, 500, -1] as const; // -1 = All
 /** Paste mode: raw pastes text into PTY, embed saves to file and inserts path */
-export type PasteMode = 'raw' | 'embed';
+export type PasteMode = SettingsPreferenceValues['atTerminalPasteMode'];
 
 /** State specific to the @ terminal handler */
 export interface AtTerminalHandlerState {
