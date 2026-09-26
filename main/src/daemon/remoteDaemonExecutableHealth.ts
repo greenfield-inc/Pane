@@ -109,8 +109,8 @@ function collectProcessImage(options: {
         evidence: 'No supported installed Pane executable could be found for comparison.',
       };
     }
-    const runtimeStat = statSync(options.procExecutablePath);
-    const installedStat = statSync(options.installedPath);
+    const runtimeStat = statSync(options.procExecutablePath, { bigint: true });
+    const installedStat = statSync(options.installedPath, { bigint: true });
     const current = runtimeStat.dev === installedStat.dev && runtimeStat.ino === installedStat.ino;
     return {
       status: current ? 'current' : 'replaced',
