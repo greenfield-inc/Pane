@@ -89,7 +89,8 @@ export const SETTINGS_PREFERENCE_KEYS = {
 
 export type SidebarPaneRowLayout = 'single' | 'two-row';
 type AtTerminalPasteMode = 'raw' | 'embed';
-type AtTerminalLineCount = 100 | 300 | 500 | -1;
+export const AT_TERMINAL_LINE_COUNT_PRESETS = [100, 300, 500, -1] as const;
+type AtTerminalLineCount = typeof AT_TERMINAL_LINE_COUNT_PRESETS[number];
 
 export interface SettingsPreferenceValues {
   autoRenameSessionsToPr: boolean;
@@ -115,9 +116,8 @@ export function parseSettingsPreferences(raw: Record<string, string | null | und
     autoRenameSessionsToPr: raw[SETTINGS_PREFERENCE_KEYS.autoRenameSessionsToPr] !== 'false',
     sidebarPaneRowLayout: normalizeSidebarPaneRowLayout(raw[SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout]),
     atTerminalPasteMode: raw[SETTINGS_PREFERENCE_KEYS.atTerminalPasteMode] === 'embed' ? 'embed' : 'raw',
-    atTerminalLineCount: lineCount === 100 || lineCount === 300 || lineCount === 500 || lineCount === -1
-      ? lineCount
-      : 500,
+    atTerminalLineCount: AT_TERMINAL_LINE_COUNT_PRESETS.find(preset => preset === lineCount)
+      ?? DEFAULT_SETTINGS_PREFERENCES.atTerminalLineCount,
   };
 }
 
