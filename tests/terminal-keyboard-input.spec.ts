@@ -76,6 +76,15 @@ for (const fullscreen of [false, true]) {
       await expect(input).toBeAttached();
       await expect(terminal.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
       await input.focus();
+      if (!win32) {
+        for (const [key, expected] of [
+          ['Control+a', '\x01'], ['Control+d', '\x04'], ['Control+q', '\x11'],
+        ]) {
+          await page.evaluate(() => window.__terminalInputMessages.length = 0);
+          await page.keyboard.press(key);
+          expect.soft(await inputMessages(page), key).toEqual([expected]);
+        }
+      }
       for (const { key, vt, win32: records } of cases) {
         await page.evaluate(() => window.__terminalInputMessages.length = 0);
         await page.keyboard.press(key);
@@ -90,3 +99,35 @@ for (const fullscreen of [false, true]) {
     });
   }
 }
+
+test('macOS Ctrl+Backslash sends SIGQUIT while Cmd+Backslash splits a multi-tab group', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' }));
+  const extraPanel = {
+    ...panels[1], id: 'input-terminal-2', title: 'Second Input Terminal',
+    metadata: { ...panels[1].metadata, position: 2 },
+  };
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: [...panels, extraPanel],
+    activeProjectId: project.id,
+  });
+  await page.goto('/');
+  await page.evaluate(() => {
+    window.__terminalInputMessages = [];
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => {
+      if (channel === 'terminal:input') window.__terminalInputMessages.push(String(args[1]));
+      return invoke(channel, ...args);
+    };
+  });
+  await page.getByRole('button', { name: 'Expand repository Terminal input fixture', exact: true }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+  const input = page.getByRole('tabpanel').locator('.xterm-helper-textarea').first();
+  await expect(input).toBeAttached();
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await input.focus();
+  await page.keyboard.press('Control+Backslash');
+  expect(await inputMessages(page)).toEqual(['\x1c']);
+  await expect(page.getByRole('tabpanel')).toHaveCount(1);
+  await page.keyboard.press('Meta+Backslash');
+  await expect(page.getByRole('tabpanel')).toHaveCount(2);
+});

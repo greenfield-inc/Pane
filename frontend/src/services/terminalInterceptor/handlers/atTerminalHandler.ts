@@ -1,3 +1,4 @@
+import { isPrintable } from '../input';
 import type {
   AtTerminalHandlerState,
   InterceptAction,
@@ -194,8 +195,8 @@ export function createAtTerminalHandler(
         }
 
         case '\x1b': {
-          // Bare Escape
-          return { type: 'cancel' };
+          // Escape closes our picker, so it must not become a shell Meta prefix.
+          return { type: 'cancel', consumeInput: true };
         }
 
         case ' ': {
@@ -217,8 +218,7 @@ export function createAtTerminalHandler(
 
         default: {
           // Printable character — update filter buffer
-          const isPrintable = data.length === 1 && data >= ' ';
-          if (isPrintable) {
+          if (isPrintable(data)) {
             const newBuffer = buffer + data;
             updateFiltered(newBuffer);
             // Auto-cancel when filter matches zero terminals (only after terminals loaded).
