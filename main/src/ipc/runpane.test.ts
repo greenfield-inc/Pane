@@ -166,6 +166,17 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     } as AppServices['app'],
     getMainWindow: () => null,
     databaseService: {
+      getSession: vi.fn((id: string) => {
+        const pane = overrides.sessionManager?.getSession(id) ?? session;
+        return {
+          id: pane.id,
+          worktree_name: 'fixture-worktree',
+          worktree_path: pane.worktreePath,
+          project_id: pane.projectId,
+          is_main_repo: pane.isMainRepo,
+          worktree_ownership: pane.worktreeOwnership,
+        };
+      }),
       getAllProjects: vi.fn(() => [project]),
       createProject: vi.fn((name: string, repoPath: string): Project => ({
         ...project,
@@ -2566,112 +2577,17 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('sets pinned state declaratively and idempotently', async () => {
-    const databaseRow = {
-      id: session.id,
-      is_favorite: 0,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      favorite_pinned_at: null as string | null,
-    };
-    const setSessionFavorite = vi.fn((_id: string, pinned: boolean) => {
-      databaseRow.is_favorite = pinned ? 1 : 0;
-      databaseRow.favorite_pinned_at = pinned
-        ? databaseRow.favorite_pinned_at ?? '2026-07-21 12:00:00'
-        : null;
-      return databaseRow;
-    });
-    const emit = vi.fn();
+  it('dry-runs pinned state changes without changing the session', async () => {
+    const setFavorite = vi.fn();
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        setSessionFavorite,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        emit,
-      } as never,
+      // SAFETY: This fixture only exercises the pin command's SessionManager boundary.
+      sessionManager: { ...createServices().sessionManager, setFavorite } as never,
     });
-    const registry = createRegistry(services);
-
-    const firstPin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: true }]);
-    const pinTimestamp = databaseRow.favorite_pinned_at;
-    const secondPin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: true }]);
-    const listedPinned = await registry.invoke('runpane:panes:list', [{ repo: 'active' }]);
-
-    expect(firstPin).toEqual({
-      ok: true,
-      paneId: session.id,
-      pinned: true,
-      favoritePinnedAt: pinTimestamp,
-      generation: 0,
-    });
-    expect(secondPin).toEqual(firstPin);
-    expect(databaseRow.favorite_pinned_at).toBe(pinTimestamp);
-    expect(listedPinned).toMatchObject({ panes: [{ paneId: session.id, pinned: true }] });
-
-    const firstUnpin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: false }]);
-    const secondUnpin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: false }]);
-
-    expect(firstUnpin).toEqual({ ok: true, paneId: session.id, pinned: false, favoritePinnedAt: undefined, generation: 0 });
-    expect(secondUnpin).toEqual(firstUnpin);
-    expect(databaseRow).toMatchObject({ is_favorite: 0, favorite_pinned_at: null });
-    expect(setSessionFavorite).toHaveBeenCalledTimes(4);
-    expect(emit).toHaveBeenCalledTimes(4);
-    expect(emit).toHaveBeenLastCalledWith('session-updated', expect.objectContaining({
-      id: session.id,
-      isFavorite: false,
-      favoritePinnedAt: undefined,
-    }));
-  });
-
-  it('dry-runs pinned state changes without mutating or emitting', async () => {
-    session.isFavorite = false;
-    session.favoritePinnedAt = undefined;
-    const databaseRow = {
-      id: session.id,
-      is_favorite: 0,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      favorite_pinned_at: null as string | null,
-    };
-    const setSessionFavorite = vi.fn((_id: string, pinned: boolean) => {
-      databaseRow.is_favorite = pinned ? 1 : 0;
-      databaseRow.favorite_pinned_at = pinned ? '2026-07-21 12:00:00' : null;
-      return databaseRow;
-    });
-    const emit = vi.fn();
-    const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        setSessionFavorite,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        emit,
-      } as never,
-    });
-    const registry = createRegistry(services);
-
-    const result = await registry.invoke('runpane:panes:pin', [{
-      paneId: session.id,
-      pinned: true,
-      dryRun: true,
+    const result = await createRegistry(services).invoke('runpane:panes:pin', [{
+      paneId: session.id, pinned: true, dryRun: true,
     }]);
-
-    expect(result).toEqual({
-      ok: true,
-      dryRun: true,
-      paneId: session.id,
-      pinned: true,
-      favoritePinnedAt: undefined,
-    });
-    expect(databaseRow).toMatchObject({ is_favorite: 0, favorite_pinned_at: null });
-    expect(session.isFavorite).toBe(false);
-    expect(setSessionFavorite).not.toHaveBeenCalled();
-    expect(emit).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, dryRun: true, paneId: session.id, pinned: true });
+    expect(setFavorite).not.toHaveBeenCalled();
   });
 
   it('rejects missing and non-boolean pinned state', async () => {
@@ -2683,100 +2599,35 @@ describe('runpane IPC handlers', () => {
       .rejects.toThrow('pinned as a boolean');
   });
 
-  it('renames a pane, trims the name, emits an update, and returns the updated pane', async () => {
-    const renamedSession = { ...session };
-    const updateSession = vi.fn(() => ({ id: session.id, name: 'renamed pane' }));
-    const emit = vi.fn();
+  it('dry-runs pane rename without changing the session', async () => {
+    const renameSession = vi.fn();
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        getSession: vi.fn(() => renamedSession),
-        emit,
-      } as never,
+      // SAFETY: This fixture only exercises the rename command's SessionManager boundary.
+      sessionManager: { ...createServices().sessionManager, renameSession } as never,
     });
-    const registry = createRegistry(services);
-
-    const result = await registry.invoke('runpane:panes:rename', [{
-      paneId: session.id,
-      name: '  renamed pane  ',
+    const result = await createRegistry(services).invoke('runpane:panes:rename', [{
+      paneId: session.id, name: 'preview name', dryRun: true,
     }]);
-
-    expect(updateSession).toHaveBeenCalledWith(session.id, { name: 'renamed pane' });
-    expect(renamedSession.name).toBe('renamed pane');
-    expect(emit).toHaveBeenCalledWith('session-updated', renamedSession);
-    expect(result).toMatchObject({
-      ok: true,
-      pane: { paneId: session.id, name: 'renamed pane' },
-    });
-  });
-
-  it('dry-runs pane rename without persisting, mutating, or emitting', async () => {
-    const originalSession = { ...session };
-    const updateSession = vi.fn();
-    const emit = vi.fn();
-    const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        getSession: vi.fn(() => originalSession),
-        emit,
-      } as never,
-    });
-    const registry = createRegistry(services);
-
-    const result = await registry.invoke('runpane:panes:rename', [{
-      paneId: session.id,
-      name: 'preview name',
-      dryRun: true,
-    }]);
-
-    expect(result).toMatchObject({
-      ok: true,
-      dryRun: true,
-      pane: { paneId: session.id, name: 'preview name' },
-    });
-    expect(originalSession.name).toBe(session.name);
-    expect(updateSession).not.toHaveBeenCalled();
-    expect(emit).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, dryRun: true, pane: { name: 'preview name' } });
+    expect(renameSession).not.toHaveBeenCalled();
   });
 
   it('rejects empty rename names and accepts names without a new length limit', async () => {
     const longName = 'x'.repeat(10_000);
-    const renamedSession = { ...session };
-    const updateSession = vi.fn(() => ({ id: session.id, name: longName }));
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      // SAFETY: Name persistence is exercised by the public command tests with real SessionManager.
       sessionManager: {
         ...createServices().sessionManager,
-        getSession: vi.fn(() => renamedSession),
-        emit: vi.fn(),
+        renameSession: vi.fn(() => ({ ...session, name: longName })),
       } as never,
     });
     const registry = createRegistry(services);
-
     await expect(registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: '' }]))
       .rejects.toThrow('non-empty name');
     await expect(registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: '   ' }]))
       .rejects.toThrow('non-empty name');
-
-    const result = await registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: longName }]);
-    expect(result).toMatchObject({ pane: { name: longName } });
+    expect(await registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: longName }]))
+      .toMatchObject({ pane: { name: longName } });
   });
 
   it('rejects rename for a pane id that does not exist', async () => {

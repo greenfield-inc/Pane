@@ -331,7 +331,7 @@ export class SessionManager extends EventEmitter {
       projectId: dbSession.project_id ?? undefined,
       folderId: dbSession.folder_id,
       displayOrder: dbSession.display_order, // Include displayOrder for proper sorting
-      isFavorite: dbSession.is_favorite,
+      isFavorite: Boolean(dbSession.is_favorite),
       favoritePinnedAt: dbSession.favorite_pinned_at ?? undefined,
       // Model is now managed at panel level
       toolType: normalizedToolType,
@@ -605,6 +605,24 @@ export class SessionManager extends EventEmitter {
     });
   }
 
+  renameSession(id: string, name: string): Session {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error('Session name must be non-empty');
+    return this.publishSessionMetadata(id, this.db.updateSession(id, { name: trimmedName }));
+  }
+
+  setFavorite(id: string, pinned: boolean): Session {
+    return this.publishSessionMetadata(id, this.db.setSessionFavorite(id, pinned));
+  }
+
+  private publishSessionMetadata(id: string, updated: DbSession | undefined): Session {
+    if (!updated) throw new Error(`Session ${id} not found`);
+    const session = this.convertDbSessionToSession(updated);
+    this.activeSessions.set(id, session);
+    this.emit('session-updated', session);
+    return session;
+  }
+
   updateSession(id: string, update: SessionUpdate): void {
 
     // Add log entry for important status changes
@@ -618,7 +636,9 @@ export class SessionManager extends EventEmitter {
       addSessionLog(id, 'error', `Session error: ${update.error}`, 'SessionManager');
     }
 
+    const { run_started_at: runStartedAt, ...sessionUpdate } = update;
     const dbUpdate: UpdateSessionData = {};
+    if (runStartedAt !== undefined) dbUpdate.run_started_at = runStartedAt;
 
     if (update.status !== undefined) {
       dbUpdate.status = this.mapSessionStatusToDbStatus(update.status);
@@ -643,7 +663,7 @@ export class SessionManager extends EventEmitter {
     const session = this.convertDbSessionToSession(updatedDbSession);
 
     // Apply any additional updates not stored in DB
-    Object.assign(session, update);
+    Object.assign(session, sessionUpdate);
 
     this.activeSessions.set(id, session);
     this.emit('session-updated', session);

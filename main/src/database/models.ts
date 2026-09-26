@@ -134,7 +134,7 @@ export interface UpdateSessionData {
   pid?: number;
   folder_id?: string | null;
   claude_session_id?: string;
-  run_started_at?: string;
+  run_started_at?: string | null;
   is_favorite?: boolean;
   favorite_pinned_at?: string | null;
   skip_continue_next?: boolean;
