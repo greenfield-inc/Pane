@@ -173,6 +173,9 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
 
   parseFlags(args, parsed);
+  if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
+    throw new Error('--timeout-ms must be greater than 0 with --follow.');
+  }
   if (parsed.command === 'watch' && parsed.allManaged && parsed.watchPaneIds?.length) {
     throw new Error('runpane watch accepts either --all-managed or --pane, not both.');
   }

@@ -458,6 +458,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         parsed.target = "client"
 
     parse_flags(args, parsed)
+    if parsed.command == "watch" and parsed.follow and parsed.timeout_ms == 0:
+        raise ValueError("--timeout-ms must be greater than 0 with --follow.")
     if parsed.command == "watch" and parsed.all_managed and parsed.watch_pane_ids:
         raise ValueError("runpane watch accepts either --all-managed or --pane, not both.")
     if parsed.command == "watch" and parsed.json and parsed.watch_format == "lines":
