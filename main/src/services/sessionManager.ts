@@ -130,7 +130,7 @@ function normalizeDbOutputType(type: DbSessionOutputType): SessionOutput['type']
 type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 
 // Interface for panel state with custom state that can hold any AI-specific data
-import { addSessionLog, cleanupSessionLogs } from '../ipc/logs';
+import { addSessionLog, cleanupSessionLogs } from './session-logs';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { withLock } from '../utils/mutex';
@@ -832,6 +832,7 @@ export class SessionManager extends EventEmitter {
     await this.terminalSessionManager.closeTerminalSession(id);
     
     this.activeSessions.delete(id);
+    cleanupSessionLogs(id);
     this.emit('session-deleted', { id }); // Keep the same event name for frontend compatibility
   }
 

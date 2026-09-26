@@ -520,7 +520,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Log operations
     getLogs: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:get-logs', sessionId),
     clearLogs: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:clear-logs', sessionId),
-    addLog: (sessionId: string, entry: LogEntry): Promise<IPCResponse> => invokeIpc('sessions:add-log', sessionId, entry),
   },
 
   // Project management

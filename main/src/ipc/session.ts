@@ -5,6 +5,7 @@
  */
 
 import type { IpcMain } from 'electron';
+import { cleanupSessionLogs } from '../services/session-logs';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -634,6 +635,7 @@ export function registerSessionHandlers(
         return { success: false, error: 'Session not found or not archived' };
       }
 
+      cleanupSessionLogs(sessionId);
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);
       return { success: true };
@@ -663,6 +665,7 @@ export function registerSessionHandlers(
       }
 
       const deletedCount = databaseService.deleteArchivedSessionsPermanently();
+      for (const session of archivedSessions) cleanupSessionLogs(session.id);
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);
       return { success: true, data: { deletedCount } };
