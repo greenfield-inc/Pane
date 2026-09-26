@@ -100,6 +100,15 @@ describe('estimateCostUsd', () => {
     expect(cacheReadCostUsd).toBeCloseTo(1.5, 6);
   });
 
+  it.each(['claude-opus-4-5-20251101', 'anthropic/claude-opus-4.5', 'claude-opus-4-6', 'anthropic/claude-opus-4.7', 'claude-opus-4-8'])('prices %s at its published standard rates', model => {
+    const result = estimateCostUsd({ model, inputTokens: 1_000_000, outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000, cacheCreationTokens: 1_000_000 });
+    // Anthropic standard USD/MTok: input 5, output 25, cache read .50, 5-minute write 6.25.
+    expect(result.complete).toBe(true);
+    expect(result.costUsd).toBeCloseTo(36.75, 6);
+    expect(result.cacheReadCostUsd).toBeCloseTo(0.5, 6);
+  });
+
   it('prices a Codex request', () => {
     const { costUsd, complete } = estimateCostUsd({
       model: 'gpt-5-codex',
