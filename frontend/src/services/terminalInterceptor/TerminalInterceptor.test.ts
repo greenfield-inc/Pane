@@ -58,10 +58,19 @@ describe('TerminalInterceptor keyboard protocols', () => {
     expect(interceptor.handleInput('\x1b[20;58;0;0;128;1_').consumed).toBe(false);
     interceptor.handleInput('\x1b[70;33;102;1;0;1_');
     expect(interceptor.getState().buffer).toBe('f');
-    interceptor.handleInput('\x1b[27;1;27;1;0;1_');
+    expect(interceptor.handleInput('\x1b[27;1;27;1;0;1_').consumed).toBe(true);
     expect(onFlush).toHaveBeenCalledWith('@f');
     expect(interceptor.getState().active).toBe(false);
-    expect(interceptor.handleInput('\x1b[27;1;27;0;0;1_').consumed).toBe(false);
+    expect(interceptor.handleInput('\x1b[27;1;27;0;0;1_').consumed).toBe(true);
+  });
+
+  it('consumes Escape used to cancel the picker without sending a shell Meta prefix', () => {
+    const { interceptor, onFlush } = setup();
+    interceptor.handleInput('@');
+    interceptor.handleInput('f');
+    expect(interceptor.handleInput('\x1b')).toEqual({ consumed: true });
+    expect(onFlush.mock.calls).toEqual([['@f']]);
+    expect(interceptor.handleInput('x')).toEqual({ consumed: false });
   });
 
   it.each([
