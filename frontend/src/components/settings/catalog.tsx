@@ -55,13 +55,13 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'AI & Agents',
     description: 'Agent defaults, context, and CLI installations.',
     icon: Bot,
-    settingIds: ['default-pane-chat-agent', 'agent-context', 'session-defaults', 'claude-executable'],
+    settingIds: ['default-pane-chat-agent', 'session-defaults', 'claude-executable'],
     aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md'],
   },
   {
     id: 'usage',
-    label: 'Usage',
-    description: 'Subscription usage and rate limits for detected agent logins.',
+    label: 'Usage & Limits',
+    description: 'Agent token usage, costs, and subscription limits.',
     icon: Gauge,
     settingIds: [],
     aliases: ['codex', 'usage', 'limits', 'quota', 'plan', 'rate limit'],
@@ -123,10 +123,6 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path'],
   },
 ] as const;
-
-/** The catalog without the detection-gated Usage tab (shown only when a Codex login is detected). */
-export const SETTINGS_CATEGORIES_WITHOUT_USAGE: readonly SettingsCategoryDefinition[] =
-  SETTINGS_CATEGORIES.filter((category) => category.id !== 'usage');
 
 export function settingDomId(settingId: SettingsSettingId): string {
   return `settings-${settingId}`;

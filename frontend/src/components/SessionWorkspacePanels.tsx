@@ -21,6 +21,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
 }) {
   const trailingSlot = useTitleBarSlotStore(state => state.trailingSlot);
+  const sessionTabsSlot = useTitleBarSlotStore(state => state.sessionTabsSlot);
   const sessionId = agentPanel.sessionId;
   const panels = usePanelStore(state => state.panels[sessionId] ?? EMPTY_PANELS);
   const activePanelId = usePanelStore(state => state.activePanels[sessionId]);
@@ -129,13 +130,14 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
 
   return (
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+      {sessionTabsSlot && createPortal(tabStrip, sessionTabsSlot)}
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
-      <div className="flex min-h-9 items-center border-b border-border-primary">
+      {!sessionTabsSlot && <div className="flex min-h-9 items-center border-b border-border-primary">
         <div className="flex min-w-0 flex-1 items-center overflow-hidden px-2">
           {tabStrip}
         </div>
         {!trailingSlot && titleBarActions}
-      </div>
+      </div>}
       {error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

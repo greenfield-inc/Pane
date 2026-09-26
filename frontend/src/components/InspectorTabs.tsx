@@ -24,7 +24,7 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
     ...(changesPanel ? [{ id: 'changes' as const, label: 'Changes', badge: changesCount }] : []),
   ];
   return (
-    <div role="tablist" aria-label="Inspector" className={cn('flex h-8 flex-shrink-0 items-stretch border-b border-border-primary', className)}>
+    <div role="tablist" aria-label="Inspector" className={cn('flex h-8 flex-shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1', className)}>
       {tabs.map(item => {
         const selected = item.id === tab;
         return (
@@ -43,9 +43,9 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
               onTabChange(next.id);
             }}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 px-2 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring-subtle',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus:outline-none focus:ring-0',
               selected
-                ? 'text-text-primary shadow-[inset_0_-2px_0_0_var(--color-interactive-primary)]'
+                ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px'
                 : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover',
             )}
           >
