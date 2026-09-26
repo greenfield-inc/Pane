@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 
 interface MermaidRendererProps {
@@ -8,6 +8,8 @@ interface MermaidRendererProps {
 
 export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) => {
   const elementRef = useRef<HTMLDivElement>(null);
+  const instanceId = useId().replace(/:/g, '');
+  const renderSequence = useRef(0);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -15,8 +17,8 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
     const renderChart = async () => {
       if (!elementRef.current || !chart) return;
 
-      // Create a unique ID for this render (define it outside try block)
-      const graphId = `mermaid-${id}-${Date.now()}`;
+      // Mermaid uses CSS selectors internally; each instance/render owns its ID.
+      const graphId = `mermaid-${instanceId}-${++renderSequence.current}`;
 
       try {
         // Clear any previous content
@@ -55,13 +57,10 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
         }
         setErrorMessage(message);
 
-        // Clean up any error SVGs that mermaid may have inserted
-        const errorElements = document.querySelectorAll(`#${graphId}, [id^="mermaid-"]`);
-        errorElements.forEach(el => {
-          if (el.parentNode) {
-            el.parentNode.removeChild(el);
-          }
-        });
+        // Remove only this render's SVG and Mermaid's temporary container.
+        // Other previews may already contain successfully rendered diagrams.
+        document.getElementById(graphId)?.remove();
+        document.getElementById(`d${graphId}`)?.remove();
 
         // Try to clean up mermaid's internal state
         try {
@@ -79,7 +78,7 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
     // Render with a small delay to ensure DOM is ready
     const timer = setTimeout(renderChart, 50);
     return () => clearTimeout(timer);
-  }, [chart, id]);
+  }, [chart, id, instanceId]);
 
   if (hasError) {
     return (
