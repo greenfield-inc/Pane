@@ -865,11 +865,13 @@ function App() {
           onRespond={handlePermissionResponse}
           session={currentPermissionRequest ? sessions.find(s => s.id === currentPermissionRequest.sessionId) : undefined}
         />
-        <ResumeSessionsDialog
-          isOpen={isResumeDialogOpen}
-          onClose={() => setIsResumeDialogOpen(false)}
-          sessions={resumableSessions}
-        />
+        {isResumeDialogOpen && (
+          <ResumeSessionsDialog
+            isOpen={isResumeDialogOpen}
+            onClose={() => setIsResumeDialogOpen(false)}
+            sessions={resumableSessions}
+          />
+        )}
         <CommandPalette
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
