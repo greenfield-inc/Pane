@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useProjectStore } from '../stores/project-store';
 import { useSessionStore } from '../stores/sessionStore';
 import { useErrorStore } from '../stores/errorStore';
 import { usePanelStore } from '../stores/panelStore';
@@ -168,6 +169,19 @@ export function useIPCEvents() {
 
     // Set up IPC event listeners
     const unsubscribeFunctions: (() => void)[] = [];
+
+    void useProjectStore.getState().ensureLoaded();
+    const refreshProjects = () => { void useProjectStore.getState().refresh(); };
+    window.addEventListener('project-changed', refreshProjects);
+    window.addEventListener('project-sessions-refresh', refreshProjects);
+    unsubscribeFunctions.push(() => {
+      window.removeEventListener('project-changed', refreshProjects);
+      window.removeEventListener('project-sessions-refresh', refreshProjects);
+    });
+    const unsubscribeProjectUpdated = window.electronAPI.events.onProjectUpdated?.(project => {
+      useProjectStore.getState().upsert(project);
+    });
+    if (unsubscribeProjectUpdated) unsubscribeFunctions.push(unsubscribeProjectUpdated);
 
     // Listen for session events
     unsubscribeFunctions.push(window.electronAPI.events.onSessionCreationFailed((failure) => {

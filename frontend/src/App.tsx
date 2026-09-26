@@ -55,7 +55,7 @@ import {
 import type { VersionInfo, VersionUpdateInfo } from './types/session';
 import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
-import type { Project } from './types/project';
+import { useProjectStore } from './stores/project-store';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
 import type {
   PanePermissionRequest,
@@ -104,7 +104,7 @@ function App() {
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [showCreateSessionDialog, setShowCreateSessionDialog] = useState(false);
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const projects = useProjectStore(s => s.projects);
   const activeProjectId = useNavigationStore(s => s.activeProjectId);
   const sidebarCollapsed = useNavigationStore(s => s.sidebarCollapsed);
   const [titleBarControlsSlot, setTitleBarControlsSlot] = useState<HTMLDivElement | null>(null);
@@ -287,22 +287,6 @@ function App() {
       );
     });
   }, [showNotification]);
-
-  // Fetch projects for global shortcuts
-  useEffect(() => {
-    const fetchProjects = async () => {
-      const res = await API.projects.getAll();
-      if (res.success && res.data) setProjects(res.data);
-    };
-    fetchProjects();
-    const handle = () => fetchProjects();
-    window.addEventListener('project-changed', handle);
-    window.addEventListener('project-sessions-refresh', handle);
-    return () => {
-      window.removeEventListener('project-changed', handle);
-      window.removeEventListener('project-sessions-refresh', handle);
-    };
-  }, []);
 
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
@@ -533,8 +517,9 @@ function App() {
         if (result?.data !== 'true') {
           // Only show onboarding for truly new users (no existing projects).
           // Existing users who upgrade won't have this preference but already have projects.
-          const projectsRes = await API.projects.getAll();
-          const hasExistingProjects = projectsRes.success && projectsRes.data && projectsRes.data.length > 0;
+          const projects = await useProjectStore.getState().ensureLoaded();
+          if (!projects) return;
+          const hasExistingProjects = projects.length > 0;
           if (!hasExistingProjects) {
             if (!cancelled) setIsOnboardingOpen(true);
           }
@@ -580,8 +565,9 @@ function App() {
         // If user explicitly said "don't show again", respect that preference
         if (!hideWelcome && !completedOnboardingThisSession) {
           try {
-            const projectsResponse = await API.projects.getAll();
-            const hasProjects = projectsResponse.success && projectsResponse.data && projectsResponse.data.length > 0;
+            const projects = await useProjectStore.getState().ensureLoaded();
+            if (!projects) return;
+            const hasProjects = projects.length > 0;
             // Get sessions from the API to avoid stale closure
             const sessionsResponse = await API.sessions.getAll();
             const hasSessions = sessionsResponse.success && sessionsResponse.data && sessionsResponse.data.length > 0;

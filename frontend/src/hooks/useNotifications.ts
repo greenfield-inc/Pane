@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { usePanelStore } from '../stores/panelStore';
-import { API } from '../utils/api';
+import { useProjectStore } from '../stores/project-store';
 import { useConfigStore } from '../stores/configStore';
 import { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
@@ -65,23 +65,6 @@ export function useNotifications() {
 
   // Track previous agentStatus per panelId to detect transitions.
   const prevAgentStatusRef = useRef<Record<string, AgentState>>({});
-
-  // Project name cache keyed by project id, refreshed on mount and on project changes.
-  const projectNamesRef = useRef<Map<number, string>>(new Map());
-  useEffect(() => {
-    const loadProjects = async () => {
-      const res = await API.projects.getAll();
-      if (res.success && res.data) {
-        projectNamesRef.current = new Map(
-          // SAFETY: The named IPC/API channel contract establishes this response payload type.
-          (res.data as { id: number; name: string }[]).map((p) => [p.id, p.name])
-        );
-      }
-    };
-    loadProjects();
-    window.addEventListener('project-changed', loadProjects);
-    return () => window.removeEventListener('project-changed', loadProjects);
-  }, []);
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
     if (!('Notification' in window)) {
@@ -175,7 +158,7 @@ export function useNotifications() {
     if (!session) return null;
 
     const projectName = session.projectId
-      ? projectNamesRef.current.get(session.projectId) ?? ''
+      ? useProjectStore.getState().projects.find(project => project.id === session.projectId)?.name ?? ''
       : '';
     return {
       session,
