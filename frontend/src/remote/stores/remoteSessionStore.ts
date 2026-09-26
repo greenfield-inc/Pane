@@ -9,6 +9,8 @@ interface RemoteSessionState {
   selectedPanelId: string | null;
   panelsBySessionId: Record<string, ToolPanel[]>;
   setProjects: (projects: RemoteProjectWithSessions[]) => void;
+  upsertSession: (session: Session) => void;
+  removeSession: (sessionId: string) => void;
   selectSession: (sessionId: string | null) => void;
   setPanels: (sessionId: string, panels: ToolPanel[]) => void;
   setSelectedPanel: (panelId: string | null) => void;
@@ -24,10 +26,39 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
   selectedPanelId: null,
   panelsBySessionId: {},
 
-  setProjects: (projects) => set((state) => ({
-    projects,
-    selectedSessionId: state.selectedSessionId ?? findFirstSessionId(projects),
+  setProjects: (projects) => set((state) => {
+    const hasSelection = projects.some(project => project.sessions?.some(session => session.id === state.selectedSessionId));
+    return {
+      projects,
+      selectedSessionId: hasSelection ? state.selectedSessionId : null,
+      selectedPanelId: hasSelection ? state.selectedPanelId : null,
+    };
+  }),
+
+  upsertSession: (session) => set((state) => ({
+    projects: state.projects.map(project => {
+      const sessions = project.sessions ?? [];
+      if (project.id !== session.projectId && !sessions.some(existing => existing.id === session.id)) return project;
+      return {
+        ...project,
+        sessions: sessions.some(existing => existing.id === session.id)
+          ? sessions.map(existing => existing.id === session.id ? session : existing)
+          : [...sessions, session],
+      };
+    }),
   })),
+
+  removeSession: (sessionId) => set((state) => {
+    const panelsBySessionId = { ...state.panelsBySessionId };
+    delete panelsBySessionId[sessionId];
+    return {
+      projects: state.projects.map(project => project.sessions?.some(session => session.id === sessionId)
+        ? { ...project, sessions: project.sessions.filter(session => session.id !== sessionId) } : project),
+      panelsBySessionId,
+      selectedSessionId: state.selectedSessionId === sessionId ? null : state.selectedSessionId,
+      selectedPanelId: state.selectedSessionId === sessionId ? null : state.selectedPanelId,
+    };
+  }),
 
   selectSession: (sessionId) => set({
     selectedSessionId: sessionId,
@@ -82,13 +113,3 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
     return selectedSessionId ? panelsBySessionId[selectedSessionId] ?? [] : [];
   },
 }));
-
-function findFirstSessionId(projects: RemoteProjectWithSessions[]): string | null {
-  for (const project of projects) {
-    const session = project.sessions?.[0];
-    if (session) {
-      return session.id;
-    }
-  }
-  return null;
-}
