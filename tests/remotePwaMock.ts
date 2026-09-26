@@ -9,6 +9,8 @@ import type { JsonValue } from '../shared/validation/boundaryDecoder';
 export interface RemotePwaMockOptions {
   /** Panes the mock host reports, in sidebar order. */
   sessionNames?: string[];
+  /** Enable one voice mode without a real transcription service. */
+  voiceMode?: 'streaming' | 'recorded';
   /** Terminal panels the selected pane reports, in tab order. */
   panelTitles?: string[];
   /** Host-defined terminal shortcuts offered in the mobile input bar. */
@@ -108,8 +110,8 @@ function buildFixtures(options: RemotePwaMockOptions) {
       { name: 'Codex', command: 'codex' },
     ],
     voiceTranscription: {
-      availableModes: [],
-      defaultMode: 'streaming',
+      availableModes: options.voiceMode ? [options.voiceMode] : [],
+      defaultMode: options.voiceMode ?? 'streaming',
       configured: {
         cleanup: false, recorded: false, streaming: false,
         fal: false, deepgram: false, openRouter: false,
@@ -142,10 +144,11 @@ export async function openConnectedRemotePwa(
     // server-sent traffic, so it only has to connect and stay quiet — but it does
     // have to be able to *drop*, because losing the host is the defining event of
     // using Pane from a phone and the status bar's motion is about saying so.
-    class MockEventSource {
+    class MockEventSource extends EventTarget {
       onopen: ((event: Event) => void) | null = null;
       onerror: ((event: Event) => void) | null = null;
       constructor(readonly url: string) {
+        super();
         // Handed to the registrar rather than aliased into a local, so the
         // newest stream is reachable without keeping a `self` around.
         register(this);
@@ -156,8 +159,6 @@ export async function openConnectedRemotePwa(
           window.setTimeout(() => this.onopen?.(new Event('open')), 0);
         }
       }
-      addEventListener(): void {}
-      removeEventListener(): void {}
       close(): void {}
     }
 
@@ -166,6 +167,20 @@ export async function openConnectedRemotePwa(
     const register = (source: MockEventSource) => { live = source; };
 
     Object.defineProperty(window, 'EventSource', { configurable: true, value: MockEventSource });
+
+    Object.defineProperty(window, '__paneRemoteEvent', {
+      configurable: true,
+      value: (channel: string) => live?.dispatchEvent(new MessageEvent('daemon-event', {
+        data: JSON.stringify({ channel, args: [], timestamp: new Date().toISOString() }),
+      })),
+    });
+
+    Object.defineProperty(window, '__paneRemoteHeartbeat', {
+      configurable: true,
+      value: (timestamp: string) => live?.dispatchEvent(new MessageEvent('heartbeat', {
+        data: JSON.stringify({ timestamp }),
+      })),
+    });
 
     // Drops the stream the way a phone leaving wifi does, and keeps it down. The
     // client's own backoff walks the status to `reconnecting` and keeps retrying
@@ -225,6 +240,8 @@ declare global {
   interface Window {
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
     __paneRemoteDropConnection?: () => void;
+    __paneRemoteHeartbeat?: (timestamp: string) => void;
+    __paneRemoteEvent?: (channel: string) => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
     __paneRemoteRestoreConnection?: () => void;
   }
