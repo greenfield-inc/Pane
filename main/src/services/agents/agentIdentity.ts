@@ -1,10 +1,9 @@
-import { TerminalPanelState } from '../../../../shared/types/panels';
+import { CLI_AGENTS, cliAgentSchema, type CliAgentType } from '../../../../shared/types/cli-agent';
+export type { CliAgentType } from '../../../../shared/types/cli-agent';
 import type { PaneCommandValue } from '../../daemon/commandRegistry';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
-export type CliAgentType = NonNullable<TerminalPanelState['agentType']>;
-
-export const CLI_AGENT_TYPES: readonly CliAgentType[] = ['claude', 'codex', 'cursor'];
+export const CLI_AGENT_TYPES = CLI_AGENTS;
 
 interface AgentExecutableLookup {
   readonly [executable: string]: CliAgentType;
@@ -293,7 +292,7 @@ function resolveExecutableToken(command: string, platformHint: NodeJS.Platform):
 
 export function isCliAgentType(value: PaneCommandValue): value is CliAgentType {
   try {
-    decodeBoundary(value, boundary.enumeration(...CLI_AGENT_TYPES));
+    decodeBoundary(value, cliAgentSchema);
     return true;
   } catch {
     return false;

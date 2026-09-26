@@ -1488,7 +1488,7 @@ function sessionSelectorFromParsed(parsed: ParsedArgs): SessionSelectorValue {
 function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
   return decodeBoundary(value, boundary.object({
     name: boundary.nonEmptyString,
-    agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+    agent: boundary.optional(agentSchema),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -1504,7 +1504,7 @@ function parseSessionUpdatePayload(value: JsonValue): SessionUpdatePayload {
     name: boundary.optional(boundary.string),
     archived: boundary.optional(boundary.boolean),
     isPinned: boundary.optional(boundary.boolean),
-    agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+    agent: boundary.optional(agentSchema),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),

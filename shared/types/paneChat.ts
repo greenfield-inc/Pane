@@ -1,8 +1,9 @@
+import { cliAgentSchema, type CliAgentType } from './cli-agent';
 import type { ToolPanel } from './panels';
-import { boundary, decodeBoundary } from '../validation/boundaryDecoder';
+import { decodeBoundary } from '../validation/boundaryDecoder';
 import type { JsonValue } from '../validation/boundaryDecoder';
 
-export type PaneChatAgent = 'claude' | 'codex' | 'cursor';
+export type PaneChatAgent = CliAgentType;
 
 export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = 'claude';
 export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';
@@ -27,7 +28,7 @@ export interface PaneChatState<TSession = unknown> {
 
 export function normalizePaneChatAgent(value: JsonValue | undefined): PaneChatAgent {
   try {
-    return decodeBoundary(value, boundary.enumeration('claude', 'codex', 'cursor'));
+    return decodeBoundary(value, cliAgentSchema);
   } catch {
     return DEFAULT_PANE_CHAT_AGENT;
   }
