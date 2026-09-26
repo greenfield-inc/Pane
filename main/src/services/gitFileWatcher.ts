@@ -63,7 +63,6 @@ interface WatchedSession {
   nonFatalErrorLogged?: boolean; // rate-limits log-only watcher errors (separate from the degrade warn)
   lastModified: number;
   pendingRefresh: boolean;
-  refreshInFlight?: boolean;
   pollInFlight?: boolean;
 }
 
@@ -79,7 +78,6 @@ interface GitFileWatcherStats {
  * 1. Uses chokidar with function-form ignored for efficient file monitoring
  * 2. Short-circuits descent into heavy directories (node_modules, dist, etc.)
  * 3. Batches rapid file changes
- * 4. Uses git update-index to quickly check if index is dirty
  */
 export class GitFileWatcher extends EventEmitter {
   private watchedSessions: Map<string, WatchedSession> = new Map();
@@ -99,7 +97,8 @@ export class GitFileWatcher extends EventEmitter {
   constructor(
     private logger?: Logger,
     private commandRunner?: CommandRunner,
-    private pathResolver?: PathResolver
+    private pathResolver?: PathResolver,
+    private watchFiles: typeof chokidarWatch = chokidarWatch,
   ) {
     super();
     this.setMaxListeners(100);
@@ -231,7 +230,7 @@ export class GitFileWatcher extends EventEmitter {
         return this.isIgnoredEventPath(rel, gitignoredDirs, stats.isDirectory());
       };
 
-      const worktreeWatcher = chokidarWatch(watchPath, {
+      const worktreeWatcher = this.watchFiles(watchPath, {
         ignored,
         ignoreInitial: true,
         persistent: true,
@@ -470,46 +469,18 @@ export class GitFileWatcher extends EventEmitter {
     // Set new timer
     const timer = setTimeout(() => {
       this.refreshDebounceTimers.delete(sessionId);
-      void this.performRefreshCheck(sessionId);
+      this.emitPendingRefresh(sessionId);
     }, this.DEBOUNCE_MS);
 
     this.refreshDebounceTimers.set(sessionId, timer);
   }
 
-  /**
-   * Perform the actual refresh check using git plumbing commands
-   */
-  private async performRefreshCheck(sessionId: string): Promise<void> {
+  /** Refresh after every relevant event, including transitions back to a clean tree. */
+  private emitPendingRefresh(sessionId: string): void {
     const session = this.watchedSessions.get(sessionId);
-    if (!session || !session.pendingRefresh || session.refreshInFlight) {
-      return;
-    }
-
+    if (!session?.pendingRefresh) return;
     session.pendingRefresh = false;
-    session.refreshInFlight = true;
-
-    try {
-      // Quick check if the index is dirty using git update-index
-      // This is much faster than running full git status
-      const needsRefresh = await this.checkIfRefreshNeeded(session.worktreePath);
-      if (this.watchedSessions.get(sessionId) !== session) return;
-
-      if (needsRefresh) {
-        this.logger?.info(`[GitFileWatcher] Session ${sessionId} needs refresh`);
-        this.emit('needs-refresh', sessionId);
-      } else {
-        this.logger?.info(`[GitFileWatcher] Session ${sessionId} no refresh needed`);
-      }
-    } catch (error) {
-      this.logger?.error(`[GitFileWatcher] Error checking session ${sessionId}:`, error instanceof Error ? error : new Error(String(error)));
-      // On error, emit refresh to be safe
-      if (this.watchedSessions.get(sessionId) === session) this.emit('needs-refresh', sessionId);
-    } finally {
-      session.refreshInFlight = false;
-      if (this.watchedSessions.get(sessionId) === session && session.pendingRefresh) {
-        this.scheduleRefreshCheck(sessionId);
-      }
-    }
+    this.emit('needs-refresh', sessionId);
   }
 
   /** Run a git command, using CommandRunner when available for WSL support */
@@ -611,9 +582,8 @@ export class GitFileWatcher extends EventEmitter {
     if (!session || session.pollInFlight) return;
     session.pollInFlight = true;
     try {
-      // session.worktreePath (unconverted), matching performRefreshCheck →
-      // checkIfRefreshNeeded(session.worktreePath) — execGit/commandRunner
-      // expect the runner-domain path, not the toFileSystem-converted one.
+      // execGit/commandRunner expect the runner-domain path, not the
+      // toFileSystem-converted one used by native filesystem watchers.
       const snapshot = await this.execGit(
         'git status --porcelain=v1 --branch --untracked-files=normal',
         session.worktreePath,
@@ -741,7 +711,7 @@ export class GitFileWatcher extends EventEmitter {
           ? [path.join(commonDir, 'packed-refs'), path.join(commonDir, 'refs', 'heads')]
           : []), // degrade to index/HEAD-only, as today
       ]);
-      const gitWatcher = chokidarWatch([...targets], {
+      const gitWatcher = this.watchFiles([...targets], {
         ignoreInitial: true,
         persistent: true,
         followSymlinks: false,
@@ -767,55 +737,6 @@ export class GitFileWatcher extends EventEmitter {
         gitDirErr instanceof Error ? gitDirErr : new Error(String(gitDirErr)),
       );
       return undefined;
-    }
-  }
-
-  /**
-   * Quick check if git status needs refreshing
-   * Returns true if there are changes, false if working tree is clean
-   */
-  private async checkIfRefreshNeeded(worktreePath: string): Promise<boolean> {
-    try {
-      // First, refresh the index to ensure it's up to date
-      // This is very fast and updates git's internal cache
-      try {
-        await this.execGit('git update-index --refresh --ignore-submodules', worktreePath);
-      } catch (error) {
-        // `git update-index --refresh` exits non-zero for dirty/racy paths.
-        // That is a refresh signal, not an application error.
-        this.logger?.verbose(`[GitFileWatcher] update-index indicated refresh needed for ${worktreePath}: ${error instanceof Error ? error.message : String(error)}`);
-        return true;
-      }
-
-      // Check for unstaged changes (modified files)
-      try {
-        await this.execGit('git diff-files --quiet --ignore-submodules', worktreePath);
-      } catch {
-        // Non-zero exit means there are unstaged changes
-        return true;
-      }
-
-      // Check for staged changes
-      try {
-        await this.execGit('git diff-index --cached --quiet HEAD --ignore-submodules', worktreePath);
-      } catch {
-        // Non-zero exit means there are staged changes
-        return true;
-      }
-
-      // Check for untracked files
-      const untrackedOutput = (await this.execGit('git ls-files --others --exclude-standard', worktreePath)).trim();
-
-      if (untrackedOutput) {
-        return true;
-      }
-
-      // Working tree is clean
-      return false;
-    } catch (error) {
-      // If any command fails unexpectedly, assume refresh is needed
-      this.logger?.warn(`[GitFileWatcher] Unexpected refresh check failure for ${worktreePath}; scheduling refresh`, error instanceof Error ? error : new Error(String(error)));
-      return true;
     }
   }
 

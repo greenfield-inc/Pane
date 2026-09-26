@@ -1,5 +1,5 @@
 import os from 'os';
-import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { GitStatusManager } from '../gitStatusManager';
 import type { fastCheckWorkingDirectory as fastCheckWorkingDirectoryImpl, fastGetAheadBehind as fastGetAheadBehindImpl, fastGetDiffStats as fastGetDiffStatsImpl } from '../gitPlumbingCommands';
 import type { SessionManager } from '../sessionManager';
@@ -151,6 +151,58 @@ describe('GitStatusManager', () => {
     });
     // Git and GitHub CLI outputs have independent fixtures.
     vi.mocked(projectGitOutput).mockReturnValue('');
+  });
+
+  describe('debounced refresh callers', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => {
+      gitStatusManager.stopPolling();
+      vi.useRealTimers();
+    });
+
+    it('settles every caller when rapid refresh requests share one batch', async () => {
+      const results: Array<GitStatus | null> = [];
+      void gitStatusManager.refreshSessionGitStatus('test-session').then(status => results.push(status));
+      await vi.advanceTimersByTimeAsync(1000);
+      void gitStatusManager.refreshSessionGitStatus('test-session').then(status => results.push(status));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(results).toHaveLength(2);
+      expect(results).toEqual([expect.objectContaining({ state: 'clean' }), expect.objectContaining({ state: 'clean' })]);
+    });
+  });
+
+  describe('refresh lifecycle and changing dirty status', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => {
+      gitStatusManager.stopPolling();
+      vi.useRealTimers();
+    });
+
+    it.each(['cancel', 'clear', 'stop'] as const)('settles pending callers on %s', async action => {
+      const results: Array<GitStatus | null> = [];
+      void gitStatusManager.refreshSessionGitStatus('test-session').then(status => results.push(status));
+      void gitStatusManager.refreshSessionGitStatus('test-session').then(status => results.push(status));
+      if (action === 'cancel') gitStatusManager.cancelSessionGitStatus('test-session');
+      if (action === 'clear') gitStatusManager.clearSessionCache('test-session');
+      if (action === 'stop') gitStatusManager.stopPolling();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(results).toEqual([null, null]);
+    });
+
+    it('updates counts and conflicts while the worktree remains dirty', async () => {
+      fastCheckWorkingDirectory.mockResolvedValue({ ...cleanIndexStatus, hasModified: true });
+      fastGetDiffStats.mockResolvedValue({ additions: 2, deletions: 1, filesChanged: 1 });
+      const initial = gitStatusManager.refreshSessionGitStatus('test-session');
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await initial).toMatchObject({ state: 'modified', additions: 2 });
+
+      fastCheckWorkingDirectory.mockResolvedValue({ ...cleanIndexStatus, hasModified: true, hasConflicts: true });
+      fastGetDiffStats.mockResolvedValue({ additions: 9, deletions: 3, filesChanged: 2 });
+      fastGetAheadBehind.mockResolvedValue({ ahead: 2, behind: 0 });
+      const updated = gitStatusManager.refreshSessionGitStatus('test-session');
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await updated).toMatchObject({ state: 'conflict', additions: 9, deletions: 3, filesChanged: 2, ahead: 2 });
+    });
   });
 
   describe('fetchGitStatus via getGitStatus (cache miss scenarios)', () => {

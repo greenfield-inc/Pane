@@ -29,6 +29,15 @@ interface GitStatusCache {
   };
 }
 
+interface PendingRefresh {
+  timer?: NodeJS.Timeout;
+  isUserInitiated: boolean;
+  waiters: Array<{
+    resolve: (status: GitStatus | null) => void;
+    reject: (error: Error) => void;
+  }>;
+}
+
 type PrData = {
   prNumber?: number;
   prUrl?: string;
@@ -60,7 +69,7 @@ export class GitStatusManager extends EventEmitter {
   private cache: GitStatusCache = {};
   // Smart visibility-aware polling for active sessions only
   private readonly CACHE_TTL_MS = 5000; // 5 seconds cache
-  private refreshDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
+  private pendingRefreshes = new Map<string, PendingRefresh>();
   private readonly DEBOUNCE_MS = 2000; // 2 seconds debounce to batch rapid changes
   private gitLogger: GitStatusLogger;
   private fileWatcher: GitFileWatcher;
@@ -224,8 +233,7 @@ export class GitStatusManager extends EventEmitter {
     this.gitLogger.logSummary();
 
     // Clear any pending debounce timers
-    this.refreshDebounceTimers.forEach(timer => clearTimeout(timer));
-    this.refreshDebounceTimers.clear();
+    for (const sessionId of this.pendingRefreshes.keys()) this.cancelPendingRefresh(sessionId);
 
     // Clear event throttle timer
     if (this.eventThrottleTimer) {
@@ -464,53 +472,49 @@ export class GitStatusManager extends EventEmitter {
     // This provides immediate visual feedback
     this.emitThrottled(sessionId, 'loading');
     
-    // Clear any existing debounce timer for this session
-    const existingTimer = this.refreshDebounceTimers.get(sessionId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      this.refreshDebounceTimers.delete(sessionId);
+    const pending = this.pendingRefreshes.get(sessionId) ?? { isUserInitiated, waiters: [] };
+    if (pending.timer) {
+      clearTimeout(pending.timer);
       this.gitLogger.logDebounce(sessionId, 'cancelled');
     }
-
-    // Create a promise that will be resolved after debounce
+    pending.isUserInitiated ||= isUserInitiated;
     this.gitLogger.logDebounce(sessionId, 'start');
-    return new Promise((resolve) => {
-      const timer = setTimeout(async () => {
-        this.refreshDebounceTimers.delete(sessionId);
-        this.gitLogger.logDebounce(sessionId, 'complete');
-        
-        // Fast path: check if git status actually changed before doing expensive operations
-        const session = await this.sessionManager.getSession(sessionId);
-        if (session?.worktreePath) {
-          const hasChanged = await this.hasGitStatusChanged(sessionId, session.worktreePath);
-          if (!hasChanged) {
-            this.logger?.info(`[GitStatus] Quick check: no changes for session ${sessionId}, skipping refresh`);
-            // Still emit updated to clear loading state even if no changes
-            const cached = this.cache[sessionId]?.status || null;
-            if (cached) {
-              this.emitThrottled(sessionId, 'updated', cached);
-              if (this.shouldSchedulePrEnrichment(cached)) {
-                this.schedulePrEnrichment(sessionId);
-              }
-            }
-            resolve(cached);
-            return;
-          }
-        }
-        
-        const status = await this.fetchGitStatus(sessionId);
-        if (status) {
-          const cachedStatus = this.updateCache(sessionId, status);
-          this.emitThrottled(sessionId, 'updated', cachedStatus);
-          if (this.shouldSchedulePrEnrichment(cachedStatus)) {
-            this.schedulePrEnrichment(sessionId, isUserInitiated);
-          }
-        }
-        resolve(status ? this.cache[sessionId]?.status || status : status);
-      }, this.DEBOUNCE_MS);
-
-      this.refreshDebounceTimers.set(sessionId, timer);
+    const result = new Promise<GitStatus | null>((resolve, reject) => {
+      pending.waiters.push({ resolve, reject });
     });
+    pending.timer = setTimeout(() => {
+      this.pendingRefreshes.delete(sessionId);
+      this.gitLogger.logDebounce(sessionId, 'complete');
+      void this.runPendingRefresh(sessionId, pending).then(
+        status => pending.waiters.forEach(waiter => waiter.resolve(status)),
+        error => {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          pending.waiters.forEach(waiter => waiter.reject(failure));
+        },
+      );
+    }, this.DEBOUNCE_MS);
+    this.pendingRefreshes.set(sessionId, pending);
+    return result;
+  }
+
+  private async runPendingRefresh(sessionId: string, pending: PendingRefresh): Promise<GitStatus | null> {
+    const status = await this.fetchGitStatus(sessionId);
+    if (status) {
+      const cachedStatus = this.updateCache(sessionId, status);
+      this.emitThrottled(sessionId, 'updated', cachedStatus);
+      if (this.shouldSchedulePrEnrichment(cachedStatus)) {
+        this.schedulePrEnrichment(sessionId, pending.isUserInitiated);
+      }
+    }
+    return status ? this.cache[sessionId]?.status || status : status;
+  }
+
+  private cancelPendingRefresh(sessionId: string): void {
+    const pending = this.pendingRefreshes.get(sessionId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingRefreshes.delete(sessionId);
+    pending.waiters.forEach(waiter => waiter.resolve(null));
   }
 
   /**
@@ -824,11 +828,7 @@ export class GitStatusManager extends EventEmitter {
     this.setGitStatusLoading(sessionId, false);
     
     // Clear any pending debounce timer
-    const timer = this.refreshDebounceTimers.get(sessionId);
-    if (timer) {
-      clearTimeout(timer);
-      this.refreshDebounceTimers.delete(sessionId);
-    }
+    this.cancelPendingRefresh(sessionId);
   }
   
   /**
@@ -846,52 +846,6 @@ export class GitStatusManager extends EventEmitter {
    */
   cancelMultipleGitStatus(sessionIds: string[]): void {
     sessionIds.forEach(id => this.cancelSessionGitStatus(id));
-  }
-
-  /**
-   * Quick check if git status actually changed using fast plumbing commands
-   * Returns true if status is different from cached, false if unchanged
-   */
-  private async hasGitStatusChanged(sessionId: string, worktreePath: string): Promise<boolean> {
-    if (isHomeDirectory(worktreePath)) return true;
-    const cached = this.cache[sessionId];
-    if (!cached) return true;
-    
-    try {
-      const ctx = this.sessionManager.getProjectContext(sessionId);
-
-      // Quick check using plumbing commands
-      const quickStatus = await this.dependencies.fastCheckWorkingDirectory(worktreePath, ctx?.commandRunner.wslContext);
-
-      // Compare with cached status
-      const cachedHasChanges = cached.status.hasUncommittedChanges || cached.status.hasUntrackedFiles;
-      const currentHasChanges = quickStatus.hasModified || quickStatus.hasStaged || quickStatus.hasUntracked;
-
-      // If the basic state differs, we need to refresh
-      if (cachedHasChanges !== currentHasChanges) {
-        return true;
-      }
-
-      // If both have no changes, check if ahead/behind changed
-      if (!currentHasChanges) {
-        if (ctx) {
-          const session = await this.sessionManager.getSession(sessionId);
-          const comparisonBranch = session
-            ? await this.worktreeManager.getSessionComparisonBranch(session, ctx)
-            : await this.worktreeManager.getProjectMainBranch(ctx.project.path, ctx.commandRunner);
-          const { ahead, behind } = await this.dependencies.fastGetAheadBehind(worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
-
-          if ((cached.status.ahead || 0) !== ahead || (cached.status.behind || 0) !== behind) {
-            return true;
-          }
-        }
-      }
-      
-      return false;
-    } catch {
-      // On any error, assume we need to refresh
-      return true;
-    }
   }
 
   /**
@@ -1125,12 +1079,8 @@ export class GitStatusManager extends EventEmitter {
     // (verified at line 906 where it is set).
     this.pendingEvents.delete(sessionId);
 
-    // L5: drain refreshDebounceTimers
-    const timer = this.refreshDebounceTimers.get(sessionId);
-    if (timer) {
-      clearTimeout(timer);
-      this.refreshDebounceTimers.delete(sessionId);
-    }
+    // Settle callers waiting for a debounced refresh
+    this.cancelPendingRefresh(sessionId);
 
     // L5: drain abortControllers
     const ac = this.abortControllers.get(sessionId);
