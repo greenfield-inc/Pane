@@ -312,6 +312,24 @@ Selecting a file opens an editor tab alongside the agent conversation. Panels
 are saved with the Session and reused when you reopen the tools; switching
 Sessions keeps their shells and files separate.
 
+## Plans, pages, and split view
+
+Agents show pages and files with `runpane panels open --file <path>` or
+`--url <url>`. HTML files open as a browser tab; other files open in an editor
+tab. By default the tab opens in split view: the first one splits the stage to
+the right of the conversation, and later ones join that side group as tabs.
+`--tab` opens it as a plain tab instead. Reopening the same file or URL reuses
+and reloads its tab. This works the same in Sessions and in project Panes.
+
+Generated Session instructions ask the orchestrator to write plans, reports, and
+other documents as self-contained HTML files in its Session folder and open them
+this way. Opening a Session never submits a prompt or starts work just to write
+a document.
+
+While the stage is split, each group has its own tab strip and the agent tab
+stays in the top bar. Closing the last tab in the side group returns to a single
+group. Layouts are saved with the Session.
+
 ## Reaching Pane and delegating work
 
 The generated Session instructions tell the orchestrator how to reach
@@ -351,7 +369,7 @@ its branch, files, and uncommitted changes remain in place. Other tabs stay ther
 Cursor and custom launch wrappers are not yet supported for promotion. Missing
 history, conflicting ownership, and active work are rejected before transfer.
 A durable Session record allows reopening to complete an interrupted transfer
-without copying the conversation. Terminal and Files
+without copying the conversation. Terminal, Files, and split view
 capabilities are the same as for a newly created Session.
 
 Promotion defaults to the worktree's current name.

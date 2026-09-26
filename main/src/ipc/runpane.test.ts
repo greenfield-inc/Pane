@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { Project } from '../database/models';
@@ -509,6 +510,7 @@ describe('runpane IPC handlers', () => {
     expect(daemon.channels).toContain('runpane:doctor');
     expect(daemon.channels).toContain('runpane:panes:rename');
     expect(daemon.channels).toContain('runpane:panes:focus');
+    expect(daemon.channels).toContain('runpane:panels:open');
   });
 
   it('lists saved Pane repositories with session counts', async () => {
@@ -4092,6 +4094,122 @@ describe('runpane IPC handlers', () => {
 
       expect(window.show).not.toHaveBeenCalled();
       expect(window.webContents.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('runpane:panels:open', () => {
+    let worktree: string;
+
+    beforeEach(() => {
+      worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-open-'));
+      fs.writeFileSync(path.join(worktree, 'plan.html'), '<h1>Plan</h1>');
+      fs.mkdirSync(path.join(worktree, 'src'));
+      fs.writeFileSync(path.join(worktree, 'src', 'app.ts'), 'export {};');
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([]);
+      vi.mocked(panelManager.createPanel).mockImplementation(async (request: CreatePanelRequest) => ({
+        id: 'opened-panel',
+        sessionId: request.sessionId,
+        type: request.type,
+        title: request.title ?? 'Panel',
+        // SAFETY: The handler passes { customState } for browser and editor panels.
+        state: { isActive: request.activate !== false, customState: (request.initialState as { customState?: object } | undefined)?.customState },
+        metadata: { createdAt: '', lastActiveAt: '', position: 0, ...request.metadata },
+      }));
+    });
+
+    afterEach(() => {
+      fs.rmSync(worktree, { recursive: true, force: true });
+    });
+
+    function openServices(pane: Session, withProject = true): AppServices {
+      const base = createServices();
+      return createServices({
+        // SAFETY: panels:open only reads getSession and getProjectContext from this fixture.
+        sessionManager: {
+          ...base.sessionManager,
+          getSession: vi.fn(() => pane),
+          getProjectContext: vi.fn(() => (withProject ? { pathResolver: new PathResolver({ path: worktree }) } : undefined)),
+        } as never,
+      });
+    }
+
+    it('opens an HTML file as a browser tab in split view by default', async () => {
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
+
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: 'plan.html', source: 'agent' }]);
+
+      const request = vi.mocked(panelManager.createPanel).mock.calls[0][0];
+      const url = pathToFileURL(path.join(worktree, 'plan.html')).href;
+      expect(request).toMatchObject({
+        sessionId: session.id,
+        type: 'browser',
+        title: 'plan.html',
+        metadata: { openPlacement: 'split' },
+        activate: true,
+      });
+      expect(request.initialState).toEqual({ customState: { currentUrl: url } });
+      expect(result).toMatchObject({ ok: true, type: 'browser', filePath: 'plan.html', url, placement: 'split', reused: false, active: true });
+    });
+
+    it('opens other files as editor tabs and honors --tab and --no-focus', async () => {
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
+
+      const result = await registry.invoke('runpane:panels:open', [{
+        paneId: session.id, filePath: path.join(worktree, 'src', 'app.ts'), placement: 'tab', noFocus: true,
+      }]);
+
+      expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'editor',
+        initialState: { customState: { filePath: 'src/app.ts', isPreview: false, isDirty: false } },
+        metadata: { openPlacement: 'tab' },
+        activate: false,
+      }));
+      expect(result).toMatchObject({ type: 'editor', filePath: 'src/app.ts', placement: 'tab', active: false });
+    });
+
+    it('opens URLs and reuses a tab already showing the same URL', async () => {
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([{
+        id: 'existing-browser',
+        sessionId: session.id,
+        type: 'browser',
+        title: 'localhost:3000',
+        state: { isActive: false, customState: { currentUrl: 'http://localhost:3000/' } },
+        metadata: { createdAt: '', lastActiveAt: '', position: 1 },
+      }]);
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
+
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, url: 'http://localhost:3000' }]);
+
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, 'existing-browser');
+      // Reopening stamps the tab so an open page reloads with the latest content.
+      expect(panelManager.updatePanel).toHaveBeenCalledWith('existing-browser', expect.objectContaining({
+        state: expect.objectContaining({ customState: expect.objectContaining({ currentUrl: 'http://localhost:3000/', reopenedAt: expect.any(String) }) }),
+      }));
+      expect(result).toMatchObject({ panelId: 'existing-browser', type: 'browser', reused: true });
+    });
+
+    it('resolves files in a hidden Session orchestrator workspace', async () => {
+      const orchestrator: Session = { ...session, id: '__orchestration_session_abc', isHidden: true, worktreePath: worktree };
+      const registry = createRegistry(openServices(orchestrator, false));
+
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, filePath: 'plan.html' }]);
+
+      expect(result).toMatchObject({ paneId: orchestrator.id, type: 'browser', filePath: 'plan.html' });
+    });
+
+    it('rejects paths outside the worktree, missing files, and unsupported URL schemes', async () => {
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
+
+      await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: '../escape.html' }]))
+        .rejects.toThrow('inside the Pane worktree');
+      await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: 'missing.html' }]))
+        .rejects.toThrow('File not found');
+      await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, url: 'javascript:alert(1)' }]))
+        .rejects.toThrow('Unsupported URL scheme');
+      await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, url: 'https://a.test', filePath: 'plan.html' }]))
+        .rejects.toThrow('exactly one of url or filePath');
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
     });
   });
 });

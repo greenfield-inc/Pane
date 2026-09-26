@@ -556,6 +556,9 @@ function compareParserParity() {
       agent: parsed.agent ?? null,
       toolCommand: parsed.toolCommand ?? null,
       title: parsed.title ?? null,
+      url: parsed.url ?? null,
+      file: parsed.file ?? null,
+      placement: parsed.placement ?? null,
       initialInput: parsed.initialInput ?? null,
       initialInputFile: parsed.initialInputFile ?? null,
       panelInput: parsed.panelInput ?? null,
@@ -637,6 +640,9 @@ for args in samples:
         "agent": parsed.agent,
         "toolCommand": parsed.tool_command,
         "title": parsed.title,
+        "url": parsed.url,
+        "file": parsed.file,
+        "placement": parsed.placement,
         "initialInput": parsed.initial_input,
         "initialInputFile": parsed.initial_input_file,
         "panelInput": parsed.panel_input,
@@ -2205,6 +2211,13 @@ function compareAgentContextParity() {
   assert.strictEqual(nodePanelsDetail.command.name, 'panels create');
   assert.ok(nodePanelsDetail.command.details.includes("shares the existing Pane's worktree"));
   assert.ok(nodePanelsDetail.command.notes.some((note) => note.includes("share the existing Pane's worktree")));
+
+  const nodeOpenDetail = JSON.parse(runNode(['agent-context', '--command', 'panels open', '--json']));
+  const pyOpenDetail = JSON.parse(runPython(['agent-context', '--command', 'panels open', '--json']));
+  assert.deepStrictEqual(pyOpenDetail, nodeOpenDetail);
+  assert.strictEqual(nodeOpenDetail.command.name, 'panels open');
+  assert.ok(nodeOpenDetail.command.details.includes('split view'));
+  assert.ok(nodeOpenDetail.command.jsonSchemas.includes('panelOpenResult'));
 
   const managedBlock = nodeBrief.source === 'runpane-contract'
     ? require(path.join(rootDir, 'packages', 'runpane', 'dist', 'generated', 'contract.js')).RUNPANE_CONTRACT.agentContext.managedBlock.join('\n')

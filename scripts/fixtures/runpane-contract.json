@@ -393,6 +393,31 @@
       "demo",
       "--from-json",
       "-"
+    ],
+    [
+      "panels",
+      "open",
+      "--pane",
+      "session-1",
+      "--file",
+      "plan.html",
+      "--title",
+      "Plan",
+      "--split",
+      "--no-focus",
+      "--source",
+      "agent",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
+      "open",
+      "--url",
+      "http://localhost:3000",
+      "--tab",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

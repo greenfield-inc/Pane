@@ -33,6 +33,7 @@ from .local_control import (
     run_panes_archive,
     run_panes_create,
     run_panes_focus,
+    run_panels_open,
     run_panes_cost,
     run_panes_list,
     run_panes_pin,
@@ -117,6 +118,9 @@ class ParsedArgs:
     agent: Optional[str] = None
     tool_command: Optional[str] = None
     title: Optional[str] = None
+    url: Optional[str] = None
+    file: Optional[str] = None
+    placement: Optional[str] = None
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
     panel_input: Optional[str] = None
@@ -259,6 +263,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_list(parsed)
     if parsed.command == "panels create":
         return run_panels_create(parsed)
+    if parsed.command == "panels open":
+        return run_panels_open(parsed)
     if parsed.command == "panels output":
         return run_panels_output(parsed)
     if parsed.command == "panels input":
@@ -568,6 +574,12 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--focus":
         parsed.focus = True
         return
+    if flag in {"--split", "--tab"}:
+        placement = flag[2:]
+        if parsed.placement and parsed.placement != placement:
+            raise ValueError("Use either --split or --tab, not both.")
+        parsed.placement = placement
+        return
     if flag == "--pinned":
         parsed.pinned = True
         return
@@ -634,6 +646,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--path":
         parsed.repo_path = value
+        return
+    if flag == "--url":
+        parsed.url = value
+        return
+    if flag == "--file":
+        parsed.file = value
         return
     if flag == "--name":
         parsed.name = value
@@ -812,6 +830,7 @@ def is_runpane_local_command(command: str) -> bool:
         "panes rename",
         "panes focus",
         "panels create",
+        "panels open",
         "panels list",
         "panels output",
         "panels input",

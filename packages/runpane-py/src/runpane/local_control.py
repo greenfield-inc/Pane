@@ -511,6 +511,37 @@ def run_panels_create(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_panels_open(parsed: Any) -> int:
+    pane_id = parsed.pane_id or os.environ.get("PANE_SESSION_ID")
+    if not pane_id:
+        raise ValueError("runpane panels open requires --pane (or PANE_SESSION_ID from a Pane terminal).")
+    if bool(parsed.url) == bool(parsed.file):
+        raise ValueError("runpane panels open requires exactly one of --url or --file.")
+    if parsed.no_focus and parsed.focus:
+        raise ValueError("Use either --focus or --no-focus, not both.")
+
+    request = {
+        "paneId": pane_id,
+        **optional_value("url", parsed.url),
+        **optional_value("filePath", parsed.file),
+        **optional_value("title", parsed.title),
+        "placement": parsed.placement or "split",
+        **optional_value("noFocus", True if parsed.no_focus else None),
+        **optional_value("focus", True if parsed.focus else None),
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+    }
+    confirm_panel_open(parsed, request)
+    result = invoke_daemon("runpane:panels:open", [request], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        target = result.get("url") or result.get("filePath") or result.get("title")
+        action = "Reused" if result.get("reused") else "Opened"
+        print(f"{action} {result.get('type')} panel {result.get('panelId')} in pane {result.get('paneId')} ({result.get('placement')}): {target}")
+    return 0
+
+
 def run_panels_output(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels output requires --panel.")
@@ -869,6 +900,18 @@ def confirm_pane_focus(parsed: Any, request: Dict[str, Any]) -> None:
 
     panel_suffix = f" (panel {request.get('panelId')})" if request.get("panelId") else ""
     answer = input(f"Focus pane {request.get('paneId')}{panel_suffix}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def confirm_panel_open(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels open mutates Pane state. Rerun with --yes in non-interactive shells.")
+
+    target = request.get("url") or request.get("filePath")
+    answer = input(f"Open {target} in pane {request.get('paneId')}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

@@ -100,6 +100,14 @@ describe('Session workspace instructions', () => {
     expect(() => prepareSessionWorkspace('session-a')).toThrow('markers are incomplete');
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(broken);
   });
+  it('tells the agent to write plans as HTML and open them in split tabs', async () => {
+    const cwd = prepareSessionWorkspace('plans');
+    const agents = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('self-contained HTML file');
+    expect(agents).toContain('runpane panels open --file');
+    expect(agents).not.toContain('progress.html');
+  });
+
   it('requires Pane delegation instead of silent fallbacks', async () => {
     const cwd = prepareSessionWorkspace('delegation');
     const agents = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
