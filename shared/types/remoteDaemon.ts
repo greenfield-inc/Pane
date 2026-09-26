@@ -320,11 +320,13 @@ const remoteDaemonEventEnvelopeSchema = boundary.object({
   timestamp: boundary.string,
 });
 
-export function decodeRemoteHeartbeatPayload<Value>(value: Value): RemoteDaemonHeartbeatPayload {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+export function decodeRemoteHeartbeatPayload(value: unknown): RemoteDaemonHeartbeatPayload {
   return decodeBoundary(value, remoteHeartbeatPayloadSchema);
 }
 
-export function decodeRemoteDaemonEventEnvelope<Value>(value: Value): RemoteDaemonEventEnvelope {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+export function decodeRemoteDaemonEventEnvelope(value: unknown): RemoteDaemonEventEnvelope {
   return decodeBoundary(value, remoteDaemonEventEnvelopeSchema);
 }
 
@@ -444,11 +446,13 @@ const remoteImportSchema = boundary.object({
   tunnel: boundary.optional(remoteTunnelSchema),
 });
 
-export function isRemoteDaemonClientRecord<Value>(value: Value): value is Value & RemoteDaemonClientRecord {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This schema-backed type guard validates external records at their boundary.
+export function isRemoteDaemonClientRecord(value: unknown): value is RemoteDaemonClientRecord {
   return matchesSchema(value, remoteClientRecordSchema);
 }
 
-export function isRemotePaneConnectionProfile<Value>(value: Value): value is Value & RemotePaneConnectionProfile {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This schema-backed type guard validates external records at their boundary.
+export function isRemotePaneConnectionProfile(value: unknown): value is RemotePaneConnectionProfile {
   return matchesSchema(value, remoteProfileSchema);
 }
 
@@ -496,8 +500,9 @@ export function remoteImportPayloadToProfile(
   return profile;
 }
 
-export function normalizePaneRemoteConnectionImportPayload<Value>(
-  value: Value,
+export function normalizePaneRemoteConnectionImportPayload(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Connection imports are validated with the named import schema at this boundary.
+  value: unknown,
 ): PaneRemoteConnectionImportPayload {
   const decoded = decodeBoundary(value, remoteImportSchema);
   const baseUrl = normalizeRemoteImportBaseUrl(decoded.baseUrl.trim());
@@ -516,7 +521,8 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
   return payload;
 }
 
-export function normalizeRemoteDaemonConfig<Value>(value: Value): RemoteDaemonConfig {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig {
   const defaults = createDefaultRemoteDaemonConfig();
   const config = readJsonObject(value);
   if (config === undefined) {
@@ -770,7 +776,8 @@ function readOptionalString(value: JsonValue | undefined): string | undefined {
   }
 }
 
-function readJsonObject<Value>(value: Value): JsonObject | undefined {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+function readJsonObject(value: unknown): JsonObject | undefined {
   try {
     return decodeBoundary(value, boundary.jsonObject);
   } catch {
@@ -786,8 +793,9 @@ function readJsonArray(value: JsonValue | undefined): JsonValue[] {
   }
 }
 
-function matchesSchema<Input, Output>(
-  value: Input,
+function matchesSchema<Output>(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- The supplied schema establishes the input contract at this parsing boundary.
+  value: unknown,
   schema: BoundarySchema<Output>,
 ): boolean {
   try {
