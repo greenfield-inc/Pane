@@ -14,7 +14,7 @@ function createTerminal(agentType: 'claude' | 'codex' | undefined = 'codex') {
   let onData: (data: string) => void = () => undefined;
   let onExit: (exit: { exitCode: number; signal?: number }) => void = () => undefined;
   const terminal = {
-    panelId: 'p', sessionId: 's', agentType,
+    panelId: 'p', sessionId: 's', agentType, pendingInitialCommand: false,
     pty: {
       onData: (listener: typeof onData) => { onData = listener; },
       onExit: (listener: typeof onExit) => { onExit = listener; },
@@ -101,6 +101,24 @@ afterEach(() => {
 });
 
 describe('terminal status events', () => {
+  it('keeps idle waits pending during boot and delayed command injection', async () => {
+    const fixture = attach('codex', 20_000);
+    vi.setSystemTime(20_500);
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBeUndefined();
+    expect(manager.getTerminalSnapshot('p')?.activityStatus).toBe('active');
+    fixture.terminal.pendingInitialCommand = true;
+    vi.setSystemTime(24_500);
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBeUndefined();
+    expect(manager.getTerminalSnapshot('p')?.activityStatus).toBe('active');
+    fixture.terminal.pendingInitialCommand = false;
+    fixture.data('\x1b]2;Codex\x07');
+    await pollAgentStatus();
+    expect(manager.getTerminalSnapshot('p')?.activityStatus).toBe('idle');
+    expect(journal.readAfter(0).entries).toEqual([]);
+  });
+
   it('publishes consistent idle status on exit and deduplicates repeated callbacks', async () => {
     const fixture = attach('codex');
     fixture.data('\x1b]2;⠙ Codex\x07');
@@ -411,8 +429,71 @@ describe('terminal status events', () => {
     fixture.terminal.pty.write.mockImplementation(() => { throw new Error('write failed'); });
     manager.writeToTerminal('p', 'hello');
     expect(manager.isTerminalInitialized('p')).toBe(true);
-    expect(manager.getAgentStatus('p')).toBe('working');
+    fixture.data('\x1b]2;Codex\x07');
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('idle');
     fixture.exit();
     expect(manager.getAgentStatus('p')).toBeUndefined();
+  });
+
+  it.each(['claude', 'codex'] as const)('does not publish work or completion from %s typing and cursor redraws', async agent => {
+    const fixture = attach(agent);
+    const title = agent === 'claude' ? '✳ Project' : 'Project';
+    fixture.data(`\x1b]2;${title}\x07Finished.\r\n› `);
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('idle');
+    fixture.data('\x1b[?25l');
+    fixture.data('\x1b[?25h');
+    fixture.data('draft input');
+    await pollAgentStatus();
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    expect(events.filter(event => event.channel === 'panel:agentStatus')).toEqual([
+      { channel: 'panel:agentStatus', payload: { panelId: 'p', sessionId: 's', state: 'idle', reason: 'osc_title_idle' } },
+    ]);
+    expect(journal.readAfter(0).entries).toEqual([]);
+    expect(formatWaitResult({ epoch: journal.epoch, ...journal.readAfter(0) }, 'lines')).toEqual([]);
+  });
+
+  it('reports immediate real work and completion with coherent reasons', async () => {
+    const fixture = attach('claude', 20_000);
+    fixture.data('\x1b]2;✳ Project\x07');
+    await pollAgentStatus();
+    manager.writeToTerminal('p', 'go\r');
+    fixture.data('\x1b]2;◐ Building\x07');
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('working');
+    fixture.data('\x1b]2;✳ Project\x07Done.');
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('idle');
+    expect(journal.readAfter(0).entries.map(entry => [entry.kind, entry.reason])).toEqual([
+      ['agent.busy', 'osc_title_working'], ['agent.ready', 'osc_title_idle'],
+    ]);
+    expect(formatWaitResult({ epoch: journal.epoch, ...journal.readAfter(0) }, 'lines')).toEqual([
+      'BUSY Pane pane s panel p', 'READY Pane pane s panel p',
+    ]);
+  });
+  it.each([
+    { label: 'with its idle title', title: '\x1b]2;✳ Claude Code\x07' },
+    { label: 'without a title', title: '' },
+  ])('sends typed initial input once Claude leaves its trust prompt ($label)', async ({ title }) => {
+    const fixture = attach('claude', 20_000);
+    panelManager.getPanel.mockReturnValue({
+      id: 'p', sessionId: 's', type: 'terminal', title: 'Claude',
+      state: { isActive: true, customState: { isCliReady: true, initialInput: '/review' } },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    });
+    const rule = '─'.repeat(40);
+    fixture.data(`${rule}\r\n Accessing workspace:\r\n\r\n ❯ No, exit\r\n   Yes, I trust this folder\r\n\r\n Enter to confirm · Esc to cancel`);
+    manager.deliverPendingInitialInput('p');
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('blocked');
+    expect(fixture.terminal.pty.write).not.toHaveBeenCalled();
+
+    // Claude redraws its composer after the folder is trusted.
+    fixture.data(`\x1b[2J\x1b[H${title}${rule}\r\n❯ \r\n${rule}`);
+    await pollAgentStatus();
+    expect(manager.getAgentStatus('p')).toBe('idle');
+    await vi.waitFor(() => expect(fixture.terminal.pty.write).toHaveBeenCalledWith('/review\r'));
   });
 });

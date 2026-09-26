@@ -13,7 +13,7 @@ export interface AgentStatusVisual {
  * Single source of truth for how an {@link AgentDisplayStatus} looks: blocked is
  * red and pulses, working is the info blue (matching the label shimmer) and
  * pulses, a freshly finished agent is a blue
- * "done" cue, a seen-idle agent is calm green. `unknown` (no agent / plain shell)
+ * "done" cue, a seen-idle agent is calm green. `unknown` (no detected terminal status)
  * returns null so callers render no badge.
  */
 export function agentStatusVisual(status: AgentDisplayStatus): AgentStatusVisual | null {

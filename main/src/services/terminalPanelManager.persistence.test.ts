@@ -165,6 +165,40 @@ describe('terminal panel persistence', () => {
     return { manager, handle: ptyHost.latest() };
   }
 
+  it('keeps a tool panel unknown until its delayed command is injected', async () => {
+    const panel = makePanel('panel-delayed-command');
+    panel.state.customState = { initialCommand: 'codex', agentType: 'codex', isCliPanel: true };
+    const { manager, handle } = await startTerminal(panel);
+    // No shell prompt arrives. The command must wait for the five-second
+    // fallback, beyond the ordinary three-second monitor startup grace.
+    await new Promise(resolve => setTimeout(resolve, 3500));
+    expect(handle.written.some(data => data.includes('codex'))).toBe(false);
+    expect(manager.getAgentStatus(panel.id)).toBeUndefined();
+    expect(manager.getTerminalSnapshot(panel.id)?.activityStatus).toBe('active');
+    await vi.waitFor(() => expect(handle.written.some(data => data.includes('codex'))).toBe(true), { timeout: 2500 });
+    expect(manager.getAgentStatus(panel.id)).toBeUndefined();
+    handle.emit('\x1b]2;Codex\x07');
+    await vi.waitFor(() => expect(manager.getAgentStatus(panel.id)).toBe('idle'), { timeout: 1500 });
+    expect(manager.getTerminalSnapshot(panel.id)?.activityStatus).toBe('idle');
+  }, 10_000);
+
+  it('ignores the launch shell title until Codex supplies its own status', async () => {
+    const panel = makePanel('panel-shell-title');
+    panel.state.customState = { initialCommand: 'codex', agentType: 'codex', isCliPanel: true };
+    const { manager, handle } = await startTerminal(panel);
+    handle.emit('\x1b]2;user@host: ~/project\x07user@host:~/project$ ');
+    await vi.waitFor(() => expect(handle.written.some(data => data.includes('codex'))).toBe(true), { timeout: 1500 });
+    // Allow status polling to run within the startup grace window.
+    await new Promise(resolve => setTimeout(resolve, 800));
+    expect(manager.getAgentStatus(panel.id)).toBeUndefined();
+    expect(manager.getTerminalSnapshot(panel.id)?.activityStatus).toBe('active');
+
+    handle.emit('\x1b]2;Custom task title\x07');
+    await vi.waitFor(() => expect(manager.getAgentStatus(panel.id)).toBe('idle'), { timeout: 1500 });
+    handle.emit('\x1b]2;⠙ Custom task title\x07');
+    await vi.waitFor(() => expect(manager.getAgentStatus(panel.id)).toBe('working'), { timeout: 1500 });
+  });
+
   it('streams 50 MB of newline-free alternate-screen frames without growing the persisted state', async () => {
     const panel = makePanel('panel-frames');
     const { manager, handle } = await startTerminal(panel);

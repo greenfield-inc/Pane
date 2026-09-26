@@ -62,7 +62,10 @@ add a ready detector like `createCursorReadyDetector` and gate `signalCliReady` 
 fixtures and register it in `MANIFESTS_BY_AGENT`. Unknown agents fall back to
 `GENERIC_MANIFEST` (works, less precise). Keep blocker rules narrow and live-region
 gated so answered prompts in scrollback don't stick. Record the CLI version the
-fixtures came from.
+fixtures came from. Set `visibleIdle` only for reliable idle/completion evidence;
+composers that remain visible mid-turn must not set it. The monitor prioritizes
+blockers and working chrome, then reliable idle evidence, with byte activity as
+a fallback. Unclassified boot output is ignored during the startup grace window.
 
 ## 5. Restart/auto-resume
 

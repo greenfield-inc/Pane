@@ -29,7 +29,7 @@ const containerSizeClasses = {
 /**
  * At-a-glance agent status indicator. Working renders as a blue spinner; blocked
  * (red), done (blue), and idle (green) render as a dot — the "dot + spinner"
- * variation. Renders nothing for `unknown` so non-agent panels show no badge.
+ * variation. Renders nothing until a terminal has a known status.
  */
 interface AgentActivityDotProps {
   active: boolean;

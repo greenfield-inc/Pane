@@ -22,6 +22,34 @@ describe('getManifestForAgent', () => {
 });
 
 describe('CLAUDE_MANIFEST', () => {
+  it.each(['◐', '◑', '◒', '◓', '⠙'])('recognizes Claude working title %s', (glyph) => {
+    expect(detectAgentState(CLAUDE_MANIFEST, screen('', `${glyph} Building`)).state).toBe('working');
+  });
+
+  it.each(['· Flowing…', '✶ Jitterbugging…', '✶ Jitterbugging… (2s · ↓ 10 tokens)'])('recognizes live status %s', (line) => {
+    expect(detectAgentState(CLAUDE_MANIFEST, screen(`${line}\n────────────\n❯ text\n────────────`)).state).toBe('working');
+  });
+
+  it('does not mistake completed summaries or arbitrary titles for working', () => {
+    expect(detectAgentState(CLAUDE_MANIFEST, screen('✻ Brewed for 0s · done 10:28 PM', 'Project')).state).toBe('idle');
+  });
+
+  it('prioritizes permission and trust prompts over working titles', () => {
+    for (const prompt of [
+      'Bash command\nDo you want to proceed?\n❯ 1. Yes\n2. No',
+      '────────────\nDo you want to proceed?\n❯ 1. Yes\n2. No (esc to cancel)',
+      'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\nYes, I trust this folder\nEnter to confirm · Esc to cancel',
+    ]) {
+      expect(detectAgentState(CLAUDE_MANIFEST, screen(prompt, '◐ Building')).state).toBe('blocked');
+    }
+  });
+
+  it('ignores an answered permission above the current composer', () => {
+    const text = 'Bash command\nDo you want to proceed?\n❯ 1. Yes\n2. No\nDone.\n────────────\n❯ next task\n────────────';
+    expect(detectAgentState(CLAUDE_MANIFEST, screen(text, '✳ Project')).state).toBe('idle');
+    expect(detectAgentState(CLAUDE_MANIFEST, screen(text, '◐ Building')).state).toBe('working');
+  });
+
   it('classifies a bash permission prompt as blocked', () => {
     const s = [
       '● I will run a command',
@@ -215,6 +243,22 @@ describe('CLAUDE_MANIFEST', () => {
 });
 
 describe('CODEX_MANIFEST', () => {
+  it.each([
+    'The script asks [y/n].\n› ',
+    'Do you want to continue? Say yes.\n› ',
+    '› Explain this\nThe documentation says [y/n].\n› next question',
+  ])('ignores completed prose containing prompt text: %s', (text) => {
+    expect(detectAgentState(CODEX_MANIFEST, screen(text, 'Codex')).state).toBe('idle');
+  });
+
+  it('recognizes wrapped working chrome', () => {
+    expect(detectAgentState(CODEX_MANIFEST, screen('• Working (5s • esc to\n  interrupt)\n› ')).state).toBe('working');
+  });
+
+  it.each(['q close', 'q to quit'])('holds transcript viewer state with %s', (close) => {
+    expect(detectAgentState(CODEX_MANIFEST, screen(`↑/↓ to scroll · pgup/pgdn to page · home/end to jump\n${close} · esc to edit prev`)).skipStateUpdate).toBe(true);
+  });
+
   it('classifies the Action Required title as blocked', () => {
     const r = detectAgentState(CODEX_MANIFEST, screen('working on it', 'Action Required · Codex'));
     expect(r.state).toBe('blocked');

@@ -197,6 +197,8 @@ interface TerminalProcess {
   screenEmulator?: RemoteTerminalEmulator;
   commandHistory: string[];
   currentCommand: string;
+  /** The requested tool has not yet been injected into its shell. */
+  pendingInitialCommand?: boolean;
   /** Coalesces teardown callers and prevents callbacks from reviving a closing terminal. */
   destroying?: Promise<void>;
   exitDuringDestroy?: { exitCode: number; signal?: number };
@@ -1073,13 +1075,15 @@ export class TerminalPanelManager extends EventEmitter {
       agentSessionScrapeBuffer: ''
     };
 
+    terminalProcess.pendingInitialCommand = Boolean(terminalCustomState(panel.state).initialCommand);
+
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
 
     // Install lifetime guards before any launch-state persistence can yield.
     this.setupTerminalHandlers(terminalProcess);
 
-    // Begin at-a-glance status detection for AI/CLI agent panels.
+    // Begin at-a-glance status detection for every terminal panel.
     this.registerAgentStatusPanel(terminalProcess);
 
     // Tell the renderer which `ptyId` backs this panel so `TerminalPanel.tsx`
@@ -1122,6 +1126,13 @@ export class TerminalPanelManager extends EventEmitter {
       const panelId = panel.id;
       const injectCommand = () => {
         if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
+        if (isCliCommand) {
+          // Clear the shell's title in the headless model before trusting agent
+          // status. Queued shell writes drain before this reset and CLI output.
+          terminalProcess.screenEmulator?.write('\x1b]2;\x07');
+        }
+        terminalProcess.pendingInitialCommand = false;
+        this.agentStatusMonitor.register(panelId, Date.now());
         this.writeToTerminal(panelId, commandToRun! + '\r');
 
         // For CLI tool terminals, signal the frontend when the CLI responds
@@ -1213,7 +1224,7 @@ export class TerminalPanelManager extends EventEmitter {
       terminal.lastOutputAt = outputAt;
       terminal.outputGeneration += 1;
 
-      // Feed PTY activity to the agent-status monitor (the "working" authority).
+      // Feed byte activity as a fallback behind explicit screen/title evidence.
       this.agentStatusMonitor.noteActivity(terminal.panelId, outputAt.getTime());
 
       // Detect alternate screen buffer enter/exit for universal TUI detection
@@ -1661,18 +1672,21 @@ export class TerminalPanelManager extends EventEmitter {
   
   private deriveActivityStatus(panelId: string): 'active' | 'idle' {
     const state = this.agentStatusMonitor.getState(panelId);
-    return state === 'working' || state === 'blocked' ? 'active' : 'idle';
+    // Legacy idle waits must not succeed while a tracked terminal is still booting.
+    return state === 'working' || state === 'blocked' ||
+      (state === undefined && this.agentStatusMonitor.isTracked(panelId)) ||
+      this.terminals.get(panelId)?.pendingInitialCommand ? 'active' : 'idle';
   }
 
   getAgentStatus(panelId: string): AgentState | undefined {
     return this.agentStatusMonitor.getState(panelId);
   }
 
-  private emitActivityStatus(terminal: TerminalProcess): void {
+  private emitActivityStatus(terminal: TerminalProcess, state: AgentState): void {
     this.sendRendererEvent('panel:activityStatus', {
       panelId: terminal.panelId,
       sessionId: terminal.sessionId,
-      status: this.deriveActivityStatus(terminal.panelId),
+      status: state === 'working' || state === 'blocked' ? 'active' : 'idle',
       lastActivityAt: terminal.lastActivity.toISOString()
     });
   }
@@ -1706,7 +1720,7 @@ export class TerminalPanelManager extends EventEmitter {
     };
     this.sendRendererEvent('panel:agentStatus', payload);
     this.emit('agent-status', payload);
-    this.emitActivityStatus(terminal);
+    this.emitActivityStatus(terminal, state);
   }
 
   private ensureAgentStatusPoll(): void {
@@ -1731,7 +1745,7 @@ export class TerminalPanelManager extends EventEmitter {
   private pollAgentStatus(): void {
     try {
       for (const terminal of this.terminals.values()) {
-        if (terminal.destroying || !this.agentStatusMonitor.isTracked(terminal.panelId)) continue;
+        if (terminal.destroying || terminal.pendingInitialCommand || !this.agentStatusMonitor.isTracked(terminal.panelId)) continue;
         const manifest = getManifestForAgent(terminal.agentType);
         const emulator = terminal.screenEmulator;
         if (!emulator) continue;
@@ -1750,7 +1764,10 @@ export class TerminalPanelManager extends EventEmitter {
           terminal.lastStatusScan = { screen, detection };
         }
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
-        if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId);
+        if (next) {
+          const reason = next === detection.state ? detection.matchedRuleId : 'pty_activity';
+          this.emitAgentStatus(terminal, next, reason ?? 'idle_settle');
+        }
         this.releaseHeldInitialInput(terminal, manifest.id);
       }
     } catch (error) {

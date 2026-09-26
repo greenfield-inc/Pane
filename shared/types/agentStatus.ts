@@ -31,7 +31,7 @@ export interface AgentDetectionResult {
   visibleBlocker: boolean;
   /** The matched screen visibly shows live working chrome. */
   visibleWorking: boolean;
-  /** The matched screen visibly shows live idle chrome. */
+  /** The matched chrome reliably indicates idle; excludes composers also visible during work. */
   visibleIdle: boolean;
   /**
    * The matched screen is an agent-owned viewer (transcript/history) rather than
