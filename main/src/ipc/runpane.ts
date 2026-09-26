@@ -3,6 +3,7 @@ import { assertRawTerminal, chatLastMessage, chatText, submitChat, waitForChat }
 import { paneCommandSignal } from '../daemon/commandRegistry';
 import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
+import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
@@ -752,20 +753,13 @@ export function registerRunpaneHandlers(
         };
       }
 
-      const updatedSession = databaseService.setSessionFavorite(normalized.paneId, normalized.pinned);
-      if (!updatedSession) {
-        throw new Error(`Failed to update pinned state for Pane ${normalized.paneId}`);
-      }
-
-      pane.isFavorite = Boolean(updatedSession.is_favorite);
-      pane.favoritePinnedAt = updatedSession.favorite_pinned_at ?? undefined;
-      sessionManager.emit('session-updated', pane);
+      const updatedSession = sessionManager.setFavorite(normalized.paneId, normalized.pinned);
 
       return {
         ok: true,
         paneId: normalized.paneId,
-        pinned: Boolean(updatedSession.is_favorite),
-        favoritePinnedAt: updatedSession.favorite_pinned_at ?? undefined,
+        pinned: Boolean(updatedSession.isFavorite),
+        favoritePinnedAt: updatedSession.favoritePinnedAt,
       };
     }, result => ({ paneId: result.paneId }));
   });
@@ -787,17 +781,11 @@ export function registerRunpaneHandlers(
         };
       }
 
-      const updatedSession = databaseService.updateSession(pane.id, { name: normalized.name });
-      if (!updatedSession) {
-        throw new Error(`Failed to rename Pane ${pane.id}`);
-      }
-
-      pane.name = normalized.name;
-      sessionManager.emit('session-updated', pane);
+      const renamedPane = sessionManager.renameSession(pane.id, normalized.name);
 
       return {
         ok: true,
-        pane: sessionToPaneSummary(pane, project),
+        pane: sessionToPaneSummary(renamedPane, project),
       };
     }, result => ({ paneId: result.pane.paneId }));
   });
@@ -1026,7 +1014,8 @@ export function registerRunpaneHandlers(
 
       const removeWorktree = Boolean(normalized.removeWorktree);
       await assertRemovableWorktree(services, pane, removeWorktree);
-      const worktreeCleanupApplicable = removesPaneWorktree(pane, removeWorktree);
+      const worktreeCleanupApplicable = ownsRemovableWorktree(databaseService.getSession(pane.id))
+        || (removeWorktree && removesPaneWorktree(pane, removeWorktree));
       const cleanupSkipReason = worktreeCleanupApplicable ? undefined : archiveCleanupSkipReason(pane);
       const safetyCheck: RunpanePaneArchiveSafetyCheck = worktreeCleanupApplicable
         ? await computeArchiveSafety(services, pane)
