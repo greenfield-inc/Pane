@@ -1,3 +1,4 @@
+import { boundary, type BoundarySchema } from '../validation/boundaryDecoder';
 import type { UsageProvider } from './usage';
 
 export interface LeaderboardSubmission {
@@ -74,3 +75,29 @@ export interface LeaderboardStatus {
   lastSubmittedAtMs: number | null;
   doNotTrack: boolean;
 }
+
+export const leaderboardResponseSchema: BoundarySchema<LeaderboardResponse> = boundary.object({
+  windowDays: boundary.literal(30),
+  total: boundary.number,
+  entries: boundary.array(boundary.object({
+    rank: boundary.number,
+    displayName: boundary.string,
+    verified: boundary.boolean,
+    estimatedCostUsd: boundary.number,
+    costIncomplete: boundary.boolean,
+    outputTokens: boundary.number,
+    messageCount: boundary.number,
+    topModel: boundary.nullable(boundary.string),
+    installs: boundary.number,
+    updatedAtMs: boundary.number,
+  })),
+  generatedAtMs: boundary.number,
+});
+
+export const leaderboardSubmitResultSchema: BoundarySchema<LeaderboardSubmitResult> = boundary.object({
+  rank: boundary.number,
+  displayName: boundary.string,
+  verified: boundary.boolean,
+  total: boundary.number,
+  installs: boundary.number,
+});
