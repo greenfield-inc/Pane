@@ -266,7 +266,6 @@ interface ElectronAPI {
     // Log operations
     getLogs: (sessionId: string) => Promise<IPCResponse>;
     clearLogs: (sessionId: string) => Promise<IPCResponse>;
-    addLog: (sessionId: string, entry: LogEntry) => Promise<IPCResponse>;
     
     // Large text operations
     saveLargeText: (sessionId: string, text: string) => Promise<string>;

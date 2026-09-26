@@ -1,7 +1,7 @@
 import { getPaneEventSink } from './core/runtime';
 import type { AppServices } from './ipc/types';
 import type { VersionInfo } from './services/versionChecker';
-import { addSessionLog } from './ipc/logs';
+import { addSessionLog } from './services/session-logs';
 import { panelManager } from './services/panelManager';
 import { terminalPanelManager } from './services/terminalPanelManager';
 import {
