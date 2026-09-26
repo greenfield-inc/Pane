@@ -237,9 +237,15 @@ async function installSessionsFixture(
       guidePath: '/tmp/issue-653-session-fixture/guide.md',
       started: false,
     });
-    const changed = (kind = 'updated', selectionChanged = false) => {
-      const detail = { sessionId: selectedSessionId, kind, selectionChanged };
-      return window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail }));
+    type ChangeCallback = Parameters<NonNullable<typeof window.electronAPI.events.onOrchestrationSessionsChanged>>[0];
+    type OverviewCallback = Parameters<NonNullable<typeof window.electronAPI.events.onOrchestrationSessionsOverviewUpdated>>[0];
+    // SAFETY: installElectronApiMock provides these controls using the preload callback types.
+    const eventTransport = window as typeof window & { __paneTestElectronMock: {
+      emitOrchestrationSessionsChanged: (change: Parameters<ChangeCallback>[0]) => void;
+      emitOrchestrationSessionsOverviewUpdated: (change: Parameters<OverviewCallback>[0]) => void;
+    } };
+    const changed = (kind = 'updated', selectionChanged = false, sessionId = selectedSessionId) => {
+      eventTransport.__paneTestElectronMock.emitOrchestrationSessionsChanged({ sessionId: sessionId ?? '', kind, selectionChanged });
     };
 
     const api = {
@@ -388,9 +394,12 @@ async function installSessionsFixture(
         record.agent = agent;
         record.revision += 1;
         record.updatedAt = new Date().toISOString();
-        window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { sessionId, kind: 'updated' } }));
+        changed('updated', false, sessionId);
       },
-      emitOrchestrationChanged: (kind = 'updated') => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { sessionId: selectedSessionId, kind } })),
+      emitOrchestrationChanged: (kind = 'updated') => changed(kind),
+      emitOrchestrationOverview: (sessionId?: string) => {
+        eventTransport.__paneTestElectronMock.emitOrchestrationSessionsOverviewUpdated({ sessionId, panelId: 'tracked-panel', state: 'working' });
+      },
       getOrchestrationSelectedSessionId: () => selectedSessionId,
       getOrchestrationRecord: (sessionId: string) => clone(sessions.find(session => session.id === sessionId) ?? null),
       failNextOrchestrationUpdate: (message: string) => { nextOrchestrationUpdateError = message; },
@@ -949,7 +958,7 @@ test('Archiving a Session during a delayed chat load cannot reinstall its view',
   })).toBe('beta');
 });
 
-test('Session overview refreshes for associated Pane activity without reacting to unrelated events', async ({ page }) => {
+test('Session overview refreshes for associated Pane activity without reacting to unrelated events', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
     sessionFixture(
@@ -1077,4 +1086,18 @@ test('Session overview refreshes for associated Pane activity without reacting t
   })).toBe(callsAfterAssociatedEvents);
   await expect(overview.getByText('Renamed Tracked Pane', { exact: true })).toBeVisible();
   await expect(overview.getByText('Should stay visible', { exact: true })).toHaveCount(0);
+  await page.evaluate(() => {
+    // SAFETY: installSessionsFixture exposes the typed IPC event transport control.
+    const mock = window as typeof window & { __paneTestElectronMock: { emitOrchestrationOverview: (sessionId: string) => void } };
+    mock.__paneTestElectronMock.emitOrchestrationOverview('unrelated-session');
+  });
+  await page.waitForTimeout(150);
+  await expect(overview.getByText('Renamed Tracked Pane', { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    // SAFETY: installSessionsFixture exposes the typed IPC event transport control.
+    const mock = window as typeof window & { __paneTestElectronMock: { emitOrchestrationOverview: (sessionId: string) => void } };
+    mock.__paneTestElectronMock.emitOrchestrationOverview('tracked-session');
+  });
+  await expect(overview.getByText('Should stay visible', { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('typed-overview-update.png') });
 });

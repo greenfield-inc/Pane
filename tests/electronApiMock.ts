@@ -13,6 +13,10 @@ import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 
+type OrchestrationEventHandlers = Window['electronAPI']['events'];
+type OrchestrationChangeCallback = Parameters<NonNullable<OrchestrationEventHandlers['onOrchestrationSessionsChanged']>>[0];
+type OrchestrationOverviewCallback = Parameters<NonNullable<OrchestrationEventHandlers['onOrchestrationSessionsOverviewUpdated']>>[0];
+
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
 
@@ -313,6 +317,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
 
     const events = new Proxy({}, {
       get: (_target, prop: string | symbol) => {
+        if (prop === 'onOrchestrationSessionsChanged') {
+          return (callback: MockEventCallback) => subscribe('orchestration-sessions:changed', callback);
+        }
+        if (prop === 'onOrchestrationSessionsOverviewUpdated') {
+          return (callback: MockEventCallback) => subscribe('orchestration-sessions:overview-updated', callback);
+        }
         if (prop === 'onPermissionRequest') {
           return (callback: MockEventCallback) => subscribe('permission:request', callback);
         }
@@ -1021,6 +1031,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     Object.defineProperty(window, '__paneTestElectronMock', {
       configurable: true,
       value: {
+        emitOrchestrationSessionsChanged(change: Parameters<OrchestrationChangeCallback>[0]) {
+          emit('orchestration-sessions:changed', change);
+        },
+        emitOrchestrationSessionsOverviewUpdated(change: Parameters<OrchestrationOverviewCallback>[0]) {
+          emit('orchestration-sessions:overview-updated', change);
+        },
         getConfig() {
           return clone(configState);
         },

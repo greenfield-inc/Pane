@@ -128,18 +128,10 @@ export function OrchestrationSessionNav({
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const handleSessionsChanged = (event: Event) => {
-      // SAFETY: Pane's orchestration event contract supplies this detail shape.
-      const detail = event instanceof CustomEvent
-        ? event.detail as { kind?: string; selectionChanged?: boolean }
-        : undefined;
-      const adoptServerSelection = detail?.kind === 'selected' || detail?.selectionChanged === true;
-      void refresh({ adoptServerSelection });
-    };
-    window.addEventListener('orchestration-sessions-changed', handleSessionsChanged);
-    return () => window.removeEventListener('orchestration-sessions-changed', handleSessionsChanged);
-  }, [refresh]);
+  useEffect(() => window.electronAPI?.events.onOrchestrationSessionsChanged?.(change => {
+    const adoptServerSelection = change.kind === 'selected' || change.selectionChanged === true;
+    void refresh({ adoptServerSelection });
+  }), [refresh]);
 
   const openSession = useCallback(async (sessionId: string) => {
     setActionError(null);
