@@ -8,9 +8,7 @@ import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { Session } from '../types/session';
-import { getGitAttributionEnv } from '../utils/attribution';
-import { commandExecutor } from '../utils/commandExecutor';
-import { buildGitCommitCommand } from '../utils/shellEscape';
+import { commitGitMessage } from '../utils/gitCommit';
 import { revealInFileManager } from '../utils/revealInFileManager';
 
 interface FileReadRequest {
@@ -448,17 +446,9 @@ export function registerFileHandlers(
         // Stage all changes
         await commandRunner.execAsync('git add -A', session.worktreePath);
 
-        // Check if Pane footer is enabled (default: true)
-        const config = configManager.getConfig();
-        const enableCommitFooter = config?.enableCommitFooter !== false;
-
-        // Build platform-safe git commit command
-        const commitCommand = buildGitCommitCommand(request.message, enableCommitFooter);
-        await commandExecutor.execAsync(commitCommand, {
-          cwd: session.worktreePath,
+        await commitGitMessage(commandRunner, session.worktreePath, request.message, configManager.getConfig(), {
           timeout: 120_000,
-          env: { ...process.env, ...getGitAttributionEnv(config) }
-        }, commandRunner.wslContext);
+        });
 
         // Refresh git status for this session after commit
         try {
@@ -476,17 +466,9 @@ export function registerFileHandlers(
           try {
             await commandRunner.execAsync('git add -A', session.worktreePath);
 
-            // Check if Pane footer is enabled (default: true)
-            const config = configManager.getConfig();
-            const enableCommitFooter = config?.enableCommitFooter !== false;
-
-            // Build platform-safe git commit command
-            const retryCommitCommand = buildGitCommitCommand(request.message, enableCommitFooter);
-            await commandExecutor.execAsync(retryCommitCommand, {
-              cwd: session.worktreePath,
+            await commitGitMessage(commandRunner, session.worktreePath, request.message, configManager.getConfig(), {
               timeout: 120_000,
-              env: { ...process.env, ...getGitAttributionEnv(config) }
-            }, commandRunner.wslContext);
+            });
 
             // Refresh git status for this session after commit
             try {

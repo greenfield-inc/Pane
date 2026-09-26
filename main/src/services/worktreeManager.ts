@@ -5,6 +5,7 @@ import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
+import { commitGitMessage } from '../utils/gitCommit';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
@@ -294,7 +295,7 @@ export class WorktreeManager {
         } catch {
           // Ignore add errors (no files to add)
         }
-        await commandRunner.execAsync('git commit -m "Initial commit" --allow-empty', projectPath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
+        await commandRunner.execFile('git', ['commit', '-m', 'Initial commit', '--allow-empty'], projectPath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
       }
 
       await ensureFastGitConfig(projectPath, commandRunner);
@@ -1031,20 +1032,8 @@ export class WorktreeManager {
         const resetResult = await commandRunner.execAsync(command, worktreePath);
         lastOutput = resetResult.stdout || resetResult.stderr || '';
 
-        // Get config to check if Pane footer is enabled (default: true)
-        const config = this.configManager?.getConfig();
-        const enableCommitFooter = config?.enableCommitFooter !== false;
-
-        // Add Pane footer if enabled
-        const fullMessage = enableCommitFooter ? `${commitMessage}
-
-Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
-
-        // Properly escape commit message for cross-platform compatibility
-        const escapedMessage = fullMessage.replace(/"/g, '\\"');
-        command = `git commit -m "${escapedMessage}"`;
         executedCommands.push(`git commit -m "..." (in ${worktreePath})`);
-        const commitResult = await commandRunner.execAsync(command, worktreePath, { env: getGitAttributionEnv(config) });
+        const commitResult = await commitGitMessage(commandRunner, worktreePath, commitMessage, this.configManager?.getConfig());
         lastOutput = commitResult.stdout || commitResult.stderr || '';
 
         // Switch to main branch in the main repository
@@ -1303,8 +1292,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
   async gitStash(worktreePath: string, message: string | undefined, commandRunner: CommandRunner): Promise<{ output: string }> {
     try {
       const stashMessage = message || 'pane stash';
-      const escapedMessage = stashMessage.replace(/"/g, '\\"');
-      const { stdout, stderr } = await commandRunner.execAsync(`git stash push -m "${escapedMessage}"`, worktreePath);
+      const { stdout, stderr } = await commandRunner.execFile('git', ['stash', 'push', '-m', stashMessage], worktreePath);
       const output = stdout || stderr || 'Changes stashed successfully';
 
       return { output };
@@ -1415,9 +1403,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
       // Stage all changes including untracked files
       await commandRunner.execAsync('git add -A', worktreePath);
 
-      // Commit with message
-      const escapedMessage = message.replace(/"/g, '\\"');
-      const { stdout, stderr } = await commandRunner.execAsync(`git commit -m "${escapedMessage}"`, worktreePath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
+      const { stdout, stderr } = await commitGitMessage(commandRunner, worktreePath, message, this.configManager?.getConfig());
       const output = stdout || stderr || 'Committed successfully';
 
       return { output };

@@ -4,7 +4,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
-import { buildGitCommitCommand } from '../utils/shellEscape';
+import { commitGitMessage } from '../utils/gitCommit';
 import { getPaneEventSink } from '../core/runtime';
 import { panelEventBus } from '../services/panelEventBus';
 import { PanelEventType, PanelEvent } from '../../../shared/types/panels';
@@ -454,11 +454,8 @@ export function registerGitHandlers(
       // Stage all changes
       await ctx.commandRunner.execAsync('git add -A', session.worktreePath);
 
-      // Create the commit with Pane's signature using safe escaping
-      const commitCommand = buildGitCommitCommand(message);
-
       try {
-        await ctx.commandRunner.execAsync(commitCommand, session.worktreePath);
+        await commitGitMessage(ctx.commandRunner, session.worktreePath, message, services.configManager.getConfig());
 
         // Refresh git status for this session after commit
         await refreshGitStatusForSession(sessionId);
