@@ -1,3 +1,4 @@
+import { cliAgentSchema, CLI_AGENTS, CLI_AGENT_LABELS } from '../../../shared/types/cli-agent';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { withLock } from '../utils/mutex';
@@ -50,13 +51,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
-type PaneChatPanelIds = { claude: string; codex: string; cursor: string };
-const PANE_CHAT_AGENT_LABELS = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-} satisfies Record<PaneChatAgent, string>;
+type PaneChatPanelIds = Record<PaneChatAgent, string>;
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 1;
@@ -484,12 +479,12 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
 
     const legacyRecord = legacy;
-    const hadSupplementalLayout = PANE_CHAT_AGENTS.some(agent =>
+    const hadSupplementalLayout = CLI_AGENTS.some(agent =>
       legacyRecord.panelIds[agent] !== getPaneChatPanelId(agent)
       || sessions.some(session => session.id === getLegacyAgentSessionId(agent)),
     );
     const importedAgents = new Set<PaneChatAgent>();
-    for (const agent of PANE_CHAT_AGENTS) {
+    for (const agent of CLI_AGENTS) {
       const importedId = getLegacyAgentSessionId(agent);
       const existing = sessions.find(session => session.id === importedId);
       if (existing) {
@@ -551,7 +546,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       activity: [{
         id: `${id}-imported`,
         kind: 'created',
-        message: `Imported existing ${PANE_CHAT_AGENT_LABELS[agent]} Pane Chat terminal history.`,
+        message: `Imported existing ${CLI_AGENT_LABELS[agent]} Pane Chat terminal history.`,
         at: now,
         source: 'system',
       }],
@@ -750,7 +745,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       : association.panelIds.map(panelId => panelManager.getPanel(panelId)).filter((panel): panel is ToolPanel => panel !== undefined);
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
-        agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+        agentType: boundary.optional(cliAgentSchema),
         isInitialized: boundary.optional(boundary.boolean),
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
@@ -887,7 +882,7 @@ function legacyPanelIdsForOwner(
   ownerId: string,
   ownerAgent: PaneChatAgent,
   importedAgents: ReadonlySet<PaneChatAgent>,
-): PaneChatPanelIds {
+) {
   return {
     claude: ownerAgent === 'claude' || !importedAgents.has('claude')
       ? getPaneChatPanelId('claude')
@@ -898,19 +893,19 @@ function legacyPanelIdsForOwner(
     cursor: ownerAgent === 'cursor' || !importedAgents.has('cursor')
       ? getPaneChatPanelId('cursor')
       : getOrchestrationPanelId(ownerId, 'cursor'),
-  };
+  } satisfies PaneChatPanelIds;
 }
 
-function legacyAgentPanelIdsForOwner(ownerId: string, ownerAgent: PaneChatAgent): PaneChatPanelIds {
+function legacyAgentPanelIdsForOwner(ownerId: string, ownerAgent: PaneChatAgent) {
   return {
     claude: ownerAgent === 'claude' ? getPaneChatPanelId('claude') : getOrchestrationPanelId(ownerId, 'claude'),
     codex: ownerAgent === 'codex' ? getPaneChatPanelId('codex') : getOrchestrationPanelId(ownerId, 'codex'),
     cursor: ownerAgent === 'cursor' ? getPaneChatPanelId('cursor') : getOrchestrationPanelId(ownerId, 'cursor'),
-  };
+  } satisfies PaneChatPanelIds;
 }
 
 function samePanelIds(left: Record<PaneChatAgent, string>, right: Record<PaneChatAgent, string>): boolean {
-  return PANE_CHAT_AGENTS.every(agent => left[agent] === right[agent]);
+  return CLI_AGENTS.every(agent => left[agent] === right[agent]);
 }
 
 function panelHasLegacyHistory(panel: ToolPanel): boolean {
@@ -933,7 +928,7 @@ function uniqueLegacyAgentName(
   agent: PaneChatAgent,
   sessions: OrchestrationSessionRecord[],
 ): string {
-  const base = `${baseName} · ${PANE_CHAT_AGENT_LABELS[agent]}`;
+  const base = `${baseName} · ${CLI_AGENT_LABELS[agent]}`;
   const existingNames = new Set(sessions.map(session => normalizeSessionName(session.name)));
   let candidate = base;
   let suffix = 2;

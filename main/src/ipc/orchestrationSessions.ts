@@ -1,3 +1,4 @@
+import { cliAgentSchema } from '../../../shared/types/cli-agent';
 import type { IpcMain } from 'electron';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -27,7 +28,7 @@ const reportSchema = boundary.object({
 });
 const createSchema = boundary.object({
   name: boundary.nonEmptyString,
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(cliAgentSchema),
   goal: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   decisions: boundary.optional(boundary.array(boundary.string)),
@@ -40,7 +41,7 @@ const updateSchema = boundary.object({
   name: boundary.optional(boundary.string),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(cliAgentSchema),
   goal: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   decisions: boundary.optional(boundary.array(boundary.string)),
@@ -54,7 +55,7 @@ const updateSchema = boundary.object({
 });
 const agentSchema = boundary.object({
   ...selectorSchemaFields(),
-  agent: boundary.enumeration('claude', 'codex', 'cursor'),
+  agent: cliAgentSchema,
 });
 const associationSchema = boundary.object({
   ...selectorSchemaFields(),
@@ -108,7 +109,7 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.register('orchestration-sessions:set-agent', async (value: PaneCommandValue, agent?: PaneCommandValue) => {
     const decoded = agent === undefined
       ? decodeBoundary(value, agentSchema)
-      : { ...decodeSelector(value), agent: decodeBoundary(agent, boundary.enumeration('claude', 'codex', 'cursor')) };
+      : { ...decodeSelector(value), agent: decodeBoundary(agent, cliAgentSchema) };
     return invokeSafely(() => requireManager().setAgent(
       { sessionId: decoded.sessionId, name: decoded.name },
       decoded.agent,

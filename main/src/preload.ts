@@ -1,3 +1,4 @@
+import type { CliAgentType } from '../../shared/types/cli-agent';
 import { contextBridge, ipcRenderer } from 'electron';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
 import {
@@ -385,7 +386,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
-    setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
+    setAgent: (agent: CliAgentType): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
   },
 
   orchestrationSessions: {
@@ -394,7 +395,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input),
     get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
-    setAgent: (selector: OrchestrationSessionSelector, agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
+    setAgent: (selector: OrchestrationSessionSelector, agent: CliAgentType): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),

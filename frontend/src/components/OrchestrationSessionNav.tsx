@@ -1,3 +1,4 @@
+import { CLI_AGENTS, CLI_AGENT_LABELS } from '../../../shared/types/cli-agent';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ChevronDown, ChevronRight, MessageSquare, Pin, PinOff, Plus, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -52,11 +53,7 @@ function availabilityIsVisible(availability: OrchestrationSessionAvailability): 
   return availability === 'ready' || availability === 'loading' || availability === 'error';
 }
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' },
-];
+const SESSION_AGENT_OPTIONS = CLI_AGENTS.map(id => ({ id, label: CLI_AGENT_LABELS[id] }));
 
 function availableSessionAgents(): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
   const visible = new Set(visibleAgentPresets().map(preset => preset.id));
