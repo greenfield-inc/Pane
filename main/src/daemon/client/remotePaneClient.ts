@@ -21,6 +21,7 @@ import type { RemoteDaemonEventEnvelope } from '../../../../shared/types/remoteD
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { PaneSseParser } from './sseParser';
+import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 
 interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
@@ -135,6 +136,8 @@ export class RemotePaneClient {
   private consecutiveReconnectFailures = 0;
   private lastSeenAt: string | null = null;
   private closedByClient = false;
+  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
+    this.invokeRequest(channel, args, signal));
 
   constructor(
     readonly profile: RemotePaneConnectionProfile,
@@ -181,6 +184,7 @@ export class RemotePaneClient {
 
   async disconnect(): Promise<void> {
     this.closedByClient = true;
+    this.inputQueue.cancel(new Error('Remote Pane disconnected; pending terminal input was discarded'));
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
     this.eventParser.reset();
@@ -197,11 +201,16 @@ export class RemotePaneClient {
   }
 
   async invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined> {
+    return this.inputQueue.invoke(channel, args);
+  }
+
+  private async invokeRequest(channel: string, args: unknown[], signal?: AbortSignal): Promise<JsonValue | undefined> {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'invoke');
     let response: JsonResponse;
     try {
       response = await requestJson(endpoint, this.buildRequestOptions(endpoint, {
         method: 'POST',
+        signal,
         headers: {
           Authorization: `Bearer ${this.profile.token}`,
           'Content-Type': 'application/json; charset=utf-8',
@@ -209,6 +218,7 @@ export class RemotePaneClient {
         },
       }), JSON.stringify({ channel, args }));
     } catch (error) {
+      if (signal?.aborted) throw error;
       const message = getErrorMessage(error, 'Failed to invoke remote daemon');
       this.handleUnexpectedDisconnect(message, true);
       throw error;
@@ -406,6 +416,7 @@ export class RemotePaneClient {
   }
 
   private handleUnexpectedDisconnect(message: string, destroyStream: boolean): void {
+    this.inputQueue.cancel(new Error(message));
     const activeResponse = this.eventResponse;
     const activeRequest = this.eventRequest;
 

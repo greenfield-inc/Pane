@@ -21,6 +21,7 @@ import {
 } from '../../utils/terminalKeyHandling';
 import { isMac } from '../../utils/platformUtils';
 import { copyTerminalText, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
+import { sendTerminalInput } from '../../utils/terminalInput';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
@@ -1049,7 +1050,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // passthrough, while ordinary TUIs still receive Shift+Enter directly.
           if (terminalKeyDecision.action === 'send-input') {
             if (e.type === 'keydown') {
-              window.electronAPI.invoke('terminal:input', panel.id, terminalKeyDecision.input);
+              sendTerminalInput(panel.id, terminalKeyDecision.input);
             }
             return false;
           }
@@ -1361,11 +1362,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (!terminal) return;
             const shouldProtectMultilinePaste = isCliPanelRef.current && !tuiActiveRef.current && /[\r\n]/.test(text);
             if (shouldProtectMultilinePaste) {
-              window.electronAPI.invoke(
-                'terminal:input',
-                panel.id,
-                text.replace(/\r\n|\r|\n/g, '\x1b\r'),
-              );
+              sendTerminalInput(panel.id, text.replace(/\r\n|\r|\n/g, '\x1b\r'));
               return;
             }
 
@@ -1653,7 +1650,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Create interceptor for @ mentions and future trigger handlers
           const interceptor = new TerminalInterceptor({
             onStateChange: (state) => setInterceptorState(state.active ? state : null),
-            onFlush: (data) => window.electronAPI.invoke('terminal:input', panel.id, data),
+            onFlush: (data) => sendTerminalInput(panel.id, data),
           });
           interceptorRef.current = interceptor;
 
@@ -1744,12 +1741,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             // Skip interception for AltGr-produced @ (e.g. German keyboard)
             if (skipNextInterceptRef.current) {
               skipNextInterceptRef.current = false;
-              window.electronAPI.invoke('terminal:input', panel.id, data);
+              sendTerminalInput(panel.id, data);
               return;
             }
             const result = interceptor.handleInput(data);
             if (!result.consumed) {
-              window.electronAPI.invoke('terminal:input', panel.id, data);
+              sendTerminalInput(panel.id, data);
             }
           });
 
