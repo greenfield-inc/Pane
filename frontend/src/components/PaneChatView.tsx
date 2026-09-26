@@ -413,16 +413,17 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
   }, [scheduleOverviewRefresh, view.session.id]);
 
   useEffect(() => {
-    const handleRefresh = (event: Event) => {
-      const sessionId = event instanceof CustomEvent ? event.detail?.sessionId : undefined;
+    const events = window.electronAPI?.events;
+    if (!events) return;
+    const refreshSession = (sessionId: string | undefined) => {
       if (sessionId && sessionId !== view.session.id) return;
       scheduleOverviewRefresh();
     };
-    window.addEventListener('orchestration-sessions-changed', handleRefresh);
-    window.addEventListener('orchestration-sessions-overview-updated', handleRefresh);
+    const unsubscribeChanged = events.onOrchestrationSessionsChanged?.(change => refreshSession(change.sessionId));
+    const unsubscribeOverview = events.onOrchestrationSessionsOverviewUpdated?.(change => refreshSession(change.sessionId));
     return () => {
-      window.removeEventListener('orchestration-sessions-changed', handleRefresh);
-      window.removeEventListener('orchestration-sessions-overview-updated', handleRefresh);
+      unsubscribeChanged?.();
+      unsubscribeOverview?.();
     };
   }, [scheduleOverviewRefresh, view.session.id]);
 

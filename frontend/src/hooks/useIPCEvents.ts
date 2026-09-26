@@ -316,16 +316,6 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribeOutputAvailable);
 
-    const unsubscribeOrchestrationChanged = window.electronAPI.events.onOrchestrationSessionsChanged?.((change) => {
-      window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: change }));
-    });
-    if (unsubscribeOrchestrationChanged) unsubscribeFunctions.push(unsubscribeOrchestrationChanged);
-
-    const unsubscribeOrchestrationOverview = window.electronAPI.events.onOrchestrationSessionsOverviewUpdated?.((change) => {
-      window.dispatchEvent(new CustomEvent('orchestration-sessions-overview-updated', { detail: change }));
-    });
-    if (unsubscribeOrchestrationOverview) unsubscribeFunctions.push(unsubscribeOrchestrationOverview);
-    
     // Listen for zombie process detection
     const unsubscribeZombieProcesses = window.electronAPI.events.onZombieProcessesDetected((data: { sessionId?: string | null; pids?: number[]; message: string }) => {
       console.error('[useIPCEvents] Zombie processes detected:', data);
