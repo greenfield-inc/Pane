@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  applyManagedAgentsMdSetting,
   ensureProjectAgentContext,
   PANE_AGENT_CONTEXT_END,
   PANE_AGENT_CONTEXT_START,
@@ -34,7 +35,7 @@ describe('agentContextManager', () => {
     }
   });
 
-  it('creates AGENTS.md with a managed Pane block by default', async () => {
+  it('creates AGENTS.md with a managed Pane block when publishing is on', async () => {
     const projectPath = await createTempProject();
 
     const result = await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
@@ -51,6 +52,34 @@ describe('agentContextManager', () => {
     expect(content).toContain('Set-Location $env:TEMP');
     expect(content).toContain('broken Windows shim');
     expect(content).toContain(PANE_AGENT_CONTEXT_END);
+  });
+
+  it('leaves repositories untouched when the setting is absent', async () => {
+    const projectPath = await createTempProject();
+
+    const result = await ensureProjectAgentContext({ path: projectPath }, {});
+
+    expect(result.changed).toBe(false);
+    await expect(fs.access(path.join(projectPath, 'AGENTS.md'))).rejects.toThrow();
+  });
+
+  it('removes only Pane\'s section from every project when publishing turns off', async () => {
+    const active = await createTempProject();
+    const inactive = await createTempProject();
+    await fs.writeFile(path.join(inactive, 'AGENTS.md'), '# Repo Rules\n\nKeep this line.\n', 'utf8');
+    await ensureProjectAgentContext({ path: active }, enabledConfig());
+    await ensureProjectAgentContext({ path: inactive }, enabledConfig());
+    const projects = [{ path: active }, { path: inactive }];
+
+    await applyManagedAgentsMdSetting(disabledConfig(), {
+      all: () => projects,
+      active: () => projects[0],
+    });
+
+    await expect(fs.readFile(path.join(active, 'AGENTS.md'), 'utf8')).resolves.not.toContain(PANE_AGENT_CONTEXT_START);
+    const kept = await fs.readFile(path.join(inactive, 'AGENTS.md'), 'utf8');
+    expect(kept).toContain('Keep this line.');
+    expect(kept).not.toContain(PANE_AGENT_CONTEXT_START);
   });
 
   it('updates an existing agents.md variant while preserving user content', async () => {

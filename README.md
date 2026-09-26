@@ -228,7 +228,9 @@ runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick
 
 `runpane agent-context` is token-efficient by default and prints only command names, arguments, and safe usage notes. Agents can lazy-load full details for a specific command with `runpane agent-context --command "panes create" --json`.
 
-Pane can also manage a short `AGENTS.md` block in saved repositories so agent CLIs know the developer is using Pane and can discover the CLI contract without bloating their context.
+Pane teaches agents about RunPane without editing your repositories. It installs a small Pane-managed `pane` skill in your home skill folders (`~/.claude/skills/pane`, or under `CLAUDE_CONFIG_DIR`, and `~/.agents/skills/pane`), marked `<!-- pane-managed-skill v1 -->`. Pane never overwrites or removes a skill it did not write, and **Settings → AI & Agents → Install Pane skill for agents** removes it again.
+
+Publishing a Pane section into each repository's `AGENTS.md` is still available under **Settings → AI & Agents → Publish Pane instructions to AGENTS.md**, but it is off by default because it edits files in your repositories. Upgrading turns it off once and removes only Pane's marked section; turning it back on afterward sticks.
 
 See [Runpane CLI Contract](docs/RUNPANE_CLI_CONTRACT.md) for the full schema and automation examples.
 

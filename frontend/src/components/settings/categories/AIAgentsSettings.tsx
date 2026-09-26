@@ -54,14 +54,26 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
           />
         </SettingRow>
         <SettingRow
+          settingId="agent-skill"
+          label="Install Pane skill for agents"
+          description="Adds a Pane-managed skill to your home skill folders (~/.claude/skills and ~/.agents/skills) so agents in Pane terminals know how to use RunPane. Pane never touches skills it did not create; turning this off removes its skill."
+          saveState={persistence.saveStates['agent-skill']}
+        >
+          <ImmediateToggle
+            label="Install Pane skill for agents"
+            value={config.agentContext?.homeSkill !== false}
+            onSave={(value) => persistence.saveConfig('agent-skill', { agentContext: { homeSkill: value } })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="agent-context"
           label="Publish Pane instructions to AGENTS.md"
-          description="Adds a managed block to active repositories so coding agents can discover RunPane commands."
+          description="Edits files in your repositories: adds a marked Pane section to the AGENTS.md at each active repository's root, creating the file if needed. Off by default; turning it off removes only Pane's section."
           saveState={persistence.saveStates['agent-context']}
         >
           <ImmediateToggle
             label="Publish Pane instructions to AGENTS.md"
-            value={config.agentContext?.managedAgentsMd !== false}
+            value={config.agentContext?.managedAgentsMd === true}
             onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
           />
         </SettingRow>

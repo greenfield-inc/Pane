@@ -24,7 +24,7 @@ export async function ensureProjectAgentContext(
   config: Pick<AppConfig, 'agentContext'>,
 ): Promise<AgentContextWriteResult> {
   const root = resolveProjectRoot(project);
-  const enabled = config.agentContext?.managedAgentsMd !== false;
+  const enabled = config.agentContext?.managedAgentsMd === true;
 
   if (!enabled) {
     return removeProjectAgentContext(root);
@@ -44,6 +44,26 @@ export async function ensureProjectAgentContext(
 
   await writeFileNoFollow(filePath, next);
   return { changed: true, filePath };
+}
+
+/**
+ * Apply the repository AGENTS.md setting. Off removes Pane's marked section
+ * from every known project; on publishes it to the active project. Used by the
+ * settings toggle and by the startup migration that turned it off.
+ */
+export async function applyManagedAgentsMdSetting<P extends Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>>(
+  config: Pick<AppConfig, 'agentContext'>,
+  projects: { all: () => P[]; active: () => P | null | undefined },
+): Promise<void> {
+  const active = projects.active();
+  const targets = config.agentContext?.managedAgentsMd === true ? (active ? [active] : []) : projects.all();
+  for (const project of targets) {
+    try {
+      await ensureProjectAgentContext(project, config);
+    } catch (error) {
+      console.warn('[AgentContext] Failed to update Pane agent context for project:', project.path, error);
+    }
+  }
 }
 
 function renderManagedAgentContextBlock(): string {
