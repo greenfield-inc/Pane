@@ -596,7 +596,7 @@ def run_panels_submit_composer(parsed: Any) -> int:
 
     result = invoke_daemon("runpane:panels:submit-composer", [{
         "panelId": parsed.panel_id,
-        "strategy": parsed.composer_strategy,
+        **optional_value("strategy", parsed.composer_strategy),
     }], pane_dir=parsed.pane_dir)
 
     if parsed.json:

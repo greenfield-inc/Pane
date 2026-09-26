@@ -1845,6 +1845,107 @@ print(json.dumps({"calls": calls, "jsonOutputs": json_outputs, "textOutput": std
   assert.deepStrictEqual(python.incompleteTextOutput, incompleteTextOutput);
 }
 
+function checkComposerStrategyRequests() {
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+requests = []
+def fake_invoke(channel, args, **kwargs):
+    assert channel == "runpane:panels:submit-composer"
+    requests.append(args[0])
+    return {"ok": True}
+
+local_control.invoke_daemon = fake_invoke
+with contextlib.redirect_stdout(io.StringIO()):
+    for flags in [[], ["--strategy", "enter"], ["--strategy", "auto"], ["--strategy", "codex-ctrl-enter"]]:
+        result = local_control.run_panels_submit_composer(parse_args([
+            "panels", "submit-composer", "--panel", "panel-1", "--yes", "--json", *flags
+        ]))
+        assert result == 0
+print(json.dumps(requests))
+`));
+  assert.deepStrictEqual(python, [
+    { panelId: 'panel-1' },
+    { panelId: 'panel-1', strategy: 'enter' },
+    { panelId: 'panel-1', strategy: 'auto' },
+    { panelId: 'panel-1', strategy: 'codex-ctrl-enter' },
+  ], 'omitting --strategy must leave selection to the daemon, while explicit strategies are preserved');
+}
+
+async function checkPaneAdoptOverrides() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runPanesAdopt } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-adopt-'));
+  const inputPath = path.join(directory, 'adopt.json');
+  const payload = {
+    repo: 'active', dryRun: false, noFocus: true, focus: false, source: 'agent',
+    panes: [
+      { name: 'Existing work', path: '/work/tree', pinned: true, launch: false, tool: { agent: 'codex' } },
+      { name: 'Other work', path: '/work/other', pinned: true, launch: false, tool: { command: 'echo ready' } },
+    ],
+  };
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const requests = [];
+  daemonClient.invokeDaemon = async (channel, args) => {
+    assert.strictEqual(channel, 'runpane:panes:adopt');
+    requests.push(JSON.parse(JSON.stringify(args[0])));
+    return { ok: true, repo: {}, items: [] };
+  };
+  console.log = () => {};
+  try {
+    fs.writeFileSync(inputPath, JSON.stringify(payload));
+    // No --yes: dry-run must be forwarded when it bypasses confirmation.
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--focus', '--source', 'user',
+      '--no-pinned', '--launch', '--json',
+    ]));
+    assert.deepStrictEqual(requests.pop(), {
+      repo: 'active', dryRun: true, noFocus: false, focus: true, source: 'user',
+      panes: [
+        { name: 'Existing work', path: '/work/tree', pinned: false, launch: true, tool: { agent: 'codex' } },
+        { name: 'Other work', path: '/work/other', pinned: false, launch: true, tool: { command: 'echo ready' } },
+      ],
+    });
+    await runPanesAdopt(parseRunpaneArgs(['panes', 'adopt', '--from-json', inputPath, '--yes', '--json']));
+    assert.deepStrictEqual(requests.pop(), payload, 'absent flags preserve the JSON request');
+
+    fs.writeFileSync(inputPath, JSON.stringify({
+      ...payload, noFocus: false, focus: true, source: 'user',
+      panes: payload.panes.map(pane => ({ ...pane, pinned: false })),
+    }));
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--no-focus', '--source', 'agent',
+      '--pinned', '--json',
+    ]));
+    assert.deepStrictEqual(requests.pop(), { ...payload, dryRun: true });
+    await assert.rejects(runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--focus', '--no-focus',
+    ])), /Use either --focus or --no-focus/);
+    await assert.rejects(runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--pinned', '--no-pinned',
+    ])), /Use either --pinned or --no-pinned/);
+    assert.strictEqual(requests.length, 0, 'conflicting overrides must not reach the daemon');
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--repo', 'active', '--path', '/work/tree', '--name', 'Existing work',
+      '--agent', 'codex', '--dry-run', '--no-pinned', '--no-focus', '--source', 'agent', '--launch', '--json',
+    ]));
+    assert.deepStrictEqual(requests.pop(), {
+      repo: 'active', dryRun: true, noFocus: true, focus: false, source: 'agent',
+      panes: [{ name: 'Existing work', path: '/work/tree', pinned: false, launch: true, tool: { agent: 'codex' } }],
+    });
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function checkPaneArchiveDryRunParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -2496,6 +2597,8 @@ async function runChecks() {
   await checkExistingDaemonShortCircuit();
   checkWindowsPaneVersionDoesNotLaunchExecutable();
   await checkFromJsonAcceptsBom();
+  checkComposerStrategyRequests();
+  await checkPaneAdoptOverrides();
   await checkPaneArchiveDryRunParity();
   await checkPanePinParity();
   await checkPanesCostParity();
