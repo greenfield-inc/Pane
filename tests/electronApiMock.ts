@@ -231,6 +231,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     let mockPanels = clone(mockOptions.initialPanels ?? []);
+    let nextPanelId = mockPanels.length + 1;
     const uiState = {
       expandedProjects: [] satisfies number[],
       expandedFolders: [] satisfies string[],
@@ -660,10 +661,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getSessionPanels: (sessionId: string) => success(
           clone(mockPanels.filter((panel) => panel.sessionId === sessionId)),
         ),
+        deletePanel: (panelId: string) => {
+          mockPanels = mockPanels.filter((panel) => panel.id !== panelId);
+          return success();
+        },
         createPanel: (sessionId: string, type: string, title: string, initialState?: JsonObject) => {
           const now = new Date().toISOString();
           const panel = {
-            id: `mock-panel-${mockPanels.length + 1}`,
+            id: `mock-panel-${nextPanelId++}`,
             sessionId,
             type,
             title,

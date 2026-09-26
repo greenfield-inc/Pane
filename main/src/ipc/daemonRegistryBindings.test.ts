@@ -62,6 +62,8 @@ const PANE_CHAT_CHANNELS = [
   'pane-chat:set-agent',
 ] as const;
 const ORCHESTRATION_SESSION_CHANNELS = [
+  'orchestration-sessions:progress',
+  'orchestration-sessions:promote',
   'orchestration-sessions:list',
   'orchestration-sessions:select',
   'orchestration-sessions:create',

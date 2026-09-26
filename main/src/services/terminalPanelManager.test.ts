@@ -23,6 +23,7 @@ type TerminalUnderTest = {
     resize: ReturnType<typeof vi.fn>;
     write: ReturnType<typeof vi.fn>;
     kill: ReturnType<typeof vi.fn>;
+    onExit: ReturnType<typeof vi.fn>;
   };
   isPtyHost: boolean;
   panelId: string;
@@ -130,6 +131,7 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
       resize: vi.fn(),
       write: vi.fn(),
       kill: vi.fn(),
+      onExit: vi.fn(() => ({ dispose: vi.fn() })),
     },
     isPtyHost: false,
     panelId: 'panel-1',
@@ -814,11 +816,34 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(codex.customState.initialInputSentAt).toBeUndefined();
   });
 
+  it('reopens an untouched Claude Session without resuming a nonexistent transcript', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000000001';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    try {
+      const result = manager.resolveCliLaunchCommand('panel', 'claude --model test', {
+        agentType: 'claude', orchestrationSessionId: 'untouched', agentSessionId: id, hasClaudeSessionId: true,
+      });
+      expect(result.commandToRun).toBe(`claude --model test --session-id ${id}`);
+      expect(result.customState.initialInputSentAt).toBeUndefined();
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
   it('does not mistake a Codex option value for a subcommand on resume', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const command = 'codex -c model_instructions_file="/tmp/review.md"';
     const result = manager.resolveCliLaunchCommand('panel', command, { agentType: 'codex', agentSessionId: 'saved-thread', wasInterrupted: true });
     expect(result.commandToRun).toBe(`${command} resume "saved-thread"`);
+  });
+
+  it('pins resumed Codex Sessions to their managed directory without overriding user cwd arguments', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = { agentType: 'codex', orchestrationSessionId: 'session', orchestrationWorkspace: '/tmp/new session', agentSessionId: 'saved-thread' };
+    expect(manager.resolveCliLaunchCommand('panel', 'codex --yolo', state).commandToRun)
+      .toBe('codex --yolo resume "saved-thread" --cd "/tmp/new session"');
+    expect(manager.resolveCliLaunchCommand('panel', 'codex --cd /custom', state).commandToRun)
+      .toBe('codex --cd /custom resume "saved-thread"');
   });
 
   it('uses generic templates to allocate and resume a wrapper conversation without changing its saved command', () => {
@@ -894,6 +919,17 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(() => manager.resolveCliLaunchCommand('panel', 'wrapper', { customResume: {
       mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --latest',
     } })).toThrow('must contain {sessionId}');
+  });
+
+  it('passes Session wrapper commands through without appending agent flags or prompts', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'agent-farm run planner -- --model "my model"';
+    const result = manager.resolveCliLaunchCommand('panel', command, {
+      agentType: 'claude', preserveLaunchCommand: true, wasInterrupted: true,
+      agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+    });
+    expect(result.commandToRun).toBe(command);
+    expect(result.customState.initialInputSentAt).toBeUndefined();
   });
 
   it('keeps resumed Claude input composer-bound', () => {
@@ -1237,5 +1273,72 @@ describe('TerminalPanelManager agent status poll', () => {
     expect(manager.getAgentStatus(terminal.panelId)).toBe('blocked');
 
     manager.destroyTerminal(terminal.panelId);
+  });
+});
+
+
+describe('chat promotion shutdown', () => {
+  it('accepts a live idle prompt while the sidebar status is still settling', async () => {
+    const manager = new TerminalPanelManager();
+    const screenEmulator = inProcessEmulatorHost().createEmulator(80, 24);
+    screenEmulator.write('────────────────────\r\n❯ \r\n────────────────────\r\n  bypass permissions on');
+    const terminal = createTerminal({ agentType: 'claude', screenEmulator });
+    testAccess<VisibilityAccess>(manager).terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'getAgentStatus').mockReturnValue('working');
+    vi.spyOn(manager, 'saveTerminalState').mockResolvedValue();
+    let exit: (() => void) | undefined;
+    terminal.pty.onExit.mockImplementation((callback: () => void) => { exit = callback; return { dispose: vi.fn() }; });
+    terminal.pty.kill.mockImplementation(() => exit?.());
+    try {
+      await manager.stopForPromotion(terminal.panelId);
+      expect(terminal.pty.kill).toHaveBeenCalledOnce();
+    } finally {
+      screenEmulator.dispose();
+    }
+  });
+
+  it('rejects visible work even when the cached status is idle', async () => {
+    const manager = new TerminalPanelManager();
+    const screenEmulator = inProcessEmulatorHost().createEmulator(80, 24);
+    screenEmulator.write('\x1b]0;⠋ Working\x07');
+    const terminal = createTerminal({ agentType: 'claude', screenEmulator });
+    testAccess<VisibilityAccess>(manager).terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'getAgentStatus').mockReturnValue('idle');
+    try {
+      await expect(manager.stopForPromotion(terminal.panelId)).rejects.toThrow('finish');
+      expect(terminal.pty.kill).not.toHaveBeenCalled();
+    } finally {
+      screenEmulator.dispose();
+      disposeFlowControlRecord(terminal.flowControl);
+    }
+  });
+
+  it('saves output before killing and waits for the old process to exit', async () => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal();
+    testAccess<VisibilityAccess>(manager).terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'getAgentStatus').mockReturnValue('idle');
+    const order: string[] = [];
+    vi.spyOn(manager, 'saveTerminalState').mockImplementation(async () => { order.push('saved'); });
+    let exit: (() => void) | undefined;
+    terminal.pty.onExit.mockImplementation((callback: () => void) => { exit = callback; return { dispose: vi.fn() }; });
+    terminal.pty.kill.mockImplementation(() => order.push('killed'));
+    const stopping = manager.stopForPromotion(terminal.panelId).then(() => order.push('finished'));
+    await Promise.resolve();
+    expect(order).toEqual(['saved', 'killed']);
+    exit?.();
+    await stopping;
+    expect(order).toEqual(['saved', 'killed', 'finished']);
+  });
+
+  it('does not kill or save a working agent', async () => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal();
+    testAccess<VisibilityAccess>(manager).terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'getAgentStatus').mockReturnValue('working');
+    const save = vi.spyOn(manager, 'saveTerminalState');
+    await expect(manager.stopForPromotion(terminal.panelId)).rejects.toThrow('finish');
+    expect(save).not.toHaveBeenCalled();
+    expect(terminal.pty.kill).not.toHaveBeenCalled();
   });
 });

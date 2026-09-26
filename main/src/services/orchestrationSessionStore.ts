@@ -1,3 +1,4 @@
+import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -69,11 +70,15 @@ const activitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
 });
 
 const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.object({
+  promotedFrom: boundary.optional(boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.nonEmptyString })),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   agent: paneChatAgentSchema,
+  launchCommand: boundary.optional(boundary.string),
+  customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
+  profile: boundary.optional(boundary.string),
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({
     claude: boundary.nonEmptyString,
@@ -191,7 +196,7 @@ function validateSession(session: OrchestrationSessionRecord): void {
   if (!Number.isInteger(session.revision) || session.revision < 0) {
     throw new Error(`Session ${session.id} has an invalid revision`);
   }
-  for (const value of [session.goal, session.context, session.nextAction]) {
+  for (const value of [session.goal, session.context, session.nextAction, session.launchCommand ?? '', session.profile ?? '']) {
     validateText(value, `Session ${session.id}`);
   }
   validateTextArray(session.decisions, `Session ${session.id} decisions`);

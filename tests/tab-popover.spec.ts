@@ -137,3 +137,33 @@ test('custom profiles keep their names and commands when renamed and launched', 
   await trigger.click();
   await expect(page.getByRole('menuitem', { name: /^npm run dev/ })).toBeVisible();
 });
+
+test('chat promotion sends the selected chat and preserves it when the move is rejected', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session],
+    initialPanels: [{ ...panel, title: 'Codex chat', state: { ...panel.state, customState: { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'saved-chat' } } }], activeProjectId: project.id,
+  });
+  await page.addInitScript(() => {
+    const original = window.electronAPI.invoke.bind(window.electronAPI);
+    window.electronAPI.invoke = async (channel: string, ...args: unknown[]) => {
+      if (channel === 'orchestration-sessions:promote') {
+        sessionStorage.setItem('promotion-request', JSON.stringify(args[0]));
+        return { success: false, error: 'Wait for the agent to finish before moving this chat' };
+      }
+      return original(channel, ...args);
+    };
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+  await page.getByRole('button', { name: 'Move chat to Session', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move chat to Session' });
+  await expect(dialog.getByRole('textbox', { name: 'Session name' })).toHaveValue('Tool menu');
+  await dialog.getByRole('textbox', { name: 'Session name' }).fill('Feature planning');
+  await dialog.getByRole('button', { name: 'Move chat', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Wait for the agent');
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('promotion-request')!))).toEqual({ panelId: panel.id, name: 'Feature planning' });
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('button', { name: 'Move chat to Session', exact: true })).toBeVisible();
+  expect(await page.evaluate(async () => (await window.electronAPI.panels.getSessionPanels('tab-popover-session')).data?.map(item => item.id))).toContain(panel.id);
+});
