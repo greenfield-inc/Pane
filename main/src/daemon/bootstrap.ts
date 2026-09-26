@@ -19,6 +19,7 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
+import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { TaskQueue } from '../services/taskQueue';
@@ -203,6 +204,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   await skillCacheManager.start().catch(error => {
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
   });
+  await skillCacheManager.syncHomeSkill(configManager.getConfig());
+  if (configManager.consumeAgentContextMigration()) {
+    // Repo AGENTS.md publishing is now off by default; clean up as the toggle would.
+    await applyManagedAgentsMdSetting(configManager.getConfig(), {
+      all: () => databaseService.getAllProjects(),
+      active: () => sessionManager.getActiveProject(),
+    });
+  }
   const paneChatManager = new PaneChatManager(configManager, sessionManager, skillCacheManager);
   await paneChatManager.getOrCreate().catch(error => {
     logger.warn('[PaneChat] Failed to ensure startup Pane Chat session', error instanceof Error ? error : undefined);

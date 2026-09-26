@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfigManager } from './configManager';
+import { AGENT_CONTEXT_DEFAULTS_VERSION, ConfigManager } from './configManager';
 
 describe('ConfigManager appearance persistence', () => {
   let paneDir: string;
@@ -154,5 +154,59 @@ describe('ConfigManager freeze prevention defaults', () => {
     expect(new ConfigManager(os.homedir()).getGitRepoPath()).toBe('');
     const repoPath = path.join(os.homedir(), 'project');
     expect(new ConfigManager(repoPath).getGitRepoPath()).toBe(repoPath);
+  });
+});
+
+describe('ConfigManager agent context defaults', () => {
+  let paneDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-agent-context-'));
+    process.env.PANE_DIR = paneDir;
+    configPath = path.join(paneDir, 'config.json');
+  });
+
+  afterEach(async () => {
+    delete process.env.PANE_DIR;
+    await fs.rm(paneDir, { recursive: true, force: true });
+  });
+
+  it('keeps repositories untouched and installs the home skill on new installs', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext).toEqual({
+      managedAgentsMd: false, homeSkill: true, defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION,
+    });
+    expect(manager.consumeAgentContextMigration()).toBe(false);
+  });
+
+  it('turns the old repository AGENTS.md default off once and reports it', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: true } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext).toMatchObject({ managedAgentsMd: false, defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION });
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).agentContext).toMatchObject({ managedAgentsMd: false, defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION });
+    expect(manager.consumeAgentContextMigration()).toBe(true);
+    expect(manager.consumeAgentContextMigration()).toBe(false);
+  });
+
+  it('keeps a later opt-in across restarts', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: true } }));
+    const first = new ConfigManager();
+    await first.initialize();
+    await first.updateConfig({ agentContext: { managedAgentsMd: true } });
+    const second = new ConfigManager();
+    await second.initialize();
+    expect(second.getConfig().agentContext?.managedAgentsMd).toBe(true);
+    expect(second.consumeAgentContextMigration()).toBe(false);
+  });
+
+  it('does not report cleanup when publishing was already off', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: false } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext?.defaultsVersion).toBe(AGENT_CONTEXT_DEFAULTS_VERSION);
+    expect(manager.consumeAgentContextMigration()).toBe(false);
   });
 });

@@ -7,7 +7,8 @@ import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
-import { ensureProjectAgentContext } from '../services/agentContextManager';
+import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
+import { isPaneHomeSkillEnabled, syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { AppearanceValidationError } from '../../../shared/types/appearance';
 
@@ -56,6 +57,8 @@ export function registerConfigHandlers(
                                updates.claudeExecutablePath !== oldConfig.claudeExecutablePath;
       const managedAgentsMdChanged = updates.agentContext?.managedAgentsMd !== undefined
         && updates.agentContext.managedAgentsMd !== oldConfig.agentContext?.managedAgentsMd;
+      const homeSkillChanged = updates.agentContext?.homeSkill !== undefined
+        && updates.agentContext.homeSkill !== isPaneHomeSkillEnabled(oldConfig);
 
       const updatedConfig = await configManager.updateConfig(updates);
 
@@ -70,19 +73,15 @@ export function registerConfigHandlers(
       }
 
       if (managedAgentsMdChanged) {
-        const nextConfig = configManager.getConfig();
-        const activeProject = sessionManager.getActiveProject();
-        const projects = nextConfig.agentContext?.managedAgentsMd === false
-          ? databaseService.getAllProjects()
-          : activeProject ? [activeProject] : [];
+        await applyManagedAgentsMdSetting(configManager.getConfig(), {
+          all: () => databaseService.getAllProjects(),
+          active: () => sessionManager.getActiveProject(),
+        });
+      }
 
-        for (const project of projects) {
-          try {
-            await ensureProjectAgentContext(project, nextConfig);
-          } catch (error) {
-            console.warn('[Config] Failed to update Pane agent context after setting change:', error);
-          }
-        }
+      if (homeSkillChanged) {
+        await syncPaneHomeSkill(configManager.getConfig())
+          .catch(error => console.warn('[Config] Failed to update the Pane home skill after setting change:', error));
       }
 
       // Apply UI scale live

@@ -34,6 +34,7 @@ export type SettingsSettingId =
   | 'terminal-reference-line-count'
   | 'terminal-shell'
   | 'default-pane-chat-agent'
+  | 'agent-skill'
   | 'agent-context'
   | 'claude-executable'
   | 'commit-footer'
