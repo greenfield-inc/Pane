@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { cn } from '../utils/cn';
 
@@ -18,6 +19,7 @@ interface InspectorTabsProps {
  * Changes only appear once their panel exists for the session.
  */
 export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, changesCount, className }: InspectorTabsProps) {
+  const buttons = useRef<Partial<Record<InspectorTab, HTMLButtonElement | null>>>({});
   const tabs: Array<{ id: InspectorTab; label: string; badge?: number }> = [
     { id: 'details', label: 'Details' },
     ...(filesPanel ? [{ id: 'files' as const, label: 'Files' }] : []),
@@ -30,6 +32,8 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
         return (
           <button
             key={item.id}
+            ref={button => { buttons.current[item.id] = button; }}
+            tabIndex={selected ? 0 : -1}
             type="button"
             role="tab"
             aria-selected={selected}
@@ -38,9 +42,10 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
             onKeyDown={(event) => {
               if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
               event.preventDefault();
-              const index = tabs.findIndex(t => t.id === item.id);
+              const index = tabs.findIndex(t => t.id === tab);
               const next = tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
               onTabChange(next.id);
+              buttons.current[next.id]?.focus();
             }}
             className={cn(
               'flex flex-1 items-center justify-center gap-1.5 px-2 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring-subtle',
