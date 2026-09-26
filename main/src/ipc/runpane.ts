@@ -1533,12 +1533,10 @@ async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
     return;
   }
 
-  const nextCustomState = { ...customState };
-  delete nextCustomState.initialInputSentAt;
   await panelManager.updatePanel(panel.id, {
     state: {
       ...state,
-      customState: nextCustomState,
+      customState: { ...customState, initialInputSentAt: undefined },
     },
   });
 }
