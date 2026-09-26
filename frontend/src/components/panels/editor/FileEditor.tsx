@@ -42,7 +42,7 @@ interface HeadlessFileTreeProps {
   initialShowSearch?: boolean;
   onTreeStateChange?: (state: { expandedDirs: string[]; searchQuery: string; showSearch: boolean }) => void;
   onHtmlPreview: (filePath: string) => void;
-  /** Window-level shortcuts (⌘F, rename, delete, clipboard) only while the tree is the visible panel. */
+  /** Enable tree shortcuts while its panel is visible; focus stays scoped to the tree. */
   shortcutsActive?: boolean;
 }
 
@@ -61,6 +61,7 @@ function HeadlessFileTree({
 }: HeadlessFileTreeProps) {
   // Cache stores loaded directory contents. Key = dirPath, Value = FileItem[].
   const filesCacheRef = useRef(new Map<string, FileItem[]>());
+  const keyboardScopeRef = useRef<HTMLDivElement>(null);
 
   // Refs for values used in dataLoader (avoids stale closures)
   const sessionIdRef = useCommittedRef(sessionId);
@@ -705,7 +706,8 @@ function HeadlessFileTree({
 
   // Keyboard shortcuts
   useEffect(() => {
-    if (!shortcutsActive) return;
+    const keyboardScope = keyboardScopeRef.current;
+    if (!shortcutsActive || !keyboardScope) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target instanceof HTMLElement ? e.target : null;
       const isEditingText = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || !!target?.isContentEditable;
@@ -759,12 +761,13 @@ function HeadlessFileTree({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    keyboardScope.addEventListener('keydown', handleKeyDown);
+    return () => keyboardScope.removeEventListener('keydown', handleKeyDown);
   }, [shortcutsActive, searchQuery, showNewItemDialog, contextMenu, keyboardShortcutsEnabled, selectedItems, tree, startRename, handleDelete, clipboard, handlePaste]);
 
   return (
     <div
+      ref={keyboardScopeRef}
       className={`h-full flex flex-col ${isDragOver ? 'ring-2 ring-interactive ring-inset bg-interactive/10' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
