@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import { existsSync } from 'fs';
+import { stat } from 'fs/promises';
 import { join } from 'path';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -748,24 +749,26 @@ export function registerGitHandlers(
       const ctx = sessionManager.getProjectContext(sessionId);
       if (!ctx) throw new Error('Project context not found for session');
 
-      const comparisonBranch = await worktreeManager.getSessionComparisonBranch(session, ctx);
-
-      // Check if we're actually in a rebase state (could have been pre-detected conflicts)
-      // Try to abort any existing rebase, but don't fail if there isn't one
-      try {
-        const statusOutput = (await ctx.commandRunner.execAsync('git status --porcelain=v1', session.worktreePath)).stdout;
-        if (statusOutput.includes('rebase')) {
-          await worktreeManager.abortRebase(session.worktreePath, ctx.commandRunner);
-
-          // Emit git operation event about aborting the rebase
-          const abortMessage = `🔄 GIT OPERATION\nAborted rebase successfully`;
-          emitGitOperationToProject(sessionId, 'git:operation_completed', abortMessage, {
-            operation: 'abort_rebase'
-          });
+      // Rebase metadata works in linked worktrees and does not depend on Git's locale.
+      let rebaseInProgress = false;
+      for (const stateDirectory of ['rebase-merge', 'rebase-apply']) {
+        const { stdout } = await ctx.commandRunner.execFile('git',
+          ['rev-parse', '--path-format=absolute', '--git-path', stateDirectory], session.worktreePath);
+        try {
+          if ((await stat(ctx.pathResolver.toFileSystem(stdout.trim()))).isDirectory()) rebaseInProgress = true;
+        } catch (error) {
+          const { code } = decodeBoundary(error, boundary.object({ code: boundary.optional(boundary.string) }));
+          if (code !== 'ENOENT') throw error;
         }
-      } catch {
-        // Not in a rebase state or already clean - that's fine
       }
+      if (rebaseInProgress) {
+        await worktreeManager.abortRebase(session.worktreePath, ctx.commandRunner);
+        emitGitOperationToProject(sessionId, 'git:operation_completed', '🔄 GIT OPERATION\nAborted rebase successfully', {
+          operation: 'abort_rebase'
+        });
+      }
+      // Abort restores the branch from detached HEAD before choosing its comparison target.
+      const comparisonBranch = await worktreeManager.getSessionComparisonBranch(session, ctx);
 
       // Use session-based Claude to handle the rebase and conflicts
       const prompt = `Please rebase ${comparisonBranch} into this branch and resolve all conflicts`;
