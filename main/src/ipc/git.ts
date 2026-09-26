@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import { existsSync } from 'fs';
+import { stat } from 'fs/promises';
 import { join } from 'path';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -748,20 +749,26 @@ export function registerGitHandlers(
       const ctx = sessionManager.getProjectContext(sessionId);
       if (!ctx) throw new Error('Project context not found for session');
 
-      const comparisonBranch = await worktreeManager.getSessionComparisonBranch(session, ctx);
-
-      // Porcelain status lists files, not whether a rebase is in progress.
-      try {
+      // Rebase metadata works in linked worktrees and does not depend on Git's locale.
+      let rebaseInProgress = false;
+      for (const stateDirectory of ['rebase-merge', 'rebase-apply']) {
+        const { stdout } = await ctx.commandRunner.execFile('git',
+          ['rev-parse', '--path-format=absolute', '--git-path', stateDirectory], session.worktreePath);
+        try {
+          if ((await stat(ctx.pathResolver.toFileSystem(stdout.trim()))).isDirectory()) rebaseInProgress = true;
+        } catch (error) {
+          const { code } = decodeBoundary(error, boundary.object({ code: boundary.optional(boundary.string) }));
+          if (code !== 'ENOENT') throw error;
+        }
+      }
+      if (rebaseInProgress) {
         await worktreeManager.abortRebase(session.worktreePath, ctx.commandRunner);
         emitGitOperationToProject(sessionId, 'git:operation_completed', '🔄 GIT OPERATION\nAborted rebase successfully', {
           operation: 'abort_rebase'
         });
-      } catch (error) {
-        // Pre-detected conflicts can reach this action before a rebase starts.
-        if (!(error instanceof Error) || !/^(?:fatal: )?no rebase in progress\??\s*$/im.test(error.message)) {
-          throw error;
-        }
       }
+      // Abort restores the branch from detached HEAD before choosing its comparison target.
+      const comparisonBranch = await worktreeManager.getSessionComparisonBranch(session, ctx);
 
       // Use session-based Claude to handle the rebase and conflicts
       const prompt = `Please rebase ${comparisonBranch} into this branch and resolve all conflicts`;

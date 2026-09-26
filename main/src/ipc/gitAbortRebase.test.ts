@@ -6,6 +6,7 @@ import { join } from 'path';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { WorktreeManager } from '../services/worktreeManager';
 import { CommandRunner } from '../utils/commandRunner';
+import { PathResolver } from '../utils/pathResolver';
 import type { AppServices } from './types';
 import { registerGitHandlers } from './git';
 
@@ -40,17 +41,21 @@ async function conflictingRebase(): Promise<void> {
   await expect(runner.execFile('git', ['rebase', 'main'], repo)).rejects.toThrow();
 }
 
-function registeredHandler() {
-  const session = { id: 'test-session', worktreePath: repo, baseBranch: 'main' };
+function registeredHandler(baseBranch = 'main') {
+  const session = { id: 'test-session', worktreePath: repo, baseBranch };
   const project = { id: 1, path: repo, name: 'Test' };
   const launchedFiles: string[] = [];
-  const startSession = async () => { launchedFiles.push(await readFile(join(repo, 'example.txt'), 'utf8')); };
+  const prompts: string[] = [];
+  const startSession = async (_id: string, _cwd: string, prompt: string) => {
+    launchedFiles.push(await readFile(join(repo, 'example.txt'), 'utf8'));
+    prompts.push(prompt);
+  };
   // SAFETY: This fixture implements the service members used by the registered abort-rebase handler.
   const services = {
     sessionManager: {
       getSession: () => session,
       getProjectForSession: () => project,
-      getProjectContext: () => ({ project, commandRunner: runner }),
+      getProjectContext: () => ({ project, commandRunner: runner, pathResolver: new PathResolver(project) }),
       addSessionOutput: vi.fn(),
     },
     worktreeManager: new WorktreeManager(),
@@ -60,7 +65,7 @@ function registeredHandler() {
   const ipc = { handle: vi.fn() } as IpcMain;
   const registry = new PaneCommandRegistry();
   registerGitHandlers(ipc, services, registry);
-  return { registry, launchedFiles };
+  return { registry, launchedFiles, prompts };
 }
 
 it('aborts a conflicting rebase before starting the resolution agent', async () => {
@@ -87,4 +92,11 @@ it('reports an abort failure and leaves the agent stopped', async () => {
     error: expect.stringContaining('index.lock'),
   });
   expect(launchedFiles).toEqual([]);
+});
+
+it('resolves the main comparison branch after restoring an existing feature branch', async () => {
+  await conflictingRebase();
+  const { registry, prompts } = registeredHandler('feature');
+  await expect(registry.invoke('sessions:abort-rebase-and-use-claude', ['test-session'])).resolves.toMatchObject({ success: true });
+  expect(prompts).toEqual(['Please rebase main into this branch and resolve all conflicts']);
 });
