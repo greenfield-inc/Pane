@@ -234,6 +234,8 @@ export interface RunpanePaneCreateRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** Session to associate each new Pane with (the calling orchestrator's PANE_ORCHESTRATION_SESSION_ID). */
+  associateSession?: string;
 }
 
 export interface RunpanePaneAdoptItem {
@@ -254,6 +256,7 @@ export interface RunpanePaneAdoptRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  associateSession?: string;
 }
 
 export type RunpanePaneAdoptResult = RunpanePaneCreateResult;
@@ -335,6 +338,14 @@ export interface RunpanePaneCreateSuccessItem {
   focused?: boolean;
   readiness?: RunpanePaneReadiness;
   initialInput?: RunpaneInitialInputDeliveryResult;
+  association?: RunpanePaneAssociationOutcome;
+}
+
+/** Automatic Session association for a created or adopted Pane; failure never undoes the Pane. */
+export interface RunpanePaneAssociationOutcome {
+  sessionId: string;
+  ok: boolean;
+  error?: string;
 }
 
 export interface RunpanePaneCreateFailureItem {

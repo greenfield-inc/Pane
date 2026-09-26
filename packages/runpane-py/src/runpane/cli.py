@@ -135,6 +135,7 @@ class ParsedArgs:
     focus: bool = False
     pinned: bool = False
     no_pinned: bool = False
+    no_associate: bool = False
     composer_strategy: Optional[str] = None
     force: bool = False
     watch_as: Optional[str] = None
@@ -573,6 +574,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--no-pinned":
         parsed.no_pinned = True
+        return
+    if flag == "--no-associate":
+        parsed.no_associate = True
         return
     if flag == "--force":
         parsed.force = True

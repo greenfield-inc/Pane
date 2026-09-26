@@ -721,6 +721,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
                 for item in payload.get("panes", [])
             ]
         apply_pane_focus_options(parsed, payload)
+        payload.update(optional_value("associateSession", resolve_associate_session(parsed)))
         return payload
 
     if not parsed.repo:
@@ -750,7 +751,15 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)) else None),
         **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source),
+        **optional_value("associateSession", resolve_associate_session(parsed)),
     }
+
+
+def resolve_associate_session(parsed: Any) -> Optional[str]:
+    """Inside a Session orchestrator, new Panes join that Session unless --no-associate."""
+    if parsed.no_associate:
+        return None
+    return (os.environ.get("PANE_ORCHESTRATION_SESSION_ID") or "").strip() or None
 
 
 def apply_pane_focus_options(parsed: Any, request: Dict[str, Any]) -> None:
@@ -1112,6 +1121,12 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
                 blocked = readiness.get("blocked")
                 if blocked:
                     print(f"  Blocked: {blocked.get('message')}")
+            association = item.get("association")
+            if association:
+                if association.get("ok"):
+                    print(f"  Associated with Session {association.get('sessionId')}")
+                else:
+                    print(f"  Not associated with Session {association.get('sessionId')}: {association.get('error', 'unknown error')}")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")
         else:

@@ -67,10 +67,13 @@ ordinary resumes and unrelated prompts.
 ## Pane association before delegation
 
 Management is a Pane-level relationship; tabs inherit the relationship and
-share the Pane's worktree. The orchestrator reads its own stable identity from
-`PANE_ORCHESTRATION_SESSION_ID` and associates a Pane immediately after
-creating it, or before delegating to an existing Pane. The supported command
-is:
+share the Pane's worktree. Panes the orchestrator creates or adopts with
+`runpane panes create` or `panes adopt` are associated with its Session in the
+same call: the CLI reads `PANE_ORCHESTRATION_SESSION_ID`, each result item
+reports `association: { sessionId, ok, error? }`, and `--no-associate` opts
+out. A failed association never undoes the new Pane. Before delegating to an
+existing Pane, or when automatic association failed, the orchestrator
+associates it explicitly. The supported command is:
 
 ```text
 runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
@@ -78,9 +81,8 @@ runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane
 
 Verify the result with `runpane sessions overview` and reuse an existing
 association. A Pane already managed by another Session is a conflict: do not
-detach, reassign, or create a duplicate Pane. Prefer creating a Pane without
-an implementation prompt, associating and verifying it, then submitting the
-prompt. Keep a Pane attached through idle and completion; do not detach on
+detach, reassign, or create a duplicate Pane. When a prompt is passed to `panes
+create`, check the item's `association.ok` right away. Keep a Pane attached through idle and completion; do not detach on
 completion. Archive behavior remains a separate #654 follow-up.
 
 Before mutating, use `runpane agent-context --command 'sessions associate'
