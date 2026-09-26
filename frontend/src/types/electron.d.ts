@@ -209,7 +209,6 @@ interface ElectronAPI {
 
     // Script operations
     hasRunScript: (sessionId: string) => Promise<IPCResponse>;
-    getRunningSession: () => Promise<IPCResponse>;
     runScript: (sessionId: string) => Promise<IPCResponse>;
     stopScript: (sessionId?: string) => Promise<IPCResponse>;
     runTerminalCommand: (sessionId: string, command: string) => Promise<IPCResponse>;

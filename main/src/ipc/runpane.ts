@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
 import type { IpcMain } from 'electron';
@@ -333,14 +333,15 @@ export function registerRunpaneHandlers(
         };
       }
 
-      validateRepositoryPath(normalized.path);
+      const registration = resolveProjectRegistration(normalized.path);
+      await validateProjectRepository(registration);
 
       const preview = {
         name: normalized.name,
-        path: normalized.path,
+        path: registration.path,
         alreadyExists: false,
         wouldCreate: true,
-        environment: new PathResolver({ path: normalized.path }).environment,
+        environment: registration.pathResolver.environment,
       };
 
       if (normalized.dryRun) {
@@ -354,11 +355,14 @@ export function registerRunpaneHandlers(
 
       const project = databaseService.createProject(
         normalized.name,
-        normalized.path,
+        registration.path,
         undefined,
         undefined,
         undefined,
         'ignore',
+        undefined,
+        registration.wsl_enabled || undefined,
+        registration.wsl_distribution,
       );
 
       try {
@@ -2992,7 +2996,8 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
 
   const repoPath = expandUserRepoPath(requestedPath);
   const providedName = optionalString(value.name)?.trim();
-  const defaultName = path.basename(repoPath) || repoPath;
+  const location = resolveProjectRegistration(repoPath);
+  const defaultName = path.posix.basename(location.path.replace(/\\/g, '/')) || location.path;
 
   return {
     path: repoPath,
@@ -3296,34 +3301,6 @@ function parsePaneCreateItem(value: PaneCommandValue, index: number): RunpanePan
   };
 }
 
-function validateRepositoryPath(repoPath: string): void {
-  const resolvedPath = expandUserRepoPath(repoPath);
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(resolvedPath);
-  } catch {
-    throw new Error(`Repo path does not exist: ${resolvedPath}`);
-  }
-
-  if (!stat.isDirectory()) {
-    throw new Error(`Repo path must be a directory: ${resolvedPath}`);
-  }
-
-  try {
-    const output = execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
-      cwd: resolvedPath,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-
-    if (output !== 'true') {
-      throw new Error('not inside work tree');
-    }
-  } catch {
-    throw new Error(`Repo path must be an existing git repository: ${resolvedPath}`);
-  }
-}
-
 function parseRunpaneToolSpec(value: PaneCommandValue, label: string): RunpaneToolSpec {
   if (!isRecord(value)) {
     throw new Error(`${label} must include a tool object`);
@@ -3432,8 +3409,8 @@ function resolveActiveProject(projects: Project[]): Project {
 }
 
 function resolveProjectByPath(projects: Project[], selectorPath: string): Project | undefined {
-  const normalized = path.resolve(selectorPath);
-  return projects.find(project => project.path === selectorPath || path.resolve(project.path) === normalized);
+  const key = projectRegistrationKey({ path: selectorPath });
+  return projects.find(project => projectRegistrationKey(project) === key);
 }
 
 function resolveProjectByName(projects: Project[], selectorName: string): Project {
