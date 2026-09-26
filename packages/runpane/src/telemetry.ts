@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { boundary, decodeBoundary } from './boundaryDecoder';
+import { matchCommand } from './commands';
 import type { ArtifactFormat, InstallTarget, RunpaneCommand } from './commands';
 import type { JsonObject, JsonValue } from './boundaryDecoder';
 import type { PanePlatform } from './platform';
@@ -95,42 +96,13 @@ export function createInitialTelemetryContext(argv: string[]): WrapperTelemetryC
     const target = argv[1] === 'daemon' || argv[1] === 'client' ? argv[1] : 'client';
     return { command: 'install', resolvedCommand: 'install', target };
   }
-  if (first === 'setup') {
-    return { command: 'setup' };
-  }
   if (first === 'update') {
     return { command: 'update', resolvedCommand: 'update', target: 'client' };
   }
   if (first === 'doctor') {
     return { command: 'doctor', resolvedCommand: 'doctor' };
   }
-  if (first === 'version') {
-    return { command: 'version' };
-  }
-  if (first === 'agent-context') {
-    return { command: 'agent-context' };
-  }
-  if (first === 'agents') {
-    return { command: argv[1] === 'doctor' ? 'agents doctor' : 'unknown' };
-  }
-  if (first === 'repos') {
-    return { command: argv[1] === 'add' ? 'repos add' : 'repos list' };
-  }
-  if (first === 'panes') {
-    if (argv[1] === 'list') return { command: 'panes list' };
-    if (argv[1] === 'cost') return { command: 'panes cost' };
-    if (argv[1] === 'adopt') return { command: 'panes adopt' };
-    return { command: 'panes create' };
-  }
-  if (first === 'panels') {
-    if (argv[1] === 'output') return { command: 'panels output' };
-    if (argv[1] === 'input') return { command: 'panels input' };
-    if (argv[1] === 'screen') return { command: 'panels screen' };
-    if (argv[1] === 'submit') return { command: 'panels submit' };
-    if (argv[1] === 'wait') return { command: 'panels wait' };
-    return { command: 'panels list' };
-  }
-  return { command: 'unknown' };
+  return { command: matchCommand(argv)?.name ?? 'unknown' };
 }
 
 export function applyParsedArgsToTelemetryContext(

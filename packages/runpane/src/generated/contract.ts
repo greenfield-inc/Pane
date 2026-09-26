@@ -82,6 +82,7 @@ export const RUNPANE_CONTRACT = {
   "commands": [
     {
       "name": "help",
+      "localControl": false,
       "summary": "Show help for runpane or a specific command.",
       "usage": [
         "runpane help [command]"
@@ -89,6 +90,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "setup",
+      "localControl": false,
       "summary": "Open the guided setup wizard for install, remote host setup, update, and diagnostics.",
       "usage": [
         "runpane setup"
@@ -97,6 +99,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "install",
+      "localControl": false,
       "summary": "Install Pane on this machine or configure this machine as a remote daemon host.",
       "usage": [
         "runpane install [client|daemon] [options]"
@@ -110,6 +113,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "update",
+      "localControl": false,
       "summary": "Update the Pane desktop app using the same artifact path as install client.",
       "usage": [
         "runpane update [options]"
@@ -118,6 +122,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "version",
+      "localControl": false,
       "summary": "Print the runpane wrapper version without contacting, launching, or focusing Pane.",
       "usage": [
         "runpane version",
@@ -126,6 +131,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "doctor",
+      "localControl": true,
       "summary": "Run platform, release, installed Pane, daemon reachability, and remote setup diagnostics.",
       "usage": [
         "runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <format>] [--verbose]",
@@ -137,6 +143,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "daemon repair",
+      "localControl": true,
       "summary": "Repair and restart the managed remote-daemon launcher without changing pairing or tunnel configuration.",
       "usage": [
         "runpane daemon repair [--pane-dir <path>] [--pane-path <path>] [--yes] [--json]"
@@ -148,6 +155,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "agents doctor",
+      "localControl": true,
       "summary": "Diagnose whether a built-in agent command is available in a Pane repository environment.",
       "usage": [
         "runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]"
@@ -158,6 +166,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "agent-context",
+      "localControl": false,
       "summary": "Print token-efficient Pane command context for coding agents.",
       "usage": [
         "runpane agent-context [--json]",
@@ -170,6 +179,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "repos list",
+      "localControl": true,
       "summary": "List repositories saved in the running Pane app.",
       "usage": [
         "runpane repos list [--json] [--pane-dir <path>]"
@@ -180,6 +190,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "repos add",
+      "localControl": true,
       "summary": "Register an existing git repository with the running Pane app.",
       "usage": [
         "runpane repos add --path <path> [--name <name>] [--json] [--yes]"
@@ -192,6 +203,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes list",
+      "localControl": true,
       "summary": "List Pane sessions in a saved repository.",
       "usage": [
         "runpane panes list [--repo <selector>] [--json]"
@@ -202,6 +214,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes cost",
+      "localControl": true,
       "summary": "Report estimated token cost per Pane, with per-model breakdown and cache efficiency.",
       "usage": [
         "runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]"
@@ -213,6 +226,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace state",
+      "localControl": true,
       "summary": "Read one workspace snapshot of every Pane and CLI panel.",
       "usage": [
         "runpane workspace state [--repo <selector>] [--json]"
@@ -223,6 +237,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "watch",
+      "localControl": true,
       "summary": "Wait for workspace agent and Pane transitions using a daemon-held cursor.",
       "usage": [
         "runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>] [--include-shells] [--self-test] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json]"
@@ -234,6 +249,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes create",
+      "localControl": true,
       "summary": "Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.",
       "usage": [
         "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [options]",
@@ -247,6 +263,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes adopt",
+      "localControl": true,
       "summary": "Adopt an existing externally managed git worktree as a Pane without changing the worktree.",
       "usage": [
         "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch] [--no-pinned] [--dry-run] [--yes] [--json]"
@@ -258,6 +275,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes archive",
+      "localControl": true,
       "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree.",
       "usage": [
         "runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--dry-run] --yes [--json]"
@@ -270,6 +288,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes pin",
+      "localControl": true,
       "summary": "Declaratively pin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.",
       "usage": [
         "runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]"
@@ -282,6 +301,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes unpin",
+      "localControl": true,
       "summary": "Declaratively unpin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.",
       "usage": [
         "runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]"
@@ -294,6 +314,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes rename",
+      "localControl": true,
       "summary": "Rename a Pane without changing its worktree, branch, panels, or focus.",
       "usage": [
         "runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]"
@@ -306,6 +327,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes focus",
+      "localControl": true,
       "summary": "Raise the Pane window and select a Pane (and optionally one of its panels) on explicit user request.",
       "usage": [
         "runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json]"
@@ -318,6 +340,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels create",
+      "localControl": true,
       "summary": "Create a terminal-backed tool panel inside an existing Pane session.",
       "usage": [
         "runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] --yes [--json]",
@@ -331,6 +354,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels list",
+      "localControl": true,
       "summary": "List tool panels inside a Pane session.",
       "usage": [
         "runpane panels list --pane <pane-id> [--json]"
@@ -341,6 +365,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels output",
+      "localControl": true,
       "summary": "Read recent terminal output from a panel.",
       "usage": [
         "runpane panels output --panel <panel-id> [--limit <count>] [--json]"
@@ -351,6 +376,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels screen",
+      "localControl": true,
       "summary": "Read a compact current-screen view from a terminal panel.",
       "usage": [
         "runpane panels screen --panel <panel-id> [--limit <count>] [--json]"
@@ -361,6 +387,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels input",
+      "localControl": true,
       "summary": "Send input bytes to a terminal panel.",
       "usage": [
         "runpane panels input --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]"
@@ -373,6 +400,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels submit",
+      "localControl": true,
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
         "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]"
@@ -385,6 +413,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels submit-composer",
+      "localControl": true,
       "summary": "Submit an agent composer using the panel-appropriate key sequence.",
       "usage": [
         "runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter] --yes [--json]"
@@ -397,6 +426,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panels wait",
+      "localControl": true,
       "summary": "Wait for a terminal panel to initialize, become ready/idle, or contain text.",
       "usage": [
         "runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json]"
@@ -407,6 +437,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions list",
+      "localControl": true,
       "summary": "List durable named orchestration Sessions.",
       "usage": [
         "runpane sessions list [--json] [--pane-dir <path>]"
@@ -417,6 +448,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions create",
+      "localControl": true,
       "summary": "Create a durable named orchestration Session and its hidden terminal owner.",
       "usage": [
         "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
@@ -428,6 +460,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions get",
+      "localControl": true,
       "summary": "Read one durable named orchestration Session.",
       "usage": [
         "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]"
@@ -438,6 +471,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions update",
+      "localControl": true,
       "summary": "Update a Session overview from structured JSON.",
       "usage": [
         "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]"
@@ -449,6 +483,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions set-agent",
+      "localControl": true,
       "summary": "Switch the durable terminal agent for a named Session.",
       "usage": [
         "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]"
@@ -460,6 +495,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions associate",
+      "localControl": true,
       "summary": "Associate a user-visible Pane with a named Session.",
       "usage": [
         "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]"
@@ -471,6 +507,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions detach",
+      "localControl": true,
       "summary": "Detach a Pane from a named Session.",
       "usage": [
         "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]"
@@ -482,6 +519,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "sessions overview",
+      "localControl": true,
       "summary": "Read a live status, activity, git, and pull request overview for a named Session.",
       "usage": [
         "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]"

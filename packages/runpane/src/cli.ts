@@ -3,8 +3,9 @@ import * as os from 'node:os';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { runAgentContext } from './agentContext';
-import { helpText, parseRunpaneArgs, type ParsedArgs } from './commands';
+import { helpText, parseRunpaneArgs, type ParsedArgs, type RunpaneCommand } from './commands';
 import { boundary, decodeBoundary } from './boundaryDecoder';
+import { RUNPANE_CONTRACT } from './generated/contract';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
 import {
@@ -91,158 +92,62 @@ export async function main(argv: string[]): Promise<number> {
   return runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
 }
 
-async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
-  if (parsed.command === 'help') {
+type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext) => number | Promise<number>;
+
+const commandHandlers = new Map<string, CommandHandler>(Object.entries({
+  help: (parsed) => {
     console.log(helpText(parsed.helpTopic));
     return 0;
-  }
+  },
+  setup: (_parsed, telemetryContext) => runNoArgsEntrypoint(telemetryContext),
+  version: (parsed) => printVersion(parsed.panePath),
+  doctor: (parsed) => runDoctor(parsed, SOURCE),
+  'daemon repair': runDaemonRepair,
+  'agent-context': runAgentContext,
+  'repos list': runReposList,
+  'repos add': runReposAdd,
+  'panes list': runPanesList,
+  'panes cost': runPanesCost,
+  'sessions list': runSessionsList,
+  'sessions create': runSessionsCreate,
+  'sessions get': runSessionsGet,
+  'sessions update': runSessionsUpdate,
+  'sessions set-agent': runSessionsSetAgent,
+  'sessions associate': runSessionsAssociate,
+  'sessions detach': runSessionsDetach,
+  'sessions overview': runSessionsOverview,
+  'workspace state': runWorkspaceState,
+  watch: runWatch,
+  'panes create': runPanesCreate,
+  'panes adopt': runPanesAdopt,
+  'panes archive': runPanesArchive,
+  'panes pin': (parsed) => runPanesPin(parsed, true),
+  'panes unpin': (parsed) => runPanesPin(parsed, false),
+  'panes rename': runPanesRename,
+  'panes focus': runPanesFocus,
+  'panels list': runPanelsList,
+  'panels create': runPanelsCreate,
+  'panels output': runPanelsOutput,
+  'panels input': runPanelsInput,
+  'panels screen': runPanelsScreen,
+  'panels submit': runPanelsSubmit,
+  'panels submit-composer': runPanelsSubmitComposer,
+  'panels wait': runPanelsWait,
+  'agents doctor': runAgentsDoctor,
+  install: installOrUpdate,
+  update: installOrUpdate,
+} satisfies Record<RunpaneCommand, CommandHandler>));
 
-  if (parsed.command === 'setup') {
-    return runNoArgsEntrypoint(telemetryContext);
-  }
+const contractCommands = new Set<string>(RUNPANE_CONTRACT.commands.map(command => command.name));
+const missingHandlers = [...contractCommands].filter(command => !commandHandlers.has(command));
+const unexpectedHandlers = [...commandHandlers.keys()].filter(command => !contractCommands.has(command));
+if (missingHandlers.length) throw new Error(`Missing command handlers: ${missingHandlers.join(', ')}`);
+if (unexpectedHandlers.length) throw new Error(`Unexpected command handlers: ${unexpectedHandlers.join(', ')}`);
 
-  if (parsed.command === 'version') {
-    return printVersion(parsed.panePath);
-  }
-
-  if (parsed.command === 'doctor') {
-    return runDoctor(parsed, SOURCE);
-  }
-
-  if (parsed.command === 'daemon repair') {
-    return runDaemonRepair(parsed);
-  }
-
-  if (parsed.command === 'agent-context') {
-    return runAgentContext(parsed);
-  }
-
-  if (parsed.command === 'repos list') {
-    return runReposList(parsed);
-  }
-
-  if (parsed.command === 'repos add') {
-    return runReposAdd(parsed);
-  }
-
-  if (parsed.command === 'panes list') {
-    return runPanesList(parsed);
-  }
-
-  if (parsed.command === 'panes cost') {
-    return runPanesCost(parsed);
-  }
-
-  if (parsed.command === 'sessions list') {
-    return runSessionsList(parsed);
-  }
-
-  if (parsed.command === 'sessions create') {
-    return runSessionsCreate(parsed);
-  }
-
-  if (parsed.command === 'sessions get') {
-    return runSessionsGet(parsed);
-  }
-
-  if (parsed.command === 'sessions update') {
-    return runSessionsUpdate(parsed);
-  }
-
-  if (parsed.command === 'sessions set-agent') {
-    return runSessionsSetAgent(parsed);
-  }
-
-  if (parsed.command === 'sessions associate') {
-    return runSessionsAssociate(parsed);
-  }
-
-  if (parsed.command === 'sessions detach') {
-    return runSessionsDetach(parsed);
-  }
-
-  if (parsed.command === 'sessions overview') {
-    return runSessionsOverview(parsed);
-  }
-
-  if (parsed.command === 'workspace state') {
-    return runWorkspaceState(parsed);
-  }
-
-  if (parsed.command === 'watch') {
-    return runWatch(parsed);
-  }
-
-  if (parsed.command === 'panes create') {
-    return runPanesCreate(parsed);
-  }
-
-  if (parsed.command === 'panes adopt') {
-    return runPanesAdopt(parsed);
-  }
-
-  if (parsed.command === 'panes archive') {
-    return runPanesArchive(parsed);
-  }
-
-  if (parsed.command === 'panes pin') {
-    return runPanesPin(parsed, true);
-  }
-
-  if (parsed.command === 'panes unpin') {
-    return runPanesPin(parsed, false);
-  }
-
-  if (parsed.command === 'panes rename') {
-    return runPanesRename(parsed);
-  }
-
-  if (parsed.command === 'panes focus') {
-    return runPanesFocus(parsed);
-  }
-
-  if (parsed.command === 'panels list') {
-    return runPanelsList(parsed);
-  }
-
-  if (parsed.command === 'panels create') {
-    return runPanelsCreate(parsed);
-  }
-
-  if (parsed.command === 'panels output') {
-    return runPanelsOutput(parsed);
-  }
-
-  if (parsed.command === 'panels input') {
-    return runPanelsInput(parsed);
-  }
-
-  if (parsed.command === 'panels screen') {
-    return runPanelsScreen(parsed);
-  }
-
-  if (parsed.command === 'panels submit') {
-    return runPanelsSubmit(parsed);
-  }
-
-  if (parsed.command === 'panels submit-composer') {
-    return runPanelsSubmitComposer(parsed);
-  }
-
-  if (parsed.command === 'panels wait') {
-    return runPanelsWait(parsed);
-  }
-
-  if (parsed.command === 'agents doctor') {
-    return runAgentsDoctor(parsed);
-  }
-
-  if (parsed.command === 'install' || parsed.command === 'update') {
-    return installOrUpdate(parsed, telemetryContext);
-  }
-
-  console.log(helpText());
-  return 0;
+async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
+  const handler = commandHandlers.get(parsed.command);
+  if (!handler) throw new Error(`Unsupported command: ${parsed.command}`);
+  return handler(parsed, telemetryContext);
 }
 
 const daemonRepairResultSchema = boundary.object({
