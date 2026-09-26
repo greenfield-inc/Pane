@@ -12,6 +12,7 @@ export const usePanelStore = create<PanelStore>()(
     activityStatus: {},
     agentStatus: {},
     agentStatusSession: {},
+    agentStatusSnapshotVersion: 0,
     lastActivityAt: {},
     unviewedCompletedActivity: {},
     layouts: {},
@@ -20,6 +21,15 @@ export const usePanelStore = create<PanelStore>()(
     // Pure synchronous state updates
     setPanels: (sessionId, panels) => {
       set((state) => {
+        const panelIds = new Set(panels.map(panel => panel.id));
+        for (const [panelId, owner] of Object.entries(state.agentStatusSession)) {
+          if (owner === sessionId && !panelIds.has(panelId)) {
+            delete state.agentStatus[panelId];
+            delete state.agentStatusSession[panelId];
+            delete state.activityStatus[panelId];
+            delete state.lastActivityAt[panelId];
+          }
+        }
         // Replace panels array entirely to ensure React detects changes
         state.panels[sessionId] = panels;
       });

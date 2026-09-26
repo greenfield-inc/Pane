@@ -118,7 +118,7 @@ export class PaneChatManager {
       const needsAgentSwitch = existingAgent !== agent;
       const needsRepair = needsAgentSwitch || (!isInitialized && this.needsLaunchStateRepair(existingPanel, existingAgent));
       if (needsAgentSwitch && isInitialized) {
-        terminalPanelManager.destroyTerminal(existingPanel.id);
+        await terminalPanelManager.destroyTerminal(existingPanel.id);
       }
 
       if (!isInitialized || needsRepair) {

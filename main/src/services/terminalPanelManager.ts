@@ -197,6 +197,9 @@ interface TerminalProcess {
   screenEmulator?: RemoteTerminalEmulator;
   commandHistory: string[];
   currentCommand: string;
+  /** Coalesces teardown callers and prevents callbacks from reviving a closing terminal. */
+  destroying?: Promise<void>;
+  exitDuringDestroy?: { exitCode: number; signal?: number };
   lastActivity: Date;
   lastOutputAt?: Date;
   outputGeneration: number;
@@ -463,13 +466,16 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private sendInitialInputOnce(panelId: string): void {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal || terminal.destroying) return;
     this.markInitialInputSent(panelId).then((delivery) => {
-      if (!delivery) {
+      if (!delivery || this.terminals.get(panelId) !== terminal || terminal.destroying) {
         return;
       }
 
       this.writeInitialInput(panelId, delivery.input, delivery.submitStrategy);
     }).catch((error) => {
+      if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
       console.warn(`[TerminalPanelManager] Failed to send initial input for panel ${panelId}:`, error);
       this.markInitialInputError(panelId, error instanceof Error ? error.message : String(error)).catch(() => {});
     });
@@ -494,9 +500,12 @@ export class TerminalPanelManager extends EventEmitter {
     input: string,
     submitStrategy: NonNullable<TerminalPanelState['initialInputSubmitStrategy']>,
   ): void {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal || terminal.destroying) return;
     if (submitStrategy === 'codex-ctrl-enter') {
       this.writeToTerminal(panelId, input);
       setTimeout(() => {
+        if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
         this.writeToTerminal(panelId, '\x1b[13;5u\r');
       }, 500);
       return;
@@ -1007,6 +1016,12 @@ export class TerminalPanelManager extends EventEmitter {
       });
     }
 
+    // Another initialization can finish while the ptyHost spawn is awaited.
+    if (this.terminals.has(panel.id)) {
+      ptyProcess.kill();
+      return;
+    }
+
     // Create terminal process object
     const terminalProcess: TerminalProcess = {
       pty: ptyProcess,
@@ -1040,6 +1055,9 @@ export class TerminalPanelManager extends EventEmitter {
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
 
+    // Install lifetime guards before any launch-state persistence can yield.
+    this.setupTerminalHandlers(terminalProcess);
+
     // Begin at-a-glance status detection for AI/CLI agent panels.
     this.registerAgentStatusPanel(terminalProcess);
 
@@ -1059,8 +1077,7 @@ export class TerminalPanelManager extends EventEmitter {
     const initialCommand = existingState?.initialCommand;
     const initialInput = existingState?.initialInput;
 
-    // If we have an initial command, set up the prompt detection listener BEFORE
-    // setupTerminalHandlers so we don't miss early shell output.
+    // Wait for the shell prompt before sending an initial command.
     let commandToRun: string | undefined;
     if (initialCommand) {
       const launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType);
@@ -1074,6 +1091,8 @@ export class TerminalPanelManager extends EventEmitter {
         });
       }
 
+      if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) return;
+
       // Detect the interactive prompt before injecting the command.
       // Previous approaches (fixed 500ms delay, then fire-on-any-data + 300ms) failed
       // because shell init output (MINGW banner, .bashrc) fires before the prompt is ready.
@@ -1081,6 +1100,7 @@ export class TerminalPanelManager extends EventEmitter {
       // so banner lines ending with % or > don't trigger a false positive.
       const panelId = panel.id;
       const injectCommand = () => {
+        if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
         this.writeToTerminal(panelId, commandToRun! + '\r');
 
         // For CLI tool terminals, signal the frontend when the CLI responds
@@ -1090,7 +1110,7 @@ export class TerminalPanelManager extends EventEmitter {
           let onCliOutput: ReturnType<typeof ptyProcess.onData> | null = null;
 
           const signalCliReady = () => {
-            if (cliReadySignaled) return;
+            if (cliReadySignaled || this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
             cliReadySignaled = true;
             if (onCliOutput) onCliOutput.dispose();
 
@@ -1127,17 +1147,18 @@ export class TerminalPanelManager extends EventEmitter {
           // Safety timeout: dismiss after 10s regardless
           setTimeout(signalCliReady, 10000);
         } else if (initialInput) {
-          setTimeout(() => this.sendInitialInputOnce(panelId), 1000);
+          setTimeout(() => {
+            if (this.terminals.get(panelId) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panelId);
+          }, 1000);
         }
       };
 
       this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
     } else if (initialInput) {
-      setTimeout(() => this.sendInitialInputOnce(panel.id), 1000);
+      setTimeout(() => {
+        if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
+      }, 1000);
     }
-
-    // Set up event handlers
-    this.setupTerminalHandlers(terminalProcess);
 
     // Update panel state
     const state = panel.state;
@@ -1164,6 +1185,7 @@ export class TerminalPanelManager extends EventEmitter {
   private setupTerminalHandlers(terminal: TerminalProcess): void {
     // Handle terminal output
     terminal.pty.onData((data: string) => {
+      if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
       // Update last activity
       const outputAt = new Date();
       terminal.lastActivity = outputAt;
@@ -1266,28 +1288,17 @@ export class TerminalPanelManager extends EventEmitter {
     
     // Handle terminal exit
     terminal.pty.onExit((exitCode: { exitCode: number; signal?: number }) => {
-      // A finished agent is "done": settle its status to idle and stop tracking.
-      if (this.agentStatusMonitor.isTracked(terminal.panelId)) {
-        this.emitAgentStatus(terminal, 'idle', 'exit');
-        this.agentStatusMonitor.unregister(terminal.panelId);
-        this.maybeStopAgentStatusPoll();
+      if (this.terminals.get(terminal.panelId) !== terminal) return;
+      if (terminal.destroying) {
+        // The save still owns the emulator; retain exit details until it drains.
+        terminal.exitDuringDestroy ??= exitCode;
+        return;
       }
-
-      // Emit exit event
-      panelManager.emitPanelEvent(
-        terminal.panelId,
-        'terminal:exit',
-        {
-          exitCode: exitCode.exitCode,
-          signal: exitCode.signal,
-          timestamp: new Date().toISOString()
-        }
-      );
-
-      // Clean up
-      terminal.screenEmulator?.dispose();
-      this.terminals.delete(terminal.panelId);
-      this.visibleViewersByPanel.delete(terminal.panelId);
+      try {
+        this.retireTerminal(terminal, exitCode);
+      } finally {
+        terminal.screenEmulator?.dispose();
+      }
 
       // Notify frontend (include signal for crash detection)
       this.sendRendererEvent('terminal:exited', {
@@ -1349,13 +1360,12 @@ export class TerminalPanelManager extends EventEmitter {
       return;
     }
 
+    if (terminal.destroying) return;
     try {
       terminal.pty.write(data);
     } catch (err) {
-      // PTY may have exited between the map lookup and the write call
+      // A write failure alone does not prove process death; onExit owns cleanup.
       console.warn(`[TerminalPanelManager] Failed to write to terminal ${panelId}:`, err);
-      this.terminals.delete(panelId);
-      this.visibleViewersByPanel.delete(panelId);
       return;
     }
     terminal.lastActivity = new Date();
@@ -1368,6 +1378,7 @@ export class TerminalPanelManager extends EventEmitter {
     options: { force?: boolean } = {},
   ): Promise<void> {
     const terminal = this.terminals.get(panelId);
+    if (terminal?.destroying) return;
     if (!terminal) {
       console.warn(`[TerminalPanelManager] Terminal ${panelId} not found for resize`);
       return;
@@ -1404,12 +1415,14 @@ export class TerminalPanelManager extends EventEmitter {
         // Back-to-back TIOCSWINSZ calls can collapse into a single pending signal.
         await new Promise(resolve => setTimeout(resolve, FORCED_REDRAW_TRANSITION_MS));
       }
+      if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
       terminal.pty.resize(cols, rows);
       terminal.screenEmulator?.resize(cols, rows);
       if (options.force) {
         // Let the final application redraw reach our output batch before the
         // renderer removes its activation mask.
         await new Promise(resolve => setTimeout(resolve, FORCED_REDRAW_SETTLE_MS));
+        if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
         this.flushOutputBuffer(terminal);
       }
     } catch (err) {
@@ -1456,9 +1469,16 @@ export class TerminalPanelManager extends EventEmitter {
       console.warn(`[TerminalPanelManager] Could not get CWD for terminal ${panelId}:`, error);
     }
     
-    // Save state to panel
-    const state = panel.state;
+    if (this.terminals.get(panelId) !== terminal || panelManager.getPanel(panelId) !== panel) return;
+    await this.persistTerminalState(terminal, panel, cwd);
+  }
+
+  private async persistTerminalState(terminal: TerminalProcess, panel: ToolPanel, cwd: string): Promise<void> {
+    const panelId = terminal.panelId;
     const restore = await terminal.screenEmulator?.restoreSnapshot();
+    // The worker read can finish after this terminal or panel was replaced.
+    if (this.terminals.get(panelId) !== terminal || panelManager.getPanel(panelId) !== panel) return;
+    const state = panel.state;
     const savedIsAlternateScreen = restore?.isAlternateScreen ?? terminal.isAlternateScreen;
     // Same source as getTerminalState: persist the rendered emulator model for
     // normal buffers so restarts replay a duplicate-free snapshot, not the raw
@@ -1539,6 +1559,8 @@ export class TerminalPanelManager extends EventEmitter {
     if (!terminal) return null;
 
     const restore = await terminal.screenEmulator?.restoreSnapshot();
+    if (this.terminals.get(panelId) !== terminal) return null;
+
     const isAlternateScreen = restore?.isAlternateScreen ?? terminal.isAlternateScreen;
     // Normal-buffer restore content comes from the rendered emulator model, not
     // the raw append log: the log accumulates repaint traffic (forced activation
@@ -1650,6 +1672,7 @@ export class TerminalPanelManager extends EventEmitter {
    */
   private registerAgentStatusPanel(terminal: TerminalProcess): void {
     this.agentStatusMonitor.register(terminal.panelId, Date.now());
+    this.emitAgentStatus(terminal, 'unknown', 'terminal_start');
     this.ensureAgentStatusPoll();
   }
 
@@ -1687,7 +1710,7 @@ export class TerminalPanelManager extends EventEmitter {
   private pollAgentStatus(): void {
     try {
       for (const terminal of this.terminals.values()) {
-        if (!this.agentStatusMonitor.isTracked(terminal.panelId)) continue;
+        if (terminal.destroying || !this.agentStatusMonitor.isTracked(terminal.panelId)) continue;
         const manifest = getManifestForAgent(terminal.agentType);
         const emulator = terminal.screenEmulator;
         if (!emulator) continue;
@@ -1713,49 +1736,89 @@ export class TerminalPanelManager extends EventEmitter {
     }
   }
 
-  destroyTerminal(panelId: string): void {
+  destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {
     const terminal = this.terminals.get(panelId);
-    if (!terminal) {
-      return;
-    }
+    if (!terminal) return Promise.resolve();
+    terminal.destroying ??= this.finishDestroyTerminal(terminal, options.saveState !== false);
+    return terminal.destroying;
+  }
 
-    // Save state before destroying. `saveTerminalState` is async, so a
-    // surrounding synchronous `try` could never observe its rejection — and
-    // `panelManager.updatePanel` writes to SQLite, which can reject.
-    this.saveTerminalState(panelId).catch((error) => {
+  private async finishDestroyTerminal(terminal: TerminalProcess, saveState: boolean): Promise<void> {
+    const panelId = terminal.panelId;
+    // Stop detection as soon as teardown begins, so output during the save
+    // cannot announce completion. Keep the emulator alive through any snapshot save.
+    this.agentStatusMonitor.unregister(panelId);
+    this.maybeStopAgentStatusPoll();
+    try {
+      if (saveState) await this.saveTerminalState(panelId);
+    } catch (error) {
       console.error(`[TerminalPanelManager] Failed to save state for ${panelId}:`, error);
-    });
+    }
+    if (this.terminals.get(panelId) !== terminal) return;
 
-    // Clear timers
+    try {
+      this.retireTerminal(terminal, terminal.exitDuringDestroy);
+    } finally {
+      // Event subscribers can throw; cleanup must still reclaim this lifetime.
+      try {
+        terminal.screenEmulator?.dispose();
+      } catch (error) {
+        console.warn(`[TerminalPanelManager] Emulator dispose failed for ${panelId}:`, error);
+      }
+      if (!terminal.exitDuringDestroy) {
+        try {
+          if (terminal.isWSL) {
+            try {
+              terminal.pty.write('exit\r');
+            } finally {
+              // Reclaim the PTY even if the graceful exit write failed.
+              setTimeout(() => {
+                try { terminal.pty.kill(); } catch { /* already exited */ }
+              }, 500);
+            }
+          } else {
+            terminal.pty.kill();
+          }
+        } catch (error) {
+          console.error(`[TerminalPanelManager] Error killing terminal ${panelId}:`, error);
+        }
+      }
+    }
+  }
+
+  /** Retire exactly one terminal lifetime, before kill can call back synchronously. */
+  private retireTerminal(terminal: TerminalProcess, exit?: { exitCode: number; signal?: number }): void {
+    const panelId = terminal.panelId;
+    if (this.terminals.get(panelId) !== terminal) return;
     if (terminal.outputFlushTimer) {
       clearTimeout(terminal.outputFlushTimer);
       terminal.outputFlushTimer = null;
     }
-    disposeFlowControlRecord(terminal.flowControl);
-    this.flushOutputBuffer(terminal);
-    terminal.screenEmulator?.dispose();
-
-    // Kill the PTY process
     try {
-      if (terminal.isWSL) {
-        terminal.pty.write('exit\r');
-        // Give WSL a moment to gracefully exit
-        setTimeout(() => {
-          try { terminal.pty.kill(); } catch { /* already exited */ }
-        }, 500);
-      } else {
-        terminal.pty.kill();
-      }
-    } catch (error) {
-      console.error(`[TerminalPanelManager] Error killing terminal ${panelId}:`, error);
+      this.flushOutputBuffer(terminal);
+    } finally {
+      disposeFlowControlRecord(terminal.flowControl);
+      this.agentStatusMonitor.unregister(panelId);
+      this.terminals.delete(panelId);
+      this.visibleViewersByPanel.delete(panelId);
+      this.serializedBuffers.delete(panelId);
+      this.maybeStopAgentStatusPoll();
     }
+    this.emitAgentStatus(terminal, 'idle', exit ? 'exit' : 'destroyed');
 
-    // Remove from maps
-    this.terminals.delete(panelId);
-    this.visibleViewersByPanel.delete(panelId);
-    this.serializedBuffers.delete(panelId);
-    this.agentStatusMonitor.unregister(panelId);
-    this.maybeStopAgentStatusPoll();
+    const data = { ...exit, timestamp: new Date().toISOString() };
+    if (panelManager.getPanel(panelId)) {
+      void panelManager.emitPanelEvent(panelId, 'terminal:exit', data);
+    } else {
+      // The panel may already be deleted. Its terminal still owns enough
+      // identity to notify the journal and transport consumers of the exit.
+      this.sendRendererEvent('panel:event', {
+        type: 'terminal:exit',
+        source: { panelId, sessionId: terminal.sessionId, panelType: 'terminal' },
+        data,
+        timestamp: data.timestamp,
+      });
+    }
   }
 
   /**

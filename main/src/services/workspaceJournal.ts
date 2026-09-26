@@ -258,6 +258,20 @@ export class WorkspaceJournal implements PaneEventSink {
     reason?: string | null;
   }): void {
     const { panelId, sessionId: paneId, state } = payload;
+    if (payload.reason === 'terminal_start') {
+      this.exitedPanels.delete(panelId);
+      this.stateByPanel.delete(panelId);
+      this.readySinceByPanel.delete(panelId);
+      return;
+    }
+    // Ending the process is not a completed agent turn. terminal:exit records
+    // the lifecycle event separately, including user destruction and archive.
+    if (payload.reason === 'exit' || payload.reason === 'destroyed') {
+      this.stateByPanel.delete(panelId);
+      this.readySinceByPanel.delete(panelId);
+      return;
+    }
+    this.exitedPanels.delete(panelId);
     const panel = this.resolvePanel?.(panelId);
     if (!panel?.isCliPanel) return;
 
@@ -285,7 +299,7 @@ export class WorkspaceJournal implements PaneEventSink {
       agentType: panel?.agentType,
       from: previous,
       to: state,
-      source: payload.reason === 'exit' ? 'exit' : 'agent',
+      source: 'agent',
       reason: payload.reason ?? null,
       settledMs,
     };
