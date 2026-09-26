@@ -235,6 +235,13 @@ test('opens Usage & Limits from expanded and compact navigation', async ({ page 
 
   await page.getByTestId('usage-nav').click();
   await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
+  const providerFilters = page.getByRole('group', { name: 'Provider', exact: true });
+  for (const label of ['All', 'Claude', 'Codex']) {
+    await expect(providerFilters.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  const limits = page.getByRole('region', { name: 'Provider limits' });
+  await expect(limits).toContainText('OpenAI');
+  await expect(limits.getByText('58% left', { exact: true })).toBeVisible();
   await expect(page.getByText('6.1M', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('gpt-5.6-sol', { exact: true })).toBeVisible();
   await expect(page.getByText('Usage fixture', { exact: true }).last()).toBeVisible();
