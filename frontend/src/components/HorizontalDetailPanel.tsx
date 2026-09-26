@@ -1,5 +1,6 @@
+import { detailBranchLabel, detailIdeItems, remoteIdeTooltip } from './detail-panel-options';
 import React, { useMemo } from 'react';
-import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronUp, Code2, GitBranch, Settings, TerminalSquare } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronUp, Code2, GitBranch, Link, Settings } from 'lucide-react';
 import { useSession } from '../contexts/SessionContext';
 import { useNavigationStore } from '../stores/navigationStore';
 import { Button } from './ui/Button';
@@ -61,20 +62,10 @@ export function HorizontalDetailPanel({
     priority: 30,
     ownerElement: () => detailPanelRef.current,
   });
-  const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
-  const ideItems = useMemo(() => {
-    if (!sessionContext?.onOpenIDEWithCommand) return [];
-    const handler = sessionContext.onOpenIDEWithCommand;
-    const configured = sessionContext.configuredIDECommand?.trim();
-    const isCustom = configured && !['code .', 'cursor .'].includes(configured);
-    return [
-      ...(isCustom
-        ? [{ id: 'configured', label: configured, description: 'Project default', icon: TerminalSquare, onClick: () => handler() }]
-        : []),
-      { id: 'vscode', label: 'VS Code', description: 'code .', icon: Code2, onClick: () => handler('vscode') },
-      { id: 'cursor', label: 'Cursor', description: 'cursor .', icon: Code2, onClick: () => handler('cursor') },
-    ];
-  }, [sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand]);
+  const ideItems = useMemo(
+    () => detailIdeItems(sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand),
+    [sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand],
+  );
 
   if (!sessionContext) return null;
 
@@ -85,6 +76,8 @@ export function HorizontalDetailPanel({
     gitCommands,
     onOpenIDEWithCommand,
     onConfigureIDE,
+    onSetTracking,
+    trackingBranch,
     isRemoteMode,
   } = sessionContext;
   const gitStatus = session.gitStatus;
@@ -150,7 +143,7 @@ export function HorizontalDetailPanel({
 
             <GitBranch className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
             <span className="text-sm text-text-primary font-medium truncate max-w-[150px]">
-              {gitCommands?.currentBranch?.trim() || session.baseBranch?.replace(/^origin\//, '') || 'unknown'}
+              {detailBranchLabel(gitCommands?.currentBranch, session.baseBranch)}
             </span>
 
             {!isProject && gitStatus && (
@@ -169,12 +162,13 @@ export function HorizontalDetailPanel({
               </Tooltip>
             )}
 
-            {!gitUnavailable && !isProject && gitBranchActions?.map(action => (
+            {!gitUnavailable && gitBranchActions?.map(action => (
               <Tooltip key={action.id} content={action.label + (action.description ? ` — ${action.description}` : '')} side="top">
                 <Button
                   variant="ghost"
                   size="sm"
                   className="!px-1.5 !py-0.5 text-xs h-6 flex-shrink-0"
+                  aria-label={action.label}
                   onClick={action.onClick}
                   disabled={action.disabled || isMerging}
                 >
@@ -183,10 +177,18 @@ export function HorizontalDetailPanel({
               </Tooltip>
             ))}
 
+            {!gitUnavailable && onSetTracking && (
+              <Tooltip content={trackingBranch ? `Set upstream tracking branch (currently ${trackingBranch})` : 'Set upstream tracking branch for git pull/push'} side="top">
+                <Button variant="ghost" size="sm" className="!px-1.5 !py-0.5 text-xs h-6 flex-shrink-0" aria-label="Set Tracking" onClick={onSetTracking} disabled={isMerging}>
+                  <Link className="w-3 h-3" />
+                </Button>
+              </Tooltip>
+            )}
+
             {onOpenIDEWithCommand && (isRemoteMode ? (
               <Tooltip content={remoteIdeTooltip} side="top">
                 <span>
-                  <Button variant="ghost" size="sm" className="!px-1.5 !py-0.5 text-xs h-6 flex-shrink-0" disabled>
+                  <Button variant="ghost" size="sm" className="!px-1.5 !py-0.5 text-xs h-6 flex-shrink-0" aria-label="Open in IDE" disabled>
                     <Code2 className="w-3 h-3" />
                   </Button>
                 </span>
@@ -195,7 +197,7 @@ export function HorizontalDetailPanel({
               <Dropdown
                 trigger={(
                   <Tooltip content="Open in IDE" side="top">
-                    <Button variant="ghost" size="sm" className="!px-1.5 !py-0.5 text-xs h-6 flex-shrink-0">
+                    <Button variant="ghost" size="sm" className="!px-1.5 !py-0.5 text-xs h-6 flex-shrink-0" aria-label="Open in IDE">
                       <Code2 className="w-3 h-3" />
                     </Button>
                   </Tooltip>

@@ -1,3 +1,4 @@
+import { panelCloseSuccessor } from '../utils/panel-close-successor';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API } from '../utils/api';
 import { useSessionStore } from '../stores/sessionStore';
@@ -199,23 +200,22 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     async (panel: ToolPanel) => {
       if (!mainRepoSessionId) return;
 
-      // Activate the neighbouring working tab (never an inspector panel).
-      const panelIndex = workingPanels.findIndex(p => p.id === panel.id);
-      const nextPanel = workingPanels[panelIndex + 1] || workingPanels[panelIndex - 1];
+      const activeId = currentActivePanel?.id;
+      const nextId = panelCloseSuccessor(workingPanels.map(p => p.id), activeId, panel.id);
 
       // Remove from store first for immediate UI update
       removePanel(mainRepoSessionId, panel.id);
 
       // Set next active panel if available
-      if (nextPanel) {
-        setActivePanelInStore(mainRepoSessionId, nextPanel.id);
-        await panelApi.setActivePanel(mainRepoSessionId, nextPanel.id);
+      if (nextId && nextId !== activeId) {
+        setActivePanelInStore(mainRepoSessionId, nextId);
+        await panelApi.setActivePanel(mainRepoSessionId, nextId);
       }
 
       // Delete on backend
       await panelApi.deletePanel(panel.id);
     },
-    [mainRepoSessionId, workingPanels, removePanel, setActivePanelInStore]
+    [mainRepoSessionId, workingPanels, currentActivePanel, removePanel, setActivePanelInStore]
   );
 
   const handlePanelCreate = useCallback(
