@@ -399,6 +399,7 @@ test.describe('Settings', () => {
 
     const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
     await expect(confirm).toBeVisible();
+    await expect(confirm.getByRole('button', { name: 'Discard Changes' })).toBeFocused();
     await confirm.getByRole('button', { name: 'Stay' }).focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Worktrees & Git' })).toBeVisible();
