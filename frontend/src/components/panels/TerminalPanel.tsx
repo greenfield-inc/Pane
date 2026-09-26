@@ -741,13 +741,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       // width — resizing after getState would replay a stale-width snapshot,
       // and the normal-buffer path has no forced app redraw left to repair it.
       await resizePtyToFit();
+      // Switching sessions can dispose this xterm while a resize reply is pending.
+      if (xtermRef.current !== terminal) return;
       const state = await window.electronAPI.invoke('terminal:getState', panel.id);
+      if (xtermRef.current !== terminal) return;
       if (state?.isAlternateScreen) {
         // Renderer refresh alone cannot repair an application frame that was
         // restored before the visible grid settled. Ask main for a forced resize
         // (single PTY row nudge) so the foreground app receives a real resize
         // notification and repaints at the settled grid.
         await resizePtyToFit(true);
+        if (xtermRef.current !== terminal) return;
         if (terminal.rows > 0) {
           terminal.refresh(0, terminal.rows - 1);
         }
@@ -807,6 +811,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     const wasNearBottom = isNearBottomRef.current || distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_ROWS;
 
     await resizePtyToFit();
+    // A refocus refresh may finish after switching to another session's terminal.
+    if (xtermRef.current !== terminal) return;
     if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
 
     if (wasNearBottom) {

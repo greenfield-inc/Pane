@@ -94,6 +94,7 @@ interface BootFixtureResult {
 declare global {
   interface Window {
     __maskAppearances?: MaskAppearance[];
+    __resumeTerminalRequest?: () => void;
   }
 }
 
@@ -342,6 +343,59 @@ test('session remount retains full recovery', async ({ page }) => {
   ))).toBeGreaterThan(1);
   expect(await maskAppearances(page, panel)).not.toEqual([]);
 });
+
+for (const pendingRequest of ['refocus-resize', 'forced-resize'] as const) {
+  test(`switching sessions during ${pendingRequest} does not produce a disposed-terminal error`, async ({ page }) => {
+    const { panel } = await bootFixture(page, 'performance', pendingRequest === 'forced-resize');
+    const failures: string[] = [];
+    page.on('dialog', async (dialog) => {
+      failures.push(dialog.message());
+      await dialog.dismiss();
+    });
+    page.on('pageerror', (error) => failures.push(error.message));
+    page.on('console', (message) => {
+      if (message.text().includes('Failed to refresh terminal')) failures.push(message.text());
+    });
+
+    // Hold one resize reply until switching sessions has disposed its caller's xterm.
+    await page.evaluate(({ panelId, pendingRequest }) => {
+      const invoke = window.electronAPI.invoke;
+      let held = false;
+      window.electronAPI.invoke = async (channel, ...args) => {
+        const matchesRequest = channel === 'terminal:resize' && (pendingRequest !== 'forced-resize'
+          || (args[3] instanceof Object && 'force' in args[3] && args[3].force === true));
+        if (!held && args[0] === panelId && matchesRequest) {
+          held = true;
+          await new Promise<void>((resolve) => { window.__resumeTerminalRequest = resolve; });
+        }
+        return invoke(channel, ...args);
+      };
+    }, { panelId: primaryPanel.id, pendingRequest });
+
+    if (pendingRequest === 'refocus-resize') {
+      await emitFocus(page, false);
+      await waitForWindowFocusState(page, false);
+      await emitFocus(page, true);
+    } else {
+      await panel.hover();
+      await panel.getByTitle('Refresh terminal').click();
+    }
+    await expect.poll(() => page.evaluate(() => window.__resumeTerminalRequest !== undefined)).toBe(true);
+
+    await page.getByRole('button', { name: otherSession.name, exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    const other = page.getByRole('tabpanel', { name: otherPanel.title });
+    await expect(other.locator('.xterm-screen')).toBeVisible();
+    await expect(other.getByTestId('terminal-activation-mask')).toHaveCount(0);
+    const before = await readSnapshot(other);
+
+    await page.evaluate(() => { window.__resumeTerminalRequest?.(); });
+    await advanceActivation(page);
+
+    expect(failures).toEqual([]);
+    expect(await readSnapshot(other)).toEqual(before);
+  });
+}
 
 test('WebGL context loss keeps content readable without an activation mask', async ({ page }) => {
   const { panel, webglLoaded } = await bootFixture(page);
