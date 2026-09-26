@@ -70,7 +70,7 @@ print(main(['panes', 'pin', '--pane', 'p1', '--yes']))
 print(main(['panes', 'unpin', '--pane', 'p2', '--yes']))
 `);
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), '["p1",true]\n7\n["p2",false]\n7');
+    assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['["p1",true]', '7', '["p2",false]', '7']);
   });
 }
 
