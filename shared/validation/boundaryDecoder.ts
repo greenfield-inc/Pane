@@ -1,4 +1,4 @@
-export type DecodePath = readonly (string | number)[];
+type DecodePath = readonly (string | number)[];
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
 
@@ -67,15 +67,17 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
   schemas: Schemas,
   current: BoundaryCursor,
 ): InferSchema<Schemas[number]> {
+  const failures: string[] = [];
   for (const schema of schemas) {
     try {
       // SAFETY: Schemas[number] is the schema being decoded in this iteration.
       return schema.decode(current) as InferSchema<Schemas[number]>;
     } catch (error) {
       if (!(error instanceof BoundaryDecodeError)) throw error;
+      failures.push(error.message);
     }
   }
-  return current.fail("did not match any allowed shape");
+  return current.fail(`did not match any allowed shape: ${failures.join("; ")}`);
 }
 
 function decodeJsonValue(current: BoundaryCursor): JsonValue {
