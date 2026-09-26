@@ -5,7 +5,12 @@ test('session lifecycle events update the sidebar without refetching on terminal
   const host = await openConnectedRemotePwa(page);
   await expect(page.getByRole('tab', { name: 'claude', exact: true })).toBeVisible();
   const reads = host.invocations.filter(channel => channel === 'sessions:get-all-with-projects').length;
-  const updated = { ...host.project.sessions[0], name: 'Renamed from host', status: 'stopped' };
+  const updated = {
+    ...host.project.sessions[0], name: 'Renamed from host', status: 'stopped',
+    statusMessage: null, pid: null, lastViewedAt: null, folderId: null,
+    runStartedAt: null, baseCommit: null, baseBranch: null,
+    isMainRepo: 0, isFavorite: 0, archived: 0,
+  };
   const created = { ...updated, id: 'created-on-host', name: 'Created from host' };
   await page.evaluate(({ updated, created }) => {
     window.__paneRemoteEmit?.('session:updated', [updated]);
@@ -15,6 +20,9 @@ test('session lifecycle events update the sidebar without refetching on terminal
   await expect(page.getByRole('button', { name: 'Renamed from host', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Created from host', exact: true })).toBeVisible();
   expect(host.invocations.filter(channel => channel === 'sessions:get-all-with-projects')).toHaveLength(reads);
+  await page.evaluate(session => window.__paneRemoteEmit?.('session:updated', [{ ...session, isFavorite: 1 }]), created);
+  await expect(page.getByText('Pinned', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unpin pane', exact: true }).first()).toBeVisible();
   await page.evaluate(session => window.__paneRemoteEmit?.('session:deleted', [session]), updated);
   await expect(page.getByRole('button', { name: 'Renamed from host', exact: true })).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Select a remote pane' })).toBeVisible();
@@ -66,3 +74,20 @@ test('native Back stays on the pane chooser through updates and reconnects', asy
   await page.getByRole('button', { name: 'Back stays here running', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'claude', exact: true })).toBeVisible();
 });
+
+for (const flag of ['isHidden', 'isMainRepo'] as const) {
+  test(`${flag} session events remove panes excluded by the host list`, async ({ page }) => {
+    const host = await openConnectedRemotePwa(page);
+    await expect(page.getByRole('tab', { name: 'claude', exact: true })).toBeVisible();
+    const excluded = { ...host.project.sessions[0], [flag]: true };
+    await page.evaluate(session => window.__paneRemoteEmit?.('session:updated', [session]), excluded);
+    await expect(page.getByRole('button', { name: `${excluded.name} running`, exact: true })).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'Select a remote pane' })).toBeVisible();
+    await page.evaluate(session => {
+      window.__paneRemoteEmit?.('session:created', [{ ...session, id: 'excluded-new', name: 'Excluded new pane' }]);
+      window.__paneRemoteEmit?.('session:created', [{ ...session, id: 'visible-new', name: 'Visible new pane', isHidden: false, isMainRepo: false }]);
+    }, excluded);
+    await expect(page.getByRole('button', { name: 'Visible new pane running', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Excluded new pane running', exact: true })).toBeHidden();
+  });
+}
