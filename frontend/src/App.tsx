@@ -67,11 +67,6 @@ import { boundary, decodeOptionalBoundary } from '../../shared/validation/bounda
 // Stable empty array to avoid creating new references in render
 const EMPTY_TERMINAL_SHORTCUTS: TerminalShortcut[] = [];
 
-const preferenceResponseSchema = boundary.object({
-  success: boundary.boolean,
-  data: boundary.optional(boundary.string),
-  error: boundary.optional(boundary.string),
-});
 function App() {
   const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);
   const [hasCheckedAnalyticsDefault, setHasCheckedAnalyticsDefault] = useState(false);
@@ -344,18 +339,18 @@ function App() {
     let cancelled = false;
 
     const checkAnalyticsDefault = async () => {
-      if (!window.electron?.invoke) {
+      if (!window.electronAPI?.preferences) {
         if (!cancelled) setHasCheckedAnalyticsDefault(true);
         return;
       }
 
       try {
         const [legacyConsentResult, defaultAppliedResult] = await Promise.all([
-          window.electron.invoke('preferences:get', 'analytics_consent_shown'),
-          window.electron.invoke('preferences:get', 'analytics_default_applied'),
+          API.preferences.get('analytics_consent_shown'),
+          API.preferences.get('analytics_default_applied'),
         ]);
-        const hasLegacyChoice = decodeOptionalBoundary(legacyConsentResult, preferenceResponseSchema)?.data === 'true';
-        const hasAppliedDefault = decodeOptionalBoundary(defaultAppliedResult, preferenceResponseSchema)?.data === 'true';
+        const hasLegacyChoice = legacyConsentResult === 'true';
+        const hasAppliedDefault = defaultAppliedResult === 'true';
 
         if (!hasLegacyChoice && !hasAppliedDefault) {
           const identity = await resolveAnalyticsIdentity();
@@ -376,7 +371,7 @@ function App() {
           await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
           await captureFirstOpenOnce(identity);
           flushPendingEvents();
-          await window.electron.invoke('preferences:set', 'analytics_default_applied', 'true');
+          await API.preferences.set('analytics_default_applied', 'true');
           if (appConfig.analytics?.enabled !== true) {
             await useConfigStore.getState().updateConfig({
               analytics: { ...appConfig.analytics, enabled: true },
@@ -411,11 +406,11 @@ function App() {
 
       try {
         const [legacyConsentResult, defaultAppliedResult] = await Promise.all([
-          window.electron?.invoke?.('preferences:get', 'analytics_consent_shown'),
-          window.electron?.invoke?.('preferences:get', 'analytics_default_applied'),
+          API.preferences.get('analytics_consent_shown'),
+          API.preferences.get('analytics_default_applied'),
         ]);
         consentDecided = [legacyConsentResult, defaultAppliedResult].some((result) =>
-          decodeOptionalBoundary(result, preferenceResponseSchema)?.data === 'true'
+          result === 'true'
         );
       } catch (error) {
         console.error('[App] Error resolving analytics consent state:', error);
@@ -521,16 +516,13 @@ function App() {
     let cancelled = false;
 
     const checkOnboarding = async () => {
-      if (!window.electron?.invoke) {
+      if (!window.electronAPI?.preferences) {
         if (!cancelled) setHasCheckedOnboarding(true);
         return;
       }
       try {
-        const result = decodeOptionalBoundary(
-          await window.electron.invoke('preferences:get', ONBOARDING_REPO_SETUP_PREFERENCE),
-          preferenceResponseSchema,
-        );
-        if (result?.data !== 'true') {
+        const result = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
+        if (result !== 'true') {
           // Only show onboarding for truly new users (no existing projects).
           // Existing users who upgrade won't have this preference but already have projects.
           const projectsRes = await API.projects.getAll();
@@ -564,17 +556,17 @@ function App() {
     let cancelled = false;
 
     const checkInitialState = async () => {
-      if (!window.electron?.invoke) {
+      if (!window.electronAPI?.preferences) {
         if (!cancelled) setHasResolvedStartupDialogs(true);
         return;
       }
 
       try {
         // Get preferences from database
-        const hideWelcomeResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', 'hide_welcome'), preferenceResponseSchema);
-        const welcomeShownResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', 'welcome_shown'), preferenceResponseSchema);
-        const hideWelcome = hideWelcomeResult?.data === 'true';
-        const hasSeenWelcome = welcomeShownResult?.data === 'true';
+        const hideWelcomeResult = await API.preferences.get('hide_welcome');
+        const welcomeShownResult = await API.preferences.get('welcome_shown');
+        const hideWelcome = hideWelcomeResult === 'true';
+        const hasSeenWelcome = welcomeShownResult === 'true';
 
 
         // If user explicitly said "don't show again", respect that preference
@@ -596,7 +588,7 @@ function App() {
             if (isFirstTimeUser || isReturningUserWithNoData) {
               if (!cancelled) setIsWelcomeOpen(true);
               // Mark that welcome has been shown at least once
-              await window.electron.invoke('preferences:set', 'welcome_shown', 'true');
+              await API.preferences.set('welcome_shown', 'true');
             }
           } catch (error) {
             console.error('Error checking initial state:', error);
@@ -633,21 +625,21 @@ function App() {
     let cancelled = false;
 
     const checkDeferredSupportPrompt = async () => {
-      if (!window.electron?.invoke || !window.electronAPI?.onboarding?.detectEnvironment) {
+      if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
         return;
       }
 
       try {
-        const onboardingResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', ONBOARDING_REPO_SETUP_PREFERENCE), preferenceResponseSchema);
-        if (onboardingResult?.data !== 'true') return;
+        const onboardingResult = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
+        if (onboardingResult !== 'true') return;
 
-        const promptResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE), preferenceResponseSchema);
-        if (promptResult?.data === 'true') return;
+        const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
+        if (promptResult === 'true') return;
 
         const envResult = await window.electronAPI.onboarding.detectEnvironment();
         if (!envResult.success || envResult.data?.ghReady !== true) return;
 
-        await window.electron.invoke('preferences:set', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
+        await API.preferences.set(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
         capture('onboarding_support_prompt_shown', {
           source: 'future_launch',
           gh_status: 'gh_ready',

@@ -350,7 +350,7 @@ test.describe('Settings', () => {
     expect(config.autoCheckUpdates).toBe(true);
   });
 
-  test('recovers from config-load failure and preference-write failure', async ({ page }) => {
+  test('recovers from config-load failure and preference-write failure', async ({ page }, testInfo) => {
     await bootSettings(page, { configGetFailures: 100 });
     await expect(page.getByRole('alert')).toContainText('Mock config read failed');
     await page.evaluate(() => {
@@ -370,6 +370,7 @@ test.describe('Settings', () => {
     await page.getByRole('radio', { name: 'Two rows' }).click();
     await expect(page.getByRole('alert')).toContainText('Preference database is read-only');
     await expect(page.getByRole('radio', { name: 'Single row' })).toHaveAttribute('aria-checked', 'true');
+    await page.screenshot({ path: testInfo.outputPath('preference-write-rejected.png') });
   });
 
   test('applies a staged worktree editor without closing settings', async ({ page }) => {

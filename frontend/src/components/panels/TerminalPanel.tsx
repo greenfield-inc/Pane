@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import { API } from '../../utils/api';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { WebglAddon } from '@xterm/addon-webgl';
@@ -1721,14 +1722,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             onCopy: handleCopy,
             onStateChange: () => interceptor.notifyStateChange(),
             onForceCancel: () => interceptor.forceCancel(),
-            getPreference: async (key: string) => {
-              const resp = await window.electronAPI.invoke('preferences:get', key);
-              return resp?.success
-                ? decodeOptionalBoundary(resp.data, boundary.nullable(boundary.string)) ?? null
-                : null;
-            },
+            getPreference: (key: string) => API.preferences.get(key).catch(() => null),
             setPreference: (key: string, value: string) => {
-              window.electronAPI.invoke('preferences:set', key, value);
+              void API.preferences.set(key, value).catch(error => console.error('[TerminalPanel] Failed to save preference:', error));
             },
           }));
 

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -331,6 +332,7 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  preferences: createPreferencesApi(invokeIpc),
   // Generic invoke method for direct IPC calls
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   

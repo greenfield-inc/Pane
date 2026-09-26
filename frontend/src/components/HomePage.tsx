@@ -175,9 +175,9 @@ function DiscordBanner() {
 
   useEffect(() => {
     let cancelled = false;
-    void window.electron?.invoke('preferences:get', HIDE_DISCORD_PREFERENCE)
-      .then((result) => {
-        if (!cancelled) setIsVisible(result?.success === true && result.data !== 'true');
+    void API.preferences.get(HIDE_DISCORD_PREFERENCE)
+      .then((value) => {
+        if (!cancelled) setIsVisible(value !== 'true');
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -185,7 +185,7 @@ function DiscordBanner() {
 
   const dismiss = useCallback(() => {
     setIsVisible(false);
-    void window.electron?.invoke('preferences:set', HIDE_DISCORD_PREFERENCE, 'true');
+    void API.preferences.set(HIDE_DISCORD_PREFERENCE, 'true').catch(() => setIsVisible(true));
   }, []);
 
   const handleJoin = useCallback(async () => {
