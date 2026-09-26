@@ -1,5 +1,6 @@
+import { detailBranchLabel, detailIdeItems, remoteIdeTooltip } from './detail-panel-options';
 import React, { useMemo } from 'react';
-import { AlertTriangle, ArrowLeftRight, Code2, GitBranch, Link, Settings, TerminalSquare } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Code2, GitBranch, Link, Settings } from 'lucide-react';
 import { useSession } from '../contexts/SessionContext';
 import { useNavigationStore } from '../stores/navigationStore';
 import { DetailPanelGitActions } from './DetailPanelGitActions';
@@ -39,7 +40,6 @@ interface DetailPanelProps {
 }
 
 const sidebarButtonClass = 'w-full justify-start text-sm !px-2';
-const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return <h3 className="text-xs uppercase text-text-tertiary font-medium mb-2 px-1">{children}</h3>;
@@ -85,19 +85,10 @@ export function DetailPanel({
     priority: 30,
     ownerElement: () => detailPanelRef.current,
   });
-  const ideItems = useMemo(() => {
-    if (!sessionContext?.onOpenIDEWithCommand) return [];
-    const handler = sessionContext.onOpenIDEWithCommand;
-    const configured = sessionContext.configuredIDECommand?.trim();
-    const isCustom = configured && !['code .', 'cursor .'].includes(configured);
-    return [
-      ...(isCustom
-        ? [{ id: 'configured', label: configured, description: 'Project default', icon: TerminalSquare, onClick: () => handler() }]
-        : []),
-      { id: 'vscode', label: 'VS Code', description: 'code .', icon: Code2, onClick: () => handler('vscode') },
-      { id: 'cursor', label: 'Cursor', description: 'cursor .', icon: Code2, onClick: () => handler('cursor') },
-    ];
-  }, [sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand]);
+  const ideItems = useMemo(
+    () => detailIdeItems(sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand),
+    [sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand],
+  );
 
   if (!sessionContext) return null;
   if (orientation === 'horizontal') {
@@ -182,7 +173,7 @@ export function DetailPanel({
             <GitBranch className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
             <span className="flex flex-col leading-tight min-w-0 flex-1">
               <span className="text-sm text-text-primary font-medium truncate">
-                {gitCommands?.currentBranch?.trim() || session.baseBranch?.replace(/^origin\//, '') || 'unknown'}
+                {detailBranchLabel(gitCommands?.currentBranch, session.baseBranch)}
               </span>
               {session.baseBranch && gitCommands?.currentBranch
                 && gitCommands.currentBranch !== session.baseBranch.replace(/^origin\//, '') && (

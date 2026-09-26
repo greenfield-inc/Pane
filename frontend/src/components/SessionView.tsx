@@ -1,3 +1,4 @@
+import { panelCloseSuccessor } from '../utils/panel-close-successor';
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -922,9 +923,7 @@ export const SessionView = memo(() => {
           // active tab; closing a background tab keeps the current one
           // (matching VS Code).
           if (group && group.activePanelId === panel.id) {
-            const remainingInGroup = group.panelIds.filter(id => id !== panel.id);
-            const panelIndex = group.panelIds.indexOf(panel.id);
-            const nextInGroup = remainingInGroup[Math.min(panelIndex, remainingInGroup.length - 1)];
+            const nextInGroup = panelCloseSuccessor(group.panelIds, group.activePanelId, panel.id);
             if (nextInGroup) {
               // Update the group's activePanelId
               function fixActive(node: SessionPanelLayout['root']): SessionPanelLayout['root'] {
@@ -945,18 +944,18 @@ export const SessionView = memo(() => {
         }
       } else {
         // Fallback: no layout, use old logic
-        const panelIndex = sessionPanels.findIndex(p => p.id === panel.id);
-        const nextPanel = sessionPanels[panelIndex + 1] || sessionPanels[panelIndex - 1];
-        if (nextPanel) {
-          setActivePanelInStore(sid, nextPanel.id);
-          await panelApi.setActivePanel(sid, nextPanel.id);
+        const activeId = currentActivePanel?.id;
+        const nextId = panelCloseSuccessor(tabBarPanels.map(p => p.id), activeId, panel.id);
+        if (nextId && nextId !== activeId) {
+          setActivePanelInStore(sid, nextId);
+          await panelApi.setActivePanel(sid, nextId);
         }
       }
 
       // Delete on backend
       await panelApi.deletePanel(panel.id);
     },
-    [activeSession, sessionPanels, removePanel, setActivePanelInStore, applyLayout]
+    [activeSession, currentActivePanel, tabBarPanels, removePanel, setActivePanelInStore, applyLayout]
   );
 
   const handlePanelCreate = useCallback(
