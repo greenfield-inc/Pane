@@ -460,7 +460,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // Script operations
     hasRunScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:has-run-script', sessionId),
-    getRunningSession: (): Promise<IPCResponse> => invokeIpc('sessions:get-running-session'),
     runScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:run-script', sessionId),
     stopScript: (sessionId?: string): Promise<IPCResponse> => invokeIpc('sessions:stop-script', sessionId),
     runTerminalCommand: (sessionId: string, command: string): Promise<IPCResponse> => invokeIpc('sessions:run-terminal-command', sessionId, command),

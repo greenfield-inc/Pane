@@ -451,7 +451,7 @@ export class TaskQueue {
           });
 
           const buildCommands = buildScript.split('\n').filter(cmd => cmd.trim());
-          const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath);
+          const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath, ctx.commandRunner);
           console.log(`[TaskQueue] Build script completed. Success: ${buildResult.success}`);
         }
 

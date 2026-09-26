@@ -10,7 +10,6 @@ import { scriptExecutionTracker } from '../services/scriptExecutionTracker';
 
 const DAEMON_SCRIPT_CHANNELS = [
   'sessions:has-run-script',
-  'sessions:get-running-session',
   'sessions:run-script',
   'sessions:stop-script',
   'sessions:run-terminal-command',
@@ -35,16 +34,6 @@ export function registerScriptHandlers(
     } catch (error) {
       console.error('Failed to check run script:', error);
       return { success: false, error: 'Failed to check run script' };
-    }
-  });
-
-  commandRegistry.register('sessions:get-running-session', async () => {
-    try {
-      const runningSessionId = sessionManager.getCurrentRunningSessionId();
-      return { success: true, data: runningSessionId };
-    } catch (error) {
-      console.error('Failed to get running session:', error);
-      return { success: false, error: 'Failed to get running session' };
     }
   });
 
@@ -78,9 +67,6 @@ export function registerScriptHandlers(
           if (logsPanel) {
             console.log('[Script] Found logs panel, stopping:', logsPanel.id);
             await logsManager.stopScript(logsPanel.id);
-          } else {
-            console.log('[Script] No logs panel found, calling sessionManager.stopRunningScript');
-            await sessionManager.stopRunningScript();
           }
           // Ensure tracker is updated
           scriptExecutionTracker.stop('session', runningScript.id);
@@ -125,7 +111,7 @@ export function registerScriptHandlers(
   commandRegistry.register('sessions:stop-script', async (sessionId?: string) => {
     try {
       // If sessionId provided, stop that session's logs panel
-      // Otherwise stop the old running script (for backward compatibility)
+      // Otherwise resolve the active session from the script tracker
       if (sessionId) {
         const panels = await panelManager.getPanelsForSession(sessionId);
         const logsPanel = panels?.find((p: { type: string }) => p.type === 'logs');
@@ -153,10 +139,7 @@ export function registerScriptHandlers(
           }
         }
 
-        // Also call old mechanism for backward compatibility
-        await sessionManager.stopRunningScript();
-
-        // Ensure tracker is updated even if sessionManager's internal update fails
+        // Update the tracker after stopping the logs process
         if (runningScript && runningScript.type === 'session') {
           console.log('[Script] Updating tracker to stopped state for session:', runningScript.id);
           scriptExecutionTracker.stop('session', runningScript.id);

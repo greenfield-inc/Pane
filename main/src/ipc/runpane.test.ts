@@ -985,6 +985,22 @@ describe('runpane IPC handlers', () => {
     expect(resumed.reset).toBeUndefined();
   });
 
+  it('recognizes a WSL repo registered by the UI through either UNC spelling', async () => {
+    const savedProject: Project = {
+      ...project, path: '/home/user/repo', wsl_enabled: true, wsl_distribution: 'Ubuntu',
+    };
+    const services = createServices({
+      // SAFETY: Repo lookup only reads these projects and never reaches persistence for an existing repo.
+      databaseService: { getAllProjects: () => [savedProject] } as AppServices['databaseService'],
+    });
+    const registry = createRegistry(services);
+    for (const path of ['\\\\wsl$\\Ubuntu\\home\\user\\repo', '\\\\wsl.localhost\\Ubuntu\\home\\user\\repo']) {
+      await expect(registry.invoke('runpane:repos:add', [{ path }])).resolves.toMatchObject({
+        ok: true, created: false, repo: { path: '/home/user/repo', environment: 'wsl' },
+      });
+    }
+  });
+
   it('dry-runs adding an existing git repository without saving it', async () => {
     const repoPath = createTempGitRepo('pane-addon');
     const services = createServices({

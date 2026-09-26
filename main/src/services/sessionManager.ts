@@ -6,22 +6,15 @@
 
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
-import { spawn, ChildProcess, exec, execSync } from 'child_process';
-import { promisify } from 'util';
 import { existsSync } from 'fs';
-import { getRuntimeConfigManager } from '../core/runtime';
-import { ShellDetector } from '../utils/shellDetector';
 import type { Session, SessionUpdate, SessionOutput } from '../types/session';
 import type { DatabaseService } from '../database/database';
 import type { Session as DbSession, CreateSessionData, UpdateSessionData, ConversationMessage, PromptMarker, ExecutionDiff, CreateExecutionDiffData, Project } from '../database/models';
-import { getShellPath } from '../utils/shellPath';
-import { inheritedProcessEnv } from '../utils/inheritedProcessEnv';
 import { TerminalSessionManager } from './terminalSessionManager';
 import type { ToolPanelState, ResumableSession } from '../../../shared/types/panels';
 import { formatForDisplay } from '../utils/timestampUtils';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { resolveResumeId } from './agents/agentResume';
-import { scriptExecutionTracker } from './scriptExecutionTracker';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 interface CreateSessionOptions {
@@ -130,19 +123,16 @@ function normalizeDbOutputType(type: DbSessionOutputType): SessionOutput['type']
 type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 
 // Interface for panel state with custom state that can hold any AI-specific data
-import { addSessionLog, cleanupSessionLogs } from '../ipc/logs';
+import { addSessionLog } from '../ipc/logs';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { withLock } from '../utils/mutex';
 import { detectGitBase } from './worktreeManager';
-import * as os from 'os';
 import { panelManager } from './panelManager';
 import type { AnalyticsManager } from './analyticsManager';
 
 export class SessionManager extends EventEmitter {
   private activeSessions: Map<string, Session> = new Map();
-  private runningScriptProcess: ChildProcess | null = null;
-  private currentRunningSessionId: string | null = null;
   private activeProject: Project | null = null;
   private terminalSessionManager: TerminalSessionManager;
   private autoContextBuffers: Map<string, SessionOutput[]> = new Map();
@@ -1217,158 +1207,44 @@ export class SessionManager extends EventEmitter {
     return null;
   }
 
-  async runScript(sessionId: string, commands: string[], workingDirectory: string): Promise<void> {
-    // Stop any currently running script and wait for it to fully terminate
-    await this.stopRunningScript();
-
-    // Clear previous logs when starting a new run
-    cleanupSessionLogs(sessionId);
-
-    // Mark session as running
-    this.setSessionRunning(sessionId, true);
-    this.currentRunningSessionId = sessionId;
-
-    // Track in shared script execution tracker
-    scriptExecutionTracker.start('session', sessionId);
-    
-    // Join commands with && to run them sequentially
-    const command = commands.join(' && ');
-    
-    // Get enhanced shell PATH
-    const shellPath = getShellPath();
-    
-    // Get the user's default shell and command arguments
-    const preferredShell = getRuntimeConfigManager().getPreferredShell();
-    const { shell, args } = ShellDetector.getShellCommandArgs(command, preferredShell);
-    
-    // Spawn the process with its own process group for easier termination
-    this.runningScriptProcess = spawn(shell, args, {
-      cwd: workingDirectory,
-      stdio: 'pipe',
-      detached: true, // Create a new process group
-      env: {
-        ...inheritedProcessEnv(),
-        PATH: shellPath
-      }
-    });
-
-    // Handle output - send to logs instead of terminal
-    this.runningScriptProcess.stdout?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      // Split by lines and add each as a log entry
-      const lines = output.split('\n').filter(line => line.trim());
-      lines.forEach(line => {
-        addSessionLog(sessionId, 'info', line, 'Application');
-      });
-      // Log output is now handled via addSessionLog above
-    });
-
-    this.runningScriptProcess.stderr?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      // Split by lines and add each as a log entry
-      const lines = output.split('\n').filter(line => line.trim());
-      lines.forEach(line => {
-        addSessionLog(sessionId, 'error', line, 'Application');
-      });
-      // Log output is now handled via addSessionLog above
-    });
-
-    // Handle process exit
-    this.runningScriptProcess.on('exit', (code) => {
-      addSessionLog(sessionId, 'info', `Process exited with code: ${code}`, 'Application');
-
-      this.setSessionRunning(sessionId, false);
-      this.currentRunningSessionId = null;
-      this.runningScriptProcess = null;
-
-      // Update shared tracker
-      scriptExecutionTracker.stop('session', sessionId);
-    });
-
-    this.runningScriptProcess.on('error', (error) => {
-      addSessionLog(sessionId, 'error', `Error: ${error.message}`, 'Application');
-
-      this.setSessionRunning(sessionId, false);
-      this.currentRunningSessionId = null;
-      this.runningScriptProcess = null;
-
-      // Update shared tracker
-      scriptExecutionTracker.stop('session', sessionId);
-    });
+  /** Run project cleanup commands in the same environment as setup commands. */
+  runArchiveScript(sessionId: string, commands: string[], cwd: string, commandRunner: CommandRunner): Promise<{ success: boolean; output: string }> {
+    return this.runScriptCommands('Archive', sessionId, commands, cwd, commandRunner);
   }
 
-  /**
-   * Runs an archive script before a worktree is removed during session deletion.
-   *
-   * This method is called by the `cleanupCallback` in `ipc/session.ts` after an
-   * archive script has been resolved (from DB `archive_script` or from a detected
-   * config file via `detectProjectConfig`). It gives the project a chance to run
-   * cleanup commands — e.g. stopping background processes, uploading artifacts,
-   * sending a notification — inside the worktree before the directory is deleted.
-   *
-   * HOW IT DIFFERS FROM `runBuildScript`:
-   * - `runBuildScript` uses the legacy node `child_process.exec` path which does not
-   *   route through WSL. It is suitable for simple shell commands on the host OS.
-   * - `runArchiveScript` accepts an optional `commandRunner` (the project's
-   *   `CommandRunner` instance, which is WSL-aware). When a `commandRunner` is
-   *   provided the commands are executed through it — correctly translating paths and
-   *   shell invocations for WSL environments. When no `commandRunner` is provided it
-   *   falls back to `runBuildScript` for backward compatibility.
-   *
-   * CALL SITE:
-   *   `ipc/session.ts` → `cleanupCallback` → after archive script is resolved,
-   *   before `worktreeManager.removeWorktree`.
-   *
-   * FALLBACK CHAIN (caller is responsible for resolving the script):
-   *   1. DB `project.archive_script`  (set by user in Project Settings)
-   *   2. Detected config `archive` field from `detectProjectConfig` (pane.json etc.)
-   *   3. Skip — no archive script runs
-   *
-   * @param sessionId    - Session being archived; used for log attribution.
-   * @param commands     - Individual commands to execute, split from the script string.
-   * @param worktreePath - Absolute path to the session's worktree directory.
-   * @param commandRunner - WSL-aware executor from the project context. When omitted
-   *                        the method delegates to `runBuildScript`.
-   * @returns Object with `success` (all commands exited 0) and `output` (combined stdout/stderr).
-   */
-  async runArchiveScript(
-    sessionId: string,
-    commands: string[],
-    worktreePath: string,
-    commandRunner?: CommandRunner,
-  ): Promise<{ success: boolean; output: string }> {
-    if (!commandRunner) {
-      return this.runBuildScript(sessionId, commands, worktreePath);
-    }
+  runBuildScript(sessionId: string, commands: string[], cwd: string, commandRunner: CommandRunner): Promise<{ success: boolean; output: string }> {
+    return this.runScriptCommands('Build', sessionId, commands, cwd, commandRunner);
+  }
 
+  private async runScriptCommands(label: 'Build' | 'Archive', sessionId: string, commands: string[], worktreePath: string, commandRunner: CommandRunner): Promise<{ success: boolean; output: string }> {
     const timestamp = new Date().toLocaleTimeString();
-    addSessionLog(sessionId, 'info', `🗄 ARCHIVE SCRIPT RUNNING at ${timestamp}`, 'Archive');
+    addSessionLog(sessionId, 'info', `${label.toUpperCase()} SCRIPT RUNNING at ${timestamp}`, label);
 
     let allOutput = '';
     let overallSuccess = true;
 
     for (const command of commands) {
       if (command.trim()) {
-        console.log(`[SessionManager] Executing archive command: ${command}`);
-        addSessionLog(sessionId, 'info', `$ ${command}`, 'Archive');
+        console.log(`[SessionManager] Executing ${label.toLowerCase()} command: ${command}`);
+        addSessionLog(sessionId, 'info', `$ ${command}`, label);
 
         try {
-          const { stdout, stderr } = await commandRunner.execAsync(command, worktreePath);
+          const { stdout, stderr } = await commandRunner.execAsync(command, worktreePath, label === 'Build' ? { timeout: 0 } : undefined);
 
           if (stdout) {
             allOutput += stdout;
             stdout.split('\n').filter(line => line.trim()).forEach(line => {
-              addSessionLog(sessionId, 'info', line, 'Archive');
+              addSessionLog(sessionId, 'info', line, label);
             });
           }
           if (stderr) {
             allOutput += stderr;
             stderr.split('\n').filter(line => line.trim()).forEach(line => {
-              addSessionLog(sessionId, 'warn', line, 'Archive');
+              addSessionLog(sessionId, 'warn', line, label);
             });
           }
         } catch (cmdError) {
-          console.error(`[SessionManager] Archive command failed: ${command}`, cmdError);
+          console.error(`[SessionManager] ${label} command failed: ${command}`, cmdError);
           let error: CommandExecutionError = {};
           try {
             error = decodeBoundary(cmdError, boundary.object({
@@ -1380,119 +1256,22 @@ export class SessionManager extends EventEmitter {
           const errorMessage = error.stderr || error.stdout || error.message || String(cmdError);
           allOutput += errorMessage;
 
-          addSessionLog(sessionId, 'error', `Command failed: ${command}`, 'Archive');
-          addSessionLog(sessionId, 'error', errorMessage, 'Archive');
+          addSessionLog(sessionId, 'error', `Command failed: ${command}`, label);
+          addSessionLog(sessionId, 'error', errorMessage, label);
 
           overallSuccess = false;
         }
       }
     }
 
-    const archiveEndTimestamp = new Date().toLocaleTimeString();
+    const endTimestamp = new Date().toLocaleTimeString();
     if (overallSuccess) {
-      addSessionLog(sessionId, 'info', `✅ ARCHIVE COMPLETED at ${archiveEndTimestamp}`, 'Archive');
+      addSessionLog(sessionId, 'info', `✅ ${label.toUpperCase()} COMPLETED at ${endTimestamp}`, label);
     } else {
-      addSessionLog(sessionId, 'error', `❌ ARCHIVE FAILED at ${archiveEndTimestamp}`, 'Archive');
+      addSessionLog(sessionId, 'error', `❌ ${label.toUpperCase()} FAILED at ${endTimestamp}`, label);
     }
 
     return { success: overallSuccess, output: allOutput };
-  }
-
-  async runBuildScript(sessionId: string, commands: string[], workingDirectory: string): Promise<{ success: boolean; output: string }> {
-    // Get enhanced shell PATH
-    const shellPath = getShellPath();
-    
-    // Add build start message to logs
-    const timestamp = new Date().toLocaleTimeString();
-    addSessionLog(sessionId, 'info', `🔨 BUILD SCRIPT RUNNING at ${timestamp}`, 'Build');
-    
-    // Show PATH information for debugging in logs
-    addSessionLog(sessionId, 'debug', `Using PATH: ${shellPath.split(':').slice(0, 5).join(':')}...`, 'Build');
-    
-    // Check if yarn is available
-    try {
-      const { stdout: yarnPath } = await this.execWithShellPath('which yarn', { cwd: workingDirectory });
-      if (yarnPath.trim()) {
-        addSessionLog(sessionId, 'debug', `yarn found at: ${yarnPath.trim()}`, 'Build');
-      }
-    } catch {
-      addSessionLog(sessionId, 'warn', `yarn not found in PATH`, 'Build');
-    }
-    
-    let allOutput = '';
-    let overallSuccess = true;
-    
-    // Run commands sequentially
-    for (const command of commands) {
-      if (command.trim()) {
-        console.log(`[SessionManager] Executing build command: ${command}`);
-        
-        // Add command to logs
-        addSessionLog(sessionId, 'info', `$ ${command}`, 'Build');
-        
-        try {
-          const { stdout, stderr } = await this.execWithShellPath(command, { cwd: workingDirectory });
-          
-          if (stdout) {
-            allOutput += stdout;
-            // Split stdout by lines and add to logs
-            const lines = stdout.split('\n').filter(line => line.trim());
-            lines.forEach(line => {
-              addSessionLog(sessionId, 'info', line, 'Build');
-            });
-          }
-          if (stderr) {
-            allOutput += stderr;
-            // Split stderr by lines and add to logs
-            const lines = stderr.split('\n').filter(line => line.trim());
-            lines.forEach(line => {
-              addSessionLog(sessionId, 'warn', line, 'Build');
-            });
-          }
-        } catch (cmdError) {
-          console.error(`[SessionManager] Build command failed: ${command}`, cmdError);
-          let error: CommandExecutionError = {};
-          try {
-            error = decodeBoundary(cmdError, boundary.object({
-              stderr: boundary.optional(boundary.string),
-              stdout: boundary.optional(boundary.string),
-              message: boundary.optional(boundary.string),
-            }));
-          } catch { /* String(cmdError) remains the fallback. */ }
-          const errorMessage = error.stderr || error.stdout || error.message || String(cmdError);
-          allOutput += errorMessage;
-          
-          addSessionLog(sessionId, 'error', `Command failed: ${command}`, 'Build');
-          addSessionLog(sessionId, 'error', errorMessage, 'Build');
-          
-          overallSuccess = false;
-          // Continue with next command instead of stopping entirely
-        }
-      }
-    }
-    
-    // Add completion message to logs
-    const buildEndTimestamp = new Date().toLocaleTimeString();
-    if (overallSuccess) {
-      addSessionLog(sessionId, 'info', `✅ BUILD COMPLETED at ${buildEndTimestamp}`, 'Build');
-    } else {
-      addSessionLog(sessionId, 'error', `❌ BUILD FAILED at ${buildEndTimestamp}`, 'Build');
-    }
-    
-    return { success: overallSuccess, output: allOutput };
-  }
-  
-  private async execWithShellPath(command: string, options?: { cwd?: string }): Promise<{ stdout: string; stderr: string }> {
-    const execAsync = promisify(exec);
-    
-    const shellPath = getShellPath();
-    return execAsync(command, {
-      ...options,
-      env: {
-        ...process.env,
-        PATH: shellPath
-      }
-    });
   }
 
   addScriptOutput(sessionId: string, data: string, type: 'stdout' | 'stderr' = 'stdout'): void {
@@ -1504,264 +1283,7 @@ export class SessionManager extends EventEmitter {
     });
   }
 
-  /**
-   * Recursively gets all descendant PIDs of a parent process.
-   * This handles deeply nested process trees where processes spawn children
-   * that spawn their own children, etc.
-   * 
-   * @param parentPid The parent process ID
-   * @returns Array of all descendant PIDs
-   */
-  private getAllDescendantPids(parentPid: number): number[] {
-    const descendants: number[] = [];
-    const platform = os.platform();
-    
-    try {
-      if (platform === 'win32') {
-        // On Windows, use wmic to get process tree
-        const output = execSync(`wmic process where (ParentProcessId=${parentPid}) get ProcessId`, { encoding: 'utf8' });
-        const lines = output.split('\n').filter(line => line.trim());
-        for (let i = 1; i < lines.length; i++) { // Skip header
-          const pid = parseInt(lines[i].trim());
-          if (!isNaN(pid)) {
-            descendants.push(pid);
-            // Recursively get children of this process
-            descendants.push(...this.getAllDescendantPids(pid));
-          }
-        }
-      } else {
-        // On Unix-like systems, use ps to get children
-        const output = execSync(`ps -o pid= --ppid ${parentPid}`, { encoding: 'utf8' });
-        const pids = output.split('\n')
-          .map(line => parseInt(line.trim()))
-          .filter(pid => !isNaN(pid));
-        
-        for (const pid of pids) {
-          descendants.push(pid);
-          // Recursively get children of this process
-          descendants.push(...this.getAllDescendantPids(pid));
-        }
-      }
-    } catch {
-      // Command might fail if no children exist, which is fine
-    }
-    
-    return descendants;
-  }
-
-  /**
-   * Stops the currently running script and ensures all child processes are terminated.
-   * This method uses multiple approaches to ensure complete cleanup:
-   * 1. Gets all descendant PIDs recursively before killing
-   * 2. Uses platform-specific commands (taskkill on Windows, kill on Unix)
-   * 3. Kills the process group (Unix) or process tree (Windows)
-   * 4. Kills individual descendant processes as a fallback
-   * 5. Uses graceful SIGTERM first, then forceful SIGKILL
-   * @returns Promise that resolves when the script has been stopped
-   */
-  stopRunningScript(): Promise<void> {
-    return new Promise((resolve) => {
-      if (!this.runningScriptProcess || !this.currentRunningSessionId) {
-        resolve();
-        return;
-      }
-
-      const sessionId = this.currentRunningSessionId;
-      const process = this.runningScriptProcess;
-
-      // Mark as closing in shared tracker
-      scriptExecutionTracker.markClosing('session', sessionId);
-
-      // Immediately clear references to prevent new output
-      this.currentRunningSessionId = null;
-      this.runningScriptProcess = null;
-      
-      // Kill the entire process group to ensure all child processes are terminated
-      try {
-        if (process.pid) {
-          // First, get all descendant PIDs before we start killing
-          const descendantPids = this.getAllDescendantPids(process.pid);
-          
-          // Add a simple log entry for stopping the script
-          addSessionLog(sessionId, 'info', `Stopping application process...`, 'Application');
-          
-          const platform = os.platform();
-          
-          if (platform === 'win32') {
-            // On Windows, use taskkill to terminate the process tree
-            addSessionLog(sessionId, 'info', `[Using taskkill to terminate process tree ${process.pid}]`, 'System');
-            
-            exec(`taskkill /F /T /PID ${process.pid}`, (error) => {
-              if (error) {
-                console.warn(`Error killing Windows process tree: ${error.message}`);
-                addSessionLog(sessionId, 'error', `[Error terminating process tree: ${error.message}]`, 'System');
-                
-                // Fallback: kill individual processes
-                try {
-                  process.kill('SIGKILL');
-                } catch (killError) {
-                  console.warn('Fallback kill failed:', killError);
-                }
-                
-                // Kill descendants individually
-                let killedCount = 0;
-                let processedCount = 0;
-                
-                if (descendantPids.length === 0) {
-                  // No descendants, we're done
-                  this.finishStopScript(sessionId);
-                  resolve();
-                  return;
-                }
-                
-                descendantPids.forEach(pid => {
-                  exec(`taskkill /F /PID ${pid}`, (err) => {
-                    if (!err) killedCount++;
-                    processedCount++;
-                    
-                    // Report after all attempts
-                    if (processedCount === descendantPids.length) {
-                      addSessionLog(sessionId, 'info', `[Terminated ${killedCount} processes using fallback method]`, 'System');
-                      this.finishStopScript(sessionId);
-                      resolve();
-                    }
-                  });
-                });
-              } else {
-                addSessionLog(sessionId, 'info', '[Successfully terminated process tree]', 'System');
-                this.finishStopScript(sessionId);
-                resolve();
-              }
-            });
-          } else {
-            // On Unix-like systems (macOS, Linux)
-            // First, try SIGTERM for graceful shutdown
-            addSessionLog(sessionId, 'info', `[Sending SIGTERM to process ${process.pid} and its group]`, 'System');
-            
-            try {
-              process.kill('SIGTERM');
-            } catch (error) {
-              console.warn('SIGTERM failed:', error);
-            }
-            
-            // Kill the entire process group using negative PID
-            exec(`kill -TERM -${process.pid}`, (error) => {
-              if (error) {
-                console.warn(`Error sending SIGTERM to process group: ${error.message}`);
-              }
-            });
-            
-            // Give processes a chance to clean up gracefully
-            addSessionLog(sessionId, 'info', '[Waiting 10 seconds for graceful shutdown...]', 'System');
-            
-            // Use a shorter timeout for faster cleanup
-            setTimeout(() => {
-              addSessionLog(sessionId, 'info', '\n[Grace period expired, using forceful termination]', 'System');
-              
-              // Now forcefully kill the main process
-              try {
-                process.kill('SIGKILL');
-                addSessionLog(sessionId, 'info', `[Sent SIGKILL to process ${process.pid}]`, 'System');
-              } catch {
-                // Process might already be dead
-                addSessionLog(sessionId, 'info', `[Process ${process.pid} already terminated]`, 'System');
-              }
-              
-              // Kill the process group with SIGKILL
-              exec(`kill -9 -${process.pid}`, (error) => {
-                if (error) {
-                  console.warn(`Error sending SIGKILL to process group: ${error.message}`);
-                  addSessionLog(sessionId, 'warn', `[Warning: Could not kill process group: ${error.message}]`, 'System');
-                } else {
-                  addSessionLog(sessionId, 'info', `[Sent SIGKILL to process group ${process.pid}]`, 'System');
-                }
-              });
-              
-              // Kill all known descendants individually to be sure
-              let killedCount = 0;
-              let alreadyDeadCount = 0;
-              
-              descendantPids.forEach(pid => {
-                exec(`kill -9 ${pid}`, (error) => {
-                  if (error) {
-                    alreadyDeadCount++;
-                  } else {
-                    killedCount++;
-                  }
-                  
-                  // Report results after processing all descendants
-                  if (killedCount + alreadyDeadCount === descendantPids.length) {
-                    if (killedCount > 0) {
-                      addSessionLog(sessionId, 'info', `[Forcefully terminated ${killedCount} child process${killedCount > 1 ? 'es' : ''}]`, 'System');
-                    }
-                    if (alreadyDeadCount > 0) {
-                      addSessionLog(sessionId, 'info', `[${alreadyDeadCount} process${alreadyDeadCount > 1 ? 'es' : ''} had already terminated gracefully]`, 'System');
-                    }
-                  }
-                });
-              });
-              
-              // Final cleanup attempt using pkill
-              exec(`pkill -9 -P ${process.pid}`, () => {
-                // Ignore errors - processes might already be dead
-              });
-              
-              // Check for zombie processes after a short delay
-              setTimeout(() => {
-                if (process.pid) {
-                  const remainingPids = this.getAllDescendantPids(process.pid);
-                  if (remainingPids.length > 0) {
-                    addSessionLog(sessionId, 'warn', `[WARNING: ${remainingPids.length} zombie process${remainingPids.length > 1 ? 'es' : ''} could not be terminated: ${remainingPids.join(', ')}]`, 'System');
-                    addSessionLog(sessionId, 'error', `[Please manually kill these processes using: kill -9 ${remainingPids.join(' ')}]`, 'System');
-                  } else {
-                    addSessionLog(sessionId, 'info', '\n[All processes terminated successfully]', 'System');
-                  }
-                }
-                this.finishStopScript(sessionId);
-                resolve();
-              }, 500);
-            }, 2000); // Reduced from 10 seconds to 2 seconds for faster cleanup
-          }
-        } else {
-          // No process PID
-          this.finishStopScript(sessionId);
-          resolve();
-        }
-      } catch (error) {
-        console.warn('Error killing script process:', error);
-        this.finishStopScript(sessionId);
-        resolve();
-      }
-    });
-  }
-
-  private finishStopScript(sessionId: string): void {
-    // Update session state
-    this.setSessionRunning(sessionId, false);
-
-    // Update shared tracker
-    scriptExecutionTracker.stop('session', sessionId);
-
-    // Emit a final message to indicate the script was stopped
-    addSessionLog(sessionId, 'info', '\n[Script stopped by user]', 'System');
-  }
-
-  private setSessionRunning(sessionId: string, isRunning: boolean): void {
-    const session = this.activeSessions.get(sessionId);
-    if (session) {
-      session.isRunning = isRunning;
-      this.emit('session-updated', session);
-    }
-  }
-
-  getCurrentRunningSessionId(): string | null {
-    // Use shared tracker for consistency
-    const runningId = scriptExecutionTracker.getRunningScriptId('session');
-    return decodeBoundary(runningId, boundary.nullable(boundary.string));
-  }
-
   async cleanup(): Promise<void> {
-    this.stopRunningScript();
     await this.terminalSessionManager.cleanup();
   }
 
@@ -1792,10 +1314,7 @@ export class SessionManager extends EventEmitter {
       throw new Error('Session not found');
     }
 
-    // Don't allow running commands while a script is active
-    if (this.currentRunningSessionId === sessionId && this.runningScriptProcess) {
-      throw new Error('Cannot run terminal commands while a script is running');
-    }
+
 
     const worktreePath = session.worktreePath;
 

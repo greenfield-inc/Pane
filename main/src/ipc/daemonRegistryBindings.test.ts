@@ -135,7 +135,6 @@ const PANEL_CHANNELS = [
 
 const SCRIPT_CHANNELS = [
   'sessions:has-run-script',
-  'sessions:get-running-session',
   'sessions:run-script',
   'sessions:stop-script',
   'sessions:run-terminal-command',

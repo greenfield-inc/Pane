@@ -867,7 +867,9 @@ export function registerSessionHandlers(
           });
 
           const buildCommands = mainRepoBuildScript.split('\n').filter(cmd => cmd.trim());
-          const buildResult = await sessionManager.runBuildScript(sessionId, buildCommands, session.worktreePath);
+          const buildContext = sessionManager.getProjectContext(sessionId);
+          if (!buildContext) throw new Error('Project context not found for setup script');
+          const buildResult = await sessionManager.runBuildScript(sessionId, buildCommands, session.worktreePath, buildContext.commandRunner);
           console.log(`[IPC] Build script completed. Success: ${buildResult.success}`);
         }
 
