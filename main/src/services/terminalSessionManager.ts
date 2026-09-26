@@ -1,3 +1,4 @@
+import { withRunpaneOnPath } from './runpaneShim';
 import { EventEmitter } from 'events';
 import * as pty from '@lydell/node-pty';
 import { getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
@@ -138,7 +139,9 @@ export class TerminalSessionManager extends EventEmitter {
 
     const spawnCols = 80;
     const spawnRows = 24;
-    const shellArgs = shellInfo.args || [];
+    const definedEnv = Object.fromEntries(Object.entries(rawEnv).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    const launch = withRunpaneOnPath({ name: shellInfo.name, args: shellInfo.args || [] }, definedEnv);
+    const shellArgs = launch.args;
 
     // When the `usePtyHost` setting is on (with a live supervisor) the spawn
     // is routed through the ptyHost `UtilityProcess`; otherwise fall back to
@@ -160,12 +163,7 @@ export class TerminalSessionManager extends EventEmitter {
 
     if (usePtyHost && supervisor) {
       // RPC DTO requires `Record<string, string>`; drop undefined keys.
-      const envStr: Record<string, string> = {};
-      for (const [key, value] of Object.entries(rawEnv)) {
-        if (value !== undefined) {
-          envStr[key] = value;
-        }
-      }
+      const envStr = launch.env;
       const spawned = await supervisor.spawn({
         shell: shellInfo.path,
         args: shellArgs,
@@ -188,7 +186,7 @@ export class TerminalSessionManager extends EventEmitter {
         cwd: worktreePath,
         cols: spawnCols,
         rows: spawnRows,
-        env: Object.fromEntries(Object.entries(rawEnv).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+        env: launch.env,
       });
     }
 
