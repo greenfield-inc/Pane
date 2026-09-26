@@ -229,6 +229,8 @@ interface TerminalProcess {
   agentType?: CliAgentType;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
+  /** The CLI came up with typed initial input still to send; the status poll sends it. */
+  initialInputHeld?: boolean;
   // DEC Mode 2026 synchronized-output block tracking — persists across chunks
   inSyncBlock: boolean;
   /** Alt-screen state as seen by filterSyncBlockClears (stream-ordered, may
@@ -492,7 +494,26 @@ export class TerminalPanelManager extends EventEmitter {
       return;
     }
 
-    this.sendInitialInputOnce(panelId);
+    this.holdInitialInput(panelId);
+  }
+
+  /** Queue typed initial input for the status poll to send once the agent can take it. */
+  private holdInitialInput(panelId: string): void {
+    const terminal = this.terminals.get(panelId);
+    if (terminal) terminal.initialInputHeld = true;
+  }
+
+  /**
+   * Send held initial input once a known agent's status is idle (ready at its
+   * composer), so it never lands in a trust or permission menu or a startup
+   * frame. Other CLIs take it as soon as they are not blocked.
+   */
+  private releaseHeldInitialInput(terminal: TerminalProcess, manifestId: string): void {
+    if (!terminal.initialInputHeld) return;
+    const status = this.agentStatusMonitor.getState(terminal.panelId);
+    if (status === 'blocked' || (manifestId !== 'generic' && status !== 'idle')) return;
+    terminal.initialInputHeld = false;
+    this.sendInitialInputOnce(terminal.panelId);
   }
 
   private writeInitialInput(
@@ -1126,7 +1147,7 @@ export class TerminalPanelManager extends EventEmitter {
 
             // Emit to renderer
             this.sendRendererEvent('terminal:cliReady', { panelId });
-            this.sendInitialInputOnce(panelId);
+            this.holdInitialInput(panelId);
           };
 
           // Listen for CLI output after command injection. Cursor launches are
@@ -1730,6 +1751,7 @@ export class TerminalPanelManager extends EventEmitter {
         }
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
         if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId);
+        this.releaseHeldInitialInput(terminal, manifest.id);
       }
     } catch (error) {
       console.error('[TerminalPanelManager] agent status poll failed:', error);
