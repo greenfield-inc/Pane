@@ -27,7 +27,7 @@ Pane is an open source project created by [Dcouple Inc](https://dcouple.ai). Dco
 
 ```bash
 # Run the Electron app in development mode
-pnpm run electron-dev
+pnpm dev
 
 # Run tests
 pnpm test

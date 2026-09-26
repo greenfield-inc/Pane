@@ -35,7 +35,7 @@
     "dev": "node scripts/pane-run-script.js",
     "daemon:headless": "pnpm run build:main && pnpm exec electron ./main/dist/main/src/daemon/headless.js",
     "remote:setup": "node scripts/pane-remote-setup.js",
-    "electron-dev": "pnpm run build:main && concurrently \"pnpm run --filter main dev\" \"pnpm run --filter frontend dev\" \"wait-on http-get://localhost:${VITE_PORT:-${PORT:-4521}} && electron .\"",
+    "electron-dev": "node scripts/pane-run-script.js",
     "electron-dev:custom": "concurrently \"pnpm run --filter frontend dev\" \"wait-on http-get://localhost:${VITE_PORT:-${PORT:-4521}} && electron .\"",
     "build": "pnpm run build:frontend && pnpm run build:main && pnpm run build:electron",
     "build:frontend": "pnpm run --filter frontend build",

@@ -430,7 +430,7 @@ Pane uses xterm.js, the same terminal engine that powers VS Code's integrated te
 git clone https://github.com/greenfield-inc/Pane.git
 cd Pane
 pnpm run setup
-pnpm run electron-dev
+pnpm dev
 ```
 
 ### Production Builds

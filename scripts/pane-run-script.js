@@ -356,13 +356,18 @@ async function main() {
   const worktree = isWorktree(projectRoot);
   console.log(`🌲 Git worktree: ${worktree ? 'YES' : 'NO (main repo)'}`);
 
-  // Calculate unique port (worktrees get offset range to avoid conflicts)
-  let port = calculatePort(projectRoot, worktree);
+  // Explicit ports are used by Playwright and existing electron-dev callers.
+  const configuredPort = process.env.VITE_PORT || process.env.PORT;
+  let port = configuredPort ? Number(configuredPort) : calculatePort(projectRoot, worktree);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid dev server port: ${configuredPort}`);
+  }
   console.log(`🔢 Calculated port: ${port}${worktree ? ' (worktree range)' : ' (main repo)'}`);
 
   // Check port availability
   const portAvailable = await checkPortAvailable(port);
   if (!portAvailable) {
+    if (configuredPort) throw new Error(`Configured dev server port ${port} is in use.`);
     console.log(`⚠️  Port ${port} is in use, finding next available...`);
     port = await findNextAvailablePort(port);
     console.log(`✅ Using port: ${port}`);
@@ -421,6 +426,7 @@ async function main() {
   const tscWatch = spawn('pnpm', ['run', '--filter', 'main', 'dev'], {
     cwd: projectRoot,
     env,
+    detached: !isWindows,
     stdio: ['ignore', 'pipe', 'inherit'],
     shell: true
   });
@@ -448,6 +454,7 @@ async function main() {
   const vite = spawn('pnpm', ['run', '--filter', 'frontend', 'dev', '--', '--port', port.toString()], {
     cwd: projectRoot,
     env,
+    detached: !isWindows,
     stdio: ['ignore', 'inherit', 'inherit'],
     shell: true
   });
@@ -459,6 +466,7 @@ async function main() {
   const waitOn = spawn('npx', ['wait-on', `http-get://localhost:${port}`], {
     cwd: projectRoot,
     env,
+    detached: !isWindows,
     stdio: ['ignore', 'inherit', 'inherit'],
     shell: true
   });
@@ -479,6 +487,7 @@ async function main() {
       electron = spawn('npx', ['electron', '.'], {
         cwd: projectRoot,
         env,
+        detached: !isWindows,
         stdio: ['ignore', 'inherit', 'inherit'],
         shell: true
       });
@@ -517,6 +526,7 @@ async function main() {
   // Register cleanup handlers
   process.on('SIGINT', cleanup);  // Ctrl+C
   process.on('SIGTERM', cleanup); // Kill command
+  process.on('SIGHUP', cleanup);  // Terminal or Pane panel closed
 
   // If any critical process exits, shut everything down
   vite.on('exit', (code) => {
