@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import math
 import os
 import socket
 import sys
@@ -675,7 +676,7 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             timeout_ms = float(value)
         except ValueError as error:
             raise ValueError("--timeout-ms must be a positive number.") from error
-        if timeout_ms < 0 or (timeout_ms == 0 and parsed.command != "watch"):
+        if not math.isfinite(timeout_ms) or timeout_ms < 0 or (timeout_ms == 0 and parsed.command != "watch"):
             raise ValueError("--timeout-ms must be a positive number (watch also accepts 0).")
         parsed.timeout_ms = timeout_ms
         return
@@ -684,7 +685,7 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             ready_timeout_ms = float(value)
         except ValueError as error:
             raise ValueError("--ready-timeout-ms must be a positive number.") from error
-        if ready_timeout_ms <= 0:
+        if not math.isfinite(ready_timeout_ms) or ready_timeout_ms <= 0:
             raise ValueError("--ready-timeout-ms must be a positive number.")
         parsed.ready_timeout_ms = ready_timeout_ms
         return
@@ -719,7 +720,7 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             interval_ms = float(value)
         except ValueError as error:
             raise ValueError("--interval-ms must be a positive number.") from error
-        if interval_ms <= 0:
+        if not math.isfinite(interval_ms) or interval_ms <= 0:
             raise ValueError("--interval-ms must be a positive number.")
         parsed.interval_ms = interval_ms
         return
@@ -833,7 +834,7 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
 
 
 def read_value(args: List[str], index: int, flag: str) -> str:
-    if index >= len(args) or (args[index].startswith("-") and args[index] != "-"):
+    if index >= len(args) or not args[index] or (args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
 

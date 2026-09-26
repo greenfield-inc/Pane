@@ -653,8 +653,16 @@ def collect_daemon_health(pane_dir: Optional[str], endpoint: Dict[str, str]) -> 
             "reachable": False,
             "endpoint": endpoint,
             "error": str(error),
-            "nextCommand": "Open Pane, then rerun runpane doctor --json",
+            "nextCommand": resolve_daemon_recovery_command(endpoint, str(error)),
         }
+
+
+def resolve_daemon_recovery_command(endpoint: Dict[str, str], message: str) -> str:
+    if endpoint["transport"] == "unix" and (
+        "ECONNREFUSED" in message or "connection refused" in message.lower() or os.path.exists(endpoint["path"])
+    ):
+        return "Quit Pane completely, reopen Pane, then rerun runpane doctor --json"
+    return "Open Pane, then rerun runpane doctor --json"
 
 
 WATCH_DEFAULTS_NOT_REPORTED = {"format", "agentsOnly", "includeHeldInputPresence"}
