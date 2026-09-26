@@ -6,7 +6,7 @@ The App Store listing for **Pane - Remote CLI Code Agents** (`com.dcouple.pane.m
 | --- | --- |
 | `metadata/en-US/*.txt` | Name, subtitle, promotional text, keywords, release notes and URLs |
 | `metadata/*.txt` | Categories and copyright |
-| `screenshots/en-US/` | 6 iPhone 6.9" (1320x2868) PNGs, sRGB, no alpha. The app is iPhone-only, so there are no iPad screenshots. |
+| `screenshots/en-US/` | 6 iPhone 6.9" (1320x2868) PNGs, sRGB, no alpha. The app is iPhone-only. |
 | `screenshots-src/` | The generator for those screenshots |
 | `review_information.md` | App Review notes and what the reviewer needs |
 | `app_privacy.md` | App Privacy answers with evidence |
