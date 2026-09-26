@@ -54,3 +54,27 @@ test('Explorer in the add-tool menu creates a missing panel and opens the Files 
 
   await expect(page.getByRole('tab', { name: 'Files', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
+
+test('inspector arrows move selection and focus through every tab', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], activeProjectId: project.id,
+    initialPanels: [panel, ...['explorer', 'diff'].map((type, index) => ({
+      ...panel, id: `inspector-${type}`, type, title: type,
+      metadata: { ...panel.metadata, position: index + 1 },
+    }))],
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+  const tabs = page.getByRole('tablist', { name: 'Inspector' });
+  await tabs.getByRole('tab', { name: 'Details' }).click();
+  for (const name of ['Files', 'Changes', 'Details']) {
+    await page.keyboard.press('ArrowRight');
+    await expect(tabs.getByRole('tab', { name })).toBeFocused();
+    await expect(tabs.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
+    await expect(tabs.locator('[tabindex="0"]')).toHaveCount(1);
+  }
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.getByRole('tab', { name: 'Changes' })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath('inspector-keyboard.png') });
+});
