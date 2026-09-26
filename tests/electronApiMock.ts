@@ -231,6 +231,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     let mockPanels = clone(mockOptions.initialPanels ?? []);
+    const mockLayouts = new Map<string, unknown>();
+    const setActiveMockPanel = (sessionId: string, panelId: string | null) => {
+      for (const panel of mockPanels) {
+        // SAFETY: Panel fixtures and createPanel below supply ToolPanel-shaped state objects.
+        const state = panel.state as JsonObject | undefined;
+        if (panel.sessionId === sessionId && state) {
+          state.isActive = panel.id === panelId;
+        }
+      }
+    };
     const uiState = {
       expandedProjects: [] satisfies number[],
       expandedFolders: [] satisfies string[],
@@ -372,7 +382,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       const key = args[0] === undefined ? undefined : String(args[0]);
       const value = args[1] === undefined ? undefined : String(args[1]);
       if (channel === 'panels:get-layout') {
-        return success(clone(mockOptions.initialLayout ?? null));
+        return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
+      }
+      if (channel === 'panels:set-layout') {
+        if (key) mockLayouts.set(key, clone(args[1] ?? null));
+        return success();
       }
       if (channel === 'panels:shouldAutoCreate') {
         // Fixtures seed their own panels; the app must not grow a terminal.
@@ -660,6 +674,25 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getSessionPanels: (sessionId: string) => success(
           clone(mockPanels.filter((panel) => panel.sessionId === sessionId)),
         ),
+        deletePanel: (panelId: string) => {
+          const deleted = mockPanels.find(panel => panel.id === panelId);
+          mockPanels = mockPanels.filter(panel => panel.id !== panelId);
+          if (deleted) {
+            // SAFETY: The deleted record comes from the same ToolPanel-shaped mock collection.
+            const state = deleted.state as JsonObject | undefined;
+            if (state?.isActive) {
+              const remaining = mockPanels.filter(panel => panel.sessionId === deleted.sessionId);
+              const next = remaining.find(panel => panel.type !== 'explorer' && panel.type !== 'diff') ?? remaining[0];
+              setActiveMockPanel(String(deleted.sessionId), next ? String(next.id) : null);
+            }
+            emit('panel:deleted', { panelId, sessionId: deleted.sessionId });
+          }
+          return success();
+        },
+        setActivePanel: (sessionId: string, panelId: string) => {
+          setActiveMockPanel(sessionId, panelId);
+          return success();
+        },
         createPanel: (sessionId: string, type: string, title: string, initialState?: JsonObject) => {
           const now = new Date().toISOString();
           const panel = {
@@ -671,6 +704,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             metadata: { createdAt: now, lastActiveAt: now, position: mockPanels.length },
           };
           mockPanels.push(panel);
+          setActiveMockPanel(sessionId, panel.id);
+          emit('panel:created', clone(panel));
           return success(clone(panel));
         },
         shouldAutoCreate: () => success(false),
