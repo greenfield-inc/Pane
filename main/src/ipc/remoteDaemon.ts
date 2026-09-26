@@ -1,3 +1,4 @@
+import { runRemoteSetupCommand } from '../daemon/remote-setup-command';
 import {
   decodePaneRemoteConnection,
   encodePaneRemoteConnection,
@@ -140,7 +141,7 @@ export function registerRemoteDaemonHandlers(
 
   ipcMain.handle('remote-daemon:get-host-state', async () => {
     try {
-      return { success: true, data: remoteHostRuntimeStateStore.getState() };
+      return { success: true, data: await remoteHostRuntimeStateStore.refreshExecutableHealth() };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to get remote daemon host state') };
     }
@@ -203,6 +204,7 @@ export function registerRemoteDaemonHandlers(
         preferTunnel: request.preferTunnel,
         baseUrl: request.baseUrl,
         autoSelectListenPort: true,
+        asyncCommandRunner: runRemoteSetupCommand,
         existingConfig: useCurrentDataDirectory ? configManager.getConfig() : undefined,
         writeConfig: useCurrentDataDirectory
           ? async (nextConfig) => {
@@ -292,7 +294,7 @@ export function registerRemoteDaemonHandlers(
     try {
       const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
       const label = readOptionalConnectionCodeLabel(input) ?? `${os.hostname()} Pane daemon`;
-      const access = resolveCurrentHostAccess(current, dependencies.readConfiguredTailscaleServeAccess);
+      const access = await resolveCurrentHostAccess(current, dependencies.readConfiguredTailscaleServeAccess);
       const pair = createRemoteDaemonConnectionPair({
         label,
         baseUrl: access.baseUrl,
@@ -668,15 +670,15 @@ function readOptionalConnectionCodeLabel(input: PaneCommandValue): string | unde
   return label.length > 0 ? label : undefined;
 }
 
-function resolveCurrentHostAccess(
+async function resolveCurrentHostAccess(
   current: RemoteDaemonConfig,
   readTailscaleAccess: typeof readConfiguredTailscaleServeAccess,
-): RemoteDaemonHostAccess {
+): Promise<RemoteDaemonHostAccess> {
   if (current.host.access) {
     return current.host.access;
   }
 
-  const discoveredTailscaleAccess = readTailscaleAccess(current.host.config.listenPort);
+  const discoveredTailscaleAccess = await readTailscaleAccess(current.host.config.listenPort);
   if (discoveredTailscaleAccess) {
     return discoveredTailscaleAccess;
   }

@@ -10,6 +10,13 @@ The intended flow is:
 
 Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
 
+## Creating a code in desktop Settings
+
+Desktop setup uses an installed, signed-in Tailscale client. If Tailscale is
+missing, Pane shows installation instructions; use the setup terminal to install
+it. Tailscale discovery, Serve configuration and requested daemon service setup
+run asynchronously so the desktop stays responsive while they finish.
+
 ## One-Command Setup
 
 Recommended package-manager commands:

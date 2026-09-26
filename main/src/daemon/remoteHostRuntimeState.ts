@@ -7,21 +7,41 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { getAppDirectory } from '../utils/appDirectory';
-import { collectRemoteDaemonExecutableHealth } from './remoteDaemonExecutableHealth';
+import { collectRemoteDaemonExecutableHealthAsync } from './remoteDaemonExecutableHealth';
 
 interface RemoteHttpAddress {
   host: string;
   port: number;
 }
 
-class RemoteHostRuntimeStateStore extends EventEmitter {
+export class RemoteHostRuntimeStateStore extends EventEmitter {
+  constructor(private readonly collectHealth = collectRemoteDaemonExecutableHealthAsync) {
+    super();
+  }
   private state: RemoteDaemonHostRuntimeState = createDefaultRemoteDaemonHostRuntimeState();
 
+  private healthRefresh: Promise<RemoteDaemonHostRuntimeState> | null = null;
+  private generation = 0;
+  private healthInitialized = false;
+
   getState(): RemoteDaemonHostRuntimeState {
-    return {
-      ...this.state,
-      executableHealth: collectRemoteDaemonExecutableHealth(getAppDirectory()),
-    };
+    return { ...this.state };
+  }
+
+  refreshExecutableHealth(): Promise<RemoteDaemonHostRuntimeState> {
+    if (this.healthRefresh) return this.healthRefresh;
+    this.healthInitialized = true;
+    const generation = this.generation;
+    this.healthRefresh = this.collectHealth(getAppDirectory()).then(executableHealth => {
+      if (generation === this.generation) {
+        this.state = { ...this.state, executableHealth };
+        this.emit('state-changed', this.getState());
+      }
+      return this.getState();
+    }).finally(() => {
+      if (generation === this.generation) this.healthRefresh = null;
+    });
+    return this.healthRefresh;
   }
 
   setInactive(config?: RemoteDaemonHostConfig | null): void {
@@ -76,11 +96,17 @@ class RemoteHostRuntimeStateStore extends EventEmitter {
   }
 
   resetForTests(): void {
-    this.setState(createDefaultRemoteDaemonHostRuntimeState());
+    this.generation += 1;
+    this.healthInitialized = false;
+    this.healthRefresh = null;
+    this.state = createDefaultRemoteDaemonHostRuntimeState();
   }
 
   private setState(state: RemoteDaemonHostRuntimeState): void {
     this.state = { ...state };
+    if (!this.healthInitialized) {
+      void this.refreshExecutableHealth().catch(error => console.error('Failed to inspect remote executable health:', error));
+    }
     this.emit('state-changed', this.getState());
   }
 }
