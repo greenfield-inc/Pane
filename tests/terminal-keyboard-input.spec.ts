@@ -76,6 +76,15 @@ for (const fullscreen of [false, true]) {
       await expect(input).toBeAttached();
       await expect(terminal.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
       await input.focus();
+      if (!win32) {
+        for (const [key, expected] of [
+          ['Control+a', '\x01'], ['Control+d', '\x04'], ['Control+q', '\x11'],
+        ]) {
+          await page.evaluate(() => window.__terminalInputMessages.length = 0);
+          await page.keyboard.press(key);
+          expect.soft(await inputMessages(page), key).toEqual([expected]);
+        }
+      }
       for (const { key, vt, win32: records } of cases) {
         await page.evaluate(() => window.__terminalInputMessages.length = 0);
         await page.keyboard.press(key);

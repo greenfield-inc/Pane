@@ -61,7 +61,19 @@ describe('TerminalInterceptor keyboard protocols', () => {
     interceptor.handleInput('\x1b[27;1;27;1;0;1_');
     expect(onFlush).toHaveBeenCalledWith('@f');
     expect(interceptor.getState().active).toBe(false);
-    expect(interceptor.handleInput('\x1b[27;1;27;0;0;1_').consumed).toBe(true);
+    expect(interceptor.handleInput('\x1b[27;1;27;0;0;1_').consumed).toBe(false);
+  });
+
+  it.each([
+    'pasted text', '日本語', 'é', '\x03', '\x04', ' ',
+    '\x1b[67;46;3;1;8;1_',
+  ])('flushes the picker prefix once and forwards cancelling input unchanged: %j', (data) => {
+    const { interceptor, onFlush } = setup();
+    interceptor.handleInput('@');
+    interceptor.handleInput('f');
+    expect(interceptor.handleInput(data)).toEqual({ consumed: false });
+    expect(onFlush.mock.calls).toEqual([['@f']]);
+    expect(interceptor.getState().active).toBe(false);
   });
 
   it('preserves Backspace dismissal of an empty @ filter', () => {
