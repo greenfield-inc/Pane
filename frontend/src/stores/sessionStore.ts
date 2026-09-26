@@ -111,21 +111,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   updateSession: (updatedSession) => set((state) => {
     const normalizedUpdatedSession = normalizeSession(updatedSession);
     
-    // If this is the active main repo session, update it
-    if (state.activeMainRepoSession && state.activeMainRepoSession.id === normalizedUpdatedSession.id) {
-      const newActiveSession = {
-        ...state.activeMainRepoSession,
-        ...normalizedUpdatedSession,
-        output: state.activeMainRepoSession.output,
-        jsonMessages: state.activeMainRepoSession.jsonMessages
-      };
-      return {
-        ...state,
-        activeMainRepoSession: newActiveSession
-      };
-    }
-    
-    // Otherwise update in regular sessions
+    const activeMainRepoSession = state.activeMainRepoSession?.id === normalizedUpdatedSession.id
+      ? {
+          ...state.activeMainRepoSession,
+          ...normalizedUpdatedSession,
+          output: state.activeMainRepoSession.output,
+          jsonMessages: state.activeMainRepoSession.jsonMessages,
+        }
+      : state.activeMainRepoSession;
+
+    // Keep the list entry in sync with the active main-repo session.
     // Performance: Only clone array if session exists
     let newSessions = state.sessions;
     for (let i = 0; i < state.sessions.length; i++) {
@@ -144,7 +139,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     
     return {
       ...state,
-      sessions: newSessions
+      sessions: newSessions,
+      activeMainRepoSession
     };
   }),
   
@@ -179,6 +175,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return;
     }
     
+    const wasAlreadyActive = get().activeSessionId === sessionId;
+
     // Emit session-switched event for cleanup
     if (get().activeSessionId !== sessionId) {
       startSwitchPane(sessionId);
@@ -215,7 +213,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       
       // Only mark session as viewed if it wasn't already active
       // This prevents the blue dot from disappearing when the session completes while you're viewing it
-      const wasAlreadyActive = state.activeSessionId === sessionId;
       if (!wasAlreadyActive) {
         get().markSessionAsViewed(sessionId);
       }
@@ -257,8 +254,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           set({ activeSessionId: sessionId, activeMainRepoSession: null });
         }
         // Only mark session as viewed if it wasn't already active
-        const currentState = get();
-        const wasAlreadyActive = currentState.activeSessionId === sessionId;
         if (!wasAlreadyActive) {
           get().markSessionAsViewed(sessionId);
         }
