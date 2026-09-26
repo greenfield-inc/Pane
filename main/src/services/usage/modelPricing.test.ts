@@ -13,6 +13,16 @@ afterEach(() => {
 });
 
 describe('findModelPrice', () => {
+  it('keeps a dated GPT-5 identifier distinct from the GPT-5.2 family', () => {
+    expect(estimateCostUsd({
+      model: 'gpt-5-2025-08-07',
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    }).costUsd).toBe(11.25);
+  });
+
   it('resolves Claude models from the bundled table', () => {
     expect(findModelPrice('claude-opus-5')?.model).toBe('claude-opus-5');
     expect(findModelPrice('claude-sonnet-5-20260101')?.model).toBe('claude-sonnet-5');
