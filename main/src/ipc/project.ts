@@ -3,7 +3,7 @@ import { mkdir, access } from 'fs/promises';
 import path from 'path';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
-import type { CreateProjectRequest, UpdateProjectRequest } from '../../../frontend/src/types/project';
+import type { CreateProjectRequest, UpdateProjectRequest } from '../../../shared/types/project';
 import { scriptExecutionTracker } from '../services/scriptExecutionTracker';
 import { panelManager } from '../services/panelManager';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
