@@ -953,7 +953,8 @@ export function ArchivedSessions() {
       }
       // SAFETY: The named IPC/API channel contract establishes this response payload type.
       const projects = response.data as Array<Project & { sessions: Session[] }>;
-      if (request === archiveRequestRef.current) setArchivedProjects(projects);
+      if (request !== archiveRequestRef.current) return null;
+      setArchivedProjects(projects);
       return projects;
     } catch (cause) {
       if (request === archiveRequestRef.current) {
@@ -1065,14 +1066,20 @@ export function ArchivedSessions() {
 
       // Only delete the snapshot the user confirmed. A newly archived pane
       // belongs to the next batch; the server rejects panes restored meanwhile.
+      const errors: string[] = [];
       for (const sessionId of sessionIds) {
-        const response = await API.sessions.permanentDelete(sessionId);
-        if (!response.success) throw new Error(response.error || 'Failed to permanently delete archived panes');
-        if (activeSessionId === sessionId) {
-          await setActiveSession(null);
-          navigateToSessions();
+        try {
+          const response = await API.sessions.permanentDelete(sessionId);
+          if (!response.success) throw new Error(response.error || 'Failed to permanently delete archived panes');
+          if (activeSessionId === sessionId) {
+            await setActiveSession(null);
+            navigateToSessions();
+          }
+        } catch (cause) {
+          errors.push(cause instanceof Error ? cause.message : 'Failed to permanently delete archived panes');
         }
       }
+      if (errors.length > 0) setArchiveError(errors.join('; '));
     } catch (cause) {
       setArchiveError(cause instanceof Error ? cause.message : 'Failed to permanently delete archived panes');
     } finally {
@@ -1109,7 +1116,7 @@ export function ArchivedSessions() {
             type="button"
             onClick={handlePermanentDeleteAllArchived}
             disabled={isDeletingArchived}
-            className="flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived-header:opacity-100 group-focus-within/archived-header:opacity-100"
+            className="flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-colors opacity-0 group-hover/archived-header:opacity-100 group-focus-within/archived-header:opacity-100"
             title="Permanently delete all archived panes"
             aria-label="Permanently delete all archived panes"
           >

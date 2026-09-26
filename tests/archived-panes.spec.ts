@@ -10,6 +10,8 @@ declare global {
       confirmations: string[];
       archiveDuringConfirmation: boolean;
       failId?: string;
+      releaseLoad?: () => void;
+      releaseDelete?: () => void;
     };
   }
 }
@@ -92,11 +94,56 @@ test('delete-all confirms a fresh count and deletes only the confirmed panes', a
 });
 
 
-test('a pane restored during deletion is preserved and the archive refreshes with an error', async ({ page }) => {
+test('a superseded archive snapshot is not offered for deletion', async ({ page }, testInfo) => {
   await setup(page);
-  await page.evaluate(() => { window.__archivedPaneFixture.failId = 'old'; });
+  await page.evaluate(() => {
+    const original = window.electronAPI.sessions.getArchivedWithProjects;
+    let first = true;
+    window.electronAPI.sessions.getArchivedWithProjects = async () => {
+      const snapshot = await original();
+      if (first) {
+        first = false;
+        await new Promise<void>(resolve => { window.__archivedPaneFixture.releaseLoad = resolve; });
+      }
+      return snapshot;
+    };
+  });
+  const deleteAll = page.getByRole('button', { name: 'Permanently delete all archived panes', exact: true });
+  await deleteAll.click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.__archivedPaneFixture.releaseLoad))).toBe(true);
+  await page.evaluate(() => {
+    const pane = { id: 'latest', name: 'Latest archive', archived: true };
+    window.__archivedPaneFixture.panes = [pane];
+    // SAFETY: installElectronApiMock supplies the event bridge used by the live UI.
+    const mock = (window as Window & { __paneTestElectronMock: { emitSessionUpdated: (pane: ArchivedPane) => void } }).__paneTestElectronMock;
+    mock.emitSessionUpdated(pane);
+  });
+  await expect(page.getByRole('button', { name: 'Open archived pane Latest archive', exact: true })).toBeVisible();
+  await page.evaluate(() => window.__archivedPaneFixture.releaseLoad?.());
+  await expect(deleteAll).toBeEnabled();
+  expect(await page.evaluate(() => window.__archivedPaneFixture.confirmations)).toEqual([]);
+  expect(await page.evaluate(() => window.__archivedPaneFixture.deletedIds)).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('superseded-snapshot-preserved.png') });
+});
+
+test('a pane restored during deletion does not block the remaining confirmed deletions', async ({ page }, testInfo) => {
+  await setup(page);
+  await page.evaluate(() => {
+    window.__archivedPaneFixture.panes.push({ id: 'next', name: 'Next confirmed pane', archived: true });
+    const original = window.electronAPI.sessions.permanentDelete;
+    window.electronAPI.sessions.permanentDelete = async id => {
+      if (id === 'old') await new Promise<void>(resolve => { window.__archivedPaneFixture.releaseDelete = resolve; });
+      return original(id);
+    };
+  });
   await page.getByRole('button', { name: 'Permanently delete all archived panes', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(window.__archivedPaneFixture.releaseDelete))).toBe(true);
+  await page.evaluate(() => {
+    window.__archivedPaneFixture.failId = 'old';
+    window.__archivedPaneFixture.releaseDelete?.();
+  });
   await expect(page.getByRole('alert').filter({ hasText: 'Pane was restored' })).toBeVisible();
   await expect(page.getByText('No archived panes', { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__archivedPaneFixture.deletedIds)).toEqual([]);
+  expect(await page.evaluate(() => window.__archivedPaneFixture.deletedIds)).toEqual(['next']);
+  await page.screenshot({ path: testInfo.outputPath('remaining-confirmed-panes-deleted.png') });
 });
