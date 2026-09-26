@@ -91,12 +91,12 @@ async function fileExists(
   cwd?: string,
 ): Promise<boolean> {
   try {
-    if (environment === 'windows') {
+    if (environment !== 'wsl') {
       await fs.promises.access(filePath);
       return true;
     }
     if (!commandRunner) return false;
-    await commandRunner.execAsync(`test -e "${filePath}"`, cwd || filePath, { silent: true });
+    await commandRunner.execFile('test', ['-e', filePath], cwd || filePath, { silent: true });
     return true;
   } catch {
     return false;
@@ -109,11 +109,11 @@ async function readFile(
   commandRunner?: CommandRunner,
   cwd?: string,
 ): Promise<string> {
-  if (environment === 'windows') {
+  if (environment !== 'wsl') {
     return fs.promises.readFile(filePath, 'utf-8');
   }
-  if (!commandRunner) throw new Error('CommandRunner required for non-Windows environments');
-  const { stdout } = await commandRunner.execAsync(`cat "${filePath}"`, cwd || filePath);
+  if (!commandRunner) throw new Error('CommandRunner required for WSL');
+  const { stdout } = await commandRunner.execFile('cat', ['--', filePath], cwd || filePath);
   return stdout;
 }
 
@@ -135,7 +135,7 @@ const CONFIG_FILES: Array<{ file: string; parser: ConfigParser }> = [
  *
  * @param projectPath - Path to check for config files (typically session worktree path)
  * @param environment - Platform environment for correct path handling
- * @param commandRunner - Required for non-Windows environments (WSL/Linux/macOS)
+ * @param commandRunner - Required for WSL
  * @returns Parsed config with scripts and source filename, or null if nothing found
  */
 export async function detectProjectConfig(

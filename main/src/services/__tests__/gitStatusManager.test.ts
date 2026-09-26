@@ -70,7 +70,7 @@ const projectGithubCommand = vi.fn<CommandRunner['execAsync']>();
 const mockProjectContext = {
   project: mockProject,
   pathResolver: {},
-  commandRunner: { execAsync: vi.fn<CommandRunner['execAsync']>(), wslContext: null },
+  commandRunner: { execAsync: vi.fn<CommandRunner['execAsync']>(), execFile: vi.fn<CommandRunner['execFile']>(), wslContext: null },
 };
 
 const cleanIndexStatus: GitIndexStatus = {
@@ -149,6 +149,9 @@ describe('GitStatusManager', () => {
       if (command.startsWith('git ')) return { stdout: projectGitOutput(command, cwd), stderr: '' };
       return projectGithubCommand(command, cwd, options);
     });
+    mockProjectContext.commandRunner.execFile.mockImplementation(async (file, args, cwd) => ({
+      stdout: projectGitOutput([file, ...args].join(' '), cwd), stderr: '', exitCode: 0,
+    }));
     // Git and GitHub CLI outputs have independent fixtures.
     vi.mocked(projectGitOutput).mockReturnValue('');
   });

@@ -1,7 +1,6 @@
 import { commandExecutor } from '../utils/commandExecutor';
 import * as fs from 'fs';
 import { WSLContext, linuxToUNCPath } from '../utils/wslUtils';
-import { escapeShellArg } from '../utils/shellEscape';
 
 /**
  * Optimized git commands using plumbing (low-level) commands
@@ -72,28 +71,28 @@ export async function fastCheckWorkingDirectory(cwd: string, wslContext?: WSLCon
   try {
     // 1. Refresh the index first (very fast, updates git's cache)
     try {
-      await commandExecutor.execAsync('git update-index --refresh --ignore-submodules', { cwd, silent: true }, wslContext);
+      await commandExecutor.execFileAsync('git', ['update-index', '--refresh', '--ignore-submodules'], { cwd, silent: true }, wslContext);
     } catch {
       // Some files may have been modified, that's ok
     }
 
     // 2. Check for unstaged changes (modified files in working directory)
     try {
-      await commandExecutor.execAsync('git diff-files --quiet --ignore-submodules', { cwd, silent: true }, wslContext);
+      await commandExecutor.execFileAsync('git', ['diff-files', '--quiet', '--ignore-submodules'], { cwd, silent: true }, wslContext);
     } catch {
       result.hasModified = true;
     }
 
     // 3. Check for staged changes (in index)
     try {
-      await commandExecutor.execAsync('git diff-index --cached --quiet HEAD --ignore-submodules', { cwd, silent: true }, wslContext);
+      await commandExecutor.execFileAsync('git', ['diff-index', '--cached', '--quiet', 'HEAD', '--ignore-submodules'], { cwd, silent: true }, wslContext);
     } catch {
       result.hasStaged = true;
     }
 
     // 4. Check for untracked files (more efficient than ls-files for just checking existence)
-    const untrackedCheck = (await commandExecutor.execAsync(
-      'git ls-files --others --exclude-standard --directory --no-empty-directory',
+    const untrackedCheck = (await commandExecutor.execFileAsync(
+      'git', ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory'],
       { cwd },
       wslContext
     )).stdout.trim();
@@ -103,7 +102,7 @@ export async function fastCheckWorkingDirectory(cwd: string, wslContext?: WSLCon
     }
 
     // 5. Check for merge conflicts
-    const conflictCheck = (await commandExecutor.execAsync('git diff --name-only --diff-filter=U', { cwd }, wslContext)).stdout.trim();
+    const conflictCheck = (await commandExecutor.execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], { cwd }, wslContext)).stdout.trim();
 
     if (conflictCheck) {
       result.hasConflicts = true;
@@ -131,7 +130,7 @@ export async function fastGetAheadBehind(cwd: string, baseBranch: string, wslCon
   }
 
   try {
-    const result = (await commandExecutor.execAsync(`git rev-list --left-right --count ${baseBranch}...HEAD`, { cwd }, wslContext)).stdout.trim();
+    const result = (await commandExecutor.execFileAsync('git', ['rev-list', '--left-right', '--count', `${baseBranch}...HEAD`, '--'], { cwd }, wslContext)).stdout.trim();
 
     const [behind, ahead] = result.split('\t').map(n => parseInt(n, 10));
     return {
@@ -152,10 +151,8 @@ export async function listCommitsAhead(
     throw new Error(`Directory does not exist: ${cwd}`);
   }
 
-  const range = escapeShellArg(`${baseBranch}..HEAD`);
-  const format = escapeShellArg('%H%x00%s');
-  const output = (await commandExecutor.execAsync(
-    `git log --format=${format} -z ${range}`,
+  const output = (await commandExecutor.execFileAsync(
+    'git', ['log', '--format=%H%x00%s', '-z', `${baseBranch}..HEAD`, '--'],
     { cwd, silent: true },
     wslContext,
   )).stdout;
@@ -184,7 +181,7 @@ export async function fastGetDiffStats(cwd: string, wslContext?: WSLContext | nu
 
   try {
     // Use numstat for machine-readable output (faster to parse)
-    const result = (await commandExecutor.execAsync('git diff --numstat', { cwd }, wslContext)).stdout.trim();
+    const result = (await commandExecutor.execFileAsync('git', ['diff', '--numstat'], { cwd }, wslContext)).stdout.trim();
 
     if (!result) {
       return { additions: 0, deletions: 0, filesChanged: 0 };
