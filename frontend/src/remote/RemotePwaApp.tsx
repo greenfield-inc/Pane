@@ -23,7 +23,8 @@ import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileS
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { useRemoteSessionStore } from './stores/remoteSessionStore';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { remoteCreationFailureSchema, remotePanelReferenceSchema, remotePanelSchema } from './runtime/remotePayloadSchemas';
 import { ErrorDialog } from '../components/ErrorDialog';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
@@ -511,31 +512,28 @@ export function RemotePwaApp() {
     if (!adapter) return;
     return adapter.onEvent(event => {
       if (event.channel === 'session:creation-failed') {
-        const failure = decodeBoundary(event.args[0], boundary.object({ name: boundary.string, error: boundary.string }));
-        setCreationFailure(failure);
+        const failure = decodeOptionalBoundary(event.args[0], remoteCreationFailureSchema);
+        if (failure) setCreationFailure(failure);
+        else setLastError('The remote host sent invalid pane creation data.');
         return;
       }
       if (event.channel === 'panel:created' || event.channel === 'panel:updated') {
-        // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-        const panel = event.args[0] as ToolPanel | undefined;
-        if (panel?.id && panel.sessionId) {
-          upsertPanel(panel);
-        }
+        const panel = decodeOptionalBoundary(event.args[0], remotePanelSchema);
+        if (panel) upsertPanel(panel);
+        else setLastError('The remote host sent invalid panel data.');
         return;
       }
 
       if (event.channel === 'panel:deleted') {
-        // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-        const payload = event.args[0] as { panelId?: string; sessionId?: string } | undefined;
-        if (payload?.panelId && payload.sessionId) {
-          removePanel(payload.sessionId, payload.panelId);
-        }
+        const payload = decodeOptionalBoundary(event.args[0], remotePanelReferenceSchema);
+        if (payload) removePanel(payload.sessionId, payload.panelId);
+        else setLastError('The remote host sent invalid panel data.');
         return;
       }
 
       if (event.channel === 'panel:activeChanged') {
-        // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-        const payload = event.args[0] as { sessionId?: string; panelId?: string } | undefined;
+        const payload = decodeOptionalBoundary(event.args[0], remotePanelReferenceSchema);
+        if (!payload) { setLastError('The remote host sent invalid panel data.'); return; }
         if (payload?.sessionId === selectedSessionId && payload.panelId) {
           setSelectedPanel(payload.panelId);
         }
@@ -546,7 +544,7 @@ export function RemotePwaApp() {
         void refreshProjects(adapter);
       }
     });
-  }, [adapter, refreshProjects, removePanel, selectedSessionId, setSelectedPanel, upsertPanel]);
+  }, [adapter, refreshProjects, removePanel, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
   useEffect(() => {
     if (!selectedSessionId || !adapter) return;

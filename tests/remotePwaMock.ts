@@ -156,11 +156,20 @@ export async function openConnectedRemotePwa(
           window.setTimeout(() => this.onopen?.(new Event('open')), 0);
         }
       }
-      addEventListener(): void {}
-      removeEventListener(): void {}
+      private listeners = new Map<string, Set<EventListener>>();
+      addEventListener(type: string, listener: EventListener): void {
+        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+      removeEventListener(type: string, listener: EventListener): void { this.listeners.get(type)?.delete(listener); }
+      emit(type: string, data: string): void {
+        for (const listener of this.listeners.get(type) ?? []) listener(new MessageEvent(type, { data }));
+      }
       close(): void {}
     }
 
+    window.__paneRemoteEmit = (channel, args) => live?.emit('daemon-event', JSON.stringify({ channel, args, timestamp: new Date().toISOString() }));
     let live: MockEventSource | undefined;
     let held = false;
     const register = (source: MockEventSource) => { live = source; };
@@ -225,6 +234,7 @@ declare global {
   interface Window {
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
     __paneRemoteDropConnection?: () => void;
+    __paneRemoteEmit?: (channel: string, args: JsonValue[]) => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
     __paneRemoteRestoreConnection?: () => void;
   }
