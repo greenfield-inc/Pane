@@ -97,7 +97,8 @@ export class GitFileWatcher extends EventEmitter {
   constructor(
     private logger?: Logger,
     private commandRunner?: CommandRunner,
-    private pathResolver?: PathResolver
+    private pathResolver?: PathResolver,
+    private watchFiles: typeof chokidarWatch = chokidarWatch,
   ) {
     super();
     this.setMaxListeners(100);
@@ -229,7 +230,7 @@ export class GitFileWatcher extends EventEmitter {
         return this.isIgnoredEventPath(rel, gitignoredDirs, stats.isDirectory());
       };
 
-      const worktreeWatcher = chokidarWatch(watchPath, {
+      const worktreeWatcher = this.watchFiles(watchPath, {
         ignored,
         ignoreInitial: true,
         persistent: true,
@@ -710,7 +711,7 @@ export class GitFileWatcher extends EventEmitter {
           ? [path.join(commonDir, 'packed-refs'), path.join(commonDir, 'refs', 'heads')]
           : []), // degrade to index/HEAD-only, as today
       ]);
-      const gitWatcher = chokidarWatch([...targets], {
+      const gitWatcher = this.watchFiles([...targets], {
         ignoreInitial: true,
         persistent: true,
         followSymlinks: false,

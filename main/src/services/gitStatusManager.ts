@@ -34,7 +34,7 @@ interface PendingRefresh {
   isUserInitiated: boolean;
   waiters: Array<{
     resolve: (status: GitStatus | null) => void;
-    reject: (error: unknown) => void;
+    reject: (error: Error) => void;
   }>;
 }
 
@@ -487,7 +487,10 @@ export class GitStatusManager extends EventEmitter {
       this.gitLogger.logDebounce(sessionId, 'complete');
       void this.runPendingRefresh(sessionId, pending).then(
         status => pending.waiters.forEach(waiter => waiter.resolve(status)),
-        error => pending.waiters.forEach(waiter => waiter.reject(error)),
+        error => {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          pending.waiters.forEach(waiter => waiter.reject(failure));
+        },
       );
     }, this.DEBOUNCE_MS);
     this.pendingRefreshes.set(sessionId, pending);
