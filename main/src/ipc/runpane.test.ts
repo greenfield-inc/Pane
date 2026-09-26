@@ -16,6 +16,7 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { WorkspaceJournal } from '../services/workspaceJournal';
+import { createWorkspaceJournal } from '../services/createWorkspaceJournal';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
@@ -158,7 +159,7 @@ function terminalSnapshot(
 
 function createServices(overrides: Partial<AppServices> = {}): AppServices {
   // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-  return {
+  const services = {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     app: {
       getVersion: vi.fn(() => '2.3.8'),
@@ -219,6 +220,11 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
       hashSessionId: vi.fn((id: string) => `hash-${id}`),
     },
     spotlightManager: {},
+    archiveProgressManager: new ArchiveProgressManager(),
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    skillCacheManager: {},
+    paneChatManager: {},
+    orchestrationSessionManager: {},
     worktreeManager: {
       getUpstream: vi.fn(async () => null),
       getSessionComparisonBranch: vi.fn(async () => 'main'),
@@ -235,6 +241,8 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     },
     ...overrides,
   } as AppServices;
+  services.workspaceJournal = overrides.workspaceJournal ?? createWorkspaceJournal(services.sessionManager, panelManager, terminalPanelManager);
+  return services;
 }
 
 const tempDirs: string[] = [];
@@ -270,13 +278,9 @@ function registerSessionsDeleteStub(
     if (options.result) {
       return options.result;
     }
-    if (services.archiveProgressManager) {
-      services.archiveProgressManager.addTask(sessionId, 'issue-252', 'issue-252-worktree', 'Pane', async () => {
-        await options.onArchive?.();
-      });
-    } else {
-      setImmediate(() => options.onArchive?.());
-    }
+    services.archiveProgressManager.addTask(sessionId, 'issue-252', 'issue-252-worktree', 'Pane', async () => {
+      await options.onArchive?.();
+    });
     return { success: true };
   });
   registry.register('sessions:delete', handler);
@@ -544,6 +548,20 @@ describe('runpane IPC handlers', () => {
         { kind: 'agent.ready', paneId: session.id, panelId: terminalPanel.id, panelTitle: terminalPanel.title, baseline: true },
       ],
     });
+  });
+
+  it('reports held input on ready events from the production journal sources', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+      terminalSnapshot('› ship it', 'idle'),
+    );
+    const services = createServices();
+    const registry = createRegistry(services);
+    services.workspaceJournal.send('panel:agentStatus', { panelId: terminalPanel.id, sessionId: session.id, state: 'working' });
+    services.workspaceJournal.send('panel:agentStatus', { panelId: terminalPanel.id, sessionId: session.id, state: 'idle' });
+    const result = await registry.invoke('runpane:workspace:wait', [{
+      since: 0, timeoutMs: 0, kinds: ['agent.ready'], includeHeldInput: true,
+    }]);
+    expect(result).toMatchObject({ entries: [{ kind: 'agent.ready', heldInput: 'ship it' }] });
   });
 
   it('waits for filtered workspace journal entries after an explicit generation', async () => {
@@ -3892,35 +3910,7 @@ describe('runpane IPC handlers', () => {
       });
     });
 
-    it('polls for worktree removal when no archiveProgressManager is configured', async () => {
-      const repoPath = createTempGitRepo('polling-repo');
-      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
-      const pollingSession: Session = { ...session, worktreePath: repoPath };
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      const services = createServices({
-        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-        sessionManager: {
-          ...createServices().sessionManager,
-          getSession: vi.fn(() => pollingSession),
-        } as never,
-        archiveProgressManager: undefined,
-      } as never);
-      const registry = createRegistry(services);
-      registerSessionsDeleteStub(registry, services, {
-        onArchive: () => {
-          fs.rmSync(repoPath, { recursive: true, force: true });
-        },
-      });
 
-      const result = await registry.invoke('runpane:panes:archive', [{
-        paneId: session.id,
-      }]);
-
-      expect(result).toMatchObject({
-        ok: true,
-        worktreeCleanup: 'completed',
-      });
-    });
   });
 
   describe('runpane:panes:focus', () => {

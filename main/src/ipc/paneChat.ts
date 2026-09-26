@@ -11,10 +11,6 @@ export function registerPaneChatHandlers(
 ): void {
   commandRegistry.register('pane-chat:get-or-create', async () => {
     try {
-      if (!services.paneChatManager) {
-        throw new Error('Pane Chat manager is not initialized');
-      }
-
       const state = await services.paneChatManager.getOrCreate();
       return { success: true, data: state };
     } catch (error) {
@@ -29,10 +25,6 @@ export function registerPaneChatHandlers(
 
   commandRegistry.register('pane-chat:set-agent', async (agent: PaneCommandValue) => {
     try {
-      if (!services.paneChatManager) {
-        throw new Error('Pane Chat manager is not initialized');
-      }
-
       const decodedAgent = decodeBoundary(agent, boundary.optional(boundary.json));
       const state = await services.paneChatManager.setAgent(normalizePaneChatAgent(decodedAgent));
       return { success: true, data: state };

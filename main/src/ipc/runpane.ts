@@ -173,7 +173,6 @@ const CLAUDE_UI_QUIET_MS = 3_000;
 const MAX_CREATE_SUBMIT_ATTEMPTS = 3;
 const CREATE_SUBMIT_CONFIRMATION_DELAY_MS = 400;
 const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
-const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
 const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
 const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
@@ -246,7 +245,7 @@ export function registerRunpaneHandlers(
   commandRegistry: PaneCommandRegistry,
 ): void {
   const { databaseService, sessionManager, taskQueue, configManager } = services;
-  const workspaceJournal = services.workspaceJournal ?? createWorkspaceJournal(services);
+  const workspaceJournal = services.workspaceJournal;
   const workspaceStateReader = services.workspaceStateReader ?? new WorkspaceStateReader(
     sessionManager,
     () => workspaceJournal.epoch,
@@ -377,7 +376,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:list', async (): Promise<RunpaneSessionListResult> => {
     return withRunpaneAction(services, 'sessions:list', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const result = await manager.list();
       return { ok: true, ...result };
     }, result => ({ resultCount: result.sessions.length }));
@@ -385,7 +384,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:create', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:create', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const input = parseOrchestrationSessionCreateRequest(request);
       const view = await manager.create(input);
       return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
@@ -394,7 +393,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:get', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:get', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const session = await manager.get(parseOrchestrationSessionSelector(request));
       return { ok: true, session };
     }, result => ({ resultCount: 1 }));
@@ -402,7 +401,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:update', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:update', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const normalized = parseOrchestrationSessionUpdateRequest(request);
       const session = await manager.update(normalized.selector, normalized.input);
       return { ok: true, session };
@@ -411,7 +410,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:set-agent', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:set-agent', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const normalized = parseOrchestrationSessionAgentRequest(request);
       const view = await manager.setAgent(normalized.selector, normalized.agent);
       return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
@@ -420,7 +419,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:associate', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:associate', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const normalized = parseOrchestrationSessionAssociationRequest(request);
       const session = await manager.associate(normalized.selector, normalized.association);
       return { ok: true, session };
@@ -429,7 +428,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:detach', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:detach', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const normalized = parseOrchestrationSessionDetachRequest(request);
       const session = await manager.detach(normalized.selector, normalized.paneId);
       return { ok: true, session };
@@ -438,7 +437,7 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:overview', async (request: PaneCommandValue): Promise<RunpaneSessionOverviewResult> => {
     return withRunpaneAction(services, 'sessions:overview', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
+      const manager = services.orchestrationSessionManager;
       const overview = await manager.overview(parseOrchestrationSessionSelector(request));
       return { ok: true, ...overview };
     }, result => ({ resultCount: result.panes.length }));
@@ -832,7 +831,7 @@ export function registerRunpaneHandlers(
         }
       }
 
-      const cleanupWait = worktreeCleanupApplicable && services.archiveProgressManager
+      const cleanupWait = worktreeCleanupApplicable
         ? waitForArchiveProgressCompletion(services.archiveProgressManager, normalized.paneId, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS)
         : null;
 
@@ -847,14 +846,7 @@ export function registerRunpaneHandlers(
         throw new Error(deleteResult.error ?? `Failed to archive pane ${normalized.paneId}`);
       }
 
-      let worktreeCleanup: RunpaneWorktreeCleanupState;
-      if (!worktreeCleanupApplicable) {
-        worktreeCleanup = 'not-applicable';
-      } else if (cleanupWait) {
-        worktreeCleanup = await cleanupWait;
-      } else {
-        worktreeCleanup = await waitForWorktreeRemovalByPolling(pane.worktreePath, DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS);
-      }
+      const worktreeCleanup = cleanupWait ? await cleanupWait : 'not-applicable';
 
       const success: RunpanePaneArchiveSuccessResult = {
         ok: worktreeCleanup === 'completed' || worktreeCleanup === 'not-applicable',
@@ -2449,10 +2441,6 @@ function parsePaneListRequest(value: PaneCommandValue): RunpanePaneListRequest {
   };
 }
 
-function requireOrchestrationSessionManager(services: AppServices) {
-  if (!services.orchestrationSessionManager) throw new Error('Sessions manager is not initialized');
-  return services.orchestrationSessionManager;
-}
 
 function parseOrchestrationSessionSelector(value: PaneCommandValue): RunpaneSessionSelector {
   const selector = decodeBoundary(value, orchestrationSelectorSchema);
@@ -3167,21 +3155,6 @@ function waitForArchiveProgressCompletion(
   });
 }
 
-async function waitForWorktreeRemovalByPolling(
-  worktreePath: string,
-  timeoutMs: number,
-  intervalMs = DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS,
-): Promise<RunpaneWorktreeCleanupState> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (!fs.existsSync(worktreePath)) {
-      return 'completed';
-    }
-    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
-  }
-  return fs.existsSync(worktreePath) ? 'timeout' : 'completed';
-}
-
 function parsePaneArchiveRequest(value: PaneCommandValue): RunpanePaneArchiveRequest {
   if (!isRecord(value)) {
     throw new Error('Pane archive request must be an object');
@@ -3557,7 +3530,7 @@ async function withRunpaneAction<T extends { ok: boolean }>(
 ): Promise<T> {
   const startedAt = Date.now();
   const generation = MUTATING_RUNPANE_ACTIONS.has(action)
-    ? services.workspaceJournal?.generation
+    ? services.workspaceJournal.generation
     : undefined;
   try {
     const result = await handler();
@@ -3583,50 +3556,6 @@ async function withRunpaneAction<T extends { ok: boolean }>(
     }, error);
     throw error;
   }
-}
-
-function createWorkspaceJournal(services: AppServices): WorkspaceJournal {
-  const journal = new WorkspaceJournal({
-    resolvePane: (paneId) => {
-      const session = services.sessionManager.getSession(paneId);
-      if (!session) return undefined;
-      const project = services.sessionManager.getProjectForSession(paneId);
-      return {
-        paneId,
-        paneName: session.name,
-        repoId: project?.id,
-        repoName: project?.name,
-        worktreePath: session.worktreePath,
-      };
-    },
-    resolvePanel: (panelId) => {
-      const panel = panelManager.getPanel(panelId);
-      if (!panel) return undefined;
-      const snapshot = terminalPanelManager.getTerminalSnapshot(panelId);
-      const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
-      return {
-        panelId,
-        paneId: panel.sessionId,
-        panelTitle: panel.title,
-        isCliPanel: snapshot?.isCliPanel ?? optionalBoolean(customState.isCliPanel) ?? false,
-        agentType: snapshot?.agentType ?? optionalString(customState.agentType),
-        lastActivityAt: snapshot?.lastActivityTime,
-        screenText: snapshot?.screenText,
-      };
-    },
-  });
-  const sessions = services.sessionManager.getAllSessions();
-  for (const session of sessions) {
-    const project = services.sessionManager.getProjectForSession(session.id);
-    journal.rememberPane({
-      paneId: session.id,
-      paneName: session.name,
-      repoId: project?.id,
-      repoName: project?.name,
-      worktreePath: session.worktreePath,
-    });
-  }
-  return journal;
 }
 
 function workspaceCadenceOptions(

@@ -33,9 +33,9 @@ export interface CoreServices {
   worktreeNameGenerator: WorktreeNameGenerator;
   runCommandManager: RunCommandManager;
   versionChecker: VersionChecker;
-  logger?: Logger;
-  archiveProgressManager?: ArchiveProgressManager;
-  skillCacheManager?: SkillCacheManager;
-  paneChatManager?: PaneChatManager;
-  orchestrationSessionManager?: OrchestrationSessionManager;
+  logger: Logger;
+  archiveProgressManager: ArchiveProgressManager;
+  skillCacheManager: SkillCacheManager;
+  paneChatManager: PaneChatManager;
+  orchestrationSessionManager: OrchestrationSessionManager;
 }
