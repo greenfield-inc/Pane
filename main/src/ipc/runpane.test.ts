@@ -16,7 +16,7 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { WorkspaceJournal } from '../services/workspaceJournal';
-import { createWorkspaceJournal } from '../services/createWorkspaceJournal';
+import { createWorkspaceJournal } from '../services/create-workspace-journal';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';

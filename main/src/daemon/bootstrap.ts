@@ -40,7 +40,7 @@ import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { createWorkspaceJournal } from '../services/createWorkspaceJournal';
+import { createWorkspaceJournal } from '../services/create-workspace-journal';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 
