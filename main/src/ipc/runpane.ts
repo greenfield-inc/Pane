@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -21,7 +22,8 @@ import type { ArchiveProgressManager, SerializedArchiveTask } from '../services/
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
-import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import {
@@ -65,6 +67,8 @@ import type {
   RunpanePanelBlockedState,
   RunpanePanelCreateRequest,
   RunpanePanelCreateResult,
+  RunpanePanelOpenRequest,
+  RunpanePanelOpenResult,
   RunpanePanelInputRequest,
   RunpanePanelInputResult,
   RunpanePanelListRequest,
@@ -149,6 +153,7 @@ const RUNPANE_CHANNELS = [
   'runpane:panes:focus',
   'runpane:panes:archive',
   'runpane:panels:create',
+  'runpane:panels:open',
   'runpane:panels:list',
   'runpane:panels:output',
   'runpane:panels:input',
@@ -187,6 +192,7 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:pin',
   'panes:rename',
   'panels:create',
+  'panels:open',
   'panels:input',
   'panels:submit',
   'panels:submit-composer',
@@ -915,6 +921,66 @@ export function registerRunpaneHandlers(
         readiness,
         initialInput,
         nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
+      };
+    }, result => ({
+      paneId: result.paneId,
+      panelId: result.panelId,
+      ok: result.ok,
+      resultCount: 1,
+    }));
+  });
+
+  commandRegistry.register('runpane:panels:open', async (request: PaneCommandValue): Promise<RunpanePanelOpenResult> => {
+    return withRunpaneAction(services, 'panels:open', {}, async () => {
+      const normalized = parsePanelOpenRequest(request);
+      const pane = resolvePane(sessionManager, normalized.paneId);
+      if (pane.archived) {
+        throw new Error(`Pane ${pane.id} is archived; panels cannot be opened in it`);
+      }
+      const target = normalized.url !== undefined
+        ? resolvePanelOpenUrl(normalized.url)
+        : await resolvePanelOpenFile(services, pane, normalized.filePath ?? '');
+      const placement = normalized.placement ?? 'split';
+      // Activates the tab inside its Pane; never raises or focuses the window.
+      const activate = normalized.noFocus !== true;
+      const existing = panelManager.getPanelsForSession(pane.id).find(panel => panelShowsOpenTarget(panel, target));
+
+      let panel: ToolPanel;
+      if (existing) {
+        const title = normalized.title && normalized.title !== existing.title ? normalized.title : undefined;
+        // Agents reopen a page after rewriting it; the stamp makes an open tab reload.
+        const state = target.type === 'browser'
+          ? { ...existing.state, customState: { ...(existing.state.customState ?? {}), reopenedAt: new Date().toISOString() } }
+          : undefined;
+        if (title || state) {
+          await panelManager.updatePanel(existing.id, { title, state });
+        }
+        if (activate) {
+          await panelManager.setActivePanel(pane.id, existing.id);
+        }
+        panel = panelManager.getPanel(existing.id) ?? existing;
+      } else {
+        panel = await panelManager.createPanel({
+          sessionId: pane.id,
+          type: target.type,
+          title: normalized.title || target.title,
+          initialState: { customState: target.customState },
+          metadata: { openPlacement: placement },
+          activate,
+        });
+      }
+
+      return {
+        ok: true,
+        paneId: pane.id,
+        panelId: panel.id,
+        type: target.type,
+        title: panel.title,
+        url: target.type === 'browser' ? target.customState.currentUrl : undefined,
+        filePath: target.filePath,
+        placement,
+        active: Boolean(panel.state.isActive),
+        reused: Boolean(existing),
       };
     }, result => ({
       paneId: result.paneId,
@@ -2840,6 +2906,115 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
     waitReady: optionalBoolean(value.waitReady),
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
   };
+}
+
+function parsePanelOpenRequest(value: PaneCommandValue): RunpanePanelOpenRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel open request must be an object');
+  }
+
+  const paneId = optionalString(value.paneId)?.trim();
+  if (!paneId) {
+    throw new Error('Panel open request must include paneId');
+  }
+  const url = optionalString(value.url)?.trim();
+  const filePath = optionalString(value.filePath)?.trim();
+  if (Boolean(url) === Boolean(filePath)) {
+    throw new Error('Panel open request must include exactly one of url or filePath');
+  }
+  if (value.placement !== undefined && value.placement !== 'split' && value.placement !== 'tab') {
+    throw new Error('Panel open placement must be split or tab');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Panel open source must be user or agent');
+  }
+  if (value.noFocus === true && value.focus === true) {
+    throw new Error('Panel open request cannot include both noFocus and focus');
+  }
+
+  return {
+    paneId,
+    url: url || undefined,
+    filePath: filePath || undefined,
+    title: optionalString(value.title)?.trim() || undefined,
+    placement: value.placement === 'split' || value.placement === 'tab' ? value.placement : undefined,
+    noFocus: optionalBoolean(value.noFocus),
+    focus: optionalBoolean(value.focus),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+  };
+}
+
+type PanelOpenTarget =
+  | { type: 'browser'; title: string; filePath?: string; customState: BrowserPanelState & { currentUrl: string } }
+  | { type: 'editor'; title: string; filePath: string; customState: EditorPanelState };
+
+const PANEL_OPEN_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:']);
+const HTML_FILE_PATTERN = /\.html?$/iu;
+
+function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${rawUrl}`);
+  }
+  if (!PANEL_OPEN_URL_PROTOCOLS.has(parsed.protocol)) {
+    throw new Error(`Unsupported URL scheme ${parsed.protocol} (use http, https, or file)`);
+  }
+  const title = parsed.protocol === 'file:'
+    ? path.basename(decodeURIComponent(parsed.pathname)) || 'Browser'
+    : parsed.host || 'Browser';
+  return { type: 'browser', title, customState: { currentUrl: parsed.href } };
+}
+
+/**
+ * Resolve a file inside the Pane's worktree. Session orchestrators run in a
+ * hidden internal Pane whose worktree is the Session folder and which has no
+ * project context, mirroring file.ts getFileContext.
+ */
+async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPath: string): Promise<PanelOpenTarget> {
+  const context = services.sessionManager.getProjectContext(pane.id);
+  let pathResolver: PathResolver;
+  if (context) {
+    pathResolver = context.pathResolver;
+  } else if (pane.isHidden && isOrchestrationInternalSessionId(pane.id)) {
+    pathResolver = new PathResolver({ path: pane.worktreePath });
+  } else {
+    throw new Error(`No Pane repo found for pane ${pane.id}`);
+  }
+
+  const basePath = pathResolver.toFileSystem(pane.worktreePath);
+  const requested = path.isAbsolute(rawPath) ? path.relative(basePath, rawPath) : rawPath;
+  const relativePath = path.normalize(requested);
+  if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`File path must be inside the Pane worktree: ${rawPath}`);
+  }
+  const fullPath = path.join(basePath, relativePath);
+  if (!await pathResolver.isWithin(basePath, fullPath)) {
+    throw new Error(`File path must be inside the Pane worktree: ${rawPath}`);
+  }
+  const stat = await fs.promises.stat(fullPath).catch(() => null);
+  if (!stat?.isFile()) {
+    throw new Error(`File not found: ${rawPath}`);
+  }
+
+  const filePath = relativePath.split(path.sep).join('/');
+  const title = path.basename(relativePath);
+  if (HTML_FILE_PATTERN.test(relativePath)) {
+    return { type: 'browser', title, filePath, customState: { currentUrl: pathToFileURL(fullPath).href } };
+  }
+  return { type: 'editor', title, filePath, customState: { filePath, isPreview: false, isDirty: false } };
+}
+
+function panelShowsOpenTarget(panel: ToolPanel, target: PanelOpenTarget): boolean {
+  if (panel.type !== target.type) return false;
+  if (target.type === 'browser') {
+    // SAFETY: The browser panel type discriminator establishes BrowserPanelState.
+    return (panel.state.customState as BrowserPanelState | undefined)?.currentUrl === target.customState.currentUrl;
+  }
+  // SAFETY: The editor panel type discriminator establishes EditorPanelState.
+  const state = panel.state.customState as EditorPanelState | undefined;
+  return state?.filePath === target.filePath && !state.diff;
 }
 
 function parsePanelOutputRequest(value: PaneCommandValue): RunpanePanelOutputRequest {

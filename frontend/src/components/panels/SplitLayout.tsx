@@ -73,6 +73,10 @@ export interface SplitLayoutProps {
   getPanelTabPresentation?: PanelTabPresentationResolver;
   /** Rendered in a group that has no working panels. */
   emptyState?: React.ReactNode;
+  /** Group strips show the "+" add-tool button (default true). */
+  showAddTool?: boolean;
+  /** Group strips keep tab close buttons visible instead of on hover. */
+  alwaysShowClose?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +102,8 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   onStripDrop,
   getPanelTabPresentation,
   emptyState,
+  showAddTool,
+  alwaysShowClose,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -193,7 +199,9 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           onDragEnd={onDragEnd}
           onStripDrop={onStripDrop ? (panelId, idx) => onStripDrop(node.id, panelId, idx) : undefined}
           getPanelTabPresentation={getPanelTabPresentation}
-              emptyState={emptyState}
+          emptyState={emptyState}
+          showAddTool={showAddTool}
+          alwaysShowClose={alwaysShowClose}
         />
       );
     }
@@ -238,6 +246,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     onPanelSelect, onPanelClose, onFocusGroup, onSizesChange,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
+    showAddTool, alwaysShowClose,
   ]);
 
   // Single-group root: render directly without Allotment

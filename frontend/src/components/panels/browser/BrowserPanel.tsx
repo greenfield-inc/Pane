@@ -24,6 +24,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
@@ -114,6 +116,14 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     if (!currentUrlFromPanelState || currentUrlFromPanelState === url) return;
     navigateTo(currentUrlFromPanelState);
   }, [currentUrlFromPanelState, navigateTo, url]);
+
+  // An agent reopened this page after rewriting it; show the new content.
+  const lastReopenedAt = useRef(reopenedAt);
+  useEffect(() => {
+    if (!reopenedAt || reopenedAt === lastReopenedAt.current) return;
+    lastReopenedAt.current = reopenedAt;
+    webviewRef.current?.reload();
+  }, [reopenedAt]);
 
   const handleBack = () => {
     webviewRef.current?.goBack();

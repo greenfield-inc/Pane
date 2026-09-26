@@ -573,6 +573,33 @@ export interface RunpanePanelCreateResult {
   nextCommand?: string;
 }
 
+export type RunpanePanelOpenPlacement = 'split' | 'tab';
+
+/** Exactly one of url or filePath is set. */
+export interface RunpanePanelOpenRequest {
+  paneId: string;
+  url?: string;
+  filePath?: string;
+  title?: string;
+  placement?: RunpanePanelOpenPlacement;
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: RunpanePanelCreateSource;
+}
+
+export interface RunpanePanelOpenResult {
+  ok: true;
+  paneId: string;
+  panelId: string;
+  type: 'browser' | 'editor';
+  title: string;
+  url?: string;
+  filePath?: string;
+  placement: RunpanePanelOpenPlacement;
+  active: boolean;
+  reused: boolean;
+}
+
 export interface RunpanePanelOutputRecord {
   type: string;
   data: unknown;

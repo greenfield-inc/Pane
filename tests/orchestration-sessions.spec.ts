@@ -2,6 +2,7 @@ import type { CustomCommandResume } from '../shared/types/customCommandResume';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
+import type { ToolPanel } from '../shared/types/panels';
 
 type UiAssociationFixture = {
   paneId: string;
@@ -1409,6 +1410,45 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect.poll(readPanels).toHaveLength(3);
+});
+
+test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  const titleBarTabs = page.getByTestId('window-title-bar-session-tabs');
+  await expect(titleBarTabs.getByRole('tab').first()).toBeVisible();
+  const openPage = (id: string, title: string) => page.evaluate(({ id, title }) => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void } };
+    const now = new Date(0).toISOString();
+    mockWindow.__paneTestElectronMock.emitPanelCreated({
+      id, sessionId: '__orchestration_session_plansterminal__', type: 'browser', title,
+      state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
+      metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
+    });
+  }, { id, title });
+
+  await openPage('plan-page', 'plan.html');
+  const groupStrips = page.locator('.panel-group-tab-bar');
+  await expect(groupStrips).toHaveCount(2);
+  // The permanent agent tab stays in the title bar; opened pages get the side strip.
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(0);
+
+  await openPage('report-page', 'report.html');
+  await expect(groupStrips).toHaveCount(2);
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(2);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'report.html' })).toHaveAttribute('aria-selected', 'true');
+  const screenshot = testInfo.outputPath('session-split-tabs.png');
+  await page.screenshot({ path: screenshot });
+  await testInfo.attach('session-split-tabs.png', { path: screenshot, contentType: 'image/png' });
+
+  await groupStrips.nth(1).getByRole('button', { name: 'Close report.html' }).click();
+  await groupStrips.nth(1).getByRole('button', { name: 'Close plan.html' }).click();
+  await expect(groupStrips).toHaveCount(0);
+  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
 });
 
 test('Sessions can be renamed from their right-click menu', async ({ page }) => {

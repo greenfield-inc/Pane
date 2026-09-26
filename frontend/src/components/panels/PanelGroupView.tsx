@@ -119,6 +119,8 @@ export interface PanelGroupViewProps {
   onStripDrop?: (panelId: string, insertIndex: number) => void;
   getPanelTabPresentation?: PanelTabPresentationResolver;
   emptyState?: React.ReactNode;
+  showAddTool?: boolean;
+  alwaysShowClose?: boolean;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -141,6 +143,8 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   onStripDrop,
   getPanelTabPresentation,
   emptyState,
+  showAddTool = true,
+  alwaysShowClose = false,
 }) => {
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
@@ -218,8 +222,9 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             isTabDragging={isTabDragging}
             draggedPanelId={draggedPanelId}
             getPanelTabPresentation={getPanelTabPresentation}
+            alwaysShowClose={alwaysShowClose}
           />
-          <button
+          {showAddTool && <button
             ref={addButtonRef}
             type="button"
             aria-label="Add tool"
@@ -228,7 +233,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             onClick={handleAddTool}
           >
             <Plus className="w-4 h-4" />
-          </button>
+          </button>}
         </div>
       )}
 

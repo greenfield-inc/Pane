@@ -393,6 +393,30 @@ interface PaneFocusResult {
   focused: true;
 }
 
+interface PanelOpenRequest {
+  paneId: string;
+  url?: string;
+  filePath?: string;
+  title?: string;
+  placement: 'split' | 'tab';
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: 'user' | 'agent';
+}
+
+interface PanelOpenResult {
+  ok: true;
+  paneId: string;
+  panelId: string;
+  type: 'browser' | 'editor';
+  title: string;
+  url?: string;
+  filePath?: string;
+  placement: 'split' | 'tab';
+  active: boolean;
+  reused: boolean;
+}
+
 interface PaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -1107,6 +1131,18 @@ const paneFocusResultSchema: BoundarySchema<PaneFocusResult> = boundary.object({
   paneId: boundary.string,
   panelId: boundary.optional(boundary.string),
   focused: boundary.literal(true),
+});
+const panelOpenResultSchema: BoundarySchema<PanelOpenResult> = boundary.object({
+  ok: boundary.literal(true),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  type: boundary.enumeration('browser', 'editor'),
+  title: boundary.string,
+  url: boundary.optional(boundary.string),
+  filePath: boundary.optional(boundary.string),
+  placement: boundary.enumeration('split', 'tab'),
+  active: boundary.boolean,
+  reused: boundary.boolean,
 });
 const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
@@ -1906,6 +1942,45 @@ export async function runPanelsCreate(parsed: ParsedArgs): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+export async function runPanelsOpen(parsed: ParsedArgs): Promise<number> {
+  const paneId = parsed.paneId || process.env.PANE_SESSION_ID;
+  if (!paneId) {
+    throw new Error('runpane panels open requires --pane (or PANE_SESSION_ID from a Pane terminal).');
+  }
+  if (Boolean(parsed.url) === Boolean(parsed.file)) {
+    throw new Error('runpane panels open requires exactly one of --url or --file.');
+  }
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+
+  const request: PanelOpenRequest = {
+    paneId,
+    url: parsed.url || undefined,
+    filePath: parsed.file || undefined,
+    title: parsed.title || undefined,
+    placement: parsed.placement ?? 'split',
+    noFocus: parsed.noFocus || undefined,
+    focus: parsed.focus || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+  };
+
+  await confirmPanelOpen(parsed, request);
+
+  const result = await invokeDaemon('runpane:panels:open', [request], panelOpenResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const target = result.url ?? result.filePath ?? result.title;
+    console.log(`${result.reused ? 'Reused' : 'Opened'} ${result.type} panel ${result.panelId} in pane ${result.paneId} (${result.placement}): ${target}`);
+  }
+
+  return 0;
+}
+
 export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
   if (!parsed.panelId) {
     throw new Error('runpane panels output requires --panel.');
@@ -2385,6 +2460,26 @@ async function confirmPaneFocus(parsed: ParsedArgs, request: PaneFocusRequest): 
   try {
     const panelSuffix = request.panelId ? ` (panel ${request.panelId})` : '';
     const answer = (await rl.question(`Focus pane ${request.paneId}${panelSuffix}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmPanelOpen(parsed: ParsedArgs, request: PanelOpenRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panels open mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Open ${request.url ?? request.filePath} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }

@@ -32,6 +32,7 @@ import {
   dropZoneFor,
   subsetInsertIndex,
   mergeAllGroups,
+  placePanelInSplit,
 } from './panelLayout';
 
 // ---------------------------------------------------------------------------
@@ -387,7 +388,39 @@ describe('removePanelFromLayout', () => {
 // reconcile
 // ---------------------------------------------------------------------------
 
+describe('placePanelInSplit', () => {
+  it('splits a single group to the right with the new panel active', () => {
+    const root = placePanelInSplit(group('g1', ['agent']), 'page');
+    if (root.type !== 'split') throw new Error('Expected split');
+    expect(root.direction).toBe('row');
+    expect(requireGroup(root.children[0]).panelIds).toEqual(['agent']);
+    expect(requireGroup(root.children[1])).toMatchObject({ panelIds: ['page'], activePanelId: 'page' });
+  });
+
+  it('adds later panels as tabs in the existing side group', () => {
+    const root = placePanelInSplit(split('s1', 'row', [group('g1', ['agent']), group('g2', ['page'])]), 'plan');
+    expect(findGroup(root, 'g1')?.panelIds).toEqual(['agent']);
+    expect(findGroup(root, 'g2')).toMatchObject({ panelIds: ['page', 'plan'], activePanelId: 'plan' });
+  });
+
+  it('leaves a panel already in the layout where it is', () => {
+    const root = group('g1', ['agent', 'page']);
+    expect(placePanelInSplit(root, 'page')).toBe(root);
+  });
+
+  it('fills an empty layout without leaving an empty group', () => {
+    expect(placePanelInSplit(group('g1', []), 'page')).toMatchObject({ type: 'group', panelIds: ['page'] });
+  });
+});
+
 describe('reconcile', () => {
+  it('opens orphans marked for split beside the primary group', () => {
+    const { layout: result, changed } = reconcile(layoutOf(group('g1', ['agent'])), ['agent', 'tab', 'page'], new Set(['page']));
+    expect(changed).toBe(true);
+    const groups = allGroups(result.root);
+    expect(groups.map(g => g.panelIds)).toEqual([['agent', 'tab'], ['page']]);
+  });
+
   it('reports no change for a layout matching the live panels', () => {
     const layout = layoutOf(split('s1', 'row', [group('g1', ['a']), group('g2', ['b'])]));
     const { layout: result, changed } = reconcile(layout, ['a', 'b']);

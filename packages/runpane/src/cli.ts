@@ -33,6 +33,7 @@ import {
   runPanesPin,
   runPanesRename,
   runPanesFocus,
+  runPanelsOpen,
   runSessionsAssociate,
   runSessionsCreate,
   runSessionsDetach,
@@ -207,6 +208,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panels create') {
     return runPanelsCreate(parsed);
+  }
+
+  if (parsed.command === 'panels open') {
+    return runPanelsOpen(parsed);
   }
 
   if (parsed.command === 'panels output') {
