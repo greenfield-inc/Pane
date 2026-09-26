@@ -247,7 +247,7 @@
       "name": "panes adopt",
       "summary": "Adopt an existing externally managed git worktree as a Pane without changing the worktree.",
       "usage": [
-        "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch] [--no-pinned] [--dry-run] [--yes] [--json]"
+        "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json]"
       ],
       "mutates": true,
       "jsonSchemas": [
@@ -814,6 +814,10 @@
         "description": "Create the pane unpinned instead of the default pinned (the UI's favorite/pin star)."
       },
       {
+        "name": "--no-associate",
+        "description": "Inside a Session orchestrator, do not associate the created pane with that Session."
+      },
+      {
         "name": "--force",
         "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
       },
@@ -1166,6 +1170,7 @@
         "  --focus                        Explicitly focus the created pane",
         "  --pinned                       Accepted for compatibility; creation already pins by default",
         "  --no-pinned                    Create unpinned instead of the default pinned (the UI's favorite/pin star)",
+        "  --no-associate                 Inside a Session orchestrator, do not associate the new pane with that Session",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -1177,7 +1182,7 @@
         "",
         "Adopts an existing externally managed git worktree without creating, syncing, or deleting it.",
         "",
-        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
+        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --no-associate skips automatic Session association; --dry-run previews."
       ],
       "panes archive": [
         "Usage:",
@@ -1785,6 +1790,7 @@
         "  --focus                        Explicitly focus the created pane",
         "  --pinned                       Accepted for compatibility; creation already pins by default",
         "  --no-pinned                    Create unpinned instead of the default pinned (the UI's favorite/pin star)",
+        "  --no-associate                 Inside a Session orchestrator, do not associate the new pane with that Session",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -1796,7 +1802,7 @@
         "",
         "Adopts an existing externally managed git worktree without creating, syncing, or deleting it.",
         "",
-        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --dry-run previews."
+        "Options: --resume <id> stages the agent resume command; --launch runs it immediately; --folder <name> groups the pane; --no-pinned opts out of pinning; --no-associate skips automatic Session association; --dry-run previews."
       ],
       "panes archive": [
         "Usage:",
@@ -2229,7 +2235,7 @@
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
-      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected.",
+      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default; pass `--no-pinned` to opt out. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
       "For `panes create --wait-ready`, `initialInput.verifiedSubmitted: true` is reported only after argument attachment or composer-clear plus activity evidence. Routing input does not by itself verify submission.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. Add `--dry-run` to inspect the same evidence without archiving. Successful archives wait for worktree removal and report `worktreeCleanup`.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
@@ -2457,6 +2463,7 @@
         "--source",
         "agent",
         "--no-pinned",
+        "--no-associate",
         "--dry-run",
         "--yes",
         "--json"
@@ -3376,6 +3383,10 @@
             "user",
             "agent"
           ]
+        },
+        "associateSession": {
+          "type": "string",
+          "description": "Session id to associate each created Pane with; the CLI sets it from PANE_ORCHESTRATION_SESSION_ID unless --no-associate."
         }
       },
       "additionalProperties": false
@@ -3652,6 +3663,25 @@
                           "observed",
                           "unverifiable"
                         ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "association": {
+                    "type": "object",
+                    "required": [
+                      "sessionId",
+                      "ok"
+                    ],
+                    "properties": {
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "ok": {
+                        "type": "boolean"
+                      },
+                      "error": {
+                        "type": "string"
                       }
                     },
                     "additionalProperties": false
@@ -5969,6 +5999,7 @@
             "--source <user|agent>",
             "--pinned",
             "--no-pinned",
+            "--no-associate",
             "--no-focus",
             "--focus",
             "--wait-ready",
@@ -6651,6 +6682,11 @@
             "description": "Create the pane unpinned instead of the default pinned (the Pane UI's favorite/pin star). Pinning never implies focus."
           },
           {
+            "name": "--no-associate",
+            "required": false,
+            "description": "Inside a Session orchestrator, do not associate the created pane with that Session (associated automatically by default)."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for mutating commands."
@@ -6697,7 +6733,7 @@
           "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism.",
           "Register the saved base repository once. Pane creates and owns the worktree/branch for each new Pane.",
           "Use `panels create` instead when a reviewer/helper should share an existing Pane's worktree.",
-          "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op.",
+          "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
           "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user.",
           "Use --initial-input-file for multi-line prompts or shell-sensitive initial input.",
           "With --wait-ready, verifiedSubmitted is earned from delivery evidence; routing initial input alone does not imply verified submission.",
@@ -6763,6 +6799,11 @@
             "name": "--no-pinned",
             "required": false,
             "description": "Do not pin the adopted pane."
+          },
+          {
+            "name": "--no-associate",
+            "required": false,
+            "description": "Inside a Session orchestrator, do not associate the adopted pane with that Session (associated automatically by default)."
           },
           {
             "name": "--dry-run",
@@ -7786,7 +7827,7 @@
       "sessions associate": {
         "name": "sessions associate",
         "summary": "Associate a user-visible Pane with a named Session.",
-        "details": "Associate a user-visible Pane with a named Session.",
+        "details": "Associate a user-visible Pane with a named Session. `panes create` and `panes adopt` already do this automatically when run inside a Session orchestrator; use this for existing Panes or after `--no-associate`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [],

@@ -661,6 +661,7 @@ export function registerRunpaneHandlers(
           activate: resolvePaneCreateActivation(normalized, item),
         }),
       );
+      await associateCreatedPanes(services, normalized.associateSession, items);
 
       return {
         ok: items.every(isPaneCreateItemSuccessful),
@@ -779,6 +780,7 @@ export function registerRunpaneHandlers(
         }
       }
 
+      if (!normalized.dryRun) await associateCreatedPanes(services, normalized.associateSession, items);
       return { ok: items.every(item => item.ok), repo: repoSummary, items };
     }, result => ({ repoId: result.repo.id, resultCount: result.items.length }));
   });
@@ -2665,6 +2667,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    associateSession: optionalString(value.associateSession)?.trim() || undefined,
   };
 }
 
@@ -2699,7 +2702,30 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    associateSession: optionalString(value.associateSession)?.trim() || undefined,
   };
+}
+
+/**
+ * Panes created from inside a Session orchestrator become that Session's
+ * children in the same call, so agents cannot forget `sessions associate`.
+ * A failed association is reported on the item and never undoes the Pane.
+ */
+async function associateCreatedPanes(
+  services: AppServices,
+  sessionId: string | undefined,
+  items: RunpanePaneCreateResultItem[],
+): Promise<void> {
+  if (!sessionId) return;
+  for (const item of items) {
+    if (!item.ok || !('panelId' in item) || !item.paneId) continue;
+    try {
+      await requireOrchestrationSessionManager(services).associate({ sessionId }, { paneId: item.paneId });
+      item.association = { sessionId, ok: true };
+    } catch (error) {
+      item.association = { sessionId, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
 }
 
 async function validateAdoptedWorktree(

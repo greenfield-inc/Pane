@@ -188,6 +188,7 @@
       "--source",
       "agent",
       "--no-pinned",
+      "--no-associate",
       "--dry-run",
       "--yes",
       "--json"

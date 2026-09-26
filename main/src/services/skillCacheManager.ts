@@ -49,7 +49,15 @@ A Session manages whole Panes. Tabs inside a Pane belong to the same Session
 and share its worktree. This Session's identity is the stable ID in
 \`PANE_ORCHESTRATION_SESSION_ID\`, and RunPane records which Panes belong to it.
 
-Before delegating work to an existing Pane:
+Panes you create or adopt from this Session with \`runpane panes create\` or
+\`runpane panes adopt\` are associated with it automatically: each returned
+item carries \`association: { sessionId, ok, error? }\`. Check that
+\`association.ok\` is true (or that the Pane appears in \`sessions overview\`)
+before sending work. Pass \`--no-associate\` only when the user wants the Pane
+kept out of this Session.
+
+Run \`sessions associate\` yourself only for a Pane that already existed, or
+when automatic association failed. Before delegating work to an existing Pane:
 
 1. Resolve the target Pane and read this Session's current overview.
 2. Already associated with this Session: reuse it as it is. One Pane serves
@@ -76,12 +84,13 @@ delegated work.
 
 For a new Pane, work starts only after the association exists:
 
-- Create it without an implementation prompt, associate it, verify, then
-  submit the prompt.
-- If a trusted caller associates it automatically, verify that result before
-  work starts.
-- Otherwise capture the returned Pane ID and run the same association command
-  immediately.
+- A prompt passed to \`panes create\` starts work once the Pane exists, so
+  check the item's \`association.ok\` right away.
+- If \`association.ok\` is false, or the result has no \`association\` field
+  (an older wrapper), capture the returned Pane ID and run the association
+  command above immediately, then verify.
+- The Pane is never removed when association fails; report the error if the
+  association command fails too.
 
 The association lasts through working, idle, and completed states. Archiving
 is a separate follow-up (#654).
