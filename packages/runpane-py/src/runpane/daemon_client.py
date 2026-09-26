@@ -7,6 +7,7 @@ import os
 import posixpath
 import socket
 import sys
+import time
 from typing import Any, Dict, List, Optional
 
 FRAME_DELIMITER = b"\n"
@@ -70,36 +71,65 @@ def invoke_daemon(
 
 def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: float) -> Any:
     decoder = PaneDaemonFrameDecoder()
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(timeout_ms / 1000)
-        try:
-            client.connect(socket_path)
-        except OSError as error:
-            raise PaneDaemonClientError(
-                f"Could not connect to Pane daemon at {socket_path}: {error}",
-                "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
-            ) from error
-
-        client.sendall(encoded_request)
-        while True:
-            chunk = client.recv(65536)
-            if not chunk:
+    deadline = time.monotonic() + timeout_ms / 1000
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(timeout_ms / 1000)
+            try:
+                client.connect(socket_path)
+            except socket.timeout:
+                raise
+            except OSError as error:
                 raise PaneDaemonClientError(
-                    f"Pane daemon closed the connection before responding at {socket_path}",
-                    "ERR_RUNPANE_DAEMON_CLOSED",
-                )
-            response = first_matching_response(decoder.push(chunk))
-            if response is not None:
-                return response
+                    f"Could not connect to Pane daemon at {socket_path}: {error}",
+                    "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+                ) from error
+
+            client.sendall(encoded_request)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout()
+                client.settimeout(remaining)
+                chunk = client.recv(65536)
+                if not chunk:
+                    raise PaneDaemonClientError(
+                        f"Pane daemon closed the connection before responding at {socket_path}",
+                        "ERR_RUNPANE_DAEMON_CLOSED",
+                    )
+                response = first_matching_response(decoder.push(chunk))
+                if response is not None:
+                    return response
+    except socket.timeout as error:
+        raise PaneDaemonClientError(
+            f"Timed out waiting for Pane daemon at {socket_path} after {timeout_ms}ms",
+            "ERR_RUNPANE_DAEMON_TIMEOUT",
+        ) from error
 
 
 def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: float) -> Any:
+    import _winapi
+    import msvcrt
+
     decoder = PaneDaemonFrameDecoder()
+    deadline = time.monotonic() + timeout_ms / 1000
     try:
         with open(pipe_path, "r+b", buffering=0) as pipe:
             pipe.write(encoded_request)
+            handle = msvcrt.get_osfhandle(pipe.fileno())
             while True:
-                chunk = pipe.read(65536)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise PaneDaemonClientError(
+                        f"Timed out waiting for Pane daemon at {pipe_path} after {timeout_ms}ms",
+                        "ERR_RUNPANE_DAEMON_TIMEOUT",
+                    )
+                # Peek before reading: a synchronous named-pipe read has no timeout.
+                available, _ = _winapi.PeekNamedPipe(handle)
+                if not available:
+                    time.sleep(min(0.01, remaining))
+                    continue
+                chunk = pipe.read(min(65536, available))
                 if not chunk:
                     raise PaneDaemonClientError(
                         f"Pane daemon closed the connection before responding at {pipe_path}",

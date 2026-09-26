@@ -833,7 +833,8 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
 
 
 def read_value(args: List[str], index: int, flag: str) -> str:
-    if index >= len(args) or (args[index].startswith("-") and args[index] != "-"):
+    free_text = flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
+    if index >= len(args) or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
 
