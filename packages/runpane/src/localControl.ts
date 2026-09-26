@@ -2721,12 +2721,7 @@ function isInteractiveShell(): boolean {
 }
 
 function parsePaneCreateRequestPayload(value: JsonValue): PaneCreateRequest {
-  let decoded: PaneCreateRequestInput;
-  try {
-    decoded = decodeBoundary(value, paneCreateRequestInputSchema);
-  } catch {
-    throw new Error('--from-json payload must be an object.');
-  }
+  const decoded = decodeBoundary(value, paneCreateRequestInputSchema);
 
   if (decoded.panes.length === 0) {
     throw new Error('--from-json payload must include at least one pane.');

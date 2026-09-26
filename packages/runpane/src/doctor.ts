@@ -258,11 +258,11 @@ export async function runDoctor(parsed: ParsedArgs, source: 'npm' | 'pip' = 'npm
 
   if (parsed.json) {
     console.log(JSON.stringify(report, null, 2));
-    return 0;
+    return report.ok ? 0 : 1;
   }
 
   renderDoctorText(report);
-  return report.release.ok ? 0 : 1;
+  return report.ok ? 0 : 1;
 }
 
 export function prepareDoctorFailureReport(parsed: ParsedArgs, doctor: DoctorReport): PreparedDoctorReport {

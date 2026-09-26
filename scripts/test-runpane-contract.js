@@ -247,7 +247,7 @@ function isExpectedClientDisconnect(error, socket) {
   return error.code === 'ERR_STREAM_DESTROYED' && socket.destroyed;
 }
 
-async function withFakeDaemon(paneDir, onRequest, action) {
+async function withFakeDaemon(paneDir, onRequest, action, onFrame = () => {}) {
   const { getPaneDaemonEndpoint } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const endpoint = getPaneDaemonEndpoint(paneDir);
   if (endpoint.transport === 'unix') {
@@ -278,6 +278,7 @@ async function withFakeDaemon(paneDir, onRequest, action) {
         buffer = buffer.slice(index + 1);
         if (!raw.trim()) continue;
         const frame = JSON.parse(raw);
+        onFrame(frame);
         if (frame.type !== 'request' || frame.id !== 1) continue;
         const response = onRequest(frame);
         if (response.destroy) {
@@ -2473,9 +2474,193 @@ async function checkAgentTemplateParity() {
   });
 }
 
+async function checkCreatePayloadErrorPaths() {
+  const { runPanesCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-invalid-payload-'));
+  const inputPath = path.join(directory, 'request.json');
+  try {
+    for (const [payload, expected] of [
+      [{ repo: 'active', panes: [{ name: false, tool: { agent: 'codex' } }] }, /input\.panes\.0\.name: expected string/],
+      [{ repo: 'active', panes: [{ name: 'Work', pinned: 'yes', tool: { agent: 'codex' } }] }, /input\.panes\.0\.pinned: expected boolean/],
+      [[], /input: expected object/],
+    ]) {
+      fs.writeFileSync(inputPath, JSON.stringify(payload));
+      await assert.rejects(runPanesCreate(parseRunpaneArgs([
+        'panes', 'create', '--from-json', inputPath, '--dry-run', '--yes',
+      ])), expected);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+async function checkInstallerFailures() {
+  const { installPaneArtifact } = require(path.join(rootDir, 'packages/runpane', 'dist', 'installers.js'));
+  const originalSpawn = childProcess.spawnSync;
+  const originalExists = fs.existsSync;
+  const artifact = { path: '/fixture/installer', fileName: 'fixture', usedFallback: false };
+  try {
+    // An older Pane executable exists. It must not disguise a failed update.
+    fs.existsSync = () => true;
+    for (const platform of [{ os: 'linux', arch: 'x64' }, { os: 'win32', arch: 'x64' }]) {
+      const options = { parsed: { command: 'update' }, platform, format: platform.os === 'linux' ? 'deb' : 'exe', target: 'client' };
+      for (const outcome of [{ status: 7 }, { status: null, signal: 'SIGTERM' }, { status: null, error: new Error('Permission denied') }]) {
+        childProcess.spawnSync = command => command === 'sudo' || command === artifact.path ? outcome : { status: 0 };
+        await assert.rejects(installPaneArtifact(artifact, options), /installer exited|Permission denied/);
+      }
+      childProcess.spawnSync = () => ({ status: 0 });
+      const result = await installPaneArtifact(artifact, options);
+      assert.strictEqual(result.installKind, platform.os === 'linux' ? 'installed' : 'launched-installer');
+    }
+  } finally {
+    childProcess.spawnSync = originalSpawn;
+    fs.existsSync = originalExists;
+  }
+  runPythonSnippet(`
+from types import SimpleNamespace
+import runpane.installers as installers
+from runpane.download import DownloadedArtifact
+from runpane.platforms import PanePlatform
+installers.os.path.exists = lambda path: True
+installers.shutil.which = lambda command: "/fixture/apt"
+artifact = DownloadedArtifact(path="/fixture/installer", file_name="fixture", used_fallback=False)
+for platform_name in ["linux", "win32"]:
+    for status in [7, -15, "error", 0]:
+        def call(args, **kwargs):
+            if status == "error":
+                raise OSError("Permission denied")
+            return status
+        installers.subprocess.call = call
+        try:
+            result = installers.install_pane_artifact(artifact, SimpleNamespace(command="update", pane_path=None), PanePlatform(os=platform_name, arch="x64"), "deb" if platform_name == "linux" else "exe", "client")
+            assert status == 0, "Failed installer was reported as successful"
+            assert result.install_kind == ("installed" if platform_name == "linux" else "launched-installer")
+        except (RuntimeError, OSError) as error:
+            assert status != 0
+            assert "installer exited" in str(error) or "Permission denied" in str(error)
+`);
+}
+
+async function checkDoctorExitStatus() {
+  const doctor = require(path.join(rootDir, 'packages/runpane', 'dist', 'doctor.js'));
+  const releases = require(path.join(rootDir, 'packages/runpane', 'dist', 'releases.js'));
+  const daemon = require(path.join(rootDir, 'packages/runpane', 'dist', 'daemonClient.js'));
+  const platform = require(path.join(rootDir, 'packages/runpane', 'dist', 'platform.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages/runpane', 'dist', 'commands.js'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-doctor-status-'));
+  const cases = [
+    { reachable: false, releaseAvailable: true, expectedCode: 1 },
+    { reachable: true, releaseAvailable: true, expectedCode: 0 },
+    { reachable: true, releaseAvailable: false, expectedCode: 1 },
+  ];
+  const original = { release: releases.resolveRelease, invoke: daemon.invokeDaemon, platform: platform.detectPlatform, log: console.log };
+  try {
+    platform.detectPlatform = () => ({ os: 'darwin', arch: 'arm64' });
+    for (const scenario of cases) {
+      releases.resolveRelease = async () => {
+        if (!scenario.releaseAvailable) throw new Error('Release service unavailable');
+        return { release: { tag_name: 'v1' }, artifact: { name: 'Pane.dmg' }, format: 'dmg' };
+      };
+      daemon.invokeDaemon = async () => {
+        if (!scenario.reachable) throw new Error('Daemon unavailable');
+        return { daemon: {}, repos: { count: 0 } };
+      };
+      for (const json of [true, false]) {
+        const output = [];
+        console.log = line => output.push(line);
+        const code = await doctor.runDoctor(parseRunpaneArgs([
+          'doctor', '--pane-dir', directory, '--pane-path', path.join(directory, 'missing'), ...(json ? ['--json'] : []),
+        ]));
+        if (json) assert.strictEqual(JSON.parse(output.join('\n')).ok, scenario.expectedCode === 0);
+        assert.strictEqual(code, scenario.expectedCode, `doctor ${json ? 'JSON' : 'text'} status must match overall health`);
+      }
+    }
+    runPythonSnippet(`
+import contextlib
+import io
+import json
+import sys
+from types import SimpleNamespace
+import runpane.doctor as doctor
+from runpane.cli import parse_args
+from runpane.platforms import PanePlatform
+payload = json.loads(sys.stdin.read())
+doctor.detect_platform = lambda: PanePlatform(os="darwin", arch="arm64")
+for scenario in payload["cases"]:
+    def release(**kwargs):
+        if not scenario["releaseAvailable"]:
+            raise RuntimeError("Release service unavailable")
+        return SimpleNamespace(release={"tag_name": "v1"}, artifact={"name": "Pane.dmg"}, format="dmg", preferred_download_url=None, fallback_download_url=None)
+    def invoke(*args, **kwargs):
+        if not scenario["reachable"]:
+            raise RuntimeError("Daemon unavailable")
+        return {"daemon": {}, "repos": {"count": 0}}
+    doctor.resolve_release = release
+    doctor.invoke_daemon = invoke
+    for json_output in [True, False]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = doctor.run_doctor(parse_args(["doctor", "--pane-dir", payload["directory"], "--pane-path", payload["missing"], *(["--json"] if json_output else [])]))
+        if json_output:
+            assert json.loads(output.getvalue())["ok"] == (scenario["expectedCode"] == 0)
+        assert code == scenario["expectedCode"], (scenario, json_output, code)
+`, JSON.stringify({ cases, directory, missing: path.join(directory, 'missing') }));
+  } finally {
+    releases.resolveRelease = original.release;
+    daemon.invokeDaemon = original.invoke;
+    platform.detectPlatform = original.platform;
+    console.log = original.log;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function checkFollowRequiresPositiveTimeout() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  for (const args of [['watch', '--follow', '--timeout-ms', '0'], ['watch', '--timeout-ms', '0', '--follow']]) {
+    assert.throws(() => parseRunpaneArgs(args), /--timeout-ms must be greater than 0 with --follow/);
+  }
+  assert.strictEqual(parseRunpaneArgs(['watch', '--timeout-ms', '0']).timeoutMs, 0);
+  assert.strictEqual(parseRunpaneArgs(['watch', '--follow', '--timeout-ms', '1']).timeoutMs, 1);
+  runPythonSnippet(`
+from runpane.cli import parse_args
+for args in [["watch", "--follow", "--timeout-ms", "0"], ["watch", "--timeout-ms", "0", "--follow"]]:
+    try:
+        parse_args(args)
+        raise AssertionError("follow accepted zero timeout")
+    except ValueError as error:
+        assert "--timeout-ms must be greater than 0 with --follow" in str(error)
+assert parse_args(["watch", "--timeout-ms", "0"]).timeout_ms == 0
+assert parse_args(["watch", "--follow", "--timeout-ms", "1"]).timeout_ms == 1
+`);
+}
+
+async function checkCliEventSubscriptions() {
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-event-filter-'));
+    const frames = [];
+    try {
+      await withFakeDaemon(paneDir, () => ({ result: { ok: true, repos: [] } }),
+        () => runWatchCli(runtime, ['repos', 'list', '--json'], paneDir, stdout => stdout.includes('"repos"')),
+        frame => frames.push(frame));
+      assert.deepStrictEqual(frames, [
+        { type: 'request', id: 0, channel: 'daemon:events', args: [{ include: [] }] },
+        { type: 'request', id: 1, channel: 'runpane:repos:list', args: [] },
+      ], `${runtime} ordinary commands must opt out of unrelated daemon events before invoking`);
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
+  await checkCliEventSubscriptions();
+  checkFollowRequiresPositiveTimeout();
+  await checkDoctorExitStatus();
+  await checkInstallerFailures();
+  await checkCreatePayloadErrorPaths();
   compareParserParity();
   checkWatchFormatterGoldens();
   await checkWatchStreamParity();

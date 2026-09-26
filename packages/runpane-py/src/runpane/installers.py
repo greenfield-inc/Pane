@@ -144,7 +144,9 @@ def install_linux(artifact: DownloadedArtifact, format_name: str) -> InstalledPa
     if format_name == "deb":
         installer = "apt" if shutil.which("apt") else "dpkg"
         args = ["install", "-y", artifact.path] if installer == "apt" else ["-i", artifact.path]
-        subprocess.call(["sudo", installer, *args])
+        status = subprocess.call(["sudo", installer, *args])
+        if status != 0:
+            raise RuntimeError(f"Pane installer exited with status {status}.")
         executable = resolve_existing_pane_path()
         if not executable:
             raise RuntimeError("Pane installed from .deb, but the pane executable could not be found.")
@@ -160,7 +162,9 @@ def install_linux(artifact: DownloadedArtifact, format_name: str) -> InstalledPa
 
 def install_windows(artifact: DownloadedArtifact, target: str) -> InstalledPane:
     args = ["/S"] if target == "daemon" else []
-    subprocess.call([artifact.path, *args])
+    status = subprocess.call([artifact.path, *args])
+    if status != 0:
+        raise RuntimeError(f"Pane installer exited with status {status}.")
     executable = resolve_existing_pane_path()
     if not executable:
         raise RuntimeError("Pane installer completed, but Pane.exe could not be found. Open the installer manually and rerun with --pane-path.")

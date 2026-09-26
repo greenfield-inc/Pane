@@ -164,7 +164,7 @@ function installLinux(
   if (format === 'deb') {
     const installer = commandExists('apt') ? 'apt' : 'dpkg';
     const args = installer === 'apt' ? ['install', '-y', artifact.path] : ['-i', artifact.path];
-    childProcess.spawnSync('sudo', [installer, ...args], { stdio: 'inherit' });
+    ensureInstallerSucceeded(childProcess.spawnSync('sudo', [installer, ...args], { stdio: 'inherit' }));
     const executablePath = resolveExistingPanePath();
     if (!executablePath) {
       throw new Error('Pane installed from .deb, but the pane executable could not be found.');
@@ -186,15 +186,21 @@ function installWindows(
 ): InstalledPane {
   const args = target === 'daemon' ? ['/S'] : [];
   const result = childProcess.spawnSync(artifact.path, args, { stdio: 'inherit' });
-  if (result.error) {
-    throw result.error;
-  }
+  ensureInstallerSucceeded(result);
 
   const executablePath = resolveExistingPanePath();
   if (!executablePath) {
     throw new Error('Pane installer completed, but Pane.exe could not be found. Open the installer manually and rerun with --pane-path.');
   }
   return { executablePath, installKind: target === 'daemon' ? 'installed' : 'launched-installer' };
+}
+
+function ensureInstallerSucceeded(result: childProcess.SpawnSyncReturns<Buffer>): void {
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const reason = result.signal ? `signal ${result.signal}` : `status ${result.status}`;
+    throw new Error(`Pane installer exited with ${reason}.`);
+  }
 }
 
 function commandExists(command: string): boolean {
