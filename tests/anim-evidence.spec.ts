@@ -205,7 +205,7 @@ test.describe('animation evidence', () => {
       'The sidebar overflow menu opening from its trigger',
       async () => {},
       async (page) => {
-        await page.getByRole('button', { name: 'Sidebar menu' }).click();
+        await page.getByRole('button', { name: 'Home menu' }).click();
         await expect(page.getByRole('menu')).toBeVisible();
       },
       (page) => boxOf(page, '[role="menu"]', 52),
@@ -218,7 +218,7 @@ test.describe('animation evidence', () => {
       'menu-row-highlight',
       'Running the pointer down the menu rows',
       async (page) => {
-        await page.getByRole('button', { name: 'Sidebar menu' }).click();
+        await page.getByRole('button', { name: 'Home menu' }).click();
         await expect(page.getByRole('menu')).toBeVisible();
       },
       async (page) => {

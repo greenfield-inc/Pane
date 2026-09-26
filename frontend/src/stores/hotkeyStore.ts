@@ -200,7 +200,9 @@ function handleKeyDown(e: KeyboardEvent) {
 
   // Modal-local commands can opt in, but all other application hotkeys remain
   // suppressed while focus is trapped in a dialog.
-  const isInsideModal = target.closest('[aria-modal="true"]') !== null;
+  // A full-page surface (Settings) blocks the workspace hotkeys behind it.
+  const isInsideModal = target.closest('[aria-modal="true"]') !== null
+    || Boolean(globalThis.document?.querySelector('[data-hotkey-scope="modal"]'));
   if (isInsideModal && !def.allowInModal) return;
 
   // Let native text editing win for shortcuts users expect in focused inputs.

@@ -24,7 +24,7 @@ async function bootSettings(page: Page, options: Parameters<typeof installElectr
   const settingsButton = page.getByRole('button', { name: 'Settings' }).first();
   await expect(settingsButton).toBeVisible();
   await settingsButton.click();
-  await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   return settingsButton;
 }
 
@@ -155,6 +155,7 @@ test.describe('Settings', () => {
     await fontInput.fill('Menlo');
     await fontInput.blur();
 
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
     await expect.poll(() => host.getAttribute('data-terminal-font')).toBe('"Menlo", "Symbols Nerd Font Mono", monospace');
     await expect(page.locator('body')).toHaveCSS('font-family', bodyFont);
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -207,27 +208,25 @@ test.describe('Settings', () => {
   });
 
   test('navigates categories and keeps the last category for the renderer session', async ({ page }) => {
-    const opener = await bootSettings(page);
-    const dialog = page.getByRole('dialog', { name: 'Pane Settings' });
-    await page.waitForTimeout(250);
-    const initialHeight = (await dialog.boundingBox())?.height;
+    await bootSettings(page);
+    const settingsPage = page.getByTestId('settings-page');
+    const initialHeight = (await settingsPage.boundingBox())?.height;
 
     await page.getByRole('button', { name: 'Terminal', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Settings categories' }).locator('[aria-current="page"]')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Terminal', exact: true })).toHaveAttribute('aria-current', 'page');
-    const terminalHeight = (await dialog.boundingBox())?.height;
+    const terminalHeight = (await settingsPage.boundingBox())?.height;
     expect(Math.abs((terminalHeight ?? 0) - (initialHeight ?? 0))).toBeLessThan(1);
-    expect(initialHeight).toBeGreaterThanOrEqual(560);
-    expect(initialHeight).toBeLessThanOrEqual(760);
+    expect(initialHeight).toBe(page.viewportSize()?.height);
     expect(await page.getByTestId('settings-content').evaluate(
       (content) => content.scrollHeight > content.clientHeight,
     )).toBe(true);
     await page.screenshot({ path: 'test-results/settings-normal.png' });
 
-    await page.getByRole('button', { name: 'Close modal' }).click();
-    await expect(opener).toBeFocused();
-    await opener.click();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(settingsPage).toHaveCount(0);
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible();
   });
 
@@ -238,7 +237,7 @@ test.describe('Settings', () => {
 
     await page.keyboard.press('Control+Alt+/');
 
-    await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+    await expect(page.getByTestId('settings-page')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Shortcuts', exact: true })).toBeVisible();
     await expect(page.locator('[data-setting-id="terminal-shortcuts"]')).toBeFocused();
   });
@@ -290,7 +289,7 @@ test.describe('Settings', () => {
     const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
     await expect(confirm).toBeVisible();
     await confirm.getByRole('button', { name: 'Stay' }).click();
-    await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+    await expect(page.getByTestId('settings-page')).toBeVisible();
 
     await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
     await confirm.getByRole('button', { name: 'Discard Changes' }).click();
@@ -379,7 +378,7 @@ test.describe('Settings', () => {
     await page.getByPlaceholder('e.g. .env').last().fill('.env.local');
     await page.getByRole('button', { name: 'Apply', exact: true }).click();
     await expect(page.getByText('Saved', { exact: true })).toBeVisible();
-    await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+    await expect(page.getByTestId('settings-page')).toBeVisible();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
     const updates = await page.evaluate(() => (
@@ -402,14 +401,10 @@ test.describe('Settings', () => {
     await confirm.getByRole('button', { name: 'Stay' }).click();
     await expect(page.getByRole('heading', { name: 'Worktrees & Git' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Close modal' }).click();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
     await expect(confirm).toBeVisible();
     await confirm.getByRole('button', { name: 'Stay' }).click();
-    await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
-
-    await page.keyboard.press('Escape');
-    await expect(confirm).toBeVisible();
-    await confirm.getByRole('button', { name: 'Stay' }).click();
+    await expect(page.getByTestId('settings-page')).toBeVisible();
 
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     await confirm.getByRole('button', { name: 'Discard Changes' }).click();
@@ -449,25 +444,22 @@ test.describe('Settings', () => {
     await page.getByRole('option', { name: 'Terminal' }).click();
     await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible();
 
-    const overflows = await page.getByRole('dialog', { name: 'Pane Settings' }).evaluate(
+    const overflows = await page.getByTestId('settings-page').evaluate(
       (dialog) => dialog.scrollWidth > dialog.clientWidth + 1,
     );
     expect(overflows).toBe(false);
     await page.screenshot({ path: 'test-results/settings-narrow.png' });
   });
 
-  test('centers the dialog in the window', async ({ page }) => {
+  test('fills the window instead of opening a dialog', async ({ page }) => {
     for (const viewport of [{ width: 1280, height: 720 }, { width: 640, height: 760 }]) {
       await page.setViewportSize(viewport);
       await bootSettings(page);
 
-      const panel = page.getByRole('dialog', { name: 'Pane Settings' }).locator(':scope > div').first();
-      const box = await panel.boundingBox();
-      if (!box) throw new Error('Settings dialog has no bounding box');
-      expect(box.x).toBeCloseTo((viewport.width - box.width) / 2, 0);
-      expect(box.y).toBeCloseTo((viewport.height - box.height) / 2, 0);
-
-      await page.getByRole('button', { name: 'Close modal' }).click();
+      const box = await page.getByTestId('settings-page').boundingBox();
+      expect(box).toMatchObject({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+      await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toHaveCount(0);
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
     }
   });
 
@@ -499,25 +491,49 @@ test.describe('Settings', () => {
     // Options carry their picker description in the accessible name; match the label prefix (not the OLED variant).
     await page.getByRole('option', { name: /^Night Owl(?! \(OLED\))/ }).click();
     await expect(page.locator('html')).toHaveClass(/night-owl/);
-    await expect(page.getByRole('dialog', { name: 'Pane Settings' })).toBeVisible();
+    await expect(page.getByTestId('settings-page')).toBeVisible();
     await page.screenshot({ path: 'test-results/settings-dark.png' });
   });
 
-  test('traps focus in the modal and restores it to the opener', async ({ page }) => {
+  test('keeps workspace shortcuts off while Settings is open', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByTestId('settings-content').click();
+    await page.keyboard.press('ControlOrMeta+b');
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    // bootSettings collapsed the sidebar; the ignored shortcut left it collapsed.
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+  });
+
+  test('moves focus in on open and back to the opener when Escape closes it', async ({ page }) => {
     const opener = await bootSettings(page);
-    const dialog = page.getByRole('dialog', { name: 'Pane Settings' });
-
-    for (let index = 0; index < 30; index += 1) {
-      await page.keyboard.press('Tab');
-      const focusInside = await page.evaluate(() => {
-        const active = document.activeElement;
-        return active instanceof HTMLElement && active.closest('[aria-modal="true"]') !== null;
-      });
-      expect(focusInside).toBe(true);
-    }
-
+    await expect(page.getByTestId('settings-page').locator(':focus')).toHaveCount(1);
     await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
     await expect(opener).toBeFocused();
+  });
+
+  test('asks before Escape discards unsaved changes', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByRole('button', { name: 'Worktrees & Git', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Entry' }).click();
+    await page.getByTestId('settings-content').getByRole('textbox').last().fill('.env.local');
+    await expect(page.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
+    await page.keyboard.press('Escape');
+    const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole('button', { name: 'Stay' }).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByTestId('settings-page')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await confirm.getByRole('button', { name: 'Discard Changes' }).click();
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
+  });
+
+  test('returns to the workspace with Back', async ({ page }) => {
+    await bootSettings(page);
+    await expect(page.getByTestId('sidebar')).toBeHidden();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
+    await expect(page.getByTestId('sidebar')).toBeVisible();
   });
 });

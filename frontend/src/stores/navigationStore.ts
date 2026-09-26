@@ -15,7 +15,7 @@ const toProjectIdArray = (projectIds: Set<number>): number[] =>
  * here also requires a branch in `SessionView` and an entry in *both* sidebar
  * components (`Sidebar` compact rail and `ProjectSessionList` expanded tree).
  */
-export type ActiveView = 'sessions' | 'project' | 'pane-chat' | 'usage';
+export type ActiveView = 'sessions' | 'project' | 'pane-chat';
 
 interface NavigationState {
   activeView: ActiveView;
@@ -49,7 +49,6 @@ interface NavigationState {
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
-  navigateToUsage: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -127,9 +126,4 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     activeProjectId: null
   }),
 
-  // Usage is reported per host, not per project.
-  navigateToUsage: () => set({
-    activeView: 'usage',
-    activeProjectId: null
-  }),
 }));

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, RefreshCw, Settings as SettingsIcon } from 'lucide-react';
-import { Modal, ModalHeader } from './ui/Modal';
+import { AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 import { Button } from './ui/Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SettingsLayout } from './settings/SettingsLayout';
@@ -15,12 +14,12 @@ import { IntegrationsSettings } from './settings/categories/IntegrationsSettings
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
-import { UsageSettings } from './settings/categories/UsageSettings';
+import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
 import { useDirtySettingsForms } from './settings/useDirtySettingsForms';
 import { useRemoteAccessSettings } from './settings/useRemoteAccessSettings';
-import { SETTINGS_CATEGORIES, SETTINGS_CATEGORIES_WITHOUT_USAGE, settingDomId } from './settings/catalog';
+import { SETTINGS_CATEGORIES, settingDomId } from './settings/catalog';
 import type {
   RemoteAccessSubviewId,
   SettingsCategoryId,
@@ -36,9 +35,6 @@ interface AvailableShell {
   name: string;
   path: string;
 }
-
-/** Whether the host probe found a Codex login; the Usage tab is rendered only when 'available'. */
-type CodexUsageDetection = 'unknown' | 'available' | 'unavailable';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -66,7 +62,6 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [availableShells, setAvailableShells] = useState<AvailableShell[]>([]);
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
-  const [codexUsageDetection, setCodexUsageDetection] = useState<CodexUsageDetection>('unknown');
   const handledRequestRef = useRef<number | null>(null);
   const fontsLoadedRef = useRef(false);
   const remote = useRemoteAccessSettings(isOpen, onClose);
@@ -93,31 +88,6 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       }).catch(() => undefined);
     }
   }, [isOpen]);
-
-  // Show the Usage tab when Codex transcripts have been indexed (rate limits exist).
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    void API.usage.getReport({ providers: ['codex'] }).then((response) => {
-      if (cancelled) return;
-      const hasLimits = response.success && (response.data?.rateLimits.length ?? 0) > 0;
-      setCodexUsageDetection(hasLimits ? 'available' : 'unavailable');
-    }).catch(() => {
-      if (!cancelled) setCodexUsageDetection('unavailable');
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen]);
-
-  const visibleCategories = codexUsageDetection === 'available'
-    ? SETTINGS_CATEGORIES
-    : SETTINGS_CATEGORIES_WITHOUT_USAGE;
-
-  // A remembered Usage category with no Codex login falls back to General.
-  useEffect(() => {
-    if (isOpen && category === 'usage' && codexUsageDetection === 'unavailable') onCategoryChange('general');
-  }, [category, codexUsageDetection, isOpen, onCategoryChange]);
 
   const focusSetting = useCallback((setting?: SettingsSettingId) => {
     if (!setting) return;
@@ -186,7 +156,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'ai-agents':
         return <AIAgentsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'usage':
-        return <UsageSettings />;
+        return <UsageView />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'notifications':
@@ -206,32 +176,60 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     }
   };
 
+  // Keyboard parity with the old modal: focus moves in on open and returns on
+  // close, and Escape leaves through the unsaved-changes check.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const requestCloseRef = useRef(requestClose);
+  useEffect(() => { requestCloseRef.current = requestClose; }, [requestClose]);
+  // Settings mounts when it opens, so the first render still sees the opener
+  // focused; hiding the workspace blurs it right after. Restore it on close.
+  const [opener] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  useEffect(() => {
+    if (!isOpen) return;
+    pageRef.current?.querySelector<HTMLElement>('[data-testid="settings-content"], button')?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [isOpen, opener]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (document.querySelector('[aria-modal="true"]')) return; // a dialog above Settings handles it
+      event.preventDefault();
+      requestCloseRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
   return (
     <>
-      <Modal
-        isOpen={isOpen}
-        onClose={requestClose}
-        size="full"
-        showCloseButton={false}
-        className="mx-auto h-[calc(100vh-4rem)] min-h-[560px] max-h-[760px] max-w-6xl"
-      >
-        <ModalHeader title="Pane Settings" icon={<SettingsIcon className="h-5 w-5" />} onClose={requestClose} />
-        {persistence.isLoading && !persistence.config ? (
-          <div className="flex min-h-[420px] items-center justify-center text-sm text-text-tertiary" aria-live="polite">
-            <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Loading settings
-          </div>
-        ) : persistence.configError && !persistence.config ? (
-          <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 p-6 text-center">
-            <AlertCircle className="h-6 w-6 text-status-error" />
-            <p className="max-w-md text-sm text-status-error" role="alert">{persistence.configError}</p>
-            <Button type="button" variant="secondary" size="sm" onClick={() => void persistence.fetchConfig()}>Retry</Button>
+      <div ref={pageRef} data-testid="settings-page" data-hotkey-scope="modal" className="flex h-full min-h-0 w-full flex-col bg-bg-primary">
+        <div className="pane-drag-area h-[38px] flex-shrink-0 bg-surface-secondary" />
+        {!persistence.config && (persistence.isLoading || persistence.configError) ? (
+          <div className="relative flex min-h-0 flex-1 items-center justify-center">
+            <button type="button" onClick={requestClose} className="absolute left-3 top-3 inline-flex h-7 items-center gap-1.5 rounded px-2 text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary">
+              <ArrowLeft className="h-3.5 w-3.5" /> Back
+            </button>
+            {persistence.isLoading ? (
+              <div className="flex items-center text-sm text-text-tertiary" aria-live="polite">
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Loading settings
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 p-6 text-center">
+                <AlertCircle className="h-6 w-6 text-status-error" />
+                <p className="max-w-md text-sm text-status-error" role="alert">{persistence.configError}</p>
+                <Button type="button" variant="secondary" size="sm" onClick={() => void persistence.fetchConfig()}>Retry</Button>
+              </div>
+            )}
           </div>
         ) : (
-          <SettingsLayout category={category} categories={visibleCategories} onCategoryChange={changeCategory}>
+          <SettingsLayout category={category} categories={SETTINGS_CATEGORIES} onCategoryChange={changeCategory} onBack={requestClose} fullBleed={category === 'usage'}>
             {content()}
           </SettingsLayout>
         )}
-      </Modal>
+      </div>
       <ConfirmDialog
         isOpen={confirmOpen}
         onClose={stay}

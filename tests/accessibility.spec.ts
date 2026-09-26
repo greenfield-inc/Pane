@@ -248,7 +248,7 @@ test('Home and About are axe-clean and the modal contains and restores focus', a
   await expectNoAxeViolations(page);
 
   // About lives in the sidebar's ⋯ menu; the menu trigger is what focus returns to.
-  const menuButton = page.getByRole('button', { name: 'Sidebar menu' });
+  const menuButton = page.getByRole('button', { name: 'Home menu' });
   await menuButton.focus();
   await menuButton.click();
   const aboutItem = page.getByRole('menuitem', { name: /About Pane/i });
