@@ -183,8 +183,6 @@ describe('terminal panel persistence', () => {
       if (index % 256 === 0) await manager.waitForTerminalState(panel.id);
     }
 
-    expect(manager.getTerminalSnapshot(panel.id)?.currentCommand.length ?? 0).toBeLessThanOrEqual(4096);
-
     await manager.saveTerminalState(panel.id);
     expect(lastPersisted).not.toBeNull();
     const persisted = lastPersisted ?? { isActive: false };
@@ -200,18 +198,6 @@ describe('terminal panel persistence', () => {
     expect(storedBytes).toBeLessThan(PANEL_STATE_CEILING_BYTES);
     expect(databaseService.getPanelBuffers(panel.id)?.alternate?.length ?? 0).toBeGreaterThan(0);
   }, 120_000);
-
-  it('caps the in-memory command accumulator at 4 KB on the normal screen', async () => {
-    const panel = makePanel('panel-accumulator');
-    const { manager, handle } = await startTerminal(panel);
-    manager.setVisibility(panel.id, false);
-
-    for (let index = 0; index < 512; index += 1) handle.emit('\x1b[2K\x1b[Gprogress '.padEnd(1024, '.'));
-    expect(manager.getTerminalSnapshot(panel.id)?.currentCommand.length ?? Infinity).toBeLessThanOrEqual(4096);
-
-    handle.emit('git status\r\n');
-    expect(manager.getTerminalSnapshot(panel.id)?.currentCommand).toBe('');
-  });
 
   it.each(['normal', 'alternate'] as const)('replays the same bytes after a manager restart (%s screen)', async (mode) => {
     const panel = makePanel(`panel-restore-${mode}`);

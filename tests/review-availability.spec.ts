@@ -122,6 +122,7 @@ async function openSession(
     initialConfig?: JsonObject;
     expectInspector?: boolean;
   } = { withLocalChanges: true },
+  beforeLoad?: (page: Page) => Promise<void>,
 ): Promise<void> {
   await installElectronApiMock(page, {
     initialProjects: [project],
@@ -143,6 +144,7 @@ async function openSession(
     activeProjectId: project.id,
     initialConfig: options.initialConfig,
   });
+  await beforeLoad?.(page);
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: /^Expand repository Review fixture$/ }).click();
   const paneButton = page.getByRole('button', {
@@ -394,3 +396,57 @@ test('Legacy GitHub review preference stays local and opens the PR in Browser', 
     'https://github.com/dcouple/Pane/pull/571/files',
   );
 });
+
+declare global {
+  interface Window { __gitRefreshReads: { graph: number; diff: number } }
+}
+
+for (const view of ['graph', 'diff'] as const) {
+  test(`${view} refresh ignores other panes and follows its own git changes`, async ({ page }, testInfo) => {
+    await openSession(page, baseGitStatus, { withLocalChanges: true }, async browser => {
+      await browser.addInitScript(() => {
+        window.__gitRefreshReads = { graph: 0, diff: 0 };
+        window.electronAPI.sessions.getGitGraph = async () => {
+          window.__gitRefreshReads.graph++;
+          return { success: true, data: { entries: [{
+            hash: '1234567890abcdef', parents: [], branch: 'review', message: 'Implement scoped refresh',
+            committerDate: '2026-08-06T12:00:00.000Z', author: 'Pane QA',
+          }], currentBranch: 'review' } };
+        };
+        const getFileDiff = window.electronAPI.sessions.getFileDiff;
+        window.electronAPI.sessions.getFileDiff = (...args) => {
+          window.__gitRefreshReads.diff++;
+          return getFileDiff(...args);
+        };
+      });
+    });
+    if (view === 'graph') {
+      await page.getByRole('tab', { name: 'Details', exact: true }).click();
+      await expect(page.getByRole('region', { name: 'Commit history' }).getByText('Implement scoped refresh', { exact: true })).toBeVisible();
+    } else {
+      await page.getByRole('tab', { name: 'Changes', exact: true }).click();
+      await page.getByRole('option', { name: 'Open diff for src/review.ts, Modified, +8 −3', exact: true }).click();
+      await expect(page.getByRole('tab', { name: 'review.ts (All changes)', exact: true })).toHaveAttribute('aria-selected', 'true');
+    }
+    await expect.poll(() => page.evaluate(key => window.__gitRefreshReads[key], view)).toBeGreaterThan(0);
+    const initialReads = await page.evaluate(key => window.__gitRefreshReads[key], view);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('panel:event', { detail: {
+      type: 'git:operation_completed', source: { sessionId: 'another-pane', panelId: 'git', panelType: 'git' }, data: {}, timestamp: new Date().toISOString(),
+    } })));
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('git-status-updated', { detail: {
+      sessionId: 'another-pane', gitStatus: { state: 'modified', filesChanged: 2 },
+    } })));
+    // Allow the React effect and resulting IPC request to run before counting.
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(key => window.__gitRefreshReads[key], view)).toBe(initialReads);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('panel:event', { detail: {
+      type: 'git:operation_completed', source: { sessionId: 'review-session', panelId: 'git', panelType: 'git' }, data: {}, timestamp: new Date().toISOString(),
+    } })));
+    await expect.poll(() => page.evaluate(key => window.__gitRefreshReads[key], view)).toBe(initialReads + 1);
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('git-status-updated', { detail: {
+      sessionId: 'review-session', gitStatus: { state: 'modified', filesChanged: 2 },
+    } })));
+    await expect.poll(() => page.evaluate(key => window.__gitRefreshReads[key], view)).toBe(initialReads + 2);
+    await page.screenshot({ path: testInfo.outputPath(`${view}-scoped-refresh.png`) });
+  });
+}

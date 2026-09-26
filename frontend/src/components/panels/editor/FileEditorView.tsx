@@ -9,6 +9,7 @@ import type * as monaco from 'monaco-editor';
 import { MonacoErrorBoundary } from '../../MonacoErrorBoundary';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
 import { debounce } from '../../../utils/debounce';
+import { subscribeToSessionGitChanges } from '../../../utils/session-git-events';
 import { useCommittedRef } from '../../../hooks/useCommittedRef';
 import { MarkdownPreview } from '../../MarkdownPreview';
 import { NotebookPreview } from './NotebookPreview';
@@ -31,8 +32,6 @@ export interface FileEditorViewProps {
   /** Fired when the user edits or saves (⌘S) the file — pins preview tabs. */
   onUserEdit?: () => void;
 }
-
-const GIT_REFRESH_EVENTS = new Set(['git:operation_completed', 'diff:refreshed', 'terminal:command_executed', 'files:changed']);
 
 export function FileEditorView({
   sessionId,
@@ -136,14 +135,8 @@ export function FileEditorView({
   useEffect(() => {
     if (!selectedFile) return;
     refreshGitStatus(selectedFile.path);
-    const handlePanelEvent = (event: Event) => {
-      if (!(event instanceof CustomEvent)) return;
-      const { type } = event.detail || {};
-      if (GIT_REFRESH_EVENTS.has(type)) refreshGitStatus(selectedFile.path);
-    };
-    window.addEventListener('panel:event', handlePanelEvent);
-    return () => window.removeEventListener('panel:event', handlePanelEvent);
-  }, [selectedFile, refreshGitStatus]);
+    return subscribeToSessionGitChanges(sessionId, () => refreshGitStatus(selectedFile.path));
+  }, [selectedFile, refreshGitStatus, sessionId]);
 
   const handleEditorMount = (editor: monaco.editor.IStandaloneCodeEditor) => {
     editorRef.current = editor;

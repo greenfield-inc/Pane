@@ -38,12 +38,6 @@ const MAX_CONCURRENT_SPAWNS = 3;
 const AGENT_STATUS_POLL_MS = 500; // cadence for re-deriving blocked/working/done from the live screen
 const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
 const MAX_ALTERNATE_SCREEN_BUFFER_SIZE = 100_000; // 100KB of recent TUI redraw state
-// Command-detection heuristic bounds. These buffers live in memory only and
-// are never persisted; full-screen apps redraw without newlines, so the
-// accumulator is frozen while the alternate screen is active.
-const MAX_CURRENT_COMMAND_SIZE = 4096;
-const MAX_COMMAND_HISTORY_ENTRY_SIZE = 1024;
-const MAX_COMMAND_HISTORY_ENTRIES = 100;
 const MIN_PTY_COLS = 20;
 const MIN_PTY_ROWS = 5;
 const FORCED_REDRAW_TRANSITION_MS = 50;
@@ -81,7 +75,6 @@ export interface TerminalPanelSnapshot {
   isAlternateScreen: boolean;
   activityStatus: 'active' | 'idle';
   lastActivityTime: string;
-  currentCommand: string;
   isCliPanel?: boolean;
   isCliReady?: boolean;
   agentType?: CliAgentType;
@@ -195,8 +188,6 @@ interface TerminalProcess {
   alternateScreenBuffer: string;
   /** Authoritative xterm-compatible model of the live PTY byte stream. */
   screenEmulator?: RemoteTerminalEmulator;
-  commandHistory: string[];
-  currentCommand: string;
   lastActivity: Date;
   lastOutputAt?: Date;
   outputGeneration: number;
@@ -1017,8 +1008,6 @@ export class TerminalPanelManager extends EventEmitter {
       scrollbackBuffer: '',
       alternateScreenBuffer: '',
       screenEmulator: this.emulatorHost().createEmulator(spawnCols, spawnRows),
-      commandHistory: [],
-      currentCommand: '',
       lastActivity: new Date(),
       outputGeneration: 0,
       isWSL: !!(wslContext && process.platform === 'win32'),
@@ -1202,47 +1191,6 @@ export class TerminalPanelManager extends EventEmitter {
       // recent visual frame and should not evict normal history.
       this.addToScrollback(terminal, filtered);
 
-      // Detect commands (simple heuristic - look for carriage returns)
-      if (data.includes('\r') || data.includes('\n')) {
-        if (terminal.currentCommand.trim()) {
-          terminal.commandHistory.push(terminal.currentCommand.slice(0, MAX_COMMAND_HISTORY_ENTRY_SIZE));
-          if (terminal.commandHistory.length > MAX_COMMAND_HISTORY_ENTRIES) {
-            terminal.commandHistory.splice(0, terminal.commandHistory.length - MAX_COMMAND_HISTORY_ENTRIES);
-          }
-
-          // Emit command executed event
-          panelManager.emitPanelEvent(
-            terminal.panelId,
-            'terminal:command_executed',
-            {
-              command: terminal.currentCommand,
-              timestamp: new Date().toISOString()
-            }
-          );
-
-          // Check for file operation commands
-          if (this.isFileOperationCommand(terminal.currentCommand)) {
-            panelManager.emitPanelEvent(
-              terminal.panelId,
-              'files:changed',
-              {
-                command: terminal.currentCommand,
-                timestamp: new Date().toISOString()
-              }
-            );
-          }
-
-          terminal.currentCommand = '';
-        }
-      } else if (!terminal.isAlternateScreen) {
-        // Accumulate command input. Anything past the cap is not a command
-        // (a TUI frame, a paste, a progress bar), so drop it rather than grow.
-        terminal.currentCommand += data;
-        if (terminal.currentCommand.length > MAX_CURRENT_COMMAND_SIZE) {
-          terminal.currentCommand = '';
-        }
-      }
-
       // Buffer output for batching instead of sending immediately
       terminal.outputBuffer += filtered;
 
@@ -1312,17 +1260,6 @@ export class TerminalPanelManager extends EventEmitter {
       terminal.scrollbackBuffer + data,
       MAX_SCROLLBACK_BUFFER_SIZE
     );
-  }
-  
-  private isFileOperationCommand(command: string): boolean {
-    const fileOperations = [
-      'touch', 'rm', 'mv', 'cp', 'mkdir', 'rmdir',
-      'cat >', 'echo >', 'echo >>', 'vim', 'vi', 'nano', 'emacs',
-      'git add', 'git rm', 'git mv'
-    ];
-    
-    const trimmedCommand = command.trim().toLowerCase();
-    return fileOperations.some(op => trimmedCommand.startsWith(op));
   }
   
   isTerminalInitialized(panelId: string): boolean {
@@ -1587,7 +1524,6 @@ export class TerminalPanelManager extends EventEmitter {
       isAlternateScreen: terminal.screenEmulator?.state.isAlternateScreen ?? terminal.isAlternateScreen,
       activityStatus: this.deriveActivityStatus(panelId),
       lastActivityTime: terminal.lastActivity.toISOString(),
-      currentCommand: terminal.currentCommand,
       isCliPanel: customState.isCliPanel,
       isCliReady: customState.isCliReady,
       agentType,
