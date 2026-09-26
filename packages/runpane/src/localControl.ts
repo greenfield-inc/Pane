@@ -1724,23 +1724,32 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
     }
     const tool = await buildToolSpec(parsed, 'panes adopt');
     request = {
-    repo: parsed.repo,
-    panes: [{
-      path: parsed.repoPath,
-      name: parsed.name,
-      baseBranch: parsed.baseBranch,
-      folder: parsed.folder,
-      pinned: resolvePinnedOverride(parsed) ?? true,
-      tool,
-      resume: parsed.resume,
-      launch: parsed.launch || undefined,
-    }],
-    dryRun: parsed.dryRun || undefined,
-    noFocus: parsed.noFocus || undefined,
-    focus: parsed.focus || undefined,
-    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+      repo: parsed.repo,
+      panes: [{
+        path: parsed.repoPath,
+        name: parsed.name,
+        baseBranch: parsed.baseBranch,
+        folder: parsed.folder,
+        pinned: true,
+        tool,
+        resume: parsed.resume,
+      }],
     };
   }
+  if (parsed.dryRun) request.dryRun = true;
+  const pinnedOverride = resolvePinnedOverride(parsed);
+  for (const pane of request.panes) {
+    if (pinnedOverride !== undefined) pane.pinned = pinnedOverride;
+    if (parsed.launch) pane.launch = true;
+  }
+  if (parsed.focus && parsed.noFocus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+  if (parsed.focus || parsed.noFocus) {
+    request.focus = Boolean(parsed.focus);
+    request.noFocus = Boolean(parsed.noFocus);
+  }
+  if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
   await confirmPaneAdopt(parsed, request);
   const result = await invokeDaemon('runpane:panes:adopt', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
