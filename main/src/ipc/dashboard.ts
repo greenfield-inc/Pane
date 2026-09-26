@@ -111,13 +111,10 @@ export function registerDashboardHandlers(ipcMain: IpcMain, services: AppService
       // Send initial update
       event.sender.send('dashboard:update', { projectId, data: initialData, isPartial: true });
 
-      // Start async operations in parallel
-      const fetchPromise = ctx.commandRunner.execAsync('git fetch origin', project.path, { timeout: 15000 }).catch(error => {
-        console.warn('Failed to fetch from origin:', error);
-      });
-
-      const mainBranchPromise = getMainBranchStatusAsync(ctx, project.path, mainBranch);
+      // Remote status loading fetches each remote once. Main-branch counts must
+      // use the resulting tracking refs, not race that fetch.
       const remotesPromise = getRemoteStatuses(ctx, project.path, mainBranch);
+      const mainBranchPromise = remotesPromise.then(() => getMainBranchStatusAsync(ctx, project.path, mainBranch));
 
       // Get all sessions for this project
       const sessions = databaseService.getAllSessions(projectId);
@@ -168,7 +165,6 @@ export function registerDashboardHandlers(ipcMain: IpcMain, services: AppService
       });
 
       // Wait for all sessions to complete
-      await fetchPromise; // Ensure fetch completes
       const sessionBranches = (await Promise.all(sessionPromises)).filter(result => result !== null);
 
       // Send final complete data

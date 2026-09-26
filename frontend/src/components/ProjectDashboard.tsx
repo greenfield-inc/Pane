@@ -40,7 +40,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
     setFilterType(event.target.value as typeof filterType);
   };
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
-  const [isProgressive] = useState(true); // Use progressive loading by default
+  const requests = useRef({ id: 0 }).current;
   const pendingSessionUpdatesRef = useRef<Map<string, SessionBranchInfo>>(new Map());
   const dashboardDataRef = useRef<ProjectDashboardData | null>(null);
 
@@ -78,11 +78,15 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
     []
   );
 
-  const fetchDashboardData = useCallback(async (useCache: boolean = true, useProgressive: boolean = true) => {
+  const fetchDashboardData = useCallback(async (useCache: boolean = true) => {
+    const requestId = ++requests.id;
     // Check cache first if not forcing refresh
     if (useCache) {
       const cachedData = dashboardCache.get(projectId);
       if (cachedData) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+        setError(null);
         setDashboardData(cachedData);
         setLastRefreshTime(new Date(Date.now() - 30000)); // Show it was from cache
         setStatusAnnouncement('Dashboard loaded from cache');
@@ -97,65 +101,59 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
     setStatusAnnouncement(hasDashboardData ? 'Refreshing dashboard' : 'Loading dashboard');
     
     try {
-      if (useProgressive && isProgressive) {
-        // Use progressive loading
-        const response = await API.dashboard.getProjectStatusProgressive(projectId);
-        
-        if (response.success && response.data) {
-          setDashboardData(response.data);
-          setLastRefreshTime(new Date());
-          // Cache the data
-          dashboardCache.set(projectId, response.data);
-          setStatusAnnouncement('Dashboard updated');
-        } else {
-          setError(response.error || 'Failed to fetch project status');
-        }
+      const response = await API.dashboard.getProjectStatusProgressive(projectId);
+      if (requestId !== requests.id) return;
+      if (response.success && response.data) {
+        applyPendingSessionUpdates.cancel();
+        pendingSessionUpdatesRef.current.clear();
+        setDashboardData(response.data);
+        setLastRefreshTime(new Date());
+        dashboardCache.set(projectId, response.data);
+        setStatusAnnouncement('Dashboard updated');
       } else {
-        // Use traditional loading
-        const response = await API.dashboard.getProjectStatus(projectId);
-        
-        if (response.success && response.data) {
-          setDashboardData(response.data);
-          setLastRefreshTime(new Date());
-          // Cache the data
-          dashboardCache.set(projectId, response.data);
-          setStatusAnnouncement('Dashboard updated');
-        } else {
-          setError(response.error || 'Failed to fetch project status');
-        }
+        setError(response.error || 'Failed to fetch project status');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      if (requestId === requests.id) setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (requestId === requests.id) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, [projectId, isProgressive]);
+  }, [projectId, applyPendingSessionUpdates, requests]);
 
   // Debounced refresh function
   const debouncedRefresh = useMemo(
     () => debounce(() => {
       dashboardCache.invalidate(projectId);
-      fetchDashboardData(false, true);
+      fetchDashboardData(false);
     }, 500),
     [projectId, fetchDashboardData]
   );
 
   // Set up progressive loading event listeners
   useEffect(() => {
-    if (!isProgressive) return;
-
     const cleanupFns: Array<() => void> = [];
+    const pendingUpdates = pendingSessionUpdatesRef.current;
 
     // Handle dashboard updates
     const unsubscribeUpdate = API.dashboard.onUpdate((event) => {
       if (event.projectId === projectId) {
+        if (!event.isPartial) {
+          applyPendingSessionUpdates.cancel();
+          pendingSessionUpdatesRef.current.clear();
+        }
         setDashboardData(prevData => {
           if (!prevData) {
             return isProjectDashboardSeed(event.data) ? event.data : null;
           } else if (prevData && event.isPartial) {
             // Merge partial update
-            return { ...prevData, ...event.data };
+            return {
+              ...prevData,
+              ...event.data,
+              sessionBranches: event.data.sessionBranches?.length ? event.data.sessionBranches : prevData.sessionBranches,
+            };
           } else if (!event.isPartial) {
             // Full update
             const data = event.data;
@@ -190,32 +188,21 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
       cleanupFns.forEach(fn => fn());
       // Cancel any pending updates
       applyPendingSessionUpdates.cancel();
+      pendingUpdates.clear();
     };
-  }, [projectId, isProgressive, applyPendingSessionUpdates]);
+  }, [projectId, applyPendingSessionUpdates]);
 
   useEffect(() => {
     // Clear previous data when switching projects to show skeleton
     dashboardDataRef.current = null;
     setDashboardData(null);
     setError(null);
-    fetchDashboardData();
-  }, [fetchDashboardData]);
-
-  // Memoize grouped sessions by base branch (for future use)
-  // const groupedSessions = useMemo(() => {
-  //   if (!dashboardData) return new Map();
-  //   
-  //   const groups = new Map<string, SessionBranchInfo[]>();
-  //   dashboardData.sessionBranches.forEach(session => {
-  //     const baseBranch = session.baseBranch || 'unknown';
-  //     if (!groups.has(baseBranch)) {
-  //       groups.set(baseBranch, []);
-  //     }
-  //     groups.get(baseBranch)!.push(session);
-  //   });
-  //   
-  //   return groups;
-  // }, [dashboardData?.sessionBranches]);
+    void fetchDashboardData();
+    return () => {
+      requests.id++;
+      debouncedRefresh.cancel();
+    };
+  }, [fetchDashboardData, debouncedRefresh, requests]);
 
   const renderSessionRow = useCallback((session: SessionBranchInfo) => {
     const staleClass = session.isStale ? 'bg-status-warning/10' : '';
@@ -388,7 +375,6 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
               mainBranch={dashboardData.mainBranch}
               mainBranchStatus={dashboardData.mainBranchStatus}
               remotes={dashboardData.remotes}
-              onReviewUpdates={() => {}}
             />
           )}
           
