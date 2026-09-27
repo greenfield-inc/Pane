@@ -77,7 +77,7 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Split fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
   await page.getByRole('button', { name: 'Split pane', exact: true }).click();
 
   const alpha = page.getByRole('tab', { name: 'Alpha', exact: true });

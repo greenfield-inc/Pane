@@ -19,7 +19,7 @@ test('add-tool popover supports keyboard navigation and dismissal', async ({ pag
     platform: 'darwin', initialProjects: [project], initialSessions: [session], initialPanels: [panel], activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
   const trigger = page.getByRole('button', { name: 'Add tool', exact: true });
@@ -46,7 +46,7 @@ test('Explorer in the add-tool menu creates a missing panel and opens the Files 
     initialPanels: [panel], activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
@@ -61,7 +61,7 @@ test('agent presets create JSON-valid terminal state without a resume profile', 
     initialPanels: [panel], activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
   await page.getByRole('menuitem', { name: /^Claude Code/ }).click();
@@ -83,7 +83,7 @@ test('custom profiles keep their names and commands when renamed and launched', 
     initialPanels: [panel], activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   const trigger = page.getByRole('button', { name: 'Add tool', exact: true });
   await trigger.click();
@@ -154,7 +154,7 @@ test('chat promotion sends the selected chat and preserves it when the move is r
     };
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /^Expand repository Popover$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   await page.getByRole('button', { name: 'Move chat to Session', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Move chat to Session' });

@@ -132,7 +132,7 @@ test('selection popover works in restored bottom and tab terminals', async ({ pa
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
@@ -179,7 +179,7 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();

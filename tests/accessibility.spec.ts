@@ -297,7 +297,7 @@ test('Night Owl recent-pane metadata remains axe-clean', async ({ page }) => {
 test('seeded Create Pane dialog is keyboard reachable and axe-clean', async ({ page }) => {
   await openDesktop(page);
 
-  await page.getByRole('button', { name: /^Expand repository Accessibility fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Accessibility fixture$/ }).click();
   const newPaneButton = page.getByRole('button', { name: /New (workspace|pane)/i }).first();
   await expect(newPaneButton).toBeVisible();
   await newPaneButton.click();
@@ -344,7 +344,7 @@ test('queued pane creation failures show a dismissible accessible error', async 
 test('seeded pane exposes separate compound actions and arrow-keyed panel tabs', async ({ page }) => {
   await openDesktop(page);
 
-  await page.getByRole('button', { name: /^Expand repository Accessibility fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Accessibility fixture$/ }).click();
   const paneButton = page.getByRole('button', { name: 'Accessibility pane', exact: true });
   await expect(paneButton).toBeVisible();
   const archiveButton = page.getByRole('button', { name: /Archive Accessibility pane/i });

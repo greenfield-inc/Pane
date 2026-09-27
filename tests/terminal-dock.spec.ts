@@ -22,8 +22,8 @@ const emptyLayout = {
 };
 
 async function openPane(page: Page, name = pane.name) {
-  const expand = page.getByRole('button', { name: `Expand repository ${project.name}`, exact: true });
-  await expect(page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true })).toBeVisible();
+  const expand = page.getByRole('button', { name: `Expand project ${project.name}`, exact: true });
+  await expect(page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true })).toBeVisible();
   if (await expand.isVisible()) await expand.click();
   await page.getByRole('button', { name, exact: true }).click();
 }

@@ -115,7 +115,7 @@ async function bootChromeFixture(page: Page, opts: BootOptions = {}) {
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Pane$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
   await page.getByRole('button', { name: 'Flat chrome', exact: true }).click();
   if (opts.theme) {
     await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${opts.theme}\\b`));

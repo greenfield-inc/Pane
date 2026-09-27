@@ -515,7 +515,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   return (
     <>
-    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls")}>
+    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", trailingSlot && "panel-tab-bar-with-title-controls", barCollapsed && "hidden")}>
       {/* Flex container */}
       <div
         className={cn("relative flex min-h-[38px] items-center", trailingSlot ? "pr-28" : "pr-2")}
