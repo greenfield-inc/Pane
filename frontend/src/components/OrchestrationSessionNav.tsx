@@ -20,6 +20,8 @@ import { Tooltip } from './ui/Tooltip';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
+import { useOrchestrationSessionActivity } from '../hooks/useAgentStatus';
+import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import type { AppConfig } from '../types/config';
@@ -50,6 +52,23 @@ function statusLabel(session: OrchestrationSessionRecord): string {
   if (session.blockers.length > 0) return 'Blocked';
   if (session.report) return 'Report available';
   return 'No report yet';
+}
+
+/** Rolled-up agent status for a Session: its orchestrator plus child Panes. */
+function SessionActivityDot({ session, paneIds }: { session: OrchestrationSessionRecord; paneIds: readonly string[] }) {
+  const { status } = useOrchestrationSessionActivity(session.internalSessionId, paneIds);
+  return status === 'unknown'
+    ? <AgentActivityDot active={false} size="sm" className="flex-shrink-0" />
+    : <AgentStatusDot status={status} size="sm" className="flex-shrink-0" />;
+}
+
+/** How much delegated work is in flight, in place of the plain child count. */
+function SessionActivitySummary({ session, paneIds }: { session: OrchestrationSessionRecord; paneIds: readonly string[] }) {
+  const { working, blocked } = useOrchestrationSessionActivity(session.internalSessionId, paneIds);
+  if (blocked > 0) return <span className="pr-1 text-[10px] tabular-nums text-status-error">{blocked} need{blocked === 1 ? 's' : ''} input</span>;
+  if (working > 0) return <span className="pr-1 text-[10px] tabular-nums text-text-secondary">{working} working</span>;
+  if (paneIds.length === 0) return null;
+  return <span className="pr-1 text-[10px] tabular-nums text-text-muted">{paneIds.length}</span>;
 }
 
 function availabilityIsVisible(availability: OrchestrationSessionAvailability): boolean {
@@ -217,6 +236,7 @@ export function OrchestrationSessionNav({
         .map((association, index) => renderPane(association.paneId, session.id, index))
         .filter((row): row is ReactNode => row !== null && row !== undefined)
       : [];
+    const visiblePaneIds = paneRows.length > 0 ? visibleAssociations.map(association => association.paneId) : [];
     const expanded = sessionExpansionOverrides.get(session.id) ?? paneRows.length > 0;
     const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
     const label = session.name || 'Pane Chat';
@@ -246,8 +266,9 @@ export function OrchestrationSessionNav({
             onKeyDown={event => handleSessionKeyDown(event, session)}
             className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
           >
+            <SessionActivityDot session={session} paneIds={visiblePaneIds} />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
-            {paneRows.length > 0 && <span className="pr-1 text-[10px] tabular-nums text-text-muted">{paneRows.length}</span>}
+            <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
           </button>
         </div>
         <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>

@@ -371,6 +371,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPanelDeleted') {
           return (callback: MockEventCallback) => subscribe('panel:deleted', callback);
         }
+        if (prop === 'onPanelAgentStatus') {
+          return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
+        }
         return () => unsubscribe;
       },
     });
@@ -1182,6 +1185,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitPanelUpdated(panel: JsonObject) {
           emit('panel:updated', clone(panel));
+        },
+        emitPanelAgentStatus(panelId: string, sessionId: string, state: string) {
+          emit('panel:agent-status', { panelId, sessionId, state });
         },
         emitPanelDeleted(panelId: string, sessionId: string) {
           emit('panel:deleted', { panelId, sessionId });
