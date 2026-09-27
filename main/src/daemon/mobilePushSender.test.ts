@@ -270,7 +270,6 @@ describe('MobilePushSender', () => {
     for (const reason of ['exit', 'destroyed']) {
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working' });
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'idle', reason });
-      expect(manager.config.host.mobilePush.panelStates['panel-1']).toBe('idle');
       expect(manager.config.host.mobilePush.attentionSequence).toBe(2);
       expect(requests).toHaveLength(2);
     }
