@@ -99,6 +99,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
 );
 
 export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
+  const useCompactFooterActions = width < 260;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -795,7 +796,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary"
               >
                 <Home className="h-3.5 w-3.5 shrink-0" />
-                <span className="flex-1 text-left">Home</span>
+                <span className="min-w-0 flex-1 truncate text-left">Home</span>
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
               </button>
             }
@@ -804,6 +805,24 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             width="sm"
             className="min-w-0 flex-1"
           />
+          <button
+            type="button"
+            onClick={onFeedbackClick}
+            aria-label="Feedback"
+            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            {!useCompactFooterActions && <span>Feedback</span>}
+          </button>
+          <button
+            type="button"
+            onClick={onDiscordClick}
+            aria-label="Discord"
+            className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          >
+            <DiscordIcon className="h-3.5 w-3.5" />
+            {!useCompactFooterActions && <span>Discord</span>}
+          </button>
           <IconButton
             aria-label="Settings"
             onClick={onSettingsClick}
