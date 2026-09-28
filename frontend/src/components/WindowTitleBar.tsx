@@ -1,12 +1,14 @@
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import type { Project } from '../types/project';
-import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneTitle } from '../utils/paneTitle';
+import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
 import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
+import { Badge } from './ui/Badge';
 
 const TITLE_BAR_HEIGHT = 38;
 const GUTTER = 8;
@@ -18,6 +20,44 @@ const OVERLAY_CONTROLS_RIGHT: CSSProperties = {
 };
 // SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits it.
 const NO_DRAG = { WebkitAppRegion: 'no-drag' } as CSSProperties;
+// An rtl line box overflows at its left edge, so the ellipsis lands on the head
+// and the end of a long pane name ("… (TM-622)") survives. The inner ltr embed
+// keeps the name itself a single left-to-right run — without it, trailing
+// punctuation is reordered to the clipped end and lost.
+const HEAD_ELLIPSIS_STYLE: CSSProperties = { direction: 'rtl' };
+const LTR_RUN_STYLE: CSSProperties = { direction: 'ltr', unicodeBidi: 'embed' };
+
+/**
+ * Which of `keys` appeared just now, as opposed to being here all along.
+ *
+ * The distinction is the whole point of animating these at all. A pill that
+ * arrives while you are watching the pane — the PR opened, the branch became
+ * mergeable — is a state change, and motion is how a state change stops being a
+ * thing you have to notice. A pill that is simply present because you switched
+ * to a pane that already had one is not news, and animating it would put motion
+ * on pane switching, which is the one thing this must not do.
+ *
+ * Keyed by `scope` (the pane): when that changes, everything counts as
+ * pre-existing.
+ */
+function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
+  const signature = keys.join('\u0000');
+  const [seen, setSeen] = useState({ scope, signature, arrived: new Set<string>() });
+
+  if (seen.scope !== scope || seen.signature !== signature) {
+    // Render-phase update: React re-renders immediately with the value below,
+    // so the commit that first paints a new pill already carries its class.
+    setSeen({
+      scope,
+      signature,
+      arrived: seen.scope === scope
+        ? new Set(keys.filter(key => !seen.signature.split('\u0000').includes(key)))
+        : new Set(),
+    });
+  }
+
+  return seen.scope === scope && seen.signature === signature ? seen.arrived : new Set();
+}
 
 interface WindowTitleBarProps {
   projects: Project[];
@@ -26,10 +66,23 @@ interface WindowTitleBarProps {
   controlsSlotRef?: (element: HTMLDivElement | null) => void;
 }
 
-/** Positions window controls over the sidebar and tabs without consuming a layout row. */
+/**
+ * Positions window controls over the sidebar and tabs without consuming a
+ * layout row, and names the pane you are looking at. The name and its status
+ * pills are passive text portalled into the pane tab bar's free space (the
+ * row this strip shares), so they never cover a tab and the row keeps
+ * dragging and double-click-to-zoom.
+ *
+ * It renders wherever the app owns the title bar: macOS via `hiddenInset`, and
+ * Windows and Linux via the Window Controls Overlay. A Linux desktop that failed
+ * the overlay gate in main keeps its native frame and gets no strip — there it
+ * is `document.title`, which this also owns, that carries the pane name. That is
+ * true on every platform for the taskbar and task switcher.
+ */
 export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, controlsSlotRef }: WindowTitleBarProps) {
   const setTrailingSlot = useTitleBarSlotStore(state => state.setTrailingSlot);
   const setSessionTabsSlot = useTitleBarSlotStore(state => state.setSessionTabsSlot);
+  const titleSlot = useTitleBarSlotStore(state => state.titleSlot);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
@@ -41,10 +94,17 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
     : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
 
+  // Runs before the platform gate below: naming the window is the part of this
+  // that a native-framed Windows or Linux window still uses.
   useEffect(() => {
     document.title = windowTitle;
     return () => { document.title = APP_WINDOW_TITLE; };
   }, [windowTitle]);
+
+  // Only a pane gets the visible name; the Session view shows its tabs here.
+  const paneTitle = activeView === 'sessions' ? title : null;
+  const pills = paneTitle ? resolvePaneStatusPills(activeSession) : [];
+  const arrived = useArrivedKeys(activeSession?.id ?? null, pills.map(pill => pill.key));
 
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
 
@@ -71,6 +131,51 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
       />
+      {paneTitle && titleSlot && createPortal(
+        <div className="relative flex min-w-0 items-center">
+          <div
+            className="flex min-w-0 items-center gap-1.5 text-xs"
+            data-testid="window-title-bar-label"
+            title={windowTitle}
+          >
+            <span className="truncate text-text-tertiary">{paneTitle.project}</span>
+            {paneTitle.pane && (
+              <>
+                <span className="flex-shrink-0 text-text-tertiary" aria-hidden="true">·</span>
+                <span
+                  className="truncate font-medium text-text-secondary"
+                  style={HEAD_ELLIPSIS_STYLE}
+                >
+                  <span style={LTR_RUN_STYLE}>{paneTitle.pane}</span>
+                </span>
+              </>
+            )}
+          </div>
+          {pills.length > 0 && (
+            // Anchored past the end of the title rather than laid out after it, so a
+            // pill appearing or clearing never nudges the centered name sideways.
+            <div
+              className="absolute left-full top-1/2 flex -translate-y-1/2 items-center gap-1 pl-2"
+              data-testid="window-title-bar-pills"
+            >
+              {pills.map(pill => (
+                <Badge
+                  key={pill.key}
+                  variant={pill.variant}
+                  size="sm"
+                  className={`whitespace-nowrap px-1.5 py-0 text-[10px] leading-4${
+                    arrived.has(pill.key) ? ' origin-left animate-title-pill-enter' : ''
+                  }`}
+                  title={pill.tooltip}
+                >
+                  {pill.label}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>,
+        titleSlot,
+      )}
       {activeView === 'pane-chat' && (
         <div
           ref={setSessionTabsSlot}
