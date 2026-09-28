@@ -377,8 +377,7 @@ test('appearance picker shows all 15 themes, grouped by family', async ({ page }
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
   if (await collapse.isVisible().catch(() => false)) await collapse.click();
   await page.getByRole('button', { name: 'Settings' }).first().click();
-  const dialog = page.getByRole('dialog', { name: 'Pane Settings' });
-  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
   await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Appearance', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Appearance', exact: true })).toBeVisible();
 
