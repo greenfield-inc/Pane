@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Monitor, MessageSquare, Settings } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -805,6 +805,29 @@ function SessionRow({
           agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
         />
+      </div>
+
+      {/* Quick actions stay out of the resting row and appear on hover or
+          keyboard focus; the right-click menu carries the full set. */}
+      <div className="relative z-10 flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onArchive(); }}
+          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
+          title="Archive"
+          aria-label={`Archive ${accessibleName}`}
+        >
+          <Archive className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
+          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary"
+          title={session.isFavorite ? 'Unpin' : 'Pin'}
+          aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
+        >
+          <Pin className="h-3.5 w-3.5 rotate-45" />
+        </button>
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
