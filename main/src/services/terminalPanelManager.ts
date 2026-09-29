@@ -63,6 +63,7 @@ const FORCED_REDRAW_TRANSITION_MS = 50;
 const FORCED_REDRAW_SETTLE_MS = 80;
 const SHELL_PROMPT_SETTLE_MS = 300;
 const SHELL_PROMPT_FALLBACK_MS = 5000;
+const OH_MY_ZSH_UPDATE_PROMPT = /\[oh-my-zsh\] Would you like to update\?\s*\[Y\/n\]/i;
 // Held initial input for an agent is staged, then submitted with its own
 // Enter once the agent has echoed it and gone quiet for a moment.
 const INPUT_SETTLE_POLL_MS = 50;
@@ -764,8 +765,24 @@ export class TerminalPanelManager extends EventEmitter {
       callback();
     };
 
+    // oh-my-zsh can ask to update before the first prompt. Typing the launch command into
+    // that question lets it swallow the first character, so decline it and keep waiting.
+    let recentOutput = '';
+    let declinedUpdatePrompt = false;
+
     const onPromptReady = ptyProcess.onData((data: string) => {
       if (callbackInvoked) return;
+      if (!declinedUpdatePrompt) {
+        // oxlint-disable-next-line eslint/no-control-regex
+        recentOutput = `${recentOutput}${data}`.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').slice(-200);
+        if (OH_MY_ZSH_UPDATE_PROMPT.test(recentOutput)) {
+          declinedUpdatePrompt = true;
+          ptyProcess.write('n');
+          clearTimeout(fallback);
+          fallback = setTimeout(invokeOnce, SHELL_PROMPT_FALLBACK_MS);
+          return;
+        }
+      }
       // Strip OSC too: Git Bash ends its prompt with a window-title sequence.
       const cleanLine = this.stripAnsiSequences(data).split(/\r?\n/).filter(line => line.length > 0).pop() || '';
       if (promptPattern.test(cleanLine)) {
@@ -773,7 +790,7 @@ export class TerminalPanelManager extends EventEmitter {
       }
     });
 
-    setTimeout(invokeOnce, SHELL_PROMPT_FALLBACK_MS);
+    let fallback = setTimeout(invokeOnce, SHELL_PROMPT_FALLBACK_MS);
   }
 
   private extractAgentSessionId(agentType: CliAgentType | undefined, output: string): string | undefined {

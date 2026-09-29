@@ -364,6 +364,42 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  it('invokes once when repeated prompts race the fallback', async () => {
+    vi.useFakeTimers();
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const promptPty = createPromptPty();
+    const callback = vi.fn();
+
+    manager.scheduleAfterShellPrompt(promptPty.pty, callback);
+    promptPty.emit('\x1b[32m$\x1b[0m ');
+    promptPty.emit('\x1b[32m$\x1b[0m ');
+
+    await vi.runAllTimersAsync();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(promptPty.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('declines the oh-my-zsh update prompt instead of typing the launch command into it', async () => {
+    vi.useFakeTimers();
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const promptPty = createPromptPty();
+    const callback = vi.fn();
+
+    manager.scheduleAfterShellPrompt(promptPty.pty, callback);
+    promptPty.emit('\x1b[1m[oh-my-zsh] Would you like to update?');
+    promptPty.emit(' [Y/n] \x1b[0m');
+
+    expect(promptPty.pty.write).toHaveBeenCalledTimes(1);
+    expect(promptPty.pty.write).toHaveBeenCalledWith('n');
+    expect(callback).not.toHaveBeenCalled();
+
+    promptPty.emit('n\r\n[oh-my-zsh] You can update manually by running `omz update`\r\n');
+    promptPty.emit('user@host ~ % ');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(promptPty.pty.write).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back after five seconds when no prompt is detected', async () => {
     vi.useFakeTimers();
     const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
