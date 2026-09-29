@@ -639,6 +639,28 @@ interface PanelListResult {
   panels: PanelSummary[];
 }
 
+interface PanelResumeManyResult {
+  ok: boolean;
+  scope: { kind: 'session' | 'all-stopped'; sessionId?: string; sessionName?: string };
+  resumed: number;
+  alreadyRunning: number;
+  failed: number;
+  items: Array<{
+    ok: boolean;
+    panelId: string;
+    paneId: string;
+    paneName: string;
+    panelTitle?: string;
+    agentType?: string;
+    action?: 'resumed' | 'already-running';
+    message?: string;
+    agentSessionId?: string;
+    readiness?: PanelReadiness;
+    error?: string;
+  }>;
+  nextCommand?: string;
+}
+
 interface PanelResumeResult {
   ok: boolean;
   panelId: string;
@@ -1525,6 +1547,31 @@ export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.o
   ok: boundary.literal(true),
   paneId: boundary.string,
   panels: boundary.array(panelSummarySchema),
+});
+const panelResumeManyResultSchema: BoundarySchema<PanelResumeManyResult> = boundary.object({
+  ok: boundary.boolean,
+  scope: boundary.object({
+    kind: boundary.enumeration('session', 'all-stopped'),
+    sessionId: boundary.optional(boundary.string),
+    sessionName: boundary.optional(boundary.string),
+  }),
+  resumed: boundary.number,
+  alreadyRunning: boundary.number,
+  failed: boundary.number,
+  items: boundary.array(boundary.object({
+    ok: boundary.boolean,
+    panelId: boundary.string,
+    paneId: boundary.string,
+    paneName: boundary.string,
+    panelTitle: boundary.optional(boundary.string),
+    agentType: boundary.optional(boundary.string),
+    action: boundary.optional(boundary.enumeration('resumed', 'already-running')),
+    message: boundary.optional(boundary.string),
+    agentSessionId: boundary.optional(boundary.string),
+    readiness: boundary.optional(panelReadinessSchema),
+    error: boundary.optional(boundary.string),
+  })),
+  nextCommand: boundary.optional(boundary.string),
 });
 const panelResumeResultSchema: BoundarySchema<PanelResumeResult> = boundary.object({
   ok: boundary.boolean,
@@ -2848,10 +2895,14 @@ export async function runPanelsWait(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runPanelsResume(parsed: ParsedArgs): Promise<number> {
-  if (!parsed.panelId) {
-    throw new Error('runpane panels resume requires --panel.');
+  const scopes = [parsed.panelId, parsed.sessionId, parsed.allStopped].filter(Boolean).length;
+  if (scopes !== 1) {
+    throw new Error('runpane panels resume requires exactly one of --panel, --session, or --all-stopped.');
   }
   await confirmPanelResume(parsed);
+  if (!parsed.panelId) {
+    return runPanelsResumeMany(parsed);
+  }
 
   const result = await invokeDaemon('runpane:panels:resume', [{
     panelId: parsed.panelId,
@@ -3336,7 +3387,10 @@ async function confirmPanelResume(parsed: ParsedArgs): Promise<void> {
 
   const rl = createInterface({ input, output });
   try {
-    const answer = (await rl.question(`Resume panel ${parsed.panelId}? [y/N] `)).trim().toLowerCase();
+    const target = parsed.panelId
+      ? `panel ${parsed.panelId}`
+      : parsed.sessionId ? `every stopped agent panel in Session ${parsed.sessionId}` : 'every stopped agent panel';
+    const answer = (await rl.question(`Resume ${target}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }
@@ -3623,6 +3677,39 @@ function printInitialInputDelivery(initialInput: InitialInputDeliveryResult | un
   if (initialInput.error) {
     console.log(`${prefix}Initial input error: ${initialInput.error.message}`);
   }
+}
+
+const RESUME_MANY_TIMEOUT_MS = 2 * 60_000;
+const RESUME_MANY_WAIT_TIMEOUT_MS = 15 * 60_000;
+
+async function runPanelsResumeMany(parsed: ParsedArgs): Promise<number> {
+  const result = await invokeDaemon('runpane:panels:resume-many', [{
+    sessionId: parsed.sessionId,
+    allStopped: parsed.allStopped || undefined,
+    waitReady: parsed.waitReady,
+    readyTimeoutMs: parsed.readyTimeoutMs,
+    concurrency: parsed.concurrency,
+  }], panelResumeManyResultSchema, {
+    paneDir: parsed.paneDir,
+    // The number of panels in scope is unknown here, and each waits up to --ready-timeout-ms.
+    timeoutMs: parsed.waitReady ? RESUME_MANY_WAIT_TIMEOUT_MS : RESUME_MANY_TIMEOUT_MS,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const scope = result.scope.kind === 'session' ? `Session ${result.scope.sessionName}` : 'every Pane';
+    console.log(`Resumed ${result.resumed} stopped agent panel${result.resumed === 1 ? '' : 's'} in ${scope}; ${result.alreadyRunning} already running, ${result.failed} failed.`);
+    for (const item of result.items) {
+      const status = item.error
+        ? `failed: ${item.error}`
+        : item.readiness?.blocked
+          ? `blocked: ${item.readiness.blocked.message}`
+          : item.readiness && !item.readiness.ok ? 'not ready' : item.action ?? 'resumed';
+      console.log(`${item.ok ? 'OK' : 'FAIL'} ${item.paneName} panel ${item.panelId}: ${status}`);
+    }
+  }
+  return result.ok ? 0 : 1;
 }
 
 function printPanelResumeResult(result: PanelResumeResult): void {

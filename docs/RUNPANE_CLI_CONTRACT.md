@@ -135,6 +135,7 @@ runpane agents send --pane <pane-id> --text "Also add a test" --yes --json
 runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json
 runpane panels last-message --panel <panel-id> --json
 runpane panels resume --panel <panel-id> --wait-ready --yes --json
+runpane panels resume --session <id|name> --wait-ready --yes --json
 runpane docs search --query "archive a pane" --json
 runpane links create --pane <pane-id> --json
 runpane panes git-status --pane <pane-id> --json
@@ -228,7 +229,7 @@ A watch releases its pending slot when its client socket or named pipe disconnec
 
 `runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.
 
-`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: "already-running"`). After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.
+`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: "already-running"`). `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope, `--concurrency` at a time (default 3), and returns `{ resumed, alreadyRunning, failed, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.
 
 `runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: "transcript-unavailable" }` and exits 1.
 
@@ -371,6 +372,7 @@ runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [
 runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json] [--pane-dir <path>]
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]
+runpane panels resume (--session <id|name>|--all-stopped) [--wait-ready] [--ready-timeout-ms <ms>] [--concurrency <count>] --yes [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]
@@ -575,6 +577,7 @@ These flags are consumed by local daemon-control commands:
 --ack-now
 --include-held-input
 --agents-only
+--all-stopped
 --all-managed
 --include-shells
 --no-held-input

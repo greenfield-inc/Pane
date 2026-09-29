@@ -119,6 +119,9 @@ import type {
   RunpanePanelScreenResult,
   RunpanePanelResumeRequest,
   RunpanePanelResumeResult,
+  RunpanePanelResumeManyItem,
+  RunpanePanelResumeManyRequest,
+  RunpanePanelResumeManyResult,
   RunpanePanelScreenSource,
   RunpanePanelStateSummary,
   RunpanePanelSubmitComposerRequest,
@@ -219,6 +222,7 @@ const RUNPANE_CHANNELS = [
   'runpane:panels:submit-composer',
   'runpane:panels:wait',
   'runpane:panels:resume',
+  'runpane:panels:resume-many',
   'runpane:panels:last-message',
   'runpane:report',
   'runpane:workspace:state',
@@ -235,6 +239,9 @@ const LAST_MESSAGE_TRUNCATION_MARKER = '[earlier text truncated]\n';
 const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
 /** How long a ready/idle wait lets a panel that is not running start before reporting it stopped. */
 const STOPPED_PANEL_WAIT_GRACE_MS = 2_000;
+/** Agents a bulk resume restarts at once; each spawn also takes one of the terminal manager's slots. */
+const DEFAULT_RESUME_CONCURRENCY = 3;
+const MAX_RESUME_CONCURRENCY = 10;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
 const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
 const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
@@ -1202,40 +1209,68 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:resume', async (request: PaneCommandValue): Promise<RunpanePanelResumeResult> => {
     return withRunpaneAction(services, 'panels:resume', {}, async () => {
       const normalized = parsePanelResumeRequest(request);
-      const panel = resolveTerminalPanel(normalized.panelId);
-      const pane = sessionManager.getSession(panel.sessionId);
-      // Archiving already cleaned up the Pane; nothing would ever stop a process started in it.
-      if (pane?.archived) {
-        throw new Error(`Pane ${pane.id} is archived; its panels cannot be resumed`);
-      }
-      const waitIfAsked = async (target: ToolPanel) => normalized.waitReady
-        ? toPaneReadiness(await waitForPanel(target, {
-          panelId: target.id,
-          condition: 'ready',
-          timeoutMs: normalized.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
-          intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
-        }))
-        : undefined;
-      if (terminalPanelManager.isTerminalInitialized(panel.id)) {
-        // It may have just been started elsewhere (the app shows the Pane), so still answer --wait-ready.
-        return panelResumeResult(panel, 'already-running', 'The panel is already running; nothing was restarted.', await waitIfAsked(panel));
-      }
-
-      // The same restart the app runs when it shows a stopped panel: the saved
-      // launch command, resolved to the agent's resume command, in this panel.
-      const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
-      const cwd = pane?.worktreePath
-        ?? optionalString(customState.cwd)
-        ?? process.cwd();
-      await terminalPanelManager.initializeTerminal(panel, cwd, sessionWslContext(services, panel.sessionId));
-      const resumed = panelManager.getPanel(panel.id) ?? panel;
-      return panelResumeResult(resumed, 'resumed', resumeMessage(resumed), await waitIfAsked(resumed));
+      return resumeTerminalPanel(services, resolveTerminalPanel(normalized.panelId), normalized);
     }, result => ({
       paneId: result.paneId,
       panelId: result.panelId,
       ok: result.ok,
       resultCount: result.action === 'resumed' ? 1 : 0,
     }));
+  });
+
+  commandRegistry.register('runpane:panels:resume-many', async (request: PaneCommandValue): Promise<RunpanePanelResumeManyResult> => {
+    return withRunpaneAction(services, 'panels:resume-many', {}, async () => {
+      const normalized = parsePanelResumeManyRequest(request);
+      let scope: RunpanePanelResumeManyResult['scope'] = { kind: 'all-stopped' };
+      let candidates = workspaceStateReader.listManagedCliPanels();
+      if (normalized.sessionId !== undefined) {
+        const record = await requireOrchestrationSessionManager(services).get({ sessionId: normalized.sessionId });
+        const membership = services.orchestrationSessionManager?.workspaceMembership(record.id);
+        scope = { kind: 'session', sessionId: record.id, sessionName: record.name };
+        candidates = candidates.filter((candidate) => {
+          const limitedTo = membership?.panes.get(candidate.paneId);
+          return limitedTo !== undefined
+            && (limitedTo.length === 0 || limitedTo.includes(candidate.panelId))
+            && !membership?.ownPaneIds.has(candidate.paneId)
+            && !membership?.ownPanelIds.has(candidate.panelId);
+        });
+      }
+
+      const stopped = candidates.filter(candidate => !candidate.running);
+      const items = await mapWithConcurrency(stopped, normalized.concurrency ?? DEFAULT_RESUME_CONCURRENCY, async (candidate): Promise<RunpanePanelResumeManyItem> => {
+        const base = {
+          panelId: candidate.panelId,
+          paneId: candidate.paneId,
+          paneName: candidate.paneName,
+          panelTitle: candidate.panelTitle,
+          agentType: candidate.agentType,
+        };
+        try {
+          const result = await resumeTerminalPanel(services, resolveTerminalPanel(candidate.panelId), normalized);
+          return {
+            ...base,
+            ok: result.ok,
+            action: result.action,
+            message: result.message,
+            agentSessionId: result.agentSessionId,
+            readiness: result.readiness,
+          };
+        } catch (error) {
+          return { ...base, ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      });
+
+      const failed = items.filter(item => item.error !== undefined).length;
+      return {
+        ok: items.every(item => item.ok),
+        scope,
+        resumed: items.filter(item => item.action === 'resumed').length,
+        alreadyRunning: candidates.length - stopped.length + items.filter(item => item.action === 'already-running').length,
+        failed,
+        items,
+        nextCommand: scope.kind === 'session' ? `runpane sessions overview --session ${scope.sessionId} --json` : undefined,
+      };
+    }, result => ({ ok: result.ok, resultCount: result.resumed }));
   });
 
   commandRegistry.register('runpane:panels:screen', async (request: PaneCommandValue): Promise<RunpanePanelScreenResult> => {
@@ -2341,6 +2376,61 @@ function resolvePanelCreateActivation(
     return false;
   }
   return !tool.agent;
+}
+
+/**
+ * Restart a stopped terminal panel in place: the same restart the app runs when it shows the
+ * panel, so the saved launch command resolves to the agent's resume command. A running panel is
+ * left alone.
+ */
+async function resumeTerminalPanel(
+  services: AppServices,
+  panel: ToolPanel,
+  options: Pick<RunpanePanelResumeRequest, 'waitReady' | 'readyTimeoutMs'>,
+): Promise<RunpanePanelResumeResult> {
+  const pane = services.sessionManager.getSession(panel.sessionId);
+  // Archiving already cleaned up the Pane; nothing would ever stop a process started in it.
+  if (pane?.archived) {
+    throw new Error(`Pane ${pane.id} is archived; its panels cannot be resumed`);
+  }
+  const waitIfAsked = async (target: ToolPanel) => options.waitReady
+    ? toPaneReadiness(await waitForPanel(target, {
+      panelId: target.id,
+      condition: 'ready',
+      timeoutMs: options.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
+      intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
+    }))
+    : undefined;
+  if (terminalPanelManager.isTerminalInitialized(panel.id)) {
+    // It may have just been started elsewhere (the app shows the Pane), so still answer --wait-ready.
+    return panelResumeResult(panel, 'already-running', 'The panel is already running; nothing was restarted.', await waitIfAsked(panel));
+  }
+
+  const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
+  const cwd = pane?.worktreePath
+    ?? optionalString(customState.cwd)
+    ?? process.cwd();
+  await terminalPanelManager.initializeTerminal(panel, cwd, sessionWslContext(services, panel.sessionId));
+  const resumed = panelManager.getPanel(panel.id) ?? panel;
+  return panelResumeResult(resumed, 'resumed', resumeMessage(resumed), await waitIfAsked(resumed));
+}
+
+/** Run `worker` over `items`, at most `limit` at a time, keeping the input order in the results. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const lanes = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await worker(items[index]);
+    }
+  });
+  await Promise.all(lanes);
+  return results;
 }
 
 function panelResumeResult(
@@ -3924,6 +4014,25 @@ function parsePanelResumeRequest(value: PaneCommandValue): RunpanePanelResumeReq
     panelId,
     waitReady: optionalBoolean(value.waitReady),
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
+  };
+}
+
+function parsePanelResumeManyRequest(value: PaneCommandValue): RunpanePanelResumeManyRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel resume request must be an object');
+  }
+  const sessionId = optionalString(value.sessionId)?.trim() || undefined;
+  const allStopped = optionalBoolean(value.allStopped) === true;
+  if ((sessionId !== undefined) === allStopped) {
+    throw new Error('Panel resume request must include exactly one of sessionId or allStopped');
+  }
+  const concurrency = parsePositiveInteger(value.concurrency, 'concurrency');
+  return {
+    sessionId,
+    allStopped: allStopped || undefined,
+    waitReady: optionalBoolean(value.waitReady),
+    readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
+    concurrency: concurrency === undefined ? undefined : Math.min(concurrency, MAX_RESUME_CONCURRENCY),
   };
 }
 

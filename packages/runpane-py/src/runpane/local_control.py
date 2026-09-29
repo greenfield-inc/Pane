@@ -1014,9 +1014,12 @@ def run_panels_wait(parsed: Any) -> int:
 
 
 def run_panels_resume(parsed: Any) -> int:
-    if not parsed.panel_id:
-        raise ValueError("runpane panels resume requires --panel.")
+    scopes = [value for value in (parsed.panel_id, parsed.session_id, parsed.all_stopped) if value]
+    if len(scopes) != 1:
+        raise ValueError("runpane panels resume requires exactly one of --panel, --session, or --all-stopped.")
     confirm_panel_resume(parsed)
+    if not parsed.panel_id:
+        return run_panels_resume_many(parsed)
 
     result = invoke_daemon("runpane:panels:resume", [{
         "panelId": parsed.panel_id,
@@ -1036,6 +1039,41 @@ def run_panels_resume(parsed: Any) -> int:
             if readiness.get("blocked"):
                 print(f"Blocked: {readiness['blocked'].get('message')}")
         print(f"Next: {result.get('nextCommand')}")
+    return 0 if result.get("ok") else 1
+
+
+def run_panels_resume_many(parsed: Any) -> int:
+    # The number of panels in scope is unknown here, and each waits up to --ready-timeout-ms.
+    timeout_ms = 15 * 60_000 if parsed.wait_ready else 2 * 60_000
+    result = invoke_daemon("runpane:panels:resume-many", [{
+        **optional_value("sessionId", parsed.session_id),
+        **optional_value("allStopped", True if parsed.all_stopped else None),
+        **optional_value("waitReady", True if parsed.wait_ready else None),
+        **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
+        **optional_value("concurrency", parsed.concurrency),
+    }], pane_dir=parsed.pane_dir, timeout_ms=timeout_ms)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        scope = result.get("scope") or {}
+        label = f"Session {scope.get('sessionName')}" if scope.get("kind") == "session" else "every Pane"
+        resumed = result.get("resumed", 0)
+        print(
+            f"Resumed {resumed} stopped agent panel{'' if resumed == 1 else 's'} in {label}; "
+            f"{result.get('alreadyRunning', 0)} already running, {result.get('failed', 0)} failed."
+        )
+        for item in result.get("items", []):
+            readiness = item.get("readiness") or {}
+            if item.get("error"):
+                status = f"failed: {item.get('error')}"
+            elif readiness.get("blocked"):
+                status = f"blocked: {readiness['blocked'].get('message')}"
+            elif readiness and not readiness.get("ok"):
+                status = "not ready"
+            else:
+                status = item.get("action") or "resumed"
+            print(f"{'OK' if item.get('ok') else 'FAIL'} {item.get('paneName')} panel {item.get('panelId')}: {status}")
     return 0 if result.get("ok") else 1
 
 
@@ -1373,7 +1411,13 @@ def confirm_panel_resume(parsed: Any) -> None:
     if not is_interactive_shell():
         raise ValueError("runpane panels resume restarts a Pane terminal. Rerun with --yes in non-interactive shells.")
 
-    answer = input(f"Resume panel {parsed.panel_id}? [y/N] ").strip().lower()
+    if parsed.panel_id:
+        target = f"panel {parsed.panel_id}"
+    elif parsed.session_id:
+        target = f"every stopped agent panel in Session {parsed.session_id}"
+    else:
+        target = "every stopped agent panel"
+    answer = input(f"Resume {target}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

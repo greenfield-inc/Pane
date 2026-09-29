@@ -388,7 +388,12 @@ After a Pane restart, an agent panel whose process did not come back is
 reported once as `panel.stopped` (`STOPPED <pane-name> pane <pane-id> panel
 <panel-id>`, `running: false`), never as `agent.ready`. Restart it in place,
 with the same panel ID and its conversation, using `runpane panels resume
---panel <panel-id> --wait-ready --yes --json`.
+--panel <panel-id> --wait-ready --yes --json`, or every stopped agent panel of
+the Session at once with `runpane panels resume --session <session-id>
+--wait-ready --yes --json`. The bulk form restarts `--concurrency` panels at a
+time (default 3), leaves running panels alone, and returns one result per panel
+with its readiness, blocker, or error; `--all-stopped` does the same for every
+Pane.
 
 Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
 pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The

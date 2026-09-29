@@ -822,6 +822,41 @@ export interface RunpanePanelResumeRequest {
 
 export type RunpanePanelResumeAction = 'resumed' | 'already-running';
 
+/** Resume every stopped agent panel in one scope: a Session's associated Panes, or every Pane. */
+export interface RunpanePanelResumeManyRequest {
+  sessionId?: string;
+  allStopped?: boolean;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+  concurrency?: number;
+}
+
+export interface RunpanePanelResumeManyItem {
+  ok: boolean;
+  panelId: string;
+  paneId: string;
+  paneName: string;
+  panelTitle?: string;
+  agentType?: string;
+  action?: RunpanePanelResumeAction;
+  message?: string;
+  agentSessionId?: string;
+  readiness?: RunpanePaneReadiness;
+  /** Why this panel could not be resumed; the others still were. */
+  error?: string;
+}
+
+export interface RunpanePanelResumeManyResult {
+  ok: boolean;
+  scope: { kind: 'session'; sessionId: string; sessionName: string } | { kind: 'all-stopped' };
+  resumed: number;
+  /** Agent panels in scope that were already running and were left alone. */
+  alreadyRunning: number;
+  failed: number;
+  items: RunpanePanelResumeManyItem[];
+  nextCommand?: string;
+}
+
 export interface RunpanePanelResumeResult {
   ok: boolean;
   panelId: string;

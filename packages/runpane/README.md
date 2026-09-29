@@ -180,7 +180,9 @@ After a Pane restart, an agent panel whose process is not running reads as
 `running: false` in `panels list`, `panels screen`, and `panels wait`, and
 never as `agent.ready`. Add `panel.stopped` to `--kinds` to get a `STOPPED`
 line for it; other watchers see `agent.unknown`. `runpane panels resume --panel <panel-id> --wait-ready --yes
---json` restarts it in the same panel and resumes the agent's conversation.
+--json` restarts it in the same panel and resumes the agent's conversation;
+`--session <id|name>` or `--all-stopped` in place of `--panel` resumes every
+stopped agent panel in that scope and reports each one.
 
 - `--kinds` drops `agent.busy`; `BUSY` carries no action.
 - `--settle <ms>` emits `READY` only after the panel stays idle that long. A

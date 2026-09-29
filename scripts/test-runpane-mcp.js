@@ -567,6 +567,43 @@ test('panels_resume restarts a stopped panel through the daemon and keeps the --
   }
 });
 
+test('panels_resume resumes every stopped agent panel of a Session or of every Pane', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const bulk = (args) => ({
+    ok: !args[0].sessionId,
+    scope: args[0].sessionId ? { kind: 'session', sessionId: '__orchestration_session_s1__', sessionName: 'Release' } : { kind: 'all-stopped' },
+    resumed: 2,
+    alreadyRunning: 1,
+    failed: 0,
+    items: [
+      { ok: true, panelId: 'panel-1', paneId: 'pane-1', paneName: 'one', action: 'resumed', readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 900, state: { initialized: true, running: true } } },
+      { ok: false, panelId: 'panel-2', paneId: 'pane-2', paneName: 'two', action: 'resumed', readiness: { ok: false, condition: 'ready', matched: false, timedOut: false, elapsedMs: 400, state: { initialized: true, running: true }, blocked: { kind: 'agent-prompt', message: 'The terminal is waiting at an interactive prompt.' } } },
+    ],
+  });
+  try {
+    await withStubDaemon(paneDir, { 'runpane:panels:resume-many': bulk }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tool = (await client.listTools()).tools.find((item) => item.name === 'panels_resume');
+        assert.ok(!tool.inputSchema.required?.includes('panel'), 'panel is optional once --session and --all-stopped exist');
+        // A panel stuck at a prompt makes the bulk result not ok: an error whose text is the full JSON.
+        const bySession = await client.callTool({ name: 'panels_resume', arguments: { session: 'Release', waitReady: true, concurrency: '2', yes: true, paneDir } });
+        assert.equal(bySession.isError, true);
+        assert.equal(JSON.parse(bySession.content[0].text).items[1].readiness.blocked.kind, 'agent-prompt');
+        const all = await client.callTool({ name: 'panels_resume', arguments: { allStopped: true, yes: true, paneDir } });
+        assert.equal(all.isError, undefined, all.content[0].text);
+        assertMatchesAdvertisedSchema(tool, all.structuredContent);
+        assert.equal(all.structuredContent.scope.kind, 'all-stopped');
+      }, { args: ['--toolsets', 'panels'] });
+      assert.deepEqual(requests.map((request) => request.args[0]), [
+        { sessionId: 'Release', waitReady: true, concurrency: 2 },
+        { allStopped: true },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('destructive pane actions return a review link, and folder actions pass the numeric repo id', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   try {

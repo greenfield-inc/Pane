@@ -186,6 +186,7 @@ class ParsedArgs:
     min_interval_ms: Optional[int] = None
     idle_backoff: bool = False
     all_managed: bool = False
+    all_stopped: bool = False
     include_shells: bool = False
     no_held_input: bool = False
     self_test: bool = False
@@ -649,6 +650,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--all-managed":
         parsed.all_managed = True
+        return
+    if flag == "--all-stopped":
+        parsed.all_stopped = True
         return
     if flag == "--include-shells":
         parsed.include_shells = True
