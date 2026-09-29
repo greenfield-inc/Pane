@@ -575,6 +575,8 @@ test('panels_resume resumes every stopped agent panel of a Session or of every P
     resumed: 2,
     alreadyRunning: 1,
     failed: 0,
+    notReady: args[0].sessionId ? 1 : 0,
+    concurrency: args[0].concurrency ?? 3,
     items: [
       { ok: true, panelId: 'panel-1', paneId: 'pane-1', paneName: 'one', action: 'resumed', readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 900, state: { initialized: true, running: true } } },
       { ok: false, panelId: 'panel-2', paneId: 'pane-2', paneName: 'two', action: 'resumed', readiness: { ok: false, condition: 'ready', matched: false, timedOut: false, elapsedMs: 400, state: { initialized: true, running: true }, blocked: { kind: 'agent-prompt', message: 'The terminal is waiting at an interactive prompt.' } } },

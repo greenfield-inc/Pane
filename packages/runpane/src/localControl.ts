@@ -645,6 +645,8 @@ interface PanelResumeManyResult {
   resumed: number;
   alreadyRunning: number;
   failed: number;
+  notReady: number;
+  concurrency: number;
   items: Array<{
     ok: boolean;
     panelId: string;
@@ -1558,6 +1560,8 @@ const panelResumeManyResultSchema: BoundarySchema<PanelResumeManyResult> = bound
   resumed: boundary.number,
   alreadyRunning: boundary.number,
   failed: boundary.number,
+  notReady: boundary.number,
+  concurrency: boundary.number,
   items: boundary.array(boundary.object({
     ok: boundary.boolean,
     panelId: boundary.string,
@@ -2899,6 +2903,9 @@ export async function runPanelsResume(parsed: ParsedArgs): Promise<number> {
   if (scopes !== 1) {
     throw new Error('runpane panels resume requires exactly one of --panel, --session, or --all-stopped.');
   }
+  if (parsed.panelId && parsed.concurrency !== undefined) {
+    throw new Error('runpane panels resume --concurrency applies only to --session or --all-stopped.');
+  }
   await confirmPanelResume(parsed);
   if (!parsed.panelId) {
     return runPanelsResumeMany(parsed);
@@ -3679,8 +3686,8 @@ function printInitialInputDelivery(initialInput: InitialInputDeliveryResult | un
   }
 }
 
-const RESUME_MANY_TIMEOUT_MS = 2 * 60_000;
-const RESUME_MANY_WAIT_TIMEOUT_MS = 15 * 60_000;
+/** Time the daemon gets to restart every panel in scope, before any readiness wait. */
+const RESUME_MANY_RESTART_BUDGET_MS = 5 * 60_000;
 
 async function runPanelsResumeMany(parsed: ParsedArgs): Promise<number> {
   const result = await invokeDaemon('runpane:panels:resume-many', [{
@@ -3691,15 +3698,16 @@ async function runPanelsResumeMany(parsed: ParsedArgs): Promise<number> {
     concurrency: parsed.concurrency,
   }], panelResumeManyResultSchema, {
     paneDir: parsed.paneDir,
-    // The number of panels in scope is unknown here, and each waits up to --ready-timeout-ms.
-    timeoutMs: parsed.waitReady ? RESUME_MANY_WAIT_TIMEOUT_MS : RESUME_MANY_TIMEOUT_MS,
+    // The resumed panels wait together, so the wait adds one --ready-timeout-ms however many there are.
+    timeoutMs: RESUME_MANY_RESTART_BUDGET_MS + (parsed.waitReady ? parsed.readyTimeoutMs ?? 30_000 : 0),
   });
 
   if (parsed.json) {
     printJson(result);
   } else {
     const scope = result.scope.kind === 'session' ? `Session ${result.scope.sessionName}` : 'every Pane';
-    console.log(`Resumed ${result.resumed} stopped agent panel${result.resumed === 1 ? '' : 's'} in ${scope}; ${result.alreadyRunning} already running, ${result.failed} failed.`);
+    const notReady = result.notReady > 0 ? `, ${result.notReady} not ready` : '';
+    console.log(`Resumed ${result.resumed} stopped agent panel${result.resumed === 1 ? '' : 's'} in ${scope}, ${result.concurrency} at a time; ${result.alreadyRunning} already running, ${result.failed} failed${notReady}.`);
     for (const item of result.items) {
       const status = item.error
         ? `failed: ${item.error}`

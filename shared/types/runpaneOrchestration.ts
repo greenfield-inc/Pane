@@ -852,7 +852,12 @@ export interface RunpanePanelResumeManyResult {
   resumed: number;
   /** Agent panels in scope that were already running and were left alone. */
   alreadyRunning: number;
+  /** Panels that could not be restarted (their item has `error`). */
   failed: number;
+  /** With waitReady: resumed panels that were blocked or not ready in time. */
+  notReady: number;
+  /** Panels restarted at once. */
+  concurrency: number;
   items: RunpanePanelResumeManyItem[];
   nextCommand?: string;
 }

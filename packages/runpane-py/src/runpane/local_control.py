@@ -1017,6 +1017,8 @@ def run_panels_resume(parsed: Any) -> int:
     scopes = [value for value in (parsed.panel_id, parsed.session_id, parsed.all_stopped) if value]
     if len(scopes) != 1:
         raise ValueError("runpane panels resume requires exactly one of --panel, --session, or --all-stopped.")
+    if parsed.panel_id and parsed.concurrency is not None:
+        raise ValueError("runpane panels resume --concurrency applies only to --session or --all-stopped.")
     confirm_panel_resume(parsed)
     if not parsed.panel_id:
         return run_panels_resume_many(parsed)
@@ -1043,8 +1045,8 @@ def run_panels_resume(parsed: Any) -> int:
 
 
 def run_panels_resume_many(parsed: Any) -> int:
-    # The number of panels in scope is unknown here, and each waits up to --ready-timeout-ms.
-    timeout_ms = 15 * 60_000 if parsed.wait_ready else 2 * 60_000
+    # The resumed panels wait together, so the wait adds one --ready-timeout-ms however many there are.
+    timeout_ms = 5 * 60_000 + ((parsed.ready_timeout_ms or 30_000) if parsed.wait_ready else 0)
     result = invoke_daemon("runpane:panels:resume-many", [{
         **optional_value("sessionId", parsed.session_id),
         **optional_value("allStopped", True if parsed.all_stopped else None),
@@ -1059,9 +1061,11 @@ def run_panels_resume_many(parsed: Any) -> int:
         scope = result.get("scope") or {}
         label = f"Session {scope.get('sessionName')}" if scope.get("kind") == "session" else "every Pane"
         resumed = result.get("resumed", 0)
+        not_ready = f", {result.get('notReady')} not ready" if result.get("notReady") else ""
         print(
-            f"Resumed {resumed} stopped agent panel{'' if resumed == 1 else 's'} in {label}; "
-            f"{result.get('alreadyRunning', 0)} already running, {result.get('failed', 0)} failed."
+            f"Resumed {resumed} stopped agent panel{'' if resumed == 1 else 's'} in {label}, "
+            f"{result.get('concurrency')} at a time; "
+            f"{result.get('alreadyRunning', 0)} already running, {result.get('failed', 0)} failed{not_ready}."
         )
         for item in result.get("items", []):
             readiness = item.get("readiness") or {}

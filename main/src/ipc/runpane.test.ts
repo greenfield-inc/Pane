@@ -3137,15 +3137,15 @@ describe('runpane IPC handlers', () => {
     const panels = [stoppedClaude, runningCodex, plainShell, otherClaude];
     let running: Set<string>;
 
-    function bulkServices(): AppServices {
+    function bulkServices(options: { limitedTo?: string[]; ownPanelIds?: string[]; archived?: boolean } = {}): AppServices {
       const services = createServices({
         // SAFETY: The fake implements the two Session manager members a Session-scoped resume uses.
         orchestrationSessionManager: {
-          get: vi.fn(async () => ({ id: '__orchestration_session_s1__', name: 'Release' })),
+          get: vi.fn(async () => ({ id: '__orchestration_session_s1__', name: 'Release', archived: options.archived ?? false })),
           workspaceMembership: vi.fn(() => ({
-            panes: new Map([[session.id, []]]),
+            panes: new Map([[session.id, options.limitedTo ?? []]]),
             ownPaneIds: new Set<string>(),
-            ownPanelIds: new Set<string>(),
+            ownPanelIds: new Set<string>(options.ownPanelIds ?? []),
           })),
         } as never,
       });
@@ -3200,6 +3200,44 @@ describe('runpane IPC handlers', () => {
       });
     });
 
+    it('resumes only the panels a panel-limited association names, never the Session\'s own panels', async () => {
+      const secondClaude = agentPanel('panel-claude-2', session.id);
+      const ownPanel = agentPanel('panel-own', session.id);
+      panels.push(secondClaude, ownPanel);
+      try {
+        const registry = createRegistry(bulkServices({ limitedTo: ['panel-claude', 'panel-codex', 'panel-own'], ownPanelIds: ['panel-own'] }));
+
+        const result = await registry.invoke('runpane:panels:resume-many', [{ sessionId: 'Release' }]);
+
+        expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls.map(([panel]) => panel.id)).toEqual(['panel-claude']);
+        expect(result).toMatchObject({ resumed: 1, alreadyRunning: 1 });
+      } finally {
+        panels.splice(panels.indexOf(secondClaude), 2);
+      }
+    });
+
+    it('refuses an archived Session', async () => {
+      const registry = createRegistry(bulkServices({ archived: true }));
+
+      await expect(registry.invoke('runpane:panels:resume-many', [{ sessionId: 'Release' }])).rejects.toThrow(/archived/);
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+    });
+
+    it('waits on the resumed panels together, so the wait takes one ready timeout rather than one per panel', async () => {
+      const many = Array.from({ length: 4 }, (_, index) => agentPanel(`panel-wait-${index}`, session.id));
+      vi.mocked(panelManager.getPanelsForSession).mockImplementation((id: string) => id === session.id ? many : []);
+      vi.mocked(panelManager.getPanel).mockImplementation((id: string) => many.find(panel => panel.id === id));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation((id: string) =>
+        running.has(id) ? terminalSnapshot('starting...', 'active', 'claude') : null);
+      const registry = createRegistry(bulkServices());
+
+      const startedAt = Date.now();
+      const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, waitReady: true, readyTimeoutMs: 400, concurrency: 1 }]);
+
+      expect(Date.now() - startedAt).toBeLessThan(1_200);
+      expect(result).toMatchObject({ ok: false, resumed: 4, notReady: 4, failed: 0 });
+    });
+
     it('waits on each resumed panel and reports a blocker on the panel it belongs to', async () => {
       vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation((id: string) => {
         if (!running.has(id)) return null;
@@ -3211,7 +3249,7 @@ describe('runpane IPC handlers', () => {
 
       const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, waitReady: true, readyTimeoutMs: 50 }]);
 
-      expect(result.ok).toBe(false);
+      expect(result).toMatchObject({ ok: false, resumed: 2, notReady: 1, failed: 0 });
       expect(result.items).toEqual(expect.arrayContaining([
         expect.objectContaining({ panelId: 'panel-claude', ok: true, readiness: expect.objectContaining({ ok: true }) }),
         expect.objectContaining({ panelId: 'panel-other', ok: false, readiness: expect.objectContaining({ blocked: expect.objectContaining({ kind: 'codex-update' }) }) }),
@@ -3251,8 +3289,12 @@ describe('runpane IPC handlers', () => {
 
       const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, concurrency: 2 }]);
 
-      expect(result).toMatchObject({ resumed: 5 });
+      expect(result).toMatchObject({ resumed: 5, concurrency: 2 });
       expect(maxInFlight).toBe(2);
+
+      running.clear();
+      const clamped = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, concurrency: 50 }]);
+      expect(clamped).toMatchObject({ concurrency: 10 });
     });
 
     it('requires exactly one scope', async () => {

@@ -2980,8 +2980,8 @@ export const RUNPANE_CONTRACT = {
         "",
         "With --session or --all-stopped it resumes every stopped agent panel in that scope (a",
         "Session's associated Panes, or every Pane), --concurrency at a time, skips running ones,",
-        "and returns one result per panel; with --wait-ready each result carries its own readiness",
-        "and blocker. One panel failing does not stop the others.",
+        "and returns one result per panel. With --wait-ready the resumed panels then wait together,",
+        "and each result carries its own readiness and blocker. One panel failing does not stop the others.",
         "",
         "Options:",
         "  --panel <panel-id>             Terminal panel id",
@@ -2989,7 +2989,7 @@ export const RUNPANE_CONTRACT = {
         "  --all-stopped                  Resume the stopped agent panels of every Pane",
         "  --concurrency <count>          Panels restarted at once for --session or --all-stopped; defaults to 3, at most 10",
         "  --wait-ready                   Wait until the resumed agent is ready; startup prompts come back as readiness.blocked",
-        "  --ready-timeout-ms <ms>        Readiness wait timeout; defaults to 30000",
+        "  --ready-timeout-ms <ms>        Readiness wait timeout; resumed panels wait together; defaults to 30000",
         "  --yes                          Skip the confirmation prompt",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
@@ -4164,8 +4164,8 @@ export const RUNPANE_CONTRACT = {
         "",
         "With --session or --all-stopped it resumes every stopped agent panel in that scope (a",
         "Session's associated Panes, or every Pane), --concurrency at a time, skips running ones,",
-        "and returns one result per panel; with --wait-ready each result carries its own readiness",
-        "and blocker. One panel failing does not stop the others.",
+        "and returns one result per panel. With --wait-ready the resumed panels then wait together,",
+        "and each result carries its own readiness and blocker. One panel failing does not stop the others.",
         "",
         "Options:",
         "  --panel <panel-id>             Terminal panel id",
@@ -4173,7 +4173,7 @@ export const RUNPANE_CONTRACT = {
         "  --all-stopped                  Resume the stopped agent panels of every Pane",
         "  --concurrency <count>          Panels restarted at once for --session or --all-stopped; defaults to 3, at most 10",
         "  --wait-ready                   Wait until the resumed agent is ready; startup prompts come back as readiness.blocked",
-        "  --ready-timeout-ms <ms>        Readiness wait timeout; defaults to 30000",
+        "  --ready-timeout-ms <ms>        Readiness wait timeout; resumed panels wait together; defaults to 30000",
         "  --yes                          Skip the confirmation prompt",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
@@ -4451,7 +4451,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.",
-      "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`). `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope, `--concurrency` at a time (default 3), and returns `{ resumed, alreadyRunning, failed, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
+      "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`). `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
@@ -8750,6 +8750,8 @@ export const RUNPANE_CONTRACT = {
         "resumed",
         "alreadyRunning",
         "failed",
+        "notReady",
+        "concurrency",
         "items"
       ],
       "properties": {
@@ -8801,7 +8803,16 @@ export const RUNPANE_CONTRACT = {
           "description": "Agent panels in scope that were already running and were left alone."
         },
         "failed": {
-          "type": "number"
+          "type": "number",
+          "description": "Panels that could not be restarted; their item carries error."
+        },
+        "notReady": {
+          "type": "number",
+          "description": "With --wait-ready: resumed panels that were blocked or not ready within --ready-timeout-ms."
+        },
+        "concurrency": {
+          "type": "number",
+          "description": "Panels restarted at once."
         },
         "items": {
           "type": "array",
@@ -12039,7 +12050,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--concurrency",
             "value": "<count>",
             "required": false,
-            "description": "Panels restarted at once for --session or --all-stopped; defaults to 3, at most 10."
+            "description": "Panels restarted at once for --session or --all-stopped; defaults to 3, at most 10. With --wait-ready the resumed panels then wait together, so the call takes the restarts plus one --ready-timeout-ms."
           },
           {
             "name": "--wait-ready",

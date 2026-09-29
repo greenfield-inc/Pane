@@ -695,9 +695,11 @@ unattended, then user present):
   after a Pane restart. Its panel and conversation are intact. If its work
   is not finished, restart it in place with \`runpane panels resume --panel
   <panel-id> --wait-ready --yes --json\` (same panel ID, no focus change).
-  After a restart, \`runpane panels resume --session
-  "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts every
-  stopped worker at once and reports each one's readiness or blocker.
+  When every stopped worker should come back (a restart stranded workers
+  that were mid-task), \`runpane panels resume --session
+  "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts them
+  all and reports each one's readiness or blocker. It relaunches finished
+  workers too, so resume single panels when only some should continue.
 - BLOCKED (\`agent.blocked\`): the agent is waiting on a human. It arrives
   within 30 seconds (15 seconds) and skips the batch.
 - IDLE (\`agent.idle\`): nothing is dispatched. It repeats after 10 minutes,

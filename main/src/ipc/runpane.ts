@@ -1225,6 +1225,9 @@ export function registerRunpaneHandlers(
       let candidates = workspaceStateReader.listManagedCliPanels();
       if (normalized.sessionId !== undefined) {
         const record = await requireOrchestrationSessionManager(services).get({ sessionId: normalized.sessionId });
+        if (record.archived) {
+          throw new Error(`Session ${record.name} is archived; restore it before resuming its panels`);
+        }
         const membership = services.orchestrationSessionManager?.workspaceMembership(record.id);
         scope = { kind: 'session', sessionId: record.id, sessionName: record.name };
         candidates = candidates.filter((candidate) => {
@@ -1237,7 +1240,10 @@ export function registerRunpaneHandlers(
       }
 
       const stopped = candidates.filter(candidate => !candidate.running);
-      const items = await mapWithConcurrency(stopped, normalized.concurrency ?? DEFAULT_RESUME_CONCURRENCY, async (candidate): Promise<RunpanePanelResumeManyItem> => {
+      const concurrency = normalized.concurrency ?? DEFAULT_RESUME_CONCURRENCY;
+      // Restart --concurrency panels at a time, then wait on all of them together, so the whole
+      // call takes the restarts plus one ready timeout however many panels are in scope.
+      const restarted = await mapWithConcurrency(stopped, concurrency, async (candidate): Promise<RunpanePanelResumeManyItem> => {
         const base = {
           panelId: candidate.panelId,
           paneId: candidate.paneId,
@@ -1246,27 +1252,35 @@ export function registerRunpaneHandlers(
           agentType: candidate.agentType,
         };
         try {
-          const result = await resumeTerminalPanel(services, resolveTerminalPanel(candidate.panelId), normalized);
-          return {
-            ...base,
-            ok: result.ok,
-            action: result.action,
-            message: result.message,
-            agentSessionId: result.agentSessionId,
-            readiness: result.readiness,
-          };
+          const result = await resumeTerminalPanel(services, resolveTerminalPanel(candidate.panelId), { waitReady: false });
+          return { ...base, ok: result.ok, action: result.action, message: result.message, agentSessionId: result.agentSessionId };
         } catch (error) {
           return { ...base, ok: false, error: error instanceof Error ? error.message : String(error) };
         }
       });
+      const items = normalized.waitReady
+        ? await Promise.all(restarted.map(async (item): Promise<RunpanePanelResumeManyItem> => {
+          if (item.error !== undefined) return item;
+          const panel = panelManager.getPanel(item.panelId);
+          if (!panel) return { ...item, ok: false, error: `Panel ${item.panelId} disappeared while resuming` };
+          const readiness = toPaneReadiness(await waitForPanel(panel, {
+            panelId: panel.id,
+            condition: 'ready',
+            timeoutMs: normalized.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
+            intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
+          }));
+          return { ...item, ok: readiness.ok, readiness };
+        }))
+        : restarted;
 
-      const failed = items.filter(item => item.error !== undefined).length;
       return {
         ok: items.every(item => item.ok),
         scope,
         resumed: items.filter(item => item.action === 'resumed').length,
         alreadyRunning: candidates.length - stopped.length + items.filter(item => item.action === 'already-running').length,
-        failed,
+        failed: items.filter(item => item.error !== undefined).length,
+        notReady: items.filter(item => item.readiness !== undefined && !item.readiness.ok).length,
+        concurrency,
         items,
         nextCommand: scope.kind === 'session' ? `runpane sessions overview --session ${scope.sessionId} --json` : undefined,
       };
