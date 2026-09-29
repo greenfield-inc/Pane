@@ -22,7 +22,7 @@ import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
 import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
-import { projectWorkspaceEntry } from '../services/workspaceJournal';
+import { presentStoppedPanel, projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent } from '../services/agentStatus/manifests';
 import { detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
@@ -117,6 +117,8 @@ import type {
   RunpanePanelOutputResult,
   RunpanePanelScreenRequest,
   RunpanePanelScreenResult,
+  RunpanePanelResumeRequest,
+  RunpanePanelResumeResult,
   RunpanePanelScreenSource,
   RunpanePanelStateSummary,
   RunpanePanelSubmitComposerRequest,
@@ -216,6 +218,7 @@ const RUNPANE_CHANNELS = [
   'runpane:panels:submit',
   'runpane:panels:submit-composer',
   'runpane:panels:wait',
+  'runpane:panels:resume',
   'runpane:panels:last-message',
   'runpane:report',
   'runpane:workspace:state',
@@ -230,6 +233,8 @@ const DEFAULT_PANEL_SCREEN_LIMIT = 80;
 const DEFAULT_LAST_MESSAGE_LIMIT = 20_000;
 const LAST_MESSAGE_TRUNCATION_MARKER = '[earlier text truncated]\n';
 const DEFAULT_PANEL_WAIT_TIMEOUT_MS = 30_000;
+/** How long a ready/idle wait lets a panel that is not running start before reporting it stopped. */
+const STOPPED_PANEL_WAIT_GRACE_MS = 2_000;
 const DEFAULT_PANEL_WAIT_INTERVAL_MS = 500;
 const DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS = 3_000;
 const DEFAULT_COMPOSER_VERIFY_INTERVAL_MS = 100;
@@ -1194,6 +1199,39 @@ export function registerRunpaneHandlers(
     }));
   });
 
+  commandRegistry.register('runpane:panels:resume', async (request: PaneCommandValue): Promise<RunpanePanelResumeResult> => {
+    return withRunpaneAction(services, 'panels:resume', {}, async () => {
+      const normalized = parsePanelResumeRequest(request);
+      const panel = resolveTerminalPanel(normalized.panelId);
+      if (terminalPanelManager.isTerminalInitialized(panel.id)) {
+        return panelResumeResult(panel, 'already-running', 'The panel is already running; nothing was restarted.');
+      }
+
+      // The same restart the app runs when it shows a stopped panel: the saved
+      // launch command, resolved to the agent's resume command, in this panel.
+      const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
+      const cwd = sessionManager.getSession(panel.sessionId)?.worktreePath
+        ?? optionalString(customState.cwd)
+        ?? process.cwd();
+      await terminalPanelManager.initializeTerminal(panel, cwd, sessionWslContext(services, panel.sessionId));
+      const resumed = panelManager.getPanel(panel.id) ?? panel;
+      const readiness = normalized.waitReady
+        ? toPaneReadiness(await waitForPanel(resumed, {
+          panelId: resumed.id,
+          condition: 'ready',
+          timeoutMs: normalized.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
+          intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
+        }))
+        : undefined;
+      return panelResumeResult(resumed, 'resumed', resumeMessage(resumed), readiness);
+    }, result => ({
+      paneId: result.paneId,
+      panelId: result.panelId,
+      ok: result.ok,
+      resultCount: result.action === 'resumed' ? 1 : 0,
+    }));
+  });
+
   commandRegistry.register('runpane:panels:screen', async (request: PaneCommandValue): Promise<RunpanePanelScreenResult> => {
     return withRunpaneAction(services, 'panels:screen', {}, async () => {
       const normalized = parsePanelScreenRequest(request);
@@ -1402,7 +1440,8 @@ export function registerRunpaneHandlers(
       const project = normalized.repo
         ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
         : undefined;
-      return workspaceStateReader.read(project?.id);
+      const state = workspaceStateReader.read(project?.id);
+      return { ...state, entries: state.entries.map(entry => presentStoppedPanel(entry, {})) };
     }, result => ({ resultCount: result.entries.length }));
   });
 
@@ -1457,6 +1496,7 @@ export function registerRunpaneHandlers(
         // Baseline entries restate current state after a reset; replay marks them so a consumer never
         // reads a replayed agent.ready as a turn that just ended.
         const baselineEntries = (): RunpaneWorkspaceEntry[] => workspaceStateReader.read(project?.id).entries
+          .map(entry => presentStoppedPanel(entry, filter))
           .filter(workspaceJournal.matcher(filter))
           .map(entry => ({ ...projectWorkspaceEntry(entry, filter), replay: true as const }));
 
@@ -1719,6 +1759,7 @@ function panelToSummary(panel: ToolPanel) {
     title: panel.title,
     active: Boolean(panel.state.isActive),
     initialized: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) : undefined,
+    running: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) : undefined,
     agentType,
     agentDetection,
     launchCommand: optionalString(customState.launchCommand) ?? initialCommand,
@@ -2296,6 +2337,37 @@ function resolvePanelCreateActivation(
   return !tool.agent;
 }
 
+function panelResumeResult(
+  panel: ToolPanel,
+  action: RunpanePanelResumeResult['action'],
+  message: string,
+  readiness?: RunpanePaneReadiness,
+): RunpanePanelResumeResult {
+  const summary = panelToSummary(panel);
+  const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
+  return {
+    ok: readiness?.ok ?? true,
+    panelId: panel.id,
+    paneId: panel.sessionId,
+    action,
+    message,
+    agentType: summary.agentType,
+    agentSessionId: summary.agentType ? optionalString(customState.agentSessionId) : undefined,
+    panel: summary,
+    readiness,
+    nextCommand: readiness?.nextCommand ?? (action === 'resumed' ? panelWaitCommand(panel.id) : panelScreenCommand(panel.id)),
+  };
+}
+
+function resumeMessage(panel: ToolPanel): string {
+  const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
+  if (!optionalString(customState.initialCommand)) return 'Started a new shell in the panel.';
+  const agentSessionId = optionalString(customState.agentSessionId);
+  return agentSessionId
+    ? `Relaunched the panel's agent, resuming conversation ${agentSessionId}.`
+    : "Relaunched the panel's command.";
+}
+
 function toPaneReadiness(result: RunpanePanelWaitResult): RunpanePaneReadiness {
   return {
     ok: result.ok,
@@ -2358,7 +2430,9 @@ async function buildPanelScreenResult(panel: ToolPanel, limit: number): Promise<
     text: bounded.text,
     state,
     composer,
-    nextCommand: bounded.hasMore ? panelOutputCommand(panel.id) : panelWaitCommand(panel.id),
+    nextCommand: !state.running
+      ? panelResumeCommand(panel.id)
+      : bounded.hasMore ? panelOutputCommand(panel.id) : panelWaitCommand(panel.id),
   };
 }
 
@@ -2411,6 +2485,7 @@ function panelStateSummary(
 
   return {
     initialized: hasLiveTerminal,
+    running: hasLiveTerminal,
     isAlternateScreen: snapshot?.isAlternateScreen ?? customState.isAlternateScreen,
     activityStatus: snapshot?.activityStatus,
     isCliReady: snapshot?.isCliReady ?? (hasLiveTerminal ? customState.isCliReady : undefined),
@@ -2477,6 +2552,14 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
     if (blocked && condition !== 'text') {
       return panelWaitResult(panel, condition, false, false, startedAt, lastScreen, blocked);
     }
+    // Give a lazy start a moment, then report a panel that is not running instead of timing out.
+    if (
+      (condition === 'ready' || condition === 'idle') &&
+      !lastScreen.state.running &&
+      Date.now() - startedAt >= STOPPED_PANEL_WAIT_GRACE_MS
+    ) {
+      return panelWaitResult(panel, condition, false, false, startedAt, lastScreen);
+    }
 
     await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
   }
@@ -2519,6 +2602,7 @@ function panelWaitResult(
   screen: RunpanePanelScreenResult,
   blocked?: RunpanePanelBlockedState,
 ): RunpanePanelWaitResult {
+  const stopped = !matched && condition !== 'text' && !screen.state.running;
   return {
     ok: matched && !timedOut && !blocked,
     panelId: panel.id,
@@ -2529,12 +2613,15 @@ function panelWaitResult(
     elapsedMs: Date.now() - startedAt,
     state: screen.state,
     blocked,
+    stopped: stopped ? true : undefined,
     screen: {
       source: screen.source,
       text: screen.text,
       hasMore: screen.hasMore,
     },
-    nextCommand: blocked?.suggestedCommand ?? (matched ? panelScreenCommand(panel.id) : panelWaitCommand(panel.id, condition)),
+    nextCommand: blocked?.suggestedCommand ?? (matched
+      ? panelScreenCommand(panel.id)
+      : stopped ? panelResumeCommand(panel.id) : panelWaitCommand(panel.id, condition)),
   };
 }
 
@@ -3145,6 +3232,10 @@ function panelScreenCommand(panelId: string): string {
   return `runpane panels screen --panel ${panelId} --limit ${DEFAULT_PANEL_SCREEN_LIMIT} --json`;
 }
 
+function panelResumeCommand(panelId: string): string {
+  return `runpane panels resume --panel ${panelId} --wait-ready --yes --json`;
+}
+
 function panelWaitCommand(panelId: string, condition: RunpanePanelWaitCondition = 'ready'): string {
   return `runpane panels wait --panel ${panelId} --for ${condition} --timeout-ms ${DEFAULT_PANEL_WAIT_TIMEOUT_MS} --json`;
 }
@@ -3380,6 +3471,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.created',
   'pane.gone',
   'panel.exited',
+  'panel.stopped',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
@@ -3808,6 +3900,21 @@ function parsePanelScreenRequest(value: PaneCommandValue): RunpanePanelScreenReq
   return {
     panelId,
     limit: parsePositiveInteger(value.limit, 'limit'),
+  };
+}
+
+function parsePanelResumeRequest(value: PaneCommandValue): RunpanePanelResumeRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel resume request must be an object');
+  }
+  const panelId = optionalString(value.panelId)?.trim();
+  if (!panelId) {
+    throw new Error('Panel resume request must include panelId');
+  }
+  return {
+    panelId,
+    waitReady: optionalBoolean(value.waitReady),
+    readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
   };
 }
 
