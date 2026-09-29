@@ -531,6 +531,42 @@ test('panels_input presses named keys, so a model can answer a menu without raw 
   }
 });
 
+test('panels_resume restarts a stopped panel through the daemon and keeps the --yes rule', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const panel = { id: 'panel-8', panelId: 'panel-8', paneId: 'pane-1', type: 'terminal', title: 'Claude Code', active: false, initialized: true, running: true, agentType: 'claude' };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panels:resume': (args) => ({
+        ok: true,
+        panelId: args[0].panelId,
+        paneId: 'pane-1',
+        action: 'resumed',
+        message: "Relaunched the panel's agent, resuming conversation panel-8.",
+        agentType: 'claude',
+        agentSessionId: 'panel-8',
+        panel,
+        nextCommand: 'runpane panels wait --panel panel-8 --for ready --timeout-ms 30000 --json',
+      }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tool = (await client.listTools()).tools.find((item) => item.name === 'panels_resume');
+        assert.ok(tool, 'panels_resume is served in the panels toolset');
+        assert.equal(tool.annotations.destructiveHint, false);
+        assert.equal(tool.annotations.idempotentHint, true);
+        const refused = await client.callTool({ name: 'panels_resume', arguments: { panel: 'panel-8', paneDir } });
+        assert.equal(refused.isError, true);
+        const resumed = await client.callTool({ name: 'panels_resume', arguments: { panel: 'panel-8', waitReady: true, yes: true, paneDir } });
+        assert.equal(resumed.isError, undefined, resumed.content[0].text);
+        assertMatchesAdvertisedSchema(tool, resumed.structuredContent);
+        assert.equal(resumed.structuredContent.action, 'resumed');
+      }, { args: ['--toolsets', 'panels'] });
+      assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-8', waitReady: true }]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('destructive pane actions return a review link, and folder actions pass the numeric repo id', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   try {

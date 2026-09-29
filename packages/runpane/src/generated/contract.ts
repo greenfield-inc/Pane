@@ -655,6 +655,23 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "panels resume",
+      "summary": "Restart a stopped terminal panel in place, resuming its agent's conversation.",
+      "usage": [
+        "runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "idempotent": true,
+      "toolsets": [
+        "panels"
+      ],
+      "jsonSchemas": [
+        "panelResumeResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panels last-message",
       "summary": "Read an agent's last reply from its transcript, without scraping the screen.",
       "usage": [
@@ -1923,6 +1940,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -2345,6 +2363,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
@@ -2943,6 +2962,26 @@ export const RUNPANE_CONTRACT = {
         "Example:",
         "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
       ],
+      "panels resume": [
+        "Usage:",
+        "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Restarts a stopped terminal panel in the same panel, keeping its panel id. An agent panel",
+        "relaunches with its resume command (Claude --resume <session>, codex resume <session>, Cursor",
+        "--resume), the same restart the app runs when it shows the panel. Nothing takes focus. A panel",
+        "that is already running is left alone and reported as already-running.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Terminal panel id",
+        "  --wait-ready                   Wait until the resumed agent is ready; startup prompts come back as readiness.blocked",
+        "  --ready-timeout-ms <ms>        Readiness wait timeout; defaults to 30000",
+        "  --yes                          Skip the confirmation prompt",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane panels resume --panel <panel-id> --wait-ready --yes --json"
+      ],
       "panels last-message": [
         "Usage:",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]",
@@ -3130,6 +3169,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -3536,6 +3576,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
+        "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
@@ -4095,6 +4136,26 @@ export const RUNPANE_CONTRACT = {
         "Example:",
         "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
       ],
+      "panels resume": [
+        "Usage:",
+        "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Restarts a stopped terminal panel in the same panel, keeping its panel id. An agent panel",
+        "relaunches with its resume command (Claude --resume <session>, codex resume <session>, Cursor",
+        "--resume), the same restart the app runs when it shows the panel. Nothing takes focus. A panel",
+        "that is already running is left alone and reported as already-running.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Terminal panel id",
+        "  --wait-ready                   Wait until the resumed agent is ready; startup prompts come back as readiness.blocked",
+        "  --ready-timeout-ms <ms>        Readiness wait timeout; defaults to 30000",
+        "  --yes                          Skip the confirmation prompt",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane panels resume --panel <panel-id> --wait-ready --yes --json"
+      ],
       "panels last-message": [
         "Usage:",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]",
@@ -4312,6 +4373,7 @@ export const RUNPANE_CONTRACT = {
       "runpane agents send --pane <pane-id> --text \"Also add a test\" --yes --json",
       "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
       "runpane panels last-message --panel <panel-id> --json",
+      "runpane panels resume --panel <panel-id> --wait-ready --yes --json",
       "runpane docs search --query \"archive a pane\" --json",
       "runpane links create --pane <pane-id> --json",
       "runpane panes git-status --pane <pane-id> --json",
@@ -4362,6 +4424,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.",
+      "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`). After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when that kind is listed in `--kinds` or implied by `--session`; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
@@ -5053,6 +5116,17 @@ export const RUNPANE_CONTRACT = {
         "--summary-file=/tmp/report.md",
         "--pane-dir",
         "/tmp/pane"
+      ],
+      [
+        "panels",
+        "resume",
+        "--panel",
+        "panel-1",
+        "--wait-ready",
+        "--ready-timeout-ms",
+        "45000",
+        "--yes",
+        "--json"
       ],
       [
         "panels",
@@ -6178,6 +6252,10 @@ export const RUNPANE_CONTRACT = {
                           "initialized": {
                             "type": "boolean"
                           },
+                          "running": {
+                            "type": "boolean",
+                            "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
+                          },
                           "isAlternateScreen": {
                             "type": "boolean"
                           },
@@ -6858,6 +6936,7 @@ export const RUNPANE_CONTRACT = {
             "pane.created",
             "pane.gone",
             "panel.exited",
+            "panel.stopped",
             "agent.report",
             "pane.associated",
             "pane.detached",
@@ -6938,6 +7017,10 @@ export const RUNPANE_CONTRACT = {
         },
         "exitCode": {
           "type": "number"
+        },
+        "running": {
+          "type": "boolean",
+          "description": "Baseline agent entries: whether the panel's terminal process is live. A stopped panel is never agent.ready."
         },
         "baseline": {
           "const": true
@@ -7727,6 +7810,10 @@ export const RUNPANE_CONTRACT = {
               "initialized": {
                 "type": "boolean"
               },
+              "running": {
+                "type": "boolean",
+                "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
+              },
               "agentType": {
                 "type": "string"
               },
@@ -8069,6 +8156,10 @@ export const RUNPANE_CONTRACT = {
             "initialized": {
               "type": "boolean"
             },
+            "running": {
+              "type": "boolean",
+              "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
+            },
             "isAlternateScreen": {
               "type": "boolean"
             },
@@ -8311,6 +8402,10 @@ export const RUNPANE_CONTRACT = {
             "initialized": {
               "type": "boolean"
             },
+            "running": {
+              "type": "boolean",
+              "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
+            },
             "isAlternateScreen": {
               "type": "boolean"
             },
@@ -8362,6 +8457,10 @@ export const RUNPANE_CONTRACT = {
           },
           "additionalProperties": false
         },
+        "stopped": {
+          "const": true,
+          "description": "The panel's terminal is not running, so it cannot become ready or idle; nextCommand is `runpane panels resume`."
+        },
         "screen": {
           "type": "object",
           "required": [
@@ -8383,6 +8482,219 @@ export const RUNPANE_CONTRACT = {
             },
             "hasMore": {
               "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "nextCommand": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelResumeResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "panelId",
+        "paneId",
+        "action",
+        "message",
+        "panel",
+        "nextCommand"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "resumed",
+            "already-running"
+          ],
+          "description": "resumed: the panel's terminal was restarted in place. already-running: nothing was restarted."
+        },
+        "message": {
+          "type": "string"
+        },
+        "agentType": {
+          "type": "string"
+        },
+        "agentSessionId": {
+          "type": "string",
+          "description": "The agent conversation the panel resumes, when Pane knows it."
+        },
+        "panel": {
+          "type": "object",
+          "required": [
+            "id",
+            "panelId",
+            "paneId",
+            "type",
+            "title",
+            "active"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "paneId": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "initialized": {
+              "type": "boolean"
+            },
+            "running": {
+              "type": "boolean",
+              "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
+            },
+            "agentType": {
+              "type": "string"
+            },
+            "agentDetection": {
+              "enum": [
+                "declared",
+                "command",
+                "process",
+                "screen"
+              ]
+            },
+            "launchCommand": {
+              "type": "string"
+            },
+            "isCliPanel": {
+              "type": "boolean"
+            },
+            "position": {
+              "type": "number"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "lastActiveAt": {
+              "type": "string"
+            },
+            "report": {
+              "$ref": "#/jsonSchemas/agentReport"
+            }
+          },
+          "additionalProperties": false
+        },
+        "readiness": {
+          "type": "object",
+          "required": [
+            "ok",
+            "condition",
+            "matched",
+            "timedOut",
+            "elapsedMs",
+            "state"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "condition": {
+              "enum": [
+                "initialized",
+                "ready",
+                "idle",
+                "text"
+              ]
+            },
+            "matched": {
+              "type": "boolean"
+            },
+            "timedOut": {
+              "type": "boolean"
+            },
+            "elapsedMs": {
+              "type": "number"
+            },
+            "state": {
+              "type": "object",
+              "required": [
+                "initialized"
+              ],
+              "properties": {
+                "initialized": {
+                  "type": "boolean"
+                },
+                "running": {
+                  "type": "boolean",
+                  "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
+                },
+                "isAlternateScreen": {
+                  "type": "boolean"
+                },
+                "activityStatus": {
+                  "enum": [
+                    "active",
+                    "idle"
+                  ]
+                },
+                "isCliReady": {
+                  "type": "boolean"
+                },
+                "isCliPanel": {
+                  "type": "boolean"
+                },
+                "agentType": {
+                  "enum": [
+                    "codex",
+                    "claude"
+                  ]
+                },
+                "lastActivity": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "blocked": {
+              "type": "object",
+              "required": [
+                "kind",
+                "message"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "codex-update",
+                    "agent-prompt",
+                    "submission_unverified",
+                    "unknown"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "suggestedCommand": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "nextCommand": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -8674,6 +8986,10 @@ export const RUNPANE_CONTRACT = {
               "properties": {
                 "initialized": {
                   "type": "boolean"
+                },
+                "running": {
+                  "type": "boolean",
+                  "description": "Whether the terminal process is live. A stopped panel can be restarted with `runpane panels resume`."
                 },
                 "isAlternateScreen": {
                   "type": "boolean"
@@ -10021,6 +10337,18 @@ export const RUNPANE_CONTRACT = {
             "--contains <text>",
             "--timeout-ms <ms>",
             "--interval-ms <ms>",
+            "--json",
+            "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "panels resume",
+          "summary": "Restart a stopped terminal panel in place (same panel id), resuming its agent's conversation.",
+          "arguments": [
+            "--panel <panel-id>",
+            "--wait-ready",
+            "--ready-timeout-ms <ms>",
+            "--yes",
             "--json",
             "--pane-dir <path>"
           ]
@@ -11426,6 +11754,58 @@ export const RUNPANE_CONTRACT = {
           "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts."
         ]
       },
+      "panels resume": {
+        "name": "panels resume",
+        "summary": "Restart a stopped terminal panel in place, resuming its agent's conversation.",
+        "details": "Use this when `panels list`, `panels screen`, or `panels wait` report `running: false`, or `watch` reports `panel.stopped`, typically after a Pane restart. The panel keeps its id. Pane re-runs the panel's saved launch command resolved to the agent's resume command (Claude `--resume <session>`, `codex resume <session>`, Cursor `--resume`), the same restart the app runs when it shows the panel. It never takes focus. On a running panel it does nothing and returns `action: \"already-running\"`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": true,
+            "description": "Terminal panel id."
+          },
+          {
+            "name": "--wait-ready",
+            "required": false,
+            "description": "Wait until the resumed agent is ready, with the same startup-screen checks as `panels create --wait-ready`."
+          },
+          {
+            "name": "--ready-timeout-ms",
+            "value": "<ms>",
+            "required": false,
+            "description": "Readiness wait timeout; defaults to 30000."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels resume --panel <panel-id> --wait-ready --yes --json"
+        ],
+        "jsonSchemas": [
+          "panelResumeResult"
+        ],
+        "notes": [
+          "If readiness.blocked is present, the agent is at a startup prompt (trust, update, [y/n]); inspect `panels screen` or follow blocked.suggestedCommand. Ask the user before answering trust or permission prompts.",
+          "A Claude panel resumes the conversation whose session id Pane launched it with; a Codex panel resumes the session id Pane captured from its output. Without one, the panel relaunches its original command."
+        ]
+      },
       "panels wait": {
         "name": "panels wait",
         "summary": "Wait for a terminal panel to initialize, become ready/idle, or contain text.",
@@ -11484,6 +11864,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "If blocked is present, do not assume success. Use blocked.suggestedCommand or inspect `panels screen`.",
+          "If stopped is true, the panel's terminal is not running (for example after a Pane restart); run nextCommand (`panels resume`) instead of waiting again.",
           "The default timeout and screen are intentionally small for agent context safety."
         ]
       },
@@ -11879,7 +12260,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--kinds",
             "required": false,
             "value": "<kind,...>",
-            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, agent.report, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. agent.report arrives only when listed explicitly. Default all, except that pane.associated, pane.detached, and the pr.* kinds arrive only when listed here or implied by --session. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
+            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, panel.stopped, agent.report, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. agent.report arrives only when listed explicitly. Default all, except that panel.stopped, pane.associated, pane.detached, and the pr.* kinds arrive only when listed here or implied by --session; without panel.stopped, a stopped agent panel reads as agent.unknown with running: false. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
           },
           {
             "name": "--pane",

@@ -1013,6 +1013,32 @@ def run_panels_wait(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_panels_resume(parsed: Any) -> int:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels resume requires --panel.")
+    confirm_panel_resume(parsed)
+
+    result = invoke_daemon("runpane:panels:resume", [{
+        "panelId": parsed.panel_id,
+        **optional_value("waitReady", True if parsed.wait_ready else None),
+        **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
+    }], pane_dir=parsed.pane_dir, timeout_ms=(parsed.ready_timeout_ms or 30_000) + 10_000)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        verb = "Resumed" if result.get("action") == "resumed" else "Already running:"
+        print(f"{verb} panel {result.get('panelId')} in pane {result.get('paneId')}. {result.get('message')}")
+        readiness = result.get("readiness")
+        if readiness:
+            status = "yes" if readiness.get("ok") else "timed out" if readiness.get("timedOut") else "blocked"
+            print(f"Ready: {status} after {readiness.get('elapsedMs')}ms")
+            if readiness.get("blocked"):
+                print(f"Blocked: {readiness['blocked'].get('message')}")
+        print(f"Next: {result.get('nextCommand')}")
+    return 0 if result.get("ok") else 1
+
+
 def run_agents_doctor(parsed: Any) -> int:
     if not parsed.agent:
         agents = "|".join(RUNPANE_CONTRACT["enums"]["agents"])
@@ -1341,6 +1367,17 @@ def confirm_panel_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
+def confirm_panel_resume(parsed: Any) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels resume restarts a Pane terminal. Rerun with --yes in non-interactive shells.")
+
+    answer = input(f"Resume panel {parsed.panel_id}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
 def confirm_panel_input(parsed: Any, request: Dict[str, Any], command: str = "input") -> None:
     if parsed.yes:
         return
@@ -1442,9 +1479,11 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
     name = sanitize_watch_value(entry.get("paneName"))
     pane = f"pane {sanitize_watch_value(entry.get('paneId'))}"
     panel = f" panel {sanitize_watch_value(entry.get('panelId'))}" if entry.get("panelId") else ""
-    if entry.get("changedWhileAway"):
-        return f"CHANGED {name} {pane}{panel}"
     kind = entry.get("kind")
+    if entry.get("changedWhileAway") and kind != "panel.stopped":
+        return f"CHANGED {name} {pane}{panel}"
+    if kind == "panel.stopped":
+        return f"STOPPED {name} {pane}{panel}"
     if kind == "agent.idle":
         minutes = max(0, int(entry.get("idleMs") or 0) // 60_000)
         return f"IDLE {name} {minutes}m {pane}{panel}"
@@ -1527,6 +1566,7 @@ def workspace_label(kind: Any) -> str:
         "pane.created": "NEW",
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
+        "panel.stopped": "STOPPED",
         "pane.associated": "JOINED",
         "pane.detached": "LEFT",
         "pr.conflicted": "PR CONFLICTED",
@@ -1741,6 +1781,8 @@ def print_panel_wait_result(result: Dict[str, Any]) -> None:
     elapsed = result.get("elapsedMs")
     if result.get("ok"):
         print(f"Matched {condition} for panel {panel_id} after {elapsed}ms.")
+    elif result.get("stopped") and not result.get("timedOut"):
+        print(f"Panel {panel_id} is not running, so it cannot become {condition}.")
     elif result.get("blocked"):
         print(f"Blocked waiting for {condition} on panel {panel_id}: {result['blocked'].get('message')}")
     elif result.get("timedOut"):
@@ -1788,6 +1830,8 @@ def print_panel_list_result(result: Dict[str, Any]) -> None:
         initialized = ""
         if panel.get("initialized") is not None:
             initialized = " initialized" if panel.get("initialized") else " not-initialized"
+        if panel.get("running") is False:
+            initialized += " stopped"
         agent = f" {panel.get('agentType')}" if panel.get("agentType") else ""
         detection = panel.get("agentDetection")
         detection_label = f" ({detection})" if detection and detection != "command" else ""

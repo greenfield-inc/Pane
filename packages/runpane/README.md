@@ -176,6 +176,13 @@ runpane watch --session <session-id> --follow --quiet --json --kinds agent.ready
 After a `RESET`, JSON baseline entries carry `replay: true`. They restate
 current state, so a replayed `agent.ready` is never `READY`.
 
+After a Pane restart, an agent panel whose process is not running reads as
+`running: false` in `panels list`, `panels screen`, and `panels wait`, and
+never as `agent.ready`. Add `panel.stopped` to `--kinds` (or watch a
+`--session`) to get a `STOPPED` line for it; other watchers see
+`agent.unknown`. `runpane panels resume --panel <panel-id> --wait-ready --yes
+--json` restarts it in the same panel and resumes the agent's conversation.
+
 - `--kinds` drops `agent.busy`; `BUSY` carries no action.
 - `--settle <ms>` emits `READY` only after the panel stays idle that long. A
   `BUSY` inside the window cancels it silently, which removes the idle/working
