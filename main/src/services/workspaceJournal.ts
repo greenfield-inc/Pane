@@ -459,17 +459,16 @@ function matchesSession(
 }
 
 /**
- * Older runpane clients reject kinds they do not know, so a stopped panel reads as
- * `agent.unknown` (still `running: false`, never `agent.ready`) unless the consumer asked for
- * `panel.stopped` by kind or watches a Session.
+ * Older runpane clients reject kinds they do not know, and a stopped panel reaches every
+ * consumer in the baseline after each restart. So it reads as `agent.unknown` (still
+ * `running: false`, never `agent.ready`) unless the consumer lists `panel.stopped` in its kinds.
  */
 export function presentStoppedPanel(
   entry: RunpaneWorkspaceEntry,
-  filter: Pick<WorkspaceJournalFilter, 'kinds' | 'sessionId'>,
+  filter: Pick<WorkspaceJournalFilter, 'kinds'>,
 ): RunpaneWorkspaceEntry {
   if (entry.kind !== 'panel.stopped') return entry;
-  const optedIn = filter.kinds ? filter.kinds.includes('panel.stopped') : filter.sessionId !== undefined;
-  return optedIn ? entry : { ...entry, kind: 'agent.unknown' };
+  return filter.kinds?.includes('panel.stopped') ? entry : { ...entry, kind: 'agent.unknown' };
 }
 
 export function projectWorkspaceEntry(

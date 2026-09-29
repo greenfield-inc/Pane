@@ -940,6 +940,24 @@ describe('runpane IPC handlers', () => {
       expect(list).toMatchObject({ panels: [{ panelId: terminalPanel.id, running: false }] });
     });
 
+    it('reports a stopped panel as stopped even when its saved screen shows a prompt', async () => {
+      stopPanel();
+      vi.mocked(panelDatabase.getPanelBuffers).mockReturnValue({
+        scrollback: 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n\nPress enter to continue\n',
+        serialized: null,
+        alternate: null,
+      });
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:wait', [{
+        panelId: terminalPanel.id, condition: 'ready', timeoutMs: 20_000, intervalMs: 50,
+      }]);
+
+      expect(result).toMatchObject({ ok: false, stopped: true, nextCommand: expect.stringContaining('panels resume') });
+      // SAFETY: The wait handler resolves to a panel wait result, whose optional `blocked` is checked here.
+      expect((result as { blocked?: unknown }).blocked).toBeUndefined();
+    });
+
     it('stops waiting for readiness on a panel that is not running', async () => {
       stopPanel();
       const registry = createRegistry();
@@ -3127,11 +3145,34 @@ describe('runpane IPC handlers', () => {
       });
     });
 
+    it('refuses to resume a panel of an archived Pane', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      const services = createServices();
+      vi.mocked(services.sessionManager.getSession).mockReturnValue({ ...session, archived: true });
+      const registry = createRegistry(services);
+
+      await expect(registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id }]))
+        .rejects.toThrow(/archived/);
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+    });
+
+    it('still waits for readiness when asked and the panel is already running', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+        terminalSnapshot('› Ask Codex to do anything\n  gpt-5.6 high\n', 'idle'),
+      );
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id, waitReady: true, readyTimeoutMs: 50 }]);
+
+      expect(result).toMatchObject({ action: 'already-running', readiness: { ok: true, matched: true } });
+    });
+
     it('is a no-op with a clear result when the panel is already running', async () => {
       vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
       const registry = createRegistry();
 
-      const result = await registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id, waitReady: true }]);
+      const result = await registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id }]);
 
       expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
       expect(result).toMatchObject({

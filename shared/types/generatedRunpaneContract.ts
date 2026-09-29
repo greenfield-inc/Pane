@@ -4424,7 +4424,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.",
-      "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`). After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when that kind is listed in `--kinds` or implied by `--session`; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
+      "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`). After a Pane restart, stopped panels report `running: false` in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
@@ -8459,7 +8459,7 @@ export const RUNPANE_CONTRACT = {
         },
         "stopped": {
           "const": true,
-          "description": "The panel's terminal is not running, so it cannot become ready or idle; nextCommand is `runpane panels resume`."
+          "description": "The wait did not match and the panel's terminal is not running (ready and idle waits return this after a 2-second grace instead of timing out); nextCommand is `runpane panels resume`."
         },
         "screen": {
           "type": "object",
@@ -10355,7 +10355,7 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "watch",
-          "summary": "Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.",
+          "summary": "Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, STOPPED, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.",
           "arguments": [
             "--follow",
             "--session <id|name>",
@@ -12260,7 +12260,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--kinds",
             "required": false,
             "value": "<kind,...>",
-            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, panel.stopped, agent.report, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. agent.report arrives only when listed explicitly. Default all, except that panel.stopped, pane.associated, pane.detached, and the pr.* kinds arrive only when listed here or implied by --session; without panel.stopped, a stopped agent panel reads as agent.unknown with running: false. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
+            "description": "Limit event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, panel.stopped, agent.report, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. agent.report arrives only when listed explicitly. Default all, except that pane.associated, pane.detached, and the pr.* kinds arrive only when listed here or implied by --session, and panel.stopped arrives only when listed here; without it, a stopped agent panel reads as agent.unknown with running: false. Drop agent.busy for any consumer that acts on lines; BUSY carries no action."
           },
           {
             "name": "--pane",

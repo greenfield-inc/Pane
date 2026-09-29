@@ -1203,27 +1203,33 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:resume', {}, async () => {
       const normalized = parsePanelResumeRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
-      if (terminalPanelManager.isTerminalInitialized(panel.id)) {
-        return panelResumeResult(panel, 'already-running', 'The panel is already running; nothing was restarted.');
+      const pane = sessionManager.getSession(panel.sessionId);
+      // Archiving already cleaned up the Pane; nothing would ever stop a process started in it.
+      if (pane?.archived) {
+        throw new Error(`Pane ${pane.id} is archived; its panels cannot be resumed`);
       }
-
-      // The same restart the app runs when it shows a stopped panel: the saved
-      // launch command, resolved to the agent's resume command, in this panel.
-      const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
-      const cwd = sessionManager.getSession(panel.sessionId)?.worktreePath
-        ?? optionalString(customState.cwd)
-        ?? process.cwd();
-      await terminalPanelManager.initializeTerminal(panel, cwd, sessionWslContext(services, panel.sessionId));
-      const resumed = panelManager.getPanel(panel.id) ?? panel;
-      const readiness = normalized.waitReady
-        ? toPaneReadiness(await waitForPanel(resumed, {
-          panelId: resumed.id,
+      const waitIfAsked = async (target: ToolPanel) => normalized.waitReady
+        ? toPaneReadiness(await waitForPanel(target, {
+          panelId: target.id,
           condition: 'ready',
           timeoutMs: normalized.readyTimeoutMs ?? DEFAULT_PANEL_WAIT_TIMEOUT_MS,
           intervalMs: DEFAULT_PANEL_WAIT_INTERVAL_MS,
         }))
         : undefined;
-      return panelResumeResult(resumed, 'resumed', resumeMessage(resumed), readiness);
+      if (terminalPanelManager.isTerminalInitialized(panel.id)) {
+        // It may have just been started elsewhere (the app shows the Pane), so still answer --wait-ready.
+        return panelResumeResult(panel, 'already-running', 'The panel is already running; nothing was restarted.', await waitIfAsked(panel));
+      }
+
+      // The same restart the app runs when it shows a stopped panel: the saved
+      // launch command, resolved to the agent's resume command, in this panel.
+      const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
+      const cwd = pane?.worktreePath
+        ?? optionalString(customState.cwd)
+        ?? process.cwd();
+      await terminalPanelManager.initializeTerminal(panel, cwd, sessionWslContext(services, panel.sessionId));
+      const resumed = panelManager.getPanel(panel.id) ?? panel;
+      return panelResumeResult(resumed, 'resumed', resumeMessage(resumed), await waitIfAsked(resumed));
     }, result => ({
       paneId: result.paneId,
       panelId: result.panelId,
@@ -2543,7 +2549,10 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
     requiresFirstEvaluation = false;
     lastScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
     condition = request.condition ?? defaultWaitCondition(lastScreen.state);
-    const blocked = detectPanelBlocker(lastScreen.text, lastScreen.state.agentType, panel.id);
+    // A stopped panel's saved screen can show an old prompt; it is not a live blocker.
+    const blocked = lastScreen.state.running
+      ? detectPanelBlocker(lastScreen.text, lastScreen.state.agentType, panel.id)
+      : undefined;
     const matched = isWaitConditionMatched(condition, lastScreen, request.contains, blocked);
 
     if (matched) {
