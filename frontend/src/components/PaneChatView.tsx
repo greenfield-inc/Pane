@@ -317,7 +317,9 @@ interface NamedSessionWorkspaceProps {
 function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpdate, onRetry }: NamedSessionWorkspaceProps) {
   const [overview, setOverview] = useState<OrchestrationSessionOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
-  const sessionTabsSlot = useTitleBarSlotStore(state => state.sessionTabsSlot);
+  // With a window title bar the Session name is shown there, so this header
+  // only remains for screen readers.
+  const hasTitleBar = useTitleBarSlotStore(state => state.trailingSlot !== null);
   const [showSettings, setShowSettings] = useState(false);
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
@@ -441,13 +443,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
   return (
     <div className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
       <LiveRegion>{statusAnnouncement}</LiveRegion>
-      {sessionTabsSlot && (
-        <div className="flex h-[38px] flex-shrink-0 bg-bg-chrome">
-          <div className="pane-drag-area min-w-0 flex-1" />
-          <div className="w-12 flex-shrink-0" />
-        </div>
-      )}
-      <div className={sessionTabsSlot ? "sr-only" : "flex min-h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5"}>
+      <div className={hasTitleBar ? "sr-only" : "flex min-h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5"}>
         <div className="flex min-w-0 items-center gap-2">
           <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
           <div className="min-w-0">
@@ -456,7 +452,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
           {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
         </div>
       </div>
-      {sessionTabsSlot && error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
+      {hasTitleBar && error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
       {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={onOverviewUpdate} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>

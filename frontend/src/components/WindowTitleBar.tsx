@@ -1,5 +1,4 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -10,8 +9,25 @@ import { isMac } from '../utils/platformUtils';
 import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
 import { Badge } from './ui/Badge';
 
-const TITLE_BAR_HEIGHT = 38;
 const GUTTER = 8;
+// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits it.
+// The bottom hairline is an inset shadow rather than a border so it does not
+// take a pixel from the 38px row: controls stay centered on whole pixels.
+const TITLE_BAR_STYLE = {
+  height: 38,
+  WebkitAppRegion: 'drag',
+  boxShadow: 'inset 0 calc(-1 * var(--border-hairline)) 0 var(--color-border-primary)',
+} as CSSProperties;
+// Traffic lights sit at x=10 with ~70px of width (see `trafficLightPosition` in
+// main/src/index.ts); equal padding on both sides clears them and keeps the
+// title centered on the window.
+const MAC_INSET_STYLE: CSSProperties = { paddingLeft: 88, paddingRight: 88 };
+// Windows and Linux report the page's share of the strip through the Window
+// Controls Overlay env() values; the far side is whatever they do not cover.
+const OVERLAY_INSET_STYLE: CSSProperties = {
+  paddingLeft: `calc(env(titlebar-area-x, 0px) + ${GUTTER}px)`,
+  paddingRight: `max(${GUTTER}px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER}px))`,
+};
 const MAC_CONTROLS_LEFT: CSSProperties = { left: 80 + GUTTER };
 const OVERLAY_CONTROLS_LEFT: CSSProperties = { left: `calc(env(titlebar-area-x, 0px) + ${GUTTER}px)` };
 const MAC_CONTROLS_RIGHT: CSSProperties = { right: GUTTER };
@@ -61,17 +77,16 @@ function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
 
 interface WindowTitleBarProps {
   projects: Project[];
-  sidebarWidth: number;
-  sidebarCollapsed: boolean;
   controlsSlotRef?: (element: HTMLDivElement | null) => void;
 }
 
 /**
- * Positions window controls over the sidebar and tabs without consuming a
- * layout row, and names the pane you are looking at. The name and its status
- * pills are passive text portalled into the pane tab bar's free space (the
- * row this strip shares), so they never cover a tab and the row keeps
- * dragging and double-click-to-zoom.
+ * The window's title bar: its own row above the sidebar and every tab strip,
+ * the way VS Code lays out its window. It carries the window drag region, the
+ * sidebar controls on the left, global controls (Run, inspector, Session
+ * settings) on the right, and the name of the pane or Session you are looking
+ * at in the middle. Tabs never share this row, so every tab strip — including
+ * each group's strip in a split — starts at the same height below it.
  *
  * It renders wherever the app owns the title bar: macOS via `hiddenInset`, and
  * Windows and Linux via the Window Controls Overlay. A Linux desktop that failed
@@ -79,10 +94,8 @@ interface WindowTitleBarProps {
  * is `document.title`, which this also owns, that carries the pane name. That is
  * true on every platform for the taskbar and task switcher.
  */
-export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, controlsSlotRef }: WindowTitleBarProps) {
+export function WindowTitleBar({ projects, controlsSlotRef }: WindowTitleBarProps) {
   const setTrailingSlot = useTitleBarSlotStore(state => state.setTrailingSlot);
-  const setSessionTabsSlot = useTitleBarSlotStore(state => state.setSessionTabsSlot);
-  const titleSlot = useTitleBarSlotStore(state => state.titleSlot);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
@@ -101,52 +114,46 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
     return () => { document.title = APP_WINDOW_TITLE; };
   }, [windowTitle]);
 
-  // Only a pane gets the visible name; the Session view shows its tabs here.
-  const paneTitle = activeView === 'sessions' ? title : null;
-  const pills = paneTitle ? resolvePaneStatusPills(activeSession) : [];
+  // Status pills describe a pane's branch and PR; a Session has neither.
+  const pills = activeView === 'sessions' && title ? resolvePaneStatusPills(activeSession) : [];
   const arrived = useArrivedKeys(activeSession?.id ?? null, pills.map(pill => pill.key));
 
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
 
-  const sessionTabsLeft = Math.max(sidebarCollapsed ? 48 : sidebarWidth, isMac() ? 136 : 72);
-  const sessionTabsRight = isMac()
-    ? '116px'
-    : `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + 116px)`;
-
   return (
     <div
-      className="pane-window-title-bar pointer-events-none absolute inset-x-0 top-0 z-30 select-none"
-      style={{ height: TITLE_BAR_HEIGHT, ...NO_DRAG }}
+      className="pane-window-title-bar relative flex flex-shrink-0 items-center justify-center overflow-hidden bg-bg-chrome select-none"
+      style={{ ...TITLE_BAR_STYLE, ...(isMac() ? MAC_INSET_STYLE : OVERLAY_INSET_STYLE) }}
       data-testid="window-title-bar"
     >
       <div
         ref={controlsSlotRef}
-        className="pointer-events-auto absolute inset-y-0 flex items-center gap-0.5"
+        className="absolute inset-y-0 flex items-center gap-0.5"
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_LEFT : OVERLAY_CONTROLS_LEFT) }}
         data-testid="window-title-bar-controls"
       />
       <div
         ref={setTrailingSlot}
-        className="pointer-events-auto absolute inset-y-0 flex items-center gap-0.5"
+        className="absolute inset-y-0 flex items-center gap-0.5"
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
       />
-      {paneTitle && titleSlot && createPortal(
+      {title && (
         <div className="relative flex min-w-0 items-center">
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
             data-testid="window-title-bar-label"
             title={windowTitle}
           >
-            <span className="truncate text-text-tertiary">{paneTitle.project}</span>
-            {paneTitle.pane && (
+            <span className="truncate text-text-tertiary">{title.project}</span>
+            {title.pane && (
               <>
                 <span className="flex-shrink-0 text-text-tertiary" aria-hidden="true">·</span>
                 <span
                   className="truncate font-medium text-text-secondary"
                   style={HEAD_ELLIPSIS_STYLE}
                 >
-                  <span style={LTR_RUN_STYLE}>{paneTitle.pane}</span>
+                  <span style={LTR_RUN_STYLE}>{title.pane}</span>
                 </span>
               </>
             )}
@@ -173,16 +180,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
               ))}
             </div>
           )}
-        </div>,
-        titleSlot,
-      )}
-      {activeView === 'pane-chat' && (
-        <div
-          ref={setSessionTabsSlot}
-          className="pointer-events-auto absolute inset-y-0 flex min-w-0 items-center overflow-hidden transition-[left] duration-reveal ease-out-strong"
-          style={{ ...NO_DRAG, left: sessionTabsLeft, right: sessionTabsRight }}
-          data-testid="window-title-bar-session-tabs"
-        />
+        </div>
       )}
     </div>
   );

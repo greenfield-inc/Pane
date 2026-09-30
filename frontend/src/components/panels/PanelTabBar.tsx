@@ -11,7 +11,6 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { Tooltip } from '../ui/Tooltip';
 import { useTitleBarSlotStore } from '../../stores/titleBarSlotStore';
-import { useObservedContentBox } from '../../hooks/useObservedContentBox';
 import { editorPanelState } from '../../services/openFileInEditor';
 import { Kbd } from '../ui/Kbd';
 import { CLI_BRAND_ICONS, getCliBrandIcon } from '../ui/brandIconRegistry';
@@ -24,9 +23,6 @@ import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFil
 const ADD_TOOL_MENU_WIDTH = 280;
 const ADD_TOOL_MENU_VIEWPORT_MARGIN = 8;
 const MAX_CUSTOM_COMMAND_LABEL_LENGTH = 18;
-// Room for the title plane's Run / inspector controls (pr-28) plus the Add
-// tool and a usable run of tabs.
-const MIN_TITLE_PLANE_TAB_BAR_WIDTH = 240;
 
 function truncateCustomCommandLabel(label: string): string {
   if (label.length <= MAX_CUSTOM_COMMAND_LABEL_LENGTH) return label;
@@ -140,18 +136,9 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   // A group strip's "+" opens this same menu, anchored to that button instead.
   const externalAnchorRef = useRef<DOMRect | null>(null);
   const trailingSlot = useTitleBarSlotStore((state) => state.trailingSlot);
-  const setTitleSlot = useTitleBarSlotStore((state) => state.setTitleSlot);
-  const titleSlotRef = useRef<HTMLDivElement | null>(null);
-  const registerTitleSlot = useCallback((element: HTMLDivElement | null) => {
-    setTitleSlot(element, titleSlotRef.current);
-    titleSlotRef.current = element;
-  }, [setTitleSlot]);
-  const tabBarBox = useObservedContentBox<HTMLDivElement>();
-  // The title plane's controls overlay this row's right end. A row too narrow
-  // to keep the Add tool clear of them hosts the controls itself instead; a
-  // collapsed (unmeasured) row leaves them on the title plane.
-  const controlsOnTitlePlane = !!trailingSlot
-    && (tabBarBox.width === 0 || tabBarBox.width >= MIN_TITLE_PLANE_TAB_BAR_WIDTH);
+  // Run / inspector controls live in the window title bar when the window owns
+  // one; a native-framed window keeps them at this row's end.
+  const controlsOnTitlePlane = !!trailingSlot;
   // Rename state moved to PanelTabStrip
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null);
@@ -531,10 +518,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   return (
     <>
-    <div ref={tabBarBox.ref} className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", controlsOnTitlePlane && "panel-tab-bar-with-title-controls", barCollapsed && "hidden")}>
+    <div className={cn("panel-tab-bar bg-bg-chrome flex-shrink-0", barCollapsed && "hidden")}>
       {/* Flex container */}
       <div
-        className={cn("relative flex min-h-[38px] items-center", controlsOnTitlePlane ? "pr-28" : "pr-2")}
+        className="relative flex min-h-[38px] items-center pr-2"
         onDragOver={tabsInGroups && isTabDragging ? () => setDragOverBar(true) : undefined}
         onDragLeave={tabsInGroups && isTabDragging ? () => setDragOverBar(false) : undefined}
       >
@@ -817,17 +804,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             );
           })()}
         </div>
-
-        {/* The window title (pane name and status pills) fills the row's
-            free space when the window owns its title bar; a row too narrow
-            for the title plane's controls has no space to give. */}
-        {controlsOnTitlePlane && (
-          <div
-            ref={registerTitleSlot}
-            data-testid="panel-tab-bar-title-slot"
-            className="flex h-full min-w-0 flex-1 items-center justify-center overflow-hidden px-2"
-          />
-        )}
 
         {/* Run / inspector controls live on the title plane when the
             window owns its title bar; otherwise they stay at the bar's end. */}

@@ -1442,27 +1442,24 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   });
   await page.goto('/');
   await page.getByTestId('orchestration-session-tools').click();
-  const titleBarTabs = page.getByTestId('window-title-bar-session-tabs');
-  const activeTab = titleBarTabs.getByRole('tab').first();
+  // The Session's tabs sit on their own row under the window title bar, which
+  // names the Session; tabs never share the title bar's row.
+  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  const activeTab = workspaceTabs.getByRole('tab').first();
   await expect(activeTab).toBeVisible();
   await expect(activeTab).toHaveCSS('border-top-left-radius', '6px');
-  const tabBounds = await activeTab.boundingBox();
-  const tabSlotBounds = await titleBarTabs.boundingBox();
-  expect(tabBounds?.y).toBe(0);
-  expect(tabBounds?.height).toBe(38);
-  expect(tabBounds && tabSlotBounds && tabBounds.x - tabSlotBounds.x).toBe(0);
+  const titleBar = page.getByTestId('window-title-bar');
+  await expect(titleBar.getByTestId('window-title-bar-label')).toContainText('Tools');
+  const [tabBounds, titleBarBounds] = [await layoutBox(activeTab), await layoutBox(titleBar)];
+  expect(tabBounds.y).toBeGreaterThanOrEqual(titleBarBounds.y + titleBarBounds.height);
   await expect(page.getByTestId('sidebar').getByRole('button', { name: 'Home menu' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Session settings', exact: true })).toBeVisible();
   const titleBarControls = page.getByTestId('window-title-bar-trailing-controls');
   await expect(titleBarControls.getByRole('button', { name: 'Session settings' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toHaveCSS('-webkit-app-region', 'no-drag');
   await expect(page.getByRole('button', { name: 'Show details', exact: true })).toHaveCSS('-webkit-app-region', 'no-drag');
-  const leftToggle = await page.getByRole('button', { name: 'Collapse sidebar' }).boundingBox();
-  const leftDragArea = await page.locator('[data-testid="sidebar"] .pane-drag-area').boundingBox();
-  const rightToggle = await page.getByRole('button', { name: 'Show details', exact: true }).boundingBox();
-  const rightDragArea = await page.locator('.pane-chat-shell > div > .pane-drag-area').boundingBox();
-  expect(leftToggle && leftDragArea && leftDragArea.x).toBeGreaterThanOrEqual(leftToggle!.x + leftToggle!.width);
-  expect(rightToggle && rightDragArea && rightDragArea.x + rightDragArea.width).toBeLessThanOrEqual(rightToggle!.x);
+  // The whole title bar drags the window; its controls opt out.
+  await expect(titleBar).toHaveCSS('-webkit-app-region', 'drag');
   await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
@@ -1492,10 +1489,10 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
     { id: 'mock-panel-2', type: 'explorer', title: 'Files' },
   ]);
   await page.getByRole('complementary', { name: 'Session files' }).getByText('notes.txt', { exact: true }).click();
-  const fileTab = titleBarTabs.getByRole('tab', { name: 'notes.txt', exact: true });
+  const fileTab = workspaceTabs.getByRole('tab', { name: 'notes.txt', exact: true });
   await expect(fileTab).toBeVisible();
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
-  const closeFile = titleBarTabs.getByRole('button', { name: 'Close notes.txt' });
+  const closeFile = workspaceTabs.getByRole('button', { name: 'Close notes.txt' });
   await expect(closeFile).toHaveCSS('opacity', '1');
   await activeTab.click();
   await expect(fileTab).toHaveAttribute('aria-selected', 'false');
@@ -1611,8 +1608,8 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   await page.getByTestId('orchestration-session-plans').click();
-  const titleBarTabs = page.getByTestId('session-workspace-tabs');
-  await expect(titleBarTabs.getByRole('tab').first()).toBeVisible();
+  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  await expect(workspaceTabs.getByRole('tab').first()).toBeVisible();
   const openPage = (id: string, title: string, active = true, reused = false) => page.evaluate(({ id, title, active, reused }) => {
     // SAFETY: installElectronApiMock adds these controls before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelUpdated: (panel: ToolPanel) => void } };
@@ -1628,10 +1625,17 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await openPage('plan-page', 'plan.html');
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
-  // The permanent agent tab stays in the workspace toolbar; opened pages get the side strip.
-  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
+  // Split, every group owns a strip: the agent tab moves into its group's strip
+  // (the toolbar row goes away) and opened pages get the side strip, so all tabs
+  // sit on one row under the title bar.
+  await expect(workspaceTabs).toHaveCount(0);
+  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
-  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(0);
+  const [agentStrip, pageStrip] = [await layoutBox(groupStrips.nth(0)), await layoutBox(groupStrips.nth(1))];
+  expect(pageStrip.y).toBe(agentStrip.y);
+  expect(pageStrip.height).toBe(agentStrip.height);
+  const titleBar = await layoutBox(page.getByTestId('window-title-bar'));
+  expect(agentStrip.y).toBeGreaterThanOrEqual(titleBar.y + titleBar.height);
 
   await openPage('report-page', 'report.html', false);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
@@ -1657,5 +1661,5 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await groupStrips.nth(1).getByRole('button', { name: 'Close report.html' }).click();
   await groupStrips.nth(1).getByRole('button', { name: 'Close plan.html' }).click();
   await expect(groupStrips).toHaveCount(0);
-  await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
+  await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
 });

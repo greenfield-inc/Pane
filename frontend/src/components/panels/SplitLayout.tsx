@@ -77,6 +77,12 @@ export interface SplitLayoutProps {
   showAddTool?: boolean;
   /** Group strips keep tab close buttons visible instead of on hover. */
   alwaysShowClose?: boolean;
+  /**
+   * Permanent tabs stay in their group's strip instead of being hoisted to a
+   * top bar. For views with no top bar while split (the Session workspace), so
+   * every tab sits on the same row.
+   */
+  keepPermanentTabsInGroups?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +110,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   emptyState,
   showAddTool,
   alwaysShowClose,
+  keepPermanentTabsInGroups,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -202,6 +209,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           emptyState={emptyState}
           showAddTool={showAddTool}
           alwaysShowClose={alwaysShowClose}
+          keepPermanentTabsInGroups={keepPermanentTabsInGroups}
         />
       );
     }
@@ -246,7 +254,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     onPanelSelect, onPanelClose, onFocusGroup, onSizesChange,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
-    showAddTool, alwaysShowClose,
+    showAddTool, alwaysShowClose, keepPermanentTabsInGroups,
   ]);
 
   // Single-group root: render directly without Allotment

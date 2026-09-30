@@ -121,6 +121,7 @@ export interface PanelGroupViewProps {
   emptyState?: React.ReactNode;
   showAddTool?: boolean;
   alwaysShowClose?: boolean;
+  keepPermanentTabsInGroups?: boolean;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -145,6 +146,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   emptyState,
   showAddTool = true,
   alwaysShowClose = false,
+  keepPermanentTabsInGroups = false,
 }) => {
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
@@ -166,10 +168,11 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
 
   // Permanent tool tabs (Diff/Explorer/Browser) are hoisted to PanelTabBar
   // from EVERY group while split, so strips carry only working tabs. Their
-  // content still renders inside whichever group owns them.
+  // content still renders inside whichever group owns them. Views without a
+  // top bar keep them here instead.
   const stripPanels = useMemo(
-    () => orderedPanels.filter(p => p.metadata?.permanent !== true),
-    [orderedPanels],
+    () => keepPermanentTabsInGroups ? orderedPanels : orderedPanels.filter(p => p.metadata?.permanent !== true),
+    [orderedPanels, keepPermanentTabsInGroups],
   );
 
   // Strip drop indexes are relative to the displayed subset; translate to the
@@ -244,7 +247,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
         {orderedPanels.map(panel => {
           const isActiveTab = panel.id === group.activePanelId;
           const keepAlive = panel.type === 'terminal' || panel.type === 'diff';
-          const panelTabNamespace = !multiGroup || panel.metadata?.permanent === true ? 'top' : group.id;
+          const panelTabNamespace = !multiGroup || (panel.metadata?.permanent === true && !keepPermanentTabsInGroups) ? 'top' : group.id;
           if (!isActiveTab && !keepAlive) return null;
           return (
             <div

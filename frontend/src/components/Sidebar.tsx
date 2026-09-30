@@ -451,7 +451,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           style={{ width: '48px' }}
         >
           {titleBarControlsSlot && createPortal(headerControls, titleBarControlsSlot)}
-          {titleBarControlsSlot && <div className="h-[38px] flex-shrink-0" />}
 
           <div className="flex shrink-0 flex-col items-center gap-1 border-b border-border-primary py-2">
             <Tooltip content="Home" side="right">
@@ -748,12 +747,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               {headerControls}
             </div>
           )}
-        {titleBarControlsSlot && (
-          <div className="flex h-[38px] flex-shrink-0">
-            <div className="w-[136px] flex-shrink-0" />
-            <div className="pane-drag-area min-w-0 flex-1" />
-          </div>
-        )}
 
         <button
           type="button"

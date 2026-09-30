@@ -35,7 +35,6 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
 }) {
   const trailingSlot = useTitleBarSlotStore(state => state.trailingSlot);
-  const sessionTabsSlot = useTitleBarSlotStore(state => state.sessionTabsSlot);
   const sessionId = agentPanel.sessionId;
   const panels = usePanelStore(state => state.panels[sessionId] ?? EMPTY_PANELS);
   const layout = usePanelStore(state => state.layouts[sessionId]);
@@ -194,19 +193,17 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
     if (current) applyLayout({ ...current, root: updateSizes(current.root, splitNodeId, sizes) });
   }, [sessionId, applyLayout]);
   const handleClose = useCallback((panel: ToolPanel) => { void closePanel(panel); }, [closePanel]);
-  // A single group keeps its tabs in the workspace toolbar. Once split, each group
-  // owns a strip and the toolbar keeps only the permanent agent tab.
+  // A single group keeps its tabs in the workspace toolbar, directly under the
+  // title bar. Once split, every group owns a strip — the agent tab included —
+  // so all tab strips sit on one row and the toolbar row goes away.
   const isSplit = layout?.root.type === 'split';
   const primary = layout ? primaryGroup(layout.root) : null;
   const primaryTabs = primary
     ? primary.panelIds.map(id => tabs.find(panel => panel.id === id)).filter((panel): panel is ToolPanel => !!panel)
     : [agentPanel];
-  const titleTabs = isSplit ? primaryTabs.filter(panel => panel.metadata?.permanent === true) : primaryTabs;
-  // The agent tab strip renders in the title bar when it has a slot, otherwise
-  // in the workspace toolbar; the test id follows it to either place.
   const tabStrip = (
     <div data-testid="session-workspace-tabs" className="flex min-w-0 items-center">
-      <PanelTabStrip panels={titleTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
+      <PanelTabStrip panels={primaryTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
         alwaysShowClose
         onPanelSelect={panel => { if (primary) selectPanel(primary.id, panel); }}
         onPanelClose={handleClose} />
@@ -221,11 +218,10 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
 
   return (
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-      {sessionTabsSlot && createPortal(tabStrip, sessionTabsSlot)}
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
-      {!sessionTabsSlot && <div className="flex min-h-9 items-center border-b border-border-primary">
+      {(!isSplit || !trailingSlot) && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome">
         <div className="flex min-w-0 flex-1 items-center overflow-hidden px-2">
-          {tabStrip}
+          {!isSplit && tabStrip}
         </div>
         {!trailingSlot && titleBarActions}
       </div>}
@@ -235,7 +231,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
           <div className="relative min-h-0 flex-1">
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={layout.focusedGroupId ?? primaryGroup(layout.root).id}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
-              onFocusGroup={focusGroup} showAddTool={false} alwaysShowClose />}
+              onFocusGroup={focusGroup} showAddTool={false} alwaysShowClose keepPermanentTabsInGroups />}
           </div>
           <div className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}

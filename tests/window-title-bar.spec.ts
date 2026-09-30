@@ -216,8 +216,7 @@ test.describe('window title bar', () => {
     expect(insets.leading?.computedLeft).toBe('8px');
     expect(insets.trailing?.computedRight).toBe('8px');
 
-    // The pane name shares the row with the tabs and stays clear of the
-    // trailing controls, so nothing on the title plane covers it.
+    // The pane name sits in the title bar, clear of the trailing controls.
     const labelBox = await titleBarLabel(page).boundingBox();
     const trailingBox = await page.getByTestId('window-title-bar-trailing-controls').boundingBox();
     if (!labelBox || !trailingBox) throw new Error('Title bar label or trailing controls have no box');
@@ -233,19 +232,14 @@ test.describe('window title bar', () => {
       const regionOf = (element: Element | null) => (
         element ? getComputedStyle(element).getPropertyValue('-webkit-app-region') : null
       );
-      // The title strip is the pane tab row: its free space, which holds the
-      // name, is the window's drag surface.
       return {
-        row: regionOf(label.closest('.panel-tab-bar-with-title-controls > div')),
-        slot: regionOf(label.closest('[data-testid="panel-tab-bar-title-slot"]')),
+        bar: regionOf(label.closest('[data-testid="window-title-bar"]')),
         label: regionOf(label),
       };
     });
 
-    expect(dragRegions.row).toBe('drag');
-    // The name and its slot inherit the row's region instead of carving a
-    // no-drag hole in it.
-    expect(dragRegions.slot).not.toBe('no-drag');
+    expect(dragRegions.bar).toBe('drag');
+    // The label inherits the bar's region instead of carving a no-drag hole in it.
     expect(dragRegions.label).not.toBe('no-drag');
   });
 });
