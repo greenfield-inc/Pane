@@ -209,7 +209,8 @@ function goneAgent(agent: ChatAgent): PanelAgent {
 async function readAgent(agent: ChatAgent, run: RunCli): Promise<PanelAgent> {
   const argv = ['agents', 'status', `--panel=${agent.panelId}`, `--limit=${SCREEN_LINES}`, '--json'];
   const { code, stdout } = await run(agent.paneDir ? [...argv, `--pane-dir=${agent.paneDir}`] : argv);
-  const fallback = goneAgent(agent);
+  // Archived Panes were filtered out above, so a failed read is a transient unknown, not a closed agent.
+  const fallback: PanelAgent = { ...goneAgent(agent), status: 'unknown' };
   if (code !== 0) return fallback;
   try {
     const status = decodeBoundary(JSON.parse(stdout), statusSchema);
