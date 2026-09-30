@@ -320,6 +320,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('name: pane-orchestrator');
     expect(canonicalSkill).toContain('associated Panes are the\nimplementation workers');
     expect(canonicalSkill).toContain('Never edit project implementation files from the Session');
+    expect(canonicalSkill).toContain('decision frame from\n`orchestrate-sessions` (Presenting decisions), and check a worker\'s premises');
     expect(canonicalSkill).toContain('## Liveness Contract');
     expect(canonicalSkill).toContain('runpane watch --self-test');
     expect(canonicalSkill).toContain('runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json');

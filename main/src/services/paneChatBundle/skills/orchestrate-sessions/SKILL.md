@@ -90,6 +90,55 @@ A quiet worker or a long-running step is normal. On a reported failure, explicit
 
 Answer from an existing approved source when you can, and cite where. Leave routine in-scope technical decisions to the assigned worker. For a bounded, unresolved technical question that merits a second opinion, ask one fresh-context subagent. Send product and architecture changes, and ask-first actions, to the user.
 
+## Presenting decisions
+
+This is the canonical decision frame for Pane's skills; others link here
+rather than restating it. It applies whenever a key decision goes to the user,
+whether you write it (in Pane, this Session is also the planning session) or
+relay it from a worker.
+
+A decision is **key** when it is hard to reverse, changes what users see, adds
+architecture, schema or infrastructure, touches security or sensitive data
+such as health records, or makes the system act on a user's behalf. Small,
+reversible choices can stay one line: state the choice and move on.
+
+For every key decision:
+
+- **Options, not a bare yes/no.** Give at least two real alternatives,
+  including doing nothing or the simplest workable option when relevant. For
+  each one, state:
+  - **Functional differences:** what the user and their customers will
+    experience, including failure and edge states.
+  - **Engineering complexity, architecture and maintainability:** new moving
+    parts, background jobs, schema, infrastructure and operating cost, and
+    what we would have to maintain afterwards. Use the complexity ladder in
+    [`options`](../options/SKILL.md).
+  - **Prior art:** what leading apps or products do for the same behaviour.
+    Mark each claim **verified** (with a source or checked behaviour) or
+    **unverified**. Never lean on an unchecked analogy.
+- **Recommend one option, with the reason**, and say what the user accepts by
+  taking it.
+- **Product decisions stand alone.** A decision that changes what users see,
+  or makes the system act on a user's behalf (posting, sending, deleting,
+  charging), is labelled a product decision and presented on its own. Never
+  bundle it into a list of technical yes/no items.
+- **Check the premises before relaying.** Whoever passes a decision on checks
+  the worker's framing first: is the assumed constraint real, is a simpler
+  mechanism missing, is the comparison true? Challenge a recommendation rather
+  than passing it through.
+
+When you relay, you are a check, not a pipe:
+
+- If a worker's options fall short of the frame, send them back to the worker
+  rather than filling the gaps with guesses.
+- Pull product decisions out of any batch and present each on its own.
+  Technical items can stay a compact list.
+- Add no analogy or claim about another product that you haven't checked.
+  Label what you couldn't check as unverified.
+
+[references/decision-framing.md](references/decision-framing.md) shows a
+relayed decision before and after, from a real postmortem.
+
 Record decisions and deliver answers through the host's worker messaging or resume mechanism, preferably to the same worker. Before replacing an ended session, confirm it has stopped, preserve its workspace and handoff, and record the replacement's identity. Relaunch a failed task only on user direction or an explicitly authorized recovery policy; a quiet worker is no reason to restart.
 
 ## Ledger, board and completion

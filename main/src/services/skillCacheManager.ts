@@ -501,6 +501,10 @@ Project implementation files are edited in an associated Pane or tab.
 Context is the scarce resource. Weigh the claims panes report and spend your
 context on cross-pane work, the part only you can do.
 
+Present every key decision to the user in the decision frame from
+\`orchestrate-sessions\` (Presenting decisions), and check a worker's premises
+before you relay it.
+
 Answer questions about the user's own work ("what did I do?", "what next?")
 in this Session with \`pane-work\`.
 
