@@ -145,7 +145,8 @@ function rewriteCliHints(text: string, allTools: readonly McpTool[], served: Rea
     const inputs = [...spoken.slice(tool.command.length).matchAll(/--([a-z][a-z0-9-]*)(?:[ =]("[^"]*"|<[^>]+>|[^\s-]\S*))?/g)]
       .filter(([, flag]) => flag !== 'json')
       .map(([, flag, value]) => `${flag.replace(/-([a-z0-9])/g, (_c, letter: string) => letter.toUpperCase())}: ${value ?? 'true'}`);
-    const where = served.has(tool.name) ? '' : ` (in the "${tool.toolsets[0] ?? 'all'}" toolset)`;
+    // No double quotes: the hint lands inside JSON strings.
+    const where = served.has(tool.name) ? '' : ` (in the ${tool.toolsets[0] ?? 'all'} toolset)`;
     return `\`${tool.name}\`${inputs.length > 0 ? ` with ${inputs.join(', ')}` : ''}${where}`;
   });
 }
