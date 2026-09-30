@@ -169,7 +169,7 @@ for (const layoutReadFails of [false, true]) {
         });
       });
     }
-    await page.getByRole('button', { name: /^Expand repository Split fixture$/ }).click();
+    await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
     await page.getByRole('button', { name: 'Split pane', exact: true }).click();
 
     const groups = page.locator('.panel-group-tab-bar');
