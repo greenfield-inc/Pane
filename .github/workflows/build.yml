@@ -355,7 +355,7 @@ jobs:
     - name: Render packaging files
       run: |
         (cd release-files && shasum -a 256 -- *.dmg *.exe) > SHA256SUMS
-        scripts/render-packaging.sh "$(node -p 'require("./package.json").version')" SHA256SUMS packages
+        scripts/render-packaging.sh "$(node -p 'require("./package.json").version')" SHA256SUMS rendered
     - name: Audit Homebrew cask
       env:
         HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -363,13 +363,13 @@ jobs:
         brew tap-new --no-git local/pane
         tap="$(brew --repository local/pane)"
         mkdir -p "$tap/Casks"
-        cp packages/homebrew/Casks/pane.rb "$tap/Casks/"
+        cp rendered/homebrew/Casks/pane.rb "$tap/Casks/"
         brew style --cask local/pane/pane
         brew audit --cask --strict local/pane/pane
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: packaging-${{ env.RELEASE_TAG }}
-        path: packages
+        path: rendered
         if-no-files-found: error
         retention-days: 90
 
@@ -383,7 +383,7 @@ jobs:
     - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         name: packaging-${{ env.RELEASE_TAG }}
-        path: packages
+        path: rendered
     - name: Push the cask to greenfield-inc/homebrew-tap
       env:
         TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -393,7 +393,7 @@ jobs:
           exit 0
         fi
         git clone "https://x-access-token:$TAP_TOKEN@github.com/greenfield-inc/homebrew-tap.git" tap
-        cp -R packages/homebrew/. tap/
+        cp -R rendered/homebrew/. tap/
         cd tap
         git add Casks
         if git diff --cached --quiet; then
