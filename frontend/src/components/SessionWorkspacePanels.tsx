@@ -202,11 +202,15 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
     ? primary.panelIds.map(id => tabs.find(panel => panel.id === id)).filter((panel): panel is ToolPanel => !!panel)
     : [agentPanel];
   const titleTabs = isSplit ? primaryTabs.filter(panel => panel.metadata?.permanent === true) : primaryTabs;
+  // The agent tab strip renders in the title bar when it has a slot, otherwise
+  // in the workspace toolbar; the test id follows it to either place.
   const tabStrip = (
-    <PanelTabStrip panels={titleTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
-      alwaysShowClose
-      onPanelSelect={panel => { if (primary) selectPanel(primary.id, panel); }}
-      onPanelClose={handleClose} />
+    <div data-testid="session-workspace-tabs" className="flex min-w-0 items-center">
+      <PanelTabStrip panels={titleTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
+        alwaysShowClose
+        onPanelSelect={panel => { if (primary) selectPanel(primary.id, panel); }}
+        onPanelClose={handleClose} />
+    </div>
   );
   const titleBarActions = (
     <>
@@ -219,7 +223,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       {sessionTabsSlot && createPortal(tabStrip, sessionTabsSlot)}
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
-      {!sessionTabsSlot && <div data-testid="session-workspace-tabs" className="flex min-h-9 items-center border-b border-border-primary">
+      {!sessionTabsSlot && <div className="flex min-h-9 items-center border-b border-border-primary">
         <div className="flex min-w-0 flex-1 items-center overflow-hidden px-2">
           {tabStrip}
         </div>
