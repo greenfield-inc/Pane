@@ -1,0 +1,86 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "pane",
+  "version": "0.1.0",
+  "description": "Start, watch, and message the coding agents Pane runs on your Mac.",
+  "author": {
+    "name": "Pane",
+    "url": "https://runpane.com"
+  },
+  "homepage": "https://runpane.com",
+  "repository": "https://github.com/greenfield-inc/Pane",
+  "license": "AGPL-3.0",
+  "keywords": ["coding agents", "codex", "claude code", "git worktrees"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Pane",
+        "shortDescription": "Run coding agents from chat",
+        "longDescription": "Pane runs Codex, Claude Code, and Cursor agents side by side on your Mac, each in its own git worktree. From ChatGPT you can start an agent on a task in one of your repos, check whether it is working, blocked, or done, and send it follow-ups. The Chat agents panel lists the agents a chat started, with live status, a message box, and Open in Pane. Requires the Pane desktop app and ChatGPT desktop.",
+        "developerName": "Pane",
+        "category": "Developer Tools",
+        "capabilities": ["Interactive", "Read", "Write"],
+        "websiteURL": "https://runpane.com",
+        "defaultPrompt": [
+          "Start a Codex agent in my web repo to fix the flaky login test.",
+          "How are the agents I started doing?",
+          "Show the agents this chat started."
+        ],
+        "composerIcon": "./assets/logo.svg",
+        "logo": "./assets/logo.svg"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Start an agent on a task",
+              "prompt": "Start a Claude agent in my demo-app repo to fix the login redirect bug.",
+              "tools_triggered": "repos_list, agents_start",
+              "expected_behavior": "Find the demo-app repo, start a Claude agent in a new Pane with the task, and return its name and pane:// link."
+            },
+            {
+              "description": "Check on an agent",
+              "prompt": "How is the login fix agent doing?",
+              "tools_triggered": "agents_status",
+              "expected_behavior": "Report whether the agent is working, blocked, or idle, and summarize its latest screen without inventing progress."
+            },
+            {
+              "description": "Send a follow-up",
+              "prompt": "Tell the login fix agent to also add a regression test.",
+              "tools_triggered": "agents_send",
+              "expected_behavior": "Send the follow-up to that agent and confirm Pane delivered it."
+            },
+            {
+              "description": "Open the agents panel",
+              "prompt": "Show me the agents this chat started.",
+              "tools_triggered": "agents_panel",
+              "expected_behavior": "Open the Chat agents panel listing the agents this chat started, each with its status."
+            },
+            {
+              "description": "List repos and Panes",
+              "prompt": "Which repos and Panes do I have open in Pane?",
+              "tools_triggered": "repos_list, panes_list",
+              "expected_behavior": "List the repos Pane knows and the open Panes with their branches."
+            }
+          ],
+          "negative": [
+            {
+              "description": "General coding question",
+              "prompt": "Explain what a git worktree is."
+            },
+            {
+              "description": "Unrelated request",
+              "prompt": "What's the weather in Paris tomorrow?"
+            },
+            {
+              "description": "Unsupported action",
+              "prompt": "Email my team that the release is out."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products or process payments."
+      }
+    }
+  }
+}
