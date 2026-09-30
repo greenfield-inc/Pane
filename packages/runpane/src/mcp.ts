@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
+import { callChatPanelTool, CHAT_TOOLSET, chatIdOf, chatPanelResource, chatPanelTools, readChatPanel, recordStartedAgent } from './chatPanel';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -40,7 +41,7 @@ interface McpServerOptions {
 /** The tools a `--toolsets` / `--read-only` selection serves. `all` and `read` are built in. */
 function selectTools(tools: readonly McpTool[], options: McpServerOptions): McpTool[] {
   const wanted = new Set(options.toolsets && options.toolsets.length > 0 ? options.toolsets : DEFAULT_TOOLSETS);
-  const known = new Set(['all', 'read', ...tools.flatMap((tool) => tool.toolsets)]);
+  const known = new Set(['all', 'read', CHAT_TOOLSET, ...tools.flatMap((tool) => tool.toolsets)]);
   const unknown = [...wanted].filter((name) => !known.has(name));
   if (unknown.length > 0) {
     throw new Error(`Unknown toolset(s): ${unknown.join(', ')}. Choose from: ${[...known].sort().join(', ')}.`);
@@ -68,15 +69,20 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
   }
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
+  const chatPanel = options.toolsets?.includes(CHAT_TOOLSET) ?? false;
+  const panelTools = new Set(chatPanel ? chatPanelTools.map((tool) => tool.name) : []);
   const listResult = {
-    tools: tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      description: rewrite(tool.description),
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-    })),
+    tools: [
+      ...tools.map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: rewrite(tool.description),
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+        annotations: tool.annotations,
+      })),
+      ...(chatPanel ? chatPanelTools : []),
+    ],
   };
 
   const createServer = () => {
@@ -89,7 +95,12 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       },
     );
     server.setRequestHandler('tools/list', () => listResult);
-    server.setRequestHandler('tools/call', (request, ctx) => {
+    server.setRequestHandler('tools/call', async (request, ctx) => {
+      const chat = () => chatIdOf(decodeBoundary(request.params._meta ?? {}, boundary.jsonObject));
+      if (panelTools.has(request.params.name)) {
+        const input = decodeBoundary(request.params.arguments ?? {}, boundary.jsonObject);
+        return callChatPanelTool(request.params.name, input, chat(), (argv) => runCli(argv, ctx.mcpReq.signal));
+      }
       const tool = toolsByName.get(request.params.name);
       if (!tool) {
         const other = allTools.find((candidate) => candidate.name === request.params.name);
@@ -103,17 +114,25 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      return callTool(tool, input, ctx.mcpReq.signal, rewrite);
+      const result = await callTool(tool, input, ctx.mcpReq.signal, rewrite);
+      // A start that created a Pane but could not confirm the prompt still started an agent.
+      const started = result.structuredContent ?? parseJsonObject(result.content[0]?.text ?? '');
+      if (chatPanel && tool.name === 'agents_start' && started) recordStartedAgent(chat(), input, started);
+      return result;
     });
     server.setRequestHandler('resources/list', () => ({
-      resources: loadDocs(undefined).map((doc) => ({
-        uri: docUri(doc.path),
-        name: doc.path,
-        title: doc.title,
-        mimeType: 'text/markdown',
-      })),
+      resources: [
+        ...(chatPanel ? [chatPanelResource] : []),
+        ...loadDocs(undefined).map((doc) => ({
+          uri: docUri(doc.path),
+          name: doc.path,
+          title: doc.title,
+          mimeType: 'text/markdown',
+        })),
+      ],
     }));
     server.setRequestHandler('resources/read', (request) => {
+      if (chatPanel && request.params.uri === chatPanelResource.uri) return readChatPanel(request.params.uri);
       const doc = loadDocs(undefined).find((entry) => docUri(entry.path) === request.params.uri);
       if (!doc) {
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `No Pane doc at ${request.params.uri}. List them with resources/list, or search with docs_search.`);

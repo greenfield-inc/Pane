@@ -560,3 +560,111 @@ test('destructive pane actions return a review link, and folder actions pass the
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
 });
+
+test('the chatgpt toolset adds a panel of the agents each chat started, with live status and open in Pane', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const chat = (id) => ({ 'openai/session': id });
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panes:create': {
+        ok: true, repo: { id: 3, name: 'app', path: '/work/app', active: true, environment: 'linux', sessionCount: 1 },
+        items: [{
+          ok: true, index: 0, name: 'fix-login', pinned: true, sessionId: 'pane-7', panelId: 'panel-8', worktreePath: '/work/app-fix-login',
+          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 900, state: { initialized: true } },
+          initialInput: { delivered: true, submitted: true, inputBytes: 17 },
+        }],
+      },
+      'runpane:panels:list': { ok: true, paneId: 'pane-7', panels: [
+        { id: 'panel-8', panelId: 'panel-8', paneId: 'pane-7', type: 'terminal', title: 'Claude', active: true, isCliPanel: true, agentType: 'claude' },
+      ] },
+      'runpane:workspace:state': { ok: true, epoch: 'epoch-1', generation: 4, entries: [
+        { gen: 4, at: '2026-09-25T00:00:00.000Z', kind: 'agent.blocked', paneId: 'pane-7', paneName: 'fix-login', panelId: 'panel-8', source: 'agent', baseline: true },
+      ] },
+      'runpane:panels:screen': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', source: 'scrollback', limit: args[0].limit, returnedLineCount: 3, hasMore: false,
+        text: 'Reading login.ts\n\nAllow edits to login.ts? (y/n)\n', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false },
+      }),
+      'runpane:panes:focus': (args) => ({ ok: true, paneId: args[0].paneId, panelId: args[0].panelId, focused: true }),
+      'runpane:panes:list': { ok: true, panes: [{
+        id: 'pane-7', paneId: 'pane-7', name: 'fix-login', status: 'running', worktreePath: '/work/app-fix-login', repoId: 3,
+        panelCount: 1, pinned: true, agentStatus: 'active', ownership: 'pane',
+      }] },
+      'runpane:panels:submit': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', inputBytes: 1, enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
+        nextCommand: `runpane panels wait --panel ${args[0].panelId} --for ready --timeout-ms 30000 --json`, sentAt: '2026-09-25T00:00:01.000Z',
+      }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const { tools } = await client.listTools();
+        for (const tool of tools) {
+          for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint']) {
+            assert.ok([true, false].includes(tool.annotations?.[hint]), `${tool.name} must set ${hint}`);
+          }
+        }
+        const panel = tools.find((tool) => tool.name === 'agents_panel');
+        assert.equal(panel.title, 'Chat agents');
+        assert.deepEqual(panel._meta['openai/ui'].entrypoints, [{ type: 'thread' }, { type: 'global' }]);
+        assert.equal(panel.icons[0].mimeType, 'image/svg+xml');
+        const uri = panel._meta.ui.resourceUri;
+        for (const name of ['agents_panel_status', 'agents_panel_open']) {
+          assert.deepEqual(tools.find((tool) => tool.name === name)._meta.ui.visibility, ['app'], `${name} is for the panel only`);
+        }
+
+        const { contents: [html] } = await client.readResource({ uri });
+        assert.equal(html.mimeType, 'text/html;profile=mcp-app');
+        assert.equal(html._meta.ui.domain, 'https://runpane.com');
+        assert.match(html.text, /<script>/);
+        assert.doesNotMatch(html.text, /<script[^>]+src=|<link[^>]+stylesheet/, 'the panel must be one self-contained file');
+
+        const empty = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(empty.structuredContent.agents, []);
+
+        await client.callTool({ name: 'agents_start', arguments: {
+          repo: 'app', name: 'fix-login', agent: 'claude', prompt: 'Fix the login redirect', yes: true,
+        }, _meta: chat('chat-a') });
+
+        const shown = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.equal(shown.isError, undefined, shown.content[0].text);
+        assert.deepEqual(shown.structuredContent.agents, [{
+          paneId: 'pane-7', panelId: 'panel-8', name: 'fix-login', status: 'blocked',
+          lastLine: 'Allow edits to login.ts? (y/n)', link: 'pane://open?pane=pane-7&panel=panel-8',
+        }]);
+        const otherChat = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-b') });
+        assert.deepEqual(otherChat.structuredContent.agents, []);
+
+        // The panel refreshes with the chat id from its first result, since the host may not tag app calls.
+        const refreshed = await client.callTool({ name: 'agents_panel_status', arguments: { chat: shown.structuredContent.chat } });
+        assert.equal(refreshed.structuredContent.agents[0].status, 'blocked');
+
+        // The panel's Send reads `delivered` from the JSON, even when the hint names a tool in another toolset.
+        const unconfirmed = await client.callTool({ name: 'agents_send', arguments: { panel: 'panel-8', text: 'y', yes: true } });
+        assert.equal(unconfirmed.isError, true);
+        assert.equal(JSON.parse(unconfirmed.content[0].text).delivered, false);
+
+        const opened = await client.callTool({ name: 'agents_panel_open', arguments: { paneId: 'pane-7', panelId: 'panel-8' } });
+        assert.equal(opened.isError, undefined, opened.content[0].text);
+      }, { args: ['--toolsets', 'core,chatgpt'], env: { PANE_DIR: paneDir } });
+
+      const focus = requests.find((request) => request.channel === 'runpane:panes:focus');
+      assert.deepEqual(focus.args[0], { paneId: 'pane-7', panelId: 'panel-8', source: 'user' });
+    });
+
+    // A restarted server still knows which agents the chat started, and shows an archived one as gone.
+    await withStubDaemon(paneDir, {
+      'runpane:panes:list': { ok: true, panes: [] },
+      'runpane:workspace:state': { ok: true, epoch: 'epoch-2', generation: 1, entries: [] },
+      'runpane:panels:list': { ok: true, paneId: 'pane-7', panels: [] },
+      'runpane:panels:screen': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', source: 'scrollback', limit: args[0].limit, returnedLineCount: 0, hasMore: false,
+        text: '', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false },
+      }),
+    }, async () => {
+      await withMcpClient(async (client) => {
+        const shown = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(shown.structuredContent.agents.map(({ paneId, status }) => ({ paneId, status })), [{ paneId: 'pane-7', status: 'gone' }]);
+      }, { args: ['--toolsets', 'core,chatgpt'], env: { PANE_DIR: paneDir } });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});

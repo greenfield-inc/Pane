@@ -535,18 +535,33 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.16.5
+      '@types/react':
+        specifier: 19.1.8
+        version: 19.1.8
+      '@types/react-dom':
+        specifier: 19.1.6
+        version: 19.1.6(@types/react@19.1.8)
       esbuild:
         specifier: 0.25.7
         version: 0.25.7
       eslint:
         specifier: ^9.17.0
         version: 9.31.0(jiti@2.7.0)
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      react-dom:
+        specifier: 19.1.0
+        version: 19.1.0(react@19.1.0)
       typescript:
         specifier: ^5.7.2
         version: 5.8.3
       typescript-eslint:
         specifier: ^8.19.0
         version: 8.37.0(eslint@9.31.0(jiti@2.7.0))(typescript@5.8.3)
+      vite:
+        specifier: 8.3.0
+        version: 8.3.0(@types/node@22.16.5)(esbuild@0.25.7)(jiti@2.7.0)(yaml@2.9.0)
 
   shared: {}
 
@@ -19928,7 +19943,7 @@ snapshots:
   vite@5.4.19(@types/node@22.16.5)(lightningcss@1.33.0)(terser@5.51.2):
     dependencies:
       esbuild: 0.21.5
-      postcss: 8.5.6
+      postcss: 8.5.28
       rollup: 4.45.1
     optionalDependencies:
       '@types/node': 22.16.5
