@@ -361,7 +361,9 @@ jobs:
         HOMEBREW_NO_AUTO_UPDATE: '1'
       run: |
         brew tap-new --no-git local/pane
-        cp packages/homebrew/Casks/pane.rb "$(brew --repository local/pane)/Casks/"
+        tap="$(brew --repository local/pane)"
+        mkdir -p "$tap/Casks"
+        cp packages/homebrew/Casks/pane.rb "$tap/Casks/"
         brew style --cask local/pane/pane
         brew audit --cask --strict local/pane/pane
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
