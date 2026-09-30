@@ -246,3 +246,15 @@ jobs:
       if: ${{ !cancelled() }}
       shell: bash
       run: scripts/ci-background.sh wait typecheck
+
+  # The one check branch protection requires. Skipped jobs pass; failed or
+  # cancelled ones fail it.
+  ci-result:
+    name: CI result
+    needs: [changes, quality-checks, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+      run: exit 1
