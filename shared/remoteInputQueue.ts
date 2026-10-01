@@ -122,20 +122,30 @@ export class RemoteInputQueue<Result> {
     const entry: InFlight<Result> = { batch, controller, timeout };
     queue.active.push(entry);
 
+    void this.deliver(panelId, queue, entry, sequence);
+  }
+
+  private async deliver(
+    panelId: string,
+    queue: PanelInputQueue<Result>,
+    entry: InFlight<Result>,
+    sequence: RemoteInputSequence | undefined,
+  ): Promise<void> {
+    const { batch, controller, timeout } = entry;
     const args = [panelId, batch.data];
-    const request = sequence
-      ? this.send(batch.channel, args, controller.signal, sequence)
-      : this.send(batch.channel, args, controller.signal);
-    void request.then((result) => {
+    try {
+      const result = sequence
+        ? await this.send(batch.channel, args, controller.signal, sequence)
+        : await this.send(batch.channel, args, controller.signal);
       // A disconnect may have canceled this queue and created a new one for the same panel.
       if (this.panels.get(panelId) !== queue) return;
       clearTimeout(timeout);
       queue.active = queue.active.filter(candidate => candidate !== entry);
       for (const waiter of batch.waiters) waiter.resolve(result);
       this.drain(panelId, queue);
-    }, (error: unknown) => {
+    } catch (error) {
       this.fail(panelId, queue, error instanceof Error ? error : new Error(String(error)));
-    });
+    }
   }
 
   private fail(panelId: string, queue: PanelInputQueue<Result>, error: Error): void {

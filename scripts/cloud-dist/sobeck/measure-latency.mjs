@@ -50,6 +50,7 @@ const KEYS = Number(env.KEYS || 40);
 const IDLE_KEYS = Number(env.IDLE_KEYS || 4);
 const SCROLL_ROUNDS = Number(env.SCROLL_ROUNDS || 4);
 const SWITCHES = Number(env.SWITCHES || 8);
+const ACTIVATION_WINDOW_MS = Number(env.ACTIVATION_WINDOW_MS || 6000);
 const skip = new Set((env.SKIP || '').split(',').map((s) => s.trim()).filter(Boolean));
 // Opt-in: start `claude --debug` in the measured terminal (needs Claude on the host; no prompt, no tokens),
 // wheel once, quit, and report the wheel profile Claude picked from its debug log (one line, no content).
@@ -95,7 +96,7 @@ async function instrumentMain() {
       const original = mod.request;
       mod.request = function patchedRequest(...args) {
         const req = original.apply(this, args);
-        const url = args[0] instanceof URL ? args[0] : typeof args[0] === 'string' ? new URL(args[0]) : null;
+        const url = args[0] instanceof URL ? args[0] : URL.canParse(String(args[0])) ? new URL(String(args[0])) : null;
         const entry = { t0: clock(), path: url?.pathname ?? args[0]?.path ?? '?', channel: null, reused: null, ms: null, bytes: 0 };
         if (!/\/(invoke|events)$/.test(entry.path)) return req;
         globalThis.__latReq.push(entry);
@@ -119,7 +120,7 @@ async function instrumentMain() {
     }
   });
 }
-const requestsSince = async (t0, t1 = Infinity) => app.evaluate(({}, [from, to]) =>
+const requestsSince = async (t0, t1 = Infinity) => app.evaluate((_electron, [from, to]) =>
   (globalThis.__latReq ?? []).filter((r) => r.t0 >= from && r.t0 <= to), [t0, t1]);
 const summarizeRequests = (requests) => {
   const invokes = requests.filter((r) => r.path.endsWith('/invoke'));
@@ -230,7 +231,7 @@ async function openPane() {
     await dialog.getByRole('button', { name: /^Create/ }).click();
   }
   // Panels load asynchronously: wait for a visible terminal; create one only if the empty stage stays empty.
-  const addTerminal = page.getByRole('button', { name: /^Terminal Ctrl\+Alt\+1/ });
+  const addTerminal = page.getByRole('button', { name: /^Terminal\s*Ctrl\+Alt\+1/ });
   const t0 = Date.now();
   let emptySince = 0;
   for (;;) {
@@ -361,12 +362,12 @@ async function scrollGesture(notches, direction) {
 async function measureActivation(click) {
   const t0 = now();
   await click();
-  const seen = await page.evaluate(async () => {
+  const seen = await page.evaluate(async (windowMs) => {
     const clock = () => performance.timeOrigin + performance.now();
     const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
     const start = clock();
     let lastMask = null; let firstVisible = null; let maskFrames = 0;
-    while (clock() - start < 3500) {
+    while (clock() - start < windowMs) {
       await frame();
       const t = clock();
       const masked = [...document.querySelectorAll('[data-testid="terminal-activation-mask"]')].some((el) => el.offsetParent !== null);
@@ -374,9 +375,9 @@ async function measureActivation(click) {
       if (firstVisible === null && [...document.querySelectorAll('.xterm')].some((el) => el.offsetParent !== null)) firstVisible = t;
     }
     return { lastMask, firstVisible, maskFrames };
-  });
+  }, ACTIVATION_WINDOW_MS);
   const done = Math.max(seen.firstVisible ?? Infinity, seen.lastMask ?? 0);
-  const requests = summarizeRequests(await requestsSince(t0, t0 + 3500));
+  const requests = summarizeRequests(await requestsSince(t0, t0 + ACTIVATION_WINDOW_MS));
   return { ms: Number.isFinite(done) ? done - t0 : null, masked: seen.maskFrames > 0, invokes: requests.invokes, newConnections: requests.newConnections, responseBytes: requests.responseBytes, byChannel: requests.byChannel };
 }
 const summarizeSwitches = (samples) => ({
@@ -419,7 +420,7 @@ async function paneSwitches(count) {
   } else {
     await otherButton.click();
   }
-  const addTerminal = page.getByRole('button', { name: /^Terminal Ctrl\+Alt\+1/ });
+  const addTerminal = page.getByRole('button', { name: /^Terminal\s*Ctrl\+Alt\+1/ });
   const deadline = Date.now() + 60_000;
   while (!await visibleTerminal().isVisible().catch(() => false) && Date.now() < deadline) {
     if (await addTerminal.isVisible().catch(() => false)) { await page.waitForTimeout(3000); if (!await visibleTerminal().isVisible().catch(() => false)) await addTerminal.click(); }
@@ -486,13 +487,13 @@ async function probeClaudeWheelProfile() {
   await page.evaluate(() => { window.__lat.capture = ''; });
   await page.evaluate(() => {
     window.electronAPI.events.onTerminalOutput((event) => {
-      if (event.panelId === window.__lat.panel && typeof window.__lat.capture === 'string') window.__lat.capture += String(event.output ?? '');
+      if (event.panelId === window.__lat.panel && window.__lat.capture !== undefined) window.__lat.capture += String(event.output ?? '');
     });
   });
   await shellCommand(`grep -ahoE 'wheel accel: [^\\r]{0,120}' ~/.rcl-claude-${marker}.txt | head -1; echo ${marker}END`);
   await page.waitForTimeout(2500);
   const captured = await page.evaluate(() => window.__lat.capture ?? '');
-  const plain = captured.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '');
+  const plain = captured.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '');
   const line = /wheel accel: [^\r\n]{0,120}/.exec(plain.slice(plain.indexOf('head -1')))?.[0] ?? null;
   return { wheelProfile: line };
 }
@@ -555,6 +556,11 @@ try {
   result.errors.push(error instanceof Error ? error.message.split('\n')[0] : String(error));
   log('FAILED', result.errors.at(-1));
   await page.screenshot({ path: path.join(out, 'error.png') }).catch(() => undefined);
+  // Requests still unanswered (channel names only): what the UI is waiting on.
+  result.pendingRequests = await app.evaluate(() => (globalThis.__latReq ?? [])
+    .filter((r) => r.path.endsWith('/invoke') && r.ms === null)
+    .map((r) => ({ channel: r.channel, ageMs: Math.round(performance.timeOrigin + performance.now() - r.t0), status: r.status ?? null, encoding: r.encoding ?? null })))
+    .catch(() => []);
 } finally {
   result.seconds = Math.round((Date.now() - started) / 1000);
   result.ok = result.errors.length === 0;

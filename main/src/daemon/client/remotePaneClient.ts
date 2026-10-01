@@ -1103,8 +1103,9 @@ async function requestJson(
   });
 }
 
-function parseKeepAliveSeconds(header: string | undefined): number | null {
-  const match = header ? /(?:^|,)\s*timeout=(\d+)/i.exec(header) : null;
+function parseKeepAliveSeconds(header: string | string[] | undefined): number | null {
+  const value = Array.isArray(header) ? header[0] : header;
+  const match = value ? /(?:^|,)\s*timeout=(\d+)/i.exec(value) : null;
   return match ? Number(match[1]) : null;
 }
 

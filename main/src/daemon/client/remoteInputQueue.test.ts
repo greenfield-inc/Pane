@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
+import { RemoteInputQueue, type RemoteInputSequence } from '../../../../shared/remoteInputQueue';
 
 afterEach(() => vi.useRealTimers());
 
@@ -105,7 +105,7 @@ describe('RemoteInputQueue lifecycle', () => {
 
   it('keeps several keys in flight with increasing sequence numbers when the host orders them', async () => {
     const finish: Array<() => void> = [];
-    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: { stream: string; seq: number }) =>
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: RemoteInputSequence) =>
       new Promise<void>(resolve => finish.push(resolve)));
     const queue = new RemoteInputQueue(send, { pipelineDepth: () => 3 });
     const typed = Promise.all([...'abcde'].map(key => queue.invoke('terminal:input', ['panel', key])));
@@ -127,7 +127,7 @@ describe('RemoteInputQueue lifecycle', () => {
 
   it('starts a new sequence stream after a failure and never replays failed input', async () => {
     const finish: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
-    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: { stream: string; seq: number }) =>
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: RemoteInputSequence) =>
       new Promise<void>((resolve, reject) => finish.push({ resolve, reject })));
     const queue = new RemoteInputQueue(send, { pipelineDepth: () => 4 });
     const first = Promise.allSettled(['a', 'b'].map(key => queue.invoke('terminal:input', ['panel', key])));
@@ -146,7 +146,7 @@ describe('RemoteInputQueue lifecycle', () => {
   });
 
   it('sends without a sequence stamp at the default depth of one', async () => {
-    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: unknown) => Promise.resolve());
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: RemoteInputSequence) => Promise.resolve());
     const queue = new RemoteInputQueue(send);
     await queue.invoke('terminal:input', ['panel', 'a']);
     expect(send.mock.calls[0]).toHaveLength(3);

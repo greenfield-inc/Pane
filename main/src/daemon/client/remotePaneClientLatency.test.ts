@@ -1,7 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 import { constants as zlibConstants, createGzip, gzipSync } from 'zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { RemotePaneClient } from './remotePaneClient';
 
 interface Seen {
@@ -78,7 +78,7 @@ async function startHost(options: HostOptions = {}) {
   return { client, seen, received, sendEvent: (text: string) => events?.write(text) };
 }
 
-function answer(entry: Seen, payload: unknown): void {
+function answer(entry: Seen, payload: JsonValue): void {
   const body = JSON.stringify(payload);
   if (entry.headers['accept-encoding']?.includes('gzip')) {
     entry.response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' });
