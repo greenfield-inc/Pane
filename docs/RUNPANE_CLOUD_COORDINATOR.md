@@ -58,8 +58,9 @@ For each Session in the directory whose sandbox is running, the coordinator chec
    sandbox. Asking to wake a host that is already awake doesn't start the grace, so a peer can't keep a
    host up by asking again and again. A user's wake of an awake host restarts the safe streak (step 4); a
    peer's does not.
-2. **Daemon ready?** `GET /health` must answer and report ready. If the daemon is down, don't stop the
-   sandbox; raise a `daemon-down` alert instead.
+2. **Daemon ready?** `GET /health` (with the coordinator's token, so the daemon reports its readiness) must
+   answer and report ready. If the daemon is down, don't stop the sandbox; raise a `daemon-down` alert
+   instead.
 3. **Safe to stop?** Call `POST /invoke runpane:cloud:safe-to-stop` with the coordinator's own paired-client
    token. The daemon refuses while an agent is working, a terminal printed output recently, a lock is
    held, a watcher is active, a PR has pending checks, or a user client is attached. When it's safe, the

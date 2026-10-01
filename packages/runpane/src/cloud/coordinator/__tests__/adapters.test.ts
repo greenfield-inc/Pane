@@ -118,7 +118,7 @@ describe('daemon probe decoding', () => {
     assert.equal((await unknown.safeToStop('https://d', 't')).kind, 'unsupported');
     const down = new HttpDaemonProbe({ fetchImpl: async () => { throw new TypeError('fetch failed'); } });
     assert.equal((await down.safeToStop('https://d', 't')).kind, 'error');
-    assert.equal((await down.health('https://d')).reachable, false);
+    assert.equal((await down.health('https://d', null)).reachable, false);
     await down.releaseStopLease('https://d', 't');
   });
 
@@ -138,6 +138,20 @@ describe('daemon probe decoding', () => {
       { channel: 'runpane:cloud:safe-to-stop', args: [{}] },
       { channel: 'runpane:cloud:stop-lease:release', args: [{}] },
     ]);
+  });
+
+  // The daemon tells only paired clients its version and readiness; the coordinator asks with its own token.
+  it('sends the coordinator token to /health when it has one', async () => {
+    const sent: Array<string | null> = [];
+    const probe = new HttpDaemonProbe({
+      fetchImpl: async (_url, init) => {
+        sent.push(new Headers(init.headers).get('authorization'));
+        return jsonResponse(200, { ok: true, status: 'ready', version: '2.4.142', readiness: { state: 'ready' } });
+      },
+    });
+    assert.equal((await probe.health('https://d', 'tok')).version, '2.4.142');
+    await probe.health('https://d', null);
+    assert.deepEqual(sent, ['Bearer tok', null]);
   });
 });
 

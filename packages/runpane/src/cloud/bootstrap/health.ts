@@ -7,10 +7,12 @@ interface WaitForDaemonHealthOptions {
   /** Per-request timeout. */
   requestTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** The host's paired token: without it the daemon only says it answers, not its version or readiness. */
+  token?: string;
 }
 
 /**
- * Polls `GET <baseUrl>/health` (unauthenticated) until the daemon reports ready or the timeout
+ * Polls `GET <baseUrl>/health` (with the paired token when given) until the daemon reports ready or the timeout
  * passes. Ready means HTTP 200 with `ok: true` and, when the daemon reports readiness,
  * `readiness.state` "ready" or "degraded" (degraded is usable); older daemons only report
  * `status: "ready"`.
@@ -28,7 +30,7 @@ export async function waitForDaemonHealth(
   let last: Omit<DaemonHealthResult, 'elapsedMs'> = { ok: false };
 
   for (;;) {
-    last = await probe(fetchImpl, url, requestTimeoutMs);
+    last = await probe(fetchImpl, url, requestTimeoutMs, options.token);
     const elapsedMs = Date.now() - started;
     if (last.ok || elapsedMs + intervalMs > timeoutMs) {
       return { ...last, elapsedMs };
@@ -41,9 +43,13 @@ async function probe(
   fetchImpl: typeof fetch,
   url: string,
   requestTimeoutMs: number,
+  token: string | undefined,
 ): Promise<Omit<DaemonHealthResult, 'elapsedMs'>> {
   try {
-    const response = await fetchImpl(url, { signal: AbortSignal.timeout(requestTimeoutMs) });
+    const response = await fetchImpl(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
     if (response.status !== 200) {
       return { ok: false, status: response.status };
     }

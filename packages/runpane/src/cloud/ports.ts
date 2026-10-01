@@ -60,7 +60,8 @@ interface HealthResult {
 export interface BootstrapPort {
   cloudHostname(sessionId: string, prefix: string): string;
   provision(sandbox: SandboxHandle, request: ProvisionRequest, tailnet: TailnetCredentials): Promise<ProvisionOutcome>;
-  waitForDaemonHealth(baseUrl: string, options?: { timeoutMs?: number; intervalMs?: number }): Promise<HealthResult>;
+  /** Polls /health; with the host's paired token the daemon also reports its version and readiness. */
+  waitForDaemonHealth(baseUrl: string, options?: { timeoutMs?: number; intervalMs?: number; token?: string }): Promise<HealthResult>;
   createTailnet(credentials: TailnetCredentials): TailnetPort;
   /** Joins a sandbox to the tailnet as tag:rp-session without installing Pane (the coordinator's box). */
   joinTailnet(sandbox: SandboxHandle, request: JoinTailnetRequest, tailnet: TailnetCredentials): Promise<JoinedNode>;

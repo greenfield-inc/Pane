@@ -433,7 +433,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       record.meta.repo ? [`/home/user/${repoDirName(record.meta.repo.url)}`] : []);
     if (agentKeys.length > 0) {
       // The daemon restarted with the agent environment; wait for it again before handing the host over.
-      const health = await deps.bootstrap.waitForDaemonHealth(pairing.baseUrl, { timeoutMs: 60_000, intervalMs: 500 });
+      const health = await deps.bootstrap.waitForDaemonHealth(pairing.baseUrl, { token: pairing.token, timeoutMs: 60_000, intervalMs: 500 });
       if (!health.ok) throw new Error(`the daemon did not come back after adding the agent credentials (${agentKeys.join(', ')})`);
       progress(`  - agent-credentials done: ${agentKeys.join(', ')}`);
       timings.agentCredentialsMs = deps.now() - started;
@@ -674,7 +674,7 @@ async function hostStatus(record: CloudHostRecord, provider: CloudProvider, tail
     status = 'waking';
   } else {
     const result = record.profile.baseUrl
-      ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: STATUS_HEALTH_TIMEOUT_MS, intervalMs: 1_000 })
+      ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: STATUS_HEALTH_TIMEOUT_MS, intervalMs: 1_000 })
       : { ok: false, elapsedMs: 0 };
     health = { ok: result.ok, status: result.status, version: result.version };
     status = result.ok ? 'awake' : 'daemon-down';
@@ -785,6 +785,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const remaining = () => Math.max(timeoutMs - (deps.now() - started), 1_000);
   // A healthy wake answers in 9-13 s; after that, check the node before waiting out the rest.
   let health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
+    token: record.profile.token,
     timeoutMs: Math.min(remaining(), WAKE_REPAIR_CHECK_MS),
     intervalMs: 500,
   });
@@ -801,7 +802,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
       await deps.store.writeHost(record);
       await importIntoDesktop(args, deps, [record.profile]);
       await pushDirectory(deps);
-      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 90_000, intervalMs: 500 });
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: 90_000, intervalMs: 500 });
       timings.repairedHealthMs = deps.now() - started;
     } else {
       // Logged in but unreachable: a resume can bring back a stale tailscaled.state without the Serve config.
@@ -810,7 +811,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
         serveRepaired = true;
         if (!args.json) deps.stdout(`runpane cloud: ${hostname} came back without its Tailscale Serve config; re-applied it.`);
       }
-      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: remaining(), intervalMs: 500 });
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: remaining(), intervalMs: 500 });
       timings.healthMs = deps.now() - started;
     }
   }
@@ -891,7 +892,7 @@ async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const deployment = (await deps.store.readSettings()).coordinator?.deployment;
   const panePin = deployment ? await pushPanePin(record, deployment.pin ?? null, deps, provider) : null;
   const health = record.profile.baseUrl
-    ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 60_000, intervalMs: 1_000 })
+    ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: 60_000, intervalMs: 1_000 })
     : { ok: false, elapsedMs: 0 };
   const done = [
     tailnetRepair.reenrolled ? `re-enrolled the tailnet node as ${tailnetRepair.nodeId}` : 'tailnet node ok',

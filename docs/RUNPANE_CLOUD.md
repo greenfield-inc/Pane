@@ -1069,8 +1069,9 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | A port declared in `.runpane/ports.json` isn't published | The file is read at the root of the repository's checkout in the Session, not from worktrees, on the branch checked out there. `port list` shows `error` with the reason when another Serve entry holds the tailnet port. A port you closed stays closed until `runpane port open <port>` |
 | A Session idle-stopped while someone was using a port's link | Browser visits don't count as activity. Hold a lock in the Session while the link is in use: `runpane lock acquire --name review --ttl 2h` |
 
-To check a daemon by hand: `curl https://rp-<id>.<your-tailnet>.ts.net/health` returns its version and
-readiness (`readiness.state`: `starting`, `ready` or `degraded`).
+To check a daemon by hand: `curl -H "Authorization: Bearer <token>" https://rp-<id>.<your-tailnet>.ts.net/health`
+returns its version and readiness (`readiness.state`: `starting`, `ready` or `degraded`); the token is the one in
+the Session's pairing (`runpane cloud pair <host>`). Without a token `/health` only says the daemon answers.
 
 ## Where things live
 

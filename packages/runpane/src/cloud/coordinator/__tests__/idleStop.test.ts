@@ -81,13 +81,14 @@ describe('IdleStopper', () => {
   });
 
   it('stops only after the required number of consecutive safe answers', async () => {
-    const { idle, provider } = setup();
+    const { idle, provider, probe } = setup();
     const first = await idle.runOnce();
     assert.equal(first.results[0].decision, 'safe-streak');
     assert.deepEqual(provider.mutations(), []);
     const second = await idle.runOnce();
     assert.equal(second.results[0].decision, 'stopped');
     assert.deepEqual(provider.mutations(), ['stop bx_a']);
+    assert.deepEqual(probe.healthTokens, ['token-s1', 'token-s1'], '/health is asked with the coordinator token');
   });
 
   it('never stops while the daemon says an agent is working, and an unsafe answer resets the streak', async () => {

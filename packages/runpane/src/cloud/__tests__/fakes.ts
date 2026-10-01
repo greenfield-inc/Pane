@@ -46,6 +46,8 @@ interface FakeWorld {
   createdByKey: Map<string, string>;
   /** Hosts whose tailnet node comes back logged out after a resume (healthy again once repaired). */
   loggedOut: Set<string>;
+  /** The bearer token each CLI /health wait sent (undefined: none). */
+  healthTokens: (string | undefined)[];
   /** The Pane version each host's daemon reports on /health (default 2.4.141). */
   daemonVersions: Map<string, string>;
   /** The Pane pin each host's sandbox holds (/etc/rp-cloud/pane-pin.json): a version, or null once cleared. */
@@ -109,6 +111,7 @@ function createFakeWorld(): FakeWorld {
     files: new Map(), daemons: new Map(), agentNotes: new Map(), agentNotesDown: new Set(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
     panePins: new Map(),
     daemonVersions: new Map(),
+    healthTokens: [],
     binaryFiles: new Map(),
     provisionRepos: [],
     provisionPaneSources: [],
@@ -389,7 +392,8 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
       world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true, tags: ['tag:rp-session'] });
       return { nodeId, magicDnsName, tailscaleIps: ['100.64.0.9'] };
     },
-    async waitForDaemonHealth(baseUrl) {
+    async waitForDaemonHealth(baseUrl, options) {
+      world.healthTokens.push(options?.token);
       const host = new URL(baseUrl).hostname.split('.')[0];
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name === host);
       const ok = world.healthy.has(host) && !world.loggedOut.has(host) && !world.serveLost.has(host) && sandbox?.state === 'running';

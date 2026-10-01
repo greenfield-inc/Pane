@@ -445,24 +445,7 @@ describe('PaneRemoteHttpApiServer', () => {
     stream.close();
   });
 
-  it('exposes an unauthenticated health endpoint for hosted readiness checks', async () => {
-    const registry = new PaneCommandRegistry();
-    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
-    activeServers.push(server);
-    await server.start();
-
-    await expect(requestJson(server, 'GET', '/health')).resolves.toEqual({
-      statusCode: 200,
-      body: {
-        ok: true,
-        status: 'ready',
-        transport: 'http+sse',
-        ...JSON.parse(JSON.stringify(cloudDaemonHealth.fields())),
-      },
-    });
-  });
-
-  it('reports the daemon version and agent readiness on health for cloud wake', async () => {
+  it('tells an unauthenticated caller only that the daemon answers', async () => {
     const registry = new PaneCommandRegistry();
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
     activeServers.push(server);
@@ -470,14 +453,49 @@ describe('PaneRemoteHttpApiServer', () => {
     cloudDaemonHealth.setVersion('2.4.141', 'abc1234');
     cloudDaemonHealth.markDaemonReady();
 
-    const health = await requestJson(server, 'GET', '/health');
+    const minimal = { statusCode: 200, body: { ok: true, status: 'ready', transport: 'http+sse' } };
+    await expect(requestJson(server, 'GET', '/health')).resolves.toEqual(minimal);
+    await expect(requestJson(server, 'GET', '/health', undefined, 'wrong-token')).resolves.toEqual(minimal);
+  });
 
-    expect(health.body).toMatchObject({
+  it('reports the daemon version and agent readiness on health to a paired client, for cloud wake', async () => {
+    const registry = new PaneCommandRegistry();
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    cloudDaemonHealth.setVersion('2.4.141', 'abc1234');
+    cloudDaemonHealth.markDaemonReady();
+
+    const health = await requestJson(server, 'GET', '/health', undefined, 'secret-token');
+
+    expect(health.body).toEqual({
+      ok: true,
       status: 'ready',
+      transport: 'http+sse',
+      ...JSON.parse(JSON.stringify(cloudDaemonHealth.fields())),
+    });
+    expect(health.body).toMatchObject({
       version: '2.4.141',
       gitCommit: 'abc1234',
       readiness: { state: 'ready', daemon: 'ready', agentRestore: 'none' },
     });
+  });
+
+  it('reports health detail to the coordinator-scoped client', async () => {
+    const registry = new PaneCommandRegistry();
+    const config = createEnabledRemoteConfig();
+    config.host.clients.push({
+      id: 'coordinator', label: 'runpane-cloud-coordinator', createdAt: '2026-09-29T00:00:00.000Z',
+      tokenHash: hashRemoteDaemonToken('coordinator-token'), scope: 'coordinator',
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+    activeServers.push(server);
+    await server.start();
+    cloudDaemonHealth.setVersion('2.4.141', 'abc1234');
+
+    const health = await requestJson(server, 'GET', '/health', undefined, 'coordinator-token');
+
+    expect(health.body).toMatchObject({ ok: true, version: '2.4.141', readiness: { daemon: expect.any(String) } });
   });
 
   it('marks peer calls so they never count as a user using the Session', async () => {

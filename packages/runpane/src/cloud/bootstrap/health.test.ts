@@ -32,6 +32,17 @@ test('waitForDaemonHealth polls until ready', async () => {
   assert.equal(calls, 3);
 });
 
+test('waitForDaemonHealth sends the paired token, so the daemon reports its version and readiness', async () => {
+  const sent: (string | null)[] = [];
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    sent.push(new Headers(init?.headers).get('authorization'));
+    return new Response(JSON.stringify({ ok: true, status: 'ready', version: '9.9.9' }), { status: 200 });
+  };
+  await waitForDaemonHealth('https://rp-x.ts.net', { fetchImpl, token: 'tok' });
+  await waitForDaemonHealth('https://rp-x.ts.net', { fetchImpl });
+  assert.deepEqual(sent, ['Bearer tok', null]);
+});
+
 test('waitForDaemonHealth gives up at the timeout with the last status', async () => {
   const fetchImpl: typeof fetch = async () => new Response('', { status: 502 });
   const result = await waitForDaemonHealth('https://rp-x.ts.net', { fetchImpl, intervalMs: 5, timeoutMs: 20 });

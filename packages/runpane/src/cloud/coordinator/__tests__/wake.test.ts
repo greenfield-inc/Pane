@@ -179,6 +179,8 @@ describe('WakeService.wake', () => {
     assert.equal(status(result), 'awake');
     assert.ok(result.ok && result.version === '2.0.0');
     assert.ok(probe.calls.includes(`upgrade ${URL_A} 2.0.0 abc`));
+    // Only a paired client learns the version from /health: every probe carries the coordinator token.
+    assert.ok(probe.healthTokens.length > 0 && probe.healthTokens.every((token) => token === 'token-s1'), String(probe.healthTokens));
   });
 
   it('reports version-mismatch but still wakes when the daemon has no upgrade hook', async () => {

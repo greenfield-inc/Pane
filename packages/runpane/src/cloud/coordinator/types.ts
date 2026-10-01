@@ -88,7 +88,8 @@ export type UpgradeAnswer =
   | { kind: 'error'; error: string };
 
 export interface DaemonProbe {
-  health(baseUrl: string): Promise<DaemonHealth>;
+  /** GET /health; the daemon reports version and readiness only to a paired client, so pass the token when there is one. */
+  health(baseUrl: string, token: string | null): Promise<DaemonHealth>;
   /** `stopLeaseMs`: ask the daemon to fence itself for that long if it answers safe. */
   safeToStop(baseUrl: string, token: string, options?: { stopLeaseMs?: number }): Promise<SafeToStopAnswer>;
   /** Lifts a stop lease the coordinator no longer needs (it did not stop). Never throws. */

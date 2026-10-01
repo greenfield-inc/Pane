@@ -2,13 +2,16 @@
 
 A cloud Session is a normal headless Pane daemon on a provider sandbox. The coordinator (`runpane cloud`)
 talks to it through `GET /health`, `runpane:cloud:safe-to-stop` (with `runpane:cloud:stop-lease:release`) and
-`runpane:cloud:upgrade`, over the usual `POST /invoke` with its paired client token. The laptop CLI adds
-`runpane:cloud:coordinator-client:pair|revoke` with its full-access token (see the coordinator doc). Code: `main/src/daemon/cloud/`.
+`runpane:cloud:upgrade`, over the usual `POST /invoke` with its paired client token; it sends the same token to
+`/health`. The laptop CLI adds `runpane:cloud:coordinator-client:pair|revoke` with its full-access token (see the
+coordinator doc). Code: `main/src/daemon/cloud/`.
 
 ## `GET /health`: version and readiness
 
-Unauthenticated, as before. The old fields stay (`ok`, `status: "ready"`, `transport`); `status` only says the HTTP
-server answers. New fields:
+Anyone may call it, as before, but without a valid paired-client token (`Authorization: Bearer <token>`; any
+client, the coordinator's scoped one included) it answers only `{ "ok": true, "status": "ready", "transport":
+"http+sse" }`: `status` only says the HTTP server answers. That is all the desktop and phone clients' reachability
+check needs. A paired client, or any caller when pairing is off, also gets the build and readiness:
 
 ```json
 {

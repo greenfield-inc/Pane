@@ -119,7 +119,7 @@ export class IdleStopper {
         activity.resetSafe(entry.sandboxId);
         return result('no-token', 'directory entry has no coordinator token; cannot ask safe-to-stop');
       }
-      const health = await this.deps.probe.health(entry.baseUrl);
+      const health = await this.deps.probe.health(entry.baseUrl, entry.coordinatorToken);
       if (!health.reachable) {
         activity.resetSafe(entry.sandboxId);
         this.deps.alerts.emit({

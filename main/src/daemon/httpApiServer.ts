@@ -90,8 +90,11 @@ interface RemoteReadyEventPayload {
   timestamp: string;
 }
 
-/** `status` says the HTTP server answers; `readiness` says whether agents are usable (cloud wake). */
-interface RemoteHealthPayload extends CloudHealthFields {
+/**
+ * `status` says the HTTP server answers. A paired client (the coordinator's scoped one included) also
+ * gets the build and `readiness`, whether agents are usable (cloud wake); nobody else learns them.
+ */
+interface RemoteHealthPayload extends Partial<CloudHealthFields> {
   ok: true;
   status: 'ready';
   transport: 'http+sse';
@@ -684,12 +687,10 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    this.writeJson(response, 200, {
-      ok: true,
-      status: 'ready',
-      transport: 'http+sse',
-      ...cloudDaemonHealth.fields(),
-    } satisfies RemoteHealthPayload);
+    const payload: RemoteHealthPayload = { ok: true, status: 'ready', transport: 'http+sse' };
+    this.writeJson(response, 200, this.authenticateRequest(request).ok
+      ? { ...payload, ...cloudDaemonHealth.fields() }
+      : payload);
   }
 
   /** Notes a user client's call for cloud safe-to-stop and returns the call's origin; peers are not users. */
