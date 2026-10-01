@@ -30,6 +30,8 @@ const IDEMPOTENT_SUBMIT_CHANNEL = 'runpane:panels:submit';
 const ORCHESTRATOR_PANEL_SELECTOR = 'orchestrator';
 const DEFAULT_WAKE_WAIT_MS = 90_000;
 const RESEND_INTERVAL_MS = 2_000;
+/** A cloud daemon answers this while its coordinator's stop lease holds (main/src/daemon/cloud/stopLease.ts). */
+const SESSION_STOPPING_CODE = 'ERR_SESSION_STOPPING';
 // Local Pane terminal ids name panels on this host, never on the target.
 const LOCAL_IDENTITY_ENV = ['PANE_SESSION_ID', 'PANE_PANEL_ID', 'PANE_ORCHESTRATION_SESSION_ID'];
 
@@ -80,7 +82,9 @@ export interface InvokeRemoteOptions {
  * Sends one channel call over HTTP `/invoke`. When the connection never opens
  * and the target is a cloud host: a submit asks the coordinator to wake it and
  * then resends the same request (same idempotency key); anything else asks for
- * the status only and fails with ERR_RUNPANE_HOST_<STATUS>.
+ * the status only and fails with ERR_RUNPANE_HOST_<STATUS>. A host its coordinator
+ * is stopping refuses everything (ERR_SESSION_STOPPING): a submit waits for the
+ * stop and wakes it the same way; anything else fails with ERR_RUNPANE_HOST_STOPPING.
  */
 export async function invokeRemote(
   target: DaemonTarget,
@@ -113,10 +117,12 @@ export async function invokeRemote(
   try {
     return await deliver();
   } catch (error) {
-    if (!(error instanceof RemoteConnectError)) throw error instanceof Error ? toTargetError(error, target) : error;
+    if (!(error instanceof RemoteConnectError) && !isStopping(error)) throw error instanceof Error ? toTargetError(error, target) : error;
+    // A daemon under the coordinator's stop lease answered: it is about to sleep. Only a submit waits it out.
+    if (isStopping(error) && (!WAKING_CHANNELS.has(channel) || !target.host.cloud || !target.coordinator)) throw stoppingError(target);
   }
 
-  // The connection never opened, so the host cannot have seen the request.
+  // The connection never opened (or the host is being stopped), so the host did not take the request.
   const cloud = target.host.cloud;
   if (!cloud || !target.coordinator) {
     throw new RemoteTargetError(
@@ -129,47 +135,69 @@ export async function invokeRemote(
   }
   const coordinator = new CoordinatorClient(target.coordinator, transport);
   const wakeWaitMs = options.wakeWaitMs ?? DEFAULT_WAKE_WAIT_MS;
-
-  let state: CloudHostState;
-  try {
-    state = WAKING_CHANNELS.has(channel)
-      ? await coordinator.wake(cloud.sessionId, wakeWaitMs)
-      : await coordinator.status(cloud.sessionId);
-  } catch (error) {
-    if (error instanceof CoordinatorError) throw new RemoteTargetError(error.message, error.code);
-    throw error;
-  }
-  // A re-enrolled host keeps its name but may come back with a new address.
-  if (state.baseUrl) baseUrl = state.baseUrl;
-
-  if (!WAKING_CHANNELS.has(channel) && state.status !== 'awake') {
-    throw hostStateError(target, state, false);
-  }
   const deadline = startedAt + wakeWaitMs + options.timeoutMs;
-  if (state.status === 'waking') {
-    state = await pollUntilSettled(coordinator, cloud.sessionId, deadline, options.resendIntervalMs ?? RESEND_INTERVAL_MS);
+  const resendIntervalMs = options.resendIntervalMs ?? RESEND_INTERVAL_MS;
+
+  // Wakes (a submit) or only asks (anything else), then waits out a host that is still booting.
+  const settle = async (waitMs: number): Promise<void> => {
+    let state: CloudHostState;
+    try {
+      state = WAKING_CHANNELS.has(channel)
+        ? await coordinator.wake(cloud.sessionId, waitMs)
+        : await coordinator.status(cloud.sessionId);
+    } catch (error) {
+      if (error instanceof CoordinatorError) throw new RemoteTargetError(error.message, error.code);
+      throw error;
+    }
+    // A re-enrolled host keeps its name but may come back with a new address.
     if (state.baseUrl) baseUrl = state.baseUrl;
-  }
-  if (state.status !== 'awake') {
-    throw hostStateError(target, state, WAKING_CHANNELS.has(channel));
-  }
+
+    if (!WAKING_CHANNELS.has(channel) && state.status !== 'awake') {
+      throw hostStateError(target, state, false);
+    }
+    if (state.status === 'waking') {
+      state = await pollUntilSettled(coordinator, cloud.sessionId, deadline, resendIntervalMs);
+      if (state.baseUrl) baseUrl = state.baseUrl;
+    }
+    if (state.status !== 'awake') {
+      throw hostStateError(target, state, WAKING_CHANNELS.has(channel));
+    }
+  };
+  await settle(wakeWaitMs);
 
   // Resend while the connection keeps failing to open (MagicDNS and routes can
-  // lag the wake by a few seconds). Once it opens, the answer is final.
+  // lag the wake by a few seconds). Once it opens, the answer is final. A host
+  // still under its stop lease is woken again once the stop it was fencing lands.
   for (;;) {
     try {
       return await deliver();
     } catch (error) {
-      if (!(error instanceof RemoteConnectError)) throw error instanceof Error ? toTargetError(error, target) : error;
-      if (Date.now() + (options.resendIntervalMs ?? RESEND_INTERVAL_MS) > deadline) {
+      const stopping = isStopping(error);
+      if (!(error instanceof RemoteConnectError) && !stopping) throw error instanceof Error ? toTargetError(error, target) : error;
+      if (Date.now() + resendIntervalMs > deadline) {
+        if (stopping) throw stoppingError(target);
         throw new RemoteTargetError(
-          `${target.host.label} woke up but its daemon did not accept connections in time (${error.message}).`,
+          `${target.host.label} woke up but its daemon did not accept connections in time (${error instanceof Error ? error.message : String(error)}).`,
           'ERR_RUNPANE_HOST_DAEMON_DOWN',
         );
       }
-      await delay(options.resendIntervalMs ?? RESEND_INTERVAL_MS);
+      await delay(resendIntervalMs);
+      if (stopping) await settle(Math.max(0, deadline - Date.now()));
     }
   }
+}
+
+function isStopping(error: unknown): boolean {
+  return error instanceof RemoteRequestError && error.code === SESSION_STOPPING_CODE;
+}
+
+function stoppingError(target: DaemonTarget): RemoteTargetError {
+  const wakeName = target.host.cloud?.hostname ?? target.host.label;
+  return new RemoteTargetError(
+    `Cloud host ${target.host.label} is being stopped by its coordinator, so it took nothing new. `
+      + `Once it is asleep, panels submit (or runpane cloud wake ${wakeName}) wakes it.`,
+    'ERR_RUNPANE_HOST_STOPPING',
+  );
 }
 
 async function pollUntilSettled(

@@ -92,15 +92,19 @@ describe('daemon probe decoding', () => {
     const flush = { walCheckpoint: { busy: 0, log: 2, checkpointed: 2 }, fsynced: [], syncedFilesystem: true, durationMs: 3 };
     assert.deepEqual(
       decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: true, failures: [] } }),
-      { kind: 'safe', checkpointed: true },
+      { kind: 'safe', checkpointed: true, lease: null },
     );
     // Only a flush the daemon verified durable counts; older daemons never said so.
     assert.deepEqual(
       decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: false, failures: ['sync failed'] } }),
-      { kind: 'safe', checkpointed: false },
+      { kind: 'safe', checkpointed: false, lease: null },
     );
-    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush }), { kind: 'safe', checkpointed: false });
-    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: null }), { kind: 'safe', checkpointed: false });
+    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush }), { kind: 'safe', checkpointed: false, lease: null });
+    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: null }), { kind: 'safe', checkpointed: false, lease: null });
+    assert.deepEqual(
+      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: true, failures: [] }, stopLease: { ms: 60_000, expiresAt: '2026-10-01T00:01:00.000Z' } }),
+      { kind: 'safe', checkpointed: true, lease: { ms: 60_000 } },
+    );
     assert.deepEqual(
       decodeSafeToStop({ ok: true, safe: false, blockers: [{ condition: 'agent-working', message: 'panel p1' }, { condition: 'lock-held' }], flush: null }),
       { kind: 'unsafe', reasons: ['agent-working: panel p1', 'lock-held'] },
@@ -115,6 +119,25 @@ describe('daemon probe decoding', () => {
     const down = new HttpDaemonProbe({ fetchImpl: async () => { throw new TypeError('fetch failed'); } });
     assert.equal((await down.safeToStop('https://d', 't')).kind, 'error');
     assert.equal((await down.health('https://d')).reachable, false);
+    await down.releaseStopLease('https://d', 't');
+  });
+
+  it('asks for a stop lease in the safe-to-stop request and releases it on its own channel', async () => {
+    const bodies: JsonValue[] = [];
+    const probe = new HttpDaemonProbe({
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return jsonResponse(200, { ok: true, result: { ok: true, safe: true, blockers: [], flush: { durable: true }, stopLease: { ms: 60_000 } } });
+      },
+    });
+    assert.deepEqual(await probe.safeToStop('https://d', 't', { stopLeaseMs: 60_000 }), { kind: 'safe', checkpointed: true, lease: { ms: 60_000 } });
+    await probe.safeToStop('https://d', 't');
+    await probe.releaseStopLease('https://d', 't');
+    assert.deepEqual(bodies, [
+      { channel: 'runpane:cloud:safe-to-stop', args: [{ stopLeaseMs: 60_000 }] },
+      { channel: 'runpane:cloud:safe-to-stop', args: [{}] },
+      { channel: 'runpane:cloud:stop-lease:release', args: [{}] },
+    ]);
   });
 });
 

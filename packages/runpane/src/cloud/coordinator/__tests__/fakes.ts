@@ -140,6 +140,8 @@ export class FakeProbe implements DaemonProbe {
   healthByUrl = new Map<string, DaemonHealth>();
   safeByUrl = new Map<string, SafeToStopAnswer>();
   upgradeAnswer: UpgradeAnswer = { kind: 'unsupported', error: 'ERR_UNKNOWN_CHANNEL' };
+  /** False: an older daemon that ignores stopLeaseMs. */
+  grantsLeases = true;
   /** Health reported once an upgrade has started. */
   healthAfterUpgrade: DaemonHealth | null = null;
 
@@ -148,9 +150,16 @@ export class FakeProbe implements DaemonProbe {
     return this.healthByUrl.get(baseUrl) ?? { reachable: true, ready: true, version: '1.0.0', detail: null };
   }
 
-  async safeToStop(baseUrl: string, token: string): Promise<SafeToStopAnswer> {
-    this.calls.push(`safe ${baseUrl} ${token}`);
-    return this.safeByUrl.get(baseUrl) ?? { kind: 'safe', checkpointed: true };
+  async safeToStop(baseUrl: string, token: string, options: { stopLeaseMs?: number } = {}): Promise<SafeToStopAnswer> {
+    this.calls.push(`safe ${baseUrl} ${token}${options.stopLeaseMs ? ` lease=${options.stopLeaseMs}` : ''}`);
+    const answer = this.safeByUrl.get(baseUrl) ?? { kind: 'safe', checkpointed: true, lease: null };
+    // Like a daemon with stop leases: a safe answer to a lease request carries the lease.
+    if (answer.kind === 'safe' && options.stopLeaseMs && this.grantsLeases) return { ...answer, lease: { ms: options.stopLeaseMs } };
+    return answer;
+  }
+
+  async releaseStopLease(baseUrl: string): Promise<void> {
+    this.calls.push(`release ${baseUrl}`);
   }
 
   async upgrade(baseUrl: string, _token: string, target: UpgradeTarget): Promise<UpgradeAnswer> {

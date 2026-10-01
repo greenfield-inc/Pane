@@ -185,8 +185,9 @@ export class RemoteDaemonClient {
           ? `Remote request failed with ${response.status}`
           : failure?.message ?? `Remote request failed with ${response.status}`;
         // The daemon's own error envelope means it ran the request and said no; only a response
-        // without it (a proxy's error page) leaves a mutation's outcome unknown.
-        if (!isRetryableResponse(response.status) || (failure?.code && !retryableRead)) {
+        // without it (a proxy's error page) leaves a mutation's outcome unknown. A cloud host under
+        // its coordinator's stop lease refuses even reads until it sleeps: the caller decides (target.ts).
+        if (!isRetryableResponse(response.status) || (failure?.code && !retryableRead) || failure?.code === 'ERR_SESSION_STOPPING') {
           throw new RemoteRequestError(message, response.status, failure?.code ?? null);
         }
         lastError = new Error(message);

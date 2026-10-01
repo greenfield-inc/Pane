@@ -6,6 +6,7 @@ import type { DaemonHealth, DaemonProbe, SafeToStopAnswer, UpgradeAnswer, Upgrad
 // POST /invoke with the coordinator's own paired-client bearer token.
 
 const SAFE_TO_STOP_CHANNEL = 'runpane:cloud:safe-to-stop';
+const STOP_LEASE_RELEASE_CHANNEL = 'runpane:cloud:stop-lease:release';
 const UPGRADE_CHANNEL = 'runpane:cloud:upgrade';
 
 const healthSchema = boundary.object({
@@ -32,6 +33,7 @@ const invokeSchema = boundary.object({
 // The daemon's safe-to-stop result: blockers name the refusing condition; `flush` is non-null once the
 // daemon has tried to checkpoint SQLite's WAL and fsync (which only happens when safe), and its
 // `durable` is true only when every step succeeded. Daemons from before `durable` never confirm.
+// `stopLease` is set when the request asked for one and the answer is safe; older daemons omit it.
 const safeToStopResultSchema = boundary.object({
   safe: boundary.boolean,
   blockers: boundary.optional(boundary.array(boundary.object({
@@ -41,6 +43,7 @@ const safeToStopResultSchema = boundary.object({
   flush: boundary.optional(boundary.nullable(boundary.object({
     durable: boundary.optional(boundary.boolean),
   }))),
+  stopLease: boundary.optional(boundary.nullable(boundary.object({ ms: boundary.number }))),
 });
 
 /**
@@ -65,7 +68,7 @@ export function decodeHealth(body: JsonValue): DaemonHealth {
 
 export function decodeSafeToStop(result: JsonValue): SafeToStopAnswer {
   const decoded = decodeBoundary(result, safeToStopResultSchema);
-  if (decoded.safe) return { kind: 'safe', checkpointed: decoded.flush?.durable === true };
+  if (decoded.safe) return { kind: 'safe', checkpointed: decoded.flush?.durable === true, lease: decoded.stopLease ?? null };
   const reasons = (decoded.blockers ?? []).map((blocker) => (
     [blocker.condition, blocker.message].filter(Boolean).join(': ')
   ));
@@ -98,14 +101,20 @@ export class HttpDaemonProbe implements DaemonProbe {
     }
   }
 
-  async safeToStop(baseUrl: string, token: string): Promise<SafeToStopAnswer> {
-    const answer = await this.invoke(baseUrl, token, SAFE_TO_STOP_CHANNEL, [{}]);
+  async safeToStop(baseUrl: string, token: string, options: { stopLeaseMs?: number } = {}): Promise<SafeToStopAnswer> {
+    const request: JsonValue = options.stopLeaseMs ? { stopLeaseMs: options.stopLeaseMs } : {};
+    const answer = await this.invoke(baseUrl, token, SAFE_TO_STOP_CHANNEL, [request]);
     if (answer.kind !== 'ok') return answer;
     try {
       return decodeSafeToStop(answer.result);
     } catch (error) {
       return { kind: 'error', error: `unexpected safe-to-stop result: ${describeError(error)}` };
     }
+  }
+
+  async releaseStopLease(baseUrl: string, token: string): Promise<void> {
+    // Best effort: an unreleased lease lapses on its own within the lease time.
+    await this.invoke(baseUrl, token, STOP_LEASE_RELEASE_CHANNEL, [{}]);
   }
 
   async upgrade(baseUrl: string, token: string, target: UpgradeTarget): Promise<UpgradeAnswer> {

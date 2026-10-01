@@ -136,6 +136,46 @@ describe('invokeRemote wake policy', () => {
     }
   });
 
+  it('waits out a host its coordinator is stopping: the submit wakes it once the stop lands and is delivered once', async () => {
+    // Awake but under a stop lease: every call gets 503 ERR_SESSION_STOPPING until the coordinator's
+    // stop lands; the coordinator's wake then waits for that stop and resumes the sandbox.
+    let fenced = 3;
+    const calls: RemoteHttpRequest[] = [];
+    const delivered: JsonValue[] = [];
+    const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
+      calls.push(request);
+      if (request.url === `${COORD_URL}/cloud/wake`) {
+        return { status: 200, body: JSON.stringify({ ok: true, host: 'bbbbbbbbbb', status: 'awake', baseUrl: B_URL }) };
+      }
+      if (fenced > 0) {
+        fenced -= 1;
+        return { status: 503, body: JSON.stringify({ ok: false, error: { code: 'ERR_SESSION_STOPPING', message: 'being stopped' } }) };
+      }
+      delivered.push(JSON.parse(request.body ?? '{}'));
+      return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true } }) };
+    };
+    await invokeRemote(cloudTarget(), 'runpane:panels:submit', [{ panelId: 'orch-1', input: 'hi' }], { ...fast, transport });
+    assert.equal(delivered.length, 1);
+    assert.equal(calls.filter((call) => call.url === `${COORD_URL}/cloud/wake`).length, 3, 'a wake after each refusal');
+    const keys = calls.filter((call) => call.url === `${B_URL}/invoke`)
+      .map((call) => decodeBoundary(JSON.parse(call.body ?? '{}'), submitBodySchema).args[0]!.idempotencyKey);
+    assert.equal(keys.length, 4);
+    assert.equal(new Set(keys).size, 1);
+  });
+
+  it('fails anything but a submit to a host being stopped with ERR_RUNPANE_HOST_STOPPING, without retrying or waking', async () => {
+    const calls: RemoteHttpRequest[] = [];
+    const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
+      calls.push(request);
+      return { status: 503, body: JSON.stringify({ ok: false, error: { code: 'ERR_SESSION_STOPPING', message: 'being stopped' } }) };
+    };
+    await assert.rejects(
+      invokeRemote(cloudTarget(), 'runpane:panels:list', [{}], { ...fast, transport }),
+      { name: 'RemoteTargetError', code: 'ERR_RUNPANE_HOST_STOPPING', message: /being stopped by its coordinator/ },
+    );
+    assert.equal(calls.length, 1, 'a reviewed read is not retried into the lease');
+  });
+
   it('does not resend a submit whose connection opened', async () => {
     let invokes = 0;
     const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {

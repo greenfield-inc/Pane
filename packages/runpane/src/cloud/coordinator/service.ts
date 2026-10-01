@@ -154,7 +154,7 @@ export function buildCoordinator(
     selfSandboxId: config.selfSandboxId,
     ignoreSandboxIds: config.ignoreSandboxIds,
   };
-  const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+  const idle = new IdleStopper({ directory, provider, probe, activity, alerts, clock }, {
     requiredConsecutiveSafe: config.idleStop.requiredConsecutiveSafe,
     wakeGraceMs: config.idleStop.wakeGraceSeconds * 1000,
     dryRun: config.idleStop.dryRun,

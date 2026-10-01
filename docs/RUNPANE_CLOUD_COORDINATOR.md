@@ -22,8 +22,8 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   It never uses `pane-remote-daemon`.
 - **Its token on each Session.** `runpane cloud new` pairs the coordinator as a `scope: 'coordinator'`
   client (`pane --remote-setup --client-scope coordinator`). That token may call only
-  `runpane:cloud:safe-to-stop` and `runpane:cloud:upgrade` (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN`
-  otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
+  `runpane:cloud:safe-to-stop`, `runpane:cloud:stop-lease:release` and `runpane:cloud:upgrade`
+  (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN` otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
   The laptop keeps that token (`<host>.coordinator.pairing`) and pushes it in the directory, so taking it back
   happens on the Sessions: `coordinator destroy` and `coordinator revoke-clients --yes` call
   `runpane:cloud:coordinator-client:revoke` (full clients only) on every awake Session and forget the token
@@ -62,8 +62,14 @@ For each Session in the directory whose sandbox is running, the coordinator chec
    daemon also checkpoints SQLite's WAL and fsyncs. A safe answer counts only when its `flush.durable`
    is true (every flush step succeeded); otherwise the coordinator raises `idle-stop-not-checkpointed`.
 4. **Enough safe answers in a row?** Stop only after `requiredConsecutiveSafe` safe answers (default 2).
-   Call boat stop immediately after the last one: boat snapshots about 4 s after the stop call and then
-   powers off without sending SIGTERM.
+   The check that would complete the streak asks for a 60 s stop lease (`stopLeaseMs`): from before that
+   check until the stop, the daemon refuses every other call with a retryable `ERR_SESSION_STOPPING`, so no
+   submit or new agent turn can start and then be lost. Call boat stop immediately after that answer: boat
+   snapshots about 4 s after the stop call and then powers off without sending SIGTERM. If the answer took
+   so long that less than 30 s of the lease is left, it doesn't stop (`lease-expired`) and asks again next
+   round. Whenever it doesn't go on to stop (unconfirmed flush, dry run, a failed stop), it releases the
+   lease (`runpane:cloud:stop-lease:release`). A daemon without stop leases answers without one; it is
+   still stopped, and its result says `not fenced`.
 
 Anything other than an explicit "safe" with a durable flush resets the streak and leaves the Session
 running: unsafe, a flush the daemon could not verify (or an older daemon that does not report

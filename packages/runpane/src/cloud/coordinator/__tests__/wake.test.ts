@@ -226,8 +226,8 @@ describe('WakeService.wake', () => {
   });
 
   it('a wake of a host that is already awake does not hold off idle-stop', async () => {
-    const { wake, provider, probe, directory, activity, alerts } = setup([sandbox('bx_a', 'running')]);
-    const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+    const { wake, provider, probe, directory, activity, alerts, clock } = setup([sandbox('bx_a', 'running')]);
+    const idle = new IdleStopper({ directory, provider, probe, activity, alerts, clock }, {
       requiredConsecutiveSafe: 1,
       wakeGraceMs: 600_000,
       dryRun: false,
@@ -238,8 +238,8 @@ describe('WakeService.wake', () => {
   });
 
   it('a user wake of an awake host restarts the safe streak; a peer wake does not', async () => {
-    const { wake, provider, probe, directory, activity, alerts } = setup([sandbox('bx_a', 'running')]);
-    const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+    const { wake, provider, probe, directory, activity, alerts, clock } = setup([sandbox('bx_a', 'running')]);
+    const idle = new IdleStopper({ directory, provider, probe, activity, alerts, clock }, {
       requiredConsecutiveSafe: 2,
       wakeGraceMs: 600_000,
       dryRun: false,
@@ -249,7 +249,7 @@ describe('WakeService.wake', () => {
     assert.equal((await idle.runOnce()).results[0].decision, 'stopped');
 
     const user = setup([sandbox('bx_a', 'running')]);
-    const userIdle = new IdleStopper({ directory: user.directory, provider: user.provider, probe: user.probe, activity: user.activity, alerts: user.alerts }, {
+    const userIdle = new IdleStopper({ directory: user.directory, provider: user.provider, probe: user.probe, activity: user.activity, alerts: user.alerts, clock: user.clock }, {
       requiredConsecutiveSafe: 2,
       wakeGraceMs: 600_000,
       dryRun: false,
@@ -289,7 +289,7 @@ describe('WakeService.wake', () => {
 
   it('a wake keeps idle-stop away for the grace period', async () => {
     const { wake, provider, probe, directory, activity, alerts, clock } = setup([sandbox('bx_a', 'stopped')]);
-    const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+    const idle = new IdleStopper({ directory, provider, probe, activity, alerts, clock }, {
       requiredConsecutiveSafe: 1,
       wakeGraceMs: 600_000,
       dryRun: false,

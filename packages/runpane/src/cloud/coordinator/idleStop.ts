@@ -2,6 +2,7 @@ import { describeError } from './daemonProbe';
 import type { SandboxActivity } from './guards';
 import type {
   AlertSink,
+  Clock,
   CoordinatorProvider,
   DaemonProbe,
   DirectoryEntry,
@@ -24,6 +25,7 @@ type IdleDecision =
   | 'safe-to-stop-error'
   | 'not-checkpointed'
   | 'provider-error'
+  | 'lease-expired'
   | 'stop-failed';
 
 export interface IdleCheckResult {
@@ -39,6 +41,14 @@ export interface IdleCheckReport {
   results: IdleCheckResult[];
 }
 
+/**
+ * The stop lease asked with the answer that completes the streak: the daemon refuses every other call
+ * for this long, and the coordinator only calls stop while at least STOP_LEASE_MARGIN_MS of it is left,
+ * which covers the stop call and boat's snapshot ~4 s after it.
+ */
+export const STOP_LEASE_MS = 60_000;
+const STOP_LEASE_MARGIN_MS = 30_000;
+
 export interface IdleStopOptions {
   requiredConsecutiveSafe: number;
   wakeGraceMs: number;
@@ -50,7 +60,9 @@ export interface IdleStopOptions {
  * `requiredConsecutiveSafe` consecutive "safe" answers. Anything other than an explicit "safe" with a
  * confirmed durable checkpoint (unsafe, unconfirmed flush, error, unreachable, unsupported daemon,
  * missing token) resets the streak and leaves the sandbox running: the coordinator never stops a
- * Session it could not ask, or whose state the daemon could not make durable.
+ * Session it could not ask, or whose state the daemon could not make durable. The answer that completes
+ * the streak asks for a stop lease, so nothing new starts on the daemon between that "safe" and the stop;
+ * the lease is released whenever the coordinator does not go on to stop.
  */
 export class IdleStopper {
   constructor(
@@ -60,6 +72,7 @@ export class IdleStopper {
       probe: DaemonProbe;
       activity: SandboxActivity;
       alerts: AlertSink;
+      clock: Clock;
     },
     private readonly options: IdleStopOptions,
   ) {}
@@ -122,7 +135,13 @@ export class IdleStopper {
         activity.resetSafe(entry.sandboxId);
         return result('daemon-not-ready', 'daemon /health is not ready yet');
       }
-      const answer = await this.deps.probe.safeToStop(entry.baseUrl, entry.coordinatorToken);
+      const token = entry.coordinatorToken;
+      const completesStreak = !options.dryRun && activity.safeStreak(entry.sandboxId) + 1 >= options.requiredConsecutiveSafe;
+      const askedAt = this.deps.clock.now();
+      const answer = await this.deps.probe.safeToStop(entry.baseUrl, token, completesStreak ? { stopLeaseMs: STOP_LEASE_MS } : {});
+      const releaseLease = async () => {
+        if (answer.kind === 'safe' && answer.lease) await this.deps.probe.releaseStopLease(entry.baseUrl, token);
+      };
       switch (answer.kind) {
         case 'unsafe':
           activity.resetSafe(entry.sandboxId);
@@ -142,6 +161,7 @@ export class IdleStopper {
           return result('safe-to-stop-error', answer.error);
         case 'safe':
           if (answer.checkpointed) break;
+          await releaseLease();
           activity.resetSafe(entry.sandboxId);
           this.deps.alerts.emit({
             level: 'warn',
@@ -154,15 +174,25 @@ export class IdleStopper {
       }
       const streak = activity.recordSafe(entry.sandboxId);
       if (streak < options.requiredConsecutiveSafe) {
+        await releaseLease();
         return result('safe-streak', `safe ${streak}/${options.requiredConsecutiveSafe}`);
       }
       if (options.dryRun) {
+        await releaseLease();
         return result('would-stop', `safe ${streak}/${options.requiredConsecutiveSafe} (dry run)`);
       }
+      if (answer.lease && this.deps.clock.now() - askedAt > answer.lease.ms - STOP_LEASE_MARGIN_MS) {
+        // Too little of the fence is left to cover the stop and the snapshot; ask again next round.
+        await releaseLease();
+        activity.resetSafe(entry.sandboxId);
+        return result('lease-expired', `safe-to-stop took ${Math.round((this.deps.clock.now() - askedAt) / 1000)}s; not stopping without a fence`);
+      }
       try {
-        // Stop immediately after the daemon's checkpoint: boat snapshots ~4 s after this call.
+        // Stop immediately after the daemon's checkpoint: boat snapshots ~4 s after this call. A daemon
+        // without stop leases (lease null) still has the short gap between its answer and the snapshot.
         await this.deps.provider.stop(entry.sandboxId, entry.org);
       } catch (error) {
+        await releaseLease();
         this.deps.alerts.emit({
           level: 'warn',
           code: 'idle-stop-failed',
@@ -180,7 +210,7 @@ export class IdleStopper {
         sandboxId: entry.sandboxId,
         sessionId: entry.sessionId,
       });
-      return result('stopped', `safe ${streak}/${options.requiredConsecutiveSafe}; checkpointed`);
+      return result('stopped', `safe ${streak}/${options.requiredConsecutiveSafe}; checkpointed${answer.lease ? '; fenced' : '; not fenced (daemon without stop leases)'}`);
     });
     return outcome.ran ? outcome.value : result('busy', 'a wake or another check holds this sandbox');
   }
