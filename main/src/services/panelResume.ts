@@ -195,13 +195,15 @@ export class PanelResume {
   /**
    * Make sure a terminal panel has a live PTY before input reaches it. Waits
    * for the launch command (and an agent's CLI) to come up. Throws a
-   * PaneCommandError with code ERR_PANEL_NOT_RUNNING when it cannot.
+   * PaneCommandError with code ERR_PANEL_NOT_RUNNING when it cannot, when the
+   * panel exits meanwhile, or when its launch does not settle within `waitMs`
+   * (a `waitMs` of 0 only requires a live PTY).
    */
   async ensureRunning(panel: ToolPanel, options: { waitMs?: number } = {}): Promise<void> {
     const waitMs = options.waitMs ?? DEFAULT_LAUNCH_WAIT_MS;
     if (this.deps.isRunning(panel.id) && !this.inFlight.has(panel.id)) {
       // A panel resumed at start-up may still be bringing its agent up.
-      await this.deps.waitForLaunch(panel.id, waitMs);
+      await this.awaitLaunch(panel, waitMs);
       return;
     }
     const state = terminalState(panel);
@@ -228,10 +230,24 @@ export class PanelResume {
       const reason = error instanceof Error ? error.message : String(error);
       throw new PaneCommandError(`Terminal panel ${panel.id} could not be restarted: ${reason}`, 'ERR_PANEL_NOT_RUNNING', details);
     }
-    await this.deps.waitForLaunch(panel.id, waitMs);
-    if (!this.deps.isRunning(panel.id)) {
-      throw new PaneCommandError(`Terminal panel ${panel.id} exited while restarting`, 'ERR_PANEL_NOT_RUNNING', details);
-    }
+    await this.awaitLaunch(panel, waitMs);
+  }
+
+  /** Wait for the panel's launch to settle, then confirm it is still running. */
+  private async awaitLaunch(panel: ToolPanel, waitMs: number): Promise<void> {
+    const launched = await this.deps.waitForLaunch(panel.id, waitMs);
+    const running = this.deps.isRunning(panel.id);
+    if (running && (launched || waitMs <= 0)) return;
+    const details = {
+      panelId: panel.id,
+      paneId: panel.sessionId,
+      runState: this.runState(panel),
+      resumable: hasResumableConversation(terminalState(panel)),
+    };
+    const message = running
+      ? `Terminal panel ${panel.id} did not finish launching within ${waitMs}ms`
+      : `Terminal panel ${panel.id} exited while starting`;
+    throw new PaneCommandError(message, 'ERR_PANEL_NOT_RUNNING', details);
   }
 
   /** What `panels list` reports for a terminal panel. */
