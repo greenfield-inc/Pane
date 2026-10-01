@@ -551,10 +551,11 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const issue = await h.call('s1', 'GET', `read/acme/app/issues/${String(seeded.body.number)}`);
     assert.equal(issue.status, 200, JSON.stringify(issue.body));
     assert.equal(issue.body.status, 200);
-    assert.equal(issue.body.data.number, seeded.body.number);
-    assert.equal(issue.body.data.title, 'seeded for read');
-    assert.equal(issue.body.data.state, 'open');
-    assert.ok(String(issue.body.data.body).startsWith('read me'));
+    const data = json(issue.body.data);
+    assert.equal(data.number, seeded.body.number);
+    assert.equal(data.title, 'seeded for read');
+    assert.equal(data.state, 'open');
+    assert.ok(String(data.body).startsWith('read me'));
     for (const route of ['read/acme/app/collaborators', 'read/acme/app/pulls/1/merge', 'read/acme/app/git/refs', 'read/acme/app/issues?access_token=x', 'read/acme/app/../../user']) {
       const refused = await h.call('s1', 'GET', route);
       assert.ok(['forbidden', 'bad-request', 'not-found'].includes(String(refused.body.code)), `${route}: ${JSON.stringify(refused.body)}`);
