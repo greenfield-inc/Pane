@@ -14,7 +14,7 @@ import type {
 import type { ProcessEntry } from '../processTree';
 import { findPanelAncestor, type TcpListener } from './listeners';
 import { isTcpPort, isUrlPath, PORT_NAME_PATTERN, readPortsManifest, type ManifestRead } from './manifest';
-import { manifestKey, readPortsState, writePortsState, type PortsState, type StoredPort } from './portsStore';
+import { emptyPortsState, manifestKey, PortsStateError, readPortsState, writePortsState, type PortsState, type StoredPort } from './portsStore';
 import { describeListener, localTarget, type ServeBackend, type ServeListener } from './tailscaleServe';
 
 /** Pane's own HTTPS port on every Session. */
@@ -54,6 +54,12 @@ export interface SessionPortsDependencies {
   log(message: string): void;
 }
 
+/** The state as listing and detection see it: an unreadable file is no ports plus why. */
+interface PortsStateView {
+  state: PortsState;
+  stateError?: string;
+}
+
 interface OpenOptions {
   source: SessionPortSource;
   repo?: string;
@@ -86,6 +92,10 @@ export class SessionPortsService {
   private projectsKey: string | undefined;
   private timers: NodeJS.Timeout[] = [];
   private certFailure: { at: number; error: string } | undefined;
+  /** Set by stop(): work already under way finishes without events, new timers or auto-opens. */
+  private stopped = false;
+  /** Bumped by start() and stop(), so a boot from an earlier start() never arms timers. */
+  private generation = 0;
 
   constructor(private readonly deps: SessionPortsDependencies) {}
 
@@ -100,8 +110,24 @@ export class SessionPortsService {
     return new Date(this.deps.now()).toISOString();
   }
 
+  /** The state a mutation starts from; an unreadable state file refuses it (ERR_PORTS_STATE_INVALID) and stays untouched. */
   private readState(): PortsState {
-    return readPortsState(this.deps.statePath);
+    try {
+      return readPortsState(this.deps.statePath);
+    } catch (error) {
+      if (error instanceof PortsStateError) fail('ERR_PORTS_STATE_INVALID', error.message, { path: error.file });
+      throw error;
+    }
+  }
+
+  /** For listing and detection: an unreadable state file shows as no ports plus `stateError`. */
+  private readStateForView(): PortsStateView {
+    try {
+      return { state: readPortsState(this.deps.statePath) };
+    } catch (error) {
+      if (!(error instanceof PortsStateError)) throw error;
+      return { state: emptyPortsState(), stateError: error.message };
+    }
   }
 
   private saveState(state: PortsState): void {
@@ -120,11 +146,12 @@ export class SessionPortsService {
   }
 
   private async snapshot(): Promise<SessionPortsListResult> {
-    const state = this.readState();
+    const { state, stateError } = this.readStateForView();
     const self = await this.deps.serve.self();
     if (!self.running || !self.dnsName) {
       return {
         ok: true,
+        stateError,
         autoOpen: state.autoOpen,
         manifests: this.manifests,
         available: false,
@@ -142,12 +169,15 @@ export class SessionPortsService {
     // Suggestions refresh on the detection tick; one just opened is already a port.
     const published = new Set(state.ports.filter(port => !port.blockedBy).map(port => port.port));
     const suggested = this.suggested.filter(suggestion => !published.has(suggestion.port));
-    return { ok: true, autoOpen: state.autoOpen, manifests: this.manifests, available: true, host: dnsName, scheme, ports, suggested };
+    return { ok: true, stateError, autoOpen: state.autoOpen, manifests: this.manifests, available: true, host: dnsName, scheme, ports, suggested };
   }
 
   private async emitChanged(): Promise<void> {
+    if (this.stopped) return;
     try {
-      this.deps.emit(await this.snapshot());
+      const snapshot = await this.snapshot();
+      if (this.stopped) return;
+      this.deps.emit(snapshot);
     } catch (error) {
       this.deps.log(`ports: could not send the change event: ${String(error)}`);
     }
@@ -523,7 +553,7 @@ export class SessionPortsService {
       await this.reconcile('repo-add');
     }
 
-    const state = this.readState();
+    const { state } = this.readStateForView();
     const panels = this.deps.panelProcesses();
     const published = new Set(state.ports.filter(port => !port.blockedBy).map(port => port.port));
     const reserved = new Set(this.deps.reservedPorts());
@@ -559,6 +589,7 @@ export class SessionPortsService {
 
     if (state.autoOpen) {
       for (const suggestion of this.suggested) {
+        if (this.stopped) return;
         try {
           await this.exclusive(() => this.openLocked({ port: suggestion.port }, { source: 'auto' }));
         } catch (error) {
@@ -578,13 +609,18 @@ export class SessionPortsService {
   start(options: { reconcileIntervalMs?: number; detectIntervalMs?: number; bootRetryMs?: number; bootAttempts?: number } = {}): void {
     const bootRetryMs = options.bootRetryMs ?? 5_000;
     let attempts = options.bootAttempts ?? 36;
+    this.stopped = false;
+    const generation = ++this.generation;
+    const current = () => generation === this.generation;
     const boot = async () => {
       const self = await this.deps.serve.self().catch(() => ({ running: false, backendState: 'unknown' }));
+      if (!current()) return;
       if (!self.running && --attempts > 0) {
         this.timers.push(setTimeout(() => void boot(), bootRetryMs).unref());
         return;
       }
       await this.reconcile('boot').catch(error => this.deps.log(`ports: boot reconcile failed: ${String(error)}`));
+      if (!current()) return;
       this.timers.push(setInterval(() => {
         void this.reconcile('periodic').catch(error => this.deps.log(`ports: reconcile failed: ${String(error)}`));
       }, options.reconcileIntervalMs ?? 60_000).unref());
@@ -595,7 +631,10 @@ export class SessionPortsService {
     }, options.detectIntervalMs ?? 5_000).unref());
   }
 
+  /** Clears the timers; a reconcile or detection round under way finishes without an event or a new timer. */
   stop(): void {
+    this.stopped = true;
+    this.generation += 1;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
   }

@@ -144,6 +144,7 @@ const listSchema = boundary.object({
     error: boundary.optional(boundary.string),
     count: boundary.number,
   })),
+  stateError: boundary.optional(boundary.string),
 });
 
 const openSchema = boundary.object({
@@ -215,6 +216,7 @@ function printList(result: ReturnType<typeof listSchema.decode>, out: (line: str
     return;
   }
   out(`Ports on ${result.host ?? 'this Session'} (tailnet only):`);
+  if (result.stateError) out(`  State file problem: ${result.stateError}`);
   if (result.ports.length === 0) out('  none published (runpane port open <port>)');
   const rows = result.ports.map((port) => [
     port.name,

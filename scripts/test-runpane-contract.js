@@ -2293,6 +2293,80 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.refused, true);
 }
 
+async function checkSubmitIdempotencyKeyParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPanelInputRequest, runPanelsSubmit } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const submitResult = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', inputBytes: 5, enter: 'cr', sequenceName: 'enter-cr',
+    verifiedSubmitted: true, verification: 'observed', sentAt: '2026-09-27T18:00:00.000Z', deduplicated: true,
+  };
+  const dedupedNote = 'This idempotency key was already used; Pane returned the first result and sent nothing again.';
+  const calls = [];
+  const stdout = [];
+  daemonClient.invokeDaemon = async (channel, args) => {
+    calls.push({ channel, request: args[0] });
+    return submitResult;
+  };
+  console.log = (line) => stdout.push(String(line));
+  try {
+    await runPanelsSubmit(parseRunpaneArgs([
+      'panels', 'submit', '--panel', 'panel-1', '--text', 'hello', '--idempotency-key', 'retry-1', '--yes',
+    ]));
+    await runPanelsSubmit(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'hello', '--yes']));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  const wireCalls = JSON.parse(JSON.stringify(calls));
+  assert.deepStrictEqual(wireCalls, [
+    { channel: 'runpane:panels:submit', request: { panelId: 'panel-1', input: 'hello', idempotencyKey: 'retry-1' } },
+    { channel: 'runpane:panels:submit', request: { panelId: 'panel-1', input: 'hello' } },
+  ]);
+  assert.ok(stdout.includes(dedupedNote), stdout.join('\n'));
+  assert.throws(
+    () => buildPanelInputRequest(parseRunpaneArgs(['panels', 'input', '--panel', 'panel-1', '--text', 'x', '--idempotency-key', 'k', '--yes']), 'input'),
+    /--idempotency-key is for panels submit/,
+  );
+
+  const pythonOutput = runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+submit_result = json.loads(${JSON.stringify(JSON.stringify(submitResult))})
+calls = []
+def fake_invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "request": args[0]})
+    return submit_result
+
+local_control.invoke_daemon = fake_invoke
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    local_control.run_panels_submit(parse_args([
+        "panels", "submit", "--panel", "panel-1", "--text", "hello", "--idempotency-key", "retry-1", "--yes"
+    ]))
+    local_control.run_panels_submit(parse_args(["panels", "submit", "--panel", "panel-1", "--text", "hello", "--yes"]))
+refused = False
+try:
+    local_control.build_panel_input_request(parse_args([
+        "panels", "input", "--panel", "panel-1", "--text", "x", "--idempotency-key", "k", "--yes"
+    ]), "input")
+except ValueError as error:
+    refused = "--idempotency-key is for panels submit" in str(error)
+
+print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "refused": refused}))
+`);
+  const python = JSON.parse(pythonOutput);
+  assert.deepStrictEqual(python.calls, wireCalls);
+  assert.ok(python.stdout.includes(dedupedNote), python.stdout.join('\n'));
+  assert.strictEqual(python.refused, true);
+}
+
 async function checkDeliveryParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -3944,6 +4018,7 @@ async function runChecks() {
   await checkPanePinParity();
   await checkWrapperAgentParity();
   await checkFilePointerParity();
+  await checkSubmitIdempotencyKeyParity();
   await checkDeliveryParity();
   await checkReportParity();
   await checkPaneCreateBlockedReadiness();

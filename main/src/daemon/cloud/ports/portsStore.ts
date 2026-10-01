@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { boundary, decodeOptionalBoundary } from '../../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../../shared/validation/boundaryDecoder';
 import type { SessionPortScheme, SessionPortSource } from '../../../../../shared/types/sessionPorts';
 
 /** The Session's published ports: the truth the boot/wake reconcile re-applies to Tailscale Serve. */
@@ -52,7 +52,7 @@ const stateSchema = boundary.object({
   dismissed: boundary.optional(boundary.array(boundary.string)),
 });
 
-function emptyPortsState(): PortsState {
+export function emptyPortsState(): PortsState {
   return { version: 1, autoOpen: false, ports: [], dismissed: [] };
 }
 
@@ -60,27 +60,39 @@ export function manifestKey(repo: string, name: string): string {
   return `${repo}#${name}`;
 }
 
+/**
+ * The state file exists but cannot be read or decoded. Nothing writes over it: Pane changes no ports
+ * until someone repairs or removes the file, so the published ports it held can still be recovered.
+ */
+export class PortsStateError extends Error {
+  constructor(readonly file: string, reason: string) {
+    super(`${file} is unreadable (${reason}); Pane keeps it as is and changes no ports until it is repaired or removed`);
+    this.name = 'PortsStateError';
+  }
+}
+
+const errnoSchema = boundary.object({ code: boundary.string });
+
+/** Only a missing file is an empty state; any other read, JSON or schema failure throws PortsStateError. */
 export function readPortsState(file: string): PortsState {
   let text: string;
   try {
     text = fs.readFileSync(file, 'utf8');
-  } catch {
-    return emptyPortsState();
+  } catch (error) {
+    if (decodeOptionalBoundary(error, errnoSchema)?.code === 'ENOENT') return emptyPortsState();
+    throw new PortsStateError(file, error instanceof Error ? error.message : String(error));
   }
-  let raw: unknown;
   try {
-    raw = JSON.parse(text);
-  } catch {
-    return emptyPortsState();
+    const state = decodeBoundary(JSON.parse(text), stateSchema);
+    return {
+      version: 1,
+      autoOpen: state.autoOpen ?? false,
+      ports: state.ports.map(port => ({ ...port })),
+      dismissed: state.dismissed ?? [],
+    };
+  } catch (error) {
+    throw new PortsStateError(file, error instanceof Error ? error.message : String(error));
   }
-  const state = decodeOptionalBoundary(raw, stateSchema);
-  if (!state) return emptyPortsState();
-  return {
-    version: 1,
-    autoOpen: state.autoOpen ?? false,
-    ports: state.ports.map(port => ({ ...port })),
-    dismissed: state.dismissed ?? [],
-  };
 }
 
 /** Written to a 0600 temp file in the 0700 directory, then renamed over, so a power-off never leaves half a file. */

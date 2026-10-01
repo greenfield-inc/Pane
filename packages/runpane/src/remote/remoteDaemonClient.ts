@@ -113,6 +113,7 @@ const RETRYABLE_READ_CHANNELS = new Set([
   'runpane:panels:output',
   'runpane:sessions:list',
   'runpane:sessions:get',
+  'runpane:ports:list',
 ]);
 
 export interface RemoteDaemonClientOptions {

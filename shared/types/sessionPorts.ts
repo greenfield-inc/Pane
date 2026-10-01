@@ -73,6 +73,12 @@ export interface SessionPortsListResult {
   ports: SessionPort[];
   suggested: SuggestedPort[];
   manifests: SessionPortsManifestState[];
+  /**
+   * Set when `~/.runpane-cloud/ports.json` exists but cannot be read or decoded. `ports` is then empty,
+   * the file stays as it is for recovery, and open, close and auto-open fail with ERR_PORTS_STATE_INVALID
+   * until someone repairs or removes it.
+   */
+  stateError?: string;
 }
 
 export interface SessionPortOpenRequest {

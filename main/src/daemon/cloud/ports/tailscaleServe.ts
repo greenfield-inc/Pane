@@ -1,8 +1,9 @@
-import { execFile } from 'child_process';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../../shared/validation/boundaryDecoder';
 import type { SessionPortScheme } from '../../../../../shared/types/sessionPorts';
+import { commandExecutor, type CommandExecutor } from '../../../utils/commandExecutor';
 
 const COMMAND_TIMEOUT_MS = 20_000;
+const COMMAND_OUTPUT_LIMIT = 4 * 1024 * 1024;
 /** tailscaled keeps issued certificates here (root only), one pair per MagicDNS name. */
 const CERT_DIRECTORY = '/var/lib/tailscale/certs';
 
@@ -93,13 +94,24 @@ interface RunResult {
 
 type Runner = (file: string, args: readonly string[]) => Promise<RunResult>;
 
-function runCommand(file: string, args: readonly string[]): Promise<RunResult> {
-  return new Promise(resolve => {
-    execFile(file, [...args], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-      const code = error ? Number(error.code) || 1 : 0;
-      resolve({ code, stdout: String(stdout), stderr: String(stderr || (error && !stderr ? error.message : '')) });
-    });
-  });
+const exitCodeSchema = boundary.object({ code: boundary.number });
+const outputSchema = boundary.object({ stdout: boundary.string, stderr: boundary.string });
+
+/**
+ * Runs argv through the shared CommandExecutor, with its timeout and output cap. A failed exit, a
+ * timeout or too much output comes back as a non-zero result, which the backend reports.
+ */
+export function serveRunner(executor: Pick<CommandExecutor, 'execFileAsync'> = commandExecutor): Runner {
+  return async (file, args) => {
+    try {
+      const result = await executor.execFileAsync(file, args, { timeout: COMMAND_TIMEOUT_MS, maxBuffer: COMMAND_OUTPUT_LIMIT, silent: true });
+      return { code: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+    } catch (error) {
+      const code = decodeOptionalBoundary(error, exitCodeSchema)?.code || 1;
+      const output = decodeOptionalBoundary(error, outputSchema);
+      return { code, stdout: output?.stdout ?? '', stderr: output?.stderr || (error instanceof Error ? error.message : String(error)) };
+    }
+  };
 }
 
 function needsRoot(result: RunResult): boolean {
@@ -110,7 +122,7 @@ function needsRoot(result: RunResult): boolean {
  * The real backend. The Session's user is tailscaled's operator (bootstrap sets `--operator`), so Serve
  * changes normally need no sudo; `sudo -n` is the fallback for a node set up without it.
  */
-export function createTailscaleServeBackend(run: Runner = runCommand): ServeBackend {
+export function createTailscaleServeBackend(run: Runner = serveRunner()): ServeBackend {
   const tailscale = async (args: readonly string[]): Promise<RunResult> => {
     const direct = await run('tailscale', args);
     if (direct.code === 0 || !needsRoot(direct)) return direct;

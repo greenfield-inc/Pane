@@ -225,6 +225,63 @@ describe('PanelResume.ensureRunning', () => {
     });
     expect(h.deps.startTerminal).not.toHaveBeenCalled();
   });
+
+  it('refuses with ERR_PANEL_NOT_RUNNING when a restarted panel does not finish launching', async () => {
+    const shell = terminalPanel('shell', pane.id, { initialCommand: 'bash' });
+    const h = harness([pane], [shell]);
+    h.deps.waitForLaunch = vi.fn(async () => false);
+    const resume = new PanelResume(h.deps);
+    resume.enable();
+
+    await expect(resume.ensureRunning(shell, { waitMs: 50 })).rejects.toMatchObject({
+      code: 'ERR_PANEL_NOT_RUNNING',
+      details: { panelId: 'shell', runState: 'running' },
+    });
+  });
+
+  it('refuses with ERR_PANEL_NOT_RUNNING when a running panel exits before its launch settles', async () => {
+    const claude = terminalPanel('claude', pane.id, { initialCommand: 'claude', agentType: 'claude' });
+    const h = harness([pane], [claude]);
+    h.running.add('claude');
+    h.deps.waitForLaunch = vi.fn(async (panelId: string) => {
+      h.running.delete(panelId);
+      return false;
+    });
+    const resume = new PanelResume(h.deps);
+    resume.enable();
+
+    await expect(resume.ensureRunning(claude)).rejects.toMatchObject({
+      code: 'ERR_PANEL_NOT_RUNNING',
+      details: { panelId: 'claude', runState: 'stopped' },
+    });
+    expect(h.deps.startTerminal).not.toHaveBeenCalled();
+  });
+
+  it('refuses with ERR_PANEL_NOT_RUNNING when a running panel never finishes launching', async () => {
+    const claude = terminalPanel('claude', pane.id, { initialCommand: 'claude', agentType: 'claude' });
+    const h = harness([pane], [claude]);
+    h.running.add('claude');
+    h.deps.waitForLaunch = vi.fn(async () => false);
+    const resume = new PanelResume(h.deps);
+    resume.enable();
+
+    await expect(resume.ensureRunning(claude, { waitMs: 50 })).rejects.toMatchObject({
+      code: 'ERR_PANEL_NOT_RUNNING',
+      details: { panelId: 'claude', runState: 'running' },
+    });
+  });
+
+  it('does not require a settled launch when the caller asks for no wait', async () => {
+    const shell = terminalPanel('shell', pane.id, { initialCommand: 'bash' });
+    const h = harness([pane], [shell]);
+    h.deps.waitForLaunch = vi.fn(async () => false);
+    const resume = new PanelResume(h.deps);
+    resume.enable();
+
+    await resume.ensureRunning(shell, { waitMs: 0 });
+
+    expect(h.running.has('shell')).toBe(true);
+  });
 });
 
 describe('hasResumableConversation', () => {

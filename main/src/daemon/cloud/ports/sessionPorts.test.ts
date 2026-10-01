@@ -19,6 +19,8 @@ class FakeServe implements ServeBackend {
   running = true;
   cert = true;
   calls: string[] = [];
+  /** Set to make `tailscale serve` fail to publish (applyWeb throws it). */
+  applyError: Error | undefined;
 
   async self() {
     return { running: this.running, backendState: this.running ? 'Running' : 'Stopped', dnsName: this.running ? HOST : undefined };
@@ -28,6 +30,7 @@ class FakeServe implements ServeBackend {
   }
   async applyWeb(scheme: 'https' | 'http', tailnetPort: number, localPort: number) {
     this.calls.push(`apply ${scheme} :${tailnetPort} -> ${localPort}`);
+    if (this.applyError) throw this.applyError;
     this.entries.set(tailnetPort, { kind: 'web', scheme, proxy: localTarget(localPort) });
   }
   async remove(tailnetPort: number) {
@@ -202,6 +205,16 @@ describe('SessionPortsService.open', () => {
     expect(h.probes).toEqual([`https://${HOST}:8787/`]);
   });
 
+  it('neither records nor announces a port Tailscale Serve failed to publish', async () => {
+    const h = makeHarness();
+    h.serve.applyError = new Error('tailscale serve exited with code 1');
+    await expect(h.service.open({ port: 8787, name: 'taste' })).rejects.toThrow('tailscale serve exited with code 1');
+    expect(h.serve.calls).toEqual(['apply https :8787 -> 8787']);
+    expect(fs.existsSync(h.statePath)).toBe(false);
+    expect(h.events).toEqual([]);
+    expect((await h.service.list()).ports).toEqual([]);
+  });
+
   it('refuses when Tailscale is not running', async () => {
     const h = makeHarness();
     h.serve.running = false;
@@ -243,6 +256,18 @@ describe('SessionPortsService.reconcile', () => {
     expect(h.serve.calls).toEqual(['apply https :8787 -> 8787', 'apply https :8788 -> 3000']);
     expect((await h.service.list()).ports.map(port => port.status)).toEqual(['serving', 'serving']);
     expect(h.probes).toEqual([`https://${HOST}:8787/`, `https://${HOST}:8788/`]);
+  });
+
+  it('keeps a port it could not re-apply as missing, never serving', async () => {
+    const h = makeHarness();
+    await h.service.open({ port: 8787 });
+    h.serve.entries.clear();
+    h.events.length = 0;
+    h.serve.applyError = new Error('tailscale serve exited with code 1');
+    await h.service.reconcile('periodic');
+    expect(h.events.flatMap(event => event.ports.map(port => port.status))).not.toContain('serving');
+    expect((await h.service.list()).ports.map(port => port.status)).toEqual(['missing']);
+    expect(readPortsState(h.statePath).ports.map(port => port.blockedBy)).toEqual([undefined]);
   });
 
   it('opens manifest ports, drops undeclared ones, and does not reopen a dismissed one', async () => {
@@ -312,25 +337,25 @@ describe('SessionPortsService.reconcile', () => {
   });
 });
 
-describe('SessionPortsService.detect', () => {
-  function withPanelServer(h: Harness): void {
-    h.panels = [{ pid: 100, panelId: 'panel-1', paneId: 'pane-1' }];
-    h.processes = [
-      { pid: 1, ppid: 0, name: 'systemd' },
-      { pid: 100, ppid: 1, name: 'bash' },
-      { pid: 101, ppid: 100, name: 'claude' },
-      { pid: 102, ppid: 101, name: 'node' },
-      { pid: 200, ppid: 1, name: 'postgres' },
-    ];
-    h.listeners = [
-      { port: 5173, address: '127.0.0.1', inode: 11 },
-      { port: 5173, address: '::1', inode: 12 },
-      { port: 5432, address: '127.0.0.1', inode: 13 },
-      { port: 42137, address: '127.0.0.1', inode: 14 },
-    ];
-    h.owners = new Map([[11, 102], [12, 102], [13, 200]]);
-  }
+function withPanelServer(h: Harness): void {
+  h.panels = [{ pid: 100, panelId: 'panel-1', paneId: 'pane-1' }];
+  h.processes = [
+    { pid: 1, ppid: 0, name: 'systemd' },
+    { pid: 100, ppid: 1, name: 'bash' },
+    { pid: 101, ppid: 100, name: 'claude' },
+    { pid: 102, ppid: 101, name: 'node' },
+    { pid: 200, ppid: 1, name: 'postgres' },
+  ];
+  h.listeners = [
+    { port: 5173, address: '127.0.0.1', inode: 11 },
+    { port: 5173, address: '::1', inode: 12 },
+    { port: 5432, address: '127.0.0.1', inode: 13 },
+    { port: 42137, address: '127.0.0.1', inode: 14 },
+  ];
+  h.owners = new Map([[11, 102], [12, 102], [13, 200]]);
+}
 
+describe('SessionPortsService.detect', () => {
   it('suggests only listeners started under a Pane panel, without publishing them', async () => {
     const h = makeHarness();
     withPanelServer(h);
@@ -370,6 +395,95 @@ describe('SessionPortsService.detect', () => {
     h.manifests.set('/home/user/new-repo', { kind: 'ok', ports: [{ name: 'docs', port: 4000, path: '/' }] });
     await h.service.detect();
     expect((await h.service.list()).ports.map(port => port.name)).toEqual(['docs']);
+  });
+});
+
+describe('SessionPortsService.stop', () => {
+  /** Holds every `self()` call until `release()`, as a slow tailscaled would. */
+  function holdSelf(h: Harness): () => void {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const self = h.serve.self.bind(h.serve);
+    h.serve.self = async () => {
+      await gate;
+      return self();
+    };
+    return release;
+  }
+
+  const settle = () => new Promise(resolve => setTimeout(resolve, 30));
+
+  it('ends a boot that was waiting on Tailscale: no reconcile, no event, no new timers', async () => {
+    const h = makeHarness();
+    await h.service.open({ port: 8787 });
+    h.serve.entries.clear();
+    h.serve.calls = [];
+    h.events.length = 0;
+    const release = holdSelf(h);
+
+    h.service.start({ reconcileIntervalMs: 5, detectIntervalMs: 5, bootRetryMs: 5 });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    h.service.stop();
+    release();
+    await settle();
+
+    expect(h.serve.calls).toEqual([]);
+    expect(h.events).toEqual([]);
+  });
+
+  it('drops the event of a detection round that was running when it stopped', async () => {
+    const h = makeHarness();
+    withPanelServer(h);
+    const release = holdSelf(h);
+
+    const pending = h.service.detect();
+    h.service.stop();
+    release();
+    await pending;
+
+    expect(h.events).toEqual([]);
+  });
+});
+
+describe('SessionPortsService with an unreadable state file', () => {
+  const unreadable: Array<[string, string]> = [
+    ['not JSON', '{"version": 1, "ports": ['],
+    ['JSON with the wrong shape', JSON.stringify({ version: 1, ports: [{ name: 'taste', port: 'eight' }] })],
+  ];
+
+  for (const [label, content] of unreadable) {
+    it(`refuses every change and keeps the file as is when it is ${label}`, async () => {
+      const h = makeHarness();
+      fs.mkdirSync(path.dirname(h.statePath), { recursive: true });
+      fs.writeFileSync(h.statePath, content);
+      h.projects = ['/home/user/app'];
+      h.manifests.set('/home/user/app', { kind: 'ok', ports: [{ name: 'web', port: 3000, path: '/' }] });
+      withPanelServer(h);
+
+      expect(await errorCode(h.service.open({ port: 8787 }))).toBe('ERR_PORTS_STATE_INVALID');
+      expect(await errorCode(h.service.close(8787))).toBe('ERR_PORTS_STATE_INVALID');
+      expect(await errorCode(h.service.configure({ autoOpen: true }))).toBe('ERR_PORTS_STATE_INVALID');
+      await expect(h.service.reconcile('boot')).rejects.toMatchObject({ code: 'ERR_PORTS_STATE_INVALID' });
+      await h.service.detect();
+
+      expect(fs.readFileSync(h.statePath, 'utf8')).toBe(content);
+      expect(h.serve.calls).toEqual([]);
+      const list = await h.service.list();
+      expect(list.ports).toEqual([]);
+      expect(list.stateError).toContain(h.statePath);
+      expect(list.suggested.map(port => port.port)).toEqual([5173]);
+      expect(h.events.at(-1)?.stateError).toContain(h.statePath);
+    });
+  }
+
+  it('treats only a missing file as no ports', async () => {
+    const h = makeHarness();
+    fs.mkdirSync(h.statePath, { recursive: true });
+    expect(() => readPortsState(path.join(dir, 'absent.json'))).not.toThrow();
+    expect(readPortsState(path.join(dir, 'absent.json')).ports).toEqual([]);
+    expect(await errorCode(h.service.open({ port: 8787 }))).toBe('ERR_PORTS_STATE_INVALID');
+    expect((await h.service.list()).stateError).toContain(h.statePath);
+    expect(fs.statSync(h.statePath).isDirectory()).toBe(true);
   });
 });
 

@@ -162,6 +162,31 @@ describe('invokeRemote wake policy', () => {
     assert.equal(invokes, 3);
   });
 
+  it('retries the Session ports list after a failure in transit, but never a ports change', async () => {
+    const flaky = () => {
+      const seen: string[] = [];
+      const transport = async (request: RemoteHttpRequest): Promise<RemoteHttpResponse> => {
+        seen.push(decodeBoundary(JSON.parse(request.body ?? '{}'), invokeBodySchema).channel);
+        if (seen.length < 3) return { status: 502, body: 'bad gateway' };
+        return { status: 200, body: JSON.stringify({ ok: true, result: { ok: true, available: true, ports: [] } }) };
+      };
+      return { seen, transport };
+    };
+    const list = flaky();
+    const result = await invokeRemote(cloudTarget(), 'runpane:ports:list', [{ verify: false }], { ...fast, transport: list.transport });
+    assert.deepEqual(result, { ok: true, available: true, ports: [] });
+    assert.deepEqual(list.seen, ['runpane:ports:list', 'runpane:ports:list', 'runpane:ports:list']);
+
+    for (const channel of ['runpane:ports:open', 'runpane:ports:close', 'runpane:ports:configure']) {
+      const change = flaky();
+      await assert.rejects(
+        invokeRemote(cloudTarget(), channel, [{}], { ...fast, transport: change.transport }),
+        { name: 'RemoteTargetError', code: 'ERR_RUNPANE_REMOTE_UNCONFIRMED' },
+      );
+      assert.deepEqual(change.seen, [channel]);
+    }
+  });
+
   it('reports a command error the daemon answered as that error, not as unconfirmed', async () => {
     const answered = (status: number, message: string, code: string) => async (): Promise<RemoteHttpResponse> => ({
       status,
