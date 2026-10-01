@@ -68,7 +68,8 @@ async function readCoordinatorToken(pairingPath: string | undefined): Promise<st
 /** Pushes the whole directory after a change. Never throws: the change itself already happened. */
 export async function pushDirectory(deps: Pick<CloudDeps, 'store' | 'now' | 'pushCoordinatorDirectory'>): Promise<CoordinatorPushResult> {
   try {
-    const directory = await buildCoordinatorDirectory(await deps.store.listHosts(), new Date(deps.now()));
+    // The whole snapshot or nothing: a host left out would look like an orphan to the reconciler.
+    const directory = await buildCoordinatorDirectory(await deps.store.readHostSnapshot(), new Date(deps.now()));
     return await deps.pushCoordinatorDirectory(directory);
   } catch (error) {
     return { pushed: false, reason: error instanceof Error ? error.message : String(error) };

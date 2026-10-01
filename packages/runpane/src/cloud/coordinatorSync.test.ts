@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import { test } from 'node:test';
 import { parseCloudArgs } from './args';
 import { runCloudCommand } from './commands';
@@ -81,4 +83,81 @@ test('without a coordinator nothing is pushed and nothing is printed about it', 
   const harness = await createTestHarness();
   assert.equal(await run(harness, ['new', '--yes', '--no-import']), 0);
   assert.doesNotMatch([...harness.out, ...harness.err].join('\n'), /coordinator/u);
+});
+
+/** Writes `hosts/<file>` next to the records `new` wrote. */
+async function writeHostFile(harness: TestHarness, file: string, text: string): Promise<void> {
+  await fs.writeFile(path.join(harness.deps.store.dir, 'hosts', file), text);
+}
+
+async function connectedRecord(harness: TestHarness) {
+  assert.equal(await run(harness, ['new', '--yes', '--no-import', '--label', 'kept']), 0);
+  const [record] = await harness.deps.store.listHosts();
+  return record;
+}
+
+test('an invalid host record blocks the whole push instead of publishing the rest', async () => {
+  const cases: Array<[string, (record: Awaited<ReturnType<typeof connectedRecord>>) => object]> = [
+    ['an unknown version', (record) => ({ ...record, version: 2 })],
+    ['no sandbox id', (record) => ({ ...record, profile: { ...record.profile, cloud: { ...record.profile.cloud, sandboxId: '' } } })],
+    ['no hostname', (record) => ({ ...record, profile: { ...record.profile, cloud: { ...record.profile.cloud, hostname: undefined } } })],
+    ['a connected host without a token', (record) => ({ ...record, profile: { ...record.profile, token: '' } })],
+    ['a base URL that is not a URL', (record) => ({ ...record, profile: { ...record.profile, baseUrl: 'rp-x:8443' } })],
+    ['broker repos that are not strings', (record) => ({ ...record, meta: { ...record.meta, brokerRepos: [42] } })],
+  ];
+  for (const [problem, corrupt] of cases) {
+    const harness = await createTestHarness();
+    harness.world.pushedDirectories = [];
+    const record = await connectedRecord(harness);
+    const pushedBefore = harness.world.pushedDirectories.length;
+    const broken = corrupt({ ...record, profile: { ...record.profile, cloud: { ...record.profile.cloud, hostname: 'rp-broken', sessionId: 'other', sandboxId: problem === 'no sandbox id' ? '' : 'bx_other' } } });
+    await writeHostFile(harness, 'rp-broken.json', JSON.stringify(broken));
+
+    assert.equal(await run(harness, ['sync', '--desktop-dir', harness.desktopDir]), 0, problem);
+    assert.equal(harness.world.pushedDirectories.length, pushedBefore, `${problem}: nothing pushed`);
+    assert.match(harness.err.join('\n'), /directory was not updated \(.*rp-broken\.json/u, problem);
+  }
+});
+
+test('a host record that is not JSON stops sync before anything is pushed', async () => {
+  const harness = await createTestHarness();
+  harness.world.pushedDirectories = [];
+  await connectedRecord(harness);
+  const pushedBefore = harness.world.pushedDirectories.length;
+  await writeHostFile(harness, 'rp-broken.json', '{torn');
+
+  await assert.rejects(run(harness, ['sync', '--desktop-dir', harness.desktopDir]), /rp-broken\.json is not valid JSON/u);
+  assert.equal(harness.world.pushedDirectories.length, pushedBefore);
+});
+
+test('a host record whose hostname does not match its file name blocks the push', async () => {
+  const harness = await createTestHarness();
+  harness.world.pushedDirectories = [];
+  const record = await connectedRecord(harness);
+  await writeHostFile(harness, 'rp-copy.json', JSON.stringify({ ...record, profile: { ...record.profile, cloud: { ...record.profile.cloud, sessionId: 'copy' } } }));
+  const pushedBefore = harness.world.pushedDirectories.length;
+
+  await run(harness, ['sync', '--desktop-dir', harness.desktopDir]);
+  assert.equal(harness.world.pushedDirectories.length, pushedBefore);
+  assert.match(harness.err.join('\n'), /rp-copy\.json/u);
+});
+
+test('a host still being set up (empty connection fields) is valid and left out of the directory', async () => {
+  const harness = await createTestHarness();
+  harness.world.pushedDirectories = [];
+  const record = await connectedRecord(harness);
+  await writeHostFile(harness, 'rp-pending.json', JSON.stringify({
+    ...record,
+    profile: {
+      ...record.profile,
+      id: 'cloud-pending',
+      baseUrl: '',
+      token: '',
+      cloud: { ...record.profile.cloud, hostname: 'rp-pending', sessionId: 'pending', sandboxId: 'bx_pending', nodeId: '' },
+    },
+    meta: { ...record.meta, magicDnsName: '' },
+  }));
+
+  assert.equal(await run(harness, ['sync', '--desktop-dir', harness.desktopDir]), 0);
+  assert.deepEqual(lastPushed(harness).entries.map((entry) => entry.label), ['kept']);
 });

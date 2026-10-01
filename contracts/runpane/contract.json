@@ -10442,7 +10442,7 @@
             "required": ["condition", "message"],
             "properties": {
               "condition": {
-                "enum": ["agent-working", "command-running", "recent-terminal-output", "lock-held", "watcher-active", "pr-checks-pending", "user-client-attached"]
+                "enum": ["agent-working", "command-running", "recent-terminal-output", "lock-held", "watcher-active", "pr-checks-pending", "user-client-attached", "flush-failed"]
               },
               "message": { "type": "string" },
               "paneId": { "type": "string" },
@@ -10456,7 +10456,7 @@
             { "type": "null" },
             {
               "type": "object",
-              "required": ["walCheckpoint", "fsynced", "syncedFilesystem", "durationMs"],
+              "required": ["walCheckpoint", "fsynced", "syncedFilesystem", "durable", "failures", "durationMs"],
               "properties": {
                 "walCheckpoint": {
                   "oneOf": [
@@ -10475,6 +10475,8 @@
                 },
                 "fsynced": { "type": "array", "items": { "type": "string" } },
                 "syncedFilesystem": { "type": "boolean" },
+                "durable": { "type": "boolean" },
+                "failures": { "type": "array", "items": { "type": "string" } },
                 "durationMs": { "type": "number" }
               },
               "additionalProperties": false

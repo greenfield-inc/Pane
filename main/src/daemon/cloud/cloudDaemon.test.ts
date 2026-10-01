@@ -75,6 +75,7 @@ function setup(overrides: Partial<CloudDaemonDependencies> = {}) {
     remoteConfig: () => config,
     checkpointWal,
     paneDirectory: '/nonexistent-pane-dir',
+    databaseFile: '/nonexistent-pane-dir/sessions.db',
     readProcesses: () => processes,
     now: () => NOW,
     ...overrides,
@@ -184,5 +185,14 @@ describe('registerCloudDaemonHandlers', () => {
     await safeToStop({});
 
     expect(checkpointWal).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to answer safe when the database it flushed is missing', async () => {
+    const { safeToStop } = setup();
+    const result = await safeToStop({});
+
+    expect(result.safe).toBe(false);
+    expect(result.flush).toMatchObject({ durable: false });
+    expect(result.blockers).toEqual([expect.objectContaining({ condition: 'flush-failed' })]);
   });
 });

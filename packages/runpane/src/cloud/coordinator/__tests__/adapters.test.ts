@@ -26,38 +26,53 @@ describe('boat provider', () => {
   });
 
   it('pages through the list, sends the bearer key, and maps 404 to missing', async () => {
-    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const requests: Array<{ method: string; url: string; headers: Headers; body: RequestInit['body'] }> = [];
+    const routes = new Map<string, () => Response>([
+      ['GET https://boat.test/api/v1/sandboxes?limit=200', () => jsonResponse(200, { ok: true, sandboxes: [{ id: 'bx_a', name: 'rp-a', state: 'idle' }], pageInfo: { nextCursor: 'c2' } })],
+      ['GET https://boat.test/api/v1/sandboxes?limit=200&cursor=c2', () => jsonResponse(200, { ok: true, sandboxes: [{ id: 'bx_b', name: 'rp-b', state: 'archived' }], pageInfo: { nextCursor: null } })],
+      ['GET https://boat.test/api/v1/sandboxes/bx_gone', () => jsonResponse(404, { ok: false, error: { code: 'not_found' } })],
+      ['POST https://boat.test/api/v1/sandboxes/bx_b/resume', () => jsonResponse(202, { ok: true, id: 'bx_b', status: 'resuming' })],
+      ['POST https://boat.test/api/v1/sandboxes/bx_b/stop', () => jsonResponse(202, { ok: true, id: 'bx_b', status: 'archiving' })],
+      ['POST https://boat.test/api/v1/sandboxes/bx_limited/resume', () => (
+        jsonResponse(429, { ok: false, code: 'rate_limited', message: 'Rate limit hit: 60 sandbox starts per hour', error: { code: 'rate_limited' } })
+      )],
+    ]);
     const provider = new BoatCoordinatorProvider({
       apiBase: 'https://boat.test/api/v1',
       apiKey: 'boat_key',
       fetchImpl: async (url, init) => {
-        requests.push({ url, init });
-        if (url.includes('/sandboxes?') && !url.includes('cursor=')) {
-          return jsonResponse(200, { ok: true, sandboxes: [{ id: 'bx_a', name: 'rp-a', state: 'idle' }], pageInfo: { nextCursor: 'c2' } });
-        }
-        if (url.includes('cursor=c2')) {
-          return jsonResponse(200, { ok: true, sandboxes: [{ id: 'bx_b', name: 'rp-b', state: 'archived' }], pageInfo: { nextCursor: null } });
-        }
-        if (url.endsWith('/sandboxes/bx_gone')) return jsonResponse(404, { ok: false, error: { code: 'not_found' } });
-        if (url.endsWith('/sandboxes/bx_limited/resume')) {
-          return jsonResponse(429, { ok: false, code: 'rate_limited', message: 'Rate limit hit: 60 sandbox starts per hour', error: { code: 'rate_limited' } });
-        }
-        return jsonResponse(202, { ok: true, id: 'bx_a', status: 'resuming' });
+        const method = init.method ?? 'GET';
+        requests.push({ method, url, headers: new Headers(init.headers), body: init.body });
+        const route = routes.get(`${method} ${url}`);
+        // Anything else (a wrong method, path or query) fails the test instead of getting a default answer.
+        if (!route) throw new Error(`unexpected boat request ${method} ${url}`);
+        return route();
       },
     });
     const list = await provider.list();
     assert.deepEqual(list.map((item) => `${item.id}:${item.state}`), ['bx_a:running', 'bx_b:stopped']);
     assert.equal((await provider.get('bx_gone')).state, 'missing');
+    for (const request of requests) {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.body, undefined, `${request.url} sends no body`);
+      assert.equal(request.headers.get('authorization'), 'Bearer boat_key');
+    }
+
     await provider.resume('bx_b');
-    const resume = requests.at(-1);
-    assert.ok(resume);
-    assert.equal(resume.url, 'https://boat.test/api/v1/sandboxes/bx_b/resume');
-    const headers = new Headers(resume.init.headers);
-    assert.equal(headers.get('authorization'), 'Bearer boat_key');
+    await provider.stop('bx_b');
+    for (const [request, action] of [[requests.at(-2), 'resume'], [requests.at(-1), 'stop']] as const) {
+      assert.ok(request, action);
+      assert.equal(request.method, 'POST', action);
+      assert.equal(request.url, `https://boat.test/api/v1/sandboxes/bx_b/${action}`);
+      assert.equal(request.headers.get('content-type'), 'application/json', action);
+      assert.equal(request.headers.get('authorization'), 'Bearer boat_key', action);
+      assert.deepEqual(JSON.parse(String(request.body)), {}, action);
+    }
     assert.equal('delete' in provider, false);
     await assert.rejects(provider.resume('bx_limited'), (error: Error) => (
       error instanceof BoatProviderError && error.status === 429 && /rate_limited\): Rate limit hit: 60 sandbox starts per hour/.test(error.message)
     ));
+    await assert.rejects(provider.get('bx_unknown'), /unexpected boat request GET https:\/\/boat\.test\/api\/v1\/sandboxes\/bx_unknown/);
   });
 });
 
@@ -74,10 +89,17 @@ describe('daemon probe decoding', () => {
   });
 
   it('decodes safe-to-stop answers', () => {
+    const flush = { walCheckpoint: { busy: 0, log: 2, checkpointed: 2 }, fsynced: [], syncedFilesystem: true, durationMs: 3 };
     assert.deepEqual(
-      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { walCheckpoint: null, fsynced: [], syncedFilesystem: true, durationMs: 3 } }),
+      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: true, failures: [] } }),
       { kind: 'safe', checkpointed: true },
     );
+    // Only a flush the daemon verified durable counts; older daemons never said so.
+    assert.deepEqual(
+      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: false, failures: ['sync failed'] } }),
+      { kind: 'safe', checkpointed: false },
+    );
+    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush }), { kind: 'safe', checkpointed: false });
     assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: null }), { kind: 'safe', checkpointed: false });
     assert.deepEqual(
       decodeSafeToStop({ ok: true, safe: false, blockers: [{ condition: 'agent-working', message: 'panel p1' }, { condition: 'lock-held' }], flush: null }),

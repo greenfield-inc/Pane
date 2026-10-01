@@ -14,6 +14,8 @@ const FLUSHED: CloudDurableFlushResult = {
   walCheckpoint: { busy: 0, log: 4, checkpointed: 4 },
   fsynced: ['/pane/sessions.db'],
   syncedFilesystem: true,
+  durable: true,
+  failures: [],
   durationMs: 12,
 };
 
@@ -29,8 +31,8 @@ function idleSources(overrides: Partial<SafeToStopSources> = {}): SafeToStopSour
   };
 }
 
-async function check(sources: SafeToStopSources, request: CloudSafeToStopRequest = {}) {
-  const flush = vi.fn(async () => FLUSHED);
+async function check(sources: SafeToStopSources, request: CloudSafeToStopRequest = {}, flushed = FLUSHED) {
+  const flush = vi.fn(async () => flushed);
   const result = await runSafeToStop({ sources, flush, version: '2.4.141', now: () => NOW }, request);
   return { result, flush };
 }
@@ -101,6 +103,17 @@ describe('runSafeToStop', () => {
     expect(result.safe).toBe(false);
     expect(result.flush).toEqual(FLUSHED);
     expect(flush).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers unsafe when the flush could not be made durable', async () => {
+    const failed = { ...FLUSHED, syncedFilesystem: false, durable: false, failures: ['syncing the filesystem holding /pane failed'] };
+    const { result } = await check(idleSources(), {}, failed);
+
+    expect(result.safe).toBe(false);
+    expect(result.blockers).toEqual([
+      { condition: 'flush-failed', message: 'State is not durable: syncing the filesystem holding /pane failed' },
+    ]);
+    expect(result.flush).toEqual(failed);
   });
 
   it('only checks when flush is never', async () => {

@@ -46,6 +46,20 @@ describe('Reconciler', () => {
     assert.ok(alerts.alerts.some((alert) => alert.code === 'orphan-stopped'));
   });
 
+  it('reports a failed orphan stop as skipped, without a stopped result or alert', async () => {
+    const { reconciler, provider, alerts } = setup(
+      [sandbox('bx_a', 'running'), sandbox('bx_orphan', 'running')],
+      [entry('s1', 'bx_a')],
+    );
+    provider.stopErrors.push(new Error('boat: 503'));
+    const report = await reconciler.runOnce();
+    assert.equal(report.aborted, null);
+    assert.deepEqual(report.stopped, []);
+    assert.deepEqual(report.skipped, [{ sandboxId: 'bx_orphan', reason: 'stop failed: boat: 503' }]);
+    assert.equal(provider.sandboxes.get('bx_orphan')?.state, 'running');
+    assert.ok(!alerts.alerts.some((alert) => alert.code === 'orphan-stopped'));
+  });
+
   it('aborts and stops nothing when the directory read fails', async () => {
     const { reconciler, provider, alerts } = setup([sandbox('bx_a', 'running'), sandbox('bx_b', 'running')], null);
     const report = await reconciler.runOnce();

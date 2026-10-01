@@ -74,6 +74,8 @@ export class FakeProvider implements CoordinatorProvider {
   listError: Error | null = null;
   /** Errors thrown by the next resume() calls, in order. */
   resumeErrors: Error[] = [];
+  /** Errors thrown by the next stop() calls, in order; the sandbox keeps its state. */
+  stopErrors: Error[] = [];
   /** State the sandbox moves to on the Nth get() after a resume (simulates boot). */
   bootAfterGets = 1;
   private pendingBoot = new Map<string, number>();
@@ -107,6 +109,8 @@ export class FakeProvider implements CoordinatorProvider {
 
   async stop(sandboxId: string): Promise<void> {
     this.calls.push(`stop ${sandboxId}`);
+    const failure = this.stopErrors.shift();
+    if (failure) throw failure;
     const current = this.sandboxes.get(sandboxId);
     if (current) {
       current.state = 'stopped';

@@ -61,6 +61,30 @@ describe('IdleStopper', () => {
     }
   });
 
+  it('never stops on a safe answer whose checkpoint the daemon did not confirm, and resets the streak', async () => {
+    const { idle, provider, probe, alerts } = setup();
+    await idle.runOnce();
+    probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'safe', checkpointed: false });
+    const unconfirmed = await idle.runOnce();
+    assert.equal(unconfirmed.results[0].decision, 'not-checkpointed');
+    assert.deepEqual(provider.mutations(), []);
+    assert.equal(alerts.alerts.at(-1)?.code, 'idle-stop-not-checkpointed');
+    probe.safeByUrl.delete('https://rp-s1.tail.ts.net');
+    assert.equal((await idle.runOnce()).results[0].decision, 'safe-streak');
+    assert.deepEqual(provider.mutations(), []);
+  });
+
+  it('reports a failed provider stop without a stopped result or alert', async () => {
+    const { idle, provider, alerts } = setup({ requiredConsecutiveSafe: 1 });
+    provider.stopErrors.push(new Error('boat: 503'));
+    const report = await idle.runOnce();
+    assert.equal(report.results[0].decision, 'stop-failed');
+    assert.match(report.results[0].detail, /503/);
+    assert.equal(provider.sandboxes.get('bx_a')?.state, 'running');
+    assert.ok(!alerts.alerts.some((alert) => alert.code === 'idle-stopped'));
+    assert.equal(alerts.alerts.at(-1)?.code, 'idle-stop-failed');
+  });
+
   it('does not stop without a coordinator token, or when not running', async () => {
     const noToken = setup({ requiredConsecutiveSafe: 1 });
     noToken.directory.result = { ok: true, generatedAt: null, entries: [entry('s1', 'bx_a', { coordinatorToken: null })] };

@@ -30,14 +30,17 @@ const invokeSchema = boundary.object({
 });
 
 // The daemon's safe-to-stop result: blockers name the refusing condition; `flush` is non-null once the
-// daemon has checkpointed SQLite's WAL and fsynced (which only happens when safe).
+// daemon has tried to checkpoint SQLite's WAL and fsync (which only happens when safe), and its
+// `durable` is true only when every step succeeded. Daemons from before `durable` never confirm.
 const safeToStopResultSchema = boundary.object({
   safe: boundary.boolean,
   blockers: boundary.optional(boundary.array(boundary.object({
     condition: boundary.optional(boundary.string),
     message: boundary.optional(boundary.string),
   }))),
-  flush: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  flush: boundary.optional(boundary.nullable(boundary.object({
+    durable: boundary.optional(boundary.boolean),
+  }))),
 });
 
 /**
@@ -62,7 +65,7 @@ export function decodeHealth(body: JsonValue): DaemonHealth {
 
 export function decodeSafeToStop(result: JsonValue): SafeToStopAnswer {
   const decoded = decodeBoundary(result, safeToStopResultSchema);
-  if (decoded.safe) return { kind: 'safe', checkpointed: decoded.flush !== undefined && decoded.flush !== null };
+  if (decoded.safe) return { kind: 'safe', checkpointed: decoded.flush?.durable === true };
   const reasons = (decoded.blockers ?? []).map((blocker) => (
     [blocker.condition, blocker.message].filter(Boolean).join(': ')
   ));
