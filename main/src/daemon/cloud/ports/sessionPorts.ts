@@ -14,7 +14,7 @@ import type {
 import type { ProcessEntry } from '../processTree';
 import { findPanelAncestor, type TcpListener } from './listeners';
 import { isTcpPort, isUrlPath, PORT_NAME_PATTERN, readPortsManifest, type ManifestRead } from './manifest';
-import { manifestKey, readPortsState, writePortsState, type PortsState, type StoredPort } from './portsStore';
+import { emptyPortsState, manifestKey, PortsStateError, readPortsState, writePortsState, type PortsState, type StoredPort } from './portsStore';
 import { describeListener, localTarget, type ServeBackend, type ServeListener } from './tailscaleServe';
 
 /** Pane's own HTTPS port on every Session. */
@@ -100,8 +100,24 @@ export class SessionPortsService {
     return new Date(this.deps.now()).toISOString();
   }
 
+  /** The state a mutation starts from; an unreadable state file refuses it (ERR_PORTS_STATE_INVALID) and stays untouched. */
   private readState(): PortsState {
-    return readPortsState(this.deps.statePath);
+    try {
+      return readPortsState(this.deps.statePath);
+    } catch (error) {
+      if (error instanceof PortsStateError) fail('ERR_PORTS_STATE_INVALID', error.message, { path: error.file });
+      throw error;
+    }
+  }
+
+  /** For listing and detection: an unreadable state file shows as no ports plus `stateError`. */
+  private readStateForView(): { state: PortsState; stateError?: string } {
+    try {
+      return { state: readPortsState(this.deps.statePath) };
+    } catch (error) {
+      if (!(error instanceof PortsStateError)) throw error;
+      return { state: emptyPortsState(), stateError: error.message };
+    }
   }
 
   private saveState(state: PortsState): void {
@@ -120,11 +136,12 @@ export class SessionPortsService {
   }
 
   private async snapshot(): Promise<SessionPortsListResult> {
-    const state = this.readState();
+    const { state, stateError } = this.readStateForView();
     const self = await this.deps.serve.self();
     if (!self.running || !self.dnsName) {
       return {
         ok: true,
+        stateError,
         autoOpen: state.autoOpen,
         manifests: this.manifests,
         available: false,
@@ -142,7 +159,7 @@ export class SessionPortsService {
     // Suggestions refresh on the detection tick; one just opened is already a port.
     const published = new Set(state.ports.filter(port => !port.blockedBy).map(port => port.port));
     const suggested = this.suggested.filter(suggestion => !published.has(suggestion.port));
-    return { ok: true, autoOpen: state.autoOpen, manifests: this.manifests, available: true, host: dnsName, scheme, ports, suggested };
+    return { ok: true, stateError, autoOpen: state.autoOpen, manifests: this.manifests, available: true, host: dnsName, scheme, ports, suggested };
   }
 
   private async emitChanged(): Promise<void> {
@@ -523,7 +540,7 @@ export class SessionPortsService {
       await this.reconcile('repo-add');
     }
 
-    const state = this.readState();
+    const { state } = this.readStateForView();
     const panels = this.deps.panelProcesses();
     const published = new Set(state.ports.filter(port => !port.blockedBy).map(port => port.port));
     const reserved = new Set(this.deps.reservedPorts());

@@ -70,6 +70,17 @@ test('runpane port list prints URLs, suggestions and manifests', async () => {
   assert.match(text, /Manifest \/home\/user\/app\/\.runpane\/ports\.json: 1 port/u);
 });
 
+test('runpane port list says when the daemon cannot read its ports state file', async () => {
+  const out: string[] = [];
+  const stateError = '/home/user/.runpane-cloud/ports.json is unreadable (not JSON); Pane keeps it as is and changes no ports until it is repaired or removed';
+  const code = await runPortsCommand({ sub: 'list', verify: false, json: false }, {
+    invoke: async () => ({ ...listResult([]), stateError }),
+    stdout: (line) => out.push(line),
+  });
+  assert.equal(code, 0);
+  assert.ok(out.includes(`  State file problem: ${stateError}`), out.join('\n'));
+});
+
 test('runpane port open prints the URL and what it replaced', async () => {
   const out: string[] = [];
   await runPortsCommand({ sub: 'open', request: { port: 8787, yes: true }, json: false }, {

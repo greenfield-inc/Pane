@@ -312,25 +312,25 @@ describe('SessionPortsService.reconcile', () => {
   });
 });
 
-describe('SessionPortsService.detect', () => {
-  function withPanelServer(h: Harness): void {
-    h.panels = [{ pid: 100, panelId: 'panel-1', paneId: 'pane-1' }];
-    h.processes = [
-      { pid: 1, ppid: 0, name: 'systemd' },
-      { pid: 100, ppid: 1, name: 'bash' },
-      { pid: 101, ppid: 100, name: 'claude' },
-      { pid: 102, ppid: 101, name: 'node' },
-      { pid: 200, ppid: 1, name: 'postgres' },
-    ];
-    h.listeners = [
-      { port: 5173, address: '127.0.0.1', inode: 11 },
-      { port: 5173, address: '::1', inode: 12 },
-      { port: 5432, address: '127.0.0.1', inode: 13 },
-      { port: 42137, address: '127.0.0.1', inode: 14 },
-    ];
-    h.owners = new Map([[11, 102], [12, 102], [13, 200]]);
-  }
+function withPanelServer(h: Harness): void {
+  h.panels = [{ pid: 100, panelId: 'panel-1', paneId: 'pane-1' }];
+  h.processes = [
+    { pid: 1, ppid: 0, name: 'systemd' },
+    { pid: 100, ppid: 1, name: 'bash' },
+    { pid: 101, ppid: 100, name: 'claude' },
+    { pid: 102, ppid: 101, name: 'node' },
+    { pid: 200, ppid: 1, name: 'postgres' },
+  ];
+  h.listeners = [
+    { port: 5173, address: '127.0.0.1', inode: 11 },
+    { port: 5173, address: '::1', inode: 12 },
+    { port: 5432, address: '127.0.0.1', inode: 13 },
+    { port: 42137, address: '127.0.0.1', inode: 14 },
+  ];
+  h.owners = new Map([[11, 102], [12, 102], [13, 200]]);
+}
 
+describe('SessionPortsService.detect', () => {
   it('suggests only listeners started under a Pane panel, without publishing them', async () => {
     const h = makeHarness();
     withPanelServer(h);
@@ -370,6 +370,48 @@ describe('SessionPortsService.detect', () => {
     h.manifests.set('/home/user/new-repo', { kind: 'ok', ports: [{ name: 'docs', port: 4000, path: '/' }] });
     await h.service.detect();
     expect((await h.service.list()).ports.map(port => port.name)).toEqual(['docs']);
+  });
+});
+
+describe('SessionPortsService with an unreadable state file', () => {
+  const unreadable: Array<[string, string]> = [
+    ['not JSON', '{"version": 1, "ports": ['],
+    ['JSON with the wrong shape', JSON.stringify({ version: 1, ports: [{ name: 'taste', port: 'eight' }] })],
+  ];
+
+  for (const [label, content] of unreadable) {
+    it(`refuses every change and keeps the file as is when it is ${label}`, async () => {
+      const h = makeHarness();
+      fs.mkdirSync(path.dirname(h.statePath), { recursive: true });
+      fs.writeFileSync(h.statePath, content);
+      h.projects = ['/home/user/app'];
+      h.manifests.set('/home/user/app', { kind: 'ok', ports: [{ name: 'web', port: 3000, path: '/' }] });
+      withPanelServer(h);
+
+      expect(await errorCode(h.service.open({ port: 8787 }))).toBe('ERR_PORTS_STATE_INVALID');
+      expect(await errorCode(h.service.close(8787))).toBe('ERR_PORTS_STATE_INVALID');
+      expect(await errorCode(h.service.configure({ autoOpen: true }))).toBe('ERR_PORTS_STATE_INVALID');
+      await expect(h.service.reconcile('boot')).rejects.toMatchObject({ code: 'ERR_PORTS_STATE_INVALID' });
+      await h.service.detect();
+
+      expect(fs.readFileSync(h.statePath, 'utf8')).toBe(content);
+      expect(h.serve.calls).toEqual([]);
+      const list = await h.service.list();
+      expect(list.ports).toEqual([]);
+      expect(list.stateError).toContain(h.statePath);
+      expect(list.suggested.map(port => port.port)).toEqual([5173]);
+      expect(h.events.at(-1)?.stateError).toContain(h.statePath);
+    });
+  }
+
+  it('treats only a missing file as no ports', async () => {
+    const h = makeHarness();
+    fs.mkdirSync(h.statePath, { recursive: true });
+    expect(() => readPortsState(path.join(dir, 'absent.json'))).not.toThrow();
+    expect(readPortsState(path.join(dir, 'absent.json')).ports).toEqual([]);
+    expect(await errorCode(h.service.open({ port: 8787 }))).toBe('ERR_PORTS_STATE_INVALID');
+    expect((await h.service.list()).stateError).toContain(h.statePath);
+    expect(fs.statSync(h.statePath).isDirectory()).toBe(true);
   });
 });
 
