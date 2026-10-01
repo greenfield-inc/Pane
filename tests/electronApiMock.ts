@@ -242,6 +242,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
       }
     };
+    // Per-host navigation memory, keyed the way main keys it: '' is this computer.
+    const navigationMemories = new Map<string, JsonObject>();
     const uiState = {
       expandedProjects: [] satisfies number[],
       expandedFolders: [] satisfies string[],
@@ -1046,6 +1048,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           else uiState.repositoriesSectionExpanded = expanded;
           return success();
         },
+        getNavigationMemory: (hostId: string | null) =>
+          success(clone(navigationMemories.get(hostId ?? '') ?? null)),
+        saveNavigationMemory: (hostId: string | null, memory: JsonObject) => {
+          navigationMemories.set(hostId ?? '', clone(memory));
+          return success();
+        },
       }),
     };
 
@@ -1128,6 +1136,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitRemoteDaemonResyncRequested(event: { hostChanged: boolean } = { hostChanged: false }) {
           emit('remote-daemon:resync-required', event);
+        },
+        getNavigationMemory(hostId: string | null) {
+          return clone(navigationMemories.get(hostId ?? '') ?? null);
         },
         getConfigReadCount() {
           return configGetCount;

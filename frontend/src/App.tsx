@@ -32,6 +32,7 @@ import { subscribePanelStatus } from './services/panelStatusSync';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
+import { startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
 
@@ -247,6 +248,9 @@ function App() {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  // Remember where the user is on the active host, so a host switch can return here.
+  useEffect(() => startHostNavigationMemoryWrites(), []);
 
   // Detect unclean shutdown from previous session and notify user
   useEffect(() => {

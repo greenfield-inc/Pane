@@ -525,6 +525,15 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
   return payload;
 }
 
+/**
+ * Names the host whose runtime is active: a saved remote profile id, or null for
+ * this computer. Per-host state keys off this on both sides of the IPC boundary.
+ */
+export function getActiveRemoteHostId<Value>(value: Value): string | null {
+  const { client } = normalizeRemoteDaemonConfig(value);
+  return client.mode === 'remote' ? client.activeProfileId : null;
+}
+
 export function normalizeRemoteDaemonConfig<Value>(value: Value): RemoteDaemonConfig {
   const defaults = createDefaultRemoteDaemonConfig();
   const config = readJsonObject(value);

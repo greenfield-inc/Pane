@@ -7,6 +7,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { panelApi } from '../services/panelApi';
 import { openPaneTarget } from '../components/terminal/openPaneLink';
+import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/hostNavigationMemory';
 import { API } from '../utils/api';
 import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
@@ -19,7 +20,7 @@ interface SessionEventData {
 
 type ValidatedEventData = SessionEventData | SessionOutput;
 
-async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
+async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
   if (hostChanged) {
     // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
     const uiState = await window.electronAPI.uiState.getExpanded();
@@ -49,6 +50,12 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     }
   }
 
+  if (hostChanged) {
+    // The new host's config and Panes have landed, so its remembered location
+    // can be validated and reopened; the panel load below brings back its tab.
+    await restoreHostNavigation();
+  }
+
   const activeSessionId = useSessionStore.getState().activeSessionId;
   if (activeSessionId) {
     const panels = await panelApi.loadPanelsForSession(activeSessionId);
@@ -64,6 +71,16 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   window.dispatchEvent(new Event('project-sessions-refresh'));
   // Sessions belong to the host too; adopt the new host's selection.
   window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { selectionChanged: true } }));
+}
+
+async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
+  if (!hostChanged) {
+    await reloadRemoteRuntimeState(loadSessions, false);
+    return;
+  }
+  // A switch clears the outgoing host's selection before restoring the incoming
+  // host's; don't let those intermediate states be remembered as either one's.
+  await withHostNavigationWritesPaused(() => reloadRemoteRuntimeState(loadSessions, true));
 }
 
 // Frontend validation helpers

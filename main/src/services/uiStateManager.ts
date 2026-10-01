@@ -1,5 +1,7 @@
 import { DatabaseService } from '../database/database';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
 
 type SidebarSection = 'pinned' | 'repositories';
 
@@ -91,6 +93,28 @@ class UIStateManager {
   saveExpandedState(projectIds: number[], folderIds: string[]): void {
     this.saveExpandedProjects(projectIds);
     this.saveExpandedFolders(folderIds);
+  }
+
+  // Unlike the keys above, navigation memory takes the host id from the caller:
+  // the renderer still shows the outgoing host while main has already switched
+  // to the incoming one, so only the renderer knows which host a location
+  // belongs to. Both sides resolve the id with getActiveRemoteHostId.
+  private navigationMemoryKey(hostId: string | null): string {
+    return hostId ? `navigation.lastLocation@${hostId}` : 'navigation.lastLocation';
+  }
+
+  getNavigationMemory(hostId: string | null): HostNavigationMemory | null {
+    const value = this.db.getUIState(this.navigationMemoryKey(hostId));
+    if (!value) return null;
+    try {
+      return decodeHostNavigationMemory(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+
+  saveNavigationMemory(hostId: string | null, memory: HostNavigationMemory): void {
+    this.db.setUIState(this.navigationMemoryKey(hostId), JSON.stringify(memory));
   }
 
   getExpandedState(): ExpandedUiState {

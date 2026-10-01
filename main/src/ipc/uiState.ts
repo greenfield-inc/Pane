@@ -1,13 +1,15 @@
 import { ipcMain } from 'electron';
 import { UIStateManager } from '../services/uiStateManager';
 import type { AppServices } from './types';
-import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
 
 export function registerUIStateHandlers(services: AppServices) {
-  const uiStateManager = new UIStateManager(services.databaseService, () => {
-    const { client } = normalizeRemoteDaemonConfig(services.configManager.getConfig().remoteDaemon);
-    return client.mode === 'remote' ? client.activeProfileId : null;
-  });
+  const uiStateManager = new UIStateManager(
+    services.databaseService,
+    () => getActiveRemoteHostId(services.configManager.getConfig().remoteDaemon),
+  );
 
   ipcMain.handle('ui-state:get-expanded', async () => {
     try {
@@ -96,6 +98,43 @@ export function registerUIStateHandlers(services: AppServices) {
       };
     } catch (error) {
       console.error('Error saving sidebar section expanded state:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // The renderer names the host: it can still be showing the outgoing one while
+  // this process has already switched runtimes. Null means this computer.
+  ipcMain.handle('ui-state:get-navigation-memory', async (_, hostId: string | null) => {
+    try {
+      return {
+        success: true,
+        data: uiStateManager.getNavigationMemory(hostId)
+      };
+    } catch (error) {
+      console.error('Error getting host navigation memory:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:save-navigation-memory', async (_, hostId: string | null, memory: HostNavigationMemory) => {
+    try {
+      // Decoded on the way in so a stored location is always readable back.
+      const decoded = decodeHostNavigationMemory(memory);
+      if (!decoded) {
+        throw new Error('Invalid host navigation memory');
+      }
+      uiStateManager.saveNavigationMemory(hostId, decoded);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving host navigation memory:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

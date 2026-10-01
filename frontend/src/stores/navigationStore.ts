@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { PaneNavigationView } from '../../../shared/types/hostNavigation';
 
 export type SidebarNavigationScope = 'repositories' | 'pinned';
 
@@ -11,11 +12,12 @@ const toProjectIdArray = (projectIds: Set<number>): number[] =>
   Array.from(projectIds).sort((a, b) => a - b);
 
 /**
- * Pane has no router — this enum is the whole navigation model. Adding a value
- * here also requires a branch in `SessionView` and an entry in *both* sidebar
- * components (`Sidebar` compact rail and `ProjectSessionList` expanded tree).
+ * Pane has no router — this enum is the whole navigation model. It lives in
+ * `shared` because per-host navigation memory crosses the IPC boundary; adding a
+ * value there also requires a branch in `SessionView` and an entry in *both*
+ * sidebar components (`Sidebar` compact rail and `ProjectSessionList` tree).
  */
-export type ActiveView = 'sessions' | 'project' | 'pane-chat' | 'usage';
+export type ActiveView = PaneNavigationView;
 
 interface NavigationState {
   activeView: ActiveView;
