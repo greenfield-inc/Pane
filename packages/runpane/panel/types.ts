@@ -1,4 +1,4 @@
-import type { Agent, CardData, PanelData } from '../model';
+import type { Agent, CardData, PanelData } from './model';
 
 export interface Notice {
   kind: 'ok' | 'error';

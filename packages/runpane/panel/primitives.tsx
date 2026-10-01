@@ -34,7 +34,7 @@ export function BranchIcon({ agent }: { agent: Agent }) {
   return <GitPullRequest className="icon pr-open" aria-label="Open pull request" />;
 }
 
-export function DiffStat({ agent }: { agent: Agent }) {
+function DiffStat({ agent }: { agent: Agent }) {
   if (!agent.diff) return null;
   return (
     <span className="diff">

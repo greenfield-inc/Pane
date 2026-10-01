@@ -21,8 +21,10 @@ Pane is a desktop app that runs coding agents side by side, each in its own git 
 - `agents_send` with `pane`, `text`, and `yes: true` types the message and submits it. Confirm it reports `delivered: true`.
 - To answer a menu (arrow keys, Enter, Escape) once the user has chosen, use `panels_input` with named keys, then check with `agents_status`.
 
-## Show the panel
-`agents_panel` opens the Chat agents panel beside the chat. It lists the agents this chat started with live status. The user can message an agent or open it in Pane from there.
+## Show agents
+- `agents_start`, `agents_status` and `agents_send` results show as a Pane card in the chat, so keep your reply short and don't repeat what the card shows.
+- `agents_panel` opens the Chat agents panel beside the chat: every agent this chat started, with live status, terminal and pull request. The user can message an agent or open it in Pane from there.
+- When the user asks about one agent, call `agents_panel_focus` with its name. It shows that agent's card and selects it in the panel.
 
 ## Other tools
 - `panes_list` and `panes_git_status` show open Panes and their git state.

@@ -4,7 +4,7 @@ import { STATUS_BY_KIND, type AgentStatus } from './agentTasks';
 import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
 import { invokeDaemon, resolvePaneDirectory } from './daemonClient';
 import { buildPaneLink } from './links';
-import { panelScreenResultSchema, workspaceStateResultSchema } from './localControl';
+import { panelListResultSchema, panelScreenResultSchema, workspaceStateResultSchema } from './localControl';
 
 /**
  * The `chatgpt` toolset: Pane's agents as native UI in ChatGPT. Agent tool results render as
@@ -21,7 +21,7 @@ const CHAT_META_KEY = 'openai/session';
 const NO_CHAT = 'local';
 const MAX_AGENTS_PER_CHAT = 12;
 const SCREEN_LINES = 6;
-const PANE_OFFLINE = 'Pane isn\'t running. Open the Pane app, then refresh.';
+const PANE_OFFLINE = 'Pane isn\'t running. Open the Pane app on this computer.';
 
 const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="14" height="13" rx="2"/><path d="M10 3.5v13M10 10h7"/></svg>';
 
@@ -29,18 +29,15 @@ const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"
 export const INLINE_CARD_TOOLS = new Set(['agents_start', 'agents_status', 'agents_send']);
 export const inlineCardMeta: JsonObject = { ui: { resourceUri: PANEL_URI } };
 
-interface ChatAgent {
-  paneId: string;
-  panelId: string;
-  name?: string;
-  paneDir?: string;
-}
+/**
+ * The only stored state: which Panes each chat started, as Pane ids in start order. Pane has no
+ * record of the ChatGPT chat behind a Pane, so this can't be derived. Everything else on a card
+ * (name, repo, agent panel, status, screen, PR, diff) is read from Pane on each refresh.
+ */
+type Store = Record<string, string[]>;
 
-interface Store {
-  chats: Record<string, ChatAgent[]>;
-  /** The Pane each chat's panel shows, set by agents_panel_focus. */
-  focus: Record<string, string>;
-}
+/** The Pane each chat's panel shows, set by agents_panel_focus. View state, so memory only. */
+const focusByChat = new Map<string, string>();
 
 interface AgentCard {
   paneId: string;
@@ -57,19 +54,8 @@ interface AgentCard {
 type ToolResult = { content: { type: 'text'; text: string }[]; structuredContent?: JsonObject; isError?: boolean };
 type RunCli = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-const chatAgentSchema = boundary.object({
-  paneId: boundary.string,
-  panelId: boundary.string,
-  name: boundary.optional(boundary.string),
-  paneDir: boundary.optional(boundary.string),
-});
 // agents_start output, possibly from a failed start that still created a Pane.
-const startedSchema = boundary.object({
-  paneId: boundary.optional(boundary.string),
-  panelId: boundary.optional(boundary.string),
-  name: boundary.optional(boundary.string),
-});
-const startInputSchema = boundary.object({ paneDir: boundary.optional(boundary.string) });
+const startedSchema = boundary.object({ paneId: boundary.optional(boundary.string) });
 const chatMetaSchema = boundary.object({ [CHAT_META_KEY]: boundary.optional(boundary.string) });
 const paneListSchema = boundary.object({
   panes: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, repoName: boundary.optional(boundary.string) })),
@@ -94,7 +80,7 @@ const statusInputSchema = boundary.object({ chat: boundary.string });
 const focusInputSchema = boundary.object({ pane: boundary.nonEmptyString });
 const cardInputSchema = boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.optional(boundary.nonEmptyString) });
 const openInputSchema = boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.optional(boundary.nonEmptyString) });
-const storeSchema = boundary.object({ chats: boundary.jsonObject, focus: boundary.optional(boundary.jsonObject) });
+const storeSchema = boundary.object({ chats: boundary.jsonObject });
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const appOnly = { ui: { resourceUri: PANEL_URI, visibility: ['app'] } };
@@ -199,16 +185,12 @@ export function chatIdOf(meta: JsonObject): string {
   return decodeBoundary(meta, chatMetaSchema)[CHAT_META_KEY] || NO_CHAT;
 }
 
-/** Remembers an agent that `agents_start` started from this chat, given the call's input and output. */
-export function recordStartedAgent(chat: string, input: JsonObject, output: JsonObject): void {
-  const { paneId, panelId, name } = decodeBoundary(output, startedSchema);
-  if (!paneId || !panelId) return;
-  const agent: ChatAgent = { paneId, panelId, name };
-  const { paneDir } = decodeBoundary(input, startInputSchema);
-  if (paneDir) agent.paneDir = paneDir;
+/** Remembers the Pane that `agents_start` started from this chat. */
+export function recordStartedAgent(chat: string, output: JsonObject): void {
+  const { paneId } = decodeBoundary(output, startedSchema);
+  if (!paneId) return;
   const store = readStore();
-  const kept = (store.chats[chat] ?? []).filter((entry) => entry.paneId !== paneId);
-  store.chats[chat] = [...kept, agent].slice(-MAX_AGENTS_PER_CHAT);
+  store[chat] = [...(store[chat] ?? []).filter((id) => id !== paneId), paneId].slice(-MAX_AGENTS_PER_CHAT);
   writeStore(store);
 }
 
@@ -218,9 +200,8 @@ export async function callChatPanelTool(name: string, input: JsonObject, chat: s
   if (name === 'agents_panel_focus') return focusResult(chat, decodeBoundary(input, focusInputSchema).pane);
   if (name === 'agents_card') return cardResult(decodeBoundary(input, cardInputSchema));
   const { paneId, panelId } = decodeBoundary(input, openInputSchema);
-  const paneDir = Object.values(readStore().chats).flat().find((agent) => agent.paneId === paneId)?.paneDir;
   const argv = ['panes', 'focus', `--pane=${paneId}`, ...(panelId ? [`--panel=${panelId}`] : []), '--source=user', '--yes', '--json'];
-  const { code, stdout, stderr } = await run(paneDir ? [...argv, `--pane-dir=${paneDir}`] : argv);
+  const { code, stdout, stderr } = await run(argv);
   const text = stdout.trim() || stderr.trim();
   return code === 0
     ? { content: [{ type: 'text', text: 'Opened in Pane.' }], structuredContent: { ok: true, paneId } }
@@ -228,39 +209,34 @@ export async function callChatPanelTool(name: string, input: JsonObject, chat: s
 }
 
 async function panelResult(chat: string): Promise<ToolResult> {
-  const store = readStore();
-  const { agents, offline } = await readAgents(store.chats[chat] ?? []);
+  const { agents, offline } = await readAgents(readStore()[chat] ?? []);
   const summary = agents.length === 0
     ? 'This chat has not started any Pane agents yet.'
     : agents.map(describe).join('\n');
   const structuredContent: JsonObject = { chat, agents: agents.map(toJson) };
-  const focus = store.focus[chat];
+  const focus = focusByChat.get(chat);
   if (focus) structuredContent.focus = focus;
   if (offline) structuredContent.error = PANE_OFFLINE;
   return { content: [{ type: 'text', text: offline ? PANE_OFFLINE : summary }], structuredContent };
 }
 
 async function focusResult(chat: string, pane: string): Promise<ToolResult> {
-  const store = readStore();
-  const started = store.chats[chat] ?? [];
-  const agent = started.find((entry) => entry.paneId === pane) ?? started.find((entry) => entry.name === pane);
+  const { agents, offline } = await readAgents(readStore()[chat] ?? []);
+  const agent = agents.find((entry) => entry.paneId === pane) ?? agents.find((entry) => entry.name === pane);
   if (!agent) {
-    const names = started.map((entry) => entry.name ?? entry.paneId).join(', ') || 'none yet';
+    const names = agents.map((entry) => entry.name).join(', ') || 'none yet';
     return { content: [{ type: 'text', text: `This chat didn't start an agent called ${pane}. Agents this chat started: ${names}.` }], isError: true };
   }
-  store.focus[chat] = agent.paneId;
-  writeStore(store);
-  return cardOf(agent);
+  focusByChat.set(chat, agent.paneId);
+  return cardResultOf(agent, offline);
 }
 
 async function cardResult({ paneId, panelId }: { paneId: string; panelId?: string }): Promise<ToolResult> {
-  const known = Object.values(readStore().chats).flat().find((agent) => agent.paneId === paneId);
-  const agent = known ?? { paneId, panelId: panelId ?? '' };
-  return cardOf({ ...agent, panelId: panelId ?? agent.panelId });
+  const { agents: [card], offline } = await readAgents([paneId], panelId);
+  return cardResultOf(card, offline);
 }
 
-async function cardOf(agent: ChatAgent): Promise<ToolResult> {
-  const { agents: [card], offline } = await readAgents([agent]);
+function cardResultOf(card: AgentCard, offline: boolean): ToolResult {
   const structuredContent: JsonObject = { agent: toJson(card) };
   if (offline) structuredContent.error = PANE_OFFLINE;
   return { content: [{ type: 'text', text: offline ? PANE_OFFLINE : describe(card) }], structuredContent };
@@ -290,42 +266,43 @@ function toJson(card: AgentCard): JsonObject {
  * Each agent's card data, read from the Pane daemon in one pass per Pane data directory. `offline`
  * means no directory answered, including the default one checked when the chat has no agents yet.
  */
-async function readAgents(agents: ChatAgent[]): Promise<{ agents: AgentCard[]; offline: boolean }> {
-  const paneDirs = agents.length === 0 ? [undefined] : [...new Set(agents.map((agent) => agent.paneDir))];
-  const dirs = new Map(await Promise.all(paneDirs.map(async (paneDir) => [paneDir, await readPaneDir(paneDir)] as const)));
-  const offline = [...dirs.values()].every((dir) => !dir.panes && dir.entries.length === 0);
-  return { agents: await Promise.all(agents.map((agent) => readAgent(agent, dirs.get(agent.paneDir)))), offline };
-}
-
-async function readPaneDir(paneDir: string | undefined) {
+async function readAgents(paneIds: string[], panelId?: string): Promise<{ agents: AgentCard[]; offline: boolean }> {
   const [panes, state] = await Promise.all([
-    invokeDaemon('runpane:panes:list', [{}], paneListSchema, { paneDir }).catch(() => undefined),
-    invokeDaemon('runpane:workspace:state', [{}], workspaceStateResultSchema, { paneDir }).catch(() => undefined),
+    invokeDaemon('runpane:panes:list', [{}], paneListSchema).catch(() => undefined),
+    invokeDaemon('runpane:workspace:state', [{}], workspaceStateResultSchema).catch(() => undefined),
   ]);
-  return { panes: panes && new Map(panes.panes.map((pane) => [pane.id, pane])), entries: state?.entries ?? [] };
+  const workspace = { panes: panes && new Map(panes.panes.map((pane) => [pane.id, pane])), entries: state?.entries ?? [] };
+  const offline = !panes && !state;
+  return { agents: await Promise.all(paneIds.map((paneId) => readAgent(paneId, panelId, workspace))), offline };
 }
 
-async function readAgent(agent: ChatAgent, dir: Awaited<ReturnType<typeof readPaneDir>> | undefined): Promise<AgentCard> {
-  const card: AgentCard = {
-    paneId: agent.paneId,
-    panelId: agent.panelId,
-    name: agent.name ?? agent.paneId,
-    status: 'unknown',
-    screen: [],
-    link: buildPaneLink({ kind: 'pane', id: agent.paneId, panelId: agent.panelId || undefined }),
-  };
-  const pane = dir?.panes?.get(agent.paneId);
+type Workspace = { panes?: Map<string, { name: string; repoName?: string }>; entries: { kind: string; panelId?: string; paneId: string }[] };
+
+/** The agent's terminal: its CLI agent panel, else the Pane's first terminal. */
+async function agentPanelOf(paneId: string): Promise<string | undefined> {
+  const list = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema).catch(() => undefined);
+  const panels = list?.panels ?? [];
+  return (panels.find((panel) => panel.isCliPanel || panel.agentType) ?? panels.find((panel) => panel.type === 'terminal'))?.panelId;
+}
+
+async function readAgent(paneId: string, knownPanelId: string | undefined, workspace: Workspace): Promise<AgentCard> {
+  const pane = workspace.panes?.get(paneId);
+  const card: AgentCard = { paneId, panelId: '', name: pane?.name ?? paneId, status: 'unknown', screen: [], link: buildPaneLink({ kind: 'pane', id: paneId }) };
   // Archived Panes drop out of the list. Without a list, a failed read is a transient unknown.
-  if (dir?.panes && !pane) return { ...card, status: 'gone' };
-  if (pane) card.name = pane.name;
+  if (workspace.panes && !pane) return { ...card, status: 'gone' };
   if (pane?.repoName) card.repo = pane.repoName;
-  const entry = dir?.entries.find((candidate) => candidate.panelId === agent.panelId);
+  const panelId = knownPanelId ?? await agentPanelOf(paneId);
+  if (panelId) {
+    card.panelId = panelId;
+    card.link = buildPaneLink({ kind: 'pane', id: paneId, panelId });
+  }
+  const entry = workspace.entries.find((candidate) => candidate.panelId === panelId);
   card.status = (entry && STATUS_BY_KIND.get(entry.kind)) ?? 'unknown';
   const [screen, git] = await Promise.all([
-    agent.panelId
-      ? invokeDaemon('runpane:panels:screen', [{ panelId: agent.panelId, limit: SCREEN_LINES * 3 }], panelScreenResultSchema, { paneDir: agent.paneDir }).catch(() => undefined)
+    panelId
+      ? invokeDaemon('runpane:panels:screen', [{ panelId, limit: SCREEN_LINES * 3 }], panelScreenResultSchema).catch(() => undefined)
       : undefined,
-    invokeDaemon('sessions:get-git-status', [agent.paneId], gitStatusSchema, { paneDir: agent.paneDir }).catch(() => undefined),
+    invokeDaemon('sessions:get-git-status', [paneId], gitStatusSchema).catch(() => undefined),
   ]);
   if (screen) card.screen = screen.text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim() !== '').slice(-SCREEN_LINES);
   const gs = git?.data?.gitStatus;
@@ -349,21 +326,18 @@ function readStore(): Store {
   try {
     raw = fs.readFileSync(storeFile(), 'utf8');
   } catch {
-    return { chats: {}, focus: {} };
+    return {};
   }
   try {
-    const store = decodeBoundary(JSON.parse(raw), storeSchema);
-    return {
-      chats: Object.fromEntries(Object.entries(store.chats).map(([chat, agents]) => [chat, decodeBoundary(agents, boundary.array(chatAgentSchema))])),
-      focus: Object.fromEntries(Object.entries(store.focus ?? {}).map(([chat, pane]) => [chat, decodeBoundary(pane, boundary.string)])),
-    };
+    const { chats } = decodeBoundary(JSON.parse(raw), storeSchema);
+    return Object.fromEntries(Object.entries(chats).map(([chat, paneIds]) => [chat, decodeBoundary(paneIds, boundary.array(boundary.string))]));
   } catch {
-    return { chats: {}, focus: {} };
+    return {};
   }
 }
 
-function writeStore(store: Store): void {
+function writeStore(chats: Store): void {
   const file = storeFile();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(store, null, 2)}\n`);
+  fs.writeFileSync(file, `${JSON.stringify({ chats }, null, 2)}\n`);
 }

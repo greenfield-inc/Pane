@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { callTool, connect, onHostContextChanged, onToolResult, openLink, updateModelContext, type HostContext } from './bridge';
-import * as cards from './directions/cards';
-import * as sidebar from './directions/sidebar';
-import * as terminal from './directions/terminal';
-import type { AgentActions, Notice } from './directions/types';
-import { sendFailure, STATUS_WORD, textOf, useCard, usePoll, viewOf, type Agent, type PanelData, type View } from './model';
+import { Card, Panel } from './sidebar';
+import type { AgentActions, Notice } from './types';
+import { currentAgent, sendFailure, STATUS_WORD, textOf, useCard, usePoll, viewOf, type Agent, type PanelData, type View } from './model';
 import './panel.css';
 
-declare const __PANEL_DIRECTION__: string;
-const DIRECTIONS = { sidebar, cards, terminal };
-const direction = DIRECTIONS[__PANEL_DIRECTION__ === 'cards' || __PANEL_DIRECTION__ === 'terminal' ? __PANEL_DIRECTION__ : 'sidebar'];
-
 const PANEL_REFRESH_MS = 4_000;
+const NO_ACTIONS: AgentActions = { notices: {}, busy: {}, send: async () => false, open: () => undefined, openPr: () => undefined };
 
 function applyHostContext(context: HostContext): void {
   const root = document.documentElement;
@@ -77,6 +72,11 @@ function PanelView({ initial }: { initial: PanelData }) {
   const onChanged = useCallback(() => void refresh().catch(() => undefined), [refresh]);
   const actions = useActions(onChanged);
 
+  // Pin the default pick, so answering a blocked agent doesn't move the view to another one.
+  useEffect(() => {
+    if (selected === undefined && data.agents.length > 0) setSelected(currentAgent(data.agents, undefined)?.paneId);
+  }, [data.agents, selected]);
+
   // The model steers the panel with agents_panel_focus; each new choice selects that agent once.
   useEffect(() => {
     if (data.focus && data.focus !== appliedFocus.current) {
@@ -88,7 +88,7 @@ function PanelView({ initial }: { initial: PanelData }) {
   // Tell the model what the user is looking at; the host replaces the previous context each time.
   const lastContext = useRef('');
   useEffect(() => {
-    const current = data.agents.find((agent) => agent.paneId === selected) ?? data.agents.at(-1);
+    const current = currentAgent(data.agents, selected);
     const text = data.agents.length === 0
       ? 'The Pane panel shows no agents for this chat yet.'
       : [
@@ -100,14 +100,14 @@ function PanelView({ initial }: { initial: PanelData }) {
     void updateModelContext(text).catch(() => undefined);
   }, [data, selected]);
 
-  return <direction.Panel data={data} selected={selected} onSelect={setSelected} actions={actions} />;
+  return <Panel data={data} selected={selected} onSelect={setSelected} actions={actions} />;
 }
 
 function CardView({ view }: { view: Extract<View, { kind: 'card' | 'cardRef' }> }) {
   const { data, failed, refresh } = useCard(view);
   const onChanged = useCallback(() => void refresh().catch(() => undefined), [refresh]);
   const actions = useActions(onChanged);
-  return <div className="inline"><direction.Card data={data} failed={failed} actions={actions} /></div>;
+  return <div className="inline"><Card data={data} failed={failed} actions={actions} /></div>;
 }
 
 function App() {
@@ -136,7 +136,9 @@ function App() {
       </main>
     );
   }
-  return view.kind === 'panel' ? <PanelView initial={view.data} /> : <CardView view={view} />;
+  if (view.kind === 'panel') return <PanelView initial={view.data} />;
+  if (view.kind === 'error') return <div className="inline"><Card failed={view.text} actions={NO_ACTIONS} /></div>;
+  return <CardView view={view} />;
 }
 
 const container = document.getElementById('root');

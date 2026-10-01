@@ -1,7 +1,7 @@
 import { ArrowUpRight, GitPullRequest } from 'lucide-react';
 import { useState } from 'react';
-import { isLive, type Agent } from '../model';
-import { Button } from '../primitives';
+import { isLive, type Agent } from './model';
+import { Button } from './primitives';
 import type { AgentActions } from './types';
 
 /** Open in Pane, plus Open PR when the branch has one: at most two actions, per the inline-card rules. */
@@ -29,21 +29,20 @@ export function NoticeLine({ agent, actions }: { agent: Agent; actions: AgentAct
 }
 
 /** A message box for one agent. Sending is a human click; the agent gets the text as typed. */
-export function Composer({ agent, actions, prompt = false }: { agent: Agent; actions: AgentActions; prompt?: boolean }) {
+export function Composer({ agent, actions }: { agent: Agent; actions: AgentActions }) {
   const [draft, setDraft] = useState('');
   const live = agent.status !== 'gone' && agent.status !== 'exited';
   const busy = actions.busy[agent.paneId] !== undefined;
   const placeholder = !live ? 'This agent has stopped' : agent.status === 'blocked' ? `Answer ${agent.name}` : `Message ${agent.name}`;
   return (
     <form
-      className={prompt ? 'composer composer-prompt' : 'composer'}
+      className="composer"
       onSubmit={(event) => {
         event.preventDefault();
         const text = draft.trim();
         if (text) void actions.send(agent, text).then((sent) => { if (sent) setDraft(''); });
       }}
     >
-      {prompt && <span className="prompt-mark" aria-hidden="true">›</span>}
       <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={placeholder} aria-label={placeholder} disabled={!live || busy} />
       <Button primary submit disabled={!live || busy || draft.trim() === ''} label={`Send to ${agent.name}`}>
         {actions.busy[agent.paneId] === 'send' ? 'Sending…' : 'Send'}

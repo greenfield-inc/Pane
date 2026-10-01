@@ -43,7 +43,8 @@ const sendOutputSchema = boundary.object({ delivered: boundary.optional(boundary
 export type View =
   | { kind: 'panel'; data: PanelData }
   | { kind: 'card'; data: CardData }
-  | { kind: 'cardRef'; ref: AgentRef; failed?: string };
+  | { kind: 'cardRef'; ref: AgentRef; failed?: string }
+  | { kind: 'error'; text: string };
 
 function decodeOr<T>(value: JsonValue | undefined, schema: BoundarySchema<T>): T | undefined {
   try {
@@ -61,6 +62,8 @@ export function viewOf(result: ToolResult): View | undefined {
   if (card) return { kind: 'card', data: card };
   const ref = decodeOr(data, agentRefSchema) ?? decodeOr(errorJson(result), agentRefSchema);
   if (ref) return { kind: 'cardRef', ref, failed: result.isError ? textOf(result) : undefined };
+  // A failed agent tool with no agent to show, such as Pane not running.
+  if (result.isError) return { kind: 'error', text: textOf(result) || 'Pane did not answer.' };
   return undefined;
 }
 
@@ -90,6 +93,13 @@ export const STATUS_WORD = {
 
 const LIVE_STATUSES: ReadonlySet<Status> = new Set(['working', 'blocked', 'unknown']);
 export const isLive = (status: Status) => LIVE_STATUSES.has(status);
+
+/** The agent the panel shows: the user's or model's pick, else the one that needs the user, else the newest. */
+export function currentAgent(agents: Agent[], selected: string | undefined): Agent | undefined {
+  return agents.find((agent) => agent.paneId === selected)
+    ?? agents.find((agent) => agent.status === 'blocked')
+    ?? agents.at(-1);
+}
 
 /** agents_send says `delivered: false` when Pane can't verify the agent took the message. */
 export function sendFailure(result: ToolResult): string {

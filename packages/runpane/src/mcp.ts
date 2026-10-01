@@ -119,7 +119,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       const result = await callTool(tool, input, ctx.mcpReq.signal, rewrite);
       // A start that created a Pane but could not confirm the prompt still started an agent.
       const started = result.structuredContent ?? parseJsonObject(result.content[0]?.text ?? '');
-      if (chatPanel && tool.name === 'agents_start' && started) recordStartedAgent(chat(), input, started);
+      if (chatPanel && tool.name === 'agents_start' && started) recordStartedAgent(chat(), started);
       return result;
     });
     server.setRequestHandler('resources/list', () => ({
