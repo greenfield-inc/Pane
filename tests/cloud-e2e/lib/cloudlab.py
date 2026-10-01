@@ -275,6 +275,10 @@ def resolve_base(target: str) -> tuple[str, Optional[str]]:
     return target.rstrip("/"), None
 
 
+def bearer(token: Optional[str]) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def redact(value: Any, token: Optional[str]) -> Any:
     text = json.dumps(value)
     if token:
@@ -490,17 +494,18 @@ def main() -> None:
         if a.op == "base":
             print(resolve_base(a.target)[0])
         elif a.op == "health":
-            base, _ = resolve_base(a.target)
-            status, payload, secs = http("GET", base + "/health", {}, timeout=a.timeout)
+            base, token = resolve_base(a.target)
+            # The daemon reports version and readiness only to a paired client.
+            status, payload, secs = http("GET", base + "/health", bearer(token), timeout=a.timeout)
             print(json.dumps({"http": status, "seconds": round(secs, 3), "body": payload}))
             sys.exit(0 if status == 200 else 1)
         elif a.op == "wait-health":
-            base, _ = resolve_base(a.target)
+            base, token = resolve_base(a.target)
             start = time.monotonic()
             last: Any = None
             status = 0
             while time.monotonic() - start < a.timeout:
-                status, last, _ = http("GET", base + "/health", {}, timeout=3)
+                status, last, _ = http("GET", base + "/health", bearer(token), timeout=3)
                 ok = status == 200
                 if ok and a.require:
                     ok = all(bool(eval(cond, {}, {"h": last})) for cond in a.require.split(";;"))  # noqa: S307 (gate-authored)

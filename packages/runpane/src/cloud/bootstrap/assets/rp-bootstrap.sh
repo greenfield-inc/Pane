@@ -562,6 +562,30 @@ UNIT
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"allowedTcp":[int(p) for p in sys.argv[1].split(",") if p]}))' "$ports")"
 }
 
+# pin-pane <version> <debUrl> <sha256> | pin-pane --clear: the Pane .deb this Session may be upgraded to on wake.
+# The daemon's runpane:cloud:upgrade installs only a request equal to this root-owned file, so the coordinator's
+# token can relay the pin but never choose what gets installed as root. Only the laptop CLI writes it.
+step_pin_pane() {
+  local file="${RP_PANE_PIN:-/etc/rp-cloud/pane-pin.json}" tmp
+  if [ "${1:-}" = --clear ]; then
+    sudo rm -f "$file"
+    result '{"ok":true,"pinned":null}'
+    return 0
+  fi
+  local version="${1:-}" url="${2:-}" sha="${3:-}"
+  [[ "$version" =~ ^[0-9A-Za-z][0-9A-Za-z.+~-]{0,63}$ ]] || fail "pin-pane: bad version '$version'"
+  case "$url" in https://*) ;; *) fail "pin-pane: the .deb URL must be https://" ;; esac
+  [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || fail "pin-pane: sha256 must be 64 lowercase hex characters"
+  tmp="$RP_STATE/pane-pin.json"
+  python3 -c 'import json,sys;print(json.dumps({"version":sys.argv[1],"url":sys.argv[2],"sha256":sys.argv[3]}))' "$version" "$url" "$sha" >"$tmp"
+  sudo mkdir -p "$(dirname "$file")"
+  # install writes a fresh inode; root:root 0644 is what the daemon requires before it trusts the pin.
+  sudo install -m 0644 "$tmp" "$file" || fail "pin-pane: could not write $file"
+  sudo chown root:root "$file" || fail "pin-pane: could not chown $file"
+  rm -f "$tmp"
+  result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"pinned":sys.argv[1]}))' "$version")"
+}
+
 # clone <url> <ref> <dir>: public HTTPS clone (no credentials in the sandbox). Idempotent.
 # <ref> is fetched from origin every time and must be: the checkout is the commit that fetch returned, never a
 # stale local branch or an older FETCH_HEAD. A branch is checked out as a local branch reset to that commit.
@@ -605,5 +629,6 @@ case "$step" in
   cert-status) step_cert_status "$@" ;;
   serve-http) step_serve_http ;;
   serve-guard) step_serve_guard "$@" ;;
+  pin-pane) step_pin_pane "$@" ;;
   *) fail "unknown step '$step'" ;;
 esac

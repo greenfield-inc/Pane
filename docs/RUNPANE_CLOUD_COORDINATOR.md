@@ -23,7 +23,11 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
 - **Its token on each Session.** `runpane cloud new` pairs the coordinator as a `scope: 'coordinator'`
   client (`pane --remote-setup --client-scope coordinator`). That token may call only
   `runpane:cloud:safe-to-stop`, `runpane:cloud:stop-lease:release` and `runpane:cloud:upgrade`
-  (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN` otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
+  (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN` otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells,
+  and can't choose what `runpane:cloud:upgrade` installs: each Session installs only the pin the laptop wrote
+  into it (root-owned `/etc/rp-cloud/pane-pin.json`), never a version older than the first Pane that enforces
+  client scopes. A leaked directory can still ask a Session to install that pin, to report whether it's safe
+  to stop, or to release a stop lease.
   The laptop keeps that token (`<host>.coordinator.pairing`) and pushes it in the directory, so taking it back
   happens on the Sessions: `coordinator destroy` and `coordinator revoke-clients --yes` call
   `runpane:cloud:coordinator-client:revoke` (full clients only) on every awake Session and forget the token
@@ -54,8 +58,9 @@ For each Session in the directory whose sandbox is running, the coordinator chec
    sandbox. Asking to wake a host that is already awake doesn't start the grace, so a peer can't keep a
    host up by asking again and again. A user's wake of an awake host restarts the safe streak (step 4); a
    peer's does not.
-2. **Daemon ready?** `GET /health` must answer and report ready. If the daemon is down, don't stop the
-   sandbox; raise a `daemon-down` alert instead.
+2. **Daemon ready?** `GET /health` (with the coordinator's token, so the daemon reports its readiness) must
+   answer and report ready. If the daemon is down, don't stop the sandbox; raise a `daemon-down` alert
+   instead.
 3. **Safe to stop?** Call `POST /invoke runpane:cloud:safe-to-stop` with the coordinator's own paired-client
    token. The daemon refuses while an agent is working, a terminal printed output recently, a lock is
    held, a watcher is active, a PR has pending checks, or a user client is attached. When it's safe, the
@@ -133,8 +138,12 @@ How a wake behaves:
   After that the wake fails with `provider-rate-limited`.
 - **Pinned version.** Once awake, if `/health.version` differs from the pinned version, the coordinator
   calls `runpane:cloud:upgrade {version, url, sha256}` and waits for `/health` to report that version.
-  It only upgrades when the configured `.deb` belongs to that exact version. A daemon without the upgrade
-  channel is reported as `version-mismatch`, and the wake doesn't fail.
+  It only upgrades when the configured `.deb` belongs to that exact version. The Session installs it only
+  when it equals the pin the laptop wrote into the Session ([daemon surface](RUNPANE_CLOUD_DAEMON.md)). A
+  Session that was asleep when you changed the pin refuses it (`ERR_CLOUD_UPGRADE_NOT_PINNED`) until the
+  laptop writes the new pin; the laptop's `runpane cloud wake` does that and then asks for the wake again, so
+  the coordinator upgrades it. A refusal, or a daemon without the upgrade
+  channel, is reported as `version-mismatch`, and the wake doesn't fail.
 
 ## HTTP API
 

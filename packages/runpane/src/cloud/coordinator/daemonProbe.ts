@@ -2,8 +2,8 @@ import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { JsonValue } from '../../boundaryDecoder';
 import type { DaemonHealth, DaemonProbe, SafeToStopAnswer, UpgradeAnswer, UpgradeTarget } from './types';
 
-// Talks to a cloud Session's Pane daemon over the tailnet: GET /health (unauthenticated) and
-// POST /invoke with the coordinator's own paired-client bearer token.
+// Talks to a cloud Session's Pane daemon over the tailnet: GET /health and POST /invoke, both with the
+// coordinator's own paired-client bearer token (without one, /health only says the daemon answers).
 
 const SAFE_TO_STOP_CHANNEL = 'runpane:cloud:safe-to-stop';
 const STOP_LEASE_RELEASE_CHANNEL = 'runpane:cloud:stop-lease:release';
@@ -88,10 +88,11 @@ export class HttpDaemonProbe implements DaemonProbe {
     this.invokeTimeoutMs = options.invokeTimeoutMs ?? 60_000;
   }
 
-  async health(baseUrl: string): Promise<DaemonHealth> {
+  async health(baseUrl: string, token: string | null): Promise<DaemonHealth> {
     try {
       const response = await this.fetchImpl(`${baseUrl}/health`, {
         method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         signal: AbortSignal.timeout(this.healthTimeoutMs),
       });
       if (!response.ok) return { reachable: false, error: `HTTP ${response.status}` };

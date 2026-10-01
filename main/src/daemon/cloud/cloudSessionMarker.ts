@@ -1,4 +1,6 @@
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 /**
  * Written by the Session bootstrap (serve guard) on every Runpane Cloud Session: `{"transport","port"}`.
@@ -11,16 +13,24 @@ const MARKER_POLL_MS = 2_000;
 /** The bootstrap writes the marker about a minute after the daemon's first start; past this, it is not a Session. */
 const MARKER_WAIT_MS = 15 * 60_000;
 
+/**
+ * The Session bootstrap's state directory (rp-bootstrap.sh `RP_STATE`), created before it installs Pane.
+ * Without it no bootstrap is running, so no marker is coming.
+ */
+const CLOUD_BOOTSTRAP_STATE_DIR = path.join(os.homedir(), '.runpane-cloud');
+
 interface WhenCloudSessionOptions {
   path?: string;
+  bootstrapStateDir?: string;
   pollMs?: number;
   waitMs?: number;
 }
 
 /**
  * Runs `onReady` once this daemon is in a Runpane Cloud Session: now when the marker exists, else as soon
- * as the bootstrap writes it (checked every couple of seconds for up to 15 minutes, on Linux only: Sessions
- * are Linux; the timer never keeps the process alive). Returns a function that stops waiting.
+ * as the bootstrap writes it (checked every couple of seconds for up to 15 minutes). It only waits on Linux
+ * with a Session bootstrap in progress (its state directory exists), so desktop and self-hosted daemons
+ * never start the timer; the timer never keeps the process alive. Returns a function that stops waiting.
  */
 export function whenCloudSession(onReady: () => void, options: WhenCloudSessionOptions = {}): () => void {
   const marker = options.path ?? CLOUD_SERVE_RECORD;
@@ -28,7 +38,7 @@ export function whenCloudSession(onReady: () => void, options: WhenCloudSessionO
     onReady();
     return () => undefined;
   }
-  if (process.platform !== 'linux') return () => undefined;
+  if (process.platform !== 'linux' || !fs.existsSync(options.bootstrapStateDir ?? CLOUD_BOOTSTRAP_STATE_DIR)) return () => undefined;
   const giveUpAt = Date.now() + (options.waitMs ?? MARKER_WAIT_MS);
   const timer = setInterval(() => {
     if (Date.now() > giveUpAt) clearInterval(timer);

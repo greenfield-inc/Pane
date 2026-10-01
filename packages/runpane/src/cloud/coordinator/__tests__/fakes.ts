@@ -145,8 +145,12 @@ export class FakeProbe implements DaemonProbe {
   /** Health reported once an upgrade has started. */
   healthAfterUpgrade: DaemonHealth | null = null;
 
-  async health(baseUrl: string): Promise<DaemonHealth> {
+  /** The bearer token each /health probe sent (null: none). */
+  healthTokens: Array<string | null> = [];
+
+  async health(baseUrl: string, token: string | null): Promise<DaemonHealth> {
     this.calls.push(`health ${baseUrl}`);
+    this.healthTokens.push(token);
     return this.healthByUrl.get(baseUrl) ?? { reachable: true, ready: true, version: '1.0.0', detail: null };
   }
 

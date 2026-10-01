@@ -46,6 +46,12 @@ interface FakeWorld {
   createdByKey: Map<string, string>;
   /** Hosts whose tailnet node comes back logged out after a resume (healthy again once repaired). */
   loggedOut: Set<string>;
+  /** The bearer token each CLI /health wait sent (undefined: none). */
+  healthTokens: (string | undefined)[];
+  /** The Pane version each host's daemon reports on /health (default 2.4.141). */
+  daemonVersions: Map<string, string>;
+  /** The Pane pin each host's sandbox holds (/etc/rp-cloud/pane-pin.json): a version, or null once cleared. */
+  panePins: Map<string, string | null>;
   /** Hosts whose Tailscale Serve config a resume lost (Running, but /health unreachable until re-applied). */
   serveLost: Set<string>;
   /** When true, a coordinator is configured and `wake` goes through it. */
@@ -103,6 +109,9 @@ function createFakeWorld(): FakeWorld {
   return {
     sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
     files: new Map(), daemons: new Map(), agentNotes: new Map(), agentNotesDown: new Set(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
+    panePins: new Map(),
+    daemonVersions: new Map(),
+    healthTokens: [],
     binaryFiles: new Map(),
     provisionRepos: [],
     provisionPaneSources: [],
@@ -354,6 +363,12 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
   return {
     cloudHostname: (sessionId, prefix) => `${prefix}-${sessionId.slice(0, 8)}`,
     createTailnet: () => createFakeTailnet(world),
+    async writePanePin(sandbox, pin) {
+      world.calls.push(`pane-pin ${sandbox.id} ${pin?.version ?? '--clear'}`);
+      const host = [...world.sandboxes.values()].find((candidate) => candidate.id === sandbox.id);
+      if (host?.state !== 'running') throw new Error(`fake: ${sandbox.id} is not running`);
+      world.panePins.set(host.name, pin?.version ?? null);
+    },
     async repairServe(sandbox, request) {
       world.calls.push(`repair-serve ${sandbox.id} ${request.transport}`);
       const host = [...world.sandboxes.values()].find((candidate) => candidate.id === sandbox.id)?.name ?? '';
@@ -377,11 +392,12 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
       world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true, tags: ['tag:rp-session'] });
       return { nodeId, magicDnsName, tailscaleIps: ['100.64.0.9'] };
     },
-    async waitForDaemonHealth(baseUrl) {
+    async waitForDaemonHealth(baseUrl, options) {
+      world.healthTokens.push(options?.token);
       const host = new URL(baseUrl).hostname.split('.')[0];
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name === host);
       const ok = world.healthy.has(host) && !world.loggedOut.has(host) && !world.serveLost.has(host) && sandbox?.state === 'running';
-      return ok ? { ok, elapsedMs: 1, status: 200, version: '2.4.141' } : { ok, elapsedMs: 1 };
+      return ok ? { ok, elapsedMs: 1, status: 200, version: world.daemonVersions.get(host) ?? '2.4.141' } : { ok, elapsedMs: 1 };
     },
     async provision(sandbox: SandboxHandle, request: ProvisionRequest) {
       world.calls.push(`provision ${sandbox.id} ${request.hostname}`);
@@ -476,6 +492,13 @@ export async function createTestHarness(): Promise<TestHarness> {
       if (!world.coordinatorWakes) return null;
       world.calls.push(`coordinator-wake ${sessionId}`);
       const sandbox = [...world.sandboxes.values()].find((candidate) => candidate.name.endsWith(sessionId.slice(0, 8)));
+      if (sandbox?.state === 'running') {
+        // An awake Session upgrades only to the pin the laptop wrote into it.
+        const pinned = world.panePins.get(sandbox.name);
+        if (!pinned) return { status: 'awake', version: world.daemonVersions.get(sandbox.name) ?? '2.4.141', detail: 'version-mismatch: ERR_CLOUD_UPGRADE_NOT_PINNED' };
+        world.daemonVersions.set(sandbox.name, pinned);
+        return { status: 'awake', version: pinned, detail: `upgraded to pinned ${pinned}` };
+      }
       if (!sandbox || sandbox.state !== 'stopped') return { status: 'lost' };
       sandbox.state = 'running';
       sandbox.pending = [];

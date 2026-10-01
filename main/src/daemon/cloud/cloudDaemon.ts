@@ -24,6 +24,7 @@ import {
 import {
   CloudUpgradeError,
   downloadToFile,
+  readPanePinFile,
   resolveOwnSystemdUnit,
   runCloudUpgrade,
   runDetachedWithSystemd,
@@ -116,6 +117,7 @@ export function registerCloudDaemonHandlers(dependencies: CloudDaemonDependencie
     }
     return runCloudUpgrade({
       currentVersion,
+      readPin: () => readPanePinFile(),
       downloadDirectory: path.join(dependencies.paneDirectory, 'cloud-upgrades'),
       resolveServiceUnit: resolveOwnSystemdUnit,
       download: downloadToFile,

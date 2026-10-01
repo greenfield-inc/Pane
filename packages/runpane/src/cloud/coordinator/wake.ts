@@ -295,7 +295,7 @@ export class WakeService {
     let health: DaemonHealth = { reachable: false, error: 'not checked' };
     while (this.deps.clock.now() < upgradeDeadline) {
       await this.deps.clock.sleep(this.options.pollIntervalMs);
-      health = await this.deps.probe.health(entry.baseUrl);
+      health = await this.deps.probe.health(entry.baseUrl, entry.coordinatorToken);
       if (health.reachable && health.ready && health.version === pinned) {
         return this.report(entry, 'awake', pinned, `upgraded to pinned ${pinned}`);
       }
@@ -327,7 +327,7 @@ export class WakeService {
       case 'running':
         break;
     }
-    const health = await this.deps.probe.health(entry.baseUrl);
+    const health = await this.deps.probe.health(entry.baseUrl, entry.coordinatorToken);
     if (health.reachable && health.ready) return this.report(entry, 'awake', health.version, health.detail ?? 'daemon ready');
     const sinceUp = this.deps.activity.msSinceWoken(entry.sandboxId)
       ?? (sandbox.updatedAt ? this.deps.clock.now() - Date.parse(sandbox.updatedAt) : null);

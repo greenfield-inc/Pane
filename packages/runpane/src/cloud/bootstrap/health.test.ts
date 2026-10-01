@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { RemoteRequestError, type RemoteHttpTransport } from '../../remote/remoteDaemonClient';
 import { interpretHealthBody, waitForDaemonHealth } from './health';
 
 test('interpretHealthBody accepts the legacy payload and the readiness payload', () => {
@@ -30,6 +31,40 @@ test('waitForDaemonHealth polls until ready', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.version, '9.9.9');
   assert.equal(calls, 3);
+});
+
+// The token goes through the transport that keeps a plain-HTTP token on the tailnet (R6), never plain fetch.
+test('waitForDaemonHealth sends the paired token through the tailnet-guarded transport', async () => {
+  const sent: (string | undefined)[] = [];
+  let fetched = 0;
+  const transport: RemoteHttpTransport = async (request) => {
+    sent.push(request.headers.Authorization);
+    return { status: 200, body: JSON.stringify({ ok: true, status: 'ready', version: '9.9.9', readiness: { state: 'ready' } }) };
+  };
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    fetched += 1;
+    assert.equal(new Headers(init?.headers).get('authorization'), null, 'plain fetch never carries the token');
+    return new Response(JSON.stringify({ ok: true, status: 'ready' }), { status: 200 });
+  };
+  const withToken = await waitForDaemonHealth('http://rp-x.ts.net:8080', { fetchImpl, transport, token: 'tok' });
+  assert.deepEqual([withToken.ok, withToken.version, withToken.readiness], [true, '9.9.9', 'ready']);
+  assert.deepEqual(sent, ['Bearer tok']);
+  assert.equal(fetched, 0);
+  await waitForDaemonHealth('https://rp-x.ts.net', { fetchImpl, transport });
+  assert.equal(fetched, 1);
+});
+
+test('waitForDaemonHealth falls back to an unauthenticated probe when the route would leave the tailnet', async () => {
+  const refused: RemoteHttpTransport = async () => {
+    throw new RemoteRequestError('Refusing to send a token over plain HTTP', 0, 'ERR_PLAIN_HTTP_OFF_TAILNET');
+  };
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    assert.equal(new Headers(init?.headers).get('authorization'), null);
+    return new Response(JSON.stringify({ ok: true, status: 'ready' }), { status: 200 });
+  };
+  const result = await waitForDaemonHealth('http://100.64.0.9:8080', { fetchImpl, transport: refused, token: 'tok' });
+  assert.equal(result.ok, true);
+  assert.equal(result.version, undefined);
 });
 
 test('waitForDaemonHealth gives up at the timeout with the last status', async () => {

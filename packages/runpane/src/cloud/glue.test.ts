@@ -62,6 +62,7 @@ test('coordinator lifecycle routing: status alone is ours, status <host> is the 
 test('coordinator deploy args: a pin needs version, url and sha256', () => {
   assert.throws(() => parseCoordinatorArgs(['deploy', '--pin-version', '1.2.3']), /all three/u);
   assert.throws(() => parseCoordinatorArgs(['deploy', '--pin-version', '1', '--pin-deb-url', 'u', '--pin-deb-sha256', 'xyz']), /64 lowercase hex/u);
+  assert.throws(() => parseCoordinatorArgs(['deploy', '--pin-version', '2.4.142', '--pin-deb-url', 'http://example.test/pane.deb', '--pin-deb-sha256', 'a'.repeat(64)]), /https/u);
   assert.throws(() => parseCoordinatorArgs(['stop', '--name', 'x']), /Unknown option/u);
   const parsed = parseCoordinatorArgs(['deploy', '--yes', '--no-reconcile', '--idle-check-seconds', '60', '--name', 'rp-coord2']);
   assert.equal(parsed.reconcile, false);
@@ -135,6 +136,49 @@ test('coordinator deploy again updates in place: no new sandbox or key, pin appl
   // Timings given at the first deploy survive a redeploy that does not repeat them.
   assert.equal(config.idleStop.intervalSeconds, 60);
   assert.equal(config.reconcile.stopOrphans, true);
+});
+
+// The Session, not the coordinator, decides what runpane:cloud:upgrade installs: the laptop writes the pin
+// into each Session (root-owned), and the daemon installs only a request equal to it.
+test('the laptop writes the coordinator pin into every Session it reaches: deploy, new, wake and repair', async () => {
+  const harness = await createTestHarness();
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  const awake = await newHost(harness, 'awake');
+  const asleep = await newHost(harness, 'asleep');
+  assert.equal(harness.world.panePins.get(awake), null, 'no pin yet: new clears any stale one');
+  await run(harness, ['stop', asleep, '--yes']);
+
+  const sha = 'a'.repeat(64);
+  const pinArgs = ['--pin-version', '2.4.142', '--pin-deb-url', 'https://example.test/pane.deb', '--pin-deb-sha256', sha];
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', ...pinArgs]), 0);
+  const deployed: { panePins: { host: string; written: boolean; reason?: string }[] } = JSON.parse(harness.out[harness.out.length - 1]);
+  assert.equal(harness.world.panePins.get(awake), '2.4.142');
+  assert.equal(harness.world.panePins.get(asleep), null, 'a sleeping Session is not woken to pin it');
+  assert.deepEqual(deployed.panePins.find((result) => result.host === asleep), { host: asleep, written: false, reason: 'sandbox is stopped' });
+
+  // The coordinator's own wake found the old pin (the Session refuses to upgrade); once the laptop has written
+  // the new one, it asks the coordinator again, which now upgrades the awake Session.
+  harness.world.coordinatorWakes = true;
+  const coordinatorWakes = () => harness.world.calls.filter((call) => call.startsWith('coordinator-wake ')).length;
+  assert.equal(await run(harness, ['wake', asleep, '--json']), 0);
+  assert.equal(harness.world.panePins.get(asleep), '2.4.142', 'the laptop pins a Session when it wakes it');
+  assert.equal(coordinatorWakes(), 2);
+  const woke: { version: string; pinUpgrade: { status: string; version: string } } = JSON.parse(harness.out[harness.out.length - 1]);
+  assert.deepEqual([woke.pinUpgrade.status, woke.pinUpgrade.version, woke.version], ['awake', '2.4.142', '2.4.142']);
+  await run(harness, ['stop', asleep, '--yes']);
+  harness.world.daemonVersions.set(asleep, '2.4.142');
+  assert.equal(await run(harness, ['wake', asleep, '--json']), 0);
+  assert.equal(coordinatorWakes(), 3, 'a Session already on the pin is not asked again');
+  harness.world.coordinatorWakes = false;
+  assert.equal(harness.world.panePins.get(await newHost(harness, 'fresh')), '2.4.142');
+
+  harness.world.panePins.set(awake, null);
+  assert.equal(await run(harness, ['repair', awake, '--json']), 0);
+  assert.equal(harness.world.panePins.get(awake), '2.4.142');
+
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', '--no-pin']), 0);
+  assert.equal(harness.world.panePins.get(awake), null, '--no-pin removes the pin, so the Session refuses every upgrade');
 });
 
 test('coordinator stop, status, start and destroy', async () => {

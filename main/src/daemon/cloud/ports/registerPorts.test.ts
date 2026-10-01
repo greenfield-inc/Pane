@@ -64,6 +64,7 @@ describe('registerSessionPortsHandlers when the Session marker appears after the
       emit: () => undefined,
       log: () => undefined,
       serveRecordPath: marker,
+      cloudBootstrapDir: dir,
       serve,
       statePath: path.join(dir, 'ports.json'),
       markerPollMs: 20,

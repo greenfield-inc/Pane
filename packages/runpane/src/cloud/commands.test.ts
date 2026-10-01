@@ -210,6 +210,9 @@ test('stop flushes, stops and waits; wake resumes and waits for /health on the s
 
   assert.equal(await run(harness, ['status', hostname, '--json']), 0);
   assert.equal(lastJson(harness).status, 'awake');
+  // The daemon reports version and readiness only to a paired client: every probe carries the host's token.
+  assert.ok(harness.world.healthTokens.length > 0);
+  assert.deepEqual(new Set(harness.world.healthTokens), new Set([record.profile.token]));
 });
 
 test('wake of an awake host does not resume it again', async () => {

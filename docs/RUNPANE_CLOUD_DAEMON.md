@@ -2,13 +2,16 @@
 
 A cloud Session is a normal headless Pane daemon on a provider sandbox. The coordinator (`runpane cloud`)
 talks to it through `GET /health`, `runpane:cloud:safe-to-stop` (with `runpane:cloud:stop-lease:release`) and
-`runpane:cloud:upgrade`, over the usual `POST /invoke` with its paired client token. The laptop CLI adds
-`runpane:cloud:coordinator-client:pair|revoke` with its full-access token (see the coordinator doc). Code: `main/src/daemon/cloud/`.
+`runpane:cloud:upgrade`, over the usual `POST /invoke` with its paired client token; it sends the same token to
+`/health`. The laptop CLI adds `runpane:cloud:coordinator-client:pair|revoke` with its full-access token (see the
+coordinator doc). Code: `main/src/daemon/cloud/`.
 
 ## `GET /health`: version and readiness
 
-Unauthenticated, as before. The old fields stay (`ok`, `status: "ready"`, `transport`); `status` only says the HTTP
-server answers. New fields:
+Anyone may call it, as before, but without a valid paired-client token (`Authorization: Bearer <token>`; any
+client, the coordinator's scoped one included) it answers only `{ "ok": true, "status": "ready", "transport":
+"http+sse" }`: `status` only says the HTTP server answers. That is all the desktop and phone clients' reachability
+check needs. A paired client, or any caller when pairing is off, also gets the build and readiness:
 
 ```json
 {
@@ -94,14 +97,24 @@ Inside the sandbox the same check runs through the local socket:
 
 ## `runpane:cloud:upgrade`: version pin on wake
 
-Headless daemons never update themselves (`versionChecker` runs only on the desktop). After a wake, when
-`/health.version` differs from the pinned version, the coordinator calls:
+Headless daemons never update themselves (`versionChecker` runs only on the desktop). The Session, not the
+caller, decides what it may be upgraded to: the laptop CLI writes the coordinator's pin into each Session as
+`/etc/rp-cloud/pane-pin.json` (`{version, url, sha256}`, root:root 0644; `rp-bootstrap.sh pin-pane`) at
+`runpane cloud new`, `wake` and `repair`, and on every awake Session at `coordinator deploy` (`--no-pin`
+removes it). After a wake, when `/health.version` differs from the pinned version, the coordinator calls:
 
 ```json
 { "channel": "runpane:cloud:upgrade", "args": [{ "version": "<pinned>", "url": "https://.../pane_<pinned>_amd64.deb", "sha256": "<64 hex>" }] }
 ```
 
 - Same version already running: `{ ok: true, upgraded: false }`.
+- A request that is not exactly the Session's pin (version, url and sha256), or a Session without a pin, is
+  refused with `ERR_CLOUD_UPGRADE_NOT_PINNED`; nothing is downloaded. So the coordinator's token can relay the
+  pin but can't choose a package, which `apt-get` would install as root. A pin file that isn't owned by root,
+  or is group- or world-writable, is refused (`_PIN_UNSAFE`), as is one that doesn't decode (`_PIN_INVALID`).
+- A pin older than `2.4.141-rc.20260930080320` in Debian version order is refused (`_TOO_OLD`): an older Pane
+  ignores client scopes, so the coordinator's token would become a full-access client. `apt-get` runs with
+  `--allow-downgrades`, so only downgrades to a pin at or above that floor are possible.
 - Otherwise the daemon downloads the package (https only) into `<pane dir>/cloud-upgrades/`, checks its sha256, and
   starts a transient `systemd-run --user` job that runs `sudo -n apt-get install` on it and restarts the daemon's own
   systemd user unit (read from `/proc/self/cgroup`). It answers `{ ok: true, upgraded: "scheduled", from, to }`
@@ -116,7 +129,9 @@ User clients (Pane desktop, the phone app, `runpane --host`, `runpane cloud port
 call these; the coordinator and peers are refused like every other channel outside their scope. Code:
 `main/src/daemon/cloud/ports/`, types in `shared/types/sessionPorts.ts`. Every daemon registers them; off a
 Runpane Cloud Session (no `/etc/rp-cloud/serve.json`) `list` answers `available: false` and the others fail
-with `ERR_PORTS_UNAVAILABLE`, so a laptop's tailnet name is never touched.
+with `ERR_PORTS_UNAVAILABLE`, so a laptop's tailnet name is never touched. On a new Session the bootstrap writes
+that marker after the daemon's first start, so a daemon whose user has the bootstrap's `~/.runpane-cloud`
+directory looks for it every 2 s for up to 15 minutes; any other daemon (desktop, self-hosted) never polls.
 
 | Channel | Args | Result |
 |---|---|---|

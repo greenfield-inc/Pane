@@ -148,3 +148,41 @@ test('install-pane refuses a non-https .deb URL and never lets curl downgrade th
     }
   }
 });
+
+// pin-pane writes the only .deb runpane:cloud:upgrade will install, as root:root 0644, and --clear removes it.
+test('pin-pane writes a root-owned pin the daemon can read, and refuses a malformed one', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-assets-'));
+  const file = path.join(dir, 'rp-bootstrap.sh');
+  fs.writeFileSync(file, cloudBootstrapAssets['rp-bootstrap.sh']);
+  const pinFile = path.join(dir, 'etc', 'pane-pin.json');
+  const chowns = path.join(dir, 'chowns');
+  const env = {
+    ...process.env,
+    RP_STATE: path.join(dir, 'state'),
+    RP_PANE_PIN: pinFile,
+    // The test is not root: record the chown instead of running it.
+    'BASH_FUNC_sudo%%': `() { if [ "$1" = chown ]; then printf '%s\\n' "$*" >> '${chowns}'; else "$@"; fi; }`,
+  };
+  const pin = (...args: string[]) => childProcess.spawnSync('bash', [file, 'pin-pane', ...args], { env, encoding: 'utf8' });
+  const sha = 'a'.repeat(64);
+
+  const written = pin('2.4.142', 'https://example.test/pane.deb', sha);
+  assert.equal(written.status, 0, written.stdout + written.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(pinFile, 'utf8')), { version: '2.4.142', url: 'https://example.test/pane.deb', sha256: sha });
+  assert.equal(fs.statSync(pinFile).mode & 0o777, 0o644);
+  assert.equal(fs.readFileSync(chowns, 'utf8').trim(), `chown root:root ${pinFile}`);
+
+  for (const [args, error] of [
+    [['2.4.142', 'http://example.test/pane.deb', sha], 'the .deb URL must be https'],
+    [['2.4.142', 'https://example.test/pane.deb', 'ABC'], 'sha256 must be 64 lowercase hex'],
+    [['2.4.142; reboot', 'https://example.test/pane.deb', sha], 'bad version'],
+  ]) {
+    const refused = pin(...args);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stdout, new RegExp(`^RP_RESULT \\{"ok": false, "error": "pin-pane: ${error}`, 'm'));
+  }
+  assert.equal(JSON.parse(fs.readFileSync(pinFile, 'utf8')).version, '2.4.142');
+
+  assert.equal(pin('--clear').status, 0);
+  assert.ok(!fs.existsSync(pinFile));
+});

@@ -24,8 +24,9 @@ interface SessionPortsWiring {
   daemonPort(): number | undefined;
   emit(channel: string, result: SessionPortsListResult): void;
   log(message: string): void;
-  /** Tests: the Session marker file, how often to look for it, and the Serve backend. */
+  /** Tests: the Session marker file, the bootstrap state dir that means one is coming, how often to look, and the Serve backend. */
   serveRecordPath?: string;
+  cloudBootstrapDir?: string;
   markerPollMs?: number;
   serve?: ServeBackend;
   statePath?: string;
@@ -149,7 +150,7 @@ export function registerSessionPortsHandlers(wiring: SessionPortsWiring): { serv
   const stopWaiting = whenCloudSession(() => {
     if (!record) wiring.log('ports: this daemon is now in a Runpane Cloud Session (the bootstrap wrote its marker); starting');
     service.start();
-  }, { path: serveRecordPath, pollMs: wiring.markerPollMs });
+  }, { path: serveRecordPath, bootstrapStateDir: wiring.cloudBootstrapDir, pollMs: wiring.markerPollMs });
   return {
     service,
     stop: () => {

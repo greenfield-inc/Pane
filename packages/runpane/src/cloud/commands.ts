@@ -17,6 +17,7 @@ import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
 import { coordinatorSecretsEnabled, describeSecretsOutcome, enableSessionSecrets } from './sessionSecrets';
 import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
+import { pushPanePin } from './panePin';
 import { pushPeersFile, runPeersCommand } from './peers';
 import { runSecretsCommand } from './secrets';
 import { runCloudPortCommand } from './sessionPorts';
@@ -432,7 +433,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       record.meta.repo ? [`/home/user/${repoDirName(record.meta.repo.url)}`] : []);
     if (agentKeys.length > 0) {
       // The daemon restarted with the agent environment; wait for it again before handing the host over.
-      const health = await deps.bootstrap.waitForDaemonHealth(pairing.baseUrl, { timeoutMs: 60_000, intervalMs: 500 });
+      const health = await deps.bootstrap.waitForDaemonHealth(pairing.baseUrl, { token: pairing.token, timeoutMs: 60_000, intervalMs: 500 });
       if (!health.ok) throw new Error(`the daemon did not come back after adding the agent credentials (${agentKeys.join(', ')})`);
       progress(`  - agent-credentials done: ${agentKeys.join(', ')}`);
       timings.agentCredentialsMs = deps.now() - started;
@@ -440,6 +441,13 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     if (outcome.daemonVersion) record.meta.daemonVersion = outcome.daemonVersion;
     if (coordinatorEnabled) record.meta.coordinatorPairingPath = deps.store.coordinatorPairingPath(hostname);
     await deps.store.writeHost(record);
+    if (coordinatorEnabled) {
+      // The daemon upgrades itself only to the pin the laptop wrote; none (cleared) refuses every upgrade.
+      const pin = settings.coordinator?.deployment?.pin ?? null;
+      const pinned = await pushPanePin(record, pin, deps, provider);
+      if (pinned.written) progress(`  - pane-pin done: ${pinned.pinned ?? 'none'}`);
+      else deps.stderr(`runpane cloud: ${hostname}'s Pane pin was not written (${pinned.reason}); the coordinator can't upgrade it until runpane cloud repair ${hostname}.`);
+    }
     // The user's guardrails (settings agentNotes.guardrails): the daemon keeps them and rewrites them at every wake.
     const guardrails = configuredGuardrails(settings);
     if (guardrails?.length) {
@@ -666,7 +674,7 @@ async function hostStatus(record: CloudHostRecord, provider: CloudProvider, tail
     status = 'waking';
   } else {
     const result = record.profile.baseUrl
-      ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: STATUS_HEALTH_TIMEOUT_MS, intervalMs: 1_000 })
+      ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: STATUS_HEALTH_TIMEOUT_MS, intervalMs: 1_000 })
       : { ok: false, elapsedMs: 0 };
     health = { ok: result.ok, status: result.status, version: result.version };
     status = result.ok ? 'awake' : 'daemon-down';
@@ -777,6 +785,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const remaining = () => Math.max(timeoutMs - (deps.now() - started), 1_000);
   // A healthy wake answers in 9-13 s; after that, check the node before waiting out the rest.
   let health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
+    token: record.profile.token,
     timeoutMs: Math.min(remaining(), WAKE_REPAIR_CHECK_MS),
     intervalMs: 500,
   });
@@ -793,7 +802,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
       await deps.store.writeHost(record);
       await importIntoDesktop(args, deps, [record.profile]);
       await pushDirectory(deps);
-      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 90_000, intervalMs: 500 });
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: 90_000, intervalMs: 500 });
       timings.repairedHealthMs = deps.now() - started;
     } else {
       // Logged in but unreachable: a resume can bring back a stale tailscaled.state without the Serve config.
@@ -802,7 +811,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
         serveRepaired = true;
         if (!args.json) deps.stdout(`runpane cloud: ${hostname} came back without its Tailscale Serve config; re-applied it.`);
       }
-      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: remaining(), intervalMs: 500 });
+      health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: remaining(), intervalMs: 500 });
       timings.healthMs = deps.now() - started;
     }
   }
@@ -817,6 +826,17 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const guardrails = configuredGuardrails(settings);
   const agentNotes = health.ok && guardrails ? await pushAgentNotes(record, guardrails, deps) : null;
   if (agentNotes && !agentNotes.pushed && !args.json) deps.stderr(`runpane cloud: ${hostname}'s agent guardrails were not updated (${agentNotes.reason}).`);
+  // And the coordinator's Pane pin, so the next coordinator wake can upgrade it.
+  const deployment = settings.coordinator?.deployment;
+  const panePin = health.ok && deployment ? await pushPanePin(record, deployment.pin ?? null, deps, provider) : null;
+  if (panePin && !panePin.written && !args.json) deps.stderr(`runpane cloud: ${hostname}'s Pane pin was not updated (${panePin.reason}).`);
+  // A Session that slept through a new pin refused the coordinator's upgrade; now that it holds the pin, ask again.
+  let pinUpgrade: CoordinatorWakeResult | null = null;
+  if (panePin?.written && deployment?.pin && health.version !== deployment.pin.version) {
+    pinUpgrade = await deps.wakeViaCoordinator(record.profile.cloud.sessionId, remaining());
+    if (pinUpgrade?.status === 'awake' && pinUpgrade.version) health = { ...health, version: pinUpgrade.version };
+    else if (pinUpgrade && !args.json) deps.stderr(`runpane cloud: ${hostname} is not on the pinned Pane ${deployment.pin.version} yet (${pinUpgrade.detail ?? pinUpgrade.status}).`);
+  }
   const summary = {
     ok: health.ok,
     host: hostname,
@@ -831,6 +851,8 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     serveRepaired,
     peersFile,
     agentNotes,
+    panePin,
+    pinUpgrade,
     timings,
   };
   report(
@@ -867,14 +889,17 @@ async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
   }
   const transport = hostTransport(record) ?? 'https';
   const serve = await deps.bootstrap.repairServe(handle, { transport });
+  const deployment = (await deps.store.readSettings()).coordinator?.deployment;
+  const panePin = deployment ? await pushPanePin(record, deployment.pin ?? null, deps, provider) : null;
   const health = record.profile.baseUrl
-    ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 60_000, intervalMs: 1_000 })
+    ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { token: record.profile.token, timeoutMs: 60_000, intervalMs: 1_000 })
     : { ok: false, elapsedMs: 0 };
   const done = [
     tailnetRepair.reenrolled ? `re-enrolled the tailnet node as ${tailnetRepair.nodeId}` : 'tailnet node ok',
     serve.serveApplied ? `re-applied the missing ${transport} Serve config` : `${transport} Serve config ok`,
     'tailscaled.state and Serve guards installed',
   ];
+  if (panePin) done.push(panePin.written ? `Pane pin ${panePin.pinned ?? 'none'} written` : `Pane pin NOT written (${panePin.reason})`);
   report(
     args,
     deps,
@@ -885,6 +910,7 @@ async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
       reenrolled: tailnetRepair.reenrolled,
       serveApplied: serve.serveApplied,
       guards: 'installed',
+      panePin,
       health: { ok: health.ok, status: health.status ?? null, version: health.version ?? null },
     },
     `${hostname}: ${done.join('; ')}. /health ${health.ok ? 'answers' : 'does NOT answer'} at ${record.profile.baseUrl}.`,
