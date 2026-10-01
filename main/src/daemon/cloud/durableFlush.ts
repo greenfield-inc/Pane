@@ -49,7 +49,7 @@ export async function flushDurableState(dependencies: DurableFlushDependencies):
     walCheckpoint = dependencies.checkpointWal();
     if (!walCheckpoint) failures.push('the SQLite WAL was not checkpointed');
   } catch (error) {
-    failures.push(`WAL checkpoint failed: ${describeError(error)}`);
+    failures.push(`WAL checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const databaseFile = dependencies.databaseFile;
@@ -89,7 +89,7 @@ function listTopLevelFiles(directory: string, failures: string[]): string[] {
       .filter(entry => entry.isFile())
       .map(entry => path.join(directory, entry.name));
   } catch (error) {
-    failures.push(`listing ${directory} failed: ${describeError(error)}`);
+    failures.push(`listing ${directory} failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
@@ -103,14 +103,10 @@ function fsyncPath(target: string): 'synced' | 'missing' | { error: string } {
   } catch (error) {
     return decodeOptionalBoundary(error, boundary.object({ code: boundary.literal('ENOENT') }))
       ? 'missing'
-      : { error: describeError(error) };
+      : { error: error instanceof Error ? error.message : String(error) };
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** The guard is root-owned, so it runs through passwordless sudo, as upgrades do. */

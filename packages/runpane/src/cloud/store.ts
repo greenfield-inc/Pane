@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { boundary, decodeBoundary, type JsonValue } from '../boundaryDecoder';
+import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { BoatOrg, CloudSize } from './provider';
 import type { CloudTransport } from './args';
 
@@ -284,11 +284,10 @@ export function createCloudStore(dir: string = defaultCloudDir()): CloudStore {
       const records: CloudHostRecord[] = [];
       const problems: string[] = [];
       for (const entry of await listHostFiles(hostsDir)) {
-        const value = await readJsonFile<JsonValue>(path.join(hostsDir, entry));
-        const problem = hostRecordProblem(value, entry);
-        if (problem) problems.push(`hosts/${entry}: ${problem}`);
-        // SAFETY: hostRecordProblem decoded every field readers of the snapshot rely on.
-        else records.push(value as unknown as CloudHostRecord);
+        const record = await readJsonFile<CloudHostRecord>(path.join(hostsDir, entry));
+        const problem = hostRecordProblem(record, entry);
+        if (problem !== null || record === undefined) problems.push(`hosts/${entry}: ${problem ?? 'removed while reading'}`);
+        else records.push(record);
       }
       problems.push(...duplicateHostProblems(records));
       if (problems.length > 0) {
@@ -364,7 +363,7 @@ const hostRecordSchema = boundary.object({
 });
 
 /** Why `value` (read from `hosts/<file>`) is not a valid host record, or null when it is. */
-function hostRecordProblem(value: JsonValue | undefined, file: string): string | null {
+function hostRecordProblem(value: CloudHostRecord | undefined, file: string): string | null {
   try {
     const record = decodeBoundary(value, hostRecordSchema);
     const { hostname } = record.profile.cloud;
