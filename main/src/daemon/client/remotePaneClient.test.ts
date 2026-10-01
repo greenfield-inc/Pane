@@ -102,6 +102,27 @@ describe('RemotePaneClient', () => {
     expect(server.getLastInvokeHost()).toBe(`${tailscaleHost}:${serverUrl.port}`);
   });
 
+  it('refuses to send the token over plain HTTP outside the tailnet, before connecting', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const port = new URL(server.baseUrl).port;
+    const profile = { id: 'p', label: 'Cloud', token: 'secret-token', transport: 'http+sse' as const };
+    // A hijacked resolver answers the MagicDNS name with a public address.
+    const publicLookup: LookupFunction = (_hostname, _options, callback) => {
+      process.nextTick(() => callback(null, [{ address: '93.184.216.34', family: 4 }]));
+    };
+    const onTailnet = () => ({ tailscale0: [{ address: '100.101.102.103', netmask: '255.192.0.0', family: 'IPv4' as const, mac: '00:00:00:00:00:00', internal: false, cidr: '100.101.102.103/10' }] });
+    const hijacked = new RemotePaneClient({ ...profile, baseUrl: `http://rp-a.tail.ts.net:${port}` }, { lookup: publicLookup, networkInterfaces: onTailnet });
+    await expect(hijacked.invoke('sessions:get-all', [])).rejects.toMatchObject({ code: 'ERR_PLAIN_HTTP_OFF_TAILNET' });
+
+    // Tailscale off: a carrier-grade NAT address on the LTE interface is not the tailnet.
+    const offTailnet = () => ({ wwan0: [{ address: '100.72.9.14', netmask: '255.192.0.0', family: 'IPv4' as const, mac: '00:00:00:00:00:00', internal: false, cidr: '100.72.9.14/10' }] });
+    const cgnat = new RemotePaneClient({ ...profile, baseUrl: `http://100.90.1.2:${port}` }, { networkInterfaces: offTailnet });
+    await expect(cgnat.invoke('sessions:get-all', [])).rejects.toMatchObject({ code: 'ERR_PLAIN_HTTP_OFF_TAILNET' });
+
+    expect(server.getLastInvokeAuth()).toBeUndefined();
+  });
+
   it('forwards remote daemon SSE events through the provided renderer sink', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

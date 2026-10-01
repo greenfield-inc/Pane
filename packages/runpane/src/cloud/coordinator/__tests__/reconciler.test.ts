@@ -26,14 +26,66 @@ function setup(sandboxes: ProviderSandbox[], entries: DirectoryEntry[] | null, o
     selfSandboxId: 'bx_coord',
     ignoreSandboxIds: [],
     orphanGraceMs: 30 * 60_000,
+    stopOrphans: true,
+    orphanStopGraceMs: 0,
     maxOrphanStopsPerRun: 3,
     dryRun: false,
     ...options,
   });
-  return { provider, alerts, reconciler, directory };
+  return { provider, alerts, reconciler, directory, clock };
 }
 
 describe('Reconciler', () => {
+  it('by default only reports a running orphan, once, and never stops it', async () => {
+    const { reconciler, provider, alerts, clock } = setup(
+      [sandbox('bx_a', 'running'), sandbox('bx_orphan', 'running')],
+      [entry('s1', 'bx_a')],
+      { stopOrphans: false, orphanStopGraceMs: 6 * 3_600_000 },
+    );
+    const first = await reconciler.runOnce();
+    clock.time += 48 * 3_600_000;
+    const later = await reconciler.runOnce();
+    assert.deepEqual([first.orphans, later.orphans], [['bx_orphan'], ['bx_orphan']]);
+    assert.deepEqual([first.stopped, later.stopped], [[], []]);
+    assert.deepEqual(provider.mutations(), []);
+    assert.deepEqual(alerts.alerts.filter((alert) => alert.code === 'orphan-found').map((alert) => alert.sandboxId), ['bx_orphan']);
+  });
+
+  it('with stopOrphans, stops an orphan only after it has been an orphan for the stop grace', async () => {
+    const { reconciler, provider, alerts, clock } = setup(
+      [sandbox('bx_a', 'running'), sandbox('bx_orphan', 'running')],
+      [entry('s1', 'bx_a')],
+      { orphanStopGraceMs: 6 * 3_600_000 },
+    );
+    // The sandbox is days old, but this coordinator only now sees it missing from the directory.
+    const first = await reconciler.runOnce();
+    assert.deepEqual(first.stopped, []);
+    assert.match(first.skipped[0]?.reason ?? '', /orphan for 0 min; stopped after 360 min/);
+    clock.time += 5 * 3_600_000;
+    assert.deepEqual((await reconciler.runOnce()).stopped, []);
+    assert.deepEqual(provider.mutations(), []);
+    clock.time += 3_600_000;
+    assert.deepEqual((await reconciler.runOnce()).stopped, ['bx_orphan']);
+    assert.deepEqual(provider.mutations(), ['stop bx_orphan']);
+    assert.ok(alerts.alerts.some((alert) => alert.code === 'orphan-stopped'));
+  });
+
+  it('restarts the stop grace when a sandbox stops being an orphan in between', async () => {
+    const { reconciler, provider, directory, clock } = setup(
+      [sandbox('bx_a', 'running'), sandbox('bx_orphan', 'running')],
+      [entry('s1', 'bx_a')],
+      { orphanStopGraceMs: 6 * 3_600_000 },
+    );
+    await reconciler.runOnce();
+    clock.time += 5 * 3_600_000;
+    directory.result = { ok: true, generatedAt: null, entries: [entry('s1', 'bx_a'), entry('s2', 'bx_orphan')] };
+    await reconciler.runOnce();
+    directory.result = { ok: true, generatedAt: null, entries: [entry('s1', 'bx_a')] };
+    clock.time += 3_600_000;
+    assert.deepEqual((await reconciler.runOnce()).stopped, []);
+    assert.deepEqual(provider.mutations(), []);
+  });
+
   it('stops a running orphan and alerts, never deleting', async () => {
     const { reconciler, provider, alerts } = setup(
       [sandbox('bx_a', 'running'), sandbox('bx_orphan', 'running')],

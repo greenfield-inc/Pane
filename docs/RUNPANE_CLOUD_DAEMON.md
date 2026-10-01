@@ -1,8 +1,9 @@
 # Runpane Cloud: daemon surface for the coordinator
 
 A cloud Session is a normal headless Pane daemon on a provider sandbox. The coordinator (`runpane cloud`)
-talks to it through three things only: `GET /health`, `runpane:cloud:safe-to-stop` and `runpane:cloud:upgrade`.
-Both channels go over the usual `POST /invoke` with a paired client token. Code: `main/src/daemon/cloud/`.
+talks to it through `GET /health`, `runpane:cloud:safe-to-stop` (with `runpane:cloud:stop-lease:release`) and
+`runpane:cloud:upgrade`, over the usual `POST /invoke` with its paired client token. The laptop CLI adds
+`runpane:cloud:coordinator-client:pair|revoke` with its full-access token (see the coordinator doc). Code: `main/src/daemon/cloud/`.
 
 ## `GET /health`: version and readiness
 
@@ -40,7 +41,7 @@ A provider stop is a power-off after a disk snapshot, with no SIGTERM (boat snap
 stop call). The daemon therefore has to say whether stopping is safe **and** make its state durable before the coordinator
 calls stop.
 
-Request (all optional): `{ "flush": "if-safe" | "always" | "never", "recentOutputMs": 120000, "clientWindowMs": 900000 }`.
+Request (all optional): `{ "flush": "if-safe" | "always" | "never", "recentOutputMs": 120000, "clientWindowMs": 900000, "stopLeaseMs": 60000 }`.
 
 It refuses while any of these holds, and lists every one it finds:
 
@@ -52,6 +53,7 @@ It refuses while any of these holds, and lists every one it finds:
 | `watcher-active` | a `runpane:workspace:wait` or `runpane:panels:wait` call is running, or one returned in the last 30 s (a watch loop between calls) |
 | `pr-checks-pending` | a Session member's open PR has checks still running (the PR monitor polls first if its last round is over 60 s old) |
 | `user-client-attached` | a user client has an open `/events` stream, or called `/invoke` within `clientWindowMs` (default 15 min) |
+| `call-in-flight` | with `stopLeaseMs` only: another call to this daemon (other than a wait) was still running when the lease went up |
 | `flush-failed` | the flush ran but could not be verified durable (`flush.failures` says why) |
 
 Peers (paired records with `scope: 'peer'`) never count: not their waits, streams or calls. Every `runpane:cloud:*`
@@ -67,11 +69,25 @@ for); `never` only checks.
 
 ```json
 { "ok": true, "safe": true, "checkedAt": "...", "version": "...", "blockers": [],
-  "flush": { "walCheckpoint": { "busy": 0, "log": 12, "checkpointed": 12 }, "fsynced": ["..."], "syncedFilesystem": true, "durable": true, "failures": [], "durationMs": 40 } }
+  "flush": { "walCheckpoint": { "busy": 0, "log": 12, "checkpointed": 12 }, "fsynced": ["..."], "syncedFilesystem": true, "durable": true, "failures": [], "durationMs": 40 },
+  "stopLease": { "expiresAt": "...", "ms": 60000 } }
 ```
 
-The coordinator should call the provider's stop right after `safe: true`. Anything written after the answer can
-still be lost; the window is the time until the provider's snapshot point.
+**The stop lease.** Between a safe answer and the provider's snapshot, anything that starts on the daemon (a
+submit from the desktop or a peer, `runpane --host`, a new agent turn) would be lost or half-written. So a
+request with `stopLeaseMs` (at most 120000) fences the daemon: the lease goes up before the check, and while it
+holds, every other call from every origin (paired clients, peers, the local socket) is refused with
+`ERR_SESSION_STOPPING` (HTTP 503, retryable), except `runpane:cloud:safe-to-stop` and
+`runpane:cloud:stop-lease:release`. A call that started before the lease and is still running blocks the answer
+(`call-in-flight`). An unsafe answer drops the lease at once; a safe one returns it as `stopLease`. The coordinator
+calls the provider's stop within the lease, or calls `runpane:cloud:stop-lease:release` when it does not stop;
+otherwise the lease lapses after `stopLeaseMs`. The lease is in memory, so a daemon restart drops it. Agents and
+commands already running are not fenced: the answer is safe only when none are working. The `runpane` CLI
+treats `ERR_SESSION_STOPPING` like a sleeping host: a submit waits for the stop and wakes the host through the
+coordinator (same idempotency key); anything else fails with `ERR_RUNPANE_HOST_STOPPING`.
+
+Without `stopLeaseMs` nothing is fenced: anything written after the answer can still be lost until the
+provider's snapshot point.
 
 Inside the sandbox the same check runs through the local socket:
 `runpane cloud safe-to-stop [--force] [--dry-run] [--json]` (exit 0 safe, 3 blocked, 1 error).

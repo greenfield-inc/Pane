@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { CloudDeps } from './commands';
 import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
+import { describeRevocation, repairRevokedCoordinatorClients, revokeSessionCoordinatorClients } from './coordinatorClients';
 import { pushDirectory } from './coordinatorSync';
 import { CloudProviderError, SANDBOX_HOME, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
@@ -18,7 +19,7 @@ import {
  * `runpane cloud coordinator deploy|status|stop|start|destroy`, run on the user's machine.
  *
  * The coordinator (m4, ./coordinator/) is the always-on part of `runpane cloud`: idle-stop, reconcile
- * (stop + alert only) and /cloud/wake. It runs on a tiny sandbox joined to the tailnet as
+ * (alert on orphans, never delete) and /cloud/wake. It runs on a tiny sandbox joined to the tailnet as
  * tag:rp-session, so cloud Sessions can reach it, and holds a provider key scoped to read, stop and
  * resume. This file creates and manages that sandbox; the service itself is ./coordinator, shipped from
  * this very CLI package so the coordinator always matches the CLI that deployed it.
@@ -54,6 +55,7 @@ interface CoordinatorArgs {
   fromSnapshot?: string;
   noGolden: boolean;
   reconcile?: boolean;
+  stopOrphans?: boolean;
   idleCheckSeconds?: number;
   wakeGraceSeconds?: number;
   pin?: Partial<PinnedPane>;
@@ -64,7 +66,7 @@ interface CoordinatorArgs {
 
 export const COORDINATOR_LIFECYCLE_USAGE = `On this machine (create and manage the coordinator sandbox):
   runpane cloud coordinator deploy --yes [--name <host>] [--size small|default|large] [--from <snapshot>|--no-golden] [--boat-org <org|personal>]
-        [--no-reconcile|--reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>]
+        [--no-reconcile|--reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>]
         [--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex> | --no-pin] [--key-ttl <90d>] [--json]
   runpane cloud coordinator status [--json]
   runpane cloud coordinator stop --yes [--json]
@@ -107,6 +109,8 @@ export function parseCoordinatorArgs(argv: readonly string[]): CoordinatorArgs {
       case '--no-golden': deployOnly(); args.noGolden = true; break;
       case '--reconcile': deployOnly(); args.reconcile = true; break;
       case '--no-reconcile': deployOnly(); args.reconcile = false; break;
+      case '--stop-orphans': deployOnly(); args.stopOrphans = true; break;
+      case '--no-stop-orphans': deployOnly(); args.stopOrphans = false; break;
       case '--idle-check-seconds': deployOnly(); args.idleCheckSeconds = positiveInt(value(index++, flag), flag); break;
       case '--wake-grace-seconds': deployOnly(); args.wakeGraceSeconds = positiveInt(value(index++, flag), flag); break;
       case '--pin-version': deployOnly(); args.pin = { ...args.pin, version: value(index++, flag) }; break;
@@ -237,6 +241,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     ...deployment,
     reconcile: args.reconcile ?? deployment.reconcile,
   };
+  if (args.stopOrphans !== undefined) next.stopOrphans = args.stopOrphans;
   if (args.idleCheckSeconds) next.idleCheckSeconds = args.idleCheckSeconds;
   if (args.wakeGraceSeconds) next.wakeGraceSeconds = args.wakeGraceSeconds;
   if (args.noPin) delete next.pin;
@@ -274,6 +279,8 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   }));
   await saveDeployment(deps, next);
 
+  // Sessions whose coordinator client was revoked (coordinator destroy, revoke-clients) get a fresh one.
+  const repaired = await repairRevokedCoordinatorClients(deps);
   const coordinator = await pushDirectory(deps);
   const records = await deps.store.listHosts();
   const withoutClient = records.filter((record) => !record.meta.coordinatorPairingPath).map((record) => record.profile.cloud.hostname);
@@ -290,26 +297,34 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
       version: health.version ?? next.appVersion,
       managedPrefix: next.managedPrefix,
       reconcile: next.reconcile,
+      stopOrphans: next.stopOrphans === true,
       pin: next.pin ?? null,
       github: next.github ? { mode: next.github.mode, appId: next.github.appId ?? null } : null,
     },
     directory: coordinator,
     peersFiles: peers,
     hostsWithoutCoordinatorClient: withoutClient,
+    coordinatorClientsPaired: repaired.done,
+    coordinatorClientsNotPaired: repaired.failed,
     timings,
   };
   if (args.json) {
     deps.stdout(JSON.stringify(summary, null, 2));
   } else {
     deps.stdout(`runpane cloud: coordinator ${next.hostname} is ${created ? 'up' : 'updated'} at ${next.baseUrl} (${Math.round(timings.totalMs / 1000)} s, version ${summary.coordinator.version}).`);
-    deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? 'on (stop + alert only)' : 'off'}.`);
+    deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? `on (${next.stopOrphans ? 'alerts on orphans, stops those still orphaned after 6 h' : 'alerts on orphans, never stops them'})` : 'off'}.`);
     deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}${next.scopedKeyTtl ? ` (lifetime ${next.scopedKeyTtl} from ${next.deployedAt.slice(0, 10)}; destroy and redeploy before it expires)` : ''}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
     if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when they wake.`);
     if (next.secrets) deps.stdout(`  Doppler secrets kept (${next.secrets.configs.map((config) => `${config.project}/${config.config}`).join(', ') || 'no configs'}; policy ${next.secrets.policy.mode}); see runpane cloud coordinator doppler status.`);
     if (next.github) deps.stdout(`  GitHub broker kept (${next.github.mode === 'app' ? `App ${next.github.appId ?? '?'}` : 'fine-grained PAT'}); see runpane cloud coordinator github status.`);
     deps.stdout(`  directory: ${coordinator.pushed ? `${coordinator.sessions} cloud Session${coordinator.sessions === 1 ? '' : 's'}` : `not pushed (${coordinator.reason})`}.`);
-    if (withoutClient.length > 0) {
-      deps.stdout(`  note: ${withoutClient.join(', ')} were created before the coordinator and have no coordinator client, so idle-stop skips them. New Sessions get one automatically.`);
+    if (repaired.done.length > 0) deps.stdout(`  paired a new coordinator client on ${repaired.done.join(', ')} (their old one was revoked).`);
+    for (const failure of repaired.failed) {
+      deps.stdout(`  note: ${failure.host} has no coordinator client yet (${failure.reason}); idle-stop skips it until a deploy pairs one.`);
+    }
+    const preCoordinator = withoutClient.filter((host) => !repaired.failed.some((failure) => failure.host === host));
+    if (preCoordinator.length > 0) {
+      deps.stdout(`  note: ${preCoordinator.join(', ')} were created before the coordinator and have no coordinator client, so idle-stop skips them. New Sessions get one automatically.`);
     }
     deps.stdout('  Stop it with runpane cloud coordinator stop --yes (idle-stop and wake-on-submit pause); start it again with runpane cloud coordinator start.');
   }
@@ -419,7 +434,8 @@ function coordinatorConfig(deployment: CoordinatorDeployment, listenHost: string
     pinnedDebUrl: deployment.pin?.debUrl ?? null,
     pinnedDebSha256: deployment.pin?.sha256 ?? null,
     idleStop: idleStopConfig(deployment),
-    reconcile: { enabled: deployment.reconcile },
+    reconcile: { enabled: deployment.reconcile, stopOrphans: deployment.stopOrphans === true },
+    revokedCallers: deployment.revokedCallers ?? [],
     github: githubConfig(deployment),
     secrets: secretsConfig(deployment),
   };
@@ -548,6 +564,7 @@ async function status(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     version: health?.version ?? null,
     managedPrefix: deployment.managedPrefix,
     reconcile: deployment.reconcile,
+    stopOrphans: deployment.stopOrphans === true,
     pin: deployment.pin ?? null,
     deployedAt: deployment.deployedAt,
   };
@@ -627,13 +644,15 @@ async function destroy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> 
   const deployment = await requireDeployment(deps);
   const { credentials, provider } = await loadProvider(deps);
   if (!credentials.tailscale) throw new Error('No Tailscale OAuth client saved; cannot delete the coordinator\'s tailnet device.');
+  // First take its token back from every awake Session, so a copy of its directory reaches none of them.
+  const clients = await revokeSessionCoordinatorClients(deps);
   const result = await removeCoordinator(provider, deps.bootstrap.createTailnet(credentials.tailscale), deployment, deps);
   const settings = await deps.store.readSettings();
   await deps.store.writeSettings({ ...settings, coordinator: { enabled: false } });
   await deps.store.removeSecretText('coordinator.json');
   await deps.store.removeSecretText('coordinator-secret');
-  report(args, deps, { ok: true, hostname: deployment.hostname, ...result },
-    `coordinator ${deployment.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${deployment.sandboxId} deleted, scoped key ${result.keyRevoked ? 'revoked' : `NOT revoked (${result.keyError ?? 'unknown'}); revoke ${deployment.scopedKeyId} in the provider dashboard`}. New Sessions no longer get a coordinator client.`);
+  report(args, deps, { ok: true, hostname: deployment.hostname, ...result, coordinatorClientsRevoked: clients.done, coordinatorClientsNotRevoked: clients.failed },
+    `coordinator ${deployment.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${deployment.sandboxId} deleted, scoped key ${result.keyRevoked ? 'revoked' : `NOT revoked (${result.keyError ?? 'unknown'}); revoke ${deployment.scopedKeyId} in the provider dashboard`}. New Sessions no longer get a coordinator client.\n${describeRevocation(clients)}`);
   return 0;
 }
 

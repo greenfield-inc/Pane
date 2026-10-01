@@ -5,9 +5,11 @@ import type {
   CloudSafeToStopFlushMode,
   CloudSafeToStopRequest,
   CloudSafeToStopResult,
+  CloudStopLease,
 } from '../../../../shared/types/cloudDaemon';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../commandRegistry';
+import { MAX_STOP_LEASE_MS } from './stopLease';
 
 /** A terminal that printed within this window is not idle. */
 export const DEFAULT_RECENT_OUTPUT_MS = 2 * 60_000;
@@ -67,10 +69,20 @@ export interface SafeToStopSources {
   userClients(since: number): SafeToStopUserClient[];
 }
 
+/** The daemon's stop fence (stopLease.ts) and the calls it can't fence because they already started. */
+interface SafeToStopLeasing {
+  grant(ms: number): { expiresAt: number; ms: number };
+  release(): void;
+  /** Calls now running, other than safe-to-stop itself and the waits counted as watchers. */
+  inFlightCalls(): number;
+}
+
 export interface SafeToStopDependencies {
   sources: SafeToStopSources;
   flush(): Promise<CloudDurableFlushResult>;
   version: string;
+  /** Absent: a request's `stopLeaseMs` is ignored and the answer carries no lease. */
+  lease?: SafeToStopLeasing;
   now?: () => number;
 }
 
@@ -78,6 +90,7 @@ const safeToStopRequestSchema = boundary.object({
   flush: boundary.optional(boundary.enumeration('if-safe', 'always', 'never')),
   recentOutputMs: boundary.optional(boundary.number),
   clientWindowMs: boundary.optional(boundary.number),
+  stopLeaseMs: boundary.optional(boundary.number),
 });
 
 export function parseSafeToStopRequest(value: PaneCommandValue): Required<CloudSafeToStopRequest> {
@@ -86,6 +99,7 @@ export function parseSafeToStopRequest(value: PaneCommandValue): Required<CloudS
     flush: decoded.flush ?? 'if-safe',
     recentOutputMs: nonNegative(decoded.recentOutputMs, DEFAULT_RECENT_OUTPUT_MS, 'recentOutputMs'),
     clientWindowMs: nonNegative(decoded.clientWindowMs, DEFAULT_CLIENT_WINDOW_MS, 'clientWindowMs'),
+    stopLeaseMs: Math.min(nonNegative(decoded.stopLeaseMs, 0, 'stopLeaseMs'), MAX_STOP_LEASE_MS),
   };
 }
 
@@ -169,19 +183,33 @@ export async function runSafeToStop(
 ): Promise<CloudSafeToStopResult> {
   const now = dependencies.now ?? Date.now;
   const request = parseSafeToStopRequest(rawRequest);
+  // The fence goes up before the check, so nothing can start while the check and the flush run; a call
+  // that started before it is still running and blocks like any other condition.
+  const lease = request.stopLeaseMs > 0 ? dependencies.lease : undefined;
+  const granted = lease?.grant(request.stopLeaseMs);
   const blockers = await collectSafeToStopBlockers(dependencies.sources, request, now());
+  const inFlight = lease?.inFlightCalls() ?? 0;
+  if (inFlight > 0) {
+    blockers.push({ condition: 'call-in-flight', message: `${inFlight} call(s) to this daemon are still running` });
+  }
   const flush = shouldFlush(request.flush, blockers.length === 0) ? await dependencies.flush() : null;
   // A stop right after an unverified flush can lose the last writes, so it blocks like any other condition.
   if (flush && !flush.durable) {
     blockers.push({ condition: 'flush-failed', message: `State is not durable: ${flush.failures.join('; ')}` });
   }
+  const safe = blockers.length === 0;
+  if (!safe) lease?.release();
+  const stopLease: CloudStopLease | null = safe && granted
+    ? { expiresAt: new Date(granted.expiresAt).toISOString(), ms: granted.ms }
+    : null;
   return {
     ok: true,
-    safe: blockers.length === 0,
+    safe,
     checkedAt: new Date(now()).toISOString(),
     version: dependencies.version,
     blockers,
     flush,
+    stopLease,
   };
 }
 

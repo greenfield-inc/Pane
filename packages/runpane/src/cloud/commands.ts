@@ -7,6 +7,7 @@ import { configuredGuardrails, pushAgentNotes, runCloudNotesCommand, type AgentN
 import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
 import { COORDINATOR_DOPPLER_USAGE, runCoordinatorDoppler } from './coordinatorDoppler';
 import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
+import { COORDINATOR_REVOKE_USAGE, isCoordinatorRevokeCommand, runCoordinatorRevoke } from './coordinatorRevoke';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { assertHttpsArtifactUrl } from './bootstrap';
@@ -130,6 +131,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'sync': return runSync(args, deps);
     case 'coordinator':
       if (isCoordinatorLifecycleCommand(args.passthrough)) return runCoordinatorLifecycle(args.passthrough, deps);
+      if (isCoordinatorRevokeCommand(args.passthrough)) return runCoordinatorRevoke(args.passthrough, deps);
       if (args.passthrough[0] === 'github') {
         if (['help', '--help', '-h', undefined].includes(args.passthrough[1])) {
           deps.stdout(COORDINATOR_GITHUB_USAGE);
@@ -144,7 +146,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
         }
         return runCoordinatorDoppler(args.passthrough.slice(1), deps);
       }
-      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n${COORDINATOR_GITHUB_USAGE}\n${COORDINATOR_DOPPLER_USAGE}\n`);
+      if (['help', '--help', '-h', undefined].includes(args.passthrough[0])) deps.stdout(`${COORDINATOR_LIFECYCLE_USAGE}\n${COORDINATOR_REVOKE_USAGE}\n${COORDINATOR_GITHUB_USAGE}\n${COORDINATOR_DOPPLER_USAGE}\n`);
       if (!deps.runCoordinator) throw new Error('runpane cloud coordinator is not available in this build.');
       return deps.runCoordinator(args.passthrough);
     case 'peers': return runPeersCommand(args.passthrough, deps);

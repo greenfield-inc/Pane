@@ -6,6 +6,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { boundary, decodeBoundary, type JsonValue } from '../boundaryDecoder';
+import { assertTailnetRoute, needsTailnetRoute, tailnetOnlyLookup, TailnetRouteError } from './tailnetRoute';
 
 export interface RemoteHostProfile {
   id: string;
@@ -21,7 +22,7 @@ export interface RemoteHttpHeaders {
 
 export interface RemoteHttpRequest {
   url: string;
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT';
   headers: RemoteHttpHeaders;
   body?: string;
   /** Give up if the TCP/TLS connection has not opened by then. */
@@ -185,8 +186,9 @@ export class RemoteDaemonClient {
           ? `Remote request failed with ${response.status}`
           : failure?.message ?? `Remote request failed with ${response.status}`;
         // The daemon's own error envelope means it ran the request and said no; only a response
-        // without it (a proxy's error page) leaves a mutation's outcome unknown.
-        if (!isRetryableResponse(response.status) || (failure?.code && !retryableRead)) {
+        // without it (a proxy's error page) leaves a mutation's outcome unknown. A cloud host under
+        // its coordinator's stop lease refuses even reads until it sleeps: the caller decides (target.ts).
+        if (!isRetryableResponse(response.status) || (failure?.code && !retryableRead) || failure?.code === 'ERR_SESSION_STOPPING') {
           throw new RemoteRequestError(message, response.status, failure?.code ?? null);
         }
         lastError = new Error(message);
@@ -245,6 +247,11 @@ function decodeInvokeResponse(body: JsonValue | null) {
   }
 }
 
+/** A refusal to send a token in clear: final (never a connect error, so nothing wakes or resends). */
+function refusedRoute(error: TailnetRouteError): RemoteRequestError {
+  return new RemoteRequestError(error.message, 0, error.code);
+}
+
 function isRetryableResponse(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -268,6 +275,14 @@ function outgoingHeaders(request: RemoteHttpRequest): http.OutgoingHttpHeaders {
 export const nodeHttpTransport: RemoteHttpTransport = (request) => new Promise((resolve, reject) => {
   const url = new URL(request.url);
   const secure = url.protocol === 'https:';
+  // A token over plain HTTP must stay inside the tailnet (tailnetRoute.ts); refused, nothing was sent.
+  const tailnetOnly = needsTailnetRoute(url);
+  try {
+    assertTailnetRoute(url);
+  } catch (error) {
+    reject(error instanceof TailnetRouteError ? refusedRoute(error) : error);
+    return;
+  }
   const requestFn = secure ? https.request : http.request;
   let opened = false;
   let settled = false;
@@ -284,11 +299,9 @@ export const nodeHttpTransport: RemoteHttpTransport = (request) => new Promise((
     resolve(outcome.response);
   };
 
-  const req = requestFn(url, {
-    method: request.method,
-    headers: outgoingHeaders(request),
-    agent: false,
-  }, (res) => {
+  const options: http.RequestOptions = { method: request.method, headers: outgoingHeaders(request), agent: false };
+  if (tailnetOnly) options.lookup = tailnetOnlyLookup();
+  const req = requestFn(url, options, (res) => {
     const chunks: Buffer[] = [];
     res.on('data', (chunk: Buffer) => chunks.push(chunk));
     res.on('end', () => finish({ response: { status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') } }));
@@ -301,6 +314,10 @@ export const nodeHttpTransport: RemoteHttpTransport = (request) => new Promise((
     });
   });
   req.on('error', (error: NodeJS.ErrnoException) => {
+    if (error instanceof TailnetRouteError) {
+      finish({ error: refusedRoute(error) });
+      return;
+    }
     if (!opened) {
       finish({ error: new RemoteConnectError(`Could not connect to ${url.host}: ${error.message}`, error.code ?? 'ECONNFAILED') });
       return;

@@ -54,7 +54,7 @@ describe('coordinator HTTP server', () => {
     },
     reconcile: async () => {
       calls.push('reconcile');
-      return { aborted: 'directory-empty', detail: '', managedCount: 1, directoryCount: 0, liveCount: 1, stopped: [], skipped: [], lost: [], dryRun: true };
+      return { aborted: 'directory-empty', detail: '', managedCount: 1, directoryCount: 0, liveCount: 1, orphans: [], stopped: [], skipped: [], lost: [], dryRun: true };
     },
     idleCheck: async () => ({ ok: true, results: [] }),
   };

@@ -154,7 +154,7 @@ export function buildCoordinator(
     selfSandboxId: config.selfSandboxId,
     ignoreSandboxIds: config.ignoreSandboxIds,
   };
-  const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+  const idle = new IdleStopper({ directory, provider, probe, activity, alerts, clock }, {
     requiredConsecutiveSafe: config.idleStop.requiredConsecutiveSafe,
     wakeGraceMs: config.idleStop.wakeGraceSeconds * 1000,
     dryRun: config.idleStop.dryRun,
@@ -162,6 +162,8 @@ export function buildCoordinator(
   const reconciler = new Reconciler({ directory, provider, activity, guard, alerts, clock }, {
     ...scope,
     orphanGraceMs: config.reconcile.orphanGraceSeconds * 1000,
+    stopOrphans: config.reconcile.stopOrphans,
+    orphanStopGraceMs: config.reconcile.orphanStopGraceSeconds * 1000,
     maxOrphanStopsPerRun: config.reconcile.maxOrphanStopsPerRun,
     dryRun: config.reconcile.dryRun,
   });

@@ -66,8 +66,12 @@ export type DaemonHealth =
   | { reachable: true; ready: boolean; version: string | null; detail: string | null };
 
 export type SafeToStopAnswer =
-  /** `checkpointed`: the daemon verified its flush durable; the coordinator never stops without it. */
-  | { kind: 'safe'; checkpointed: boolean }
+  /**
+   * `checkpointed`: the daemon verified its flush durable; the coordinator never stops without it.
+   * `lease`: the stop lease the daemon took for this answer (it refuses every other call meanwhile);
+   * null when none was asked for, or from a daemon without stop leases.
+   */
+  | { kind: 'safe'; checkpointed: boolean; lease: { ms: number } | null }
   | { kind: 'unsafe'; reasons: string[] }
   | { kind: 'unsupported'; error: string }
   | { kind: 'error'; error: string };
@@ -85,7 +89,10 @@ export type UpgradeAnswer =
 
 export interface DaemonProbe {
   health(baseUrl: string): Promise<DaemonHealth>;
-  safeToStop(baseUrl: string, token: string): Promise<SafeToStopAnswer>;
+  /** `stopLeaseMs`: ask the daemon to fence itself for that long if it answers safe. */
+  safeToStop(baseUrl: string, token: string, options?: { stopLeaseMs?: number }): Promise<SafeToStopAnswer>;
+  /** Lifts a stop lease the coordinator no longer needs (it did not stop). Never throws. */
+  releaseStopLease(baseUrl: string, token: string): Promise<void>;
   upgrade(baseUrl: string, token: string, target: UpgradeTarget): Promise<UpgradeAnswer>;
 }
 

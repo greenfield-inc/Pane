@@ -1413,9 +1413,9 @@
     },
     {
       "name": "cloud coordinator deploy",
-      "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+      "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (alerts on orphans; never deletes) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
       "usage": [
-        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]"
+        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -1453,6 +1453,28 @@
       ],
       "mutates": true,
       "idempotent": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator revoke-clients",
+      "summary": "Revoke the coordinator's paired client on every awake cloud Session and forget its token on this machine.",
+      "usage": [
+        "runpane cloud coordinator revoke-clients --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator revoke-caller",
+      "summary": "Refuse one caller of the coordinator's API (a user:<name> token or a cloud Session's peer token), or accept it again.",
+      "usage": [
+        "runpane cloud coordinator revoke-caller <user:name|host|Session id> [--undo] [--json]"
+      ],
+      "mutates": true,
       "wrappers": [
         "npm"
       ]
@@ -3715,9 +3737,9 @@
       ],
       "cloud coordinator deploy": [
         "Usage:",
-        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
         "",
-        "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+        "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (alerts on orphans; never deletes) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
         "",
         "Options:",
         "  --yes                          Confirm; the command changes billed cloud resources.",
@@ -3725,8 +3747,10 @@
         "  --size <small|default|large>   Machine size (default small).",
         "  --from <snapshot>              Named snapshot to start from (default the saved golden snapshot).",
         "  --no-golden                    Start from the plain image.",
-        "  --reconcile                    Turn the reconciler on (default: on; stop + alert only, never deletes).",
+        "  --reconcile                    Turn the reconciler on (default: on; alerts on orphans, never deletes).",
         "  --no-reconcile                 Turn the reconciler off.",
+        "  --stop-orphans                 Let the reconciler stop an orphan it has seen for 6 hours (default: alert only).",
+        "  --no-stop-orphans              Only alert on orphans again.",
         "  --idle-check-seconds <n>       How often idle-stop asks each awake Session (default 300).",
         "  --wake-grace-seconds <n>       How long after a wake idle-stop leaves a Session alone (default 600).",
         "  --pin-version <version>        Pane version to upgrade Sessions to when they wake.",
@@ -3765,6 +3789,26 @@
         "Start a stopped coordinator and wait until its service answers /health.",
         "",
         "Options:",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator revoke-clients": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-clients --yes [--json]",
+        "",
+        "Revoke the coordinator's paired client on every awake cloud Session and forget its token here. The next coordinator deploy pairs a fresh one.",
+        "",
+        "Options:",
+        "  --yes    Confirm; idle-stop skips these Sessions until coordinator deploy pairs a new client.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator revoke-caller": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-caller <user:name|host|Session id> [--undo] [--json]",
+        "",
+        "Refuse one caller of the coordinator's API (403 auth-revoked); --undo accepts it again. Kept across redeploys.",
+        "",
+        "Options:",
+        "  --undo   Accept the caller again.",
         "  --json   Print machine-readable output."
       ],
       "cloud coordinator destroy": [
@@ -5414,7 +5458,7 @@
       ],
       "cloud coordinator deploy": [
         "Usage:",
-        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
         "",
         "`runpane cloud coordinator deploy` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator deploy"
@@ -5440,6 +5484,20 @@
         "",
         "`runpane cloud coordinator start` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator start"
+      ],
+      "cloud coordinator revoke-clients": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-clients --yes [--json]",
+        "",
+        "`runpane cloud coordinator revoke-clients` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator revoke-clients"
+      ],
+      "cloud coordinator revoke-caller": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-caller <user:name|host|Session id> [--undo] [--json]",
+        "",
+        "`runpane cloud coordinator revoke-caller` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator revoke-caller"
       ],
       "cloud coordinator destroy": [
         "Usage:",
@@ -15680,7 +15738,7 @@
       },
       "cloud coordinator deploy": {
         "name": "cloud coordinator deploy",
-        "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+        "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (alerts on orphans; never deletes) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
         "details": "Creates a small sandbox from the golden image, joins it to the tailnet as tag:rp-session (Tailscale SSH off), mints a provider key scoped to sandbox.read/stop/resume, installs the coordinator service from this CLI's own package, writes this machine's caller token to <cloud dir>/coordinator.json (0600) and pushes the directory. Run it again to update the service or change settings in place; it never creates a second coordinator. Afterwards `runpane cloud new` adds the coordinator's paired client to each Session so idle-stop can ask safe-to-stop.",
         "requiresPaneDaemon": false,
         "mutates": true,
@@ -15716,12 +15774,22 @@
           {
             "name": "--reconcile",
             "required": false,
-            "description": "Turn the reconciler on (default: on; stop + alert only, never deletes)."
+            "description": "Turn the reconciler on (default: on; alerts on orphans, never deletes)."
           },
           {
             "name": "--no-reconcile",
             "required": false,
             "description": "Turn the reconciler off."
+          },
+          {
+            "name": "--stop-orphans",
+            "required": false,
+            "description": "Let the reconciler stop an orphan it has seen for 6 hours (default: alert only)."
+          },
+          {
+            "name": "--no-stop-orphans",
+            "required": false,
+            "description": "Only alert on orphans again."
           },
           {
             "name": "--idle-check-seconds",
@@ -15853,10 +15921,65 @@
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       },
+      "cloud coordinator revoke-clients": {
+        "name": "cloud coordinator revoke-clients",
+        "summary": "Revoke the coordinator's paired client on every awake cloud Session and forget its token on this machine.",
+        "details": "Calls runpane:cloud:coordinator-client:revoke on each cloud Session this machine paired the coordinator on, deletes the local .coordinator.pairing file and pushes the directory, so a copy of the coordinator's directory no longer reaches those Sessions. coordinator destroy does the same first. A Session that is asleep or unreachable keeps its record and is named; rerun once it is awake. The next coordinator deploy pairs a fresh client on the Sessions revoked here. Exits 1 when any Session was not revoked.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm; idle-stop skips these Sessions until coordinator deploy pairs a new client."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator revoke-clients --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator revoke-caller": {
+        "name": "cloud coordinator revoke-caller",
+        "summary": "Refuse one caller of the coordinator's API (a user:<name> token or a cloud Session's peer token), or accept it again.",
+        "details": "Adds the caller id to revokedCallers in this machine's deployment record, rewrites the coordinator config and restarts the coordinator; deploy, github set and doppler set keep it. A host label, hostname or Session id names that Session's peer caller. Its calls then get 403 auth-revoked. --undo removes it again. To revoke every caller, destroy and redeploy the coordinator (a new caller secret).",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<caller>",
+            "required": true,
+            "description": "user:<name>, or a cloud host's label, hostname or Session id."
+          },
+          {
+            "name": "--undo",
+            "required": false,
+            "description": "Accept the caller again."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator revoke-caller user:old-laptop"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
       "cloud coordinator destroy": {
         "name": "cloud coordinator destroy",
         "summary": "Delete the coordinator: its tailnet device, its sandbox, and its scoped provider key.",
-        "details": "Deletes the coordinator's tailnet device first, then its sandbox, then revokes its scoped provider key, and removes coordinator.json and the caller secret. Existing cloud Sessions are not touched.",
+        "details": "First revokes the coordinator's paired client on every awake cloud Session (as coordinator revoke-clients does) and names any it could not reach. Then deletes the coordinator's tailnet device, its sandbox, revokes its scoped provider key, and removes coordinator.json and the caller secret. The Sessions themselves keep running.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [

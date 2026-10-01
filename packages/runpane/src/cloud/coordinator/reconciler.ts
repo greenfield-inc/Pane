@@ -15,7 +15,9 @@ export interface ReconcileReport {
   managedCount: number;
   directoryCount: number;
   liveCount: number;
-  /** Orphans stopped this run (or that would be, in a dry run). */
+  /** Running orphans past the creation grace this run: managed sandboxes the directory doesn't name. */
+  orphans: string[];
+  /** Orphans stopped this run (or that would be, in a dry run). Always empty unless `stopOrphans`. */
   stopped: string[];
   /** Orphans left alone this run, with the reason. */
   skipped: Array<{ sandboxId: string; reason: string }>;
@@ -29,18 +31,29 @@ export interface ReconcileOptions {
   selfSandboxId: string | null;
   ignoreSandboxIds: readonly string[];
   orphanGraceMs: number;
+  /** Off (the default): orphans are only reported (`orphan-found`). The directory can simply be stale. */
+  stopOrphans: boolean;
+  /** With `stopOrphans`: how long this coordinator must have seen a sandbox as a running orphan first. */
+  orphanStopGraceMs: number;
   maxOrphanStopsPerRun: number;
   dryRun: boolean;
 }
 
 /**
  * Reconciler: compares the provider's sandboxes with the directory (saved cloud profiles).
- * It only ever STOPS and alerts; the provider port has no delete. It aborts without touching
+ * It only ever STOPS and alerts; the provider port has no delete. A running orphan is reported once
+ * (`orphan-found`) and, by default, left running: the coordinator holds no token for a sandbox the
+ * directory doesn't name, so it can't ask that daemon's safe-to-stop, and a Session created from another
+ * machine or dropped by a stale store looks exactly like an orphan. With `stopOrphans`, it stops an orphan
+ * only once it has seen it as a running orphan for `orphanStopGraceMs`. It aborts without touching
  * anything when the directory can't be read, when the directory is empty while the provider lists
  * managed sandboxes, when the provider can't be listed, or when more orphans would be stopped than
  * `maxOrphanStopsPerRun` (a stale or truncated directory looks exactly like that).
  */
 export class Reconciler {
+  /** When this coordinator first saw each current running orphan. In memory: a restart starts over. */
+  private readonly orphanSince = new Map<string, number>();
+
   constructor(
     private readonly deps: {
       directory: SessionDirectory;
@@ -61,6 +74,7 @@ export class Reconciler {
       managedCount: 0,
       directoryCount: 0,
       liveCount: 0,
+      orphans: [],
       stopped: [],
       skipped: [],
       lost: [],
@@ -128,16 +142,17 @@ export class Reconciler {
       }
       candidates.push(sandbox);
     }
+    const due = this.trackOrphans(candidates, now, options, report);
 
-    if (candidates.length > options.maxOrphanStopsPerRun) {
+    if (due.length > options.maxOrphanStopsPerRun) {
       return abort(
         'too-many-orphans',
-        `reconcile aborted, nothing stopped: ${candidates.length} running orphans exceeds maxOrphanStopsPerRun `
-          + `${options.maxOrphanStopsPerRun}; is the directory stale? (${candidates.map((s) => s.id).join(', ')})`,
+        `reconcile aborted, nothing stopped: ${due.length} running orphans exceeds maxOrphanStopsPerRun `
+          + `${options.maxOrphanStopsPerRun}; is the directory stale? (${due.map((s) => s.id).join(', ')})`,
       );
     }
 
-    for (const sandbox of candidates) {
+    for (const sandbox of due) {
       if (options.dryRun) {
         report.stopped.push(sandbox.id);
         continue;
@@ -164,7 +179,52 @@ export class Reconciler {
     if (!live.ok) this.deps.alerts.emit({ level: 'error', code: 'runaway-guard', message: live.message });
 
     report.detail = `managed=${managed.length} directory=${directory.entries.length} live=${report.liveCount} `
-      + `stopped=${report.stopped.length} lost=${report.lost.length}${options.dryRun ? ' (dry run)' : ''}`;
+      + `orphans=${report.orphans.length} stopped=${report.stopped.length} lost=${report.lost.length}${options.dryRun ? ' (dry run)' : ''}`;
     return report;
+  }
+
+  /**
+   * Reports each new running orphan once and returns the ones to stop now: none unless `stopOrphans`,
+   * then only those this coordinator has seen as running orphans for `orphanStopGraceMs`.
+   */
+  private trackOrphans(
+    candidates: readonly ProviderSandbox[],
+    now: number,
+    options: ReconcileOptions,
+    report: ReconcileReport,
+  ): ProviderSandbox[] {
+    const current = new Set(candidates.map((sandbox) => sandbox.id));
+    for (const id of this.orphanSince.keys()) {
+      if (!current.has(id)) this.orphanSince.delete(id);
+    }
+    const due: ProviderSandbox[] = [];
+    for (const sandbox of candidates) {
+      report.orphans.push(sandbox.id);
+      const since = this.orphanSince.get(sandbox.id);
+      if (since === undefined) {
+        this.orphanSince.set(sandbox.id, now);
+        this.deps.alerts.emit({
+          level: 'warn',
+          code: 'orphan-found',
+          message: `sandbox ${sandbox.id} (${sandbox.name}) is running but not in the directory (made from another `
+            + 'runpane cloud store, or lost from this one). '
+            + (options.stopOrphans
+              ? `It is stopped if it is still an orphan in ${Math.round(options.orphanStopGraceMs / 60_000)} min.`
+              : 'It is left running (reconcile.stopOrphans is off); stop or delete it yourself if nothing uses it.'),
+          sandboxId: sandbox.id,
+        });
+      }
+      const seenMs = now - (since ?? now);
+      if (!options.stopOrphans) continue;
+      if (seenMs < options.orphanStopGraceMs) {
+        report.skipped.push({
+          sandboxId: sandbox.id,
+          reason: `orphan for ${Math.round(seenMs / 60_000)} min; stopped after ${Math.round(options.orphanStopGraceMs / 60_000)} min`,
+        });
+        continue;
+      }
+      due.push(sandbox);
+    }
+    return due;
   }
 }

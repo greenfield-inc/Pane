@@ -64,6 +64,8 @@ export interface CoordinatorDeployment {
   /** Sandboxes whose name starts with this are the coordinator's to idle-stop and reconcile. */
   managedPrefix: string;
   reconcile: boolean;
+  /** `deploy --stop-orphans`: the reconciler may stop long-lived orphans; unset or false, it only alerts. */
+  stopOrphans?: boolean;
   deployedAt: string;
   appVersion: string;
   pin?: PinnedPane;
@@ -82,6 +84,8 @@ export interface CoordinatorDeployment {
    * config's read-only service token lives on the coordinator (0600), never on this machine.
    */
   secrets?: CoordinatorSecrets;
+  /** `coordinator revoke-caller`: caller ids (user:<name> or a Session id) the coordinator's API refuses. */
+  revokedCallers?: string[];
 }
 
 export interface CoordinatorSecrets {
@@ -153,6 +157,8 @@ interface CloudHostMeta {
   magicDnsName: string;
   pairingPath: string;
   coordinatorPairingPath?: string;
+  /** This machine revoked the coordinator's client here; the next `coordinator deploy` pairs a new one. */
+  coordinatorClientRevoked?: boolean;
   paneSource: PaneSource;
   daemonVersion?: string;
   pinnedVersion?: string;

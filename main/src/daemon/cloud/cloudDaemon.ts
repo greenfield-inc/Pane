@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { RemoteDaemonConfig, RemoteDaemonConnectedClient } from '../../../../shared/types/remoteDaemon';
+import { normalizeRemoteDaemonConfig, type RemoteDaemonConfig, type RemoteDaemonConnectedClient } from '../../../../shared/types/remoteDaemon';
 import type { RunpaneLockRecord } from '../../../../shared/types/runpaneOrchestration';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { AgentState } from '../../../../shared/types/agentStatus';
@@ -9,9 +9,11 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 import { resolveAgentTypeFromCommand } from '../../services/agents/agentIdentity';
 import type { PaneCommandRegistry, PaneCommandValue } from '../commandRegistry';
 import { isPeerClientRecord, type UserClientActivityTracker } from './clientActivity';
+import { pairCoordinatorClient, revokeCoordinatorClients } from './coordinatorClients';
 import { flushDurableState } from './durableFlush';
 import type { CloudDaemonHealthState, ReadinessAgentPanel } from './readiness';
 import { findAgentSpawnedShells, readProcessTable, type ProcessEntry } from './processTree';
+import { StopLease } from './stopLease';
 import {
   runSafeToStop,
   type SafeToStopRunningCommand,
@@ -60,6 +62,7 @@ export interface CloudDaemonDependencies {
   pendingPrChecks(maxAgeMs: number): Promise<Array<{ paneId: string; prNumber: number }>>;
   connectedClients(): RemoteDaemonConnectedClient[];
   remoteConfig(): RemoteDaemonConfig | undefined;
+  writeRemoteConfig(config: RemoteDaemonConfig): Promise<void>;
   checkpointWal(): CloudWalCheckpoint | null;
   paneDirectory: string;
   /** The SQLite database file the flush fsyncs with its WAL. */
@@ -69,13 +72,17 @@ export interface CloudDaemonDependencies {
 }
 
 /**
- * Registers the Runpane Cloud channels (`runpane:cloud:safe-to-stop`, `runpane:cloud:upgrade`)
- * and points `/health` readiness at the live panels. Kept out of runpane.ts: these are for the
- * coordinator and the sandbox, not for everyday orchestration.
+ * Registers the Runpane Cloud channels (`runpane:cloud:safe-to-stop` with its stop lease,
+ * `runpane:cloud:stop-lease:release`, `runpane:cloud:upgrade`, and the laptop's
+ * `runpane:cloud:coordinator-client:pair|revoke`) and points `/health` readiness at the live panels. Kept out of runpane.ts: these are for the coordinator and the sandbox, not for everyday
+ * orchestration. The coordinator's own token reaches only the first three (coordinatorScope.ts).
  */
 export function registerCloudDaemonHandlers(dependencies: CloudDaemonDependencies): void {
   const now = dependencies.now ?? Date.now;
   dependencies.health.setAgentPanelSource(() => readinessPanels(dependencies));
+  const stopLease = new StopLease(now);
+  dependencies.commandRegistry.setInvokeFence(channel => stopLease.refusal(channel));
+  const notCountedInFlight = new Set<string>(['runpane:cloud:safe-to-stop', ...WATCHER_CHANNELS]);
 
   dependencies.commandRegistry.register('runpane:cloud:safe-to-stop', async (request: PaneCommandValue = {}) => {
     return runSafeToStop({
@@ -87,8 +94,19 @@ export function registerCloudDaemonHandlers(dependencies: CloudDaemonDependencie
         now,
       }),
       version: dependencies.health.getVersion() ?? 'unknown',
+      lease: {
+        grant: ms => stopLease.grant(ms),
+        release: () => stopLease.release(),
+        // Waits are watchers (a peer's must not keep the sandbox awake); safe-to-stop is this very call.
+        inFlightCalls: () => dependencies.commandRegistry.inFlightCalls(notCountedInFlight),
+      },
       now,
     }, request);
+  });
+
+  // The coordinator releases its lease when it does not go on to stop the sandbox.
+  dependencies.commandRegistry.register('runpane:cloud:stop-lease:release', async () => {
+    return { ok: true, released: stopLease.release() };
   });
 
   dependencies.commandRegistry.register('runpane:cloud:upgrade', async (request: PaneCommandValue) => {
@@ -103,6 +121,20 @@ export function registerCloudDaemonHandlers(dependencies: CloudDaemonDependencie
       download: downloadToFile,
       runDetached: runDetachedWithSystemd,
     }, request);
+  });
+
+  // Full clients only (the laptop's `runpane cloud coordinator destroy|deploy`): the coordinator scope and
+  // peers never reach these. The config is updated in place, so no daemon restart interrupts the Session.
+  dependencies.commandRegistry.register('runpane:cloud:coordinator-client:revoke', async () => {
+    const revoked = revokeCoordinatorClients(normalizeRemoteDaemonConfig(dependencies.remoteConfig() ?? {}));
+    if (revoked.revokedClientIds.length > 0) await dependencies.writeRemoteConfig(revoked.config);
+    return { ok: true, revokedClientIds: revoked.revokedClientIds };
+  });
+
+  dependencies.commandRegistry.register('runpane:cloud:coordinator-client:pair', async () => {
+    const paired = pairCoordinatorClient(normalizeRemoteDaemonConfig(dependencies.remoteConfig() ?? {}), new Date(now()));
+    await dependencies.writeRemoteConfig(paired.config);
+    return { ok: true, clientId: paired.clientId, token: paired.token, revokedClientIds: paired.revokedClientIds };
   });
 }
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MemoryAlertSink } from '../alerts';
 import { SandboxActivity } from '../guards';
-import { IdleStopper } from '../idleStop';
+import { IdleStopper, STOP_LEASE_MS } from '../idleStop';
 import type { IdleStopOptions } from '../idleStop';
 import { entry, FakeClock, FakeDirectory, FakeProbe, FakeProvider, sandbox } from './fakes';
 
@@ -13,7 +13,7 @@ function setup(options: Partial<IdleStopOptions> = {}) {
   const directory = FakeDirectory.of([entry('s1', 'bx_a')]);
   const activity = new SandboxActivity(clock);
   const alerts = new MemoryAlertSink();
-  const idle = new IdleStopper({ directory, provider, probe, activity, alerts }, {
+  const idle = new IdleStopper({ directory, provider, probe, activity, alerts, clock }, {
     requiredConsecutiveSafe: 2,
     wakeGraceMs: 600_000,
     dryRun: false,
@@ -23,6 +23,63 @@ function setup(options: Partial<IdleStopOptions> = {}) {
 }
 
 describe('IdleStopper', () => {
+  it('asks for a stop lease only with the answer that completes the streak, and stops fenced', async () => {
+    const { idle, provider, probe } = setup();
+    await idle.runOnce();
+    const second = await idle.runOnce();
+    assert.equal(second.results[0].decision, 'stopped');
+    assert.match(second.results[0].detail, /; fenced$/u);
+    assert.deepEqual(probe.calls.filter((call) => call.startsWith('safe ')), [
+      'safe https://rp-s1.tail.ts.net token-s1',
+      `safe https://rp-s1.tail.ts.net token-s1 lease=${STOP_LEASE_MS}`,
+    ]);
+    assert.deepEqual(provider.mutations(), ['stop bx_a']);
+    assert.ok(!probe.calls.some((call) => call.startsWith('release ')), 'a stopped sandbox lets its lease lapse');
+  });
+
+  it('releases the lease whenever it does not stop: a failed stop, an unconfirmed checkpoint, a lost answer; a dry run asks none', async () => {
+    const failed = setup({ requiredConsecutiveSafe: 1 });
+    failed.provider.stopErrors.push(new Error('boat: 503'));
+    assert.equal((await failed.idle.runOnce()).results[0].decision, 'stop-failed');
+    assert.ok(failed.probe.calls.includes('release https://rp-s1.tail.ts.net'));
+
+    const unconfirmed = setup({ requiredConsecutiveSafe: 1 });
+    unconfirmed.probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'safe', checkpointed: false, lease: null });
+    assert.equal((await unconfirmed.idle.runOnce()).results[0].decision, 'not-checkpointed');
+    assert.ok(unconfirmed.probe.calls.includes('release https://rp-s1.tail.ts.net'));
+
+    const lost = setup({ requiredConsecutiveSafe: 1 });
+    lost.probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'error', error: 'socket hang up' });
+    assert.equal((await lost.idle.runOnce()).results[0].decision, 'safe-to-stop-error');
+    assert.ok(lost.probe.calls.includes('release https://rp-s1.tail.ts.net'), 'a lost answer may have taken the lease');
+
+    const dry = setup({ requiredConsecutiveSafe: 1, dryRun: true });
+    assert.equal((await dry.idle.runOnce()).results[0].decision, 'would-stop');
+    assert.ok(!dry.probe.calls.some((call) => call.includes('lease=') || call.startsWith('release ')));
+  });
+
+  it('does not stop when too little of the lease is left after a slow answer', async () => {
+    const { idle, provider, probe, clock } = setup({ requiredConsecutiveSafe: 1 });
+    const answer = probe.safeToStop.bind(probe);
+    probe.safeToStop = async (baseUrl, token, options) => {
+      await clock.sleep(STOP_LEASE_MS - 20_000);
+      return answer(baseUrl, token, options);
+    };
+    const report = await idle.runOnce();
+    assert.equal(report.results[0].decision, 'lease-expired');
+    assert.deepEqual(provider.mutations(), []);
+    assert.ok(probe.calls.includes('release https://rp-s1.tail.ts.net'));
+  });
+
+  it('still stops a daemon without stop leases, and says it was not fenced', async () => {
+    const { idle, provider, probe } = setup({ requiredConsecutiveSafe: 1 });
+    probe.grantsLeases = false;
+    const report = await idle.runOnce();
+    assert.equal(report.results[0].decision, 'stopped');
+    assert.match(report.results[0].detail, /not fenced/u);
+    assert.deepEqual(provider.mutations(), ['stop bx_a']);
+  });
+
   it('stops only after the required number of consecutive safe answers', async () => {
     const { idle, provider } = setup();
     const first = await idle.runOnce();
@@ -64,7 +121,7 @@ describe('IdleStopper', () => {
   it('never stops on a safe answer whose checkpoint the daemon did not confirm, and resets the streak', async () => {
     const { idle, provider, probe, alerts } = setup();
     await idle.runOnce();
-    probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'safe', checkpointed: false });
+    probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'safe', checkpointed: false, lease: null });
     const unconfirmed = await idle.runOnce();
     assert.equal(unconfirmed.results[0].decision, 'not-checkpointed');
     assert.deepEqual(provider.mutations(), []);

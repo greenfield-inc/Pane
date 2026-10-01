@@ -32,6 +32,7 @@ import { serializeJsonTransport } from './jsonTransport';
 import { cloudDaemonHealth, type CloudHealthFields } from './cloud/readiness';
 import { commandOriginForClient, userClientActivity } from './cloud/clientActivity';
 import { isCoordinatorAllowedChannel, isCoordinatorClient } from './cloud/coordinatorScope';
+import { SESSION_STOPPING_CODE } from './cloud/stopLease';
 import {
   authorizePeerInvoke,
   isPeerAllowedChannel,
@@ -654,7 +655,8 @@ export class PaneRemoteHttpApiServer {
         return;
       }
       if (error instanceof PaneCommandError) {
-        this.writeJson(response, 409, {
+        // A cloud stop lease (cloud/stopLease.ts) is the one refusal that clears by itself: retryable.
+        this.writeJson(response, error.code === SESSION_STOPPING_CODE ? 503 : 409, {
           ok: false,
           error: { message: error.message, code: error.code, details: error.details },
         } satisfies RemoteInvokeErrorPayload);

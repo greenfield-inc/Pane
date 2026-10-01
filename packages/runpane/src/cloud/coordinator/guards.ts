@@ -16,7 +16,7 @@ const HOUR_MS = 60 * 60 * 1000;
 export class SandboxActivity {
   private readonly busy = new Set<string>();
   private readonly wokenAt = new Map<string, number>();
-  private readonly safeStreak = new Map<string, number>();
+  private readonly safeStreaks = new Map<string, number>();
 
   constructor(private readonly clock: Clock) {}
 
@@ -37,7 +37,7 @@ export class SandboxActivity {
 
   markWoken(sandboxId: string): void {
     this.wokenAt.set(sandboxId, this.clock.now());
-    this.safeStreak.delete(sandboxId);
+    this.safeStreaks.delete(sandboxId);
   }
 
   msSinceWoken(sandboxId: string): number | null {
@@ -45,14 +45,19 @@ export class SandboxActivity {
     return at === undefined ? null : this.clock.now() - at;
   }
 
+  /** Consecutive safe answers so far. */
+  safeStreak(sandboxId: string): number {
+    return this.safeStreaks.get(sandboxId) ?? 0;
+  }
+
   recordSafe(sandboxId: string): number {
-    const next = (this.safeStreak.get(sandboxId) ?? 0) + 1;
-    this.safeStreak.set(sandboxId, next);
+    const next = (this.safeStreaks.get(sandboxId) ?? 0) + 1;
+    this.safeStreaks.set(sandboxId, next);
     return next;
   }
 
   resetSafe(sandboxId: string): void {
-    this.safeStreak.delete(sandboxId);
+    this.safeStreaks.delete(sandboxId);
   }
 }
 

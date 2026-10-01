@@ -43,6 +43,8 @@ export class PaneCommandRegistry {
   private readonly handlers = new Map<string, RegisteredPaneCommandHandler>();
   private readonly boundChannels = new Set<string>();
   private readonly activity = new Map<string, Map<PaneCommandOrigin, ChannelOriginActivity>>();
+  /** Refuses calls before they start, whatever their origin (a cloud stop lease: cloud/stopLease.ts). */
+  private fence: ((channel: string) => Error | null) | null = null;
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -79,6 +81,9 @@ export class PaneCommandRegistry {
       throw new Error(`No Pane daemon command registered for channel "${channel}"`);
     }
 
+    const refusal = this.fence?.(channel);
+    if (refusal) throw refusal;
+
     const activity = this.originActivity(channel, options.origin ?? 'local');
     activity.inFlight += 1;
     try {
@@ -87,6 +92,20 @@ export class PaneCommandRegistry {
       activity.inFlight -= 1;
       activity.lastFinishedAt = this.now();
     }
+  }
+
+  setInvokeFence(fence: ((channel: string) => Error | null) | null): void {
+    this.fence = fence;
+  }
+
+  /** Calls now running on any channel but the excluded ones, whatever their origin. */
+  inFlightCalls(excludedChannels: ReadonlySet<string>): number {
+    let count = 0;
+    for (const [channel, byOrigin] of this.activity) {
+      if (excludedChannels.has(channel)) continue;
+      for (const activity of byOrigin.values()) count += activity.inFlight;
+    }
+    return count;
   }
 
   /** Calls to a channel now running, and when the last one ended, across the given origins. */

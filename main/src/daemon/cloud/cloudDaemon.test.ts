@@ -4,7 +4,9 @@ import { createDefaultRemoteDaemonConfig } from '../../../../shared/types/remote
 import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/panels';
 import type { CloudSafeToStopRequest } from '../../../../shared/types/cloudDaemon';
 import type { AgentState } from '../../../../shared/types/agentStatus';
-import { PaneCommandRegistry } from '../commandRegistry';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { hashRemoteDaemonToken } from '../auth';
+import { PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
 import { UserClientActivityTracker } from './clientActivity';
 import { registerCloudDaemonHandlers, type CloudDaemonDependencies } from './cloudDaemon';
 import { CloudDaemonHealthState } from './readiness';
@@ -73,6 +75,9 @@ function setup(overrides: Partial<CloudDaemonDependencies> = {}) {
     pendingPrChecks: async () => [],
     connectedClients: () => connected,
     remoteConfig: () => config,
+    writeRemoteConfig: async (next) => {
+      config.host = next.host;
+    },
     checkpointWal,
     paneDirectory: '/nonexistent-pane-dir',
     databaseFile: '/nonexistent-pane-dir/sessions.db',
@@ -194,5 +199,89 @@ describe('registerCloudDaemonHandlers', () => {
     expect(result.safe).toBe(false);
     expect(result.flush).toMatchObject({ durable: false });
     expect(result.blockers).toEqual([expect.objectContaining({ condition: 'flush-failed' })]);
+  });
+
+  it('revokes the coordinator\'s client records only, and pairs a single new one in their place', async () => {
+    const { commandRegistry, config } = setup();
+    config.host.clients.push({ ...client('coord-old'), scope: 'coordinator' });
+
+    const paired = await commandRegistry.invoke('runpane:cloud:coordinator-client:pair', []);
+    expect(paired).toMatchObject({ ok: true, revokedClientIds: ['coord-old'] });
+    const { clientId, token } = decodeBoundary(paired, boundary.object({ clientId: boundary.string, token: boundary.string }));
+    expect(config.host.clients.map(record => [record.id, record.scope])).toEqual([
+      ['desktop', undefined], ['peer-a', 'peer'], [clientId, 'coordinator'],
+    ]);
+    expect(config.host.clients[2]).toMatchObject({ label: 'runpane-cloud-coordinator', tokenHash: hashRemoteDaemonToken(token) });
+
+    await expect(commandRegistry.invoke('runpane:cloud:coordinator-client:revoke', []))
+      .resolves.toEqual({ ok: true, revokedClientIds: [clientId] });
+    expect(config.host.clients.map(record => record.id)).toEqual(['desktop', 'peer-a']);
+    await expect(commandRegistry.invoke('runpane:cloud:coordinator-client:revoke', []))
+      .resolves.toEqual({ ok: true, revokedClientIds: [] });
+  });
+
+  describe('stop lease', () => {
+    function leased() {
+      let time = NOW;
+      const context = setup({ now: () => time });
+      const submits: string[] = [];
+      context.commandRegistry.register('runpane:panels:submit', (text: PaneCommandValue) => {
+        submits.push(String(text));
+        return { ok: true };
+      });
+      const submit = (origin: 'local' | 'remote-user' | 'remote-peer') => context.commandRegistry.invoke('runpane:panels:submit', [origin], { origin });
+      return { ...context, submits, submit, advance: (ms: number) => { time += ms; } };
+    }
+
+    it('fences every other call from every origin once it answers safe, until released', async () => {
+      const { safeToStop, submit, submits, commandRegistry } = leased();
+      const answer = await safeToStop({ flush: 'never', stopLeaseMs: 30_000 });
+      expect(answer).toMatchObject({ safe: true, stopLease: { ms: 30_000, expiresAt: new Date(NOW + 30_000).toISOString() } });
+
+      for (const origin of ['local', 'remote-user', 'remote-peer'] as const) {
+        await expect(submit(origin)).rejects.toMatchObject({ code: 'ERR_SESSION_STOPPING' });
+      }
+      expect(submits).toEqual([]);
+      // The coordinator may still ask again and release.
+      await expect(safeToStop({ flush: 'never' })).resolves.toMatchObject({ safe: true, stopLease: null });
+      await expect(commandRegistry.invoke('runpane:cloud:stop-lease:release', [])).resolves.toEqual({ ok: true, released: true });
+      await submit('remote-peer');
+      expect(submits).toEqual(['remote-peer']);
+    });
+
+    it('lapses on its own', async () => {
+      const { safeToStop, submit, advance } = leased();
+      await safeToStop({ flush: 'never', stopLeaseMs: 30_000 });
+      advance(29_999);
+      await expect(submit('local')).rejects.toMatchObject({ code: 'ERR_SESSION_STOPPING' });
+      advance(1);
+      await expect(submit('local')).resolves.toEqual({ ok: true });
+    });
+
+    it('is not taken when the answer is unsafe, or when a call that started before it is still running', async () => {
+      const { safeToStop, submit, agentStates, commandRegistry } = leased();
+      agentStates.set('claude-1', 'working');
+      await expect(safeToStop({ flush: 'never', stopLeaseMs: 30_000 })).resolves.toMatchObject({ safe: false, stopLease: null });
+      await expect(submit('local')).resolves.toEqual({ ok: true });
+      agentStates.set('claude-1', 'idle');
+
+      let finish: () => void = () => {};
+      commandRegistry.register('runpane:panes:create', () => new Promise<null>((resolve) => {
+        finish = () => resolve(null);
+      }));
+      const creating = commandRegistry.invoke('runpane:panes:create', [], { origin: 'remote-user' });
+      await expect(safeToStop({ flush: 'never', stopLeaseMs: 30_000 })).resolves.toMatchObject({
+        safe: false, stopLease: null, blockers: [{ condition: 'call-in-flight' }],
+      });
+      await expect(submit('remote-user')).resolves.toEqual({ ok: true });
+      finish();
+      await creating;
+    });
+
+    it('caps the lease a request may ask for, and gives none without stopLeaseMs', async () => {
+      const { safeToStop } = leased();
+      await expect(safeToStop({ flush: 'never' })).resolves.toMatchObject({ safe: true, stopLease: null });
+      await expect(safeToStop({ flush: 'never', stopLeaseMs: 3_600_000 })).resolves.toMatchObject({ stopLease: { ms: 120_000 } });
+    });
   });
 });

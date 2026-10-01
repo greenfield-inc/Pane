@@ -95,6 +95,8 @@ export interface FakeGitHub {
 export interface FakeDaemon {
   sessions: { id: string; name: string; archived?: boolean }[];
   peers: { id: string; label: string; sessions: string[] }[];
+  /** Tokens of its coordinator-scoped clients; undefined: a Pane without runpane:cloud:coordinator-client:*. */
+  coordinatorClients?: string[];
 }
 
 function createFakeWorld(): FakeWorld {
@@ -522,6 +524,16 @@ export async function createTestHarness(): Promise<TestHarness> {
           daemon.peers = daemon.peers.filter((peer) => peer.id !== request.peer);
           if (daemon.peers.length === before) throw new Error('Unknown peer');
           return { ok: true, revoked: true, peerId: String(request.peer) };
+        }
+        case 'runpane:cloud:coordinator-client:revoke':
+        case 'runpane:cloud:coordinator-client:pair': {
+          if (!daemon.coordinatorClients) throw new Error(`No Pane daemon command registered for channel "${channel}"`);
+          const revokedClientIds = daemon.coordinatorClients;
+          daemon.coordinatorClients = [];
+          if (channel.endsWith(':revoke')) return { ok: true, revokedClientIds };
+          const token = `coordinator-token-${host}-${world.calls.length}`;
+          daemon.coordinatorClients.push(token);
+          return { ok: true, clientId: `client-${token}`, token, revokedClientIds };
         }
         default:
           throw new Error(`fake daemon: unexpected ${channel}`);

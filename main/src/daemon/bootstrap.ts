@@ -399,6 +399,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     pendingPrChecks: maxAgeMs => sessionPrMonitor.pendingChecks(maxAgeMs),
     connectedClients: () => remoteHostRuntimeStateStore.getState().connectedClients,
     remoteConfig: () => configManager.getConfig().remoteDaemon,
+    writeRemoteConfig: async (remoteDaemon) => {
+      await configManager.updateConfig({ remoteDaemon });
+    },
     checkpointWal: () => databaseService.checkpointWal(),
     paneDirectory: getAppDirectory(),
     databaseFile: dbPath,

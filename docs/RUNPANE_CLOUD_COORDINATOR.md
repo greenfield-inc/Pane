@@ -22,8 +22,14 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   It never uses `pane-remote-daemon`.
 - **Its token on each Session.** `runpane cloud new` pairs the coordinator as a `scope: 'coordinator'`
   client (`pane --remote-setup --client-scope coordinator`). That token may call only
-  `runpane:cloud:safe-to-stop` and `runpane:cloud:upgrade` (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN`
-  otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
+  `runpane:cloud:safe-to-stop`, `runpane:cloud:stop-lease:release` and `runpane:cloud:upgrade`
+  (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN` otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
+  The laptop keeps that token (`<host>.coordinator.pairing`) and pushes it in the directory, so taking it back
+  happens on the Sessions: `coordinator destroy` and `coordinator revoke-clients --yes` call
+  `runpane:cloud:coordinator-client:revoke` (full clients only) on every awake Session and forget the token
+  locally. A Session that is asleep keeps accepting the old token until `revoke-clients` reaches it. The next
+  `coordinator deploy` pairs a fresh client (`runpane:cloud:coordinator-client:pair`) on the Sessions it
+  revoked, so a redeploy never reuses a token an old directory held.
 - **The provider key.** It holds a scoped boat key with `sandbox.read`, `sandbox.stop` and
   `sandbox.resume` only (`POST /api-keys/scoped`). There is no create, fork or delete: `runpane cloud new`
   and `destroy` run on the laptop with the unscoped key. Scope the key to the Sessions' sandbox ids when
@@ -56,8 +62,14 @@ For each Session in the directory whose sandbox is running, the coordinator chec
    daemon also checkpoints SQLite's WAL and fsyncs. A safe answer counts only when its `flush.durable`
    is true (every flush step succeeded); otherwise the coordinator raises `idle-stop-not-checkpointed`.
 4. **Enough safe answers in a row?** Stop only after `requiredConsecutiveSafe` safe answers (default 2).
-   Call boat stop immediately after the last one: boat snapshots about 4 s after the stop call and then
-   powers off without sending SIGTERM.
+   The check that would complete the streak asks for a 60 s stop lease (`stopLeaseMs`): from before that
+   check until the stop, the daemon refuses every other call with a retryable `ERR_SESSION_STOPPING`, so no
+   submit or new agent turn can start and then be lost. Call boat stop immediately after that answer: boat
+   snapshots about 4 s after the stop call and then powers off without sending SIGTERM. If the answer took
+   so long that less than 30 s of the lease is left, it doesn't stop (`lease-expired`) and asks again next
+   round. Whenever it doesn't go on to stop (unconfirmed flush, dry run, a failed stop), it releases the
+   lease (`runpane:cloud:stop-lease:release`). A daemon without stop leases answers without one; it is
+   still stopped, and its result says `not fenced`.
 
 Anything other than an explicit "safe" with a durable flush resets the streak and leaves the Session
 running: unsafe, a flush the daemon could not verify (or an older daemon that does not report
@@ -69,7 +81,8 @@ that fails is reported as `stop-failed` with an `idle-stop-failed` alert, never 
 The reconciler compares the provider's list with the directory. Only sandboxes whose name starts with
 `managedNamePrefix` are considered, and never the coordinator's own sandbox or `ignoreSandboxIds`.
 
-The reconciler **only stops and alerts. It never destroys.** It aborts without touching anything when:
+The reconciler **only alerts, and stops only when told to. It never destroys.** It aborts without touching
+anything when:
 
 - the directory can't be read (missing or invalid);
 - the directory is empty while the provider lists managed sandboxes;
@@ -77,9 +90,20 @@ The reconciler **only stops and alerts. It never destroys.** It aborts without t
 - more running orphans would be stopped than `maxOrphanStopsPerRun` (default 3). A stale or truncated
   directory looks exactly like that.
 
-If none of those apply, it stops running orphans older than `orphanGraceSeconds` (default 1800). The
-grace period protects a sandbox from `runpane cloud new` that hasn't been synced to the directory yet. A
-stopped orphan keeps its disk. Directory entries whose sandbox is gone or failed raise a `session-lost`
+A running orphan (a managed sandbox the directory doesn't name) older than `orphanGraceSeconds`
+(default 1800, which protects a sandbox from `runpane cloud new` that hasn't been synced yet) raises one
+`orphan-found` alert and is **left running**. The coordinator holds no token for a sandbox the directory
+doesn't name, so it can't ask that daemon's safe-to-stop, and a live Session looks exactly like an orphan
+when it was created from another machine's `runpane cloud` store, or when a store restored from backup (or
+a stale one) pushed the directory. Keep one store per set of Sessions: the store that pushes the directory
+must be the one that created them.
+
+With `reconcile.stopOrphans` (`coordinator deploy --stop-orphans`), the reconciler also stops an orphan once
+this coordinator has seen it as a running orphan for `orphanStopGraceSeconds` (default 21600, six hours).
+That clock is kept in memory, so a coordinator restart starts it over, and it restarts whenever the sandbox
+reappears in the directory or stops running. A stop is the provider's snapshot and power-off, with no
+checkpoint and no blocker check; the stopped orphan keeps its disk. The `maxOrphanStopsPerRun` abort
+above counts these due orphans. Directory entries whose sandbox is gone or failed raise a `session-lost`
 alert.
 
 ### Runaway guard
@@ -120,7 +144,11 @@ Every `/cloud/*` call needs `Authorization: Bearer rpc1.<callerId>.<mac>`, where
 - **Peer callers.** The `callerId` is a cloud Session id. A peer token stops working as soon as that
   Session leaves the directory. Peers are limited to 60 requests a minute.
 - **User callers.** The `callerId` is `user:<name>`, for the laptop CLI.
-- **Revoking.** Revoke one caller with `revokedCallers`, or everyone by rotating the secret.
+- **Revoking.** `runpane cloud coordinator revoke-caller <user:name|host> [--undo]` adds one caller to
+  `revokedCallers` (403 `auth-revoked`). The laptop keeps that list in its deployment record and writes it
+  into every config it rewrites (`deploy`, `github set`, `doppler set`), so a hand edit of the config is not
+  needed and would be overwritten. To revoke everyone, destroy and redeploy the coordinator: `destroy`
+  deletes the caller secret, and the next `deploy` mints a new one and rewrites each awake Session's peers list.
 
 | Endpoint | Callers | Purpose |
 |---|---|---|

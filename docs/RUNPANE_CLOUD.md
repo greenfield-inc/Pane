@@ -644,16 +644,21 @@ then on:
 - Sessions created before the deploy have no coordinator client, so idle-stop skips them (deploy lists
   them).
 
-It manages sandboxes named `<name-prefix>-*` and nothing else. Its reconciler stops (never deletes)
-running sandboxes with that prefix that are not in your directory after 30 minutes, so give your cloud
-Sessions a prefix no other tooling uses (`runpane cloud setup --name-prefix ...`).
+It manages sandboxes named `<name-prefix>-*` and nothing else. Its reconciler alerts (`orphan-found`) on
+running sandboxes with that prefix that are not in your directory after 30 minutes, and leaves them running
+unless you deploy with `--stop-orphans`; then it stops (never deletes) one it has seen as an orphan for six
+hours. Give your cloud Sessions a prefix no other tooling uses (`runpane cloud setup --name-prefix ...`), and
+manage one set of Sessions from one `runpane cloud` store: each `new`, `destroy` and `sync` replaces the
+coordinator's directory with that store's hosts, so Sessions from another machine's store look like orphans.
 
 ```bash
 runpane cloud coordinator status                # the coordinator itself: sandbox, service, version
 runpane cloud coordinator stop --yes            # pause idle-stop and wake-on-submit (billing stops)
 runpane cloud coordinator start                 # bring it back (one boat start)
 runpane cloud coordinator deploy --yes          # run again to update it in place; no new sandbox
-runpane cloud coordinator destroy --yes         # device, sandbox and scoped key; Sessions untouched
+runpane cloud coordinator destroy --yes         # its client on awake Sessions, then device, sandbox and scoped key
+runpane cloud coordinator revoke-clients --yes  # take its client back from Sessions that were asleep at destroy
+runpane cloud coordinator revoke-caller user:old-laptop   # refuse one caller of its API (--undo to lift)
 
 runpane cloud coordinator status "api work"     # its view of one Session, without waking it
 runpane cloud coordinator wake "api work"
@@ -663,8 +668,8 @@ runpane cloud coordinator alerts
 ```
 
 Deploy options: `--idle-check-seconds <n>` (default 300; a Session is stopped after two safe answers in a
-row) and `--wake-grace-seconds <n>` (default 600) are kept across redeploys; `--no-reconcile` turns the
-reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version, and
+row), `--wake-grace-seconds <n>` (default 600) and `--stop-orphans`/`--no-stop-orphans` are kept across
+redeploys; `--no-reconcile` turns the reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version, and
 every Session the coordinator wakes is upgraded to it before it counts as awake (`--no-pin` removes the
 pin). While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
 a sleeping one.
@@ -959,6 +964,12 @@ get a certificate. The limit lifts on its own after a few days.
 - `http`: plain HTTP inside the tailnet from the start (uses no certificate).
 
 `runpane cloud status <host>` shows which one a Session uses. Pane desktop and `runpane --host` work with both.
+Over `http://` the token travels without TLS, so Pane desktop and the `runpane` CLI send it only through
+Tailscale: this machine must be on a tailnet (a Tailscale interface carries a Tailscale address), and the host
+name must resolve only to Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48) or to this machine.
+Otherwise the call fails with `ERR_PLAIN_HTTP_OFF_TAILNET` before anything is sent: with Tailscale off, a
+`100.x` address can be a carrier-grade NAT neighbour, and a `*.ts.net` name is only as good as the resolver
+that answered it. The same rule covers the CLI's calls to the coordinator, which is always plain HTTP.
 **The phone app at https://runpane.com/app can't reach an `http://` Session**: a page loaded over HTTPS
 may not call plain HTTP (mixed content). Use Pane desktop or the CLI for such a Session, or create it again
 (`--transport https`) once certificates are available.
