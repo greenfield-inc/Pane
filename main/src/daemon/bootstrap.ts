@@ -59,6 +59,7 @@ import { readBuildCommit, registerCloudDaemonHandlers } from './cloud/cloudDaemo
 import { registerSessionPortsHandlers } from './cloud/ports/registerPorts';
 import { whenCloudSession } from './cloud/cloudSessionMarker';
 import { registerAgentNotesHandler, writeSessionAgentNotes } from './cloud/sessionAgentNotes';
+import { applySessionAgentDefaults, registerAgentDefaultsHandler } from './cloud/sessionAgentDefaults';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 
 interface PaneDaemonHostOptions {
@@ -417,12 +418,21 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: message => logger.info(`[Pane daemon] ${message}`),
   });
   registerAgentNotesHandler(commandRegistry);
+  registerAgentDefaultsHandler(commandRegistry);
   const stopWaitingForAgentNotes = whenCloudSession(() => {
     try {
       const notes = writeSessionAgentNotes();
       if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session notes for agents: ${notes.join(', ')}`);
     } catch (error) {
       logger.warn(`[Pane daemon] could not write the Session notes for agents: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      const defaults = applySessionAgentDefaults();
+      if (defaults.changedFiles.length > 0 || defaults.claudeModel.outcome === 'kept-session-choice' || defaults.claudeModel.outcome === 'settings-unreadable') {
+        logger.info(`[Pane daemon] agent defaults: Claude model ${defaults.claudeModel.outcome} (${defaults.claudeModel.inSettings ?? 'Claude Code default'})`);
+      }
+    } catch (error) {
+      logger.warn(`[Pane daemon] could not apply the agent defaults: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
 

@@ -181,3 +181,24 @@ daemon start (boot, wake, upgrade). The list replaces the previous one, and an e
 block. Each entry is one line of at most 500 characters without `<!--` or `-->` (they delimit the blocks), and a list holds at most 20. Without `guardrails`
 the channel answers the stored list. It answers `{ ok, guardrails, changedFiles }` and refuses off a Session
 (`ERR_AGENT_NOTES_UNAVAILABLE`) or for bad input (`ERR_AGENT_NOTES_INVALID`).
+
+## `runpane:cloud:agent-defaults`: the user's agent defaults
+
+The user's defaults for agents (`agentDefaults` in their `~/.config/runpane-cloud/settings.json`; Pane ships
+none) reach a Session through this channel, called by `runpane cloud new`, `wake` and `agent-defaults
+set|unset|push` with the saved user token (the coordinator's scoped token can't call it):
+
+```json
+{ "channel": "runpane:cloud:agent-defaults", "args": [{ "defaults": { "claudeModel": "claude-opus-5-5" } }] }
+```
+
+The daemon stores the defaults in `~/.runpane-cloud/agent-defaults.json` (0600; `defaults` replaces the
+previous ones and `{}` clears them) and applies them now and at every daemon start: it merges `model` into
+Claude Code's `~/.claude/settings.json`, keeping every other key and the file's mode. It records the value it
+wrote and changes only that: a `model` that differs (picked with `/model` in the Session, or there before) is
+kept, and clearing the default removes `model` only when it is still the daemon's. It never rewrites a
+settings file that is not valid JSON. Without `defaults` the channel applies and answers the stored ones. It
+answers `{ ok, defaults, claudeModel: { configured, inSettings, outcome }, changedFiles }`, where `outcome` is
+`set`, `current`, `kept-session-choice`, `removed`, `unset` or `settings-unreadable`, and refuses off a
+Session (`ERR_AGENT_DEFAULTS_UNAVAILABLE`) or for a value that is not a model id (`ERR_AGENT_DEFAULTS_INVALID`).
+Code: `main/src/daemon/cloud/sessionAgentDefaults.ts`.

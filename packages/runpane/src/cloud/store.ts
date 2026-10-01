@@ -48,6 +48,8 @@ export interface CloudSettings {
   boatOrg?: BoatOrg;
   /** Your guardrails for agents in every cloud Session (`runpane cloud notes`; none by default). */
   agentNotes?: { guardrails?: string[] };
+  /** Your defaults for agents in every cloud Session (`runpane cloud agent-defaults`; none by default, so Claude Code picks its own model). */
+  agentDefaults?: { claudeModel?: string };
 }
 
 /** The coordinator sandbox `runpane cloud coordinator deploy` created. */

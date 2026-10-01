@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import type { CloudArgs } from './args';
 import type { JsonObject, JsonValue } from '../boundaryDecoder';
 import { placeAgentCredentials } from './agentCredentials';
+import { configuredAgentDefaults, describeClaudeModel, pushAgentDefaults, runAgentDefaultsCommand, type AgentDefaultsPushResult } from './agentDefaults';
 import { configuredGuardrails, pushAgentNotes, runCloudNotesCommand, type AgentNotesPushResult } from './agentNotes';
 import { COORDINATOR_LIFECYCLE_USAGE, isCoordinatorLifecycleCommand, runCoordinatorLifecycle } from './coordinatorDeploy';
 import { COORDINATOR_DOPPLER_USAGE, runCoordinatorDoppler } from './coordinatorDoppler';
@@ -156,6 +157,7 @@ export async function runCloudCommand(args: CloudArgs, deps: CloudDeps): Promise
     case 'github': return runGitHubCommand(args.passthrough, deps);
     case 'git': return runGitCommand(args.passthrough, deps);
     case 'notes': return runCloudNotesCommand(args.passthrough, deps);
+    case 'agent-defaults': return runAgentDefaultsCommand(args.passthrough, deps);
   }
 }
 
@@ -333,6 +335,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const started = deps.now();
   const timings: Record<string, number> = {};
   let agentNotes: AgentNotesPushResult | null = null;
+  let agentDefaults: AgentDefaultsPushResult | null = null;
 
   progress(`runpane cloud: creating ${size} sandbox ${hostname}${fromSnapshot ? ` from ${fromSnapshot}` : ''}...`);
   const sandbox = await provider.create({
@@ -455,6 +458,13 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       if (agentNotes.pushed) progress(`  - agent-notes done: ${guardrails.length} guardrail${guardrails.length === 1 ? '' : 's'} in ${agentNotes.changedFiles.join(', ') || 'the notes'}`);
       else deps.stderr(`runpane cloud: the Session's agent guardrails were not written (${agentNotes.reason}). Retry with: runpane cloud notes push ${hostname}`);
     }
+    // The user's agent defaults (settings agentDefaults, e.g. the Claude model): the daemon keeps them and applies them at every wake.
+    const defaults = configuredAgentDefaults(settings);
+    if (defaults?.claudeModel !== undefined) {
+      agentDefaults = await pushAgentDefaults(record, defaults, deps);
+      if (agentDefaults.pushed) progress(`  - agent-defaults done: ${describeClaudeModel(agentDefaults)}`);
+      else deps.stderr(`runpane cloud: the Session's agent defaults were not written (${agentDefaults.reason}). Retry with: runpane cloud agent-defaults push ${hostname}`);
+    }
     if (githubRepo && brokerMode) {
       const repo = record.meta.github?.[0]?.repo ?? githubRepo;
       const enabled = await enableBroker(record, provider.handle(sandbox.id), deps, { repo, mode: brokerMode });
@@ -517,6 +527,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
       coordinator,
       peersFile,
       agentNotes,
+      agentDefaults,
       githubBroker: record.meta.brokerRepos ? { repos: record.meta.brokerRepos, mode: record.meta.brokerMode ?? 'app' } : null,
       agentCredentials: agentCredentialsSummary(credentials),
       timings,
@@ -826,6 +837,10 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const guardrails = configuredGuardrails(settings);
   const agentNotes = health.ok && guardrails ? await pushAgentNotes(record, guardrails, deps) : null;
   if (agentNotes && !agentNotes.pushed && !args.json) deps.stderr(`runpane cloud: ${hostname}'s agent guardrails were not updated (${agentNotes.reason}).`);
+  // And agent defaults (unsetting one clears what the daemon wrote).
+  const defaults = configuredAgentDefaults(settings);
+  const agentDefaults = health.ok && defaults ? await pushAgentDefaults(record, defaults, deps) : null;
+  if (agentDefaults && !agentDefaults.pushed && !args.json) deps.stderr(`runpane cloud: ${hostname}'s agent defaults were not updated (${agentDefaults.reason}).`);
   // And the coordinator's Pane pin, so the next coordinator wake can upgrade it.
   const deployment = settings.coordinator?.deployment;
   const panePin = health.ok && deployment ? await pushPanePin(record, deployment.pin ?? null, deps, provider) : null;
@@ -851,6 +866,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     serveRepaired,
     peersFile,
     agentNotes,
+    agentDefaults,
     panePin,
     pinUpgrade,
     timings,

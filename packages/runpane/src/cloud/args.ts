@@ -4,7 +4,7 @@ import { CLOUD_SIZES, type CloudSize } from './provider';
 const CLOUD_TRANSPORTS = ['auto', 'https', 'http'] as const;
 export type CloudTransport = (typeof CLOUD_TRANSPORTS)[number];
 
-const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers', 'secrets', 'port', 'github', 'git', 'notes'] as const;
+const CLOUD_SUBCOMMANDS = ['setup', 'new', 'list', 'status', 'stop', 'wake', 'repair', 'destroy', 'pair', 'sync', 'coordinator', 'peers', 'secrets', 'port', 'github', 'git', 'notes', 'agent-defaults'] as const;
 type CloudSubcommand = typeof CLOUD_SUBCOMMANDS[number];
 
 /** Subcommands that act on one host, named by a positional argument or --host. */
@@ -50,7 +50,7 @@ export interface CloudArgs {
   github: boolean;
   readWrite: boolean;
   githubTokenFile?: string;
-  /** `runpane cloud coordinator|peers|secrets|port|github|git|notes ...`: everything after the subcommand, parsed by its own module. */
+  /** `runpane cloud coordinator|peers|secrets|port|github|git|notes|agent-defaults ...`: everything after the subcommand, parsed by its own module. */
   passthrough: string[];
 }
 
@@ -125,6 +125,7 @@ const ALLOWED = {
   github: [],
   git: [],
   notes: [],
+  'agent-defaults': [],
 } satisfies Record<CloudSubcommand, readonly string[]>;
 
 function isCloudSubcommand(value: string | undefined): value is CloudSubcommand {
@@ -152,7 +153,7 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
     readWrite: false,
     passthrough: [],
   };
-  if (first === 'coordinator' || first === 'peers' || first === 'secrets' || first === 'port' || first === 'github' || first === 'git' || first === 'notes') {
+  if (first === 'coordinator' || first === 'peers' || first === 'secrets' || first === 'port' || first === 'github' || first === 'git' || first === 'notes' || first === 'agent-defaults') {
     parsed.passthrough = [...rest];
     return parsed;
   }

@@ -1798,6 +1798,50 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "cloud agent-defaults list",
+      "summary": "List your defaults for agents in every cloud Session (settings agentDefaults; today the Claude model).",
+      "usage": [
+        "runpane cloud agent-defaults list [--json]"
+      ],
+      "mutates": false,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent-defaults set",
+      "summary": "Set the model Claude Code starts with in every cloud Session, then push it to awake Sessions.",
+      "usage": [
+        "runpane cloud agent-defaults set claude-model <model> [--no-push] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent-defaults unset",
+      "summary": "Go back to Claude Code's own default model in every cloud Session, then push that to awake Sessions.",
+      "usage": [
+        "runpane cloud agent-defaults unset claude-model [--no-push] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud agent-defaults push",
+      "summary": "Give one cloud Session (default: every one) the current agent defaults now.",
+      "usage": [
+        "runpane cloud agent-defaults push [<host>] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud github connect",
       "summary": "Let a cloud Session reach one GitHub repository: generates an ed25519 key inside the sandbox and registers its public half as a read-only deploy key with your GitHub credential, which never enters the sandbox.",
       "usage": [
@@ -2483,7 +2527,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]",
         "  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]",
         "  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent-defaults|agent> [options]",
         "  runpane port <open|list|close|auto-open> [options]",
         "  runpane help [command]",
         "",
@@ -4146,9 +4190,51 @@ export const RUNPANE_CONTRACT = {
         "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
         "  --json                         Print machine-readable output."
       ],
+      "cloud agent-defaults list": [
+        "Usage:",
+        "  runpane cloud agent-defaults list [--json]",
+        "",
+        "List your defaults for agents in every cloud Session (settings agentDefaults; today the Claude model).",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud agent-defaults set": [
+        "Usage:",
+        "  runpane cloud agent-defaults set claude-model <model> [--no-push] [--json]",
+        "",
+        "Set the model Claude Code starts with in every cloud Session, then push it to awake Sessions.",
+        "",
+        "Options:",
+        "  claude-model                   The default to set (the only one today).",
+        "  <model>                        A Claude model id or alias, e.g. claude-opus-5-5 or opus.",
+        "  --no-push                      Only save the setting.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud agent-defaults unset": [
+        "Usage:",
+        "  runpane cloud agent-defaults unset claude-model [--no-push] [--json]",
+        "",
+        "Go back to Claude Code's own default model in every cloud Session, then push that to awake Sessions.",
+        "",
+        "Options:",
+        "  claude-model                   The default to unset.",
+        "  --no-push                      Only save the setting.",
+        "  --json                         Print machine-readable output."
+      ],
+      "cloud agent-defaults push": [
+        "Usage:",
+        "  runpane cloud agent-defaults push [<host>] [--json]",
+        "",
+        "Give one cloud Session (default: every one) the current agent defaults now.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json                         Print machine-readable output."
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent-defaults|agent> [options]",
         "",
         "Run each Pane Session on its own cloud sandbox with a normal Pane daemon, paired to your Pane apps as a remote host.",
         "Keys stay on this machine (~/.config/runpane-cloud, 0600). Pane desktop only lists the saved remote hosts.",
@@ -5706,9 +5792,37 @@ export const RUNPANE_CONTRACT = {
         "`runpane cloud notes push` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud notes push"
       ],
+      "cloud agent-defaults list": [
+        "Usage:",
+        "  runpane cloud agent-defaults list [--json]",
+        "",
+        "`runpane cloud agent-defaults list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent-defaults list"
+      ],
+      "cloud agent-defaults set": [
+        "Usage:",
+        "  runpane cloud agent-defaults set claude-model <model> [--no-push] [--json]",
+        "",
+        "`runpane cloud agent-defaults set` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent-defaults set"
+      ],
+      "cloud agent-defaults unset": [
+        "Usage:",
+        "  runpane cloud agent-defaults unset claude-model [--no-push] [--json]",
+        "",
+        "`runpane cloud agent-defaults unset` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent-defaults unset"
+      ],
+      "cloud agent-defaults push": [
+        "Usage:",
+        "  runpane cloud agent-defaults push [<host>] [--json]",
+        "",
+        "`runpane cloud agent-defaults push` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud agent-defaults push"
+      ],
       "cloud": [
         "Usage:",
-        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent> [options]",
+        "  runpane cloud <setup|new|list|status|stop|wake|repair|destroy|pair|sync|coordinator|peers|secrets|port|github|git|notes|agent-defaults|agent> [options]",
         "",
         "`runpane cloud` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud"
@@ -17022,6 +17136,108 @@ export const RUNPANE_CONTRACT = {
         ],
         "examples": [
           "runpane cloud notes push rp-a1b2c3d4"
+        ],
+        "notes": []
+      },
+      "cloud agent-defaults list": {
+        "name": "cloud agent-defaults list",
+        "summary": "List your defaults for agents in every cloud Session (settings agentDefaults; today the Claude model).",
+        "details": "Reads agentDefaults from ~/.config/runpane-cloud/settings.json. Pane ships none: with claude-model unset, Claude Code in a Session starts with its own default model for the account.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud agent-defaults list"
+        ],
+        "notes": []
+      },
+      "cloud agent-defaults set": {
+        "name": "cloud agent-defaults set",
+        "summary": "Set the model Claude Code starts with in every cloud Session, then push it to awake Sessions.",
+        "details": "Saves agentDefaults.claudeModel and calls each awake Session daemon's runpane:cloud:agent-defaults. The daemon writes model into ~/.claude/settings.json (other keys kept) now and at every boot and wake; a model picked in the Session (/model, or a value it did not write) is kept. An asleep Session gets it at its next runpane cloud wake. New claude panels use it; a running claude keeps its model until restarted.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "claude-model",
+            "required": true,
+            "description": "The default to set (the only one today)."
+          },
+          {
+            "name": "<model>",
+            "required": true,
+            "description": "A Claude model id or alias, e.g. claude-opus-5-5 or opus."
+          },
+          {
+            "name": "--no-push",
+            "required": false,
+            "description": "Only save the setting."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud agent-defaults set claude-model claude-opus-5-5"
+        ],
+        "notes": []
+      },
+      "cloud agent-defaults unset": {
+        "name": "cloud agent-defaults unset",
+        "summary": "Go back to Claude Code's own default model in every cloud Session, then push that to awake Sessions.",
+        "details": "Removes agentDefaults.claudeModel; each Session's daemon then removes the model it wrote from ~/.claude/settings.json (a model set in the Session stays).",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "claude-model",
+            "required": true,
+            "description": "The default to unset."
+          },
+          {
+            "name": "--no-push",
+            "required": false,
+            "description": "Only save the setting."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud agent-defaults unset claude-model"
+        ],
+        "notes": []
+      },
+      "cloud agent-defaults push": {
+        "name": "cloud agent-defaults push",
+        "summary": "Give one cloud Session (default: every one) the current agent defaults now.",
+        "details": "Calls the Session daemon's runpane:cloud:agent-defaults over the tailnet with the saved client token; the daemon stores the defaults (~/.runpane-cloud/agent-defaults.json) and applies them. Exits 1 when a Session was not updated (asleep, or a Pane that predates agent defaults). runpane cloud new and wake push too.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": false,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud agent-defaults push rp-a1b2c3d4"
         ],
         "notes": []
       },
