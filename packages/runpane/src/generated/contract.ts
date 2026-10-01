@@ -3839,7 +3839,7 @@ export const RUNPANE_CONTRACT = {
         "  --all-configs           Every config of the project.",
         "  --policy <mode>         default (built-in deny-list) or allow-all (the user's call; production included).",
         "  --token-name <name>     Name of the minted service tokens (default runpane-cloud-<coordinator>).",
-        "  --token-file <path|->   Install a service token (dp.st.*) or service account token (dp.sa.*) you made; personal and CLI tokens are refused.",
+        "  --token-file <path|->   Install a read-only service token (dp.st.*) you made; service account, personal and CLI tokens are refused.",
         "  --api-base-url <url>    Doppler API base (tests and fakes only).",
         "  --json                  Print machine-readable output."
       ],
@@ -16136,7 +16136,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--token-file",
             "required": false,
-            "description": "Install a service token (dp.st.*) or service account token (dp.sa.*) you made; personal and CLI tokens are refused."
+            "description": "Install a read-only service token (dp.st.*) you made; service account, personal and CLI tokens are refused."
           },
           {
             "name": "--api-base-url",

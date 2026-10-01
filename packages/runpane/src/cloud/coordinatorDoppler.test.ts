@@ -145,16 +145,22 @@ test('doppler set revokes what it minted when a later config fails, and installs
   assert.equal(harness.world.files.get(`${sandboxId}:${STAGE}/doppler-token-0`), undefined);
 });
 
-test('doppler set --token-file refuses personal and CLI tokens before touching the coordinator', async () => {
+test('doppler set --token-file takes only a service token: personal, CLI and service account tokens are refused before touching the coordinator', async () => {
   const { harness } = await deployed();
   const before = harness.world.scripts.length;
   const personal = path.join(harness.root, 'personal');
   await fs.writeFile(personal, 'dp.pt.0123456789abcdefghijklmnopqrstuvwxyz\n', { mode: 0o600 });
-  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--token-file', personal]), /Personal and CLI tokens are refused/u);
+  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--token-file', personal]), /a personal token .*not a service token/u);
+  assert.equal(harness.world.scripts.length, before);
+  // A service account token can span projects and configs and may write: refused by its prefix, not trusted as read-only.
+  const account = path.join(harness.root, 'account');
+  await fs.writeFile(account, 'dp.sa.0123456789abcdefghijklmnopqrstuvwxyz\n', { mode: 0o600 });
+  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--token-file', account]), /a service account token .*not a service token/u);
   assert.equal(harness.world.scripts.length, before);
   const service = path.join(harness.root, 'service');
   await fs.writeFile(service, `${minted('dev')}\n`, { mode: 0o600 });
   assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--token-file', service]), 0);
+  assert.match(harness.err.join('\n'), /cannot check it is read-only/u);
   // Not minted here, so unset cannot revoke it and says so.
   assert.equal(await run(harness, ['coordinator', 'doppler', 'unset', '--config', 'dev', '--yes']), 1);
   assert.match(harness.err.join('\n'), /not minted by this machine/u);
