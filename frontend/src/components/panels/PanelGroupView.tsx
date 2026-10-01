@@ -122,6 +122,8 @@ export interface PanelGroupViewProps {
   showAddTool?: boolean;
   alwaysShowClose?: boolean;
   keepPermanentTabsInGroups?: boolean;
+  /** Replaces the strip's "+" button, for views with their own Add tool menu. */
+  renderAddTool?: (groupId: string) => React.ReactNode;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -147,6 +149,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   showAddTool = true,
   alwaysShowClose = false,
   keepPermanentTabsInGroups = false,
+  renderAddTool,
 }) => {
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
@@ -227,7 +230,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             getPanelTabPresentation={getPanelTabPresentation}
             alwaysShowClose={alwaysShowClose}
           />
-          {showAddTool && <button
+          {renderAddTool ? renderAddTool(group.id) : showAddTool && <button
             ref={addButtonRef}
             type="button"
             aria-label="Add tool"

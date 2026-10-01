@@ -1604,6 +1604,44 @@ test('Sessions can be renamed from their right-click menu', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'New name', exact: true, level: 1 })).toBeAttached();
 });
 
+test('the Session "+" menu opens terminals and browsers as tabs, apart from the terminal dock', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('addtool', 'Add tool demo', '', '', new Date(0).toISOString())]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-addtool').click();
+  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
+  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true });
+  await expect(addTool).toBeEnabled();
+
+  await addTool.click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByRole('menuitem', { name: 'Terminal' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Browser' })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Browser' }).click();
+  await expect(workspaceTabs.getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
+
+  await addTool.click();
+  await page.getByRole('menu').getByRole('menuitem', { name: 'Terminal' }).click();
+  await expect(workspaceTabs.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
+  await expect(workspaceTabs.getByRole('tab')).toHaveCount(3);
+
+  // The bottom terminal dock stays its own shell, not the new tab.
+  await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Collapse terminal', exact: true })).toBeVisible();
+  await expect(workspaceTabs.getByRole('tab')).toHaveCount(3);
+
+  // Over the sidebar the title bar takes the sidebar's colour and width.
+  const segment = page.getByTestId('window-title-bar-sidebar-segment');
+  const sidebar = page.getByTestId('sidebar');
+  const [segmentBox, sidebarBox] = [await layoutBox(segment), await layoutBox(sidebar)];
+  expect(segmentBox.width).toBe(sidebarBox.width);
+  const colours = await page.evaluate(() => ({
+    segment: getComputedStyle(document.querySelector('[data-testid="window-title-bar-sidebar-segment"]')!).backgroundColor,
+    sidebar: getComputedStyle(document.querySelector('[data-testid="sidebar"]')!).backgroundColor,
+  }));
+  expect(colours.segment).toBe(colours.sidebar);
+});
+
 test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');

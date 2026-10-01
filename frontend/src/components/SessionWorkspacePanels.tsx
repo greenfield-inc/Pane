@@ -2,12 +2,13 @@ import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
-import type { SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
+import type { SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
+import { SessionAddToolMenu, type SessionToolSpec } from './SessionAddToolMenu';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
@@ -27,8 +28,36 @@ import {
 const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
-/** Panels that live on the Session stage as tabs; terminals and Files dock elsewhere. */
+/** Panels that always live on the Session stage as tabs; Files docks in the inspector. */
 const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser']);
+
+/** A terminal started with a command (an agent or a custom command) is always a tab. */
+function launchesCommand(panel: ToolPanel): boolean {
+  // SAFETY: The terminal discriminator determines the custom-state shape.
+  const state = panel.state.customState as TerminalPanelState | undefined;
+  return !!state?.initialCommand?.trim() || !!state?.isCliPanel || !!state?.agentType;
+}
+
+function layoutPanelIds(layout: SessionPanelLayout | null | undefined): Set<string> {
+  const ids = new Set<string>();
+  const walk = (node: SessionPanelLayout['root']) => {
+    if (node.type === 'group') node.panelIds.forEach(id => ids.add(id));
+    else node.children.forEach(walk);
+  };
+  if (layout) walk(layout.root);
+  return ids;
+}
+
+/**
+ * Whether a Session panel is a tab on the stage. Terminals opened from the "+"
+ * menu are tabs (they sit in the layout, or launch a command); the one plain
+ * shell outside the layout is the bottom terminal dock.
+ */
+function isStagePanel(panel: ToolPanel, agentPanelIds: readonly string[], inLayout: ReadonlySet<string>): boolean {
+  if (STAGE_PANEL_TYPES.has(panel.type)) return true;
+  if (panel.type !== 'terminal' || agentPanelIds.includes(panel.id)) return false;
+  return inLayout.has(panel.id) || launchesCommand(panel);
+}
 
 export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewContent, changesContent, toolbarActions }: {
   agentPanel: ToolPanel; agentPanelIds: string[];
@@ -55,10 +84,16 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const creating = useRef(false);
-  const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIds.includes(panel.id));
+  const inLayout = useMemo(() => layoutPanelIds(layout), [layout]);
+  const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIds.includes(panel.id) && !isStagePanel(panel, agentPanelIds, inLayout));
   const explorer = panels.find(panel => panel.type === 'explorer');
-  const tabs = useMemo(() => [agentPanel, ...panels.filter(panel => STAGE_PANEL_TYPES.has(panel.type))], [agentPanel, panels]);
+  const tabs = useMemo(
+    () => [agentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIds, inLayout))],
+    [agentPanel, panels, agentPanelIds, inLayout],
+  );
   const agentPanelId = agentPanel.id;
+  const agentPanelIdsRef = useRef(agentPanelIds);
+  agentPanelIdsRef.current = agentPanelIds;
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Every layout change funnels through here: store, focus mirror, and a
@@ -90,8 +125,10 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       usePanelStore.getState().setPanels(sessionId, saved);
       const stored = await panelApi.getLayout(sessionId).catch(() => null);
       if (cancelled) return;
-      const stage = (usePanelStore.getState().panels[sessionId] ?? saved).filter(panel => STAGE_PANEL_TYPES.has(panel.type));
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
+      const storedIds = layoutPanelIds(base);
+      const stage = (usePanelStore.getState().panels[sessionId] ?? saved)
+        .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
       const splitIds = new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
@@ -103,7 +140,8 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       if (panel.sessionId !== sessionId) return;
       usePanelStore.getState().addPanel(panel);
       const current = usePanelStore.getState().layouts[sessionId];
-      if (!current || !STAGE_PANEL_TYPES.has(panel.type)) return;
+      // Plain shells are the terminal dock unless the "+" menu placed them.
+      if (!current || !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
       const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
       // Agents open pages and files beside the conversation by default.
       const root = panel.metadata?.openPlacement === 'split'
@@ -117,7 +155,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       const shouldFocus = shouldActivateReopenedPanel(panel, previous);
       usePanelStore.getState().updatePanelState(panel);
       const current = usePanelStore.getState().layouts[sessionId];
-      if (current && shouldFocus && STAGE_PANEL_TYPES.has(panel.type)) {
+      if (current && shouldFocus && isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) {
         applyLayout(activatePanelInLayout(current, panel.id));
       }
     });
@@ -154,6 +192,33 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       creating.current = false;
     }
   }
+
+  // Opens a tool from the "+" menu as a tab in `groupId` (default: the focused group).
+  const addTool = useCallback(async (tool: SessionToolSpec, groupId?: string) => {
+    setError(null);
+    try {
+      let initialState: { customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> } | undefined;
+      if (tool.initialCommand) {
+        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = { initialCommand: tool.initialCommand };
+        if (tool.customResume !== undefined) customState.customResume = tool.customResume;
+        initialState = { customState };
+      }
+      const panel = await panelApi.createPanel({ sessionId, type: tool.type, title: tool.title, initialState });
+      usePanelStore.getState().addPanel(panel);
+      const current = usePanelStore.getState().layouts[sessionId];
+      if (!current) return;
+      const target = (groupId && findGroup(current.root, groupId))
+        || (current.focusedGroupId && findGroup(current.root, current.focusedGroupId))
+        || primaryGroup(current.root);
+      applyLayout({ ...current, root: addPanelToGroup(current.root, target.id, panel.id, { activate: true }), focusedGroupId: target.id });
+    } catch {
+      setError('Could not open the tool. Please try again.');
+    }
+  }, [sessionId, applyLayout]);
+
+  const renderGroupAddTool = useCallback((groupId: string) => (
+    <SessionAddToolMenu disabled={!loaded} onAdd={tool => { void addTool(tool, groupId); }} />
+  ), [loaded, addTool]);
 
   const selectSidebarTab = (tab: SessionInspectorTab) => {
     if (tab === 'files') void toggleTool('explorer');
@@ -222,6 +287,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       {(!isSplit || !trailingSlot) && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome">
         <div className="flex min-w-0 flex-1 items-center overflow-hidden px-2">
           {!isSplit && tabStrip}
+          {!isSplit && <SessionAddToolMenu disabled={!loaded} onAdd={tool => { void addTool(tool); }} />}
         </div>
         {!trailingSlot && titleBarActions}
       </div>}
@@ -231,7 +297,8 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
           <div className="relative min-h-0 flex-1">
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={layout.focusedGroupId ?? primaryGroup(layout.root).id}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
-              onFocusGroup={focusGroup} showAddTool={false} alwaysShowClose keepPermanentTabsInGroups />}
+              onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
+              renderAddTool={renderGroupAddTool} />}
           </div>
           <div className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}

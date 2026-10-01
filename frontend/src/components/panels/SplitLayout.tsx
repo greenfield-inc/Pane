@@ -83,6 +83,8 @@ export interface SplitLayoutProps {
    * every tab sits on the same row.
    */
   keepPermanentTabsInGroups?: boolean;
+  /** Replaces each group strip's "+" button (see PanelGroupView). */
+  renderAddTool?: (groupId: string) => React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +113,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   showAddTool,
   alwaysShowClose,
   keepPermanentTabsInGroups,
+  renderAddTool,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -210,6 +213,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           showAddTool={showAddTool}
           alwaysShowClose={alwaysShowClose}
           keepPermanentTabsInGroups={keepPermanentTabsInGroups}
+          renderAddTool={renderAddTool}
         />
       );
     }
@@ -254,7 +258,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     onPanelSelect, onPanelClose, onFocusGroup, onSizesChange,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
-    showAddTool, alwaysShowClose, keepPermanentTabsInGroups,
+    showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
   ]);
 
   // Single-group root: render directly without Allotment
