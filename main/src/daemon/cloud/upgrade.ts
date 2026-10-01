@@ -2,6 +2,8 @@ import { createHash } from 'crypto';
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import type { CloudUpgradeRequest, CloudUpgradeResult } from '../../../../shared/types/cloudDaemon';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { SYSTEMD_UNIT_NAME } from '../remoteDaemonService';
@@ -148,13 +150,26 @@ function readUnitMainPid(unit: string): number | undefined {
   return result.status === 0 && Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
-export async function downloadToFile(url: string, destination: string): Promise<void> {
-  const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+/** Streams the package to a 0600 file: a Pane .deb is 100+ MB, more than the daemon should hold in memory. */
+export async function downloadToFile(url: string, destination: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const response = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (!response.ok || !response.body) {
     throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_DOWNLOAD', `Download failed with HTTP ${response.status}`);
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(destination, bytes, { mode: 0o600 });
+  await pipeline(Readable.from(readResponseBody(response.body)), fs.createWriteStream(destination, { mode: 0o600 }));
+}
+
+async function* readResponseBody(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) return;
+      yield chunk.value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export function runDetachedWithSystemd(unitSuffix: string, script: string): Promise<void> {

@@ -89,6 +89,9 @@ runpane cloud setup \
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
 - `--pane-deb-url <url>` installs the Pane daemon from that `.deb` in every new Session. It must be
   an `https://` URL, and the download in the sandbox refuses a redirect to anything but https.
+  Add `--pane-deb-sha256 <hex>` (saved with it, or given to `new`) and the sandbox checks the download
+  against it before `apt-get` installs it as root. Without one, only https to that host vouches for the
+  package, and `new` prints a warning saying so.
 - Rerun `setup` with any subset of flags to change one setting. The others are kept.
 
 Setup prints what is configured. `runpane cloud list` works after setup and says `No cloud hosts.`
@@ -202,6 +205,14 @@ subscription token from `claude setup-token`). Every later `new` writes it into 
 environment file for the Pane daemon (never on a command line) and pre-answers Claude Code's first-run
 prompts, so a Claude panel works right away. Without either, open a terminal in the cloud Session and run
 `claude` once to log in; that sign-in lives on the sandbox disk and survives sleep and wake.
+
+Those pre-answered prompts include Claude Code's one-time bypass-permissions warning
+(`bypassPermissionsModeAccepted` in `~/.claude.json`, `skipDangerousModePermissionPrompt` in
+`~/.claude/settings.json`). Pane starts Claude panels with `--dangerously-skip-permissions` unless its
+permission mode is set to approve, on the desktop as well. A cloud Session has no one at the keyboard to accept
+that warning, so it would block every agent after each wake. The pre-answer grants no rights the flag doesn't
+already give: Claude in a cloud Session runs every tool without asking, on the sandbox. It also
+marks `/home/user` and the cloned repository as trusted folders.
 
 `new` marks only the repository it cloned (`--repo`) as trusted for Claude Code. Trust is per repository
 root, and trusting `/home/user` does not cover folders under it. The first Claude panel in a repository you
@@ -879,7 +890,9 @@ runpane cloud destroy "api work" --yes
 
 This deletes the Session's GitHub deploy keys, then the tailnet device, then the sandbox and its disk, checks both are gone, then removes the
 local record and the Pane desktop profile. If a deploy key can't be deleted, destroy stops before the tailnet device and
-says which key; fix the credential (or delete the key on GitHub) and rerun it. It can't be undone: push any work first (`runpane cloud git push`).
+says which key; fix the credential (or delete the key on GitHub) and rerun it. Only tailnet devices tagged `tag:rp-session`
+(the recorded node, or one under the Session's hostname) are deleted; a member's device that happens to share the name is left
+alone and named on stderr. It can't be undone: push any work first (`runpane cloud git push`).
 Destroy costs no boat start.
 
 ## Costs

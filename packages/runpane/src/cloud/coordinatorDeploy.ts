@@ -4,6 +4,7 @@ import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
 import { pushDirectory } from './coordinatorSync';
 import { CloudProviderError, SANDBOX_HOME, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
+import { deleteOwnedDevices } from './tailscale';
 import { resolveBoatOrg } from './wallet';
 import {
   DEFAULT_NAME_PREFIX,
@@ -179,6 +180,10 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   let scopedKey: { id: string; secret: string; ttl: string } | undefined;
   if (!deployment) {
     const hostname = args.name ?? `${namePrefix}-coord`;
+    // Deploy and destroy replace tailnet devices under this name, so it stays in runpane's namespace.
+    if (!hostname.startsWith(`${namePrefix}-`)) {
+      throw new Error(`--name must start with "${namePrefix}-" (the cloud name prefix), so it can't collide with a device runpane did not create.`);
+    }
     const fromSnapshot = args.noGolden ? undefined : args.fromSnapshot ?? settings.goldenSnapshot;
     const size = args.size ?? 'small';
     progress(`runpane cloud: creating ${size} coordinator sandbox ${hostname}${fromSnapshot ? ` from ${fromSnapshot}` : ''}...`);
@@ -638,13 +643,7 @@ async function removeCoordinator(
   target: { sandboxId: string; hostname: string; scopedKeyId?: string; nodeId?: string },
   deps: CloudDeps,
 ): Promise<{ deletedNodeIds: string[]; keyRevoked: boolean; keyError?: string }> {
-  const nodeIds = new Set<string>(target.nodeId ? [target.nodeId] : []);
-  for (const device of await tailnet.findDevicesByHostname(target.hostname)) nodeIds.add(device.nodeId);
-  const deletedNodeIds: string[] = [];
-  for (const nodeId of nodeIds) {
-    await tailnet.deleteDevice(nodeId);
-    deletedNodeIds.push(nodeId);
-  }
+  const deletedNodeIds = await deleteOwnedDevices(tailnet, target.hostname, target.nodeId, deps.stderr);
   await provider.destroy(target.sandboxId);
   if (!target.scopedKeyId) return { deletedNodeIds, keyRevoked: false, keyError: 'no key was minted' };
   try {

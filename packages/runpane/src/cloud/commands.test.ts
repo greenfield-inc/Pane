@@ -114,6 +114,24 @@ test('a Pane .deb URL must be https, from the flag or the saved settings, before
   assert.ok(!harness.world.calls.some((call) => call.startsWith('create')));
 });
 
+test('a Pane .deb URL takes a sha256 the sandbox checks; without one, new warns that only https vouches for it', async () => {
+  const sha = 'AB'.repeat(32);
+  const harness = await createTestHarness();
+  await newHost(harness, ['--no-golden', '--pane-deb-url', 'https://example.test/pane.deb', '--pane-deb-sha256', sha]);
+  assert.deepEqual(harness.world.provisionPaneSources.at(-1), { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: sha.toLowerCase() });
+  assert.doesNotMatch(harness.err.join('\n'), /no sha256 check/u);
+
+  await harness.deps.store.writeSettings({ paneSource: { kind: 'deb-url', url: 'https://example.test/pane.deb' } });
+  await newHost(harness, ['--no-golden']);
+  assert.deepEqual(harness.world.provisionPaneSources.at(-1), { kind: 'deb-url', url: 'https://example.test/pane.deb' });
+  assert.match(harness.err.join('\n'), /WARNING: the Pane \.deb from https:\/\/example\.test\/pane\.deb will be installed as root with no sha256 check.*--pane-deb-sha256/u);
+
+  await assert.rejects(run(harness, ['new', '--pane-deb-url', 'https://example.test/pane.deb', '--pane-deb-sha256', 'abc', '--yes']), /64 hex digit/u);
+  await assert.rejects(run(harness, ['new', '--pane-deb-sha256', sha, '--yes']), /goes with --pane-deb-url/u);
+  assert.equal(await run(harness, ['setup', '--pane-deb-url', 'https://example.test/pane.deb', '--pane-deb-sha256', sha, '--no-verify']), 0);
+  assert.deepEqual((await harness.deps.store.readSettings()).paneSource, { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: sha.toLowerCase() });
+});
+
 test('new without a Tailscale client explains how to run setup', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeCredentials({ boat: { apiKey: 'k' } });
@@ -125,7 +143,7 @@ test('a failed setup removes the tailnet device first, then the sandbox, and for
   harness.world.failProvision = 'daemon install failed';
   const originalProvision = harness.deps.bootstrap.provision;
   harness.deps.bootstrap.provision = async (sandbox, request, tailnet) => {
-    harness.world.devices.push({ nodeId: 'nHALFJOINED', hostname: request.hostname });
+    harness.world.devices.push({ nodeId: 'nHALFJOINED', hostname: request.hostname, tags: ['tag:rp-session'] });
     return originalProvision(sandbox, request, tailnet);
   };
 
@@ -280,6 +298,23 @@ test('destroy deletes the tailnet device before the sandbox, then forgets the ho
   const result = lastJson(harness);
   assert.deepEqual(result.deletedNodeIds, [record.profile.cloud.nodeId]);
   assert.equal(result.sandbox, 'deleted');
+});
+
+test('destroy never deletes a member device that shares the Session hostname, and names it', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness);
+  const [record] = await harness.deps.store.listHosts();
+  harness.world.devices.push(
+    { nodeId: 'nMEMBER', hostname, name: `${hostname}-1.tailtest.ts.net` },
+    { nodeId: 'nOTHERTAG', hostname, tags: ['tag:server'] },
+  );
+
+  assert.equal(await run(harness, ['destroy', hostname, '--yes', '--desktop-dir', harness.desktopDir, '--json']), 0);
+  assert.ok(!harness.world.calls.includes('tailnet-delete nMEMBER'), harness.world.calls.join('\n'));
+  assert.ok(!harness.world.calls.includes('tailnet-delete nOTHERTAG'), harness.world.calls.join('\n'));
+  assert.deepEqual(harness.world.devices.map((device) => device.nodeId), ['nMEMBER', 'nOTHERTAG']);
+  assert.deepEqual(lastJson(harness).deletedNodeIds, [record.profile.cloud.nodeId]);
+  assert.match(harness.err.join('\n'), /left .*nMEMBER, untagged.*nOTHERTAG, tags tag:server.* alone/u);
 });
 
 test('destroy requires --yes', async () => {

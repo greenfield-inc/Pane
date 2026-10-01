@@ -339,6 +339,20 @@ test('git-credential-runpane answers get with the read token for the repository 
   assert.equal(broker.requests.length, count, 'store and a pathless get never call the broker');
 });
 
+test('git-credential-runpane never hands the GitHub token to another host, whatever the git config routes to it', async () => {
+  const count = broker.requests.length;
+  for (const host of ['gitlab.example.com', 'github.com.evil.example', 'api.github.com', '']) {
+    const other = deps(root, `protocol=https\nhost=${host}\npath=acme/widgets.git\n\n`);
+    assert.equal(await runCloudAgent(['git-credential', 'get'], other.deps), 0);
+    assert.deepEqual(other.out, [], host);
+    assert.match(other.err.join('\n'), /answers only for github\.com/u);
+  }
+  assert.equal(broker.requests.length, count, 'another host never reaches the broker');
+  const upper = deps(root, 'protocol=https\nhost=GitHub.com\npath=acme/widgets.git\n\n');
+  assert.equal(await runCloudAgent(['git-credential', 'get'], upper.deps), 0);
+  assert.match(upper.out[0], /^username=x-access-token\n/u);
+});
+
 /**
  * git's smart HTTP (`git http-backend`) over https with a throwaway self-signed certificate, behind Basic
  * auth that only takes the broker's read token. (The helper never answers plain http.)
@@ -393,8 +407,11 @@ test('git fetch through git-credential-runpane: git gets the broker token and th
   await fs.rename(origin, path.join(projectRoot, 'acme', 'widgets.git'));
   const server = await startGitServer(projectRoot);
   const helper = path.join(root, 'git-credential-runpane');
-  // The launcher the Session gets, pointed at this build instead of Pane's runpane.
-  await fs.writeFile(helper, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e 'require(process.argv[1]).runCloudAgent(process.argv.slice(2)).then((code) => { process.exitCode = code; })' ${JSON.stringify(path.join(__dirname, 'index.js'))} git-credential "$@"\n`, { mode: 0o755 });
+  // The launcher the Session gets, pointed at this build instead of Pane's runpane, and at this server's host.
+  const gitHost = new URL(server.baseUrl).host;
+  const launch = `const session = require(${JSON.stringify(path.join(__dirname, 'session.js'))}); `
+    + `require(process.argv[1]).runCloudAgent(process.argv.slice(2), { ...session.defaultAgentDeps(), gitHost: ${JSON.stringify(gitHost)} }).then((code) => { process.exitCode = code; })`;
+  await fs.writeFile(helper, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} -e '${launch}' ${JSON.stringify(path.join(__dirname, 'index.js'))} git-credential "$@"\n`, { mode: 0o755 });
   const target = path.join(root, 'fetch-target');
   git(['init', '--quiet', target], root);
   const env = { ...process.env, ...GIT_ENV, GIT_TERMINAL_PROMPT: '0', GIT_SSL_NO_VERIFY: '1', RUNPANE_PEERS_FILE: peersFile };

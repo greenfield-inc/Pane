@@ -28,6 +28,8 @@ export interface CloudArgs {
   noGolden: boolean;
   namePrefix?: string;
   paneDebUrl?: string;
+  /** Hex sha256 the sandbox checks the --pane-deb-url download against before installing it as root. */
+  paneDebSha256?: string;
   paneNpmSpec?: string;
   panePreinstalled: boolean;
   desktopDir?: string;
@@ -69,6 +71,7 @@ const VALUE_FLAGS = new Map<string, ValueFlag>([
   ['--from', 'fromSnapshot'],
   ['--name-prefix', 'namePrefix'],
   ['--pane-deb-url', 'paneDebUrl'],
+  ['--pane-deb-sha256', 'paneDebSha256'],
   ['--pane-npm-spec', 'paneNpmSpec'],
   ['--desktop-dir', 'desktopDir'],
   ['--timeout-ms', 'timeoutMs'],
@@ -102,9 +105,9 @@ const BOOLEAN_FLAGS = new Map<string, BooleanFlag>([
 /** Flags each subcommand accepts, beyond --json. */
 const ALLOWED = {
   setup: ['--boat-key-file', '--boat-org', '--tailscale-client-id', '--tailscale-secret-file', '--tailscale-tailnet', '--anthropic-key-file', '--claude-token-file',
-    '--golden', '--no-golden', '--size', '--transport', '--name-prefix', '--pane-deb-url', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
+    '--golden', '--no-golden', '--size', '--transport', '--name-prefix', '--pane-deb-url', '--pane-deb-sha256', '--pane-npm-spec', '--pane-preinstalled', '--max-live',
     '--coordinator', '--no-coordinator', '--no-verify'],
-  new: ['--label', '--boat-org', '--repo', '--ref', '--size', '--transport', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-npm-spec',
+  new: ['--label', '--boat-org', '--repo', '--ref', '--size', '--transport', '--from', '--no-golden', '--name-prefix', '--pane-deb-url', '--pane-deb-sha256', '--pane-npm-spec',
     '--pane-preinstalled', '--desktop-dir', '--no-import', '--timeout-ms', '--keep-on-failure', '--yes', '-y',
     '--github', '--read-write', '--github-token-file'],
   list: [],
@@ -199,6 +202,7 @@ export function parseCloudArgs(argv: readonly string[]): CloudArgs {
   if ([parsed.paneDebUrl, parsed.paneNpmSpec, parsed.panePreinstalled || undefined].filter(Boolean).length > 1) {
     throw new Error('Use only one of --pane-deb-url, --pane-npm-spec, --pane-preinstalled.');
   }
+  if (parsed.paneDebSha256 && !parsed.paneDebUrl) throw new Error('--pane-deb-sha256 goes with --pane-deb-url.');
   if ((parsed.readWrite || parsed.githubTokenFile) && !parsed.github) {
     throw new Error('--read-write and --github-token-file go with --github.');
   }
@@ -226,6 +230,11 @@ function assignValue(parsed: CloudArgs, key: ValueFlag, flag: string, value: str
     const number = Number(value);
     if (!Number.isInteger(number) || number <= 0) throw new Error(`${flag} must be a positive integer.`);
     parsed[key] = number;
+    return;
+  }
+  if (key === 'paneDebSha256') {
+    if (!/^[0-9a-fA-F]{64}$/u.test(value)) throw new Error('--pane-deb-sha256 must be the 64 hex digit sha256 of the .deb.');
+    parsed.paneDebSha256 = value.toLowerCase();
     return;
   }
   if (key === 'namePrefix' && !/^[a-z][a-z0-9-]{0,40}[a-z0-9]$|^[a-z]$/u.test(value)) {

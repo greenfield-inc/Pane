@@ -150,6 +150,15 @@ test('coordinator stop, status, start and destroy', async () => {
   await assert.rejects(fs.access(harness.deps.store.coordinatorClientPath));
 });
 
+test('coordinator deploy keeps --name inside the cloud name prefix, so it can never replace a member device', async () => {
+  const harness = await createTestHarness();
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  harness.world.devices.push({ nodeId: 'nLAPTOP', hostname: 'mac-mini' });
+  await assert.rejects(run(harness, ['coordinator', 'deploy', '--yes', '--name', 'mac-mini']), /--name must start with "rp-test-"/u);
+  assert.equal(harness.world.sandboxes.size, 0);
+  assert.deepEqual(harness.world.devices.map((device) => device.nodeId), ['nLAPTOP']);
+});
+
 test('coordinator destroy still finishes when boat refuses the key revocation, and names the key to revoke by hand', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });

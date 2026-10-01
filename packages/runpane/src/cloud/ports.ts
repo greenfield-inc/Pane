@@ -15,6 +15,8 @@ export interface TailnetDevice {
   name?: string;
   online?: boolean;
   lastSeen?: string;
+  /** ACL tags; runpane deletes only devices tagged like its own nodes (see partitionOwnedDevices). */
+  tags?: string[];
 }
 
 export interface TailnetPort {

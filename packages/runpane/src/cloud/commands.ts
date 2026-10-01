@@ -10,6 +10,7 @@ import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGit
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
 import { assertHttpsArtifactUrl } from './bootstrap';
+import { deletableNodeIds, deleteOwnedDevices } from './tailscale';
 import { cloneThroughBroker, connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
 import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
 import { coordinatorSecretsEnabled, describeSecretsOutcome, enableSessionSecrets } from './sessionSecrets';
@@ -261,7 +262,7 @@ async function readRequiredSecret(deps: CloudDeps, file: string, what: string): 
 function paneSourceFromArgs(args: CloudArgs): PaneSource | undefined {
   if (args.paneDebUrl) {
     assertHttpsArtifactUrl(args.paneDebUrl, '--pane-deb-url');
-    return { kind: 'deb-url', url: args.paneDebUrl };
+    return args.paneDebSha256 ? { kind: 'deb-url', url: args.paneDebUrl, sha256: args.paneDebSha256 } : { kind: 'deb-url', url: args.paneDebUrl };
   }
   if (args.paneNpmSpec) return { kind: 'runpane-npm', spec: args.paneNpmSpec };
   if (args.panePreinstalled) return { kind: 'preinstalled' };
@@ -286,7 +287,14 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   // A golden image already carries the Pane .deb; a plain image needs it installed.
   const paneSource = paneSourceFromArgs(args) ?? settings.paneSource
     ?? (fromSnapshot ? { kind: 'preinstalled' } : DEFAULT_PANE_SOURCE);
-  if (paneSource.kind === 'deb-url') assertHttpsArtifactUrl(paneSource.url, 'The saved Pane .deb URL (runpane cloud setup --pane-deb-url)');
+  if (paneSource.kind === 'deb-url') {
+    assertHttpsArtifactUrl(paneSource.url, 'The saved Pane .deb URL (runpane cloud setup --pane-deb-url)');
+    // Installed as root: without a digest, only https to the URL's host vouches for the package.
+    if (!paneSource.sha256) {
+      deps.stderr(`runpane cloud: WARNING: the Pane .deb from ${paneSource.url} will be installed as root with no sha256 check; `
+        + 'only https to its host vouches for it. Pass --pane-deb-sha256 <hex> (or save it with runpane cloud setup --pane-deb-url <url> --pane-deb-sha256 <hex>).');
+    }
+  }
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
 
@@ -942,21 +950,14 @@ async function forgetPeerGrants(destroyed: CloudHostRecord, deps: CloudDeps) {
 }
 
 /** Tailnet device first, then the sandbox (a live node would otherwise linger as an orphan). */
-async function destroyHost(record: CloudHostRecord, provider: CloudProvider, tailnet: TailnetPort, _deps: CloudDeps) {
+async function destroyHost(record: CloudHostRecord, provider: CloudProvider, tailnet: TailnetPort, deps: CloudDeps) {
   const { hostname, nodeId, sandboxId } = record.profile.cloud;
-  const nodeIds = new Set<string>();
-  if (nodeId) nodeIds.add(nodeId);
-  for (const device of await tailnet.findDevicesByHostname(hostname)) nodeIds.add(device.nodeId);
-  const deletedNodeIds: string[] = [];
-  for (const id of nodeIds) {
-    await tailnet.deleteDevice(id);
-    deletedNodeIds.push(id);
-  }
+  const deletedNodeIds = await deleteOwnedDevices(tailnet, hostname, nodeId, deps.stderr);
   await provider.destroy(sandboxId);
   const after = await provider.get(sandboxId);
-  const remaining = await tailnet.findDevicesByHostname(hostname);
+  const remaining = deletableNodeIds(await tailnet.findDevicesByHostname(hostname)).nodeIds;
   if (remaining.length > 0) {
-    throw new Error(`Tailnet devices for ${hostname} are still listed after delete: ${remaining.map((device) => device.nodeId).join(', ')}.`);
+    throw new Error(`Tailnet devices for ${hostname} are still listed after delete: ${remaining.join(', ')}.`);
   }
   return { deletedNodeIds, sandbox: after.state === 'gone' ? 'deleted' : `deleting (${after.providerState})` };
 }

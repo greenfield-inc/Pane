@@ -4,10 +4,62 @@
 // appear in errors or logs.
 
 import { boundary, decodeBoundary, type BoundarySchema } from '../boundaryDecoder';
+import type { TailnetPort } from './ports';
 
 const DEFAULT_API_BASE = 'https://api.tailscale.com/api/v2';
 
 export const CLOUD_SESSION_TAG = 'tag:rp-session';
+
+interface DeviceIdentity {
+  nodeId: string;
+  hostname: string;
+  name?: string;
+  tags?: string[];
+}
+
+/**
+ * The node ids runpane may delete, given the devices listed under a hostname it manages: the node it
+ * recorded for that host, and any listed device carrying every tag runpane's own auth keys put on its
+ * nodes. A member's own machine (untagged) or a device tagged differently is never deleted, even when
+ * its hostname matches; those come back in `foreign` for the caller to refuse or report.
+ */
+export function deletableNodeIds<Device extends DeviceIdentity>(
+  devices: Device[],
+  tags: string[] = [CLOUD_SESSION_TAG],
+  recordedNodeId?: string,
+) {
+  const foreign = devices.filter((device) => tags.length === 0 || !tags.every((tag) => (device.tags ?? []).includes(tag)));
+  const isForeign = (nodeId: string) => foreign.some((device) => device.nodeId === nodeId);
+  const nodeIds = new Set<string>();
+  if (recordedNodeId && !isForeign(recordedNodeId)) nodeIds.add(recordedNodeId);
+  for (const device of devices) if (!isForeign(device.nodeId)) nodeIds.add(device.nodeId);
+  return { nodeIds: [...nodeIds], foreign };
+}
+
+/** "name (nodeId, tags a,b | untagged)" for a refusal or warning about a device runpane does not own. */
+export function describeForeignDevice(device: DeviceIdentity): string {
+  const tags = device.tags && device.tags.length > 0 ? `tags ${device.tags.join(',')}` : 'untagged';
+  return `${device.name || device.hostname} (${device.nodeId}, ${tags})`;
+}
+
+/**
+ * Deletes the recorded node and the devices under `hostname` tagged like runpane's own nodes. Any other
+ * device under that name (a member's machine, say) is left alone and named through `warn`. Returns the
+ * ids it deleted.
+ */
+export async function deleteOwnedDevices(
+  tailnet: TailnetPort,
+  hostname: string,
+  recordedNodeId: string | undefined,
+  warn: (line: string) => void,
+): Promise<string[]> {
+  const { nodeIds, foreign } = deletableNodeIds(await tailnet.findDevicesByHostname(hostname), [CLOUD_SESSION_TAG], recordedNodeId);
+  if (foreign.length > 0) {
+    warn(`runpane cloud: left ${foreign.map(describeForeignDevice).join(', ')} alone: it is named ${hostname} but runpane did not create it (not tagged ${CLOUD_SESSION_TAG}).`);
+  }
+  for (const nodeId of nodeIds) await tailnet.deleteDevice(nodeId);
+  return nodeIds;
+}
 
 interface TailscaleOAuthCredentials {
   clientId: string;

@@ -64,6 +64,8 @@ interface FakeWorld {
   binaryFiles: Map<string, Buffer>;
   /** The repository URL each provision was asked to clone. */
   provisionRepos: string[];
+  /** The Pane source each provision was asked to install. */
+  provisionPaneSources: ProvisionRequest['paneSource'][];
   /** boat wallets: the account's active one bills a create that names none. */
   orgs: { id: string; name: string }[];
   activeOrg: string;
@@ -101,6 +103,7 @@ function createFakeWorld(): FakeWorld {
     files: new Map(), daemons: new Map(), agentNotes: new Map(), agentNotesDown: new Set(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
     binaryFiles: new Map(),
     provisionRepos: [],
+    provisionPaneSources: [],
     github: { repos: new Map(), keys: [], nextKeyId: 100, pushes: [], tokenSources: [] },
     orgs: [{ id: 'personal', name: 'Personal' }, { id: 'team_test1', name: 'test' }],
     activeOrg: 'personal',
@@ -362,14 +365,14 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
       if (request.hostname.endsWith('-coord')) world.coordinatorHealthy = true;
       world.devices = world.devices.filter((device) => device.hostname !== request.hostname);
       const nodeId = `n${request.hostname.replace(/-/g, '')}NEW`;
-      world.devices.push({ nodeId, hostname: request.hostname, name: `${request.hostname}.tailtest.ts.net`, online: true });
+      world.devices.push({ nodeId, hostname: request.hostname, name: `${request.hostname}.tailtest.ts.net`, online: true, tags: ['tag:rp-session'] });
       return { reenrolled: true, previousBackendState: 'NeedsLogin', nodeId, magicDnsName: `${request.hostname}.tailtest.ts.net`, deletedNodeIds: [request.oldNodeId ?? ''] };
     },
     async joinTailnet(sandbox, request) {
       world.calls.push(`join ${sandbox.id} ${request.hostname}`);
       const nodeId = `n${request.hostname.replace(/-/g, '')}CNTRL`;
       const magicDnsName = `${request.hostname}.tailtest.ts.net`;
-      world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true });
+      world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true, tags: ['tag:rp-session'] });
       return { nodeId, magicDnsName, tailscaleIps: ['100.64.0.9'] };
     },
     async waitForDaemonHealth(baseUrl) {
@@ -381,10 +384,11 @@ function createFakeBootstrap(world: FakeWorld): BootstrapPort {
     async provision(sandbox: SandboxHandle, request: ProvisionRequest) {
       world.calls.push(`provision ${sandbox.id} ${request.hostname}`);
       if (request.repo) world.provisionRepos.push(request.repo.url);
+      world.provisionPaneSources.push(request.paneSource);
       if (world.failProvision) throw new Error(world.failProvision);
       const nodeId = `n${request.hostname.replace(/-/g, '')}CNTRL`;
       const magicDnsName = `${request.hostname}.tailtest.ts.net`;
-      world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true });
+      world.devices.push({ nodeId, hostname: request.hostname, name: magicDnsName, online: true, tags: ['tag:rp-session'] });
       world.healthy.add(request.hostname);
       const code = encodePairingCode({
         v: 1,

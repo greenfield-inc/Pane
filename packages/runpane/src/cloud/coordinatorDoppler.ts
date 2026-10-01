@@ -17,7 +17,7 @@ export const COORDINATOR_DOPPLER_USAGE = `Doppler secrets on the coordinator (Se
         [--policy default|allow-all] [--token-name <name>] [--api-base-url <url>] [--json]
                      mint a read-only service token per config with this machine's doppler CLI and install it
   runpane cloud coordinator doppler set --project <p> --config <c> --token-file <file|-> [--policy ...] [--json]
-                     install a service token you made (dp.st.*, or a read-only service account token dp.sa.*)
+                     install a read-only service token you made (dp.st.*; service account, personal and CLI tokens are refused)
   runpane cloud coordinator doppler policy (--default | --allow-all | --deny-names <A,B_*> [--deny-configs <prd,stg>]) [--json]
                      what the coordinator withholds from every manifest (default: production/infra names, stg/prd configs)
   runpane cloud coordinator doppler status [--check] [--json]
@@ -27,8 +27,27 @@ export const COORDINATOR_DOPPLER_USAGE = `Doppler secrets on the coordinator (Se
 
 const DOPPLER_TIMEOUT_MS = 30_000;
 const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u;
-/** Service tokens (one config, read-only when minted by set) and service account tokens; never personal or CLI tokens. */
-const ACCEPTED_TOKEN = /^dp\.(st|sa)\.[A-Za-z0-9._-]{20,}$/u;
+/**
+ * Service tokens only: Doppler scopes one to a single config, and `set` mints it read-only. Every other kind is
+ * refused by its prefix, since this machine can't check what it reaches: a service account token can span
+ * projects and configs and may write, and personal and CLI tokens act as the user.
+ */
+const SERVICE_TOKEN = /^dp\.st\.[A-Za-z0-9._-]{20,}$/u;
+const REFUSED_TOKEN_KINDS: [prefix: string, kind: string][] = [
+  ['dp.sa.', 'a service account token (it can span projects and configs and may write)'],
+  ['dp.pt.', 'a personal token (it acts as you, with write access to every project)'],
+  ['dp.ct.', 'a CLI token (it acts as you, with write access to every project)'],
+  ['dp.scim.', 'a SCIM token'],
+  ['dp.audit.', 'an audit token'],
+];
+
+/** Why `token` can't be installed, or null for a service token. */
+function refusedToken(token: string): string | null {
+  if (SERVICE_TOKEN.test(token)) return null;
+  const kind = REFUSED_TOKEN_KINDS.find(([prefix]) => token.startsWith(prefix))?.[1];
+  return `${kind ? `That is ${kind}, not a service token.` : 'That is not a Doppler service token.'} `
+    + 'Only a Doppler service token (dp.st.…, scoped to one config) is accepted: create one with Access: read, or let set mint it.';
+}
 
 type Policy = CoordinatorSecrets['policy'];
 
@@ -165,7 +184,7 @@ async function mintToken(deps: CloudDeps, project: string, config: string, name:
   } catch {
     throw new Error(`doppler created a token for ${project}/${config} but its answer was not the expected JSON; revoke tokens named ${name} in Doppler (project ${project}, config ${config}, Access).`);
   }
-  if (!ACCEPTED_TOKEN.test(created.token)) throw new Error(`doppler returned an unexpected token kind for ${project}/${config}; nothing was installed.`);
+  if (refusedToken(created.token)) throw new Error(`doppler returned an unexpected token kind for ${project}/${config}; nothing was installed.`);
   return { token: created.token, slug: created.slug };
 }
 
@@ -249,9 +268,10 @@ async function set(args: DopplerArgs, deps: CloudDeps): Promise<number> {
   const setAt = new Date(deps.now()).toISOString();
   if (args.tokenFile) {
     const token = (await deps.readSecretFile(args.tokenFile)).trim();
-    if (!ACCEPTED_TOKEN.test(token)) {
-      throw new Error('That is not a Doppler service token (dp.st.…) or service account token (dp.sa.…). Personal and CLI tokens are refused: they can write and reach every project.');
-    }
+    const refused = refusedToken(token);
+    if (refused) throw new Error(refused);
+    // A service token's access isn't visible from its text; one set mints is always read-only.
+    deps.stderr('runpane cloud: installing a service token you made; runpane cannot check it is read-only, so make sure it was created with Access: read.');
     tokens.push({ project, config: configs[0], content: token });
     records.push({ project, config: configs[0], setAt });
   } else {

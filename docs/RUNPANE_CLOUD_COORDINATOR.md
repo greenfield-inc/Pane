@@ -363,9 +363,10 @@ runpane cloud coordinator doppler unset --all --yes    # shred on the coordinato
   runpane-cloud-<coordinator> --access read --json`), keeping the token in memory only. A workplace with a
   handful of configs (say `dev`, `dev_personal`, `stg`, `prd`) needs a handful of tokens; `--all-configs`
   lists and mints them all. If any mint fails, the ones already minted are revoked and nothing is installed.
-  `--token-file` accepts a `dp.st.` service token or a `dp.sa.` service account token (give the account a
-  read-only role); personal (`dp.pt.`) and CLI (`dp.ct.`) tokens are refused, since they can write and reach
-  every project.
+  `--token-file` accepts only a `dp.st.` service token; create it with Access: read, since runpane can't
+  check that from the token (it prints a reminder). Service account (`dp.sa.`) tokens are refused: they can
+  span projects and configs and may write, which runpane can't verify either. Personal (`dp.pt.`) and CLI
+  (`dp.ct.`) tokens are refused, since they act as you and can write to every project.
 - **On the coordinator:** each token goes through the provider's files API into the stage dir, then
   `install -m 600` to `~/.config/runpane-cloud-coordinator/doppler/<project>.<config>.token` (0700 dir) and the
   staged copy is shredded. Never a command line, the environment, provider metadata, a log or this machine's

@@ -5,6 +5,7 @@ import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildUpgradeScript,
+  downloadToFile,
   parseCloudUpgradeRequest,
   resolveOwnSystemdUnit,
   resolveSystemdUnitFromCgroup,
@@ -113,5 +114,40 @@ describe('buildUpgradeScript', () => {
     expect(buildUpgradeScript("/home/u/it's/pane.deb", 'pane-remote-daemon.service')).toContain(
       `apt-get install -y --allow-downgrades '/home/u/it'\\''s/pane.deb' || sudo -n dpkg -i '/home/u/it'\\''s/pane.deb'`,
     );
+  });
+});
+
+describe('downloadToFile', () => {
+  function streamed(chunks: string[]): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    });
+    return new Response(body, { status: 200 });
+  }
+
+  it('streams the package to a 0600 file without buffering the whole body', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-cloud-download-'));
+    tempDirs.push(dir);
+    const response = streamed(['first-', 'second-', 'third']);
+    const arrayBuffer = vi.spyOn(response, 'arrayBuffer');
+    const destination = path.join(dir, 'pane.deb.partial');
+
+    await downloadToFile('https://example.test/pane.deb', destination, async () => response);
+
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(fs.readFileSync(destination, 'utf8')).toBe('first-second-third');
+    expect(fs.statSync(destination).mode & 0o777).toBe(0o600);
+  });
+
+  it('fails with the HTTP status and writes nothing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-cloud-download-'));
+    tempDirs.push(dir);
+    const destination = path.join(dir, 'pane.deb.partial');
+    await expect(downloadToFile('https://example.test/pane.deb', destination, async () => new Response('gone', { status: 404 })))
+      .rejects.toThrow('ERR_CLOUD_UPGRADE_DOWNLOAD: Download failed with HTTP 404');
+    expect(fs.existsSync(destination)).toBe(false);
   });
 });
