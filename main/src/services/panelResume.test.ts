@@ -20,7 +20,12 @@ const CLAUDE_ID = '4135d392-c6c6-462d-a214-c339474ef77b';
 function harness(
   sessions: PanelResumeSession[],
   panels: ToolPanel[],
-  options: { transcript?: boolean; hidden?: PanelResumeSession[] } = {},
+  options: {
+    transcript?: boolean;
+    hidden?: PanelResumeSession[];
+    /** Per panel: pids an earlier daemon left running, and which of them survive. */
+    strays?: Record<string, { stopped: number[]; survivors?: number[] }>;
+  } = {},
 ) {
   const withHidden = [...sessions, ...(options.hidden ?? [])];
   const running = new Set<string>();
@@ -43,7 +48,13 @@ function harness(
     }),
     waitForLaunch: vi.fn(async () => true),
     claudeTranscriptExists: () => options.transcript,
-    log: () => undefined,
+    stopStrayProcesses: vi.fn(async (panelId: string) => {
+      const stray = options.strays?.[panelId];
+      // A stray must be stopped before its panel starts.
+      if (running.has(panelId)) throw new Error(`stray check ran after ${panelId} started`);
+      return { stopped: stray?.stopped ?? [], survivors: stray?.survivors ?? [] };
+    }),
+    log: vi.fn(),
   };
   const state = (id: string): TerminalPanelState => {
     const panel = byId.get(id);
@@ -147,6 +158,33 @@ describe('PanelResume.resumeInterruptedAgents', () => {
     expect(h.launches[0]?.state).toMatchObject({ hasClaudeSessionId: false, agentSessionId: CLAUDE_ID });
   });
 
+  it('stops the agent an earlier daemon left running before resuming its panel', async () => {
+    const claude = terminalPanel('claude', pane.id, {
+      initialCommand: 'claude', wasInterrupted: true, hasClaudeSessionId: true, agentSessionId: CLAUDE_ID,
+    });
+    const h = harness([pane], [claude], { transcript: true, strays: { claude: { stopped: [374813, 374925] } } });
+
+    const status = await new PanelResume(h.deps).resumeInterruptedAgents();
+
+    expect(h.deps.stopStrayProcesses).toHaveBeenCalledWith('claude');
+    expect(status.panels).toEqual([expect.objectContaining({ panelId: 'claude', state: 'running' })]);
+    expect(h.deps.log).toHaveBeenCalledWith(expect.stringContaining('pids 374813, 374925'));
+  });
+
+  it('does not start a second agent while the earlier one survives', async () => {
+    const claude = terminalPanel('claude', pane.id, { initialCommand: 'claude', wasInterrupted: true });
+    const h = harness([pane], [claude], { strays: { claude: { stopped: [50], survivors: [50] } } });
+
+    const status = await new PanelResume(h.deps).resumeInterruptedAgents();
+
+    expect(h.launches).toEqual([]);
+    expect(status.panels).toEqual([expect.objectContaining({
+      panelId: 'claude',
+      state: 'failed',
+      error: 'an earlier process for this panel is still running (pids 50)',
+    })]);
+  });
+
   it('records a failed start and keeps going', async () => {
     const panels = [
       terminalPanel('bad', pane.id, { initialCommand: 'claude', wasInterrupted: true }),
@@ -181,6 +219,17 @@ describe('PanelResume.ensureRunning', () => {
     expect(h.deps.waitForLaunch).toHaveBeenCalledWith('shell', 1234);
   });
 
+  it('leaves stray processes of a plain shell panel alone', async () => {
+    const shell = terminalPanel('shell', pane.id, { initialCommand: 'bash' });
+    const h = harness([pane], [shell]);
+    const resume = new PanelResume(h.deps);
+    resume.enable();
+
+    await resume.ensureRunning(shell);
+
+    expect(h.deps.stopStrayProcesses).not.toHaveBeenCalled();
+  });
+
   it('shares one start between a resume in progress and a submit', async () => {
     const claude = terminalPanel('claude', pane.id, { initialCommand: 'claude', wasInterrupted: true });
     const h = harness([pane], [claude]);
@@ -196,6 +245,7 @@ describe('PanelResume.ensureRunning', () => {
     await Promise.resolve();
     expect(resume.runState(claude)).toBe('resuming');
     const submit = resume.ensureRunning(claude);
+    await vi.waitFor(() => expect(h.deps.startTerminal).toHaveBeenCalled());
     finish();
     await Promise.all([eager, submit]);
 

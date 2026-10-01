@@ -6,6 +6,7 @@ import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeS
 import { panelManager } from './panelManager';
 import { PanelResume, type PanelResumeSession } from './panelResume';
 import { ScrollbackCheckpoint } from './panelResumeCheckpoint';
+import { stopStrayPanelProcesses } from './strayPanelProcesses';
 import { terminalPanelManager } from './terminalPanelManager';
 
 function toResumeSession(row: SessionRow): PanelResumeSession {
@@ -51,6 +52,10 @@ export function createPanelResume(
     claudeTranscriptExists: sessionId => canReadClaudeTranscripts()
       ? findClaudeSessionTranscript(sessionId) !== undefined
       : undefined,
+    stopStrayProcesses: async panelId => {
+      const { trees, survivors } = await stopStrayPanelProcesses(panelId);
+      return { stopped: trees.flatMap(tree => tree.pids), survivors };
+    },
     log,
   });
 }

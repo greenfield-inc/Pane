@@ -171,8 +171,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const sessionManager = new SessionManager(databaseService, analyticsManager);
   sessionManager.initializeFromDatabase();
 
-  // Headless starts follow a crash, a restart or a sandbox power-off: no PTY
-  // survived, so clear stale runtime flags before anything can start one.
+  // Headless starts follow a crash, a restart or a sandbox power-off. Clear
+  // stale runtime flags before anything can start a PTY; a resume stops any
+  // agent an earlier daemon left running first (strayPanelProcesses.ts).
   const logResume = (message: string, error?: Error) => {
     if (error) logger.warn(message, error);
     else logger.info(message);
@@ -540,6 +541,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       }
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
+      // Stop the panels' processes here: systemd's stop does not reach them
+      // (see strayPanelProcesses.ts), and a restart resumes the agents.
+      const survivors = await terminalPanelManager.stopAllTerminalProcesses();
+      if (survivors.length > 0) logger.warn(`[Pane daemon] ${survivors.length} terminal process(es) survived shutdown: ${survivors.join(', ')}`);
       resourceMonitorService.stop();
       await spotlightManager.disableAll();
       await sessionManager.cleanup();
