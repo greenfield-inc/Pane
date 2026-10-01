@@ -10,6 +10,7 @@ import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
 import { Badge } from './ui/Badge';
 
 const GUTTER = 8;
+const SIDEBAR_EDGE = 'var(--border-hairline) solid var(--color-border-primary)';
 // SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits it.
 // The bottom hairline is an inset shadow rather than a border so it does not
 // take a pixel from the 38px row: controls stay centered on whole pixels.
@@ -77,6 +78,8 @@ function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
 
 interface WindowTitleBarProps {
   projects: Project[];
+  sidebarWidth: number;
+  sidebarCollapsed: boolean;
   controlsSlotRef?: (element: HTMLDivElement | null) => void;
 }
 
@@ -94,7 +97,7 @@ interface WindowTitleBarProps {
  * is `document.title`, which this also owns, that carries the pane name. That is
  * true on every platform for the taskbar and task switcher.
  */
-export function WindowTitleBar({ projects, controlsSlotRef }: WindowTitleBarProps) {
+export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, controlsSlotRef }: WindowTitleBarProps) {
   const setTrailingSlot = useTitleBarSlotStore(state => state.setTrailingSlot);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
@@ -126,6 +129,15 @@ export function WindowTitleBar({ projects, controlsSlotRef }: WindowTitleBarProp
       style={{ ...TITLE_BAR_STYLE, ...(isMac() ? MAC_INSET_STYLE : OVERLAY_INSET_STYLE) }}
       data-testid="window-title-bar"
     >
+      {/* Over the sidebar the bar takes the sidebar's own colour and edge and
+          drops its bottom hairline, so the sidebar runs to the top of the
+          window, as in VS Code. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 left-0 bg-surface-secondary transition-[width] duration-reveal ease-out-strong"
+        style={{ width: sidebarCollapsed ? 48 : sidebarWidth, borderRight: SIDEBAR_EDGE }}
+        data-testid="window-title-bar-sidebar-segment"
+      />
       <div
         ref={controlsSlotRef}
         className="absolute inset-y-0 flex items-center gap-0.5"
