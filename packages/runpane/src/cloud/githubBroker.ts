@@ -3,7 +3,7 @@ import { decodeBrokerStatus } from './agent/brokerClient';
 import type { CloudDeps } from './commands';
 import { pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { pushPeersFile } from './peers';
-import type { SandboxHandle } from './provider';
+import { SANDBOX_HOME, type SandboxHandle } from './provider';
 import type { CloudHostRecord } from './store';
 
 /**
@@ -14,7 +14,6 @@ import type { CloudHostRecord } from './store';
  * the Session calls the coordinator with its own caller token from its peers list.
  */
 
-export const SANDBOX_HOME = '/home/user';
 const LOCAL_BIN = `${SANDBOX_HOME}/.local/bin`;
 const GH_SHIM_PATH = `${LOCAL_BIN}/gh`;
 const GIT_CREDENTIAL_HELPER_PATH = `${LOCAL_BIN}/git-credential-runpane`;

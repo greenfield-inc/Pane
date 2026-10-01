@@ -1,4 +1,4 @@
-import type { SandboxHandle } from './provider';
+import { SANDBOX_HOME, type SandboxHandle } from './provider';
 import type { CloudCredentials } from './store';
 
 /**
@@ -8,7 +8,7 @@ import type { CloudCredentials } from './store';
  * metadata or in output, and Claude Code's first-run prompts are pre-answered for the Session.
  */
 
-const ENV_FILE = '/home/user/.runpane-cloud/agent.env';
+const ENV_FILE = `${SANDBOX_HOME}/.runpane-cloud/agent.env`;
 const DROP_IN_NAME = 'runpane-cloud-agent.conf';
 
 export type AgentCredentialKind = 'anthropic-api-key' | 'claude-oauth-token';
@@ -34,7 +34,7 @@ export async function placeAgentCredentials(
   // ~/.runpane-cloud is bootstrap's 0700 state dir, so the file is private from the moment it lands.
   await sandbox.writeFile(ENV_FILE, `${lines.join('\n')}\n`);
 
-  const trusted = JSON.stringify([...new Set(['/home/user', ...trustedDirs])]);
+  const trusted = JSON.stringify([...new Set([SANDBOX_HOME, ...trustedDirs])]);
   const script = `set -e
 chmod 600 ${ENV_FILE}
 python3 - <<'PY'

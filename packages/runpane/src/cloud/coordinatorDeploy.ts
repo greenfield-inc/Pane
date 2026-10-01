@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { CloudDeps } from './commands';
 import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
 import { pushDirectory } from './coordinatorSync';
-import { CloudProviderError, type CloudProvider, type CloudSize } from './provider';
+import { CloudProviderError, SANDBOX_HOME, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
 import { resolveBoatOrg } from './wallet';
 import {
@@ -25,7 +25,6 @@ import {
 
 const COORDINATOR_PORT = 47300;
 const SCOPED_KEY_ACTIONS = ['sandbox.read', 'sandbox.stop', 'sandbox.resume'];
-const SANDBOX_HOME = '/home/user';
 const STAGE_DIR = `${SANDBOX_HOME}/.runpane-cloud/coordinator-stage`;
 const COORDINATOR_HOME = `${SANDBOX_HOME}/.config/runpane-cloud-coordinator`;
 const COORDINATOR_APP = `${SANDBOX_HOME}/.local/share/runpane-cloud-coordinator/app`;

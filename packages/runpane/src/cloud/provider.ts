@@ -61,6 +61,13 @@ export interface SandboxCommandResult {
 }
 
 /**
+ * The home of the user that runs bootstrap and the Pane daemon in every sandbox (boat's login user). Code
+ * that writes into a Session builds its paths from this, so a provider with another login user changes one
+ * place. Bootstrap itself takes it as `sandboxHome`.
+ */
+export const SANDBOX_HOME = '/home/user';
+
+/**
  * What bootstrap needs to run inside a sandbox. It matches bootstrap's SandboxHandle
  * (bootstrap/types.ts): scripts and file contents are never logged, because
  * they can carry secrets and stdout can carry the pairing code.
