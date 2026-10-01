@@ -48,6 +48,7 @@ describe('runSafeToStop', () => {
       version: '2.4.141',
       blockers: [],
       flush: FLUSHED,
+      stopLease: null,
     });
     expect(flush).toHaveBeenCalledTimes(1);
   });
@@ -144,6 +145,7 @@ describe('parseSafeToStopRequest', () => {
       flush: 'if-safe',
       recentOutputMs: DEFAULT_RECENT_OUTPUT_MS,
       clientWindowMs: DEFAULT_CLIENT_WINDOW_MS,
+      stopLeaseMs: 0,
     });
   });
 

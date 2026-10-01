@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { hashRemoteDaemonToken } from '../auth';
+import { PaneCommandError } from '../../core/commandError';
 import { PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
+import { SESSION_STOPPING_CODE } from './stopLease';
 
 const servers: PaneRemoteHttpApiServer[] = [];
 afterEach(async () => {
@@ -15,7 +17,7 @@ async function startServer() {
   const calls: string[] = [];
   const registry = new PaneCommandRegistry();
   for (const channel of [
-    'runpane:cloud:safe-to-stop', 'runpane:cloud:upgrade', 'runpane:cloud:coordinator-client:pair',
+    'runpane:cloud:safe-to-stop', 'runpane:cloud:stop-lease:release', 'runpane:cloud:upgrade', 'runpane:cloud:coordinator-client:pair',
     'runpane:cloud:coordinator-client:revoke', 'runpane:panels:submit', 'runpane:repos:list',
   ]) {
     registry.register(channel, (..._args: PaneCommandValue[]) => {
@@ -36,7 +38,7 @@ async function startServer() {
   const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) });
   await server.start();
   servers.push(server);
-  return { server, calls };
+  return { server, calls, registry };
 }
 
 function request(
@@ -100,11 +102,11 @@ function errorCode(body: string): string | undefined {
 describe('coordinator-scoped client on the remote HTTP API', () => {
   it('may call the cloud channels the coordinator needs', async () => {
     const { server, calls } = await startServer();
-    for (const channel of ['runpane:cloud:safe-to-stop', 'runpane:cloud:upgrade']) {
+    for (const channel of ['runpane:cloud:safe-to-stop', 'runpane:cloud:stop-lease:release', 'runpane:cloud:upgrade']) {
       const response = await request(server, 'POST', '/invoke', 'coord-token', { channel, args: [{}] });
       expect(response.statusCode).toBe(200);
     }
-    expect(calls).toEqual(['runpane:cloud:safe-to-stop', 'runpane:cloud:upgrade']);
+    expect(calls).toEqual(['runpane:cloud:safe-to-stop', 'runpane:cloud:stop-lease:release', 'runpane:cloud:upgrade']);
   });
 
   it('is refused every other channel, the event stream and WebSocket upgrades', async () => {
@@ -125,5 +127,15 @@ describe('coordinator-scoped client on the remote HTTP API', () => {
     const response = await request(server, 'POST', '/invoke', 'full-token', { channel: 'runpane:repos:list', args: [{}] });
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual(['runpane:repos:list']);
+  });
+
+  it('answers a call refused by a stop lease with a retryable 503 ERR_SESSION_STOPPING', async () => {
+    const { server, calls, registry } = await startServer();
+    registry.setInvokeFence(channel => (channel === 'runpane:panels:submit'
+      ? new PaneCommandError('This cloud Session is being stopped', SESSION_STOPPING_CODE)
+      : null));
+    const response = await request(server, 'POST', '/invoke', 'full-token', { channel: 'runpane:panels:submit', args: [{}] });
+    expect([response.statusCode, errorCode(response.body)]).toEqual([503, 'ERR_SESSION_STOPPING']);
+    expect(calls).toEqual([]);
   });
 });

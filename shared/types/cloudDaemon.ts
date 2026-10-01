@@ -13,6 +13,8 @@ export type CloudSafeToStopCondition =
   | 'watcher-active'
   | 'pr-checks-pending'
   | 'user-client-attached'
+  /** A stop lease was asked for while other calls to this daemon were still running. */
+  | 'call-in-flight'
   /** The flush ran but could not be verified durable (`flush.failures` says why). */
   | 'flush-failed';
 
@@ -35,6 +37,18 @@ export interface CloudSafeToStopRequest {
   recentOutputMs?: number;
   /** A user client that invoked within this window blocks the stop. */
   clientWindowMs?: number;
+  /**
+   * The coordinator's stop lease: when the answer is safe, the daemon refuses every other call
+   * (`ERR_SESSION_STOPPING`) for this long, so nothing new starts between "safe" and the provider's stop.
+   * 0 (default): no lease.
+   */
+  stopLeaseMs?: number;
+}
+
+/** A stop lease the daemon granted with a safe answer; released by `runpane:cloud:stop-lease:release` or expiry. */
+export interface CloudStopLease {
+  expiresAt: string;
+  ms: number;
 }
 
 export interface CloudWalCheckpoint {
@@ -67,6 +81,8 @@ export interface CloudSafeToStopResult {
   blockers: CloudSafeToStopBlocker[];
   /** Null when no flush ran (blocked under `if-safe`, or `never`). */
   flush: CloudDurableFlushResult | null;
+  /** Granted only with a safe answer to a request with `stopLeaseMs`; null otherwise. */
+  stopLease: CloudStopLease | null;
 }
 
 export type CloudReadinessState = 'starting' | 'ready' | 'degraded';
