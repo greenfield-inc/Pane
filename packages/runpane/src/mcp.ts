@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
-import { callChatPanelTool, CHAT_TOOLSET, chatIdOf, chatPanelResource, chatPanelTools, readChatPanel, recordStartedAgent } from './chatPanel';
+import { callChatPanelTool, CHAT_TOOLSET, chatIdOf, chatPanelResource, chatPanelTools, INLINE_CARD_TOOLS, inlineCardMeta, readChatPanel, recordStartedAgent } from './chatPanel';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -80,6 +80,8 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         annotations: tool.annotations,
+        // With the panel toolset on, agent results render as an inline Pane card.
+        _meta: chatPanel && INLINE_CARD_TOOLS.has(tool.name) ? inlineCardMeta : undefined,
       })),
       ...(chatPanel ? chatPanelTools : []),
     ],

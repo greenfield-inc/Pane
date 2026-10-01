@@ -547,6 +547,9 @@ importers:
       eslint:
         specifier: ^9.17.0
         version: 9.31.0(jiti@2.7.0)
+      lucide-react:
+        specifier: 0.468.0
+        version: 0.468.0(react@19.1.0)
       react:
         specifier: 19.1.0
         version: 19.1.0

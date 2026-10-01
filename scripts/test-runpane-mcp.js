@@ -587,8 +587,12 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
       'runpane:panes:focus': (args) => ({ ok: true, paneId: args[0].paneId, panelId: args[0].panelId, focused: true }),
       'runpane:panes:list': { ok: true, panes: [{
         id: 'pane-7', paneId: 'pane-7', name: 'fix-login', status: 'running', worktreePath: '/work/app-fix-login', repoId: 3,
-        panelCount: 1, pinned: true, agentStatus: 'active', ownership: 'pane',
+        repoName: 'app', panelCount: 1, pinned: true, agentStatus: 'active', ownership: 'pane',
       }] },
+      'sessions:get-git-status': { success: true, data: { gitStatus: {
+        state: 'ahead', additions: 3, deletions: 1, commitAdditions: 38, commitDeletions: 5,
+        prNumber: 41, prTitle: 'Return to the requested page after login', prState: 'OPEN', prUrl: 'https://github.com/acme/app/pull/41',
+      } } },
       'runpane:panels:submit': (args) => ({
         ok: true, panelId: args[0].panelId, paneId: 'pane-7', inputBytes: 1, enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
         nextCommand: `runpane panels wait --panel ${args[0].panelId} --for ready --timeout-ms 30000 --json`, sentAt: '2026-09-25T00:00:01.000Z',
@@ -601,12 +605,13 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
             assert.ok([true, false].includes(tool.annotations?.[hint]), `${tool.name} must set ${hint}`);
           }
         }
+        assert.deepEqual(tools.find((tool) => tool.name === 'agents_start')._meta, { ui: { resourceUri: 'ui://pane/panel.html' } }, 'agent results render as inline cards');
         const panel = tools.find((tool) => tool.name === 'agents_panel');
         assert.equal(panel.title, 'Chat agents');
         assert.deepEqual(panel._meta['openai/ui'].entrypoints, [{ type: 'thread' }, { type: 'global' }]);
         assert.equal(panel.icons[0].mimeType, 'image/svg+xml');
         const uri = panel._meta.ui.resourceUri;
-        for (const name of ['agents_panel_status', 'agents_panel_open']) {
+        for (const name of ['agents_panel_status', 'agents_card', 'agents_panel_open']) {
           assert.deepEqual(tools.find((tool) => tool.name === name)._meta.ui.visibility, ['app'], `${name} is for the panel only`);
         }
 
@@ -625,10 +630,13 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
 
         const shown = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
         assert.equal(shown.isError, undefined, shown.content[0].text);
-        assert.deepEqual(shown.structuredContent.agents, [{
-          paneId: 'pane-7', panelId: 'panel-8', name: 'fix-login', status: 'blocked',
-          lastLine: 'Allow edits to login.ts? (y/n)', link: 'pane://open?pane=pane-7&panel=panel-8',
-        }]);
+        const card = {
+          paneId: 'pane-7', panelId: 'panel-8', name: 'fix-login', repo: 'app', status: 'blocked',
+          screen: ['Reading login.ts', 'Allow edits to login.ts? (y/n)'], link: 'pane://open?pane=pane-7&panel=panel-8',
+          diff: { adds: 41, dels: 6 },
+          pr: { number: 41, draft: false, title: 'Return to the requested page after login', state: 'open', url: 'https://github.com/acme/app/pull/41' },
+        };
+        assert.deepEqual(shown.structuredContent.agents, [card]);
         const otherChat = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-b') });
         assert.deepEqual(otherChat.structuredContent.agents, []);
 
@@ -640,6 +648,18 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         const unconfirmed = await client.callTool({ name: 'agents_send', arguments: { panel: 'panel-8', text: 'y', yes: true } });
         assert.equal(unconfirmed.isError, true);
         assert.equal(JSON.parse(unconfirmed.content[0].text).delivered, false);
+
+        // The model steers the panel to one agent; the panel's next refresh carries the choice.
+        const focused = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'fix-login' }, _meta: chat('chat-a') });
+        assert.deepEqual(focused.structuredContent.agent, card);
+        const steered = await client.callTool({ name: 'agents_panel_status', arguments: { chat: 'chat-a' } });
+        assert.equal(steered.structuredContent.focus, 'pane-7');
+        const stranger = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'fix-login' }, _meta: chat('chat-b') });
+        assert.equal(stranger.isError, true);
+
+        // An inline card reads one agent by id.
+        const inline = await client.callTool({ name: 'agents_card', arguments: { paneId: 'pane-7', panelId: 'panel-8' } });
+        assert.deepEqual(inline.structuredContent.agent, card);
 
         const opened = await client.callTool({ name: 'agents_panel_open', arguments: { paneId: 'pane-7', panelId: 'panel-8' } });
         assert.equal(opened.isError, undefined, opened.content[0].text);

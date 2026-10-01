@@ -4,6 +4,7 @@ import { boundary, decodeBoundary, type BoundarySchema, type JsonObject, type Js
 
 const hostContextSchema = boundary.object({
   theme: boundary.optional(boundary.enumeration('light', 'dark')),
+  displayMode: boundary.optional(boundary.enumeration('inline', 'fullscreen', 'pip')),
   styles: boundary.optional(boundary.object({ variables: boundary.optional(boundary.jsonObject) })),
 });
 export type HostContext = ReturnType<typeof hostContextSchema.decode>;
@@ -91,11 +92,16 @@ export async function connect(): Promise<HostContext> {
     post({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { width: Math.ceil(width), height: Math.ceil(height) } });
   });
   observer.observe(document.documentElement);
-  return hostContext ?? { theme: undefined, styles: undefined };
+  return hostContext ?? { theme: undefined, displayMode: undefined, styles: undefined };
 }
 
 export function callTool(name: string, args: JsonObject): Promise<ToolResult> {
   return request('tools/call', { name, arguments: args }, toolResultSchema);
+}
+
+/** Asks the host to open a link, such as a pull request, in the browser. */
+export async function openLink(url: string): Promise<void> {
+  await request('ui/open-link', { url }, boundary.json);
 }
 
 /** Tells the model what the panel shows. Each call replaces the previous context. */

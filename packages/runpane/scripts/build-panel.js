@@ -12,7 +12,7 @@ async function main() {
     configFile: false,
     root: panelDir,
     logLevel: 'warn',
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: { 'process.env.NODE_ENV': '"production"', __PANEL_DIRECTION__: JSON.stringify(process.env.PANEL_DIRECTION ?? 'sidebar') },
     build: {
       write: false,
       target: 'es2022',
@@ -33,7 +33,7 @@ async function main() {
     .replace('<!-- PANEL_STYLE -->', () => `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`)
     .replace('<!-- PANEL_SCRIPT -->', () => `<script>${scripts[0].code.replace(/<\/script/gi, '<\\/script')}</script>`);
   fs.mkdirSync(path.join(packageDir, 'dist'), { recursive: true });
-  fs.writeFileSync(path.join(packageDir, 'dist', 'panel.html'), html);
+  fs.writeFileSync(path.join(packageDir, 'dist', process.env.PANEL_OUT ?? 'panel.html'), html);
 }
 
 main().catch((error) => {
