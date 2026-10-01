@@ -402,7 +402,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     checkpointWal: () => databaseService.checkpointWal(),
     paneDirectory: getAppDirectory(),
   });
-  registerSessionPortsHandlers({
+  const sessionPorts = registerSessionPortsHandlers({
     commandRegistry,
     panelIds: () => terminalPanelManager.getAllPanelIds(),
     panelPid: panelId => terminalPanelManager.getPanelPid(panelId),
@@ -413,7 +413,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: message => logger.info(`[Pane daemon] ${message}`),
   });
   registerAgentNotesHandler(commandRegistry);
-  whenCloudSession(() => {
+  const stopWaitingForAgentNotes = whenCloudSession(() => {
     try {
       const notes = writeSessionAgentNotes();
       if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session notes for agents: ${notes.join(', ')}`);
@@ -514,6 +514,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      // First: Ports' timers and the agent-notes wait read terminals, projects and config, and emit events.
+      sessionPorts?.stop();
+      stopWaitingForAgentNotes();
       // Keep the latest scrollback; start-up recovery marks the agents interrupted.
       if (scrollbackCheckpoint) {
         scrollbackCheckpoint.stop();

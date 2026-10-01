@@ -86,6 +86,10 @@ export class SessionPortsService {
   private projectsKey: string | undefined;
   private timers: NodeJS.Timeout[] = [];
   private certFailure: { at: number; error: string } | undefined;
+  /** Set by stop(): work already under way finishes without events, new timers or auto-opens. */
+  private stopped = false;
+  /** Bumped by start() and stop(), so a boot from an earlier start() never arms timers. */
+  private generation = 0;
 
   constructor(private readonly deps: SessionPortsDependencies) {}
 
@@ -163,8 +167,11 @@ export class SessionPortsService {
   }
 
   private async emitChanged(): Promise<void> {
+    if (this.stopped) return;
     try {
-      this.deps.emit(await this.snapshot());
+      const snapshot = await this.snapshot();
+      if (this.stopped) return;
+      this.deps.emit(snapshot);
     } catch (error) {
       this.deps.log(`ports: could not send the change event: ${String(error)}`);
     }
@@ -576,6 +583,7 @@ export class SessionPortsService {
 
     if (state.autoOpen) {
       for (const suggestion of this.suggested) {
+        if (this.stopped) return;
         try {
           await this.exclusive(() => this.openLocked({ port: suggestion.port }, { source: 'auto' }));
         } catch (error) {
@@ -595,13 +603,18 @@ export class SessionPortsService {
   start(options: { reconcileIntervalMs?: number; detectIntervalMs?: number; bootRetryMs?: number; bootAttempts?: number } = {}): void {
     const bootRetryMs = options.bootRetryMs ?? 5_000;
     let attempts = options.bootAttempts ?? 36;
+    this.stopped = false;
+    const generation = ++this.generation;
+    const current = () => generation === this.generation;
     const boot = async () => {
       const self = await this.deps.serve.self().catch(() => ({ running: false, backendState: 'unknown' }));
+      if (!current()) return;
       if (!self.running && --attempts > 0) {
         this.timers.push(setTimeout(() => void boot(), bootRetryMs).unref());
         return;
       }
       await this.reconcile('boot').catch(error => this.deps.log(`ports: boot reconcile failed: ${String(error)}`));
+      if (!current()) return;
       this.timers.push(setInterval(() => {
         void this.reconcile('periodic').catch(error => this.deps.log(`ports: reconcile failed: ${String(error)}`));
       }, options.reconcileIntervalMs ?? 60_000).unref());
@@ -612,7 +625,10 @@ export class SessionPortsService {
     }, options.detectIntervalMs ?? 5_000).unref());
   }
 
+  /** Clears the timers; a reconcile or detection round under way finishes without an event or a new timer. */
   stop(): void {
+    this.stopped = true;
+    this.generation += 1;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
   }

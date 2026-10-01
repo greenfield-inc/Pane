@@ -398,6 +398,53 @@ describe('SessionPortsService.detect', () => {
   });
 });
 
+describe('SessionPortsService.stop', () => {
+  /** Holds every `self()` call until `release()`, as a slow tailscaled would. */
+  function holdSelf(h: Harness): () => void {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const self = h.serve.self.bind(h.serve);
+    h.serve.self = async () => {
+      await gate;
+      return self();
+    };
+    return release;
+  }
+
+  const settle = () => new Promise(resolve => setTimeout(resolve, 30));
+
+  it('ends a boot that was waiting on Tailscale: no reconcile, no event, no new timers', async () => {
+    const h = makeHarness();
+    await h.service.open({ port: 8787 });
+    h.serve.entries.clear();
+    h.serve.calls = [];
+    h.events.length = 0;
+    const release = holdSelf(h);
+
+    h.service.start({ reconcileIntervalMs: 5, detectIntervalMs: 5, bootRetryMs: 5 });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    h.service.stop();
+    release();
+    await settle();
+
+    expect(h.serve.calls).toEqual([]);
+    expect(h.events).toEqual([]);
+  });
+
+  it('drops the event of a detection round that was running when it stopped', async () => {
+    const h = makeHarness();
+    withPanelServer(h);
+    const release = holdSelf(h);
+
+    const pending = h.service.detect();
+    h.service.stop();
+    release();
+    await pending;
+
+    expect(h.events).toEqual([]);
+  });
+});
+
 describe('SessionPortsService with an unreadable state file', () => {
   const unreadable: Array<[string, string]> = [
     ['not JSON', '{"version": 1, "ports": ['],
