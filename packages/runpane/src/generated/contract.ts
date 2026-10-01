@@ -1415,9 +1415,9 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "cloud coordinator deploy",
-      "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+      "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (alerts on orphans; never deletes) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
       "usage": [
-        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]"
+        "runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -3717,9 +3717,9 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud coordinator deploy": [
         "Usage:",
-        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
         "",
-        "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+        "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (alerts on orphans; never deletes) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
         "",
         "Options:",
         "  --yes                          Confirm; the command changes billed cloud resources.",
@@ -3727,8 +3727,10 @@ export const RUNPANE_CONTRACT = {
         "  --size <small|default|large>   Machine size (default small).",
         "  --from <snapshot>              Named snapshot to start from (default the saved golden snapshot).",
         "  --no-golden                    Start from the plain image.",
-        "  --reconcile                    Turn the reconciler on (default: on; stop + alert only, never deletes).",
+        "  --reconcile                    Turn the reconciler on (default: on; alerts on orphans, never deletes).",
         "  --no-reconcile                 Turn the reconciler off.",
+        "  --stop-orphans                 Let the reconciler stop an orphan it has seen for 6 hours (default: alert only).",
+        "  --no-stop-orphans              Only alert on orphans again.",
         "  --idle-check-seconds <n>       How often idle-stop asks each awake Session (default 300).",
         "  --wake-grace-seconds <n>       How long after a wake idle-stop leaves a Session alone (default 600).",
         "  --pin-version <version>        Pane version to upgrade Sessions to when they wake.",
@@ -5416,7 +5418,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "cloud coordinator deploy": [
         "Usage:",
-        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
+        "  runpane cloud coordinator deploy --yes [--name <host>] [--size <small|default|large>] [--from <snapshot>|--no-golden] [--reconcile|--no-reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>] [--pin-version <version> --pin-deb-url <url> --pin-deb-sha256 <hex>|--no-pin] [--key-ttl <duration>] [--boat-org <org|personal>] [--json]",
         "",
         "`runpane cloud coordinator deploy` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator deploy"
@@ -15777,7 +15779,7 @@ export const RUNPANE_CONTRACT = {
       },
       "cloud coordinator deploy": {
         "name": "cloud coordinator deploy",
-        "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (stop + alert only) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
+        "summary": "Create (or update in place) the always-on coordinator: a small sandbox on your tailnet running idle-stop, reconcile (alerts on orphans; never deletes) and wake, with a provider key scoped to read, stop and resume. Later `cloud new` Sessions are wired to it.",
         "details": "Creates a small sandbox from the golden image, joins it to the tailnet as tag:rp-session (Tailscale SSH off), mints a provider key scoped to sandbox.read/stop/resume, installs the coordinator service from this CLI's own package, writes this machine's caller token to <cloud dir>/coordinator.json (0600) and pushes the directory. Run it again to update the service or change settings in place; it never creates a second coordinator. Afterwards `runpane cloud new` adds the coordinator's paired client to each Session so idle-stop can ask safe-to-stop.",
         "requiresPaneDaemon": false,
         "mutates": true,
@@ -15813,12 +15815,22 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--reconcile",
             "required": false,
-            "description": "Turn the reconciler on (default: on; stop + alert only, never deletes)."
+            "description": "Turn the reconciler on (default: on; alerts on orphans, never deletes)."
           },
           {
             "name": "--no-reconcile",
             "required": false,
             "description": "Turn the reconciler off."
+          },
+          {
+            "name": "--stop-orphans",
+            "required": false,
+            "description": "Let the reconciler stop an orphan it has seen for 6 hours (default: alert only)."
+          },
+          {
+            "name": "--no-stop-orphans",
+            "required": false,
+            "description": "Only alert on orphans again."
           },
           {
             "name": "--idle-check-seconds",

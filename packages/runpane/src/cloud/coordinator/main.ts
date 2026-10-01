@@ -21,7 +21,7 @@ import { buildCoordinator, renderSystemdUnit, startCoordinator } from './service
 
 const USAGE = `Usage: runpane-cloud-coordinator <command> [options]
 
-The always-on part of \`runpane cloud\`: idle-stop, reconcile (stop + alert only), runaway guard, /cloud/wake.
+The always-on part of \`runpane cloud\`: idle-stop, reconcile (alert on orphans; never deletes), runaway guard, /cloud/wake.
 
 On the coordinator machine:
   init --listen-host <tailnet-ip> --api-key-file <file> --managed-prefix <prefix>

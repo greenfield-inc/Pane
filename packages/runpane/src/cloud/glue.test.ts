@@ -62,6 +62,9 @@ test('coordinator deploy args: a pin needs version, url and sha256', () => {
   assert.equal(parsed.reconcile, false);
   assert.equal(parsed.idleCheckSeconds, 60);
   assert.equal(parsed.name, 'rp-coord2');
+  assert.equal(parsed.stopOrphans, undefined);
+  assert.equal(parseCoordinatorArgs(['deploy', '--stop-orphans']).stopOrphans, true);
+  assert.equal(parseCoordinatorArgs(['deploy', '--no-stop-orphans']).stopOrphans, false);
 });
 
 test('coordinator deploy creates a small tailnet sandbox, a scoped key, and wires this machine to it', async () => {
@@ -86,6 +89,7 @@ test('coordinator deploy creates a small tailnet sandbox, a scoped key, and wire
   assert.equal(config.listenHost, '100.64.0.9');
   assert.equal(config.selfSandboxId, deployment.sandboxId);
   assert.equal(config.managedNamePrefix, 'rp-test-');
+  assert.deepEqual(config.reconcile, { enabled: true, stopOrphans: false }, 'orphans are alert-only unless --stop-orphans');
   assert.equal(harness.world.files.get(`${deployment.sandboxId}:/home/user/.runpane-cloud/coordinator-stage/boat-scoped-key`), 'scoped-secret-value\n');
 
   const client = JSON.parse(await fs.readFile(harness.deps.store.coordinatorClientPath, 'utf8'));
@@ -112,7 +116,7 @@ test('coordinator deploy steps the scoped key lifetime down when the account key
 test('coordinator deploy again updates in place: no new sandbox or key, pin applied', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
-  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', '--idle-check-seconds', '60']), 0);
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', '--idle-check-seconds', '60', '--stop-orphans']), 0);
   const creates = harness.world.calls.filter((call) => call.startsWith('create ')).length;
   const sha = 'a'.repeat(64);
   assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json', '--pin-version', '2.4.142', '--pin-deb-url', 'https://example.test/pane.deb', '--pin-deb-sha256', sha]), 0);
@@ -125,6 +129,7 @@ test('coordinator deploy again updates in place: no new sandbox or key, pin appl
   assert.equal(config.pinnedDebSha256, sha);
   // Timings given at the first deploy survive a redeploy that does not repeat them.
   assert.equal(config.idleStop.intervalSeconds, 60);
+  assert.equal(config.reconcile.stopOrphans, true);
 });
 
 test('coordinator stop, status, start and destroy', async () => {

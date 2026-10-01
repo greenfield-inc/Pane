@@ -36,6 +36,9 @@ export interface CoordinatorConfig {
     enabled: boolean;
     intervalSeconds: number;
     orphanGraceSeconds: number;
+    /** Off: orphans are only alerted on. On: stopped after `orphanStopGraceSeconds` as an orphan. */
+    stopOrphans: boolean;
+    orphanStopGraceSeconds: number;
     maxOrphanStopsPerRun: number;
     dryRun: boolean;
   };
@@ -127,6 +130,8 @@ const rawConfigSchema = boundary.object({
     enabled: optionalBoolean,
     intervalSeconds: optionalNumber,
     orphanGraceSeconds: optionalNumber,
+    stopOrphans: optionalBoolean,
+    orphanStopGraceSeconds: optionalNumber,
     maxOrphanStopsPerRun: optionalNumber,
     dryRun: optionalBoolean,
   })),
@@ -281,6 +286,8 @@ export function parseCoordinatorConfig(value: JsonValue, home = defaultCoordinat
       enabled: raw.reconcile?.enabled ?? true,
       intervalSeconds: positive(raw.reconcile?.intervalSeconds, 600, 'reconcile.intervalSeconds'),
       orphanGraceSeconds: raw.reconcile?.orphanGraceSeconds ?? 1800,
+      stopOrphans: raw.reconcile?.stopOrphans ?? false,
+      orphanStopGraceSeconds: positive(raw.reconcile?.orphanStopGraceSeconds, 21_600, 'reconcile.orphanStopGraceSeconds'),
       maxOrphanStopsPerRun: raw.reconcile?.maxOrphanStopsPerRun ?? 3,
       dryRun: raw.reconcile?.dryRun ?? false,
     },

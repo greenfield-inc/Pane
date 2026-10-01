@@ -644,9 +644,12 @@ then on:
 - Sessions created before the deploy have no coordinator client, so idle-stop skips them (deploy lists
   them).
 
-It manages sandboxes named `<name-prefix>-*` and nothing else. Its reconciler stops (never deletes)
-running sandboxes with that prefix that are not in your directory after 30 minutes, so give your cloud
-Sessions a prefix no other tooling uses (`runpane cloud setup --name-prefix ...`).
+It manages sandboxes named `<name-prefix>-*` and nothing else. Its reconciler alerts (`orphan-found`) on
+running sandboxes with that prefix that are not in your directory after 30 minutes, and leaves them running
+unless you deploy with `--stop-orphans`; then it stops (never deletes) one it has seen as an orphan for six
+hours. Give your cloud Sessions a prefix no other tooling uses (`runpane cloud setup --name-prefix ...`), and
+manage one set of Sessions from one `runpane cloud` store: each `new`, `destroy` and `sync` replaces the
+coordinator's directory with that store's hosts, so Sessions from another machine's store look like orphans.
 
 ```bash
 runpane cloud coordinator status                # the coordinator itself: sandbox, service, version
@@ -663,8 +666,8 @@ runpane cloud coordinator alerts
 ```
 
 Deploy options: `--idle-check-seconds <n>` (default 300; a Session is stopped after two safe answers in a
-row) and `--wake-grace-seconds <n>` (default 600) are kept across redeploys; `--no-reconcile` turns the
-reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version, and
+row), `--wake-grace-seconds <n>` (default 600) and `--stop-orphans`/`--no-stop-orphans` are kept across
+redeploys; `--no-reconcile` turns the reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version, and
 every Session the coordinator wakes is upgraded to it before it counts as awake (`--no-pin` removes the
 pin). While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
 a sleeping one.

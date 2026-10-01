@@ -18,7 +18,7 @@ import {
  * `runpane cloud coordinator deploy|status|stop|start|destroy`, run on the user's machine.
  *
  * The coordinator (m4, ./coordinator/) is the always-on part of `runpane cloud`: idle-stop, reconcile
- * (stop + alert only) and /cloud/wake. It runs on a tiny sandbox joined to the tailnet as
+ * (alert on orphans, never delete) and /cloud/wake. It runs on a tiny sandbox joined to the tailnet as
  * tag:rp-session, so cloud Sessions can reach it, and holds a provider key scoped to read, stop and
  * resume. This file creates and manages that sandbox; the service itself is ./coordinator, shipped from
  * this very CLI package so the coordinator always matches the CLI that deployed it.
@@ -54,6 +54,7 @@ interface CoordinatorArgs {
   fromSnapshot?: string;
   noGolden: boolean;
   reconcile?: boolean;
+  stopOrphans?: boolean;
   idleCheckSeconds?: number;
   wakeGraceSeconds?: number;
   pin?: Partial<PinnedPane>;
@@ -64,7 +65,7 @@ interface CoordinatorArgs {
 
 export const COORDINATOR_LIFECYCLE_USAGE = `On this machine (create and manage the coordinator sandbox):
   runpane cloud coordinator deploy --yes [--name <host>] [--size small|default|large] [--from <snapshot>|--no-golden] [--boat-org <org|personal>]
-        [--no-reconcile|--reconcile] [--idle-check-seconds <n>] [--wake-grace-seconds <n>]
+        [--no-reconcile|--reconcile] [--stop-orphans|--no-stop-orphans] [--idle-check-seconds <n>] [--wake-grace-seconds <n>]
         [--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex> | --no-pin] [--key-ttl <90d>] [--json]
   runpane cloud coordinator status [--json]
   runpane cloud coordinator stop --yes [--json]
@@ -107,6 +108,8 @@ export function parseCoordinatorArgs(argv: readonly string[]): CoordinatorArgs {
       case '--no-golden': deployOnly(); args.noGolden = true; break;
       case '--reconcile': deployOnly(); args.reconcile = true; break;
       case '--no-reconcile': deployOnly(); args.reconcile = false; break;
+      case '--stop-orphans': deployOnly(); args.stopOrphans = true; break;
+      case '--no-stop-orphans': deployOnly(); args.stopOrphans = false; break;
       case '--idle-check-seconds': deployOnly(); args.idleCheckSeconds = positiveInt(value(index++, flag), flag); break;
       case '--wake-grace-seconds': deployOnly(); args.wakeGraceSeconds = positiveInt(value(index++, flag), flag); break;
       case '--pin-version': deployOnly(); args.pin = { ...args.pin, version: value(index++, flag) }; break;
@@ -237,6 +240,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     ...deployment,
     reconcile: args.reconcile ?? deployment.reconcile,
   };
+  if (args.stopOrphans !== undefined) next.stopOrphans = args.stopOrphans;
   if (args.idleCheckSeconds) next.idleCheckSeconds = args.idleCheckSeconds;
   if (args.wakeGraceSeconds) next.wakeGraceSeconds = args.wakeGraceSeconds;
   if (args.noPin) delete next.pin;
@@ -290,6 +294,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
       version: health.version ?? next.appVersion,
       managedPrefix: next.managedPrefix,
       reconcile: next.reconcile,
+      stopOrphans: next.stopOrphans === true,
       pin: next.pin ?? null,
       github: next.github ? { mode: next.github.mode, appId: next.github.appId ?? null } : null,
     },
@@ -302,7 +307,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(JSON.stringify(summary, null, 2));
   } else {
     deps.stdout(`runpane cloud: coordinator ${next.hostname} is ${created ? 'up' : 'updated'} at ${next.baseUrl} (${Math.round(timings.totalMs / 1000)} s, version ${summary.coordinator.version}).`);
-    deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? 'on (stop + alert only)' : 'off'}.`);
+    deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? `on (${next.stopOrphans ? 'alerts on orphans, stops those still orphaned after 6 h' : 'alerts on orphans, never stops them'})` : 'off'}.`);
     deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}${next.scopedKeyTtl ? ` (lifetime ${next.scopedKeyTtl} from ${next.deployedAt.slice(0, 10)}; destroy and redeploy before it expires)` : ''}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
     if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when they wake.`);
     if (next.secrets) deps.stdout(`  Doppler secrets kept (${next.secrets.configs.map((config) => `${config.project}/${config.config}`).join(', ') || 'no configs'}; policy ${next.secrets.policy.mode}); see runpane cloud coordinator doppler status.`);
@@ -419,7 +424,7 @@ function coordinatorConfig(deployment: CoordinatorDeployment, listenHost: string
     pinnedDebUrl: deployment.pin?.debUrl ?? null,
     pinnedDebSha256: deployment.pin?.sha256 ?? null,
     idleStop: idleStopConfig(deployment),
-    reconcile: { enabled: deployment.reconcile },
+    reconcile: { enabled: deployment.reconcile, stopOrphans: deployment.stopOrphans === true },
     github: githubConfig(deployment),
     secrets: secretsConfig(deployment),
   };
@@ -548,6 +553,7 @@ async function status(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     version: health?.version ?? null,
     managedPrefix: deployment.managedPrefix,
     reconcile: deployment.reconcile,
+    stopOrphans: deployment.stopOrphans === true,
     pin: deployment.pin ?? null,
     deployedAt: deployment.deployedAt,
   };

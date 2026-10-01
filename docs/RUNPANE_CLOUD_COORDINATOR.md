@@ -69,7 +69,8 @@ that fails is reported as `stop-failed` with an `idle-stop-failed` alert, never 
 The reconciler compares the provider's list with the directory. Only sandboxes whose name starts with
 `managedNamePrefix` are considered, and never the coordinator's own sandbox or `ignoreSandboxIds`.
 
-The reconciler **only stops and alerts. It never destroys.** It aborts without touching anything when:
+The reconciler **only alerts, and stops only when told to. It never destroys.** It aborts without touching
+anything when:
 
 - the directory can't be read (missing or invalid);
 - the directory is empty while the provider lists managed sandboxes;
@@ -77,9 +78,20 @@ The reconciler **only stops and alerts. It never destroys.** It aborts without t
 - more running orphans would be stopped than `maxOrphanStopsPerRun` (default 3). A stale or truncated
   directory looks exactly like that.
 
-If none of those apply, it stops running orphans older than `orphanGraceSeconds` (default 1800). The
-grace period protects a sandbox from `runpane cloud new` that hasn't been synced to the directory yet. A
-stopped orphan keeps its disk. Directory entries whose sandbox is gone or failed raise a `session-lost`
+A running orphan (a managed sandbox the directory doesn't name) older than `orphanGraceSeconds`
+(default 1800, which protects a sandbox from `runpane cloud new` that hasn't been synced yet) raises one
+`orphan-found` alert and is **left running**. The coordinator holds no token for a sandbox the directory
+doesn't name, so it can't ask that daemon's safe-to-stop, and a live Session looks exactly like an orphan
+when it was created from another machine's `runpane cloud` store, or when a store restored from backup (or
+a stale one) pushed the directory. Keep one store per set of Sessions: the store that pushes the directory
+must be the one that created them.
+
+With `reconcile.stopOrphans` (`coordinator deploy --stop-orphans`), the reconciler also stops an orphan once
+this coordinator has seen it as a running orphan for `orphanStopGraceSeconds` (default 21600, six hours).
+That clock is kept in memory, so a coordinator restart starts it over, and it restarts whenever the sandbox
+reappears in the directory or stops running. A stop is the provider's snapshot and power-off, with no
+checkpoint and no blocker check; the stopped orphan keeps its disk. The `maxOrphanStopsPerRun` abort
+above counts these due orphans. Directory entries whose sandbox is gone or failed raise a `session-lost`
 alert.
 
 ### Runaway guard

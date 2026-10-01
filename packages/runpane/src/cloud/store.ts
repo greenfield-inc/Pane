@@ -64,6 +64,8 @@ export interface CoordinatorDeployment {
   /** Sandboxes whose name starts with this are the coordinator's to idle-stop and reconcile. */
   managedPrefix: string;
   reconcile: boolean;
+  /** `deploy --stop-orphans`: the reconciler may stop long-lived orphans; unset or false, it only alerts. */
+  stopOrphans?: boolean;
   deployedAt: string;
   appVersion: string;
   pin?: PinnedPane;

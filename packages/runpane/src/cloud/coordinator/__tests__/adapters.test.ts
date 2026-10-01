@@ -130,6 +130,8 @@ describe('config and directory', () => {
     assert.equal(config.guards.maxLiveSandboxes, 25);
     assert.equal(config.idleStop.requiredConsecutiveSafe, 2);
     assert.equal(config.directoryFile, '/home/c/directory.json');
+    assert.equal(config.reconcile.stopOrphans, false);
+    assert.equal(config.reconcile.orphanStopGraceSeconds, 21_600);
     assert.throws(() => parseCoordinatorConfig({
       version: 1,
       listenHost: '0.0.0.0',

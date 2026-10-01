@@ -162,6 +162,8 @@ export function buildCoordinator(
   const reconciler = new Reconciler({ directory, provider, activity, guard, alerts, clock }, {
     ...scope,
     orphanGraceMs: config.reconcile.orphanGraceSeconds * 1000,
+    stopOrphans: config.reconcile.stopOrphans,
+    orphanStopGraceMs: config.reconcile.orphanStopGraceSeconds * 1000,
     maxOrphanStopsPerRun: config.reconcile.maxOrphanStopsPerRun,
     dryRun: config.reconcile.dryRun,
   });
