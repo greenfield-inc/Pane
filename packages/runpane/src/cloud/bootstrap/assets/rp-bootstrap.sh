@@ -562,16 +562,25 @@ UNIT
 }
 
 # clone <url> <ref> <dir>: public HTTPS clone (no credentials in the sandbox). Idempotent.
+# <ref> is fetched from origin every time and must be: the checkout is the commit that fetch returned, never a
+# stale local branch or an older FETCH_HEAD. A branch is checked out as a local branch reset to that commit.
 step_clone() {
-  local url="$1" ref="$2" dir="$3"
+  local url="$1" ref="$2" dir="$3" fresh
   if [ ! -d "$dir/.git" ]; then
     mkdir -p "$(dirname "$dir")"
     GIT_TERMINAL_PROMPT=0 git clone -q "$url" "$dir" 2>"$RP_STATE/clone.log" || fail "git clone failed: $(tail -2 "$RP_STATE/clone.log" | tr '\n' ' ')"
   fi
   if [ -n "$ref" ]; then
-    GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch -q origin "$ref" 2>>"$RP_STATE/clone.log" || true
-    git -C "$dir" checkout -q "$ref" 2>>"$RP_STATE/clone.log" || git -C "$dir" checkout -q FETCH_HEAD 2>>"$RP_STATE/clone.log" \
-      || fail "git checkout $ref failed"
+    GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch -q origin "$ref" 2>>"$RP_STATE/clone.log" \
+      || fail "git fetch of $ref failed: $(tail -2 "$RP_STATE/clone.log" | tr '\n' ' ')"
+    fresh="$(git -C "$dir" rev-parse --verify -q 'FETCH_HEAD^{commit}')" || fail "git fetch of $ref returned no commit"
+    if [ "$(git -C "$dir" rev-parse --verify -q "refs/remotes/origin/$ref^{commit}" 2>/dev/null || true)" = "$fresh" ]; then
+      git -C "$dir" checkout -q -B "$ref" "$fresh" 2>>"$RP_STATE/clone.log" || fail "git checkout $ref failed"
+      git -C "$dir" branch -q --set-upstream-to="origin/$ref" "$ref" 2>>"$RP_STATE/clone.log" || true
+    else
+      git -C "$dir" checkout -q --detach "$fresh" 2>>"$RP_STATE/clone.log" || fail "git checkout $ref failed"
+    fi
+    [ "$(git -C "$dir" rev-parse HEAD)" = "$fresh" ] || fail "git checkout $ref did not land on the fetched $fresh"
   fi
   result "$(python3 -c 'import json,sys;print(json.dumps({"ok":True,"dir":sys.argv[1],"head":sys.argv[2]}))' "$dir" "$(git -C "$dir" rev-parse HEAD)")"
 }

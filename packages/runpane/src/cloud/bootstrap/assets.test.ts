@@ -65,3 +65,52 @@ test('tailnet-identity waits until tailscaled answers and settles past NoState a
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /^RP_RESULT .*"backendState": "Running"/m);
 });
+
+// clone <url> <ref> <dir> must land on what origin has now: a failed fetch is a failure, and a branch
+// that already exists locally (a retried step, or the clone's own default branch) moves to the fetched commit.
+test('clone checks out the freshly fetched commit and fails when the fetch fails', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-assets-'));
+  const file = path.join(dir, 'rp-bootstrap.sh');
+  fs.writeFileSync(file, cloudBootstrapAssets['rp-bootstrap.sh']);
+  const env = {
+    ...process.env,
+    RP_STATE: path.join(dir, 'state'),
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@localhost', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@localhost',
+    GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1',
+  };
+  const git = (cwd: string, ...args: string[]) => {
+    const result = childProcess.spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  const step = (...args: string[]) => childProcess.spawnSync('bash', [file, 'clone', ...args], { env, encoding: 'utf8' });
+  const origin = path.join(dir, 'origin');
+  const work = path.join(dir, 'work');
+  git(dir, 'init', '-q', '-b', 'main', origin);
+  git(origin, 'commit', '-q', '--allow-empty', '-m', 'one');
+  const first = git(origin, 'rev-parse', 'HEAD');
+  const target = path.join(dir, 'session', 'app');
+  assert.equal(step(origin, '', target).status, 0);
+  git(target, 'branch', 'gone');
+
+  git(origin, 'commit', '-q', '--allow-empty', '-m', 'two');
+  const second = git(origin, 'rev-parse', 'HEAD');
+  const moved = step(origin, 'main', target);
+  assert.equal(moved.status, 0, moved.stdout + moved.stderr);
+  assert.match(moved.stdout, new RegExp(`^RP_RESULT .*"head": "${second}"`, 'm'));
+  assert.equal(git(target, 'rev-parse', 'HEAD'), second);
+  assert.equal(git(target, 'symbolic-ref', '--short', 'HEAD'), 'main');
+
+  const pinned = step(origin, first, target);
+  assert.equal(pinned.status, 0, pinned.stdout + pinned.stderr);
+  assert.equal(git(target, 'rev-parse', 'HEAD'), first);
+
+  // A ref origin doesn't have, and an origin that is gone, fail even though a local branch has the name.
+  const missing = step(origin, 'gone', target);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /^RP_RESULT \{"ok": false, "error": "git fetch of gone failed/m);
+  fs.renameSync(origin, work);
+  const offline = step(origin, 'main', target);
+  assert.equal(offline.status, 1);
+  assert.match(offline.stdout, /^RP_RESULT \{"ok": false, "error": "git fetch of main failed/m);
+});
