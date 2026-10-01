@@ -323,8 +323,9 @@ else exits 2.
   configs; `allow-all` delivers every name the manifest lists (your call: production credentials then reach
   your agents); `--deny-names A,B_* --deny-configs prd` is a custom list. Shell and Pane variables (`PATH`,
   `LD_*`, `PANE_*`, ...) are never delivered. `doppler status` in the Session lists what was withheld and why.
-- **Manifest safety:** the coordinator refuses a manifest read from the Session's own `cloud/<host>/`
-  namespace (the Session could push it and widen its own grant): keep it on a branch people review.
+- **Manifest safety:** the coordinator refuses a manifest read from any `cloud/` branch, the broker's
+  namespace that Sessions push to (a Session could widen its own grant, or grant another Session created
+  from its branch): keep it on the default branch or another branch people push and review.
 - **Audit:** `runpane cloud coordinator doppler audit` shows every fetch: Session, node, manifest (repo, ref,
   sha), and the names delivered or withheld. Never values.
 - **Existing Sessions:** `runpane cloud secrets enable <host>` installs the stand-in and fetches once
@@ -1049,7 +1050,7 @@ Session (wake it first). Run it once on Sessions created with an older `runpane`
 | `doppler ...` in a Session says "No runpane cloud coordinator is configured here" | The Session's peers list names no coordinator: `runpane cloud github connect <host> --repo <owner>/<repo> --broker` from the laptop |
 | `doppler run` says "no Doppler secrets are delivered to this Session: ... has no .runpane/secrets.json" | Commit the manifest to the branch the Session started from, then `doppler refresh` in the Session |
 | `doppler refresh` fails with `manifest-invalid` | The manifest is not `{"version": 1, "doppler": [{"project", "config", "names"}]}`; the message names the problem. The Session's copy is cleared until it is fixed |
-| `doppler refresh` fails with `manifest-ref-writable` | The Session was created from a `cloud/<its host>/` branch, which it can push to itself. Recreate it from a reviewed branch (`new --ref <branch>`) |
+| `doppler refresh` fails with `manifest-ref-writable` | The Session was created from a `cloud/<host>/` branch, which Sessions push to through the broker. Recreate it from a reviewed branch (`new --ref <branch>`), or merge the branch first |
 | `doppler run -c prd` says "not delivered: the coordinator's secrets policy (default) refuses config prd" | The default policy. Change it with `runpane cloud coordinator doppler policy` (your call), then `doppler refresh` |
 | `doppler secrets get NAME` says "Could not find requested secret" | NAME is not in the manifest's names, not in Doppler, or withheld by policy (`doppler status` lists withheld names and why) |
 | `coordinator doppler set` says "doppler could not create a read-only service token" | Log in (`doppler login`) as someone who can manage that project's service tokens, or pass `--token-file` with a token you made |

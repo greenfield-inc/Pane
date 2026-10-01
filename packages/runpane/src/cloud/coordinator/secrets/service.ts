@@ -6,7 +6,7 @@ import type { Clock, DirectoryEntry, SessionDirectory } from '../types';
 import type { JsonlAuditLog } from '../github/audit';
 import { HourlyLimiter } from '../github/audit';
 import type { RepoFile } from '../github/broker';
-import { BrokerError, namespaceOf } from '../github/policy';
+import { BrokerError } from '../github/policy';
 import type { TailnetNode, WhoisResolver } from '../github/whois';
 import { nodeMismatch } from '../github/whois';
 import type { DopplerApi } from './doppler';
@@ -233,10 +233,10 @@ export class SecretsService {
     }
     audit.repo = source.repo;
     audit.ref = source.ref;
-    const namespace = namespaceOf(entry);
-    if (source.ref && (source.ref.startsWith(namespace) || source.ref.startsWith(`refs/heads/${namespace}`))) {
-      // The Session can push to its own namespace, so a manifest read from there would let it widen its own grant.
-      throw new SecretsError('manifest-ref-writable', `this Session was created from ${source.ref}, which it can push to itself; the coordinator reads manifests only from refs the Session cannot write`);
+    if (source.ref && sessionWritableRef(source.ref)) {
+      // Every Session pushes to its own cloud/<host>/ through the broker, so a manifest read from any cloud/ branch
+      // was written by an agent: by this Session (widening its own grant) or by another one (granting this Session).
+      throw new SecretsError('manifest-ref-writable', `this Session was created from ${source.ref}, a cloud/ branch Sessions push to through the broker; the coordinator reads manifests only from refs no Session can write (the default branch or a branch a person pushed)`);
     }
     let file: RepoFile | null;
     try {
@@ -330,6 +330,11 @@ export class SecretsService {
       durationMs: this.deps.clock.now() - started,
     });
   }
+}
+
+/** Whether `ref` lies in the broker's `cloud/` namespace (any Session's), however it is spelled: `cloud/...`, `heads/cloud/...` or `refs/heads/cloud/...`. */
+export function sessionWritableRef(ref: string): boolean {
+  return /^(?:refs\/)?(?:heads\/)?cloud\//iu.test(ref.trim());
 }
 
 /** The directory's manifest source; a Session with exactly one broker repository falls back to its default branch. */

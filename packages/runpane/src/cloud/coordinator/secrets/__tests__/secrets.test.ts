@@ -18,6 +18,7 @@ import type { FetchLike } from '../../../githubTransport';
 import type { TailnetNode, WhoisResolver } from '../../github/whois';
 import { FakeGitHub } from '../../github/__tests__/fakeGitHub';
 import { MANIFEST_PATH, parseManifest } from '../manifest';
+import { sessionWritableRef } from '../service';
 
 const SECRET = 'secrets-test-secret';
 const APP_ID = '515151';
@@ -40,13 +41,16 @@ const DEV_VALUES = new Map([
 /** The values that are secrets (DOPPLER_PROJECT and DOPPLER_CONFIG are the project and config names, which output shows). */
 const SECRET_VALUES = [...DEV_VALUES].filter(([name]) => !name.startsWith('DOPPLER_')).map(([, value]) => value);
 
-const S1 = entry('s1', 'bx_a', { label: 'One', baseUrl: 'https://rp-one.tail.ts.net', nodeId: 'nOne', githubRepos: ['acme/app'], secretsManifest: { repo: 'acme/app', ref: 'cloud/rp-seed/manifest' } });
+const S1 = entry('s1', 'bx_a', { label: 'One', baseUrl: 'https://rp-one.tail.ts.net', nodeId: 'nOne', githubRepos: ['acme/app'], secretsManifest: { repo: 'acme/app', ref: 'manifest' } });
 const S2 = entry('s2', 'bx_b', { label: 'Two', baseUrl: 'https://rp-two.tail.ts.net', nodeId: 'nTwo', githubRepos: ['acme/app'], secretsManifest: { repo: 'acme/app', ref: 'cloud/rp-two/mine' } });
 const S3 = entry('s3', 'bx_c', { label: 'Three', baseUrl: 'https://rp-three.tail.ts.net', nodeId: 'nThree', githubRepos: [], secretsManifest: null });
+// Session B, created with `cloud new --ref cloud/rp-two/grant`: a branch Session A (S2) pushes to through the broker.
+const S4 = entry('s4', 'bx_d', { label: 'Four', baseUrl: 'https://rp-four.tail.ts.net', nodeId: 'nFour', githubRepos: ['acme/app'], secretsManifest: { repo: 'acme/app', ref: 'cloud/rp-two/grant' } });
 const NODES = {
   s1: { stableId: 'nOne', name: 'rp-one.tail.ts.net', tags: ['tag:rp-session'] },
   s2: { stableId: 'nTwo', name: 'rp-two.tail.ts.net', tags: ['tag:rp-session'] },
   s3: { stableId: 'nThree', name: 'rp-three.tail.ts.net', tags: ['tag:rp-session'] },
+  s4: { stableId: 'nFour', name: 'rp-four.tail.ts.net', tags: ['tag:rp-session'] },
 } satisfies Record<string, TailnetNode>;
 
 const json = (value: JsonValue): JsonObject => decodeBoundary(value, boundary.jsonObject);
@@ -118,7 +122,7 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
     github: { mode: 'app', appId: APP_ID, privateKeyFile: keyFile, apiBaseUrl: fakeBase, gitBaseUrl: fakeBase },
     secrets: secretsSection,
   }, root);
-  const directory = FakeDirectory.of([S1, S2, S3]);
+  const directory = FakeDirectory.of([S1, S2, S3, S4]);
   const whois = new SwitchableWhois();
   const dopplerCalls: string[] = [];
   const dopplerDown = { value: false };
@@ -162,11 +166,11 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
     dopplerCalls,
     dopplerDown,
     call: (caller, method, route) => {
-      if (caller === 's1' || caller === 's2' || caller === 's3') whois.node = NODES[caller];
+      if (caller === 's1' || caller === 's2' || caller === 's3' || caller === 's4') whois.node = NODES[caller];
       return callFrom(caller, whois.node, method, route);
     },
     callFrom,
-    setManifest(text, branch = 'cloud/rp-seed/manifest') {
+    setManifest(text, branch = 'manifest') {
       fake.commitFiles('acme/app', branch, new Map([[MANIFEST_PATH, text]]), 'manifest');
     },
     async close() {
@@ -283,6 +287,27 @@ describe('secrets service', () => {
       assert.equal(none.status, 200);
       assert.equal(none.body.manifest, null);
       assert.equal(h.dopplerCalls.length, 0);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('refuses a manifest another Session wrote: B created from A\'s cloud/<A>/ branch gets nothing, in any ref spelling', async () => {
+    const h = await harness({ policy: { mode: 'allow-all' } });
+    try {
+      // Session A (rp-two) asks for production through a branch the broker lets it push.
+      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: 'all' }, { project: 'my-app', config: 'prd', names: 'all' }] }), 'cloud/rp-two/grant');
+      const crossed = await h.call('s4', 'POST', 'fetch');
+      assert.equal(crossed.status, 403, `status ${crossed.status} code ${String(crossed.body.code)}`);
+      assert.equal(crossed.body.code, 'manifest-ref-writable');
+      assert.equal(crossed.body.configs, undefined, 'nothing delivered');
+      assert.equal(h.dopplerCalls.length, 0, 'Doppler is never asked');
+      for (const ref of ['refs/heads/cloud/rp-two/grant', 'heads/cloud/rp-two/grant', 'Cloud/rp-two/grant', 'cloud/rp-one/x']) {
+        assert.equal(sessionWritableRef(ref), true, ref);
+      }
+      for (const ref of ['main', 'manifest', 'refs/heads/main', 'feature/cloud/x', 'cloudy/x']) {
+        assert.equal(sessionWritableRef(ref), false, ref);
+      }
     } finally {
       await h.close();
     }

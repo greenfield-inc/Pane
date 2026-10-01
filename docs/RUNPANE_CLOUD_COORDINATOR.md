@@ -418,8 +418,9 @@ runpane cloud coordinator doppler unset --all --yes    # shred on the coordinato
 `POST /cloud/secrets/fetch` from a Session (its own peer token **and** its own tailnet node, exactly as for
 the GitHub broker: a copied token gets 403 `caller-node-mismatch` before GitHub or Doppler is asked):
 
-1. **Manifest source:** the directory's `secretsManifest` (repo and ref). A ref inside the caller's own
-   `cloud/<host>/` namespace is refused (403 `manifest-ref-writable`): the Session could push it itself.
+1. **Manifest source:** the directory's `secretsManifest` (repo and ref). A ref in the broker's `cloud/`
+   namespace (`cloud/...`, `heads/cloud/...`, `refs/heads/cloud/...`, any case, any Session's) is refused
+   (403 `manifest-ref-writable`): Sessions push there, so the manifest would be agent-written.
 2. **Manifest:** `.runpane/secrets.json` read through the GitHub broker's credential with a one-repository
    `contents:read` token (GitHub REST contents API). Absent: 200 with no configs (the Session clears its
    copy). Invalid: 422 `manifest-invalid` naming the problem.
