@@ -327,6 +327,24 @@ describe('setupRemoteHost', () => {
     expect(written.remoteDaemon).toBeDefined();
   });
 
+  it('writes a coordinator-scoped client record when asked for one', async () => {
+    const writeConfig = vi.fn(async (_config: Parameters<NonNullable<SetupRemoteHostOptions['writeConfig']>>[0]) => {});
+
+    await setupRemoteHost({
+      preferTunnel: 'ssh',
+      installService: false,
+      label: 'runpane-cloud-coordinator',
+      clientScope: 'coordinator',
+      existingConfig: {},
+      writeConfig,
+    });
+
+    const written = writeConfig.mock.calls[0][0];
+    expect(written.remoteDaemon.host.clients).toEqual([
+      expect.objectContaining({ label: 'runpane-cloud-coordinator', scope: 'coordinator' }),
+    ]);
+  });
+
   it('selects the next available loopback port when requested', async () => {
     const server = net.createServer();
     await new Promise<void>((resolve, reject) => {

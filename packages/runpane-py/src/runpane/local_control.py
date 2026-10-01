@@ -222,6 +222,21 @@ def run_lock_list(parsed: Any) -> int:
     return 0
 
 
+def run_cloud_safe_to_stop(parsed: Any) -> int:
+    if parsed.force and parsed.dry_run:
+        raise ValueError("runpane cloud safe-to-stop takes --force or --dry-run, not both.")
+    flush = "always" if parsed.force else "never" if parsed.dry_run else "if-safe"
+    result = invoke_daemon("runpane:cloud:safe-to-stop", [{"flush": flush}], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        print("Safe to stop." if result.get("safe") else "Not safe to stop:")
+        for blocker in result.get("blockers") or []:
+            print(f"  {blocker.get('condition')}: {blocker.get('message')}")
+    # 3 = blocked, so scripts can tell it from a failure (1).
+    return 0 if result.get("safe") else 3
+
+
 def _require_lock_name(parsed: Any, action: str) -> str:
     name = (parsed.name or "").strip()
     if not name:
@@ -883,6 +898,8 @@ def run_panels_submit(parsed: Any) -> int:
             f"to panel {result.get('panelId')}.{verified}"
         )
         print_delivery(result.get("delivery"))
+        if result.get("deduplicated"):
+            print("This idempotency key was already used; Pane returned the first result and sent nothing again.")
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
         print_prompt_notes(result)
@@ -1002,6 +1019,8 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         raise ValueError("--keys is for panels input; panels submit sends text followed by Enter.")
     if parsed.as_file_pointer and command != "submit":
         raise ValueError("--as-file-pointer is for panels submit; panels input sends exact bytes.")
+    if parsed.idempotency_key is not None and command != "submit":
+        raise ValueError("--idempotency-key is for panels submit.")
 
     if parsed.keys is not None:
         text = keys_to_bytes(parsed.keys)
@@ -1013,6 +1032,7 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         "panelId": parsed.panel_id,
         "input": text,
         **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("idempotencyKey", parsed.idempotency_key),
     }
 
 

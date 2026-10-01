@@ -12,6 +12,7 @@ import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/w
 import { parse as parseToml } from 'smol-toml';
 import { syncPaneUserSkills, type UserSkillTarget } from './paneUserSkills';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { isSideBySideBuild } from '../utils/sideBySide';
 
 const execFileAsync = promisify(execFile);
 
@@ -482,7 +483,8 @@ export function syncPaneMcpForApp(options: {
   /** Saved repositories; their WSL distros get registrations on Windows. */
   getProjects: () => Pick<Project, 'wsl_enabled' | 'wsl_distribution'>[];
 }): void {
-  if (!options.isPackaged) return;
+  // A side-by-side test build must not repoint the installed Pane's registrations at itself.
+  if (!options.isPackaged || isSideBySideBuild()) return;
   syncQueue = syncQueue
     .then(() => syncRegistrations(options.config.agentContext?.registerMcp !== false, options))
     .catch((error) => console.warn('[PaneMcp] Registration sync failed:', error));

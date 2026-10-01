@@ -25,7 +25,8 @@ import {
   type RemoteSetupDataDirectoryMode,
   type RemoteSetupTunnelPreference,
 } from '../../../shared/types/remoteDaemon';
-import type { PaneCommandValue } from '../daemon/commandRegistry';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { registerPeerCommands } from '../daemon/peer/peerCommands';
 import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import os from 'os';
 import path from 'path';
@@ -650,6 +651,26 @@ function parseOptionalClientIds(value: PaneCommandValue): string[] | undefined {
     .map((clientId) => clientId.trim());
 
   return clientIds.length > 0 ? clientIds : undefined;
+}
+
+/** `runpane:peers:*`: mint and manage `scope: 'peer'` client records for other Sessions. */
+export function registerRemotePeerCommands(
+  commandRegistry: PaneCommandRegistry,
+  services: Pick<AppServices, 'configManager' | 'orchestrationSessionManager'>,
+  readTailscaleAccess: typeof readConfiguredTailscaleServeAccess = readConfiguredTailscaleServeAccess,
+): void {
+  registerPeerCommands(commandRegistry, {
+    readRemoteConfig: () => getRemoteDaemonConfig(services.configManager.getConfig().remoteDaemon),
+    writeRemoteConfig: async (config) => {
+      await services.configManager.updateConfig({ remoteDaemon: config });
+    },
+    resolveSessionId: async (selector) => {
+      const manager = services.orchestrationSessionManager;
+      if (!manager) throw new Error('Sessions manager is not initialized');
+      return (await manager.get({ sessionId: selector })).id;
+    },
+    resolveHostAccess: (config) => resolveCurrentHostAccess(config, readTailscaleAccess),
+  });
 }
 
 function getRemoteDaemonConfig(value: PaneCommandValue): RemoteDaemonConfig {

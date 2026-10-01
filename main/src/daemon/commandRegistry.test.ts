@@ -61,4 +61,38 @@ describe('PaneCommandRegistry', () => {
     const testEvent: IpcMainInvokeEvent = Object.create(null);
     await expect(listener(testEvent)).resolves.toEqual({ success: true });
   });
+
+  it('tracks in-flight calls per origin and when the last one ended', async () => {
+    let now = 1_000;
+    const registry = new PaneCommandRegistry(() => now);
+    let release: () => void = () => {};
+    registry.register('runpane:workspace:wait', () => new Promise<null>((resolve) => {
+      release = () => resolve(null);
+    }));
+
+    const userCall = registry.invoke('runpane:workspace:wait', [], { origin: 'remote-user' });
+    expect(registry.getChannelActivity('runpane:workspace:wait', ['local', 'remote-user'])).toEqual({
+      inFlight: 1,
+      lastFinishedAt: undefined,
+    });
+    expect(registry.getChannelActivity('runpane:workspace:wait', ['remote-peer']).inFlight).toBe(0);
+
+    now = 2_500;
+    release();
+    await userCall;
+    expect(registry.getChannelActivity('runpane:workspace:wait', ['remote-user'])).toEqual({
+      inFlight: 0,
+      lastFinishedAt: 2_500,
+    });
+  });
+
+  it('counts a failed call as finished', async () => {
+    const registry = new PaneCommandRegistry(() => 7);
+    registry.register('runpane:panels:wait', () => {
+      throw new Error('boom');
+    });
+
+    await expect(registry.invoke('runpane:panels:wait')).rejects.toThrow('boom');
+    expect(registry.getChannelActivity('runpane:panels:wait', ['local'])).toEqual({ inFlight: 0, lastFinishedAt: 7 });
+  });
 });

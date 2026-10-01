@@ -91,6 +91,20 @@ describe('runRemoteSetupCli', () => {
     expect(formatSetupRemoteHostResult).toHaveBeenCalledOnce();
   });
 
+  it('passes --client-scope coordinator through and refuses any other scope', async () => {
+    vi.mocked(setupRemoteHost).mockRejectedValue(new Error('stop after parsing'));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runRemoteSetupCli(['--client-scope', 'coordinator', '--no-install-service'], dependencies);
+    expect(setupRemoteHost).toHaveBeenCalledWith(expect.objectContaining({ clientScope: 'coordinator' }));
+
+    vi.mocked(setupRemoteHost).mockClear();
+    expect(await runRemoteSetupCli(['--client-scope', 'admin'], dependencies)).toBe(1);
+    expect(setupRemoteHost).not.toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledWith('--client-scope must be "coordinator"');
+    errors.mockRestore();
+  });
+
   it('repairs only service assets when routed through remote setup', async () => {
     vi.mocked(repairRemoteDaemonService).mockResolvedValue({
       ok: true,

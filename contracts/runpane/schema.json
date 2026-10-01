@@ -376,7 +376,13 @@
               "minLength": 1
             },
             "args": {
-              "$ref": "#/$defs/stringList"
+              "description": "Flags whose values become the channel's positional arguments; empty for a channel that takes none.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
             }
           },
           "additionalProperties": false
@@ -506,10 +512,72 @@
         "sessions associate",
         "sessions detach",
         "sessions overview",
+        "peers",
+        "peers list",
+        "peers mint",
+        "peers allow",
+        "peers deny",
+        "peers revoke",
         "lock",
         "lock acquire",
         "lock release",
-        "lock list"
+        "lock list",
+        "cloud safe-to-stop",
+        "cloud",
+        "cloud setup",
+        "cloud new",
+        "cloud list",
+        "cloud status",
+        "cloud stop",
+        "cloud wake",
+        "cloud repair",
+        "cloud destroy",
+        "cloud pair",
+        "cloud sync",
+        "cloud coordinator",
+        "cloud coordinator deploy",
+        "cloud coordinator status",
+        "cloud coordinator stop",
+        "cloud coordinator start",
+        "cloud coordinator destroy",
+        "cloud coordinator revoke-clients",
+        "cloud coordinator revoke-caller",
+        "cloud coordinator github set",
+        "cloud coordinator github status",
+        "cloud coordinator github audit",
+        "cloud coordinator github unset",
+        "cloud coordinator doppler set",
+        "cloud coordinator doppler policy",
+        "cloud coordinator doppler status",
+        "cloud coordinator doppler audit",
+        "cloud coordinator doppler unset",
+        "cloud peers allow",
+        "cloud peers revoke",
+        "cloud peers list",
+        "cloud secrets set",
+        "cloud secrets list",
+        "cloud secrets rm",
+        "cloud secrets enable",
+        "cloud secrets disable",
+        "port open",
+        "port list",
+        "port close",
+        "port auto-open",
+        "cloud port open",
+        "cloud port list",
+        "cloud port close",
+        "cloud notes list",
+        "cloud notes add",
+        "cloud notes remove",
+        "cloud notes push",
+        "cloud github connect",
+        "cloud github disconnect",
+        "cloud github list",
+        "cloud git push",
+        "cloud agent github",
+        "cloud agent gh",
+        "cloud agent git-credential",
+        "cloud agent doppler"
       ],
       "properties": {
         "default": {
@@ -719,6 +787,24 @@
         "sessions overview": {
           "$ref": "#/$defs/helpLines"
         },
+        "peers": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers mint": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers allow": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers deny": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers revoke": {
+          "$ref": "#/$defs/helpLines"
+        },
         "lock": {
           "$ref": "#/$defs/helpLines"
         },
@@ -729,6 +815,174 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud safe-to-stop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud setup": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud new": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud stop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud wake": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud repair": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud destroy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud pair": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud sync": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator deploy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator stop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator start": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator destroy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator revoke-clients": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator revoke-caller": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github audit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator github unset": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler policy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler audit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator doppler unset": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud peers allow": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud peers revoke": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud peers list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets rm": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets enable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets disable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port close": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "port auto-open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud port open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud port list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud port close": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud notes list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud notes add": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud notes remove": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud notes push": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github connect": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github disconnect": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud github list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud git push": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent github": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent gh": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent git-credential": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent doppler": {
           "$ref": "#/$defs/helpLines"
         }
       },

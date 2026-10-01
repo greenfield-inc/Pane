@@ -26,6 +26,7 @@ from .local_control import (
     run_agents_doctor,
     run_lock_acquire,
     run_lock_list,
+    run_cloud_safe_to_stop,
     run_lock_release,
     run_panels_create,
     run_panels_input,
@@ -83,6 +84,7 @@ CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
+COMMAND_GROUP_HELP_TOPICS.add("peers")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
@@ -129,6 +131,8 @@ class ParsedArgs:
     pane_id: Optional[str] = None
     session_id: Optional[str] = None
     panel_id: Optional[str] = None
+    peer: Optional[str] = None
+    idempotency_key: Optional[str] = None
     repo_path: Optional[str] = None
     name: Optional[str] = None
     worktree_name: Optional[str] = None
@@ -295,6 +299,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_lock_release(parsed)
     if parsed.command == "lock list":
         return run_lock_list(parsed)
+    if parsed.command == "cloud safe-to-stop":
+        return run_cloud_safe_to_stop(parsed)
     if parsed.command == "panes list":
         return run_panes_list(parsed)
     if parsed.command == "panes cost":
@@ -768,6 +774,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--session":
         parsed.session_id = value
         return
+    if flag == "--peer":
+        parsed.peer = value
+        return
+    if flag == "--idempotency-key":
+        parsed.idempotency_key = value
+        return
     if flag == "--exclude-pane":
         parsed.watch_exclude_pane_ids.append(value)
         return
@@ -992,6 +1004,8 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--note":
         parsed.note = value
         return
+    if flag in ("--host", "--thread"):
+        raise ValueError(f"{flag} (remote daemons over HTTP) needs the npm runpane CLI: npx --yes runpane@latest ...")
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -1015,6 +1029,7 @@ def is_runpane_local_command(command: str) -> bool:
         "lock acquire",
         "lock release",
         "lock list",
+        "cloud safe-to-stop",
         "workspace state",
         "watch",
         "panes list",

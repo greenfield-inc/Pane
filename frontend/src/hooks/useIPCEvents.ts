@@ -47,6 +47,9 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     }
   }
 
+  // Sessions belong to the runtime too: after a host switch the list must come from the new host.
+  await useOrchestrationSessionStore.getState().refresh({ adoptServerSelection: true });
+
   window.dispatchEvent(new Event('project-changed'));
   window.dispatchEvent(new Event('project-sessions-refresh'));
 }

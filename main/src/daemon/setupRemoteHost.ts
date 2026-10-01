@@ -45,6 +45,8 @@ import {
 
 export interface SetupRemoteHostOptions extends Omit<RemoteHostSetupRequest, 'dataDirectoryMode'> {
   printOnly?: boolean;
+  /** Pair a narrow client instead of a full-access one (the Runpane Cloud coordinator). */
+  clientScope?: 'coordinator';
   interactiveTailscaleSetup?: boolean;
   autoSelectListenPort?: boolean;
   existingConfig?: object;
@@ -111,7 +113,7 @@ export async function setupRemoteHost(options: SetupRemoteHostOptions = {}): Pro
       : await readConfigFile(configPath);
     const nextRemoteDaemon = buildNextRemoteDaemonConfig(
       existingConfig.remoteDaemon,
-      pair.client,
+      options.clientScope ? { ...pair.client, scope: options.clientScope } : pair.client,
       listenPort,
       createRemoteHostAccess(tunnelSelection.baseUrl, tunnelSelection.tunnel),
     );

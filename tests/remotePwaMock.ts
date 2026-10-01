@@ -13,6 +13,11 @@ export interface RemotePwaMockOptions {
   panelTitles?: string[];
   /** Host-defined terminal shortcuts offered in the mobile input bar. */
   shortcuts?: Array<{ id: string; key: string; label: string; text: string }>;
+  /**
+   * Answers extra invoke channels (return `undefined` to fall through to the
+   * built-in fixtures). Throwing answers `{ ok: false }` with the message.
+   */
+  handleInvoke?: (channel: string, args: JsonValue[]) => JsonValue | undefined;
 }
 
 const PROFILE = {
@@ -156,9 +161,15 @@ export async function openConnectedRemotePwa(
           window.setTimeout(() => this.onopen?.(new Event('open')), 0);
         }
       }
-      addEventListener(): void {}
+      private readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>();
+      addEventListener(name: string, listener: (event: MessageEvent) => void): void {
+        this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+      }
       removeEventListener(): void {}
       close(): void {}
+      dispatch(name: string, data: string): void {
+        for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name, { data }));
+      }
     }
 
     let live: MockEventSource | undefined;
@@ -180,6 +191,14 @@ export async function openConnectedRemotePwa(
 
     // Lets the next retry through, and opens the one already waiting so the
     // recovery does not have to sit out another backoff interval.
+    // Pushes one host event down the live stream, as the daemon's SSE does.
+    Object.defineProperty(window, '__paneRemoteEmitDaemonEvent', {
+      configurable: true,
+      value: (channel: string, args: unknown[]) => {
+        live?.dispatch('daemon-event', JSON.stringify({ channel, args, timestamp: new Date().toISOString() }));
+      },
+    });
+
     Object.defineProperty(window, '__paneRemoteRestoreConnection', {
       configurable: true,
       value: () => {
@@ -189,7 +208,7 @@ export async function openConnectedRemotePwa(
     });
   }, PROFILE);
 
-  await installRemoteHostRoute(page, { project, panels, affordances });
+  await installRemoteHostRoute(page, { project, panels, affordances }, options.handleInvoke);
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
@@ -212,6 +231,15 @@ export async function dropRemoteConnection(page: Page): Promise<void> {
   });
 }
 
+/** Delivers a daemon event (for example `runpane:ports:changed`) over the mocked stream. */
+export async function emitRemoteDaemonEvent(page: Page, channel: string, args: JsonValue[]): Promise<void> {
+  await page.evaluate(({ channel, args }) => {
+    const emit = window.__paneRemoteEmitDaemonEvent;
+    if (!emit) throw new Error('Remote PWA mock is not installed on this page.');
+    emit(channel, args);
+  }, { channel, args });
+}
+
 /** Brings the held host back, settling the status to `connected`. */
 export async function restoreRemoteConnection(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -227,6 +255,8 @@ declare global {
     __paneRemoteDropConnection?: () => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
     __paneRemoteRestoreConnection?: () => void;
+    /** Installed by `openConnectedRemotePwa`; see `emitRemoteDaemonEvent`. */
+    __paneRemoteEmitDaemonEvent?: (channel: string, args: unknown[]) => void;
   }
 }
 
@@ -234,6 +264,7 @@ declare global {
 async function installRemoteHostRoute(
   page: Page,
   fixtures: ReturnType<typeof buildFixtures>,
+  handleInvoke?: RemotePwaMockOptions['handleInvoke'],
 ): Promise<void> {
   await page.route('http://anim-pane.test/**', async (route) => {
     const request = route.request();
@@ -243,8 +274,23 @@ async function installRemoteHostRoute(
     }
 
     // SAFETY: the test route receives the remote invoke envelope emitted by this fixture.
-    const body = JSON.parse(request.postData() ?? '{}') as { channel?: string };
+    const body = JSON.parse(request.postData() ?? '{}') as { channel?: string; args?: JsonValue[] };
     let result: JsonValue = null;
+
+    if (handleInvoke && body.channel) {
+      let handled: JsonValue | undefined;
+      try {
+        handled = handleInvoke(body.channel, body.args ?? []);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { message } }) });
+        return;
+      }
+      if (handled !== undefined) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, result: handled }) });
+        return;
+      }
+    }
 
     switch (body.channel) {
       case 'sessions:get-all-with-projects':
@@ -274,6 +320,10 @@ async function installRemoteHostRoute(
         break;
       case 'panels:get-output':
         result = TERMINAL_SCROLLBACK;
+        break;
+      case 'runpane:ports:list':
+        // A host off a cloud Session: the Ports row stays hidden.
+        result = { ok: true, available: false, scheme: 'https', autoOpen: false, ports: [], suggested: [], manifests: [] };
         break;
       default:
         // Panel mutations and terminal writes acknowledge without doing work;

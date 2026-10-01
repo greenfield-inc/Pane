@@ -111,7 +111,10 @@ function getProbePlan(): ShellPathProbePlan {
   console.log('Running in packaged app, using login shell to get full PATH...');
 
   // Use minimal base PATH - just enough to find the shell
-  const minimalPath = '/usr/bin:/bin';
+  // A login on Linux starts from PAM's /etc/environment, and profile files only prepend to it. Starting
+  // from /usr/bin:/bin instead let system copies shadow tools in /usr/local/bin (seen live:
+  // a gh in /usr/local/bin lost to /usr/bin/gh). macOS gets its system PATH from path_helper in /etc/zprofile.
+  const minimalPath = isLinux ? linuxLoginBasePath() : '/usr/bin:/bin';
   const homeDir = os.homedir();
 
   // First try with explicit sourcing of shell config files
@@ -162,6 +165,19 @@ function getProbePlan(): ShellPathProbePlan {
     // Fallback to current PATH + common locations
     ifAllFail: process.env.PATH || '',
   };
+}
+
+const DEFAULT_LINUX_LOGIN_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+
+/** The PATH a Linux login session starts with: /etc/environment's PATH, else the Debian/Ubuntu default. */
+function linuxLoginBasePath(): string {
+  try {
+    const match = /^\s*PATH\s*=\s*"?([^"\n]+?)"?\s*$/mu.exec(fs.readFileSync('/etc/environment', 'utf8'));
+    if (match) return match[1];
+  } catch {
+    // No /etc/environment: use the distribution default.
+  }
+  return DEFAULT_LINUX_LOGIN_PATH;
 }
 
 function mergePaths(first: string, second: string): string {

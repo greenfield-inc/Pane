@@ -43,7 +43,7 @@ import type {
 } from '../../shared/types/permissions';
 // The main build bundles this runtime dependency into preload.js; the sandbox
 // verification step rejects any remaining require other than Electron itself.
-import { boundary, decodeBoundary, type JsonObject } from '../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../shared/validation/boundaryDecoder';
 import { decodeAppearanceSnapshotArg, type Theme } from '../../shared/types/appearance';
 
 interface LogEntry {
@@ -936,6 +936,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('app:unclean-shutdown-detected', wrappedCallback);
     },
 
+    // config.json changed outside the app (e.g. `runpane cloud` saved a remote host)
+    onConfigChanged: (callback: () => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
+      ipcRenderer.on('config:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:changed', wrappedCallback);
+    },
+
     // Main process logging
     onMainLog: (callback: (level: string, message: string) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, level: string, message: string) => callback(level, message);
@@ -1015,6 +1022,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
       ipcRenderer.on('remote-daemon:resync-required', wrappedCallback);
       return () => ipcRenderer.removeListener('remote-daemon:resync-required', wrappedCallback);
+    },
+    // Session ports changed on the connected daemon (runpane:ports:changed); payload = the new list, optional.
+    onSessionPortsChanged: (callback: (snapshot: JsonValue) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: JsonValue) => callback(snapshot);
+      ipcRenderer.on('runpane:ports:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('runpane:ports:changed', wrappedCallback);
     },
   },
 

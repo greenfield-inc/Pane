@@ -22,10 +22,12 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && node scripts/bundle-dependencies.js && node scripts/build-docs-index.js && node scripts/mark-executable.js",
+    "build": "node scripts/generate-cloud-assets.js && tsc && node scripts/bundle-dependencies.js && node scripts/build-docs-index.js && node scripts/mark-executable.js",
     "lint": "pnpm --dir ../.. run lint:ox:runpane && pnpm run lint:eslint",
     "lint:eslint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "rm -rf .test-dist && tsc -p tsconfig.test.json && node --test \".test-dist/**/*.test.js\"",
+    "check:cloud-assets": "node scripts/generate-cloud-assets.js --check",
     "prepack": "pnpm run build"
   },
   "engines": {

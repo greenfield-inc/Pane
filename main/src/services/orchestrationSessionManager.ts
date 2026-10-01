@@ -446,7 +446,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         session: clone(record),
         status,
         panes,
-        activity: [...record.activity].sort((left, right) => right.at.localeCompare(left.at)),
+        // Reverse first: the sort is stable, so entries with the same timestamp keep newest-appended first.
+        activity: [...record.activity].reverse().sort((left, right) => right.at.localeCompare(left.at)),
         report,
         refreshedAt: new Date().toISOString(),
       };
@@ -468,6 +469,16 @@ export class OrchestrationSessionManager extends EventEmitter {
       ownPaneIds: new Set([record.internalSessionId]),
       ownPanelIds: new Set(Object.values(record.panelIds)),
     };
+  }
+
+  /**
+   * The hidden Panes that hold the orchestrator of each Session that is not archived, for the
+   * headless start-up resume. Reads the in-memory store without taking the Session lock.
+   */
+  activeOrchestratorPaneIds(): string[] {
+    return this.store.read().sessions
+      .filter(session => session.archived !== true)
+      .map(session => session.internalSessionId);
   }
 
   /**

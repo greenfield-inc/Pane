@@ -60,6 +60,8 @@ interface TrackedPr {
   mergeable?: 'MERGEABLE' | 'CONFLICTING';
   /** `<headOid>:<passed|failed>` of the last settled checks. */
   settledChecks?: string;
+  /** Checks as last seen, settled or not. */
+  checks: ChecksSummary['state'];
 }
 
 interface SessionPrMonitorOptions {
@@ -70,6 +72,7 @@ interface SessionPrMonitorOptions {
   logger?: Pick<Logger, 'info' | 'warn'>;
   intervalMs?: number;
   random?: () => number;
+  now?: () => number;
 }
 
 class GithubUnavailableError extends Error {}
@@ -92,15 +95,34 @@ export class SessionPrMonitor {
   private readonly intervalMs: number;
   private readonly random: () => number;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private running = false;
+  /** The round in flight; a second caller awaits it instead of starting another. */
+  private round: Promise<void> | undefined;
   private stopped = true;
   /** Bumped by `stop`, so a round in flight stops at its next Pane. */
   private stopCount = 0;
   private failures = 0;
+  private lastRoundAt: number | undefined;
+  private readonly now: () => number;
 
   constructor(private readonly options: SessionPrMonitorOptions) {
     this.intervalMs = options.intervalMs ?? SESSION_PR_POLL_INTERVAL_MS;
     this.random = options.random ?? Math.random;
+    this.now = options.now ?? Date.now;
+  }
+
+  /**
+   * Open PRs whose checks were still running at the last poll, for cloud safe-to-stop. Polls
+   * first when the last round is older than `maxAgeMs`, since the first scheduled round only
+   * runs minutes after start and a sandbox is often asked right after a wake.
+   */
+  async pendingChecks(maxAgeMs: number): Promise<Array<{ paneId: string; prNumber: number }>> {
+    if (this.lastRoundAt === undefined || this.now() - this.lastRoundAt >= maxAgeMs) {
+      await this.pollOnce();
+    }
+    const members = new Set(this.options.sessions.activeMemberPaneIds());
+    return [...this.tracked.entries()]
+      .filter(([paneId, pr]) => members.has(paneId) && pr.state === 'OPEN' && pr.checks === 'pending')
+      .map(([paneId, pr]) => ({ paneId, prNumber: pr.number }));
   }
 
   start(): void {
@@ -117,9 +139,14 @@ export class SessionPrMonitor {
   }
 
   /** One polling round. Runs no `gh` when there is no live Session member. */
-  async pollOnce(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
+  pollOnce(): Promise<void> {
+    this.round ??= this.runRound().finally(() => {
+      this.round = undefined;
+    });
+    return this.round;
+  }
+
+  private async runRound(): Promise<void> {
     const stopCount = this.stopCount;
     try {
       const members = this.members();
@@ -134,14 +161,13 @@ export class SessionPrMonitor {
         this.options.logger?.info('[SessionPrMonitor] GitHub CLI is reachable again; PR polling resumed');
       }
       if (members.length > 0) this.failures = 0;
+      this.lastRoundAt = this.now();
     } catch (error) {
       if (!(error instanceof GithubUnavailableError)) throw error;
       if (this.failures === 0) {
         this.options.logger?.warn(`[SessionPrMonitor] Pausing PR polling: ${error.message}`);
       }
       this.failures += 1;
-    } finally {
-      this.running = false;
     }
   }
 
@@ -210,7 +236,7 @@ export class SessionPrMonitor {
     const settledChecks = checks.state === 'passed' || checks.state === 'failed'
       ? `${pr.headRefOid}:${checks.state}`
       : known?.settledChecks;
-    this.tracked.set(paneId, { number: pr.number, state: pr.state, mergeable, settledChecks });
+    this.tracked.set(paneId, { number: pr.number, state: pr.state, mergeable, settledChecks, checks: checks.state });
     if (!known) return;
 
     const reference: RunpaneWorkspacePullRequest = { number: pr.number, url: pr.url, headOid: pr.headRefOid };

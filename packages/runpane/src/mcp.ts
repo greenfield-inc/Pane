@@ -161,7 +161,8 @@ async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, r
   const { code, stdout, stderr } = await runCli(argv, signal);
   // Docs come back as written; everything else speaks in tool names.
   const translate = tool.toolsets.includes('docs') ? (text: string) => text : rewrite;
-  const text = translate(stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
+  const output = stdout.trim();
+  const text = translate(failureMessage(output) ?? (output || stderr.trim() || `runpane ${tool.command} exited with code ${code}`));
   if (code !== 0) {
     const unconfirmed = !argv.includes(CONFIRM_FLAG) && tool.parameters.some((parameter) => parameter.flag === CONFIRM_FLAG);
     return errorResult(unconfirmed ? `${text}\nIf Pane refused the change, pass \`yes: true\` to confirm it.` : text);
@@ -169,6 +170,28 @@ async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, r
   const structuredContent = parseJsonObject(text);
   if (!structuredContent) return errorResult(`runpane ${tool.command} did not print JSON:\n${text}`);
   return { content: [{ type: 'text', text }], structuredContent };
+}
+
+/**
+ * The message of the `{ ok: false, code, message, details? }` envelope `--json` prints when a
+ * command throws. Tool results carry the plain message, as before the envelope existed; a
+ * command's own `ok: false` result (with `blocked`, `nextCommand`, ...) is left as JSON.
+ */
+const failureEnvelopeSchema = boundary.object({
+  ok: boundary.literal(false),
+  code: boundary.string,
+  message: boundary.string,
+});
+const FAILURE_ENVELOPE_KEYS = new Set(['ok', 'code', 'message', 'details']);
+
+function failureMessage(text: string): string | undefined {
+  const value = parseJsonObject(text);
+  if (!value || !Object.keys(value).every((key) => FAILURE_ENVELOPE_KEYS.has(key))) return undefined;
+  try {
+    return decodeBoundary(value, failureEnvelopeSchema).message;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseJsonObject(text: string): JsonObject | undefined {

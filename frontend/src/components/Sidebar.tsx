@@ -182,9 +182,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const sessions = useSessionStore((state) => state.sessions);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
+  const remoteProfiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
   const remoteFooterStatus = useMemo(
-    () => getRemoteFooterStatus(remoteConnectionState, remoteHostState),
-    [remoteConnectionState, remoteHostState],
+    () => getRemoteFooterStatus(remoteConnectionState, remoteHostState, remoteProfiles ?? []),
+    [remoteConnectionState, remoteHostState, remoteProfiles],
   );
   const remoteFooterTooltip = (
     <div className="max-w-[260px] space-y-1">
@@ -193,7 +194,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     </div>
   );
   const showRemoteDesktopLink = remoteConnectionState.mode === 'remote' && remoteConnectionState.status === 'connected';
-  const remoteProfiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   // Profiles live in the config store; a host imported or connected outside
   // Settings shows up here once the connection it caused is pushed.

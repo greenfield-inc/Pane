@@ -63,12 +63,35 @@ export interface RemoteDaemonHostRuntimeState {
   updatedAt: string;
 }
 
+export type RemoteDaemonClientScope = 'peer' | 'coordinator';
+
 export interface RemoteDaemonClientRecord {
   id: string;
   label: string;
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
+  /**
+   * Absent means a full-access paired client. 'peer' is another Pane Session with narrow access;
+   * 'coordinator' is the Runpane Cloud coordinator, which may only ask runpane:cloud:* questions.
+   */
+  scope?: RemoteDaemonClientScope;
+  /** Peer records only: orchestration Session ids on this host whose orchestrator panel the peer may reach. */
+  allowedSessionIds?: string[];
+}
+
+/**
+ * Set on profiles that `runpane cloud` created: the host is a cloud Session on a provider sandbox.
+ * Single writer (the runpane cloud CLI, then its coordinator); `version` goes up when the address
+ * changes. The desktop only reads it, for example to say a host is asleep; it never manages machines.
+ */
+export interface RemotePaneCloudInfo {
+  provider: 'boat';
+  sandboxId: string;
+  sessionId: string;
+  nodeId: string;
+  hostname: string;
+  version: number;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -78,6 +101,7 @@ export interface RemotePaneConnectionProfile {
   token: string;
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
+  cloud?: RemotePaneCloudInfo;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -341,6 +365,24 @@ export function isLoopbackRemoteDaemonHost(host: string): boolean {
   return normalizedHost === '127.0.0.1' || normalizedHost === '::1' || normalizedHost === 'localhost';
 }
 
+/**
+ * A host on the tailnet: a MagicDNS name (*.ts.net) or a Tailscale address (100.64.0.0/10,
+ * fd7a:115c:a1e0::/48). WireGuard encrypts that traffic end to end, so plain HTTP is acceptable there:
+ * a cloud Session whose Tailscale Serve can't get a TLS certificate serves TCP instead. This only says
+ * the profile may be saved; the clients check at send time that the request really goes through
+ * Tailscale (main/src/daemon/client/tailnetRoute.ts), since 100.64.0.0/10 is also carrier-grade NAT space.
+ */
+export function isTailnetRemoteDaemonHost(host: string): boolean {
+  const normalizedHost = host.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(normalizedHost)) return true;
+  const ipv4 = /^100\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(normalizedHost);
+  if (ipv4) {
+    const second = Number(ipv4[1]);
+    return second >= 64 && second <= 127 && [ipv4[2], ipv4[3]].every(part => Number(part) <= 255);
+  }
+  return normalizedHost.startsWith('fd7a:115c:a1e0:');
+}
+
 export function getRemoteDaemonHostConfigValidationError(config: RemoteDaemonHostConfig): string | null {
   if (!config.enabled) {
     return null;
@@ -419,6 +461,8 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
+  scope: boundary.optional(boundary.enumeration('peer', 'coordinator')),
+  allowedSessionIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -427,6 +471,14 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
+const remoteCloudInfoSchema: BoundarySchema<RemotePaneCloudInfo> = boundary.object({
+  provider: boundary.literal('boat'),
+  sandboxId: boundary.nonEmptyString,
+  sessionId: boundary.nonEmptyString,
+  nodeId: boundary.string,
+  hostname: boundary.nonEmptyString,
+  version: boundary.number,
+});
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -434,6 +486,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  cloud: boundary.optional(remoteCloudInfoSchema),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),
@@ -722,8 +775,8 @@ function normalizeRemoteImportBaseUrl(value: string): string {
 
   if (url.protocol === 'http:') {
     const normalizedHostname = url.hostname.replace(/^\[(.*)\]$/, '$1');
-    if (!isLoopbackRemoteDaemonHost(normalizedHostname)) {
-      throw new Error('HTTP remote base URLs must use a loopback host; use HTTPS for Tailscale or reverse-proxy endpoints');
+    if (!isLoopbackRemoteDaemonHost(normalizedHostname) && !isTailnetRemoteDaemonHost(normalizedHostname)) {
+      throw new Error('HTTP remote base URLs must use a loopback or Tailscale host; use HTTPS for reverse-proxy endpoints');
     }
   } else if (url.protocol !== 'https:') {
     throw new Error('Remote base URL must use http or https');

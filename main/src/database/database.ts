@@ -5469,6 +5469,18 @@ export class DatabaseService {
     };
   }
 
+  /**
+   * Fold the WAL into the main file and truncate it. `busy` is 1 when a reader kept part of
+   * the WAL in use; those frames are still in the -wal file, which the caller fsyncs.
+   */
+  checkpointWal(): { busy: number; log: number; checkpointed: number } {
+    const rows = decodeBoundary(
+      this.db.pragma("wal_checkpoint(TRUNCATE)"),
+      boundary.array(boundary.object({ busy: boundary.number, log: boundary.number, checkpointed: boundary.number })),
+    );
+    return rows[0] ?? { busy: 0, log: 0, checkpointed: 0 };
+  }
+
   close(): void {
     this.db.close();
   }

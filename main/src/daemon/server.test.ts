@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PaneDaemonFrame } from '../../../shared/types/daemon';
+import { PaneCommandError } from '../core/commandError';
 import { PaneCommandRegistry } from './commandRegistry';
 import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from './socketFraming';
 import { PaneDaemonServer } from './server';
@@ -157,6 +158,30 @@ describe('PaneDaemonServer', () => {
       error: {
         message: 'No Pane daemon command registered for channel "sessions:missing"',
         code: 'ERR_UNKNOWN_CHANNEL',
+      },
+    });
+  });
+
+  it('returns the code and details of a PaneCommandError', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:panels:submit', async () => {
+      throw new PaneCommandError('Terminal panel p1 is not initialized', 'ERR_PANEL_NOT_RUNNING', { panelId: 'p1', resumable: true });
+    });
+    const server = new PaneDaemonServer(registry, createTempAppDirectory());
+    activeServers.push(server);
+    await server.start();
+
+    const client = await connectClient(server);
+    client.socket.write(encodePaneDaemonFrame({ type: 'request', id: 3, channel: 'runpane:panels:submit', args: [] }));
+
+    await expect(client.nextFrame()).resolves.toEqual({
+      type: 'response',
+      id: 3,
+      ok: false,
+      error: {
+        message: 'Terminal panel p1 is not initialized',
+        code: 'ERR_PANEL_NOT_RUNNING',
+        details: { panelId: 'p1', resumable: true },
       },
     });
   });

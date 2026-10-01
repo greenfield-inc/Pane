@@ -41,6 +41,7 @@ export class ConfigManager extends EventEmitter {
   private configPath: string;
   private configDir: string;
   private fileWatcher: FSWatcher | null = null;
+  private externalReloadTimer: NodeJS.Timeout | null = null;
   private lastConfigJson: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
 
@@ -148,6 +149,7 @@ export class ConfigManager extends EventEmitter {
       const data = await fs.readFile(this.configPath, 'utf-8');
       // SAFETY: initialize immediately normalizes boundary-sensitive fields before assigning the parsed config.
       const loadedConfig = JSON.parse(data) as AppConfig;
+      this.lastConfigJson = data;
       const normalizedAppearance = normalizeAppearance(loadedConfig);
       for (const diagnostic of normalizedAppearance.diagnostics) {
         console.error(`[ConfigManager] appearance: ${diagnostic}`);
@@ -277,8 +279,18 @@ export class ConfigManager extends EventEmitter {
     return queuedWrite;
   }
 
-  private async saveConfig(): Promise<void> {
-    await this.enqueueConfigWrite(() => this.writeConfigToDisk(this.config));
+  /**
+   * Applies a change to a copy of the config (on top of any outside edits), saves the copy, and only
+   * then makes it the live config, so a failed save leaves memory as it was.
+   */
+  private async saveConfigWith(mutate: (config: AppConfig) => void): Promise<void> {
+    await this.enqueueConfigWrite(async () => {
+      await this.adoptExternalEdits();
+      const next = structuredClone(this.config);
+      mutate(next);
+      await this.writeConfigToDisk(next);
+      this.config = next;
+    });
   }
 
   getConfig(): AppConfig {
@@ -296,71 +308,63 @@ export class ConfigManager extends EventEmitter {
   }
 
   /**
-   * Start watching config file for external changes (e.g., from setup scripts).
-   * Emits 'config-updated' when the file changes.
+   * Watch config.json for edits made by other processes (e.g. `runpane cloud new|sync|destroy`
+   * saving remote hosts) and emit 'config-updated' once they are loaded. The directory is watched,
+   * not the file: every save replaces the file by rename, which ends a file watch.
    */
   startWatching(): void {
-    if (this.fileWatcher) return; // Already watching
-
+    if (this.fileWatcher) return;
+    const configFileName = path.basename(this.configPath);
     try {
-      this.lastConfigJson = JSON.stringify(this.config);
-
-      const handleFileChange = async () => {
-        try {
-          // Small delay to let the file finish writing
-          await new Promise(resolve => setTimeout(resolve, 100));
-
-          const data = await fs.readFile(this.configPath, 'utf-8');
-
-          // Only emit if content actually changed
-          if (data !== this.lastConfigJson) {
-            this.lastConfigJson = data;
-            await this.initialize();
-            console.log('[ConfigManager] Config file changed externally, reloaded');
-            this.emit('config-updated', this.config);
-          }
-        } catch (err) {
-          console.error('[ConfigManager] Error reloading config after file change:', err);
-        }
-      };
-
-      const setupWatcher = () => {
-        if (this.fileWatcher) {
-          this.fileWatcher.close();
-        }
-
-        this.fileWatcher = watch(this.configPath, { persistent: false }, async (eventType) => {
-          // Handle both 'change' and 'rename' events
-          // 'rename' occurs when using atomic writes (tmp + mv pattern)
-          if (eventType === 'change' || eventType === 'rename') {
-            await handleFileChange();
-
-            // On rename, the watched inode may have changed, so reattach the watcher
-            if (eventType === 'rename') {
-              console.log('[ConfigManager] Config file renamed/replaced, reattaching watcher');
-              // Small delay before reattaching to let filesystem settle
-              setTimeout(() => setupWatcher(), 200);
-            }
-          }
-        });
-      };
-
-      setupWatcher();
-      console.log('[ConfigManager] Watching config file for external changes');
+      this.fileWatcher = watch(this.configDir, { persistent: false }, (_eventType, fileName) => {
+        if (fileName && fileName.toString() !== configFileName) return;
+        this.scheduleExternalReload();
+      });
     } catch (err) {
       console.error('[ConfigManager] Failed to start file watcher:', err);
     }
   }
 
-  /**
-   * Stop watching config file.
-   */
   stopWatching(): void {
+    if (this.externalReloadTimer) {
+      clearTimeout(this.externalReloadTimer);
+      this.externalReloadTimer = null;
+    }
     if (this.fileWatcher) {
       this.fileWatcher.close();
       this.fileWatcher = null;
-      console.log('[ConfigManager] Stopped watching config file');
     }
+  }
+
+  private scheduleExternalReload(): void {
+    if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
+    // Let a burst of writes (temp file, rename) settle before reading.
+    this.externalReloadTimer = setTimeout(() => {
+      this.externalReloadTimer = null;
+      void this.enqueueConfigWrite(async () => {
+        if (await this.adoptExternalEdits()) {
+          console.log('[ConfigManager] Config file changed externally, reloaded');
+          this.emit('config-updated', this.config);
+        }
+      }).catch((err) => console.error('[ConfigManager] Error reloading config after file change:', err));
+    }, 100);
+    this.externalReloadTimer.unref?.();
+  }
+
+  /**
+   * Loads config.json again when another process changed it since this manager last read or wrote
+   * it, so an in-app save never reverts that edit. Call only inside the write queue.
+   */
+  private async adoptExternalEdits(): Promise<boolean> {
+    let data: string;
+    try {
+      data = await fs.readFile(this.configPath, 'utf-8');
+    } catch {
+      return false;
+    }
+    if (data === this.lastConfigJson) return false;
+    await this.initializeFromDisk();
+    return true;
   }
 
   async updateConfig(updates: Partial<AppConfig>): Promise<AppConfig> {
@@ -373,6 +377,7 @@ export class ConfigManager extends EventEmitter {
 
   async updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<AppConfig> {
     return this.enqueueConfigWrite(async () => {
+      await this.adoptExternalEdits();
       const updates = update(this.getConfig());
       const analytics = updates.analytics !== undefined
         ? { ...defaultAnalyticsConfig(), ...this.config.analytics, ...updates.analytics }
@@ -520,39 +525,43 @@ export class ConfigManager extends EventEmitter {
     return this.config.analytics?.distinctId;
   }
 
-  private ensureAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
-    if (!this.config.analytics) {
-      this.config.analytics = defaultAnalyticsConfig();
+  private static ensureAnalyticsConfig(config: AppConfig): NonNullable<AppConfig['analytics']> {
+    if (!config.analytics) {
+      config.analytics = defaultAnalyticsConfig();
     }
-    return this.config.analytics;
+    return config.analytics;
   }
 
   async getOrCreateAnalyticsInstallId(): Promise<string> {
-    const analytics = this.ensureAnalyticsConfig();
-    if (!analytics.installId) {
-      analytics.installId = `install_${randomUUID()}`;
-      await this.saveConfig();
-    }
-    return analytics.installId;
+    const existing = this.config.analytics?.installId;
+    if (existing) return existing;
+    let installId = '';
+    await this.saveConfigWith((config) => {
+      const analytics = ConfigManager.ensureAnalyticsConfig(config);
+      analytics.installId ??= `install_${randomUUID()}`;
+      installId = analytics.installId;
+    });
+    return installId;
   }
 
   async setAnalyticsDistinctId(distinctId: string): Promise<void> {
-    const analytics = this.ensureAnalyticsConfig();
-    analytics.distinctId = distinctId;
-    await this.saveConfig();
+    await this.saveConfigWith((config) => {
+      ConfigManager.ensureAnalyticsConfig(config).distinctId = distinctId;
+    });
   }
 
   async setAnalyticsIdentity(identity: AnalyticsIdentity): Promise<void> {
-    const analytics = this.ensureAnalyticsConfig();
-    analytics.distinctId = identity.distinctId;
-    analytics.identitySource = identity.identitySource;
-    analytics.installId = identity.installId ?? analytics.installId;
-    analytics.githubUsername = identity.githubUsername;
-    analytics.githubEmail = identity.githubEmail;
-    analytics.gitEmail = identity.gitEmail;
-    analytics.gitEmailHash = identity.gitEmailHash;
-    analytics.gitUserName = identity.gitUserName;
-    await this.saveConfig();
+    await this.saveConfigWith((config) => {
+      const analytics = ConfigManager.ensureAnalyticsConfig(config);
+      analytics.distinctId = identity.distinctId;
+      analytics.identitySource = identity.identitySource;
+      analytics.installId = identity.installId ?? analytics.installId;
+      analytics.githubUsername = identity.githubUsername;
+      analytics.githubEmail = identity.githubEmail;
+      analytics.gitEmail = identity.gitEmail;
+      analytics.gitEmailHash = identity.gitEmailHash;
+      analytics.gitUserName = identity.gitUserName;
+    });
   }
 
   /**

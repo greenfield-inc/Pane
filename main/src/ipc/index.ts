@@ -19,7 +19,7 @@ import { registerEditorPanelHandlers } from './editorPanel';
 import { registerNimbalystHandlers } from './nimbalyst';
 import { registerSpotlightHandlers } from './spotlight';
 import { registerJourneyTimingHandlers } from './journeyTimings';
-import { registerRemoteDaemonHandlers } from './remoteDaemon';
+import { registerRemoteDaemonHandlers, registerRemotePeerCommands } from './remoteDaemon';
 import { registerRunpaneHandlers } from './runpane';
 import { registerClipboardHandlers } from './clipboard';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
@@ -86,6 +86,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerJourneyTimingHandlers(ipcMain, services);
   registerRemoteDaemonHandlers(ipcMain, services);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
+  registerRemotePeerCommands(commandRegistry, services);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {

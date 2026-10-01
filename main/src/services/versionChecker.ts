@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { ConfigManager } from './configManager';
 import { Logger } from '../utils/logger';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { isSideBySideBuild } from '../utils/sideBySide';
 
 export interface VersionInfo {
   current: string;
@@ -43,6 +44,10 @@ export class VersionChecker {
   public async checkForUpdates(): Promise<VersionInfo> {
     try {
       const currentVersion = app.getVersion();
+      // A side-by-side test build is not replaced by a release.
+      if (isSideBySideBuild()) {
+        return { current: currentVersion, latest: currentVersion, hasUpdate: false };
+      }
 
       // Fetch latest release from GitHub API
       const response = await fetch('https://api.github.com/repos/greenfield-inc/Pane/releases/latest');

@@ -450,6 +450,8 @@ interface ElectronAPI {
      */
     onTerminalPtyReady: (callback: (data: { sessionId: string; panelId: string; ptyId: string }) => void) => () => void;
     onUncleanShutdownDetected: (callback: () => void) => () => void;
+    /** config.json changed outside the app, e.g. `runpane cloud` saved a remote host. */
+    onConfigChanged: (callback: () => void) => () => void;
     onMainLog: (callback: (level: string, message: string) => void) => () => void;
     onVersionUpdateAvailable: (callback: (versionInfo: VersionUpdateInfo) => void) => () => void;
     
@@ -468,6 +470,7 @@ interface ElectronAPI {
     onAppMenuAction: (callback: (action: 'open-about' | 'open-settings') => void) => () => void;
     onWindowFocusChanged: (callback: (focused: boolean) => void) => () => void;
     onRemoteDaemonResyncRequested: (callback: () => void) => () => void;
+    onSessionPortsChanged?: (callback: (snapshot: JsonValue) => void) => () => void;
 
     // Spotlight events
     onSpotlightStatusChanged?: (callback: (data: { sessionId: string; projectId: number; active: boolean }) => void) => () => void;

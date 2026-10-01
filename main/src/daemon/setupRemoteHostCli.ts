@@ -93,7 +93,20 @@ function parseSetupRemoteHostArgs(args: string[]): SetupRemoteHostOptions {
     installService: !hasFlag(args, '--no-install-service'),
     exposeTailscale: !hasFlag(args, '--no-tailscale-serve'),
     preferTunnel,
+    clientScope: parseClientScope(readArgValue(args, '--client-scope')),
   };
+}
+
+function parseClientScope(value: string | undefined): SetupRemoteHostOptions['clientScope'] {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value === 'coordinator') {
+    return value;
+  }
+
+  throw new Error('--client-scope must be "coordinator"');
 }
 
 function parseChannel(value: string | undefined): RemoteSetupChannel | undefined {
@@ -156,6 +169,7 @@ function getUsageText(): string {
     '  --base-url <url>              Manual HTTPS base URL when using --prefer-tunnel manual',
     '  --prefer-tunnel <mode>        tailscale, ssh, manual, or legacy auto (default: tailscale)',
     '  --interactive-tailscale-setup Install Tailscale if needed, run tailscale up interactively, then finish setup',
+    '  --client-scope coordinator    Pair the Runpane Cloud coordinator: it may only call runpane:cloud:* channels',
     '  --no-install-service          Write config and print manual daemon command without installing startup service',
     '  --no-tailscale-serve          Do not attempt to install or configure Tailscale Serve',
     '  --print-only                  Validate output without writing config, installing service, or configuring tunnels; incompatible with default Tailscale setup',

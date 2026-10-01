@@ -6,11 +6,13 @@
  * particularly dealing with pnpm + node-gyp compatibility issues.
  *
  * Usage:
- *   node scripts/build-win.js [arch] [--publish]
+ *   node scripts/build-win.js [arch] [--publish] [-- <electron-builder args>]
  *
  * Arguments:
  *   arch      - Target architecture: 'x64' or 'arm64' (default: 'x64')
  *   --publish - Use '--publish always' instead of '--publish never' (for CI releases)
+ *   --        - Everything after it is passed to electron-builder unchanged
+ *               (e.g. `-c.win.target=dir -c.extraMetadata.version=...`)
  *
  * What this script does:
  * 1. Patches winpty.gyp to fix batch file path issues on Windows
@@ -38,8 +40,11 @@ const NODE_MODULES = path.join(ROOT_DIR, 'node_modules');
 const HOST_ARCH = os.arch(); // 'x64' or 'arm64'
 
 // Parse command line arguments
-const shouldPublish = process.argv.includes('--publish');
-const args = process.argv.slice(2).filter(a => a !== '--publish');
+const passthroughIndex = process.argv.indexOf('--');
+const scriptArgs = passthroughIndex === -1 ? process.argv.slice(2) : process.argv.slice(2, passthroughIndex);
+const builderArgs = passthroughIndex === -1 ? [] : process.argv.slice(passthroughIndex + 1);
+const shouldPublish = scriptArgs.includes('--publish');
+const args = scriptArgs.filter(a => a !== '--publish');
 const arch = args[0] || 'x64';
 if (!['x64', 'arm64'].includes(arch)) {
   console.error('Invalid architecture. Use: x64 or arm64');
@@ -359,7 +364,8 @@ async function build() {
   console.log('\n🔧 Step 6: Running electron-builder...\n');
 
   const publishFlag = shouldPublish ? '--publish always' : '--publish never';
-  run(`pnpm exec electron-builder --win --${arch} ${publishFlag} --config.npmRebuild=false`);
+  const extraArgs = builderArgs.map(arg => JSON.stringify(arg)).join(' ');
+  run(`pnpm exec electron-builder --win --${arch} ${publishFlag} --config.npmRebuild=false ${extraArgs}`.trim());
 
   // The launcher's icon is written by rcedit during the electron-builder run, so
   // this is the first point it can be checked. afterPack already covered the

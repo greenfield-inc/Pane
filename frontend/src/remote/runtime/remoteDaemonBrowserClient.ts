@@ -57,6 +57,7 @@ const RETRYABLE_READ_CHANNELS = new Set([
   'projects:detect-branch',
   'remote:pwa-affordances',
   'mobile:push-status',
+  'runpane:ports:list',
 ]);
 
 export class RemoteDaemonBrowserClient {

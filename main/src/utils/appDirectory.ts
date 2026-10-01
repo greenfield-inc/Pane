@@ -2,6 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, renameSync } from 'fs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { getSideBySideName, sideBySideDataDir } from './sideBySide';
 
 let customAppDir: string | undefined;
 
@@ -122,13 +123,19 @@ export function getAppDirectory(): string {
     return envDir;
   }
 
-  // 4. If running as an installed app (from DMG, /Applications, etc), always use ~/.pane
+  // 4. A side-by-side test build keeps its own default so it never opens the installed Pane's data
+  const sideBySideName = getSideBySideName();
+  if (sideBySideName) {
+    return sideBySideDataDir(sideBySideName);
+  }
+
+  // 5. If running as an installed app (from DMG, /Applications, etc), always use ~/.pane
   if (isInstalledApp()) {
     console.log('[Pane] Running as installed app, using ~/.pane');
     return join(homedir(), '.pane');
   }
 
-  // 5. If running inside Pane (detected by bundle identifier) in development, use development directory
+  // 6. If running inside Pane (detected by bundle identifier) in development, use development directory
   // This prevents development Pane from interfering with production Pane
   const electronApp = getElectronApp();
   if (process.env.__CFBundleIdentifier === 'com.dcouple.pane' && !electronApp?.isPackaged) {
@@ -136,7 +143,7 @@ export function getAppDirectory(): string {
     return join(homedir(), '.pane_dev');
   }
 
-  // 6. Default to ~/.pane
+  // 7. Default to ~/.pane
   return join(homedir(), '.pane');
 }
 
@@ -146,8 +153,9 @@ export function getAppDirectory(): string {
  */
 export function migrateDataDirectory(): void {
   // Skip migration if a custom directory is set (via --pane-dir, --foozol-dir, or env vars)
-  // to avoid moving ~/.foozol out from under a running app that explicitly configured its path
-  if (customAppDir || getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR) {
+  // to avoid moving ~/.foozol out from under a running app that explicitly configured its path.
+  // A side-by-side build never moves the installed Pane's directories.
+  if (customAppDir || getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR || getSideBySideName()) {
     return;
   }
 

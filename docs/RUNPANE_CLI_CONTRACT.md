@@ -185,7 +185,11 @@ For `panes create --wait-ready`, `initialInput.delivery` says where the prompt w
 
 `runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.
 
-`runpane panels list` lists tool panels inside one Pane session.
+`runpane panels list` lists tool panels inside one Pane session. Terminal panels carry `runState` (`running`, `resuming`, `interrupted`: an agent stopped by a daemon restart whose conversation resumes on the next start or submit, or `stopped`) and `resumable` (a restart brings back the agent's conversation, not only its program).
+
+On a headless daemon, `panels submit`, `panels input`, `panels submit-composer` and `panels wait` start a terminal panel that is not running (resuming an agent's conversation, or a fresh shell) before delivering input. When a panel cannot run (its Pane is archived, the desktop app has not opened it, or it exits or does not finish launching within 30 seconds), they fail with code `ERR_PANEL_NOT_RUNNING` and details `{ panelId, paneId, runState, resumable }`.
+
+When a command run with `--json` fails, stdout carries one object `{ "ok": false, "code": "...", "message": "...", "details": { ... } }` (details only when the daemon sent them), the message also goes to stderr, and the exit code is 1. `code` is the daemon's code (for example `ERR_PANEL_NOT_RUNNING`, `ERR_DAEMON_REQUEST_FAILED`, `ERR_RUNPANE_DAEMON_CONNECT_FAILED`) or `ERR_RUNPANE_COMMAND_FAILED` for a CLI-side failure. `watch` keeps its own error format, and `runpane mcp` tool errors carry only the message.
 
 `runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.
 
@@ -316,6 +320,8 @@ These flags are consumed by local daemon-control commands:
 
 ```bash
 --pane-dir <path>
+--host <name|session-id|pane-remote://...|pairing-file>
+--thread <cloud-session>
 --repo <selector>
 --pane <pane-id>
 --panel <panel-id>
@@ -359,6 +365,8 @@ These flags are consumed by local daemon-control commands:
 --min-interval <milliseconds>
 --body-file <path|->
 --session <id|name>
+--peer <id|label>
+--idempotency-key <key>
 --ttl <duration>
 --wait <milliseconds>
 --note <text>

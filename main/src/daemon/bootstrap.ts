@@ -31,6 +31,7 @@ import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
+  getPaneEventSink,
   setPaneRuntime,
   type PaneWebviewContext,
   type PtyHostRuntime,
@@ -43,6 +44,7 @@ import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { createPanelResume, createScrollbackCheckpoint } from '../services/panelResumeService';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { NamedLockService } from '../services/namedLockService';
@@ -51,6 +53,13 @@ import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { extractWorkspaceHeldInput } from '../services/workspaceHeldInput';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { cloudDaemonHealth } from './cloud/readiness';
+import { userClientActivity } from './cloud/clientActivity';
+import { readBuildCommit, registerCloudDaemonHandlers } from './cloud/cloudDaemon';
+import { registerSessionPortsHandlers } from './cloud/ports/registerPorts';
+import { whenCloudSession } from './cloud/cloudSessionMarker';
+import { registerAgentNotesHandler, writeSessionAgentNotes } from './cloud/sessionAgentNotes';
+import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 
 interface PaneDaemonHostOptions {
   app: App;
@@ -74,6 +83,9 @@ export interface PaneDaemonHost {
 }
 
 let powerMonitorDiagnosticsRegistered = false;
+
+/** How often the headless daemon saves live terminal scrollback (boat stops are power-offs). */
+const SCROLLBACK_CHECKPOINT_INTERVAL_MS = 10_000;
 
 function installPaneRuntime(
   eventSink: PaneEventSink,
@@ -117,6 +129,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const configManager = new ConfigManager();
   await configManager.initialize();
   installPaneRuntime(rendererEventSink, configManager, options.getPtyHostRuntime, getWebviewContextMap);
+  if (mode === 'desktop') {
+    // `runpane cloud new|sync|destroy` save remote hosts into config.json while the app runs; the
+    // renderer refetches so the host switcher shows them without a restart.
+    configManager.on('config-updated', () => rendererEventSink.send('config:changed'));
+    configManager.startWatching();
+  }
 
   const logger = new Logger(configManager);
   console.log('[Main] Logger initialized with file logging to ~/.pane/logs');
@@ -151,6 +169,22 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const analyticsManager = new AnalyticsManager(configManager);
   const sessionManager = new SessionManager(databaseService, analyticsManager);
   sessionManager.initializeFromDatabase();
+
+  // Headless starts follow a crash, a restart or a sandbox power-off: no PTY
+  // survived, so clear stale runtime flags before anything can start one.
+  const logResume = (message: string, error?: Error) => {
+    if (error) logger.warn(message, error);
+    else logger.info(message);
+  };
+  const panelResume = mode === 'headless' ? createPanelResume(databaseService, sessionManager, logResume) : undefined;
+  const scrollbackCheckpoint = mode === 'headless'
+    ? createScrollbackCheckpoint(SCROLLBACK_CHECKPOINT_INTERVAL_MS, logResume)
+    : undefined;
+  if (panelResume) {
+    panelResume.enable();
+    const interrupted = await panelResume.recoverAfterRestart();
+    logger.info(`[PanelResume] ${interrupted.length} agent panel(s) were interrupted by the last stop`);
+  }
 
   if (process.platform === 'win32') {
     const wslDistros = databaseService.getAllProjects()
@@ -235,6 +269,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     paneChatManager,
     gitStatusManager,
   );
+  // A named Session's orchestrator lives in a hidden Pane; bring it back on start like other agents.
+  panelResume?.alsoResumePanes(() => orchestrationSessionManager.activeOrchestratorPaneIds());
   await orchestrationSessionManager.initialize().catch(error => {
     // Keep the rest of Pane available when a previously-written Session store
     // cannot be read. Session APIs retry and return the exact failure instead
@@ -340,6 +376,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     workspaceStateReader,
     workspaceCursorStore,
     namedLockService,
+    panelResume,
+    scrollbackCheckpoint,
   };
 
   const services: AppServices = {
@@ -348,6 +386,45 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+  cloudDaemonHealth.setVersion(options.app.getVersion(), readBuildCommit(options.app.getAppPath()));
+  registerCloudDaemonHandlers({
+    commandRegistry,
+    health: cloudDaemonHealth,
+    clientActivity: userClientActivity,
+    terminals: terminalPanelManager,
+    getPanel: panelId => panelManager.getPanel(panelId),
+    getPanelsForPane: paneId => panelManager.getPanelsForSession(paneId),
+    listPaneIds: () => sessionManager.getAllSessions().map(session => session.id),
+    listLocks: () => namedLockService.list(),
+    pendingPrChecks: maxAgeMs => sessionPrMonitor.pendingChecks(maxAgeMs),
+    connectedClients: () => remoteHostRuntimeStateStore.getState().connectedClients,
+    remoteConfig: () => configManager.getConfig().remoteDaemon,
+    writeRemoteConfig: async (remoteDaemon) => {
+      await configManager.updateConfig({ remoteDaemon });
+    },
+    checkpointWal: () => databaseService.checkpointWal(),
+    paneDirectory: getAppDirectory(),
+    databaseFile: dbPath,
+  });
+  const sessionPorts = registerSessionPortsHandlers({
+    commandRegistry,
+    panelIds: () => terminalPanelManager.getAllPanelIds(),
+    panelPid: panelId => terminalPanelManager.getPanelPid(panelId),
+    paneIdOf: panelId => panelManager.getPanel(panelId)?.sessionId,
+    projectPaths: () => databaseService.getAllProjects().map(project => project.path),
+    daemonPort: () => configManager.getConfig().remoteDaemon?.host.config.listenPort,
+    emit: (channel, result) => getPaneEventSink().send(channel, result),
+    log: message => logger.info(`[Pane daemon] ${message}`),
+  });
+  registerAgentNotesHandler(commandRegistry);
+  const stopWaitingForAgentNotes = whenCloudSession(() => {
+    try {
+      const notes = writeSessionAgentNotes();
+      if (notes.length > 0) logger.info(`[Pane daemon] wrote the Session notes for agents: ${notes.join(', ')}`);
+    } catch (error) {
+      logger.warn(`[Pane daemon] could not write the Session notes for agents: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
@@ -409,6 +486,18 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
   });
 
+  scrollbackCheckpoint?.start();
+  if (panelResume) {
+    // Not awaited: the socket is up already, and a submit to a panel that is
+    // still coming back waits for that panel on its own. /health readiness
+    // stays "starting" until the resume pass ends, so a cloud wake waits for it.
+    cloudDaemonHealth.setAgentRestorePhase('pending');
+    void panelResume.resumeInterruptedAgents().then(status => {
+      const failed = status.panels.filter(panel => panel.state === 'failed').length;
+      logger.info(`[PanelResume] Resumed ${status.panels.length - failed} of ${status.panels.length} agent panel(s)`);
+    }).finally(() => cloudDaemonHealth.setAgentRestorePhase('done'));
+  }
+
   if (options.restoreSpotlights !== false) {
     try {
       await spotlightManager.restoreAll();
@@ -416,6 +505,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       console.error('[Main] Failed to restore spotlight state:', error);
     }
   }
+
+  cloudDaemonHealth.markDaemonReady();
 
   return {
     services,
@@ -427,6 +518,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      // First: Ports' timers and the agent-notes wait read terminals, projects and config, and emit events.
+      sessionPorts?.stop();
+      stopWaitingForAgentNotes();
+      // Keep the latest scrollback; start-up recovery marks the agents interrupted.
+      if (scrollbackCheckpoint) {
+        scrollbackCheckpoint.stop();
+        await scrollbackCheckpoint.checkpoint().catch(error => {
+          logResume('[ScrollbackCheckpoint] Final save failed', error instanceof Error ? error : new Error(String(error)));
+        });
+      }
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
       resourceMonitorService.stop();

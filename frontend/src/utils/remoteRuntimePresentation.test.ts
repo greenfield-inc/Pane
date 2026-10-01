@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { getRemoteExecutableHealthPresentation, getRemoteHostSwitcherModel, LOCAL_RUNTIME_ID } from './remoteRuntimePresentation';
+import {
+  getCloudSwitchFailure,
+  getCloudWakeCommand,
+  getCopyWakeCommandFailure,
+  getRemoteExecutableHealthPresentation,
+  getRemoteFooterStatus,
+  getRemoteHostSwitcherModel,
+  LOCAL_RUNTIME_ID,
+} from './remoteRuntimePresentation';
 import {
   createDefaultRemoteDaemonHostRuntimeState,
   createDefaultRemotePaneConnectionState,
@@ -125,5 +133,84 @@ describe('getRemoteHostSwitcherModel', () => {
     };
     expect(getRemoteHostSwitcherModel(local, hosting, [profile]).hostingSummary).toBe('Hosting · 1 client connected');
     expect(getRemoteHostSwitcherModel(local, idleHost, [profile]).hostingSummary).toBeNull();
+  });
+});
+
+describe('cloud host asleep hint', () => {
+  const cloudProfile: RemotePaneConnectionProfile = {
+    id: 'cloud-abc',
+    label: 'Checkout',
+    baseUrl: 'https://rp-abc12345.example.ts.net',
+    token: 'synthetic',
+    transport: 'http+sse',
+    cloud: { provider: 'boat', sandboxId: 'bx_1', sessionId: 'abc12345xy', nodeId: 'n1', hostname: 'rp-abc12345', version: 1 },
+  };
+  const plainProfile: RemotePaneConnectionProfile = {
+    id: 'mac', label: 'Mac', baseUrl: 'https://mac.example.ts.net', token: 'synthetic', transport: 'http+sse',
+  };
+  const idleHost = createDefaultRemoteDaemonHostRuntimeState();
+  const failed = (profile: RemotePaneConnectionProfile): RemotePaneConnectionState => ({
+    ...createDefaultRemotePaneConnectionState(),
+    mode: 'remote',
+    status: 'error',
+    activeProfileId: profile.id,
+    activeProfileLabel: profile.label,
+    activeBaseUrl: profile.baseUrl,
+    lastError: 'fetch failed',
+  });
+
+  it('names the wake command only for profiles runpane cloud created', () => {
+    expect(getCloudWakeCommand(cloudProfile)).toBe('runpane cloud wake rp-abc12345');
+    expect(getCloudWakeCommand(plainProfile)).toBeNull();
+    expect(getCloudWakeCommand(undefined)).toBeNull();
+  });
+
+  it('tells the user to wake a cloud host whose connection failed', () => {
+    const status = getRemoteFooterStatus(failed(cloudProfile), idleHost, [cloudProfile, plainProfile]);
+    expect(status.title).toBe('Cloud host asleep or unreachable');
+    expect(status.description).toContain('`runpane cloud wake rp-abc12345`');
+    expect(getRemoteHostSwitcherModel(failed(cloudProfile), idleHost, [cloudProfile]).cloudWakeCommand)
+      .toBe('runpane cloud wake rp-abc12345');
+  });
+
+  it('keeps the generic failure for other hosts and for a connected cloud host', () => {
+    expect(getRemoteFooterStatus(failed(plainProfile), idleHost, [cloudProfile, plainProfile]).title).toBe('Remote connection failed');
+    const connected = { ...failed(cloudProfile), status: 'connected' as const };
+    expect(getRemoteFooterStatus(connected, idleHost, [cloudProfile]).title).toBe('Connected to Checkout');
+    expect(getRemoteHostSwitcherModel(connected, idleHost, [cloudProfile]).cloudWakeCommand).toBeNull();
+  });
+
+  // A desktop reopened on a sleeping host retries 5 times (~90 s) before 'error'; seen live.
+  it('names the wake command once the first attempt to reach a cloud host has failed', () => {
+    const retrying = { ...failed(cloudProfile), status: 'reconnecting' as const };
+    expect(getRemoteHostSwitcherModel(retrying, idleHost, [cloudProfile]).cloudWakeCommand).toBe('runpane cloud wake rp-abc12345');
+    expect(getRemoteFooterStatus(retrying, idleHost, [cloudProfile]).title).toBe('Cloud host asleep or unreachable');
+
+    const firstAttempt = { ...failed(cloudProfile), status: 'connecting' as const, lastError: null };
+    expect(getRemoteHostSwitcherModel(firstAttempt, idleHost, [cloudProfile]).cloudWakeCommand).toBeNull();
+    const retryingPlain = { ...failed(plainProfile), status: 'reconnecting' as const };
+    expect(getRemoteHostSwitcherModel(retryingPlain, idleHost, [plainProfile]).cloudWakeCommand).toBeNull();
+  });
+
+  // Picking a sleeping host from the switcher fails after one attempt and Pane goes back to this
+  // computer, so the connection state no longer names the host; seen live.
+  it('explains a failed switch to a cloud host with the wake command', () => {
+    expect(getCloudSwitchFailure(cloudProfile, 'Timed out waiting for remote daemon ready event after 10000ms')).toEqual({
+      title: 'Cloud host asleep or unreachable',
+      error: 'Checkout did not answer, so Pane stayed on this computer. A cloud Session that is asleep has to be woken first: run this, then pick Checkout again.',
+      command: 'runpane cloud wake rp-abc12345',
+      details: 'Timed out waiting for remote daemon ready event after 10000ms',
+    });
+    expect(getCloudSwitchFailure(plainProfile, 'fetch failed')).toBeNull();
+    expect(getCloudSwitchFailure(undefined, 'fetch failed')).toBeNull();
+  });
+
+  it('shows the wake command to copy by hand when the clipboard refuses it', () => {
+    expect(getCopyWakeCommandFailure('runpane cloud wake rp-abc12345', new Error('Clipboard access is unavailable'))).toEqual({
+      title: 'Could not copy the wake command',
+      error: 'The clipboard refused it. Run this command in a terminal to wake the cloud Session.',
+      command: 'runpane cloud wake rp-abc12345',
+      details: 'Clipboard access is unavailable',
+    });
   });
 });

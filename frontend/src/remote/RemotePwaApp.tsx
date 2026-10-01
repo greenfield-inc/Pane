@@ -16,6 +16,7 @@ import { getRemotePanelTabId, getRemotePanelTabPanelId } from './components/remo
 import { RemoteSessionList } from './components/RemoteSessionList';
 import { RemoteSidebar } from './components/RemoteSidebar';
 import { RemoteStatusBar } from './components/RemoteStatusBar';
+import { RemoteSessionPorts } from './components/RemoteSessionPorts';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { decodeRemoteConnectionCode } from './runtime/remoteProfile';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
@@ -632,6 +633,8 @@ export function RemotePwaApp() {
           onDisconnect={disconnect}
           onOpenSidebar={openSidebar}
         />
+
+        <RemoteSessionPorts adapter={connectionStatus === 'connected' || connectionStatus === 'reconnecting' ? adapter : null} />
 
         {isNativeMobile() && (
           <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">

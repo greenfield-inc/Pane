@@ -3,7 +3,7 @@ import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
 import https from 'https';
 import { isIP, type LookupFunction } from 'net';
-import { hostname as getOsHostname } from 'os';
+import { hostname as getOsHostname, networkInterfaces } from 'os';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
 import type { ConfigManager } from '../../services/configManager';
 import type { AnalyticsManager } from '../../services/analyticsManager';
@@ -21,6 +21,7 @@ import type { RemoteDaemonEventEnvelope } from '../../../../shared/types/remoteD
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { PaneSseParser } from './sseParser';
+import { assertTailnetRoute, needsTailnetRoute, tailnetOnlyLookup } from './tailnetRoute';
 import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 
 interface RemoteConnectionStateMetadata {
@@ -40,6 +41,10 @@ interface RemotePaneClientOptions {
     metadata?: RemoteConnectionStateMetadata,
   ) => void;
   onResyncRequired?: () => void;
+  /** Hostname lookup for requests; tests pass one that never asks real DNS. Defaults to dns.lookup. */
+  lookup?: LookupFunction;
+  /** This machine's interfaces, for the plain-HTTP tailnet check; tests pass their own. Defaults to os.networkInterfaces. */
+  networkInterfaces?: () => ReturnType<typeof networkInterfaces>;
 }
 
 interface RemotePaneClientConnectOptions {
@@ -117,6 +122,8 @@ type RemoteRequestOptions = RequestOptions & {
 export class RemotePaneClient {
   private readonly normalizedBaseUrl: URL;
   private readonly eventSink: PaneEventSink;
+  private readonly lookup: LookupFunction;
+  private readonly networkInterfaces: () => ReturnType<typeof networkInterfaces>;
   private readonly initialHandshakeTimeoutMs: number;
   private readonly heartbeatStaleTimeoutMs: number;
   private readonly reconnectInitialDelayMs: number;
@@ -134,6 +141,8 @@ export class RemotePaneClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatStaleTimer: NodeJS.Timeout | null = null;
   private consecutiveReconnectFailures = 0;
+  /** Why the client is retrying; reported on every retry attempt until the stream is ready again. */
+  private reconnectReason: string | null = null;
   private lastSeenAt: string | null = null;
   private closedByClient = false;
   /** Set while the system sleeps: no stream, heartbeat or reconnect until resume(). */
@@ -149,6 +158,8 @@ export class RemotePaneClient {
   ) {
     this.normalizedBaseUrl = normalizeBaseUrl(profile.baseUrl);
     this.eventSink = options.eventSink ?? noopPaneEventSink;
+    this.lookup = options.lookup ?? defaultLookup;
+    this.networkInterfaces = options.networkInterfaces ?? networkInterfaces;
     this.initialHandshakeTimeoutMs = options.initialHandshakeTimeoutMs
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
@@ -270,7 +281,7 @@ export class RemotePaneClient {
     this.clearReconnectTimer();
     const generation = ++this.streamGeneration;
     const isStale = (): boolean => generation !== this.streamGeneration;
-    this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', null, {
+    this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', isReconnect ? this.reconnectReason : null, {
       lastSeenAt: this.lastSeenAt,
     });
 
@@ -363,6 +374,7 @@ export class RemotePaneClient {
               clearHandshakeTimer();
               const lastSeenAt = this.markRemoteSeen();
               this.consecutiveReconnectFailures = 0;
+              this.reconnectReason = null;
               const readyPayload = parseRemoteReadyEventPayload(event.data);
               if (readyPayload?.resync === 'refetch-state-after-reconnect') {
                 this.onResyncRequired?.();
@@ -442,7 +454,10 @@ export class RemotePaneClient {
   }
 
   private buildRequestOptions(endpoint: URL, options: RequestOptions): RemoteRequestOptions {
-    const lookup = createTailscaleFallbackLookup(this.profile, endpoint);
+    // The bearer token goes in clear over http: only through Tailscale (tailnetRoute.ts), else refuse.
+    assertTailnetRoute(endpoint, this.networkInterfaces);
+    const fallback = createTailscaleFallbackLookup(this.profile, endpoint, this.lookup);
+    const lookup = needsTailnetRoute(endpoint) ? tailnetOnlyLookup(fallback ?? this.lookup, this.networkInterfaces) : fallback;
     const requestOptions: RemoteRequestOptions = { ...options };
     if (lookup) {
       requestOptions.lookup = lookup;
@@ -491,6 +506,7 @@ export class RemotePaneClient {
     if (this.closedByClient || this.suspended || this.reconnectTimer) {
       return;
     }
+    this.reconnectReason = message;
 
     if (this.consecutiveReconnectFailures >= this.reconnectErrorThreshold) {
       this.onConnectionStateChange?.('error', message, { lastSeenAt: this.lastSeenAt });
@@ -869,6 +885,7 @@ function buildRemoteEndpoint(baseUrl: URL, path: 'invoke' | 'events'): URL {
 function createTailscaleFallbackLookup(
   profile: RemotePaneConnectionProfile,
   endpoint: URL,
+  baseLookup: LookupFunction,
 ): LookupFunction | undefined {
   const hostname = normalizeLookupHostname(endpoint.hostname);
   if (isIP(hostname) !== 0) {
@@ -884,7 +901,7 @@ function createTailscaleFallbackLookup(
   }
 
   return (lookupHostname, options, callback) => {
-    defaultLookup(lookupHostname, options, (error, address, family) => {
+    baseLookup(lookupHostname, options, (error, address, family) => {
       if (!error) {
         callback(null, address, family);
         return;

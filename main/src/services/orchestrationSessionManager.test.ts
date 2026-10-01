@@ -993,6 +993,28 @@ describe('OrchestrationSessionManager', () => {
     await expect(fixture.manager.recordAgentReport('missing-panel', newer)).resolves.toEqual([]);
   });
 
+  it('lists the newest activity first when entries share a timestamp', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-09-27T18:00:00.000Z'));
+      const fixture = createFixture();
+      const named = await fixture.manager.create({ name: 'Same millisecond' });
+      const pane = paneFixture(fixture, 'same-ms-pane', { name: 'Same ms Pane' });
+      const worker = createPanel('same-ms-pane-claude', pane.id);
+      await seedPanel(worker);
+      await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+      const report = { state: 'ready' as const, summary: 'Done.', reportedAt: '2026-09-27T18:00:00.000Z' };
+      await panelManager.updatePanel(worker.id, { state: { ...worker.state, customState: { ...worker.state.customState, agentReport: report } } });
+
+      await fixture.manager.recordAgentReport(worker.id, report);
+
+      const overview = await fixture.manager.overview({ sessionId: named.session.id });
+      expect(overview.activity[0]).toMatchObject({ kind: 'report', panelId: worker.id });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Context handoff', context: 'Initial context' });

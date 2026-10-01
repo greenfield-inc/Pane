@@ -28,6 +28,7 @@ import {
 } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { DesktopSessionPorts } from './ports/DesktopSessionPorts';
 
 const PANE_CHAT_AGENT_LABELS = {
   claude: 'Claude',
@@ -299,7 +300,10 @@ function LegacyPaneChatWorkspace({ state, error, statusAnnouncement, onRetry }: 
           <h1 className="truncate text-sm font-semibold text-text-primary">Pane Chat</h1>
           {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
         </div>
-        <PaneChatAgentBadge agent={state.agent} />
+        <div className="flex min-w-0 items-center gap-3">
+          <DesktopSessionPorts variant="inline" className="justify-end" />
+          <PaneChatAgentBadge agent={state.agent} />
+        </div>
       </div>
       <SessionProvider session={state.session}>
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -453,6 +457,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
           </div>
           {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
         </div>
+        <DesktopSessionPorts variant="inline" className="justify-end" />
       </div>
       {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={onOverviewUpdate} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">

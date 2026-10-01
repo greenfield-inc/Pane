@@ -2166,6 +2166,38 @@ describe('runpane IPC handlers', () => {
     );
   });
 
+  it('writes once for a repeated idempotency key and marks the repeat deduplicated', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const services = createServices();
+    const registry = createRegistry(services);
+    const request = { panelId: terminalPanel.id, input: 'echo once', idempotencyKey: 'peer-a:msg-1' };
+
+    const first = await registry.invoke('runpane:panels:submit', [request]);
+    const repeat = await registry.invoke('runpane:panels:submit', [request]);
+
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveProperty('deduplicated');
+    expect(repeat).toMatchObject({ ok: true, panelId: terminalPanel.id, deduplicated: true });
+    await expect(registry.invoke('runpane:panels:submit', [{ ...request, idempotencyKey: 'bad key' }]))
+      .rejects.toThrow(/idempotencyKey/);
+  });
+
+  it('sends nothing to a shell when agentOnly is set', async () => {
+    // The orchestrator's agent has exited: Pane's own shell is in the foreground.
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'bash', isShell: true });
+    const services = createServices();
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id,
+      input: '[peer message from Session A] rm -rf ~',
+      agentOnly: true,
+    }]);
+
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'composer-unknown' } });
+  });
+
   it('stages text before submitting an idle Codex composer', async () => {
     vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot)

@@ -26,6 +26,8 @@ def repo_id(repo: Optional[str]) -> Optional[int]:
 FLAG_VALUES = {
     "--pane": lambda parsed: parsed.pane_id,
     "--panel": lambda parsed: parsed.panel_id,
+    "--session": lambda parsed: parsed.session_id,
+    "--peer": lambda parsed: parsed.peer,
     "--message": lambda parsed: parsed.message,
     "--url": lambda parsed: parsed.url,
     "--name": lambda parsed: parsed.name,

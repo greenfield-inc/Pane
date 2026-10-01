@@ -25,6 +25,8 @@ export function daemonActionFor(command: string): DaemonAction | undefined {
 const FLAG_VALUES = new Map<string, (parsed: ParsedArgs) => string | number | undefined>([
   ['--pane', (parsed) => parsed.paneId],
   ['--panel', (parsed) => parsed.panelId],
+  ['--session', (parsed) => parsed.sessionId],
+  ['--peer', (parsed) => parsed.peer],
   ['--message', (parsed) => parsed.message],
   ['--url', (parsed) => parsed.url],
   ['--name', (parsed) => parsed.name],

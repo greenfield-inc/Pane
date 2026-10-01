@@ -647,7 +647,7 @@ describe('remote daemon IPC', () => {
       baseUrl: 'http://192.168.1.50:42137',
     })).resolves.toEqual({
       success: false,
-      error: 'HTTP remote base URLs must use a loopback host; use HTTPS for Tailscale or reverse-proxy endpoints',
+      error: 'HTTP remote base URLs must use a loopback or Tailscale host; use HTTPS for reverse-proxy endpoints',
     });
     expect(setupRemoteHost).not.toHaveBeenCalled();
   });

@@ -8,6 +8,7 @@ import type { AppConfig } from '../types/config';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { getAppDirectory } from '../utils/appDirectory';
 import { linuxToUNCPath } from '../utils/wslUtils';
+import { isSideBySideBuild } from '../utils/sideBySide';
 
 /**
  * A user-level skill that teaches any agent in a Pane terminal how to reach
@@ -87,6 +88,8 @@ export function syncPaneHomeSkill(
   dirs: string[] = paneHomeSkillDirs(),
   wslDistros: string[] = [],
 ): Promise<PaneHomeSkillResult[]> {
+  // The home skill belongs to the installed Pane; a side-by-side test build leaves it alone.
+  if (isSideBySideBuild()) return Promise.resolve([]);
   const result = syncQueue.then(() => syncPaneHomeSkillNow(config, dirs, wslDistros));
   syncQueue = result.then(() => {}, () => {});
   return result;

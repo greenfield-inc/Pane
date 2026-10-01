@@ -1,9 +1,11 @@
 import { useState, type ReactElement } from 'react';
-import { Laptop, Plug, Radio, Server } from 'lucide-react';
+import { Copy, Laptop, Plug, Radio, Server } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
-import { LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { useErrorStore } from '../stores/errorStore';
+import { getCloudSwitchFailure, getCopyWakeCommandFailure, LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { copyTerminalText } from '../utils/terminalClipboard';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 
 interface RemoteHostSwitcherProps {
@@ -27,6 +29,7 @@ export function RemoteHostSwitcher({
   onOpenHosting,
 }: RemoteHostSwitcherProps) {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const showError = useErrorStore((state) => state.showError);
   // Main does not serialize client transitions, so one switch at a time.
   const [switching, setSwitching] = useState(false);
   const remote = connectionState.mode === 'remote';
@@ -41,11 +44,19 @@ export function RemoteHostSwitcher({
       ? { activeProfileId: null, mode: 'local' as const }
       : { activeProfileId: profileId, mode: 'remote' as const };
     // A failed switch still lands in the pushed connection state, which the
-    // trigger's dot reports; the log keeps the reason.
+    // trigger's dot reports; the log keeps the reason. A cloud host that fails
+    // leaves Pane on this computer, so the error dialog names its wake command.
     setSwitching(true);
     try {
       const response = await API.remoteDaemon.updateClientState(updates);
-      if (!response.success) console.error('Failed to switch remote host:', response.error);
+      if (!response.success) {
+        console.error('Failed to switch remote host:', response.error);
+        const cloudFailure = getCloudSwitchFailure(
+          profiles.find((profile) => profile.id === profileId),
+          response.error ?? 'The host did not answer.',
+        );
+        if (cloudFailure) showError(cloudFailure);
+      }
       await fetchConfig().catch(() => undefined);
     } finally {
       setSwitching(false);
@@ -57,7 +68,7 @@ export function RemoteHostSwitcher({
       id: profile.id,
       label: profile.label,
       description: remote && profile.id === model.selectedId
-        ? `${activeStatusText} · ${profile.baseUrl}`
+        ? (model.cloudWakeCommand ? `Asleep? Run ${model.cloudWakeCommand}` : `${activeStatusText} · ${profile.baseUrl}`)
         : profile.baseUrl,
       icon: Server,
       disabled: switching,
@@ -82,6 +93,17 @@ export function RemoteHostSwitcher({
       width="lg"
       footer={({ close }) => (
         <>
+          {model.cloudWakeCommand && (
+            <DropdownMenuItem
+              icon={Copy}
+              label="Copy wake command"
+              onClick={() => {
+                close();
+                const command = model.cloudWakeCommand ?? '';
+                void copyTerminalText(command).catch((cause: unknown) => showError(getCopyWakeCommandFailure(command, cause)));
+              }}
+            />
+          )}
           {model.hostingSummary && (
             <DropdownMenuItem icon={Radio} label={model.hostingSummary} onClick={() => { close(); onOpenHosting(); }} />
           )}

@@ -170,7 +170,11 @@ import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
+import { hasResumableConversation, panelRunState, terminalState, type PanelResume } from '../services/panelResume';
+import { PaneCommandError } from '../core/commandError';
 import { parseWSLPath, windowsPathToWSLMount, type WSLContext } from '../utils/wslUtils';
+import { IdempotencyWindow, isValidIdempotencyKey } from './runpaneIdempotency';
+import { PEER_MANAGEMENT_CHANNELS } from '../daemon/peer/peerCommands';
 import {
   dueIdleEntries,
   nextIdleDeadline,
@@ -215,6 +219,7 @@ const RUNPANE_CHANNELS = [
   'runpane:workspace:state',
   'runpane:workspace:wait',
   'runpane:agents:doctor',
+  ...PEER_MANAGEMENT_CHANNELS,
 ] as const;
 
 const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
@@ -1001,7 +1006,7 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:list', {}, () => {
       const normalized = parsePanelListRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
-      const panels = panelManager.getPanelsForSession(pane.id).map(panelToSummary);
+      const panels = panelManager.getPanelsForSession(pane.id).map(panel => panelToSummary(panel, services.panelResume));
 
       return {
         ok: true,
@@ -1158,16 +1163,14 @@ export function registerRunpaneHandlers(
   });
 
   commandRegistry.register('runpane:panels:input', async (request: PaneCommandValue): Promise<RunpanePanelInputResult> => {
-    return withRunpaneAction(services, 'panels:input', {}, () => {
+    return withRunpaneAction(services, 'panels:input', {}, async () => {
       const normalized = parsePanelInputRequest(request);
       const panel = resolvePanel(normalized.panelId);
 
       if (panel.type !== 'terminal') {
         throw new Error(`Panel ${panel.id} is a ${panel.type} panel, not a terminal panel`);
       }
-      if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
-        throw new Error(`Terminal panel ${panel.id} is not initialized`);
-      }
+      await ensurePanelRunning(services, panel);
 
       terminalPanelManager.writeToTerminal(panel.id, normalized.input);
 
@@ -1199,117 +1202,18 @@ export function registerRunpaneHandlers(
     }));
   });
 
+  const submitIdempotency = new IdempotencyWindow<RunpanePanelSubmitResult>();
   commandRegistry.register('runpane:panels:submit', async (request: PaneCommandValue): Promise<RunpanePanelSubmitResult> => {
     return withRunpaneAction(services, 'panels:submit', {}, async () => {
       const normalized = parsePanelSubmitRequest(request);
-      const panel = resolveTerminalPanel(normalized.panelId);
-      if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
-        throw new Error(`Terminal panel ${panel.id} is not initialized`);
-      }
-
-      let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
-      const promptFile = normalized.asFilePointer
-        ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
-        : undefined;
-      const submittedText = promptFile
-        ? filePointerPrompt(agentVisiblePath(promptFile, sessionWslContext(services, panel.sessionId)))
-        : normalized.input;
-      // A CR inside the text would be Enter to an agent composer.
-      const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
-      const agentType = screenAgentType(beforeScreen);
-      const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
-      // Claude reads text and Enter arriving in one read as a paste and keeps
-      // the Enter as a newline. Terminal readiness can precede Claude drawing
-      // its UI or reading input, so wait while it is still drawing for its
-      // composer, then for the staged text to show, before sending Enter alone.
-      // Claude draws its UI on the alternate screen, so a quiet alternate
-      // screen without a composer is a menu or picker and gets the plain
-      // write. Startup can pause for seconds before the first frame.
-      if (stagedInput.length > 0 && agentType === 'claude' && !beforeScreen.composer.isPresent) {
-        beforeScreen = await waitForPanelScreen(
-          panel,
-          screen => screen.composer.isPresent ||
-            (screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)),
-        );
-      }
-      const stagesComposer = beforeScreen.composer.isPresent && (agentType === 'claude' ||
-        agentType === 'codex');
-      if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
-        // Claude takes a separately written Enter while it works (it queues
-        // the message), so staging never waits for it to be idle.
-        const staged = await stageComposerText(panel, agentType, stagedInput);
-        const submission = await submitComposerForPanel(panel, 'auto', {
-          cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
-          text: stagedInput,
-        });
-        return {
-          ok: submission.ok,
-          panelId: panel.id,
-          paneId: panel.sessionId,
-          inputBytes: staged.inputBytes + submission.inputBytes,
-          enter: submission.strategy === 'tab' ? 'tab' : 'cr',
-          sequenceName: submission.sequenceName,
-          verifiedSubmitted: submission.verifiedSubmitted,
-          verification: submission.verification,
-          delivery: submission.delivery,
-          sentAt: submission.sentAt,
-          blocked: submission.blocked,
-          promptFile,
-          warnings,
-          nextCommand: submission.nextCommand,
-        };
-      }
-
-      if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
-        const suggestedCommand = panelScreenCommand(panel.id);
-        return {
-          ok: false,
-          panelId: panel.id,
-          paneId: panel.sessionId,
-          inputBytes: 0,
-          enter: 'cr',
-          sequenceName: 'enter-cr',
-          verifiedSubmitted: false,
-          sentAt: new Date().toISOString(),
-          blocked: {
-            kind: 'composer-unknown',
-            message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
-            suggestedCommand,
-          },
-          promptFile,
-          warnings,
-          nextCommand: suggestedCommand,
-        };
-      }
-
-      // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
-      const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
-      // A busy Codex takes text and Enter in one write and holds the message
-      // for its next turn; its transcript or queue hint says where it went.
-      const probeBase = agentType === 'codex' && beforeScreen.composer.isPresent && stagedInput.length > 0
-        ? composerDeliveryProbe(panel, sessionManager.getSession(panel.sessionId)?.worktreePath, agentType, stagedInput)
-        : undefined;
-      const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
-      const outputGenerationBeforeWrite = terminalPanelManager.getOutputGeneration(panel.id);
-      terminalPanelManager.writeToTerminal(panel.id, input);
-      const verification = probe
-        ? await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeWrite, probe)
-        : undefined;
-
-      return {
-        ok: true,
-        panelId: panel.id,
-        paneId: panel.sessionId,
-        inputBytes: Buffer.byteLength(input, 'utf8'),
-        enter: 'cr',
-        sequenceName: 'enter-cr',
-        verifiedSubmitted: verification?.verifiedSubmitted ?? false,
-        delivery: verification?.delivery,
-        sentAt: new Date().toISOString(),
-        promptFile,
-        warnings,
-        nextCommand: panelWaitCommand(panel.id),
-      };
+      if (normalized.idempotencyKey === undefined) return submitToPanel(normalized);
+      const { result, deduplicated } = await submitIdempotency.run(
+        normalized.idempotencyKey,
+        () => submitToPanel(normalized),
+        // A blocked submit wrote nothing, so the same key may try again.
+        result => result.ok || result.inputBytes > 0,
+      );
+      return deduplicated ? { ...result, deduplicated: true } : result;
     }, result => ({
       paneId: result.paneId,
       panelId: result.panelId,
@@ -1317,13 +1221,143 @@ export function registerRunpaneHandlers(
     }));
   });
 
+  async function submitToPanel(normalized: RunpanePanelSubmitRequest): Promise<RunpanePanelSubmitResult> {
+    const panel = resolveTerminalPanel(normalized.panelId);
+    await ensurePanelRunning(services, panel);
+
+    let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+    const promptFile = normalized.asFilePointer
+      ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
+      : undefined;
+    const submittedText = promptFile
+      ? filePointerPrompt(agentVisiblePath(promptFile, sessionWslContext(services, panel.sessionId)))
+      : normalized.input;
+    // A CR inside the text would be Enter to an agent composer.
+    const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
+    const agentType = screenAgentType(beforeScreen);
+    const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
+    // Claude reads text and Enter arriving in one read as a paste and keeps
+    // the Enter as a newline. Terminal readiness can precede Claude drawing
+    // its UI or reading input, so wait while it is still drawing for its
+    // composer, then for the staged text to show, before sending Enter alone.
+    // Claude draws its UI on the alternate screen, so a quiet alternate
+    // screen without a composer is a menu or picker and gets the plain
+    // write. Startup can pause for seconds before the first frame.
+    if (stagedInput.length > 0 && agentType === 'claude' && !beforeScreen.composer.isPresent) {
+      beforeScreen = await waitForPanelScreen(
+        panel,
+        screen => screen.composer.isPresent ||
+          (screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)),
+      );
+    }
+    const stagesComposer = beforeScreen.composer.isPresent && (agentType === 'claude' ||
+      agentType === 'codex');
+    if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
+      // Claude takes a separately written Enter while it works (it queues
+      // the message), so staging never waits for it to be idle.
+      const staged = await stageComposerText(panel, agentType, stagedInput);
+      const submission = await submitComposerForPanel(panel, 'auto', {
+        cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
+        text: stagedInput,
+      });
+      return {
+        ok: submission.ok,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: staged.inputBytes + submission.inputBytes,
+        enter: submission.strategy === 'tab' ? 'tab' : 'cr',
+        sequenceName: submission.sequenceName,
+        verifiedSubmitted: submission.verifiedSubmitted,
+        verification: submission.verification,
+        delivery: submission.delivery,
+        sentAt: submission.sentAt,
+        blocked: submission.blocked,
+        promptFile,
+        warnings,
+        nextCommand: submission.nextCommand,
+      };
+    }
+
+    if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
+      const suggestedCommand = panelScreenCommand(panel.id);
+      return {
+        ok: false,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: 0,
+        enter: 'cr',
+        sequenceName: 'enter-cr',
+        verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: {
+          kind: 'composer-unknown',
+          message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
+          suggestedCommand,
+        },
+        promptFile,
+        warnings,
+        nextCommand: suggestedCommand,
+      };
+    }
+
+    if (normalized.agentOnly) {
+      // Peers reach an agent's composer or nothing: when the agent has exited,
+      // the panel is a shell and the text would run as a command.
+      const suggestedCommand = panelScreenCommand(panel.id);
+      return {
+        ok: false,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: 0,
+        enter: 'cr',
+        sequenceName: 'enter-cr',
+        verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: {
+          kind: 'composer-unknown',
+          message: 'This submit only goes to an agent composer, and none is on screen (the agent may have exited or still be starting), so Pane sent nothing.',
+          suggestedCommand,
+        },
+        promptFile,
+        nextCommand: suggestedCommand,
+      };
+    }
+
+    // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
+    const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
+    // A busy Codex takes text and Enter in one write and holds the message
+    // for its next turn; its transcript or queue hint says where it went.
+    const probeBase = agentType === 'codex' && beforeScreen.composer.isPresent && stagedInput.length > 0
+      ? composerDeliveryProbe(panel, sessionManager.getSession(panel.sessionId)?.worktreePath, agentType, stagedInput)
+      : undefined;
+    const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
+    const outputGenerationBeforeWrite = terminalPanelManager.getOutputGeneration(panel.id);
+    terminalPanelManager.writeToTerminal(panel.id, input);
+    const verification = probe
+      ? await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeWrite, probe)
+      : undefined;
+
+    return {
+      ok: true,
+      panelId: panel.id,
+      paneId: panel.sessionId,
+      inputBytes: Buffer.byteLength(input, 'utf8'),
+      enter: 'cr',
+      sequenceName: 'enter-cr',
+      verifiedSubmitted: verification?.verifiedSubmitted ?? false,
+      delivery: verification?.delivery,
+      sentAt: new Date().toISOString(),
+      promptFile,
+      warnings,
+      nextCommand: panelWaitCommand(panel.id),
+    };
+  }
+
   commandRegistry.register('runpane:panels:submit-composer', async (request: PaneCommandValue): Promise<RunpanePanelSubmitComposerResult> => {
     return withRunpaneAction(services, 'panels:submit-composer', {}, async () => {
       const normalized = parsePanelSubmitComposerRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
-      if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
-        throw new Error(`Terminal panel ${panel.id} is not initialized`);
-      }
+      await ensurePanelRunning(services, panel);
 
       return submitComposerForPanel(panel, normalized.strategy, {
         cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
@@ -1340,6 +1374,10 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:wait', {}, async () => {
       const normalized = parsePanelWaitRequest(request);
       const panel = resolveTerminalPanel(normalized.panelId);
+      // Waiting on a panel is intent to use it: restart it when it is not running.
+      if (services.panelResume && !terminalPanelManager.isTerminalInitialized(panel.id)) {
+        await services.panelResume.ensureRunning(panel, { waitMs: 0 });
+      }
       return waitForPanel(panel, normalized);
     }, result => ({
       paneId: result.paneId,
@@ -1685,7 +1723,27 @@ function optionalAgentDetection(value: PaneCommandValue): RunpaneAgentDetection 
   }
 }
 
-function panelToSummary(panel: ToolPanel) {
+/**
+ * Make sure a terminal panel has a live PTY. The headless daemon restarts it
+ * (resuming an agent's conversation); otherwise a stopped panel is an error
+ * with code ERR_PANEL_NOT_RUNNING.
+ */
+async function ensurePanelRunning(services: AppServices, panel: ToolPanel): Promise<void> {
+  if (services.panelResume) {
+    await services.panelResume.ensureRunning(panel);
+    return;
+  }
+  if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
+    throw new PaneCommandError(`Terminal panel ${panel.id} is not initialized`, 'ERR_PANEL_NOT_RUNNING', {
+      panelId: panel.id,
+      paneId: panel.sessionId,
+      runState: panelRunState(panel, false),
+      resumable: hasResumableConversation(terminalState(panel)),
+    });
+  }
+}
+
+function panelToSummary(panel: ToolPanel, panelResume?: PanelResume) {
   const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
   const initialCommand = optionalString(customState.initialCommand);
   const commandAgentType = resolveAgentTypeFromCommand(initialCommand);
@@ -1702,6 +1760,10 @@ function panelToSummary(panel: ToolPanel) {
     title: panel.title,
     active: Boolean(panel.state.isActive),
     initialized: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) : undefined,
+    runState: panel.type === 'terminal'
+      ? panelResume?.runState(panel) ?? panelRunState(panel, terminalPanelManager.isTerminalInitialized(panel.id))
+      : undefined,
+    resumable: panel.type === 'terminal' ? hasResumableConversation(terminalState(panel)) : undefined,
     agentType,
     agentDetection,
     launchCommand: optionalString(customState.launchCommand) ?? initialCommand,
@@ -3826,10 +3888,17 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     throw new Error('Panel submit request must include input');
   }
 
+  const idempotencyKey = optionalString(value.idempotencyKey);
+  if (idempotencyKey !== undefined && !isValidIdempotencyKey(idempotencyKey)) {
+    throw new Error('Panel submit idempotencyKey must be 1-256 letters, numbers, dots, underscores, colons, or hyphens');
+  }
+
   return {
     panelId,
     input,
     asFilePointer: optionalBoolean(value.asFilePointer),
+    idempotencyKey,
+    agentOnly: optionalBoolean(value.agentOnly),
   };
 }
 

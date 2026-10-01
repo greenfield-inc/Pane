@@ -25,10 +25,16 @@ export interface ParsedArgs {
   json: boolean;
   contextCommand?: string;
   paneDir?: string;
+  /** --host: a remote daemon to call over HTTP (see remote/hostDirectory.ts). */
+  host?: string;
+  /** --thread: like --host, cloud Sessions only. */
+  thread?: string;
   repo?: string;
   paneId?: string;
   sessionId?: string;
   panelId?: string;
+  peer?: string;
+  idempotencyKey?: string;
   repoPath?: string;
   folder?: string;
   resume?: string;
@@ -108,6 +114,10 @@ export interface ParsedArgs {
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** `runpane cloud <subcommand> ...`: the arguments after `cloud`, parsed by cloud/args.ts. */
+  cloudArgv?: string[];
+  /** `runpane port <open|list|close|auto-open> ...`: the arguments after `port`, parsed by sessionPorts.ts. */
+  portArgv?: string[];
   remoteSetupArgs: string[];
 }
 
@@ -129,7 +139,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'peers']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -157,7 +167,7 @@ const DEFAULTS: Omit<ParsedArgs, 'command'> = {
 };
 
 export function parseRunpaneArgs(argv: string[]): ParsedArgs {
-  const args = [...argv];
+  const args = moveLeadingTargetFlags(argv);
   const first = args[0];
 
   if (!first || first === '-h' || first === '--help') {
@@ -175,6 +185,15 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
       helpTopic: args.join(' ') || undefined,
       ...DEFAULTS
     };
+  }
+
+  // `cloud safe-to-stop` runs inside the sandbox against the local daemon, so it takes the shared flags.
+  if (first === 'cloud' && args[1] !== 'safe-to-stop') {
+    return parseCloudEntry(args);
+  }
+
+  if (first === 'port') {
+    return parsePortEntry(args);
   }
 
   const groupHelpTopic = matchCommandGroupHelp(args);
@@ -238,6 +257,70 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     throw new Error('runpane watch accepts either --since or --settle/--blocked-settle/--min-interval, not both (cadence needs a named cursor).');
   }
   if (parsed.command === 'report') validateReportArgs(parsed);
+  return parsed;
+}
+
+/**
+ * `runpane cloud ...` has its own flags (cloud/args.ts), so the shared parser only resolves the
+ * command name and help, and hands the rest through untouched.
+ */
+function parseCloudEntry(args: string[]): ParsedArgs {
+  const wantsHelp = (arg: string | undefined) => arg === '-h' || arg === '--help';
+  if (args.length === 1 || wantsHelp(args[1])) {
+    return { command: 'help', helpTopic: 'cloud', ...DEFAULTS };
+  }
+  const matched = matchCommand(args);
+  if (!matched) {
+    // `runpane cloud peers|secrets|github|git` alone, or with --help: the usage of each of its subcommands.
+    const group = `cloud ${args[1]}`;
+    if (commandGroupUsage(group) && (args.length === 2 || args.slice(2).some(wantsHelp))) {
+      return { command: 'help', helpTopic: group, ...DEFAULTS };
+    }
+    throw new Error(`Unknown cloud command: ${args[1]}\n\n${helpText('cloud')}`);
+  }
+  const rest = args.slice(matched.tokens.length);
+  // The coordinator, the gh shim, the git credential helper and the doppler stand-in read their own arguments
+  // (gh's -h is --hostname; doppler run passes everything after -- to the command it runs).
+  const ownArguments = ['cloud coordinator', 'cloud agent gh', 'cloud agent git-credential', 'cloud agent doppler'];
+  if (!ownArguments.includes(matched.name) && rest.some(wantsHelp)) {
+    return { command: 'help', helpTopic: matched.name, ...DEFAULTS };
+  }
+  return {
+    command: decodeBoundary(matched.name, commandSchema),
+    ...DEFAULTS,
+    cloudArgv: [...matched.tokens.slice(1), ...rest],
+    remoteSetupArgs: [],
+  };
+}
+
+/**
+ * `runpane port ...` parses its own arguments (sessionPorts.ts); only the daemon target flags
+ * (--host, --thread, --pane-dir) are taken out here, so `runpane --host <Session> port list` works too.
+ */
+function parsePortEntry(args: string[]): ParsedArgs {
+  const matched = matchCommand(args);
+  const wantsHelp = (arg: string | undefined) => arg === '-h' || arg === '--help';
+  if (!matched || args.slice(2).some(wantsHelp)) {
+    return { command: 'help', helpTopic: matched?.name ?? 'port', ...DEFAULTS };
+  }
+  const parsed: ParsedArgs = { command: decodeBoundary(matched.name, commandSchema), ...DEFAULTS, remoteSetupArgs: [] };
+  const rest = args.slice(matched.tokens.length);
+  const portArgv = [matched.tokens[1] ?? ''];
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index] ?? '';
+    const flag = arg.startsWith('--') && arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
+    if (flag !== '--host' && flag !== '--thread' && flag !== '--pane-dir') {
+      portArgv.push(arg);
+      continue;
+    }
+    const value = flag === arg ? rest[++index] : arg.slice(flag.length + 1);
+    if (!value) throw new Error(`${flag} requires a value.`);
+    if (flag === '--host') parsed.host = value;
+    else if (flag === '--thread') parsed.thread = value;
+    else parsed.paneDir = value;
+  }
+  parsed.portArgv = portArgv;
+  parsed.json = portArgv.includes('--json');
   return parsed;
 }
 
@@ -360,6 +443,23 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
 
     throw new Error(`Unknown option for ${parsed.command}: ${arg}`);
   }
+}
+
+const TARGET_FLAGS = new Set(['--host', '--thread']);
+
+/**
+ * `runpane --host B panels list` reads like `ssh host cmd`, so a leading
+ * --host/--thread pair moves behind the command, where it parses as a local
+ * flag (commands that take no target still reject it).
+ */
+function moveLeadingTargetFlags(argv: string[]): string[] {
+  const leading: string[] = [];
+  let index = 0;
+  while (TARGET_FLAGS.has(argv[index] ?? '') && argv[index + 1] !== undefined) {
+    leading.push(argv[index]!, argv[index + 1]!);
+    index += 2;
+  }
+  return [...argv.slice(index), ...leading];
 }
 
 function matchCommand(args: string[]): { name: string; tokens: string[] } | undefined {
@@ -495,6 +595,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.paneDir = value;
     return;
   }
+  if (flag === '--host') {
+    parsed.host = value;
+    return;
+  }
+  if (flag === '--thread') {
+    parsed.thread = value;
+    return;
+  }
   if (flag === '--repo') {
     parsed.repo = value;
     return;
@@ -509,6 +617,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--session') {
     parsed.sessionId = value;
+    return;
+  }
+  if (flag === '--peer') {
+    parsed.peer = value;
+    return;
+  }
+  if (flag === '--idempotency-key') {
+    parsed.idempotencyKey = value;
     return;
   }
   if (flag === '--exclude-pane') {
@@ -811,6 +927,19 @@ export function hasCadenceValueFlag(parsed: ParsedArgs): boolean {
   return [parsed.settleMs, parsed.blockedSettleMs, parsed.minIntervalMs].some(value => value !== undefined);
 }
 
+/**
+ * Commands that honour --host/--thread/$RUNPANE_HOST: every daemon-control
+ * command except the ones that inspect or repair the local install, and the
+ * `runpane cloud` family, which manages hosts rather than calling one
+ * (`cloud safe-to-stop` asks a daemon, so it takes a target like the rest).
+ */
+export function takesDaemonTarget(command: RunpaneCommand): boolean {
+  return isRunpaneLocalCommand(command)
+    && command !== 'doctor'
+    && command !== 'daemon repair'
+    && (!command.startsWith('cloud') || command === 'cloud safe-to-stop');
+}
+
 function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
   // Every command that maps to a daemon channel takes local flags.
   if (RUNPANE_CONTRACT.commands.some((entry) => entry.name === command && 'daemonAction' in entry)) return true;
@@ -838,6 +967,8 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'lock acquire'
     || command === 'lock release'
     || command === 'lock list'
+    || command === 'cloud safe-to-stop'
+    || command.startsWith('port ')
     || command === 'panels create'
     || command === 'panels open'
     || command === 'panels list'
@@ -926,5 +1057,21 @@ export function helpText(topic?: string): string {
   const topicLines = topic
     ? Object.entries(helpTopics).find(([key]) => key === topic)?.[1]
     : undefined;
+  if (!topicLines && topic) {
+    const group = commandGroupUsage(topic);
+    if (group) return group;
+  }
   return (topicLines ?? helpTopics.default).join('\n');
+}
+
+/** Help for a command group with no topic of its own (e.g. `cloud github`): its subcommands' usage lines. */
+function commandGroupUsage(group: string): string | undefined {
+  const commands = RUNPANE_CONTRACT.commands.filter((command) => command.name.startsWith(`${group} `));
+  if (commands.length === 0) return undefined;
+  return [
+    'Usage:',
+    ...commands.flatMap((command) => command.usage.map((usage) => `  ${usage}`)),
+    '',
+    `Run "runpane help ${group} <command>" for options.`,
+  ].join('\n');
 }

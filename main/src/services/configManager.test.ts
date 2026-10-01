@@ -118,6 +118,25 @@ describe('ConfigManager appearance persistence', () => {
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
     rename.mockRestore();
   });
+
+  it('keeps the analytics identity in memory unchanged when saving it fails', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const before = await fs.readFile(configPath, 'utf8');
+    const analyticsBefore = structuredClone(manager.getConfig().analytics);
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValue(new Error('rename failed'));
+    try {
+      await expect(manager.setAnalyticsDistinctId('distinct-after')).rejects.toThrow('rename failed');
+      await expect(manager.setAnalyticsIdentity({ distinctId: 'identity-after', identitySource: 'anonymous' })).rejects.toThrow('rename failed');
+    } finally {
+      rename.mockRestore();
+    }
+    expect(manager.getConfig().analytics).toEqual(analyticsBefore);
+    expect(await fs.readFile(configPath, 'utf8')).toBe(before);
+    await manager.setAnalyticsDistinctId('distinct-after');
+    expect(manager.getConfig().analytics?.distinctId).toBe('distinct-after');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).analytics.distinctId).toBe('distinct-after');
+  });
 });
 
 
@@ -221,5 +240,79 @@ describe('ConfigManager agent context defaults', () => {
     await manager.initialize();
     expect(manager.getConfig().agentContext?.defaultsVersion).toBe(AGENT_CONTEXT_DEFAULTS_VERSION);
     expect(manager.getConfig().agentContext?.cleanupPending).toBe(true);
+  });
+});
+
+describe('ConfigManager edits from other processes', () => {
+  // `runpane cloud new|sync|destroy` write saved remote hosts straight into config.json while the
+  // desktop runs. The desktop must neither revert them nor wait for a restart.
+  const cloudProfile = {
+    id: 'cloud-abc', label: 'cloud box', baseUrl: 'https://rp-abc.example.ts.net', token: 'synthetic', transport: 'http+sse',
+  };
+  let paneDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-external-'));
+    process.env.PANE_DIR = paneDir;
+    configPath = path.join(paneDir, 'config.json');
+  });
+
+  afterEach(async () => {
+    delete process.env.PANE_DIR;
+    await fs.rm(paneDir, { recursive: true, force: true });
+  });
+
+  async function importProfileLikeTheCli(): Promise<void> {
+    const onDisk = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    onDisk.remoteDaemon = { ...onDisk.remoteDaemon, client: { ...onDisk.remoteDaemon?.client, profiles: [cloudProfile] } };
+    await fs.writeFile(`${configPath}.tmp`, JSON.stringify(onDisk, null, 2));
+    await fs.rename(`${configPath}.tmp`, configPath);
+  }
+
+  const savedProfileIds = async () =>
+    (JSON.parse(await fs.readFile(configPath, 'utf8')).remoteDaemon?.client?.profiles ?? []).map((profile: { id: string }) => profile.id);
+
+  it('keeps an imported host when the app next saves a setting', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await importProfileLikeTheCli();
+
+    await manager.updateConfig({ highContrast: true });
+
+    expect(await savedProfileIds()).toEqual(['cloud-abc']);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).highContrast).toBe(true);
+    expect(manager.getConfig().remoteDaemon?.client.profiles.map((profile) => profile.id)).toEqual(['cloud-abc']);
+  });
+
+  it('keeps an imported host when analytics identity is saved', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await importProfileLikeTheCli();
+
+    await manager.setAnalyticsDistinctId('distinct-1');
+
+    expect(await savedProfileIds()).toEqual(['cloud-abc']);
+    expect(manager.getConfig().analytics?.distinctId).toBe('distinct-1');
+  });
+
+  it('announces an outside edit while watching, but not its own writes', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const updates: string[][] = [];
+    manager.on('config-updated', (config) => {
+      updates.push((config.remoteDaemon?.client.profiles ?? []).map((profile: { id: string }) => profile.id));
+    });
+    manager.startWatching();
+    try {
+      await manager.updateConfig({ highContrast: true });
+      expect(updates).toEqual([[]]);
+
+      await importProfileLikeTheCli();
+      await vi.waitFor(() => expect(updates).toEqual([[], ['cloud-abc']]), { timeout: 3000 });
+      expect(manager.getConfig().highContrast).toBe(true);
+    } finally {
+      manager.stopWatching();
+    }
   });
 });

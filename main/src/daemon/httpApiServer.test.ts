@@ -7,6 +7,8 @@ import { hashRemoteDaemonToken } from './auth';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 import { PaneRemoteHttpApiServer } from './httpApiServer';
+import { cloudDaemonHealth } from './cloud/readiness';
+import { userClientActivity } from './cloud/clientActivity';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
@@ -443,20 +445,83 @@ describe('PaneRemoteHttpApiServer', () => {
     stream.close();
   });
 
-  it('exposes an unauthenticated health endpoint for hosted readiness checks', async () => {
+  it('tells an unauthenticated caller only that the daemon answers', async () => {
     const registry = new PaneCommandRegistry();
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
     activeServers.push(server);
     await server.start();
+    cloudDaemonHealth.setVersion('2.4.141', 'abc1234');
+    cloudDaemonHealth.markDaemonReady();
 
-    await expect(requestJson(server, 'GET', '/health')).resolves.toEqual({
-      statusCode: 200,
-      body: {
-        ok: true,
-        status: 'ready',
-        transport: 'http+sse',
-      },
+    const minimal = { statusCode: 200, body: { ok: true, status: 'ready', transport: 'http+sse' } };
+    await expect(requestJson(server, 'GET', '/health')).resolves.toEqual(minimal);
+    await expect(requestJson(server, 'GET', '/health', undefined, 'wrong-token')).resolves.toEqual(minimal);
+  });
+
+  it('reports the daemon version and agent readiness on health to a paired client, for cloud wake', async () => {
+    const registry = new PaneCommandRegistry();
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    cloudDaemonHealth.setVersion('2.4.141', 'abc1234');
+    cloudDaemonHealth.markDaemonReady();
+
+    const health = await requestJson(server, 'GET', '/health', undefined, 'secret-token');
+
+    expect(health.body).toEqual({
+      ok: true,
+      status: 'ready',
+      transport: 'http+sse',
+      ...JSON.parse(JSON.stringify(cloudDaemonHealth.fields())),
     });
+    expect(health.body).toMatchObject({
+      version: '2.4.141',
+      gitCommit: 'abc1234',
+      readiness: { state: 'ready', daemon: 'ready', agentRestore: 'none' },
+    });
+  });
+
+  it('reports health detail to the coordinator-scoped client', async () => {
+    const registry = new PaneCommandRegistry();
+    const config = createEnabledRemoteConfig();
+    config.host.clients.push({
+      id: 'coordinator', label: 'runpane-cloud-coordinator', createdAt: '2026-09-29T00:00:00.000Z',
+      tokenHash: hashRemoteDaemonToken('coordinator-token'), scope: 'coordinator',
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+    activeServers.push(server);
+    await server.start();
+    cloudDaemonHealth.setVersion('2.4.141', 'abc1234');
+
+    const health = await requestJson(server, 'GET', '/health', undefined, 'coordinator-token');
+
+    expect(health.body).toMatchObject({ ok: true, version: '2.4.141', readiness: { daemon: expect.any(String) } });
+  });
+
+  it('marks peer calls so they never count as a user using the Session', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:panels:list', () => ({ ok: true }));
+    const config = createEnabledRemoteConfig();
+    config.host.config.pairingRequired = true;
+    config.host.clients = [
+      { id: 'peer-a', label: 'Session A', createdAt: '2026-09-29T00:00:00.000Z', tokenHash: hashRemoteDaemonToken('peer-token') },
+      { id: 'desktop', label: 'MacBook', createdAt: '2026-09-29T00:00:00.000Z', tokenHash: hashRemoteDaemonToken('user-token') },
+    ];
+    Object.assign(config.host.clients[0], { scope: 'peer' });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+    activeServers.push(server);
+    await server.start();
+    userClientActivity.reset();
+    const invokeSpy = vi.spyOn(registry, 'invoke');
+
+    // The peer gate answers this one (no allowlisted Session); either way it is never a user's call.
+    await requestJson(server, 'POST', '/invoke', { channel: 'runpane:panels:list', args: [], token: 'peer-token' });
+    expect(invokeSpy).not.toHaveBeenCalledWith('runpane:panels:list', [], { origin: 'remote-user' });
+    expect(userClientActivity.invokedSince(0)).toEqual([]);
+
+    await requestJson(server, 'POST', '/invoke', { channel: 'runpane:panels:list', args: [], token: 'user-token' });
+    expect(invokeSpy).toHaveBeenLastCalledWith('runpane:panels:list', [], { origin: 'remote-user' });
+    expect(userClientActivity.invokedSince(0)).toMatchObject([{ clientId: 'desktop', label: 'MacBook' }]);
   });
 
   it('supports browser CORS preflights for PWA remote clients', async () => {

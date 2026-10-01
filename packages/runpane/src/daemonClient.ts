@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { boundary, decodeBoundary } from './boundaryDecoder';
-import type { BoundarySchema, JsonValue } from './boundaryDecoder';
+import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
+import type { DaemonTarget } from './remote/hostDirectory';
+import { getDaemonTarget, invokeRemote, RemoteTargetError } from './remote/target';
 
 interface PaneDaemonRequestFrame {
   type: 'request';
@@ -27,6 +29,7 @@ interface PaneDaemonErrorResponseFrame {
   error: {
     message: string;
     code?: string;
+    details?: JsonObject;
   };
 }
 
@@ -51,6 +54,8 @@ interface InvokeOptions {
   paneDir?: string;
   timeoutMs?: number;
   eventInclude?: string[] | null;
+  /** A remote daemon to call over HTTP; defaults to the process target from --host/--thread. */
+  target?: DaemonTarget | null;
 }
 
 interface TimeoutReference {
@@ -84,6 +89,7 @@ const paneDaemonFrameSchema: BoundarySchema<PaneDaemonFrame> = boundary.union(
     error: boundary.object({
       message: boundary.string,
       code: boundary.optional(boundary.string),
+      details: boundary.optional(boundary.jsonObject),
     }),
   }),
   boundary.object({
@@ -97,6 +103,8 @@ export class PaneDaemonClientError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    /** Machine-readable context the daemon sent with `code`. */
+    readonly details?: JsonObject,
   ) {
     super(message);
     this.name = 'PaneDaemonClientError';
@@ -129,6 +137,10 @@ export async function invokeDaemon<T>(
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
+  const target = options.target === undefined ? getDaemonTarget() : options.target;
+  if (target) {
+    return invokeDaemonOverHttp(target, channel, args, resultSchema, options);
+  }
   const endpoint = getPaneDaemonEndpoint(resolvePaneDirectory(options.paneDir));
   const request: PaneDaemonRequestFrame = {
     type: 'request',
@@ -185,7 +197,7 @@ export async function invokeDaemon<T>(
             settle({ result: decodeBoundary(frame.result, resultSchema) });
             return;
           }
-          settle({ error: new PaneDaemonClientError(frame.error.message, frame.error.code) });
+          settle({ error: new PaneDaemonClientError(frame.error.message, frame.error.code, frame.error.details) });
           return;
         }
       } catch (error) {
@@ -204,6 +216,24 @@ export async function invokeDaemon<T>(
       }
     });
   });
+}
+
+async function invokeDaemonOverHttp<T>(
+  target: DaemonTarget,
+  channel: string,
+  args: unknown[],
+  resultSchema: BoundarySchema<T>,
+  options: InvokeOptions,
+): Promise<T> {
+  try {
+    const result = await invokeRemote(target, channel, args, { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+    return decodeBoundary(result, resultSchema);
+  } catch (error) {
+    if (error instanceof RemoteTargetError) {
+      throw new PaneDaemonClientError(error.message, error.code);
+    }
+    throw error;
+  }
 }
 
 function resolveAppDirectory(appDirectory: string, platform: NodeJS.Platform): string {

@@ -154,13 +154,87 @@ function getRemoteHostRuntimePresentation(
   };
 }
 
+/**
+ * The command that wakes a saved cloud host (a profile `runpane cloud` wrote). A
+ * sleeping cloud Session's tailnet node is offline, so connecting fails like any unreachable host;
+ * the desktop only names the CLI command and never wakes or manages the machine itself (#695).
+ */
+export function getCloudWakeCommand(profile: RemotePaneConnectionProfile | undefined): string | null {
+  return profile?.cloud ? `runpane cloud wake ${profile.cloud.hostname}` : null;
+}
+
+/**
+ * The wake command once connecting to the active cloud host has failed. That includes retrying
+ * after a failed attempt: a desktop reopened on a sleeping host retries for about 90 s before it
+ * reports 'error'.
+ */
+function getFailedCloudWakeCommand(
+  connectionState: RemotePaneConnectionState,
+  profiles: RemotePaneConnectionProfile[],
+): string | null {
+  if (connectionState.mode !== 'remote') return null;
+  const failed = connectionState.status === 'error'
+    || (connectionState.status === 'reconnecting' && Boolean(connectionState.lastError));
+  if (!failed) return null;
+  return getCloudWakeCommand(profiles.find((profile) => profile.id === connectionState.activeProfileId));
+}
+
+export interface CloudSwitchFailure {
+  title: string;
+  error: string;
+  command: string;
+  details: string;
+}
+
+/**
+ * What to tell the user when picking a cloud host fails. Pane goes back to this computer after one
+ * failed attempt, so the connection state no longer names the host; this explains it and names the
+ * wake command. Display only: the desktop never wakes the machine itself (#695).
+ */
+export function getCloudSwitchFailure(
+  profile: RemotePaneConnectionProfile | undefined,
+  errorMessage: string,
+): CloudSwitchFailure | null {
+  const command = getCloudWakeCommand(profile);
+  if (!profile || !command) return null;
+  return {
+    title: 'Cloud host asleep or unreachable',
+    error: `${profile.label} did not answer, so Pane stayed on this computer. A cloud Session that is asleep has to be woken first: run this, then pick ${profile.label} again.`,
+    command,
+    details: errorMessage,
+  };
+}
+
+/** What to tell the user when "Copy wake command" cannot reach the clipboard: the command itself, to run by hand. */
+export function getCopyWakeCommandFailure(command: string, cause: unknown): CloudSwitchFailure {
+  return {
+    title: 'Could not copy the wake command',
+    error: 'The clipboard refused it. Run this command in a terminal to wake the cloud Session.',
+    command,
+    details: cause instanceof Error ? cause.message : String(cause),
+  };
+}
+
 export function getRemoteFooterStatus(
   connectionState: RemotePaneConnectionState,
   hostState: RemoteDaemonHostRuntimeState,
+  profiles: RemotePaneConnectionProfile[] = [],
 ): RemoteFooterStatus {
   const lastSeenText = formatRemoteLastSeen(connectionState.lastSeenAt, 'inline');
 
   if (connectionState.mode === 'remote') {
+    const wakeCommand = getFailedCloudWakeCommand(connectionState, profiles);
+    if (wakeCommand) {
+      return {
+        dotClassName: 'bg-status-error',
+        title: 'Cloud host asleep or unreachable',
+        description: [
+          `${connectionState.activeProfileLabel ?? 'This cloud host'} may be asleep. Run \`${wakeCommand}\`, then pick it again.`,
+          lastSeenText ? `Remote was ${lastSeenText}.` : null,
+        ].filter(Boolean).join(' '),
+        ariaLabel: 'Cloud host asleep or unreachable',
+      };
+    }
     if (connectionState.status === 'error') {
       return {
         dotClassName: 'bg-status-error',
@@ -225,6 +299,8 @@ export interface RemoteHostSwitcherModel {
   selectedId: string;
   /** Set when this machine is also hosting, so the switcher can link to it. */
   hostingSummary: string | null;
+  /** Set when the selected cloud host failed to connect: the CLI command that wakes it. */
+  cloudWakeCommand: string | null;
 }
 
 function getRemoteConnectionDotClassName(state: RemotePaneConnectionState): string {
@@ -250,5 +326,6 @@ export function getRemoteHostSwitcherModel(
     dotClassName: remote ? getRemoteConnectionDotClassName(connectionState) : null,
     selectedId: remote ? connectionState.activeProfileId ?? LOCAL_RUNTIME_ID : LOCAL_RUNTIME_ID,
     hostingSummary,
+    cloudWakeCommand: getFailedCloudWakeCommand(connectionState, profiles),
   };
 }

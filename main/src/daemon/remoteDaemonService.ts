@@ -12,7 +12,7 @@ import type {
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const SERVICE_NAME = 'com.dcouple.pane.remote-daemon';
-const SYSTEMD_UNIT_NAME = 'pane-remote-daemon.service';
+export const SYSTEMD_UNIT_NAME = 'pane-remote-daemon.service';
 const WINDOWS_TASK_NAME = 'PaneRemoteDaemon';
 const LAUNCHER_MARKER = 'pane-remote-daemon-launcher-v2';
 

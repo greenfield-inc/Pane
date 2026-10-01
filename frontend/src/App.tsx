@@ -243,9 +243,13 @@ function App() {
   // Register terminal shortcuts (hotkey-triggered clipboard paste)
   useTerminalShortcuts();
 
-  // Load config on app startup
+  // Load config on app startup, and again when another process edits it (a host saved by
+  // `runpane cloud` shows up in the host switcher without a restart).
   useEffect(() => {
     fetchConfig();
+    return window.electronAPI?.events?.onConfigChanged?.(() => {
+      void fetchConfig().catch(() => undefined);
+    });
   }, [fetchConfig]);
 
   // Detect unclean shutdown from previous session and notify user

@@ -28,6 +28,7 @@ import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { panelApi } from '../services/panelApi';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
+import { DesktopSessionPorts } from './ports/DesktopSessionPorts';
 import { PanelContainer } from './panels/PanelContainer';
 import { getDockTerminalPanel } from '../utils/terminalDock';
 import { SplitLayout } from './panels/SplitLayout';
@@ -1851,6 +1852,9 @@ export const SessionView = memo(() => {
           draggedPanelId={draggedPanelId}
           getPanelTabPresentation={getPanelTabPresentation}
         />
+
+        {/* Session ports (tailnet HTTPS links) of the connected daemon; hidden when there are none */}
+        <DesktopSessionPorts />
 
         {/* Content area: center panels + right detail */}
         <div ref={sessionContentBox.ref} className="pane-session-content flex-1 flex flex-row min-h-0 min-w-0">

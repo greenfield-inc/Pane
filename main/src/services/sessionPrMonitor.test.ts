@@ -83,6 +83,28 @@ describe('SessionPrMonitor', () => {
     vi.useRealTimers();
   });
 
+  it('lists PRs with running checks, polling first when the last round is stale', async () => {
+    const { monitor, remote, execFile } = setup();
+    remote.set(747, { statusCheckRollup: [passing, running] });
+
+    await expect(monitor.pendingChecks(60_000)).resolves.toEqual([{ paneId: 'pane-1', prNumber: 747 }]);
+    expect(execFile).toHaveBeenCalledTimes(1);
+
+    remote.set(747, { statusCheckRollup: [passing] });
+    // A fresh round is reused; a zero max age forces another poll.
+    await expect(monitor.pendingChecks(60_000)).resolves.toHaveLength(1);
+    expect(execFile).toHaveBeenCalledTimes(1);
+    await expect(monitor.pendingChecks(0)).resolves.toEqual([]);
+  });
+
+  it('shares one round between concurrent pollers', async () => {
+    const { monitor, remote, execFile } = setup();
+    remote.set(747, { statusCheckRollup: [running] });
+
+    await Promise.all([monitor.pollOnce(), monitor.pendingChecks(0)]);
+    expect(execFile).toHaveBeenCalledTimes(1);
+  });
+
   it('seeds silently, then reports each transition once', async () => {
     const { monitor, remote, entries, execFile, slot } = setup();
     remote.set(747, { mergeable: 'MERGEABLE', statusCheckRollup: [passing, running] });

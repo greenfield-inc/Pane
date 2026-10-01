@@ -281,6 +281,12 @@ interface TerminalProcess {
   filterInAltScreen: boolean;
   capturedAgentSessionId?: string;
   agentSessionScrapeBuffer: string;
+  /**
+   * Settles once the launch command is typed and, for a CLI agent, once it
+   * signals ready (or its 10 s safety timeout passes). Never rejects.
+   */
+  launchSettled: Promise<void>;
+  settleLaunch: () => void;
 }
 
 interface AgentProbe {
@@ -1284,8 +1290,13 @@ export class TerminalPanelManager extends EventEmitter {
       filterInAltScreen: false,
       agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
       shellProcessName: normalizeProcessName(shellPath),
-      agentSessionScrapeBuffer: ''
+      agentSessionScrapeBuffer: '',
+      launchSettled: Promise.resolve(),
+      settleLaunch: () => undefined,
     };
+    terminalProcess.launchSettled = new Promise<void>(resolve => {
+      terminalProcess.settleLaunch = resolve;
+    });
 
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
@@ -1337,7 +1348,10 @@ export class TerminalPanelManager extends EventEmitter {
         });
       }
 
-      if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) return;
+      if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) {
+        terminalProcess.settleLaunch();
+        return;
+      }
 
       // Detect the interactive prompt before injecting the command.
       // Previous approaches (fixed 500ms delay, then fire-on-any-data + 300ms) failed
@@ -1346,8 +1360,12 @@ export class TerminalPanelManager extends EventEmitter {
       // so banner lines ending with % or > don't trigger a false positive.
       const panelId = panel.id;
       const injectCommand = () => {
-        if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
+        if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) {
+          terminalProcess.settleLaunch();
+          return;
+        }
         this.writeToTerminal(panelId, commandToRun! + '\r');
+        if (!isCliCommand) terminalProcess.settleLaunch();
 
         // For CLI tool terminals, signal the frontend when the CLI responds
         if (isCliCommand) {
@@ -1356,7 +1374,10 @@ export class TerminalPanelManager extends EventEmitter {
           let onCliOutput: ReturnType<typeof ptyProcess.onData> | null = null;
 
           const signalCliReady = () => {
-            if (cliReadySignaled || this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
+            if (cliReadySignaled || this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) {
+              terminalProcess.settleLaunch();
+              return;
+            }
             cliReadySignaled = true;
             if (onCliOutput) onCliOutput.dispose();
 
@@ -1373,6 +1394,7 @@ export class TerminalPanelManager extends EventEmitter {
             // Emit to renderer
             this.sendRendererEvent('terminal:cliReady', { panelId });
             this.holdInitialInput(panelId);
+            terminalProcess.settleLaunch();
           };
 
           // Listen for CLI output after command injection. Cursor launches are
@@ -1400,10 +1422,13 @@ export class TerminalPanelManager extends EventEmitter {
       };
 
       this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
-    } else if (initialInput) {
-      setTimeout(() => {
-        if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
-      }, 1000);
+    } else {
+      terminalProcess.settleLaunch();
+      if (initialInput) {
+        setTimeout(() => {
+          if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
+        }, 1000);
+      }
     }
 
     // Update panel state
@@ -1592,6 +1617,31 @@ export class TerminalPanelManager extends EventEmitter {
   
   isTerminalInitialized(panelId: string): boolean {
     return this.terminals.has(panelId);
+  }
+
+  /** The PTY's root process id, for callers that inspect what runs under a panel. */
+  getPanelPid(panelId: string): number | undefined {
+    const terminal = this.terminals.get(panelId);
+    return terminal && !terminal.isPtyHost ? terminal.pty.pid : undefined;
+  }
+
+  /**
+   * Wait until the panel's launch command is typed and a CLI agent signalled
+   * ready. Resolves false when the terminal is gone or the wait timed out.
+   */
+  async waitForLaunch(panelId: string, timeoutMs: number): Promise<boolean> {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>(resolve => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    try {
+      const settled = await Promise.race([terminal.launchSettled.then(() => true as const), timedOut]);
+      return settled && this.terminals.get(panelId) === terminal && !terminal.destroying;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   getLastOutputAt(panelId: string): string | undefined {

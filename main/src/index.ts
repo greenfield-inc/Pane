@@ -5,6 +5,7 @@ import './polyfills/readablestream';
 
 import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg } from './utils/runtimeMode';
 import { getAppDirectory } from './utils/appDirectory';
+import { getSideBySideName, sideBySideUserDataDir } from './utils/sideBySide';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { boundary, decodeBoundary } from '../../shared/validation/boundaryDecoder';
@@ -58,8 +59,15 @@ if (getStartupTerminalPowerMode() === 'batterySaver') {
 
 // Set Windows AUMID to match electron-builder's appId so Windows resolves
 // the installed Start Menu shortcut for notification icon and display name.
+const sideBySideName = getSideBySideName();
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.dcouple.pane');
+  app.setAppUserModelId(sideBySideName ? `com.dcouple.pane.${sideBySideName}` : 'com.dcouple.pane');
+}
+
+// A side-by-side test build keeps its Chromium profile, and with it the
+// single-instance lock, in its own data directory, away from the installed Pane.
+if (sideBySideName) {
+  app.setPath('userData', sideBySideUserDataDir(getAppDirectory()));
 }
 
 // Now import the rest of electron
@@ -274,10 +282,12 @@ function showMainWindow(): void {
 /**
  * The installed Pane runs once per data directory. Chromium keeps the lock in
  * userData, which unpackaged builds and --pane-dir/PANE_DIR instances share with
- * the installed app, so those run beside it without taking the lock.
+ * the installed app, so those run beside it without taking the lock. A
+ * side-by-side build has its own userData per data directory, so it keeps the lock.
  */
 function acquireSingleInstanceLock(): boolean {
-  if (!app.isPackaged || getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR) {
+  if (!app.isPackaged) return true;
+  if (!sideBySideName && (getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR)) {
     return true;
   }
   return app.requestSingleInstanceLock();
@@ -1297,7 +1307,7 @@ if (launchRemoteSetup) {
       app.exit(0);
       return;
     }
-    if (app.isPackaged && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
+    if (app.isPackaged && !sideBySideName && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
       app.setAsDefaultProtocolClient(PANE_LINK_SCHEME);
     }
 
@@ -1306,7 +1316,8 @@ if (launchRemoteSetup) {
     // after the window opens reads the cache instead of blocking on the shell.
     void warmShellPath();
     await initializeServices();
-    syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    // The login item is keyed by app id on Windows: a side-by-side build would replace the installed Pane's.
+    if (!sideBySideName) syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     setTimeout(() => syncPaneMcpForApp({
       isPackaged: app.isPackaged,
       config: configManager.getConfig(),
@@ -1436,7 +1447,8 @@ if (launchRemoteSetup) {
   // Check for updates after window is created. The auto-updater is set up
   // here too: loading electron-updater blocks the main thread, which would
   // hold up the renderer's first requests if it ran as the window opens.
-  setTimeout(async () => {
+  // A side-by-side test build never offers to replace itself with a release.
+  if (!sideBySideName) setTimeout(async () => {
     setupAutoUpdater(() => mainWindow);
     console.log('[Main] Performing startup version check...');
     await versionChecker.checkOnStartup();

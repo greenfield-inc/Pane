@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { getDaemonTarget } from './remote/target';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
@@ -613,6 +614,8 @@ interface PanelSummary {
   title: string;
   active: boolean;
   initialized?: boolean;
+  runState?: 'running' | 'resuming' | 'interrupted' | 'stopped';
+  resumable?: boolean;
   agentType?: string;
   agentDetection?: 'declared' | 'command' | 'process' | 'screen';
   launchCommand?: string;
@@ -682,6 +685,7 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  idempotencyKey?: string;
 }
 
 interface PanelInputResult {
@@ -761,6 +765,7 @@ interface PanelSubmitResult {
   promptFile?: string;
   warnings?: PromptWarning[];
   nextCommand?: string;
+  deduplicated?: boolean;
 }
 
 interface PanelSubmitComposerResult {
@@ -1069,6 +1074,8 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   title: boundary.string,
   active: boundary.boolean,
   initialized: boundary.optional(boundary.boolean),
+  runState: boundary.optional(boundary.enumeration('running', 'resuming', 'interrupted', 'stopped')),
+  resumable: boundary.optional(boundary.boolean),
   agentType: boundary.optional(boundary.string),
   agentDetection: boundary.optional(boundary.enumeration('declared', 'command', 'process', 'screen')),
   launchCommand: boundary.optional(boundary.string),
@@ -1559,6 +1566,7 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   promptFile: boundary.optional(boundary.string),
   warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
+  deduplicated: boundary.optional(boundary.boolean),
 });
 const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult> = boundary.object({
   ok: boundary.boolean,
@@ -2452,13 +2460,14 @@ export async function runPanesFocus(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runPanelsList(parsed: ParsedArgs): Promise<number> {
-  if (!parsed.paneId) {
+  // A peer token lists the target Session's orchestrator panel without a Pane id.
+  if (!parsed.paneId && !getDaemonTarget()) {
     throw new Error('runpane panels list requires --pane.');
   }
 
-  const result = await invokeDaemon('runpane:panels:list', [{
+  const result = await invokeDaemon('runpane:panels:list', [parsed.paneId ? {
     paneId: parsed.paneId,
-  }], panelListResultSchema, {
+  } : {}], panelListResultSchema, {
     paneDir: parsed.paneDir,
   });
 
@@ -2685,6 +2694,9 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${verb} ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} via ${result.sequenceName} to panel ${result.panelId}.${verified}`);
     printDelivery(result.delivery);
+    if (result.deduplicated) {
+      console.log('This idempotency key was already used; Pane returned the first result and sent nothing again.');
+    }
     if (result.blocked) {
       console.log(`Blocked: ${result.blocked.message}`);
     }
@@ -2837,11 +2849,15 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
   if (parsed.asFilePointer && command !== 'submit') {
     throw new Error('--as-file-pointer is for panels submit; panels input sends exact bytes.');
   }
+  if (parsed.idempotencyKey !== undefined && command !== 'submit') {
+    throw new Error('--idempotency-key is for panels submit.');
+  }
 
   return {
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    idempotencyKey: parsed.idempotencyKey,
   };
 }
 
@@ -3567,7 +3583,9 @@ function printPanelListResult(result: PanelListResult): void {
 
   for (const panel of result.panels) {
     const marker = panel.active ? '*' : ' ';
-    const initialized = panel.initialized === undefined ? '' : panel.initialized ? ' initialized' : ' not-initialized';
+    const initialized = panel.runState && panel.runState !== 'running'
+      ? ` ${panel.runState}${panel.resumable ? ' (resumable)' : ''}`
+      : panel.initialized === undefined ? '' : panel.initialized ? ' initialized' : ' not-initialized';
     const agent = panel.agentType ? ` ${panel.agentType}` : '';
     const detection = panel.agentDetection && panel.agentDetection !== 'command' ? ` (${panel.agentDetection})` : '';
     console.log(`${marker} ${panel.id}\t${panel.type}\t${panel.title}${initialized}${agent}${detection}`);

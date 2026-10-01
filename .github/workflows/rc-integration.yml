@@ -1,0 +1,179 @@
+name: Runpane Cloud integration (fork)
+
+# Fork-only gate for the Runpane Cloud integration branch. It replaces the boat
+# devbox the integrator used to run the suite on (and gives every Phase 2/3/5/6/7/9/10 peer
+# branch rc/p2/**, rc/p3/**, rc/p5/**, rc/p6/**, rc/p7/**, rc/p9/**, rc/p10/** the same checks): the same steps as
+# ~/rc-loop/integrator/suite.sh (quality.yml's checks plus the runpane package
+# tests), then, on rc/integration only, the cloud-dist build published as a
+# fork PRERELEASE rc-<sha8>. It never publishes to upstream channels.
+on:
+  push:
+    branches:
+      - rc/integration
+      - 'rc/p2/**'
+      - 'rc/p3/**'
+      - 'rc/p5/**'
+      - 'rc/p6/**'
+      - 'rc/p7/**'
+      - 'rc/p9/**'
+      - 'rc/p10/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-integration-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  suite:
+    name: Suite (typecheck, lint, main, frontend)
+    if: github.repository != 'greenfield-inc/Pane'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Rebuild native modules for Node tests
+      run: pnpm rebuild better-sqlite3-multiple-ciphers
+
+    - name: Typecheck
+      run: pnpm typecheck
+
+    - name: Lint
+      if: ${{ !cancelled() }}
+      run: pnpm lint
+
+    - name: Main process tests
+      if: ${{ !cancelled() }}
+      run: CI=1 pnpm --filter main exec vitest run
+
+    - name: Frontend tests
+      if: ${{ !cancelled() }}
+      run: CI=1 pnpm --filter frontend test
+
+  session-ports-ui:
+    name: Session ports UI (Playwright, mocked daemon)
+    if: github.repository != 'greenfield-inc/Pane'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Install Chromium
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Ports chip row (desktop renderer + web client)
+      run: CI=1 pnpm exec playwright test --config=playwright.ports.config.ts
+
+    - name: Upload screenshots
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: session-ports-screenshots
+        path: test-results/session-ports
+        if-no-files-found: warn
+
+  runpane:
+    name: Runpane (contract, MCP, package smoke, unit, cloud assets)
+    if: github.repository != 'greenfield-inc/Pane'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Check wrapper package versions
+      run: node scripts/sync-runpane-package-versions.js --check
+
+    - name: Contract tests
+      if: ${{ !cancelled() }}
+      run: pnpm run test:runpane-contract
+
+    - name: MCP tests
+      if: ${{ !cancelled() }}
+      run: pnpm run test:runpane-mcp
+
+    - name: Package smoke tests
+      if: ${{ !cancelled() }}
+      run: pnpm run test:runpane-package-smoke
+
+    - name: Runpane unit tests
+      if: ${{ !cancelled() }}
+      run: pnpm --filter runpane test
+
+    - name: Cloud bootstrap assets are current
+      if: ${{ !cancelled() }}
+      run: pnpm --filter runpane run check:cloud-assets
+
+    - name: Fake GitHub self-test (broker gate fixture)
+      if: ${{ !cancelled() }}
+      run: bash tests/cloud-e2e/lib/fakegithub-selftest.sh "$RUNNER_TEMP/fakegithub"
+
+    - name: P4 script safety self-test (adopt/record/cleanup against the fake)
+      if: ${{ !cancelled() }}
+      run: bash tests/cloud-e2e/lib/p4-selftest.sh "$RUNNER_TEMP/p4-selftest"
+
+  # Linux .deb + runpane CLI tarball for boat sandboxes (Ubuntu 24.04), published
+  # as a fork prerelease. Only for rc/integration heads that passed the suite; a
+  # merge commit containing [no-release] (docs-only merges) skips it.
+  dist:
+    name: Publish fork prerelease rc-<sha8>
+    needs: [suite, runpane]
+    if: >-
+      github.repository != 'greenfield-inc/Pane' &&
+      github.ref == 'refs/heads/rc/integration' &&
+      !contains(github.event.head_commit.message, '[no-release]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install
+
+    - name: Build artifacts
+      run: bash scripts/cloud-dist/build-artifacts.sh dist-cloud
+
+    - name: Publish prerelease
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        VERSION=$(node -p "require('./dist-cloud/build-info.json').version")
+        TAG="rc-${GITHUB_SHA:0:8}"
+        NOTES="Runpane Cloud fork build of ${GITHUB_SHA} (branch ${GITHUB_REF_NAME}), built by GitHub Actions run ${GITHUB_RUN_ID}. Not an upstream release.
+        Version: ${VERSION}
+        Install the daemon: \`sudo apt-get install -y ./pane_${VERSION}_amd64.deb\`
+        Install the CLI: \`npm i -g https://github.com/${REPO}/releases/download/${TAG}/runpane-${VERSION}.tgz\`"
+        if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+          gh release upload "$TAG" --repo "$REPO" --clobber dist-cloud/*
+        else
+          gh release create "$TAG" --repo "$REPO" --prerelease --target "$GITHUB_SHA" \
+            --title "Runpane Cloud rc ${GITHUB_SHA:0:8}" --notes "$NOTES" dist-cloud/*
+        fi
+        echo "https://github.com/${REPO}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"

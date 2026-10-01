@@ -8,10 +8,13 @@ import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
 import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runLinksCreate } from './links';
-import { helpText, parseRunpaneArgs, type ParsedArgs } from './commands';
-import { boundary, decodeBoundary } from './boundaryDecoder';
+import { helpText, parseRunpaneArgs, takesDaemonTarget, type ParsedArgs } from './commands';
+import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
+import { PaneDaemonClientError } from './daemonClient';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
+import { runCloudSafeToStop } from './cloudSafeToStop';
+import { runPort } from './sessionPorts';
 import {
   installPaneArtifact,
   launchPaneClient,
@@ -68,6 +71,7 @@ import {
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import { configureDaemonTarget } from './remote/target';
 
 const SOURCE = 'npm' as const;
 
@@ -99,7 +103,37 @@ export async function main(argv: string[]): Promise<number> {
     return dispatchParsedCommand(parsed, telemetryContext);
   }
 
-  return runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
+  if (!parsed.json || parsed.command === 'watch' || parsed.command === 'mcp') {
+    return runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
+  }
+  try {
+    return await runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
+  } catch (error) {
+    // Scripts read stdout: a --json failure is still one JSON object there.
+    const failure = jsonFailure(error instanceof Error ? error : new Error(String(error)));
+    process.stdout.write(`${JSON.stringify(failure)}\n`);
+    process.stderr.write(`${failure.message}\n`);
+    return 1;
+  }
+}
+
+/** What `runpane <command> --json` prints on stdout when the command fails. */
+interface RunpaneJsonFailure {
+  ok: false;
+  /** Daemon codes (ERR_PANEL_NOT_RUNNING, ERR_RUNPANE_DAEMON_CONNECT_FAILED, ...) or ERR_RUNPANE_COMMAND_FAILED. */
+  code: string;
+  message: string;
+  /** Context the daemon sent with the code, e.g. `{ panelId, runState, resumable }`. */
+  details?: JsonObject;
+}
+
+function jsonFailure(error: Error): RunpaneJsonFailure {
+  if (error instanceof PaneDaemonClientError) {
+    const failure: RunpaneJsonFailure = { ok: false, code: error.code ?? 'ERR_RUNPANE_DAEMON_REQUEST_FAILED', message: error.message };
+    if (error.details) failure.details = error.details;
+    return failure;
+  }
+  return { ok: false, code: 'ERR_RUNPANE_COMMAND_FAILED', message: error.message };
 }
 
 async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
@@ -116,6 +150,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return printVersion(parsed.panePath);
   }
 
+  if (takesDaemonTarget(parsed.command)) {
+    configureDaemonTarget(parsed);
+  }
+
   if (parsed.command === 'doctor') {
     return runDoctor(parsed, SOURCE);
   }
@@ -126,6 +164,15 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'agent-context') {
     return runAgentContext(parsed);
+  }
+
+  if (parsed.cloudArgv) {
+    const { runCloud } = await import('./cloud');
+    return runCloud(parsed.cloudArgv);
+  }
+
+  if (parsed.portArgv) {
+    return runPort(parsed);
   }
 
   if (parsed.command === 'mcp') {
@@ -220,6 +267,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'lock list') {
     return runLockList(parsed);
+  }
+
+  if (parsed.command === 'cloud safe-to-stop') {
+    return runCloudSafeToStop(parsed);
   }
 
   if (parsed.command === 'workspace state') {
