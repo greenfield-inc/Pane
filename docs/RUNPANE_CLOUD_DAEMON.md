@@ -129,7 +129,9 @@ User clients (Pane desktop, the phone app, `runpane --host`, `runpane cloud port
 call these; the coordinator and peers are refused like every other channel outside their scope. Code:
 `main/src/daemon/cloud/ports/`, types in `shared/types/sessionPorts.ts`. Every daemon registers them; off a
 Runpane Cloud Session (no `/etc/rp-cloud/serve.json`) `list` answers `available: false` and the others fail
-with `ERR_PORTS_UNAVAILABLE`, so a laptop's tailnet name is never touched.
+with `ERR_PORTS_UNAVAILABLE`, so a laptop's tailnet name is never touched. On a new Session the bootstrap writes
+that marker after the daemon's first start, so a daemon whose user has the bootstrap's `~/.runpane-cloud`
+directory looks for it every 2 s for up to 15 minutes; any other daemon (desktop, self-hosted) never polls.
 
 | Channel | Args | Result |
 |---|---|---|

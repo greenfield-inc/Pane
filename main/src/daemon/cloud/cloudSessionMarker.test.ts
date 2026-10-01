@@ -18,13 +18,13 @@ describe('whenCloudSession', () => {
   it('runs at once when the marker exists', () => {
     fs.writeFileSync(marker, '{}');
     let calls = 0;
-    whenCloudSession(() => calls++, { path: marker, pollMs: 10 });
+    whenCloudSession(() => calls++, { path: marker, pollMs: 10, bootstrapStateDir: path.join(dir, 'none') });
     expect(calls).toBe(1);
   });
 
   it('runs once when the bootstrap writes the marker later', async () => {
     let calls = 0;
-    const stop = whenCloudSession(() => calls++, { path: marker, pollMs: 10 });
+    const stop = whenCloudSession(() => calls++, { path: marker, pollMs: 10, bootstrapStateDir: dir });
     await wait(40);
     expect(calls).toBe(0);
     fs.writeFileSync(marker, '{}');
@@ -35,10 +35,20 @@ describe('whenCloudSession', () => {
 
   it('stops looking after the wait (not a Session)', async () => {
     let calls = 0;
-    whenCloudSession(() => calls++, { path: marker, pollMs: 10, waitMs: 30 });
+    whenCloudSession(() => calls++, { path: marker, pollMs: 10, waitMs: 30, bootstrapStateDir: dir });
     await wait(60);
     fs.writeFileSync(marker, '{}');
     await wait(40);
     expect(calls).toBe(0);
+  });
+
+  // Desktop and self-hosted daemons have no Session bootstrap behind them: nothing to wait for.
+  it('does not poll when no Session bootstrap is in progress', async () => {
+    let calls = 0;
+    const stop = whenCloudSession(() => calls++, { path: marker, pollMs: 10, bootstrapStateDir: path.join(dir, 'none') });
+    fs.writeFileSync(marker, '{}');
+    await wait(50);
+    expect(calls).toBe(0);
+    stop();
   });
 });
