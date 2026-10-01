@@ -25,7 +25,7 @@ function createFakePortsDaemon(host = HOST, names: [string, string] = ['taste', 
     { port: 9000, address: '0.0.0.0', process: 'node' },
   ];
   const calls: Array<{ channel: string; args: JsonValue[] }> = [];
-  let listFailures: string[] = [];
+  let listFailure: string | null = null;
 
   // The daemon's PortsListResult shape (runpane:ports:list).
   const list = (): JsonObject => ({
@@ -37,9 +37,9 @@ function createFakePortsDaemon(host = HOST, names: [string, string] = ['taste', 
   return {
     calls,
     list,
-    /** The next list reads fail with these messages, in order. */
-    failNextLists(...messages: string[]) {
-      listFailures = messages;
+    /** Every list read fails with this message until it is cleared with null. */
+    failLists(message: string | null) {
+      listFailure = message;
     },
     /** Adds a published port behind the UI's back, as `runpane port open` in the Session would. */
     publishOutOfBand(name: string, port: number): JsonObject {
@@ -53,8 +53,7 @@ function createFakePortsDaemon(host = HOST, names: [string, string] = ['taste', 
       // SAFETY: the UI sends one request object for open/close.
       const request = (args[0] ?? {}) as { port?: number; yes?: boolean; target?: number | string };
       if (channel === 'runpane:ports:list') {
-        const failure = listFailures.shift();
-        if (failure) throw new Error(failure);
+        if (listFailure) throw new Error(listFailure);
         return list();
       }
       if (channel === 'runpane:ports:open') {
@@ -240,11 +239,12 @@ test.describe('Session ports chip row', () => {
 
   test('desktop: a failed first read says why and offers Retry; a refused copy says so', async ({ page }) => {
     const daemon = createFakePortsDaemon();
-    daemon.failNextLists('tailscale: not running');
+    daemon.failLists('tailscale: not running');
     await openDesktopSession(page, daemon);
 
     const row = page.getByRole('region', { name: 'Session ports' });
     await expect(row.getByRole('alert')).toContainText(/Couldn't load ports: .*tailscale: not running/);
+    daemon.failLists(null);
     await row.getByRole('button', { name: 'Retry' }).click();
     await expect(row.getByTestId('session-port-chip')).toHaveCount(2);
     await expect(row.getByRole('alert')).toHaveCount(0);
