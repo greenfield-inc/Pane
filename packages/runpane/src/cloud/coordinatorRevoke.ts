@@ -2,6 +2,7 @@ import type { CloudDeps } from './commands';
 import { describeRevocation, revokeSessionCoordinatorClients } from './coordinatorClients';
 import { loadCoordinatorProvider, reconfigureCoordinator, requireCoordinatorDeployment, saveCoordinatorDeployment } from './coordinatorDeploy';
 import { pushDirectory } from './coordinatorSync';
+import type { CoordinatorDeployment } from './store';
 
 /**
  * `runpane cloud coordinator revoke-clients|revoke-caller`: take the coordinator's credentials back.
@@ -72,12 +73,13 @@ async function revokeCaller(args: RevokeArgs, deps: CloudDeps): Promise<number> 
   const current = new Set(deployment.revokedCallers ?? []);
   if (args.undo) current.delete(callerId);
   else current.add(callerId);
-  const next = { ...deployment, revokedCallers: [...current].sort() };
-  if (next.revokedCallers.length === 0) delete next.revokedCallers;
+  const revoked = [...current].sort();
+  const next: CoordinatorDeployment = { ...deployment };
+  if (revoked.length > 0) next.revokedCallers = revoked;
+  else delete next.revokedCallers;
   const { provider } = await loadCoordinatorProvider(deps);
   await reconfigureCoordinator(provider, next);
   await saveCoordinatorDeployment(deps, next);
-  const revoked = next.revokedCallers ?? [];
   if (args.json) {
     deps.stdout(JSON.stringify({ ok: true, callerId, revoked: !args.undo, revokedCallers: revoked }, null, 2));
   } else {

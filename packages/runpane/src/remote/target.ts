@@ -117,9 +117,10 @@ export async function invokeRemote(
   try {
     return await deliver();
   } catch (error) {
-    if (!(error instanceof RemoteConnectError) && !isStopping(error)) throw error instanceof Error ? toTargetError(error, target) : error;
+    const stopping = error instanceof Error && isStopping(error);
+    if (!(error instanceof RemoteConnectError) && !stopping) throw error instanceof Error ? toTargetError(error, target) : error;
     // A daemon under the coordinator's stop lease answered: it is about to sleep. Only a submit waits it out.
-    if (isStopping(error) && (!WAKING_CHANNELS.has(channel) || !target.host.cloud || !target.coordinator)) throw stoppingError(target);
+    if (stopping && (!WAKING_CHANNELS.has(channel) || !target.host.cloud || !target.coordinator)) throw stoppingError(target);
   }
 
   // The connection never opened (or the host is being stopped), so the host did not take the request.
@@ -172,7 +173,7 @@ export async function invokeRemote(
     try {
       return await deliver();
     } catch (error) {
-      const stopping = isStopping(error);
+      const stopping = error instanceof Error && isStopping(error);
       if (!(error instanceof RemoteConnectError) && !stopping) throw error instanceof Error ? toTargetError(error, target) : error;
       if (Date.now() + resendIntervalMs > deadline) {
         if (stopping) throw stoppingError(target);
@@ -187,7 +188,7 @@ export async function invokeRemote(
   }
 }
 
-function isStopping(error: unknown): boolean {
+function isStopping(error: Error): boolean {
   return error instanceof RemoteRequestError && error.code === SESSION_STOPPING_CODE;
 }
 

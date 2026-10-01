@@ -22,7 +22,7 @@ export class StopLease {
 
   constructor(private readonly now: () => number) {}
 
-  grant(ms: number): { expiresAt: number; ms: number } {
+  grant(ms: number) {
     this.expiresAt = this.now() + ms;
     return { expiresAt: this.expiresAt, ms };
   }

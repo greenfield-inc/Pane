@@ -38,7 +38,7 @@ export async function revokeSessionCoordinatorClients(deps: CloudDeps): Promise<
     try {
       await callDaemon(record, 'runpane:cloud:coordinator-client:revoke', deps);
     } catch (error) {
-      outcome.failed.push({ host, reason: describeClientError(error, host) });
+      outcome.failed.push({ host, reason: describeClientError(error instanceof Error ? error.message : String(error), host) });
       continue;
     }
     await fs.rm(pairingPath, { force: true });
@@ -62,7 +62,7 @@ export async function repairRevokedCoordinatorClients(deps: CloudDeps): Promise<
     try {
       token = decodeBoundary(await callDaemon(record, 'runpane:cloud:coordinator-client:pair', deps), pairResultSchema).token;
     } catch (error) {
-      outcome.failed.push({ host, reason: describeClientError(error, host) });
+      outcome.failed.push({ host, reason: describeClientError(error instanceof Error ? error.message : String(error), host) });
       continue;
     }
     const pairingPath = deps.store.coordinatorPairingPath(host);
@@ -82,8 +82,7 @@ async function callDaemon(record: CloudHostRecord, channel: string, deps: CloudD
   return deps.invokeDaemon(record.profile, channel, [{}], CLIENT_CALL_TIMEOUT_MS);
 }
 
-function describeClientError(error: unknown, host: string): string {
-  const message = error instanceof Error ? error.message : String(error);
+function describeClientError(message: string, host: string): string {
   if (/No Pane daemon command registered|ERR_UNKNOWN_CHANNEL/u.test(message)) {
     return 'its Pane predates coordinator-client revocation; upgrade it (runpane cloud repair) or destroy it';
   }
