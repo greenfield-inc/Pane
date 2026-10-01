@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { JsonObject, JsonValue } from '../../boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../boundaryDecoder';
 import type { CloudDeps } from '../commands';
 import { NO_COORDINATOR } from '../coordinatorSync';
 import { encodePairingCode } from '../pairing';
@@ -40,6 +40,8 @@ interface FakeWorld {
   /** Guardrails each host's daemon was given (runpane:cloud:agent-notes); hosts listed in agentNotesDown don't answer. */
   agentNotes: Map<string, string[]>;
   agentNotesDown: Set<string>;
+  /** Agent defaults each host's daemon was given (runpane:cloud:agent-defaults). */
+  agentDefaults: Map<string, { claudeModel?: string }>;
   coordinatorHealthy: boolean;
   /** Shared by every fake provider instance, so ids stay unique across `createProvider` calls. */
   sandboxCounter: number;
@@ -108,7 +110,7 @@ export interface FakeDaemon {
 function createFakeWorld(): FakeWorld {
   return {
     sandboxes: new Map(), devices: [], calls: [], scripts: [], healthy: new Set(),
-    files: new Map(), daemons: new Map(), agentNotes: new Map(), agentNotesDown: new Set(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
+    files: new Map(), daemons: new Map(), agentNotes: new Map(), agentNotesDown: new Set(), agentDefaults: new Map(), coordinatorHealthy: true, sandboxCounter: 0, createdByKey: new Map(), loggedOut: new Set(), serveLost: new Set(),
     panePins: new Map(),
     daemonVersions: new Map(),
     healthTokens: [],
@@ -530,6 +532,13 @@ export async function createTestHarness(): Promise<TestHarness> {
         const guardrails = Array.isArray(request.guardrails) ? request.guardrails.map(String) : [];
         world.agentNotes.set(host, guardrails);
         return { ok: true, guardrails, changedFiles: ['/home/user/.claude/CLAUDE.md', '/home/user/.codex/AGENTS.md'] };
+      }
+      // ...and the user's agent defaults (hosts in agentNotesDown don't answer either).
+      if (channel === 'runpane:cloud:agent-defaults') {
+        if (world.agentNotesDown.has(host)) throw new Error('connect ETIMEDOUT');
+        const { claudeModel } = decodeBoundary(request.defaults ?? {}, boundary.object({ claudeModel: boundary.optional(boundary.string) }));
+        world.agentDefaults.set(host, claudeModel === undefined ? {} : { claudeModel });
+        return { ok: true, defaults: claudeModel === undefined ? {} : { claudeModel }, claudeModel: { inSettings: claudeModel ?? null, outcome: claudeModel ? 'set' : 'unset' }, changedFiles: ['/home/user/.claude/settings.json'] };
       }
       const daemon = world.daemons.get(host);
       if (!daemon) throw new Error('connect ECONNREFUSED');

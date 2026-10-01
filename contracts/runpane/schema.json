@@ -570,6 +570,10 @@
         "cloud notes add",
         "cloud notes remove",
         "cloud notes push",
+        "cloud agent-defaults list",
+        "cloud agent-defaults set",
+        "cloud agent-defaults unset",
+        "cloud agent-defaults push",
         "cloud github connect",
         "cloud github disconnect",
         "cloud github list",
@@ -959,6 +963,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud notes push": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent-defaults list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent-defaults set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent-defaults unset": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud agent-defaults push": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud github connect": {

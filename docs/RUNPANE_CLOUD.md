@@ -251,6 +251,26 @@ every awake Session, `new` and `wake` push it, and an asleep Session keeps its p
 Each Session's daemon keeps the copy it was given (`~/.runpane-cloud/agent-notes.json`) and writes it as a
 `runpane-cloud-guardrails` block at every boot and wake, so an agent that edits those files gets it back.
 
+### The model Claude Code starts with
+
+A Session's Claude Code signs in with a token, so it can't see your plan and starts with its own default
+model for a token sign-in (Sonnet 5.5 when we checked), even when your laptop's Claude uses Opus. Pick the model for every Session
+once, on your machine:
+
+```bash
+runpane cloud agent-defaults set claude-model claude-opus-5-5
+runpane cloud agent-defaults list
+runpane cloud agent-defaults unset claude-model    # back to Claude Code's own default
+runpane cloud agent-defaults push [<host>]         # hand the defaults to a Session (default: all) now
+```
+
+It is `agentDefaults.claudeModel` in `~/.config/runpane-cloud/settings.json` (Pane sets none). `set` and
+`unset` push it to every awake Session, `new` and `wake` push it, and an asleep Session gets it then. Each
+Session's daemon keeps its copy (`~/.runpane-cloud/agent-defaults.json`) and writes `model` into
+`~/.claude/settings.json` at every boot and wake, keeping every other key. It only changes a `model` it wrote:
+a model picked in the Session with `/model` stays. New claude panels start with it; a claude that is already
+running keeps its model until you start a new panel.
+
 ### Secrets from Doppler, with no laptop in the path (`.runpane/secrets.json`)
 
 If your team keeps secrets in Doppler, let the coordinator hold **read-only Doppler service tokens** and let
