@@ -201,8 +201,8 @@ export async function provisionSandbox(sandbox: SandboxHandle, options: Provisio
     throw new BootstrapError('health', `${baseUrl}/health not ready after ${result.elapsedMs} ms `
       + `(last HTTP ${result.status ?? 'none'}; in-sandbox loopback check ${local.ok ? 'ok' : 'failed'})`);
   };
-  const waitHealth = (timeoutMs: number) => waitForDaemonHealth(baseUrl,
-    { timeoutMs, fetchImpl: options.fetchImpl, token: decodePairingCode(pairingCode).token });
+  // No token: the install step already reported the version, and a new Session has no agents to restore.
+  const waitHealth = (timeoutMs: number) => waitForDaemonHealth(baseUrl, { timeoutMs, fetchImpl: options.fetchImpl });
 
   let health: DaemonHealthResult | undefined;
   if (transportMode !== 'http') {
