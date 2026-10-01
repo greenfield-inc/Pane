@@ -102,4 +102,54 @@ describe('RemoteInputQueue lifecycle', () => {
     finish[2]();
     await completed;
   });
+
+  it('keeps several keys in flight with increasing sequence numbers when the host orders them', async () => {
+    const finish: Array<() => void> = [];
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: { stream: string; seq: number }) =>
+      new Promise<void>(resolve => finish.push(resolve)));
+    const queue = new RemoteInputQueue(send, { pipelineDepth: () => 3 });
+    const typed = Promise.all([...'abcde'].map(key => queue.invoke('terminal:input', ['panel', key])));
+    // Three requests leave at once; the rest wait as one batch for a free slot.
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    expect(send.mock.calls.map(call => call[1][1])).toEqual(['a', 'b', 'c']);
+    const stream = send.mock.calls[0][3]?.stream;
+    expect(stream).toEqual(expect.any(String));
+    expect(send.mock.calls.map(call => call[3])).toEqual([0, 1, 2].map(seq => ({ stream, seq })));
+    finish[1]();
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(4));
+    expect(send.mock.calls[3][1]).toEqual(['panel', 'de']);
+    expect(send.mock.calls[3][3]).toEqual({ stream, seq: 3 });
+    finish[0]();
+    finish[2]();
+    finish[3]();
+    await typed;
+  });
+
+  it('starts a new sequence stream after a failure and never replays failed input', async () => {
+    const finish: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: { stream: string; seq: number }) =>
+      new Promise<void>((resolve, reject) => finish.push({ resolve, reject })));
+    const queue = new RemoteInputQueue(send, { pipelineDepth: () => 4 });
+    const first = Promise.allSettled(['a', 'b'].map(key => queue.invoke('terminal:input', ['panel', key])));
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    finish[0].reject(new Error('socket hang up'));
+    const settled = await first;
+    expect(settled.map(result => result.status)).toEqual(['rejected', 'rejected']);
+    expect(send.mock.calls[1][2]?.aborted).toBe(true);
+    const next = queue.invoke('terminal:input', ['panel', 'c']);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    expect(send.mock.calls[2][1]).toEqual(['panel', 'c']);
+    expect(send.mock.calls[2][3]?.seq).toBe(0);
+    expect(send.mock.calls[2][3]?.stream).not.toBe(send.mock.calls[0][3]?.stream);
+    finish[2].resolve();
+    await next;
+  });
+
+  it('sends without a sequence stamp at the default depth of one', async () => {
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal, _sequence?: unknown) => Promise.resolve());
+    const queue = new RemoteInputQueue(send);
+    await queue.invoke('terminal:input', ['panel', 'a']);
+    expect(send.mock.calls[0]).toHaveLength(3);
+  });
 });
+
