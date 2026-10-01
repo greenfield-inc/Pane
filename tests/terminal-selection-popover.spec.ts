@@ -203,7 +203,7 @@ test('copies OSC 52 writes from live output but not from restored scrollback', a
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen')).toBeVisible();
   await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
@@ -238,7 +238,7 @@ test('remote mode copies a mouse selection without the selection popover', async
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const viewport = page.getByRole('tabpanel').locator('.xterm-screen').first();

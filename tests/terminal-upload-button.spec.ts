@@ -52,7 +52,7 @@ test('upload button sends picked files through the drop upload path', async ({ p
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal upload fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal upload fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm-screen').first();
