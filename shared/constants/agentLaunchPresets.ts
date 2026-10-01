@@ -1,4 +1,4 @@
-export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor';
+export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode';
 
 export interface AgentLaunchPreset {
   id: AgentLaunchPresetId;
@@ -40,6 +40,14 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
     hotkeyId: 'add-tool-terminal-cursor',
     hotkey: 'mod+alt+5',
     platforms: ['darwin', 'linux', 'wsl'],
+  },
+  {
+    id: 'opencode',
+    title: 'OpenCode',
+    command: 'opencode --auto',
+    iconKey: 'opencode',
+    hotkeyId: 'add-tool-terminal-opencode',
+    hotkey: 'mod+alt+6',
   },
 ];
 

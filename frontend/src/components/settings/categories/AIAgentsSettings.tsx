@@ -12,6 +12,7 @@ import type { PaneChatAgent } from '../../../../../shared/types/paneChat';
 import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
+import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
 
 const PANE_CHAT_AGENT_LABELS = {
   claude: 'Claude',
@@ -19,7 +20,14 @@ const PANE_CHAT_AGENT_LABELS = {
   cursor: 'Cursor',
 } satisfies Record<PaneChatAgent, string>;
 
-const paneChatAgentOptions = visibleAgentPresets().map(({ id }) => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
+function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
+  return id === 'claude' || id === 'codex' || id === 'cursor';
+}
+
+const paneChatAgentOptions = visibleAgentPresets()
+  .map(({ id }) => id)
+  .filter(isPaneChatAgent)
+  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 type McpToolsetChoice = 'core' | 'all';
 const mcpToolsetOptions: { id: McpToolsetChoice; label: string }[] = [

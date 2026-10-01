@@ -22,7 +22,7 @@ Pane decides a terminal panel's agent in this order, and records the source in
 2. **`command`**: the launch command's executable word, through
    `resolveAgentTypeFromCommand` in `main/src/services/agents/agentIdentity.ts`.
 3. **`process`**: the PTY's foreground process name, which node-pty reports as
-   `pty.process`. The names `claude`, `codex` and `cursor-agent` map to agents.
+   `pty.process`. The names `claude`, `codex`, `cursor-agent` and `opencode` map to agents.
    Claude Code's native installer runs `~/.local/share/claude/versions/<version>`,
    so it reports a bare version such as `2.1.283`. Pane resolves that name to an
    executable path with `ps` (or `/proc/<pid>/exe` on Linux) before trusting it.
@@ -52,6 +52,10 @@ it is known, Pane:
 argument to it. On restart, Pane runs the wrapper again, and the wrapper handles
 its own resume. For the same reason, `--resume` is rejected for wrapper
 commands.
+
+Direct OpenCode launches use Pane's durable session id and readiness-gated input.
+Wrapped OpenCode launches run unchanged; the wrapper owns session selection and
+resume, just as it does for the other supported agents.
 
 A new built-in agent works with wrappers once its executable name is in
 `AGENT_EXECUTABLES`. Add a screen signature only if the agent's UI has a stable,

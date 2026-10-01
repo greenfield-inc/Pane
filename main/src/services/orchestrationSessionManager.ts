@@ -71,6 +71,10 @@ function getOrchestrationPanelId(sessionId: string, agent: PaneChatAgent): strin
   return `${ORCHESTRATION_SESSION_PANEL_PREFIX}${sessionId}_${agent}`;
 }
 
+function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor';
+}
+
 export class OrchestrationSessionManager extends EventEmitter {
   private initialized = false;
 
@@ -878,6 +882,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private buildTerminalState(record: OrchestrationSessionRecord): TerminalPanelState {
     const command = record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
     const nativeCommand = /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
+    const resolvedAgent = launchAgent(command, record.customResume);
     return {
       initialCommand: record.launchCommand?.trim() || this.skillCacheManager?.launchCommand(record.agent) || command,
       customResume: record.customResume,
@@ -885,7 +890,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',
       initialInputDeliveryVersion: ORCHESTRATION_BOOTSTRAP_VERSION,
-      agentType: record.customResume ? customResumeAgentType(record.customResume) : resolveAgentTypeFromCommand(command) ?? record.agent,
+      agentType: resolvedAgent ?? record.agent,
       orchestrationSessionId: record.id,
       orchestrationWorkspace: sessionWorkspacePath(record.id),
       orchestrationProfile: record.profile,
@@ -935,10 +940,11 @@ export class OrchestrationSessionManager extends EventEmitter {
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
       const initialized = panel.type === 'terminal' && terminalPanelManager.isTerminalInitialized(panel.id);
+      const panelAgent = snapshot?.agentType ?? customState.agentType;
       return {
         panelId: panel.id,
         title: panel.title,
-        agentType: snapshot?.agentType ?? customState.agentType,
+        agentType: isPaneChatAgent(panelAgent) ? panelAgent : undefined,
         state: terminalPanelManager.getAgentStatus(panel.id) ?? 'unknown',
         initialized: initialized || customState.isInitialized === true,
         lastActivityAt: snapshot?.lastActivityTime,
@@ -1028,7 +1034,12 @@ export class OrchestrationSessionManager extends EventEmitter {
 }
 
 function launchAgent(command: string, resume?: CustomCommandResume | null): PaneChatAgent | undefined {
-  return customResumeAgentType(resume) ?? resolveAgentTypeFromCommand(command);
+  const commandAgent = resolveAgentTypeFromCommand(command);
+  if (commandAgent === 'opencode') {
+    throw new Error('OpenCode is a terminal-only agent and cannot be used in named Sessions');
+  }
+  const agent = customResumeAgentType(resume) ?? commandAgent;
+  return isPaneChatAgent(agent) ? agent : undefined;
 }
 
 /** An explicit agent wins; a launch command for a different agent is rejected. */

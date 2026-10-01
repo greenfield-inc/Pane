@@ -396,6 +396,48 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow('The launch command runs claude, but the Session agent is codex');
   });
 
+  it('rejects OpenCode from named Session command and default boundaries', async () => {
+    const fixture = createFixture();
+
+    await expect(fixture.manager.create({ name: 'OpenCode command', launchCommand: 'opencode --auto' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
+
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'opencode --auto' });
+    await expect(fixture.manager.create({ name: 'OpenCode default' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
+
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: '' });
+    const created = await fixture.manager.create({ name: 'OpenCode update baseline' });
+    await expect(fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'opencode --auto' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
+    expect((await fixture.manager.getView({ sessionId: created.session.id })).panel.state.customState?.agentType)
+      .not.toBe('opencode');
+  });
+
+  it('rejects OpenCode launch commands even when custom resume identifies another agent', async () => {
+    const fixture = createFixture();
+    const customResume = {
+      mode: 'claude',
+      initialTemplate: '{command} -- --session-id {sessionId}',
+      resumeTemplate: '{command} -- --resume {sessionId}',
+    } as const;
+
+    await expect(fixture.manager.create({
+      name: 'OpenCode with resume',
+      launchCommand: 'opencode --auto',
+      customResume,
+    })).rejects.toThrow(/OpenCode.*named Session/i);
+
+    const created = await fixture.manager.create({
+      name: 'Update OpenCode with resume',
+      launchCommand: 'my-launcher run',
+      customResume,
+    });
+    await expect(fixture.manager.update({ sessionId: created.session.id }, {
+      launchCommand: 'opencode --auto',
+    })).rejects.toThrow(/OpenCode.*named Session/i);
+  });
+
   it('unpins first-time Session children and preserves later manual pins', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Coordinator' });

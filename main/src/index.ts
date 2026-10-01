@@ -9,7 +9,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { boundary, decodeBoundary } from '../../shared/validation/boundaryDecoder';
 import type { PaneEventArgument } from './core/eventSink';
-import { customCommandResumeSchema } from '../../shared/types/customCommandResume';
 
 const launchHeadlessDaemon = hasHeadlessDaemonLaunchArg();
 const launchRemoteSetup = hasRemoteSetupLaunchArg();
@@ -67,7 +66,6 @@ import { autoUpdater as nativeAutoUpdater, BrowserWindow, ipcMain, screen, shell
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
-import { isCliAgentType, resolveAgentTypeFromCommand } from './services/agents/agentIdentity';
 import type { ConfigManager } from './services/configManager';
 import { areKeyboardShortcutsEnabled, shouldForwardCommandPaletteShortcut } from './utils/keyboardShortcuts';
 import {
@@ -104,6 +102,7 @@ import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
 import * as fs from 'fs';
 import { terminalPanelManager } from './services/terminalPanelManager';
+import { markTerminalPanelsInterrupted } from './services/terminalShutdown';
 import { panelManager } from './services/panelManager';
 import { worktreePoolManager } from './services/worktreePoolManager';
 import { usageManager } from './services/usage/usageManager';
@@ -1615,34 +1614,18 @@ if (launchRemoteSetup) {
     console.log('[Main] Saving terminal states...');
     await terminalPanelManager.saveAllTerminalStates();
 
-    const interruptedPanels = new Map<string, string[]>(); // sessionId → panelIds
-
-    // Find all terminal panels running supported CLI agents and mark them as interrupted
+    // Find all terminal panels running supported CLI agents and mark them as interrupted.
+    // Each panel is decoded independently so malformed legacy state cannot abort cleanup.
     const allTerminalPanelIds = terminalPanelManager.getAllPanelIds();
-    for (const panelId of allTerminalPanelIds) {
-      const panel = panelManager.getPanel(panelId);
-      if (!panel) continue;
-
-      const customState = decodeBoundary(panel.state?.customState ?? {}, boundary.jsonObject);
-      const resumeState = decodeBoundary(customState, boundary.object({
-        agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
-        initialCommand: boundary.optional(boundary.string),
-        customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
-      }));
-      const agentType = resumeState.agentType ?? resolveAgentTypeFromCommand(resumeState.initialCommand);
-
-      if (isCliAgentType(agentType) || resumeState.customResume) {
-        panel.state.customState = { ...customState, wasInterrupted: true, agentType };
-        await panelManager.updatePanel(panelId, { state: panel.state });
-
-        const existing = interruptedPanels.get(panel.sessionId);
-        if (existing) {
-          existing.push(panelId);
-        } else {
-          interruptedPanels.set(panel.sessionId, [panelId]);
-        }
+    const interruptedPanels = await markTerminalPanelsInterrupted(
+      allTerminalPanelIds,
+      panelId => panelManager.getPanel(panelId),
+      (panelId, updates) => panelManager.updatePanel(panelId, updates),
+    );
+    for (const panelIds of interruptedPanels.values()) {
+      for (const panelId of panelIds) {
         logToFile(`Marked terminal panel ${panelId} as interrupted`);
-        console.log(`[Main] Marked terminal panel ${panelId} as interrupted (${agentType} CLI)`);
+        console.log(`[Main] Marked terminal panel ${panelId} as interrupted`);
       }
     }
 

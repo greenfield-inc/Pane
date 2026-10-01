@@ -4,7 +4,7 @@ import { boundary, decodeBoundary } from '../../../../shared/validation/boundary
 
 export type CliAgentType = NonNullable<TerminalPanelState['agentType']>;
 
-export const CLI_AGENT_TYPES: readonly CliAgentType[] = ['claude', 'codex', 'cursor'];
+export const CLI_AGENT_TYPES: readonly CliAgentType[] = ['claude', 'codex', 'cursor', 'opencode'];
 
 interface AgentExecutableLookup {
   readonly [executable: string]: CliAgentType;
@@ -14,6 +14,7 @@ const AGENT_EXECUTABLES: AgentExecutableLookup = {
   'cursor-agent': 'cursor',
   claude: 'claude',
   codex: 'codex',
+  opencode: 'opencode',
 };
 
 const OPTIONLESS_COMMAND_WRAPPERS = new Set(['command', 'exec', 'nohup']);

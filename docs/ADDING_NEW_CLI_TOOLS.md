@@ -59,6 +59,11 @@ If the CLI owns its session ids, scrape them from PTY output via
 launch readiness cannot key on first PTY byte (e.g. shell traffic precedes the TUI),
 add a ready detector like `createCursorReadyDetector` and gate `signalCliReady` on it.
 
+OpenCode validates a `ses_*` id and durably persists it before spawning the PTY,
+then reuses that exact id with `--session`. Its idle composer gates readiness and
+once-only stdin prompt delivery; wrapped commands remain opaque. RunPane doctor
+checks the installed executable's session capability before reporting support.
+
 ## 4. Status manifest
 
 `main/src/services/agentStatus/manifests.ts`: write a `<TOOL>_MANIFEST` from captured

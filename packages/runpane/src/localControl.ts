@@ -42,14 +42,16 @@ interface OrchestrationActivity {
   panelId?: string;
 }
 
+type OrchestrationAgent = 'claude' | 'codex' | 'cursor';
+
 interface OrchestrationSessionRecord {
   id: string;
   name: string;
   archived?: boolean;
   isPinned?: boolean;
-  agent: RunpaneAgent;
+  agent: OrchestrationAgent;
   internalSessionId: string;
-  panelIds: Record<RunpaneAgent, string>;
+  panelIds: Record<OrchestrationAgent, string>;
   goal: string;
   context: string;
   decisions: string[];
@@ -86,7 +88,7 @@ interface SessionSelectorValue {
 
 interface SessionCreatePayload {
   name: string;
-  agent?: RunpaneAgent;
+  agent?: OrchestrationAgent;
   goal?: string;
   context?: string;
   decisions?: string[];
@@ -100,7 +102,7 @@ interface SessionUpdatePayload {
   name?: string;
   archived?: boolean;
   isPinned?: boolean;
-  agent?: RunpaneAgent;
+  agent?: OrchestrationAgent;
   goal?: string;
   context?: string;
   decisions?: string[];
@@ -916,6 +918,7 @@ interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
 }
 
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
+const orchestrationAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
 const repoSummarySchema: BoundarySchema<RepoSummary> = boundary.object({
   id: boundary.number,
   name: boundary.string,
@@ -1128,7 +1131,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: agentSchema,
+  agent: orchestrationAgentSchema,
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({
     claude: boundary.nonEmptyString,
