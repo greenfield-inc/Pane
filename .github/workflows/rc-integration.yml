@@ -1,8 +1,8 @@
 name: Runpane Cloud integration (fork)
 
 # Fork-only gate for the Runpane Cloud integration branch. It replaces the boat
-# devbox the integrator used to run the suite on (and gives every Phase 2/3/5/6/7 peer
-# branch rc/p2/**, rc/p3/**, rc/p5/**, rc/p6/**, rc/p7/** the same checks): the same steps as
+# devbox the integrator used to run the suite on (and gives every Phase 2/3/5/6/7/9 peer
+# branch rc/p2/**, rc/p3/**, rc/p5/**, rc/p6/**, rc/p7/**, rc/p9/** the same checks): the same steps as
 # ~/rc-loop/integrator/suite.sh (quality.yml's checks plus the runpane package
 # tests), then, on rc/integration only, the cloud-dist build published as a
 # fork PRERELEASE rc-<sha8>. It never publishes to upstream channels.
@@ -15,6 +15,7 @@ on:
       - 'rc/p5/**'
       - 'rc/p6/**'
       - 'rc/p7/**'
+      - 'rc/p9/**'
   workflow_dispatch:
 
 permissions:
