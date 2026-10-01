@@ -157,6 +157,8 @@ export class IdleStopper {
           });
           return result('safe-to-stop-unsupported', answer.error);
         case 'error':
+          // The answer may have been lost after the daemon took the lease: lift it rather than wait it out.
+          if (completesStreak) await this.deps.probe.releaseStopLease(entry.baseUrl, token);
           activity.resetSafe(entry.sandboxId);
           return result('safe-to-stop-error', answer.error);
         case 'safe':

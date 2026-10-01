@@ -37,7 +37,7 @@ describe('IdleStopper', () => {
     assert.ok(!probe.calls.some((call) => call.startsWith('release ')), 'a stopped sandbox lets its lease lapse');
   });
 
-  it('releases the lease whenever it does not stop: a failed stop, an unconfirmed checkpoint, a dry run asks none', async () => {
+  it('releases the lease whenever it does not stop: a failed stop, an unconfirmed checkpoint, a lost answer; a dry run asks none', async () => {
     const failed = setup({ requiredConsecutiveSafe: 1 });
     failed.provider.stopErrors.push(new Error('boat: 503'));
     assert.equal((await failed.idle.runOnce()).results[0].decision, 'stop-failed');
@@ -47,6 +47,11 @@ describe('IdleStopper', () => {
     unconfirmed.probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'safe', checkpointed: false, lease: null });
     assert.equal((await unconfirmed.idle.runOnce()).results[0].decision, 'not-checkpointed');
     assert.ok(unconfirmed.probe.calls.includes('release https://rp-s1.tail.ts.net'));
+
+    const lost = setup({ requiredConsecutiveSafe: 1 });
+    lost.probe.safeByUrl.set('https://rp-s1.tail.ts.net', { kind: 'error', error: 'socket hang up' });
+    assert.equal((await lost.idle.runOnce()).results[0].decision, 'safe-to-stop-error');
+    assert.ok(lost.probe.calls.includes('release https://rp-s1.tail.ts.net'), 'a lost answer may have taken the lease');
 
     const dry = setup({ requiredConsecutiveSafe: 1, dryRun: true });
     assert.equal((await dry.idle.runOnce()).results[0].decision, 'would-stop');
