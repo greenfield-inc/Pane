@@ -12,7 +12,7 @@ interface Seen {
   signal?: AbortSignal;
 }
 
-function fakeFetch(replies: { status: number; text?: string; headers?: [string, string][] }[]): { fetchImpl: FetchLike; seen: Seen[] } {
+function fakeFetch(replies: { status: number; text?: string; headers?: [string, string][] }[]) {
   const seen: Seen[] = [];
   const fetchImpl: FetchLike = async (url, init) => {
     seen.push({ url, ...init });
