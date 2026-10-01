@@ -62,6 +62,8 @@ export interface CloudDaemonDependencies {
   remoteConfig(): RemoteDaemonConfig | undefined;
   checkpointWal(): CloudWalCheckpoint | null;
   paneDirectory: string;
+  /** The SQLite database file the flush fsyncs with its WAL. */
+  databaseFile: string;
   readProcesses?: () => ProcessEntry[];
   now?: () => number;
 }
@@ -81,6 +83,7 @@ export function registerCloudDaemonHandlers(dependencies: CloudDaemonDependencie
       flush: () => flushDurableState({
         checkpointWal: dependencies.checkpointWal,
         paneDirectory: dependencies.paneDirectory,
+        databaseFile: dependencies.databaseFile,
         now,
       }),
       version: dependencies.health.getVersion() ?? 'unknown',

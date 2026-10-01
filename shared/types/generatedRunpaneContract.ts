@@ -10494,7 +10494,8 @@ export const RUNPANE_CONTRACT = {
                   "lock-held",
                   "watcher-active",
                   "pr-checks-pending",
-                  "user-client-attached"
+                  "user-client-attached",
+                  "flush-failed"
                 ]
               },
               "message": {
@@ -10521,6 +10522,8 @@ export const RUNPANE_CONTRACT = {
                 "walCheckpoint",
                 "fsynced",
                 "syncedFilesystem",
+                "durable",
+                "failures",
                 "durationMs"
               ],
               "properties": {
@@ -10559,6 +10562,15 @@ export const RUNPANE_CONTRACT = {
                 },
                 "syncedFilesystem": {
                   "type": "boolean"
+                },
+                "durable": {
+                  "type": "boolean"
+                },
+                "failures": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "durationMs": {
                   "type": "number"

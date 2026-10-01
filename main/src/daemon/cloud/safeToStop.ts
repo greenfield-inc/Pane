@@ -159,8 +159,9 @@ async function collectSafeToStopBlockers(
 
 /**
  * Checks every stop condition and, per the flush mode, makes the daemon's state durable
- * before answering: boat's stop is a power-off after a disk snapshot, so anything still
- * in the page cache or the SQLite WAL at that point is lost.
+ * before answering (a flush that is not verified durable makes the answer unsafe): boat's stop
+ * is a power-off after a disk snapshot, so anything still in the page cache or the SQLite WAL
+ * at that point is lost.
  */
 export async function runSafeToStop(
   dependencies: SafeToStopDependencies,
@@ -169,11 +170,14 @@ export async function runSafeToStop(
   const now = dependencies.now ?? Date.now;
   const request = parseSafeToStopRequest(rawRequest);
   const blockers = await collectSafeToStopBlockers(dependencies.sources, request, now());
-  const safe = blockers.length === 0;
-  const flush = shouldFlush(request.flush, safe) ? await dependencies.flush() : null;
+  const flush = shouldFlush(request.flush, blockers.length === 0) ? await dependencies.flush() : null;
+  // A stop right after an unverified flush can lose the last writes, so it blocks like any other condition.
+  if (flush && !flush.durable) {
+    blockers.push({ condition: 'flush-failed', message: `State is not durable: ${flush.failures.join('; ')}` });
+  }
   return {
     ok: true,
-    safe,
+    safe: blockers.length === 0,
     checkedAt: new Date(now()).toISOString(),
     version: dependencies.version,
     blockers,

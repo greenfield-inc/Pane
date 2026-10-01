@@ -49,13 +49,16 @@ For each Session in the directory whose sandbox is running, the coordinator chec
 3. **Safe to stop?** Call `POST /invoke runpane:cloud:safe-to-stop` with the coordinator's own paired-client
    token. The daemon refuses while an agent is working, a terminal printed output recently, a lock is
    held, a watcher is active, a PR has pending checks, or a user client is attached. When it's safe, the
-   daemon also checkpoints SQLite's WAL and fsyncs.
+   daemon also checkpoints SQLite's WAL and fsyncs. A safe answer counts only when its `flush.durable`
+   is true (every flush step succeeded); otherwise the coordinator raises `idle-stop-not-checkpointed`.
 4. **Enough safe answers in a row?** Stop only after `requiredConsecutiveSafe` safe answers (default 2).
    Call boat stop immediately after the last one: boat snapshots about 4 s after the stop call and then
    powers off without sending SIGTERM.
 
-Anything other than an explicit "safe" resets the streak and leaves the Session running: unsafe, an
-error, no answer, an old daemon without the API, or no coordinator token.
+Anything other than an explicit "safe" with a durable flush resets the streak and leaves the Session
+running: unsafe, a flush the daemon could not verify (or an older daemon that does not report
+`durable`), an error, no answer, an old daemon without the API, or no coordinator token. A provider stop
+that fails is reported as `stop-failed` with an `idle-stop-failed` alert, never as stopped.
 
 ### Reconcile (every `reconcile.intervalSeconds`, default 600)
 

@@ -66,6 +66,7 @@ export type DaemonHealth =
   | { reachable: true; ready: boolean; version: string | null; detail: string | null };
 
 export type SafeToStopAnswer =
+  /** `checkpointed`: the daemon verified its flush durable; the coordinator never stops without it. */
   | { kind: 'safe'; checkpointed: boolean }
   | { kind: 'unsafe'; reasons: string[] }
   | { kind: 'unsupported'; error: string }

@@ -52,17 +52,22 @@ It refuses while any of these holds, and lists every one it finds:
 | `watcher-active` | a `runpane:workspace:wait` or `runpane:panels:wait` call is running, or one returned in the last 30 s (a watch loop between calls) |
 | `pr-checks-pending` | a Session member's open PR has checks still running (the PR monitor polls first if its last round is over 60 s old) |
 | `user-client-attached` | a user client has an open `/events` stream, or called `/invoke` within `clientWindowMs` (default 15 min) |
+| `flush-failed` | the flush ran but could not be verified durable (`flush.failures` says why) |
 
 Peers (paired records with `scope: 'peer'`) never count: not their waits, streams or calls. Every `runpane:cloud:*`
 call is exempt too, so the coordinator's own polling never keeps a Session awake.
 
 With `flush: "if-safe"` (the default), a safe answer comes only after the daemon has checkpointed the SQLite WAL
-(`wal_checkpoint(TRUNCATE)`), fsynced every file at the top of the Pane directory and the directory itself, and run
-`sync -f` on its filesystem. `always` flushes even when blocked (a stop the user asked for); `never` only checks.
+(`wal_checkpoint(TRUNCATE)`), fsynced the database, its `-wal` file, every file at the top of the Pane directory and
+the directory itself, refreshed the tailscaled-state backup (cloud sandboxes only), and run `sync -f` on its
+filesystem. `flush.durable` is true only when every one of those steps succeeded; a failed step is listed in
+`flush.failures` and turns the answer unsafe with a `flush-failed` blocker. A checkpoint that a reader kept busy
+still counts once the remaining `-wal` file is fsynced. `always` flushes even when blocked (a stop the user asked
+for); `never` only checks.
 
 ```json
 { "ok": true, "safe": true, "checkedAt": "...", "version": "...", "blockers": [],
-  "flush": { "walCheckpoint": { "busy": 0, "log": 12, "checkpointed": 12 }, "fsynced": ["..."], "syncedFilesystem": true, "durationMs": 40 } }
+  "flush": { "walCheckpoint": { "busy": 0, "log": 12, "checkpointed": 12 }, "fsynced": ["..."], "syncedFilesystem": true, "durable": true, "failures": [], "durationMs": 40 } }
 ```
 
 The coordinator should call the provider's stop right after `safe: true`. Anything written after the answer can

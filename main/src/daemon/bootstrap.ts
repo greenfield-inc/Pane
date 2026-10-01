@@ -401,6 +401,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     remoteConfig: () => configManager.getConfig().remoteDaemon,
     checkpointWal: () => databaseService.checkpointWal(),
     paneDirectory: getAppDirectory(),
+    databaseFile: dbPath,
   });
   const sessionPorts = registerSessionPortsHandlers({
     commandRegistry,

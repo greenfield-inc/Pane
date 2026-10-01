@@ -12,7 +12,9 @@ export type CloudSafeToStopCondition =
   | 'lock-held'
   | 'watcher-active'
   | 'pr-checks-pending'
-  | 'user-client-attached';
+  | 'user-client-attached'
+  /** The flush ran but could not be verified durable (`flush.failures` says why). */
+  | 'flush-failed';
 
 export interface CloudSafeToStopBlocker {
   condition: CloudSafeToStopCondition;
@@ -47,6 +49,13 @@ export interface CloudDurableFlushResult {
   fsynced: string[];
   /** Whether the whole filesystem holding the Pane directory was synced. */
   syncedFilesystem: boolean;
+  /**
+   * True only when every required step succeeded: WAL checkpoint, database/WAL and Pane directory
+   * fsyncs, the tailnet-state backup where installed, and the filesystem sync. Stop only on true.
+   */
+  durable: boolean;
+  /** What kept the flush from being durable; empty when `durable`. */
+  failures: string[];
   durationMs: number;
 }
 

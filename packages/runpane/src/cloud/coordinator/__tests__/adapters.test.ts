@@ -74,10 +74,17 @@ describe('daemon probe decoding', () => {
   });
 
   it('decodes safe-to-stop answers', () => {
+    const flush = { walCheckpoint: { busy: 0, log: 2, checkpointed: 2 }, fsynced: [], syncedFilesystem: true, durationMs: 3 };
     assert.deepEqual(
-      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { walCheckpoint: null, fsynced: [], syncedFilesystem: true, durationMs: 3 } }),
+      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: true, failures: [] } }),
       { kind: 'safe', checkpointed: true },
     );
+    // Only a flush the daemon verified durable counts; older daemons never said so.
+    assert.deepEqual(
+      decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: { ...flush, durable: false, failures: ['sync failed'] } }),
+      { kind: 'safe', checkpointed: false },
+    );
+    assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush }), { kind: 'safe', checkpointed: false });
     assert.deepEqual(decodeSafeToStop({ ok: true, safe: true, blockers: [], flush: null }), { kind: 'safe', checkpointed: false });
     assert.deepEqual(
       decodeSafeToStop({ ok: true, safe: false, blockers: [{ condition: 'agent-working', message: 'panel p1' }, { condition: 'lock-held' }], flush: null }),

@@ -22,6 +22,7 @@ type IdleDecision =
   | 'no-token'
   | 'safe-to-stop-unsupported'
   | 'safe-to-stop-error'
+  | 'not-checkpointed'
   | 'provider-error'
   | 'stop-failed';
 
@@ -46,9 +47,10 @@ export interface IdleStopOptions {
 
 /**
  * Idle-stop: ask each awake cloud Session's daemon whether it is safe to stop, and stop it only after
- * `requiredConsecutiveSafe` consecutive "safe" answers. Anything other than an explicit "safe"
- * (unsafe, error, unreachable, unsupported daemon, missing token) resets the streak and leaves the
- * sandbox running: the coordinator never stops a Session it could not ask.
+ * `requiredConsecutiveSafe` consecutive "safe" answers. Anything other than an explicit "safe" with a
+ * confirmed durable checkpoint (unsafe, unconfirmed flush, error, unreachable, unsupported daemon,
+ * missing token) resets the streak and leaves the sandbox running: the coordinator never stops a
+ * Session it could not ask, or whose state the daemon could not make durable.
  */
 export class IdleStopper {
   constructor(
@@ -139,7 +141,16 @@ export class IdleStopper {
           activity.resetSafe(entry.sandboxId);
           return result('safe-to-stop-error', answer.error);
         case 'safe':
-          break;
+          if (answer.checkpointed) break;
+          activity.resetSafe(entry.sandboxId);
+          this.deps.alerts.emit({
+            level: 'warn',
+            code: 'idle-stop-not-checkpointed',
+            message: `${entry.label}: daemon answered safe but did not confirm a durable checkpoint; not stopping`,
+            sandboxId: entry.sandboxId,
+            sessionId: entry.sessionId,
+          });
+          return result('not-checkpointed', 'safe, but the daemon did not confirm a durable checkpoint');
       }
       const streak = activity.recordSafe(entry.sandboxId);
       if (streak < options.requiredConsecutiveSafe) {
@@ -152,18 +163,24 @@ export class IdleStopper {
         // Stop immediately after the daemon's checkpoint: boat snapshots ~4 s after this call.
         await this.deps.provider.stop(entry.sandboxId, entry.org);
       } catch (error) {
+        this.deps.alerts.emit({
+          level: 'warn',
+          code: 'idle-stop-failed',
+          message: `${entry.label}: provider stop failed (${describeError(error)}); it stays running`,
+          sandboxId: entry.sandboxId,
+          sessionId: entry.sessionId,
+        });
         return result('stop-failed', describeError(error));
       }
       activity.resetSafe(entry.sandboxId);
       this.deps.alerts.emit({
         level: 'info',
         code: 'idle-stopped',
-        message: `${entry.label}: idle-stopped after ${streak} consecutive safe-to-stop answers`
-          + (answer.checkpointed ? '' : ' (daemon did not confirm a checkpoint)'),
+        message: `${entry.label}: idle-stopped after ${streak} consecutive safe-to-stop answers`,
         sandboxId: entry.sandboxId,
         sessionId: entry.sessionId,
       });
-      return result('stopped', `safe ${streak}/${options.requiredConsecutiveSafe}; checkpointed=${answer.checkpointed}`);
+      return result('stopped', `safe ${streak}/${options.requiredConsecutiveSafe}; checkpointed`);
     });
     return outcome.ran ? outcome.value : result('busy', 'a wake or another check holds this sandbox');
   }

@@ -24,6 +24,9 @@ const safeToStopResultSchema = boundary.object({
     })),
     fsynced: boundary.array(boundary.string),
     syncedFilesystem: boundary.boolean,
+    // Optional: daemons from before verified durability leave them out.
+    durable: boundary.optional(boundary.boolean),
+    failures: boundary.optional(boundary.array(boundary.string)),
     durationMs: boundary.number,
   })),
 });
@@ -48,7 +51,7 @@ export async function runCloudSafeToStop(parsed: ParsedArgs): Promise<number> {
     console.log(result.safe ? 'Safe to stop.' : 'Not safe to stop:');
     for (const blocker of result.blockers) console.log(`  ${blocker.condition}: ${blocker.message}`);
     if (result.flush) {
-      console.log(`Flushed in ${result.flush.durationMs} ms (${result.flush.fsynced.length} paths fsynced, filesystem synced: ${result.flush.syncedFilesystem}).`);
+      console.log(`Flushed in ${result.flush.durationMs} ms (${result.flush.fsynced.length} paths fsynced, filesystem synced: ${result.flush.syncedFilesystem}, durable: ${result.flush.durable === true}).`);
     }
   }
   return result.safe ? 0 : SAFE_TO_STOP_BLOCKED_EXIT_CODE;

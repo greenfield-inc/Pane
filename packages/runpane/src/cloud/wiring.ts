@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
-import { boundary, decodeBoundary, type JsonObject } from '../boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../boundaryDecoder';
 import { RemoteDaemonClient } from '../remote/remoteDaemonClient';
 import { getWrapperVersion } from '../version';
 import { createBoatProvider } from './boat';
@@ -126,8 +126,18 @@ async function pushToCoordinator(clientConfigPath: string, directory: JsonObject
 const safeToStopAnswerSchema = boundary.object({
   safe: boundary.boolean,
   blockers: boundary.array(boundary.object({ condition: boundary.string, message: boundary.string })),
-  flush: boundary.nullable(boundary.json),
+  // `durable`: every flush step succeeded. Daemons from before it never confirm, and get the plain sync.
+  flush: boundary.nullable(boundary.object({ durable: boundary.optional(boundary.boolean) })),
 });
+
+export function decodeCloudStopSafeToStop(value: JsonValue | undefined): CloudSafeToStopAnswer {
+  const result = decodeBoundary(value, safeToStopAnswerSchema);
+  return {
+    safe: result.safe,
+    blockers: result.blockers.map((blocker) => ({ condition: blocker.condition, message: blocker.message })),
+    flushed: result.flush?.durable === true,
+  };
+}
 
 /** `runpane:cloud:safe-to-stop {flush: "always"}` over the host's paired token, for `cloud stop`. */
 async function askSafeToStop(profile: { baseUrl: string; token: string }): Promise<CloudSafeToStopAnswer> {
@@ -136,15 +146,9 @@ async function askSafeToStop(profile: { baseUrl: string; token: string }): Promi
     runtimeId: 'runpane-cloud-stop',
     clientLabel: 'runpane cloud',
   });
-  const result = decodeBoundary(
+  return decodeCloudStopSafeToStop(
     await client.invoke('runpane:cloud:safe-to-stop', [{ flush: 'always' }], { timeoutMs: 60_000 }),
-    safeToStopAnswerSchema,
   );
-  return {
-    safe: result.safe,
-    blockers: result.blockers.map((blocker) => ({ condition: blocker.condition, message: blocker.message })),
-    flushed: result.flush !== null,
-  };
 }
 
 /** Reads a secret from a file, or from stdin for "-". Secrets never come from argv (visible in `ps`). */
