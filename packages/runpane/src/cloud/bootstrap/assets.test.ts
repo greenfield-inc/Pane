@@ -114,3 +114,37 @@ test('clone checks out the freshly fetched commit and fails when the fetch fails
   assert.equal(offline.status, 1);
   assert.match(offline.stdout, /^RP_RESULT \{"ok": false, "error": "git fetch of main failed/m);
 });
+
+// install-pane deb-url downloads only over https, and curl may not follow a redirect to anything else.
+test('install-pane refuses a non-https .deb URL and never lets curl downgrade the protocol', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-assets-'));
+  const file = path.join(dir, 'rp-bootstrap.sh');
+  fs.writeFileSync(file, cloudBootstrapAssets['rp-bootstrap.sh']);
+  const calls = path.join(dir, 'curl-calls');
+  const env = {
+    ...process.env,
+    RP_STATE: path.join(dir, 'state'),
+    'BASH_FUNC_curl%%': `() { printf '%s\\n' "$*" >> '${calls}'; return 22; }`,
+    'BASH_FUNC_systemctl%%': '() { return 1; }',
+  };
+  const install = (url: string) => childProcess.spawnSync('bash', [file, 'install-pane', 'deb-url', url, '', '', 'x'], { env, encoding: 'utf8' });
+
+  const plain = install('http://example.test/pane.deb');
+  assert.equal(plain.status, 1);
+  assert.match(plain.stdout, /^RP_RESULT \{"ok": false, "error": "the Pane .deb URL must be https/m);
+  assert.ok(!fs.existsSync(calls), 'curl ran for an http URL');
+
+  const secure = install('https://example.test/pane.deb');
+  assert.equal(secure.status, 1);
+  assert.match(secure.stdout, /download of the Pane .deb failed/);
+  const [args] = fs.readFileSync(calls, 'utf8').trim().split('\n');
+  assert.match(args, /--proto =https --proto-redir =https /);
+  assert.ok(args.endsWith(' https://example.test/pane.deb'), args);
+
+  for (const name of names) {
+    for (const line of cloudBootstrapAssets[name].split('\n').filter((candidate) => /^\s*[^#]*\bcurl /.test(candidate))) {
+      if (/https?:\/\/127\.0\.0\.1[:/]/.test(line)) continue;
+      assert.match(line, /--proto =https --proto-redir =https/, `${name}: ${line.trim()}`);
+    }
+  }
+});

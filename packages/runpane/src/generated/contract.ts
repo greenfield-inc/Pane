@@ -3581,7 +3581,7 @@ export const RUNPANE_CONTRACT = {
         "  --no-golden                        Start new cloud Sessions from the plain image.",
         "  --size <small|default|large>       Default machine size.",
         "  --name-prefix <prefix>             Prefix for sandbox and tailnet host names (default rp).",
-        "  --pane-deb-url <url>               Install the Pane daemon from this .deb.",
+        "  --pane-deb-url <url>               Install the Pane daemon from this https:// .deb.",
         "  --pane-npm-spec <spec>             Install the Pane daemon with this runpane npm spec (default runpane@latest).",
         "  --pane-preinstalled                Use the Pane already in the golden image.",
         "  --max-live <count>                 Runaway guard: most live cloud sandboxes (default 25).",
@@ -3607,7 +3607,7 @@ export const RUNPANE_CONTRACT = {
         "  --from <snapshot>              Named snapshot to start from (default: the saved golden).",
         "  --no-golden                    Start from the plain image.",
         "  --name-prefix <prefix>         Prefix for the sandbox and tailnet host name.",
-        "  --pane-deb-url <url>           Install the Pane daemon from this .deb.",
+        "  --pane-deb-url <url>           Install the Pane daemon from this https:// .deb.",
         "  --pane-npm-spec <spec>         Install with this runpane npm spec.",
         "  --pane-preinstalled            Use the Pane in the image.",
         "  --desktop-dir <path>           Desktop Pane data directory whose saved remote hosts to update (default $RUNPANE_CLOUD_DESKTOP_DIR, else ~/.pane; $PANE_DIR is ignored).",
@@ -15332,7 +15332,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--pane-deb-url",
             "value": "<url>",
             "required": false,
-            "description": "Install the Pane daemon from this .deb."
+            "description": "Install the Pane daemon from this https:// .deb."
           },
           {
             "name": "--pane-npm-spec",
@@ -15448,7 +15448,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--pane-deb-url",
             "value": "<url>",
             "required": false,
-            "description": "Install the Pane daemon from this .deb."
+            "description": "Install the Pane daemon from this https:// .deb."
           },
           {
             "name": "--pane-npm-spec",

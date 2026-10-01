@@ -115,7 +115,7 @@ print(json.dumps({"ok":True,"reset":sys.argv[1]=="true","previousSession":sys.ar
 step_tailscale_install() {
   local installed=false state
   if ! command -v tailscale >/dev/null 2>&1; then
-    curl -fsSL https://tailscale.com/install.sh | sudo sh >"$RP_STATE/tailscale-install.log" 2>&1
+    curl -fsSL --proto =https --proto-redir =https https://tailscale.com/install.sh | sudo sh >"$RP_STATE/tailscale-install.log" 2>&1
     installed=true
   fi
   sudo systemctl enable --now tailscaled >/dev/null 2>&1
@@ -413,7 +413,8 @@ step_install_pane() {
   fi
   case "$mode" in
     deb-url)
-      curl -fsSL --retry 3 -o "$RP_STATE/pane.deb" "$deb_url" || fail "download of the Pane .deb failed"
+      case "$deb_url" in https://*) ;; *) fail "the Pane .deb URL must be https://" ;; esac
+      curl -fsSL --proto =https --proto-redir =https --retry 3 -o "$RP_STATE/pane.deb" "$deb_url" || fail "download of the Pane .deb failed"
       if [ -n "$deb_sha" ]; then
         echo "$deb_sha  $RP_STATE/pane.deb" | sha256sum -c --status || fail "Pane .deb sha256 mismatch"
       fi

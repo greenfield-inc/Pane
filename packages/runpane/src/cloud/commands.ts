@@ -9,6 +9,7 @@ import { COORDINATOR_DOPPLER_USAGE, runCoordinatorDoppler } from './coordinatorD
 import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
+import { assertHttpsArtifactUrl } from './bootstrap';
 import { cloneThroughBroker, connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
 import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
 import { coordinatorSecretsEnabled, describeSecretsOutcome, enableSessionSecrets } from './sessionSecrets';
@@ -258,7 +259,10 @@ async function readRequiredSecret(deps: CloudDeps, file: string, what: string): 
 }
 
 function paneSourceFromArgs(args: CloudArgs): PaneSource | undefined {
-  if (args.paneDebUrl) return { kind: 'deb-url', url: args.paneDebUrl };
+  if (args.paneDebUrl) {
+    assertHttpsArtifactUrl(args.paneDebUrl, '--pane-deb-url');
+    return { kind: 'deb-url', url: args.paneDebUrl };
+  }
   if (args.paneNpmSpec) return { kind: 'runpane-npm', spec: args.paneNpmSpec };
   if (args.panePreinstalled) return { kind: 'preinstalled' };
   return undefined;
@@ -282,6 +286,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   // A golden image already carries the Pane .deb; a plain image needs it installed.
   const paneSource = paneSourceFromArgs(args) ?? settings.paneSource
     ?? (fromSnapshot ? { kind: 'preinstalled' } : DEFAULT_PANE_SOURCE);
+  if (paneSource.kind === 'deb-url') assertHttpsArtifactUrl(paneSource.url, 'The saved Pane .deb URL (runpane cloud setup --pane-deb-url)');
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
 

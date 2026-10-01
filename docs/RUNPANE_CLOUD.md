@@ -86,6 +86,8 @@ runpane cloud setup \
   `setup` saves the name without checking it exists; a missing snapshot only shows up as a create error in `new`.
 - `--size` sets the default machine size; see [Costs](#costs). The built-in default is `default`
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
+- `--pane-deb-url <url>` installs the Pane daemon from that `.deb` in every new Session. It must be
+  an `https://` URL, and the download in the sandbox refuses a redirect to anything but https.
 - Rerun `setup` with any subset of flags to change one setting. The others are kept.
 
 Setup prints what is configured. `runpane cloud list` works after setup and says `No cloud hosts.`
