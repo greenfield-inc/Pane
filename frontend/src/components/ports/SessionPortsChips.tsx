@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
-import { Check, Copy, Globe, Radio, X } from 'lucide-react';
+import { Check, Copy, Globe, Radio, RotateCw, X } from 'lucide-react';
 import type { SessionPort, SessionPortOpenRequest, SessionPortsSnapshot, SuggestedPort } from '../../../../shared/types/sessionPorts';
 import { errorMessage, isSessionPortConflict } from '../../services/sessionPortsSync';
 import { cn } from '../../utils/cn';
+import { copyTerminalText } from '../../utils/terminalClipboard';
 import { LiveRegion } from '../ui/LiveRegion';
 
 interface SessionPortsChipsProps {
@@ -11,7 +12,7 @@ interface SessionPortsChipsProps {
   onPublish(request: SessionPortOpenRequest): Promise<void>;
   onClose(target: number | string): Promise<void>;
   /** `row`: a full-width strip under a tab bar; `inline`: inside an existing header. */
-  variant?: 'row' | 'inline';
+  variant?: PortsRowVariant;
   className?: string;
 }
 
@@ -23,6 +24,28 @@ const iconButton =
   'inline-flex h-5 w-5 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle';
 const textButton =
   'rounded px-1.5 py-0.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle';
+
+type PortsRowVariant = 'row' | 'inline';
+
+function rowClassName(variant: PortsRowVariant, className?: string): string {
+  return cn(
+    'flex min-w-0 items-center gap-1.5 text-xs',
+    // A phone keeps the row one line high and scrolls it sideways; wider screens wrap.
+    variant === 'row'
+      ? 'flex-nowrap overflow-x-auto border-b border-border-primary bg-surface-primary px-3 py-1 md:flex-wrap md:overflow-x-visible'
+      : 'flex-wrap',
+    className,
+  );
+}
+
+function PortsLabel() {
+  return (
+    <span className="inline-flex flex-shrink-0 items-center gap-1 text-text-tertiary">
+      <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+      Ports
+    </span>
+  );
+}
 
 /** Why a published port may not work, or null when it is serving normally. */
 export function portProblem(port: SessionPort): string | null {
@@ -61,11 +84,16 @@ export function SessionPortsChips({ snapshot, onOpenUrl, onPublish, onClose, var
     }
   }, []);
 
-  const copy = useCallback((url: string) => {
-    void navigator.clipboard?.writeText(url).then(() => {
-      setCopiedUrl(url);
-      setTimeout(() => setCopiedUrl(current => (current === url ? null : current)), 1500);
-    }, (cause: unknown) => setActionError(`Copy failed: ${errorMessage(cause)}`));
+  const copy = useCallback(async (url: string) => {
+    setActionError(null);
+    try {
+      await copyTerminalText(url);
+    } catch (cause) {
+      setActionError(`Copy failed: ${errorMessage(cause)}`);
+      return;
+    }
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl(current => (current === url ? null : current)), 1500);
   }, []);
 
   const publish = (port: SuggestedPort, yes: boolean) => {
@@ -82,23 +110,8 @@ export function SessionPortsChips({ snapshot, onOpenUrl, onPublish, onClose, var
   if (!snapshot.available || (snapshot.ports.length === 0 && snapshot.suggested.length === 0)) return null;
 
   return (
-    <div
-      role="region"
-      aria-label="Session ports"
-      data-testid="session-ports"
-      className={cn(
-        'flex min-w-0 items-center gap-1.5 text-xs',
-        // A phone keeps the row one line high and scrolls it sideways; wider screens wrap.
-        variant === 'row'
-          ? 'flex-nowrap overflow-x-auto border-b border-border-primary bg-surface-primary px-3 py-1 md:flex-wrap md:overflow-x-visible'
-          : 'flex-wrap',
-        className,
-      )}
-    >
-      <span className="inline-flex flex-shrink-0 items-center gap-1 text-text-tertiary">
-        <Globe className="h-3.5 w-3.5" aria-hidden="true" />
-        Ports
-      </span>
+    <div role="region" aria-label="Session ports" data-testid="session-ports" className={rowClassName(variant, className)}>
+      <PortsLabel />
 
       {snapshot.ports.map(port => {
         const key = `port:${port.httpsPort}`;
@@ -123,7 +136,7 @@ export function SessionPortsChips({ snapshot, onOpenUrl, onPublish, onClose, var
               <span className="text-text-tertiary">:{port.httpsPort}</span>
               {port.scheme === 'http' && <span className="text-status-warning" title={port.detail ?? 'No TLS certificate: plain HTTP on the tailnet'}>http</span>}
             </button>
-            <button type="button" className={iconButton} aria-label={`Copy ${port.name} URL`} title="Copy URL" onClick={() => copy(port.url)}>
+            <button type="button" className={iconButton} aria-label={`Copy ${port.name} URL`} title="Copy URL" onClick={() => { void copy(port.url); }}>
               {copiedUrl === port.url
                 ? <Check className="h-3 w-3 text-status-success" aria-hidden="true" />
                 : <Copy className="h-3 w-3" aria-hidden="true" />}
@@ -177,6 +190,27 @@ export function SessionPortsChips({ snapshot, onOpenUrl, onPublish, onClose, var
 
       {actionError && <span role="alert" className="min-w-0 truncate text-status-error" title={actionError}>{actionError}</span>}
       <LiveRegion>{copiedUrl ? 'URL copied to clipboard' : ''}</LiveRegion>
+    </div>
+  );
+}
+
+interface SessionPortsLoadErrorProps {
+  message: string;
+  onRetry(): void;
+  variant?: PortsRowVariant;
+  className?: string;
+}
+
+/** The first read of a host's ports failed: say why and offer Retry instead of hiding the row. */
+export function SessionPortsLoadError({ message, onRetry, variant = 'row', className }: SessionPortsLoadErrorProps) {
+  return (
+    <div role="region" aria-label="Session ports" data-testid="session-ports" className={rowClassName(variant, className)}>
+      <PortsLabel />
+      <span role="alert" className="min-w-0 truncate text-status-error" title={message}>Couldn't load ports: {message}</span>
+      <button type="button" className={cn(textButton, 'inline-flex flex-shrink-0 items-center gap-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary')} onClick={onRetry}>
+        <RotateCw className="h-3 w-3" aria-hidden="true" />
+        Retry
+      </button>
     </div>
   );
 }

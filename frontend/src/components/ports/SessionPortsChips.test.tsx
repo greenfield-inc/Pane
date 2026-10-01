@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { SessionPort, SessionPortsSnapshot } from '../../../../shared/types/sessionPorts';
-import { SessionPortsChips, portProblem, suggestedPortLabel } from './SessionPortsChips';
+import { SessionPortsChips, SessionPortsLoadError, portProblem, suggestedPortLabel } from './SessionPortsChips';
 
 const noop = async () => {};
 const at = '2026-09-30T23:00:00Z';
@@ -57,5 +57,13 @@ describe('SessionPortsChips', () => {
   it('labels a suggestion by port and process', () => {
     expect(suggestedPortLabel({ port: 3000, address: '0.0.0.0', detectedAt: at })).toBe(':3000');
     expect(suggestedPortLabel({ port: 5173, address: '127.0.0.1', process: 'vite', detectedAt: at })).toBe(':5173 vite');
+  });
+
+  it('shows why the first read failed with a Retry button', () => {
+    const markup = renderToStaticMarkup(<SessionPortsLoadError message="tailscale: not running" onRetry={() => {}} variant="inline" />);
+    expect(markup).toContain('aria-label="Session ports"');
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain('Couldn&#x27;t load ports: tailscale: not running');
+    expect(markup).toMatch(/<button[^>]*>.*Retry<\/button>/);
   });
 });

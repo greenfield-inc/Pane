@@ -4,7 +4,8 @@ import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } fro
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { useErrorStore } from '../stores/errorStore';
-import { getCloudSwitchFailure, LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { getCloudSwitchFailure, getCopyWakeCommandFailure, LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { copyTerminalText } from '../utils/terminalClipboard';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 
 interface RemoteHostSwitcherProps {
@@ -98,7 +99,8 @@ export function RemoteHostSwitcher({
               label="Copy wake command"
               onClick={() => {
                 close();
-                void navigator.clipboard.writeText(model.cloudWakeCommand ?? '').catch(() => undefined);
+                const command = model.cloudWakeCommand ?? '';
+                void copyTerminalText(command).catch((cause: unknown) => showError(getCopyWakeCommandFailure(command, cause)));
               }}
             />
           )}

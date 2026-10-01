@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getCloudSwitchFailure,
   getCloudWakeCommand,
+  getCopyWakeCommandFailure,
   getRemoteExecutableHealthPresentation,
   getRemoteFooterStatus,
   getRemoteHostSwitcherModel,
@@ -202,5 +203,14 @@ describe('cloud host asleep hint', () => {
     });
     expect(getCloudSwitchFailure(plainProfile, 'fetch failed')).toBeNull();
     expect(getCloudSwitchFailure(undefined, 'fetch failed')).toBeNull();
+  });
+
+  it('shows the wake command to copy by hand when the clipboard refuses it', () => {
+    expect(getCopyWakeCommandFailure('runpane cloud wake rp-abc12345', new Error('Clipboard access is unavailable'))).toEqual({
+      title: 'Could not copy the wake command',
+      error: 'The clipboard refused it. Run this command in a terminal to wake the cloud Session.',
+      command: 'runpane cloud wake rp-abc12345',
+      details: 'Clipboard access is unavailable',
+    });
   });
 });
