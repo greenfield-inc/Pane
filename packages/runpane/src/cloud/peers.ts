@@ -7,7 +7,7 @@ import { hostProvider } from './wallet';
 import { findHost, type CloudHostRecord, type PeerGrant } from './store';
 
 /**
- * `runpane cloud peers allow|revoke|list`: which cloud Sessions may message which (final-plan S3, M3).
+ * `runpane cloud peers allow|revoke|list`: which cloud Sessions may message which.
  *
  * "A may message B" is a paired client record with scope 'peer' minted on B's daemon, allowlisted
  * to one Pane Session on B (runpane:peers:mint), whose token goes into A's peers list. A's peers list

@@ -89,7 +89,7 @@ describe('writeSessionAgentNotes', () => {
 
 const G_START = '<!-- runpane-cloud-guardrails:start -->';
 const G_END = '<!-- runpane-cloud-guardrails:end -->';
-const RED_LINE = 'Never publish, bind or deploy Montlake pages, and never run destructive prod DB operations (deletes, migrations, schema changes, bulk updates), without asking Red first.';
+const GUARDRAIL = 'Never deploy to production or run destructive database operations (deletes, migrations, schema changes, bulk updates) without asking the owner first.';
 
 describe('removeMarkedBlock', () => {
   it('removes the block and the blank line before it, keeping text on both sides', () => {
@@ -105,10 +105,10 @@ describe('removeMarkedBlock', () => {
 
 describe('guardrails', () => {
   it('renders each guardrail as a bullet in its own marked block, and nothing for none', () => {
-    const block = guardrailsAgentNotes([RED_LINE, 'Ask before force-pushing.']);
+    const block = guardrailsAgentNotes([GUARDRAIL, 'Ask before force-pushing.']);
     expect(block?.startsWith(G_START)).toBe(true);
     expect(block?.endsWith(G_END)).toBe(true);
-    expect(block).toContain(`\n- ${RED_LINE}\n- Ask before force-pushing.\n`);
+    expect(block).toContain(`\n- ${GUARDRAIL}\n- Ask before force-pushing.\n`);
     expect(guardrailsAgentNotes([])).toBeNull();
   });
 
@@ -145,27 +145,27 @@ describe('runpane:cloud:agent-notes', () => {
     fs.mkdirSync(path.join(root, '.claude'));
     fs.writeFileSync(claudeFile(), '# My notes\n');
 
-    const result = await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [` ${RED_LINE} `] }]);
+    const result = await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [` ${GUARDRAIL} `] }]);
 
-    expect(result).toEqual({ ok: true, guardrails: [RED_LINE], changedFiles: [claudeFile(), codexFile()] });
+    expect(result).toEqual({ ok: true, guardrails: [GUARDRAIL], changedFiles: [claudeFile(), codexFile()] });
     for (const file of [claudeFile(), codexFile()]) {
       const text = fs.readFileSync(file, 'utf8');
       expect(text).toContain(portsAgentNotes());
-      expect(text).toContain(`- ${RED_LINE}`);
+      expect(text).toContain(`- ${GUARDRAIL}`);
     }
     expect(fs.readFileSync(claudeFile(), 'utf8').startsWith('# My notes\n\n')).toBe(true);
     const config = path.join(root, '.runpane-cloud', 'agent-notes.json');
     expect(fs.statSync(config).mode & 0o777).toBe(0o600);
-    expect(readGuardrails(root)).toEqual([RED_LINE]);
+    expect(readGuardrails(root)).toEqual([GUARDRAIL]);
   });
 
   it('renders the stored guardrails again at every daemon start, idempotently', async () => {
     fs.writeFileSync(serveRecordPath, '{}');
-    await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [RED_LINE] }]);
+    await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [GUARDRAIL] }]);
     // An agent (or the user) wiped the notes; the next boot/wake restores them, once.
     fs.writeFileSync(claudeFile(), '# Fresh\n');
     expect(writeSessionAgentNotes({ home: root, serveRecordPath })).toEqual([claudeFile()]);
-    expect(fs.readFileSync(claudeFile(), 'utf8')).toContain(`- ${RED_LINE}`);
+    expect(fs.readFileSync(claudeFile(), 'utf8')).toContain(`- ${GUARDRAIL}`);
     expect(writeSessionAgentNotes({ home: root, serveRecordPath })).toEqual([]);
     const text = fs.readFileSync(codexFile(), 'utf8');
     expect(text.split(G_START).length).toBe(2);
@@ -174,10 +174,10 @@ describe('runpane:cloud:agent-notes', () => {
   it('replaces the list, and an empty list removes the block but keeps the ports notes', async () => {
     fs.writeFileSync(serveRecordPath, '{}');
     await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: ['old rule'] }]);
-    await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [RED_LINE] }]);
+    await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [GUARDRAIL] }]);
     let text = fs.readFileSync(claudeFile(), 'utf8');
     expect(text).not.toContain('old rule');
-    expect(text).toContain(RED_LINE);
+    expect(text).toContain(GUARDRAIL);
 
     expect(await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [] }])).toMatchObject({ guardrails: [] });
     text = fs.readFileSync(claudeFile(), 'utf8');
@@ -187,12 +187,12 @@ describe('runpane:cloud:agent-notes', () => {
 
   it('answers the current list without arguments', async () => {
     fs.writeFileSync(serveRecordPath, '{}');
-    await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [RED_LINE] }]);
-    expect(await registry.invoke('runpane:cloud:agent-notes', [])).toEqual({ ok: true, guardrails: [RED_LINE], changedFiles: [] });
+    await registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [GUARDRAIL] }]);
+    expect(await registry.invoke('runpane:cloud:agent-notes', [])).toEqual({ ok: true, guardrails: [GUARDRAIL], changedFiles: [] });
   });
 
   it('refuses off a Session and refuses bad input without touching anything', async () => {
-    await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [RED_LINE] }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_UNAVAILABLE' });
+    await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: [GUARDRAIL] }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_UNAVAILABLE' });
     fs.writeFileSync(serveRecordPath, '{}');
     await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: ['a\nb'] }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_INVALID' });
     await expect(registry.invoke('runpane:cloud:agent-notes', [{ guardrails: 'x' }])).rejects.toMatchObject({ code: 'ERR_AGENT_NOTES_INVALID' });

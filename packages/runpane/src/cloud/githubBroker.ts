@@ -7,7 +7,7 @@ import type { SandboxHandle } from './provider';
 import type { CloudHostRecord } from './store';
 
 /**
- * Laptop side of the coordinator's GitHub broker (phase3-design §4, setup time only): which repositories
+ * Laptop side of the coordinator's GitHub broker (setup time only): which repositories
  * a Session may publish to (the directory's `github.repos`), and the Session-side tools that talk to the
  * broker: `~/.local/bin/gh` (the gh shim), `~/.local/bin/git-credential-runpane` (App mode: read-only
  * fetch without a deploy key) and a short section in the agents' global instructions. No secret moves:

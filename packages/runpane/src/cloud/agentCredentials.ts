@@ -2,8 +2,8 @@ import type { SandboxHandle } from './provider';
 import type { CloudCredentials } from './store';
 
 /**
- * Gives a cloud Session's agents a way to sign in (final-plan S3: "an Anthropic API key from the
- * environment"). The saved key or Claude token reaches the Pane daemon's user unit through a 0600
+ * Gives a cloud Session's agents a way to sign in: an Anthropic API key or
+ * Claude token in the environment. The saved key or Claude token reaches the Pane daemon's user unit through a 0600
  * EnvironmentFile drop-in, so agent panels inherit it. It is never on a command line, in sandbox
  * metadata or in output, and Claude Code's first-run prompts are pre-answered for the Session.
  */

@@ -33,11 +33,11 @@ const DEV_VALUES = new Map([
   ['NEON_CONNECTION_STRING', 'postgres://neon-value'],
   ['R2_ACCESS_KEY_ID', 'r2-id-value'],
   ['R2_SECRET_ACCESS_KEY', 'r2-secret-value'],
-  ['DOPPLER_PROJECT', 'montlake'],
+  ['DOPPLER_PROJECT', 'my-app'],
   ['DOPPLER_CONFIG', 'dev'],
   ['PATH', '/evil'],
 ]);
-/** The values that are secrets (DOPPLER_PROJECT's "montlake" is also a config name, so it is left out). */
+/** The values that are secrets (DOPPLER_PROJECT and DOPPLER_CONFIG are the project and config names, which output shows). */
 const SECRET_VALUES = [...DEV_VALUES].filter(([name]) => !name.startsWith('DOPPLER_')).map(([, value]) => value);
 
 const S1 = entry('s1', 'bx_a', { label: 'One', baseUrl: 'https://rp-one.tail.ts.net', nodeId: 'nOne', githubRepos: ['acme/app'], secretsManifest: { repo: 'acme/app', ref: 'cloud/rp-seed/manifest' } });
@@ -102,9 +102,9 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
   fs.writeFileSync(keyFile, PRIVATE_PEM, { mode: 0o600 });
   const tokenEntries = (options.tokens ?? ['dev', 'prd']).map((name) => {
     const config = name === 'personal' ? 'dev_personal' : name;
-    const file = path.join(root, `montlake.${config}.token`);
+    const file = path.join(root, `my-app.${config}.token`);
     fs.writeFileSync(file, `${TOKENS[name]}\n`, { mode: options.badTokenFile && name === 'dev' ? 0o644 : 0o600 });
-    return { project: 'montlake', config, tokenFile: file };
+    return { project: 'my-app', config, tokenFile: file };
   });
   const secretsSection: JsonObject = { doppler: { apiBaseUrl: 'https://doppler.invalid', tokens: tokenEntries } };
   if (options.policy) secretsSection.policy = options.policy;
@@ -131,11 +131,11 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
     if (parsed.pathname !== '/v3/configs/config/secrets/download' || parsed.searchParams.get('format') !== 'json') return reply(404, { messages: ['no route'] });
     // Like Doppler: a service token reads only its own config.
     const wanted = `${parsed.searchParams.get('project') ?? ''}/${parsed.searchParams.get('config') ?? ''}`;
-    const own = token === TOKENS.dev ? 'montlake/dev' : token === TOKENS.personal ? 'montlake/dev_personal' : token === TOKENS.prd ? 'montlake/prd' : '';
+    const own = token === TOKENS.dev ? 'my-app/dev' : token === TOKENS.personal ? 'my-app/dev_personal' : token === TOKENS.prd ? 'my-app/prd' : '';
     if (own && wanted !== own) return reply(400, { messages: [`This token does not have access to requested config '${parsed.searchParams.get('config') ?? ''}'`], success: false });
     if (token === TOKENS.dev) return reply(200, Object.fromEntries(DEV_VALUES));
     if (token === TOKENS.personal) return reply(200, { OPENROUTER_API_KEY: 'personal-value', DOPPLER_CONFIG: 'dev_personal' });
-    if (token === TOKENS.prd) return reply(200, { DOPPLER_PROJECT: 'montlake', DOPPLER_CONFIG: 'prd', PRD_ONLY: 'prd-value' });
+    if (token === TOKENS.prd) return reply(200, { DOPPLER_PROJECT: 'my-app', DOPPLER_CONFIG: 'prd', PRD_ONLY: 'prd-value' });
     return reply(401, { messages: ['Invalid Auth token'], success: false });
   };
   const broker = buildGitHubBroker(config, clock, directory, { whois });
@@ -176,7 +176,7 @@ async function harness(options: { policy?: JsonObject; tokens?: Array<keyof type
   };
 }
 
-const ALL_DEV = JSON.stringify({ version: 1, doppler: [{ project: 'montlake', config: 'dev', names: 'all' }] });
+const ALL_DEV = JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: 'all' }] });
 
 function auditText(stateDir: string): string {
   return fs.readFileSync(path.join(stateDir, 'secrets-audit.jsonl'), 'utf8');
@@ -184,7 +184,7 @@ function auditText(stateDir: string): string {
 
 describe('manifest', () => {
   it('parses names or all per config and refuses bad input with the fix', () => {
-    assert.deepEqual(parseManifest(ALL_DEV).entries, [{ project: 'montlake', config: 'dev', names: 'all' }]);
+    assert.deepEqual(parseManifest(ALL_DEV).entries, [{ project: 'my-app', config: 'dev', names: 'all' }]);
     assert.deepEqual(parseManifest(JSON.stringify({ version: 1, doppler: [{ project: 'p', config: 'c', names: ['A', 'R2_*', 'A'] }] })).entries[0].names, ['A', 'R2_*']);
     for (const bad of ['{', '{"version":2,"doppler":[]}', '{"version":1,"doppler":[]}', '{"version":1,"doppler":[{"project":"p","config":"c","names":[]}]}',
       '{"version":1,"doppler":[{"project":"p","config":"c","names":["A B"]}]}', '{"version":1,"doppler":[{"project":"../x","config":"c","names":"all"}]}',
@@ -222,7 +222,7 @@ describe('secrets service', () => {
   it('the default policy withholds production families and refuses prd configs', async () => {
     const h = await harness();
     try {
-      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'montlake', config: 'dev', names: 'all' }, { project: 'montlake', config: 'prd', names: 'all' }] }));
+      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: 'all' }, { project: 'my-app', config: 'prd', names: 'all' }] }));
       const answer = await h.call('s1', 'POST', 'fetch');
       assert.equal(answer.status, 200);
       const [dev, prd] = configsOf(answer.body);
@@ -240,7 +240,7 @@ describe('secrets service', () => {
   it('a names list with patterns narrows the set and reports names Doppler lacks', async () => {
     const h = await harness({ policy: { mode: 'allow-all' } });
     try {
-      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'montlake', config: 'dev', names: ['OPENROUTER_API_KEY', 'R2_*', 'NOT_THERE'] }] }));
+      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: ['OPENROUTER_API_KEY', 'R2_*', 'NOT_THERE'] }] }));
       const [dev] = configsOf((await h.call('s1', 'POST', 'fetch')).body);
       assert.deepEqual(Object.keys(dev.values).sort(), ['OPENROUTER_API_KEY', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY']);
       assert.deepEqual(dev.missing, ['NOT_THERE']);
@@ -252,9 +252,9 @@ describe('secrets service', () => {
   it('a manifest change shows up on the next fetch (removal included), with a new version', async () => {
     const h = await harness({ policy: { mode: 'allow-all' } });
     try {
-      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'montlake', config: 'dev', names: ['OPENROUTER_API_KEY', 'R2_ACCESS_KEY_ID'] }] }));
+      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: ['OPENROUTER_API_KEY', 'R2_ACCESS_KEY_ID'] }] }));
       const first = await h.call('s1', 'POST', 'fetch');
-      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'montlake', config: 'dev', names: ['OPENROUTER_API_KEY'] }] }));
+      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: ['OPENROUTER_API_KEY'] }] }));
       const second = await h.call('s1', 'POST', 'fetch');
       assert.deepEqual(Object.keys(configsOf(second.body)[0].values), ['OPENROUTER_API_KEY']);
       assert.notEqual(first.body.version, second.body.version);
@@ -301,11 +301,11 @@ describe('secrets service', () => {
       assert.equal(untagged.status, 403);
       assert.equal((await h.callFrom('s1', null, 'GET', 'status')).status, 403);
       assert.equal(h.fake.requests.length, githubBefore);
-      const user = await h.call('user:red', 'POST', 'fetch');
+      const user = await h.call('user:owner', 'POST', 'fetch');
       assert.equal(user.status, 403);
       assert.equal(user.body.code, 'forbidden');
       assert.equal((await h.call('s1', 'GET', 'audit')).status, 403);
-      const userAudit = await h.call('user:red', 'GET', 'audit');
+      const userAudit = await h.call('user:owner', 'GET', 'audit');
       assert.equal(userAudit.status, 200);
       assert.match(JSON.stringify(userAudit.body), /caller-node-mismatch/u);
       assert.equal(h.dopplerCalls.length, 0);
@@ -317,7 +317,7 @@ describe('secrets service', () => {
   it('status: users see configs, policy and a names count with check=1; nothing secret', async () => {
     const h = await harness({ policy: { mode: 'allow-all' }, tokens: ['dev', 'personal'] });
     try {
-      const status = await h.call('user:red', 'GET', 'status?check=1');
+      const status = await h.call('user:owner', 'GET', 'status?check=1');
       assert.equal(status.status, 200);
       const text = JSON.stringify(status.body);
       assert.match(text, /"names":8/u);
@@ -332,10 +332,10 @@ describe('secrets service', () => {
   it('a config without a token is refused by name; a token file others can read is not loaded', async () => {
     const h = await harness({ policy: { mode: 'allow-all' }, badTokenFile: true, tokens: ['dev'] });
     try {
-      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'montlake', config: 'dev', names: 'all' }, { project: 'montlake', config: 'stg', names: 'all' }] }));
+      h.setManifest(JSON.stringify({ version: 1, doppler: [{ project: 'my-app', config: 'dev', names: 'all' }, { project: 'my-app', config: 'stg', names: 'all' }] }));
       const [dev, stg] = configsOf((await h.call('s1', 'POST', 'fetch')).body);
       assert.match(dev.refused ?? '', /could not be loaded: .*chmod 600/u);
-      assert.match(stg.refused ?? '', /holds no Doppler token for montlake\/stg/u);
+      assert.match(stg.refused ?? '', /holds no Doppler token for my-app\/stg/u);
     } finally {
       await h.close();
     }

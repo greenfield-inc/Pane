@@ -15630,7 +15630,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud repair rp-red-ck4vp7ki --json"
+          "runpane cloud repair rp-ck4vp7ki --json"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
@@ -16138,7 +16138,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud coordinator doppler set --project montlake --all-configs --policy allow-all"
+          "runpane cloud coordinator doppler set --project my-app --config dev"
         ],
         "notes": [
           "Tokens go from this machine's doppler CLI straight into the provider files API (0600 on the coordinator, staged copy shredded): never printed, never on a command line, never saved on this machine. Values never pass through this machine: Sessions fetch them from the coordinator over the tailnet.",
@@ -16406,7 +16406,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets set rp-red-zd56pin5 OPENROUTER_API_KEY --from-doppler my-app/dev"
+          "runpane cloud secrets set rp-zd56pin5 OPENROUTER_API_KEY --from-doppler my-app/dev"
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
@@ -16432,7 +16432,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets list rp-red-zd56pin5"
+          "runpane cloud secrets list rp-zd56pin5"
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
@@ -16463,7 +16463,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets rm rp-red-zd56pin5 OPENROUTER_API_KEY"
+          "runpane cloud secrets rm rp-zd56pin5 OPENROUTER_API_KEY"
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
@@ -16489,7 +16489,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets enable rp-red-zd56pin5"
+          "runpane cloud secrets enable rp-zd56pin5"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
@@ -16514,7 +16514,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets disable rp-red-zd56pin5"
+          "runpane cloud secrets disable rp-zd56pin5"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
@@ -16722,7 +16722,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud port open rp-red-zd56pin5 8787 --name taste --yes"
+          "runpane cloud port open rp-zd56pin5 8787 --name taste --yes"
         ],
         "notes": [
           "Tailnet only: Tailscale Serve, never Funnel. The URL works from any device on your tailnet with no forwarder."
@@ -16747,7 +16747,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud port list rp-red-zd56pin5"
+          "runpane cloud port list rp-zd56pin5"
         ],
         "notes": []
       },
@@ -16775,7 +16775,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud port close rp-red-zd56pin5 taste"
+          "runpane cloud port close rp-zd56pin5 taste"
         ],
         "notes": []
       },
@@ -16872,7 +16872,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud notes push rp-red-zd56pin5"
+          "runpane cloud notes push rp-zd56pin5"
         ],
         "notes": []
       },

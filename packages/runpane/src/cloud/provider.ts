@@ -1,6 +1,6 @@
 /**
  * Provider interface for `runpane cloud`: the only thing the CLI needs from a sandbox host.
- * boat.dev is the v1 adapter (./boat.ts); a second adapter is post-v1 (final-plan S5).
+ * boat.dev is the v1 adapter (./boat.ts); a second adapter is post-v1.
  */
 
 export type CloudSize = 'small' | 'default' | 'large';
@@ -61,8 +61,8 @@ export interface SandboxCommandResult {
 }
 
 /**
- * What bootstrap needs to run inside a sandbox. It matches m1-bootstrap's SandboxHandle
- * (~/rc-loop/ledger/iface-bootstrap.md): scripts and file contents are never logged, because
+ * What bootstrap needs to run inside a sandbox. It matches bootstrap's SandboxHandle
+ * (bootstrap/types.ts): scripts and file contents are never logged, because
  * they can carry secrets and stdout can carry the pairing code.
  */
 export interface SandboxHandle {

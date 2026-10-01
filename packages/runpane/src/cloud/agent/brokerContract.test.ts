@@ -20,7 +20,7 @@ import { runGit } from './localGit';
 import type { AgentDeps } from './session';
 
 /**
- * The Session side against the REAL coordinator broker (p3-broker) and its fake GitHub (git http-backend +
+ * The Session side against the REAL coordinator broker (coordinator/github/broker.ts) and its fake GitHub (git http-backend +
  * REST): what `gh` and `runpane cloud agent github` send is what the broker accepts, and it lands on "GitHub".
  */
 

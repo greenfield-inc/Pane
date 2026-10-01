@@ -93,7 +93,7 @@ pane_version() {
 }
 
 # identity <sessionId>: explicit first-boot identity reset.
-# M0: forks restore onto pre-booted pool machines, so boot-time units never run. A sandbox whose
+# Forks restore onto pre-booted pool machines, so boot-time units never run. A sandbox whose
 # marker names another session (a fork of a golden or of a live session) is scrubbed with the same
 # script as the golden, gets a fresh machine-id and SSH host keys, and the strip-list check must pass.
 # Re-running for the same session is a no-op, so a retried `cloud new` never wipes a working install.
@@ -225,7 +225,7 @@ UNIT
 }
 
 # Serve guard. Tailscale keeps its Serve config inside tailscaled.state, and a resume has brought back a
-# valid but STALE state without it (rp-red-ck4vp7ki: Running, same node, cert cached, "No serve config",
+# valid but STALE state without it (seen live: Running, same node, cert cached, "No serve config",
 # so the daemon was unreachable). The desired config lives in /etc/rp-cloud/serve.json (written in place)
 # and rp-serve-restore re-applies it on every boot, and on demand, when `tailscale serve status` lacks it.
 install_serve_guard() {
@@ -316,7 +316,7 @@ step_tailnet_identity() {
 }
 
 # tailscale-reset: repair path, sandbox side. The caller deletes the old device through the API FIRST
-# (M0: rejoining without that gives a -1 suffixed name). Wipes node state so the next `up` enrols fresh.
+# (rejoining without that gives a -1 suffixed name). Wipes node state so the next `up` enrols fresh.
 step_tailscale_reset() {
   sudo systemctl stop tailscaled
   sudo rm -f /var/lib/tailscale/tailscaled.state
@@ -387,7 +387,7 @@ host["access"] = {
              "note": f"Tailscale Serve TCP on :{port}, plain HTTP inside the tailnet (no TLS certificate available)"},
   "updatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
 }
-# In place, not temp+rename: boat snapshots have lost renamed files (the tailscaled.state P0). The daemon is stopped.
+# In place, not temp+rename: boat snapshots have lost a renamed tailscaled.state. The daemon is stopped.
 with open(path, "r+") as out:
     out.seek(0)
     json.dump(d, out, indent=2)

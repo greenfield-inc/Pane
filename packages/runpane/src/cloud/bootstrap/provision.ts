@@ -291,7 +291,7 @@ async function prepareAndJoin(
       await runner.run('ts-guard', [], envelopeSchema, { timeoutSeconds: 120 });
       return parseIdentity(current);
     }
-    // M0: a device left under this hostname would push the new node to "<hostname>-1".
+    // A device left under this hostname would push the new node to "<hostname>-1".
     for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
       if (await options.tailscale.deleteDevice(device.nodeId)) {
         deletedStaleNodeIds.push(device.nodeId);
@@ -338,7 +338,7 @@ export async function joinSandboxToTailnet(sandbox: SandboxHandle, options: Join
 
 /**
  * Repair path: gives a sandbox a fresh tailnet node under the SAME hostname. Deletes the old
- * device(s) through the API first (M0: otherwise the name gets a -1 suffix and the old name keeps
+ * device(s) through the API first (otherwise the name gets a -1 suffix and the old name keeps
  * pointing at a dead IP), wipes the node state, rejoins with a new single-use key and restores
  * Tailscale Serve. The MagicDNS name is kept; the tailnet IPs change.
  */

@@ -14,7 +14,7 @@ import type {
   SessionDirectory,
 } from './types';
 
-/** final-plan's four statuses plus `awake`, the success answer once /health is ready. */
+/** asleep, waking, daemon-down and lost, plus `awake`, the success answer once /health is ready. */
 export type CloudHostStatus = 'awake' | 'asleep' | 'waking' | 'daemon-down' | 'lost';
 
 export interface CloudHostReport {

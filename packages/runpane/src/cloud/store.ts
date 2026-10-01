@@ -38,7 +38,7 @@ export interface CloudSettings {
   transport?: CloudTransport;
   namePrefix?: string;
   paneSource?: PaneSource;
-  /** Largest number of live cloud sandboxes `new` may leave running (final-plan §4 runaway guard). */
+  /** Largest number of live cloud sandboxes `new` may leave running (runaway guard). */
   maxLiveSandboxes?: number;
   coordinator?: { enabled: boolean; deployment?: CoordinatorDeployment };
   /** Extra name patterns (`*` wildcards) `cloud secrets set` refuses, on top of the built-in deny-list. */
@@ -49,7 +49,7 @@ export interface CloudSettings {
   agentNotes?: { guardrails?: string[] };
 }
 
-/** The coordinator sandbox `runpane cloud coordinator deploy` created (final-plan S2). */
+/** The coordinator sandbox `runpane cloud coordinator deploy` created. */
 export interface CoordinatorDeployment {
   sandboxId: string;
   hostname: string;
@@ -122,7 +122,7 @@ export const DEFAULT_MAX_LIVE_SANDBOXES = 25;
 export const DEFAULT_PANE_SOURCE: PaneSource = { kind: 'runpane-npm', spec: 'runpane@latest' };
 
 /**
- * The `cloud` field on a saved remote host profile (final-plan S2). Single writer: the CLI at
+ * The `cloud` field on a saved remote host profile. Single writer: the CLI at
  * creation, then the coordinator; `version` goes up whenever the address changes.
  */
 interface CloudProfileInfo {
@@ -225,7 +225,7 @@ export interface CloudStore {
   pairingPath(hostname: string): string;
   coordinatorPairingPath(hostname: string): string;
   readPairing(hostname: string): Promise<string>;
-  /** `<dir>/coordinator.json`: the coordinator client config m4's client reads. */
+  /** `<dir>/coordinator.json`: the coordinator client config remote/coordinatorClient.ts reads. */
   readonly coordinatorClientPath: string;
   readSecretText(name: SecretTextName): Promise<string | undefined>;
   writeSecretText(name: SecretTextName, value: string): Promise<void>;

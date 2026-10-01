@@ -6,7 +6,7 @@ import { defaultAgentDeps, type AgentDeps } from './session';
 
 /**
  * `runpane cloud agent ...`: the commands that run INSIDE a cloud Session and talk only to the
- * coordinator (phase3-design §4). They need none of the laptop's `runpane cloud` state or keys.
+ * coordinator. They need none of the laptop's `runpane cloud` state or keys.
  *   github ...        runpane cloud agent github push|pr|issue|read|status
  *   gh ...            the gh compatibility shim (~/.local/bin/gh runs this)
  *   git-credential    the git credential helper (~/.local/bin/git-credential-runpane runs this)

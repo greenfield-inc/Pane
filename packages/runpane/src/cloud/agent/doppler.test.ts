@@ -33,9 +33,9 @@ function answer(configs: JsonObject[], extra: JsonObject = {}): JsonObject {
 }
 
 const TWO_CONFIGS = answer([
-  { project: 'montlake', config: 'dev', values: DEV, withheld: [{ name: 'PATH', reason: 'reserved' }], missing: [], refused: null },
-  { project: 'montlake', config: 'dev_personal', values: PERSONAL, withheld: [], missing: [], refused: null },
-  { project: 'montlake', config: 'prd', values: {}, withheld: [], missing: [], refused: 'policy refuses config prd' },
+  { project: 'my-app', config: 'dev', values: DEV, withheld: [{ name: 'PATH', reason: 'reserved' }], missing: [], refused: null },
+  { project: 'my-app', config: 'dev_personal', values: PERSONAL, withheld: [], missing: [], refused: null },
+  { project: 'my-app', config: 'prd', values: {}, withheld: [], missing: [], refused: 'policy refuses config prd' },
 ]);
 
 interface Harness {
@@ -103,7 +103,7 @@ test('refresh stores the set 0600 in a 0700 dir and prints names, never values',
   for (const value of [...Object.values(DEV), ...Object.values(PERSONAL)]) assert.equal(printed.includes(value), false);
   assert.deepEqual(h.requests, ['POST http://coordinator.test:47300/cloud/secrets/fetch']);
   assert.equal(await runDopplerStandIn(['status'], h.deps), 0);
-  assert.match(h.out.join('\n'), /montlake\/prd: refused: policy refuses config prd/u);
+  assert.match(h.out.join('\n'), /my-app\/prd: refused: policy refuses config prd/u);
 });
 
 test('doppler run gives the values to the child only; -p/-c pick the config; a refused or unknown config fails', async () => {
@@ -115,15 +115,15 @@ test('doppler run gives the values to the child only; -p/-c pick the config; a r
   assert.equal(first.env.get('DOPPLER_CONFIG'), 'dev');
   assert.equal(first.env.get('DOPPLER_ENVIRONMENT'), 'dev');
   assert.equal(h.deps.env.OPENROUTER_API_KEY, undefined, 'the parent environment is untouched');
-  const personal = await childEnv(h, ['run', '-p', 'montlake', '-c', 'dev_personal']);
+  const personal = await childEnv(h, ['run', '-p', 'my-app', '-c', 'dev_personal']);
   assert.equal(personal.env.get('OPENROUTER_API_KEY'), PERSONAL.OPENROUTER_API_KEY);
   assert.equal(personal.env.get('PRODUCTION_DATABASE_URL'), undefined);
-  const long = await childEnv(h, ['run', '--project', 'montlake', '--config', 'dev']);
+  const long = await childEnv(h, ['run', '--project', 'my-app', '--config', 'dev']);
   assert.equal(long.env.get('DOPPLER_CONFIG'), 'dev');
   assert.equal((await childEnv(h, ['run', '-c', 'prd'])).code, 1);
   assert.match(h.err.join('\n'), /not delivered: policy refuses config prd/u);
   assert.equal((await childEnv(h, ['run', '-c', 'stg'])).code, 1);
-  assert.match(h.err.join('\n'), /montlake\/stg is not in this Session's manifest/u);
+  assert.match(h.err.join('\n'), /my-app\/stg is not in this Session's manifest/u);
   // One fetch, then the stored copy (under an hour old).
   assert.equal(h.requests.length, 1);
   // The child's exit code comes back, and --command runs through sh.
@@ -174,12 +174,12 @@ test('an outage keeps the stored copy; a decision (service off, manifest invalid
 test('a manifest change (a name removed) is gone after refresh, and refresh reports it', async () => {
   const h = await harness();
   assert.equal(await runDopplerStandIn(['refresh'], h.deps), 0);
-  h.reply = { status: 200, body: answer([{ project: 'montlake', config: 'dev', values: { OPENROUTER_API_KEY: DEV.OPENROUTER_API_KEY }, withheld: [], missing: [], refused: null }], { version: 'v2' }) };
+  h.reply = { status: 200, body: answer([{ project: 'my-app', config: 'dev', values: { OPENROUTER_API_KEY: DEV.OPENROUTER_API_KEY }, withheld: [], missing: [], refused: null }], { version: 'v2' }) };
   assert.equal(await runDopplerStandIn(['refresh', '--json'], h.deps), 0);
   const summary = JSON.parse(h.out.pop() ?? '{}');
   assert.equal(summary.version, 'v2');
   assert.equal(summary.previousVersion, 'v1');
-  assert.ok(summary.removed.includes('montlake/dev:PRODUCTION_DATABASE_URL'));
+  assert.ok(summary.removed.includes('my-app/dev:PRODUCTION_DATABASE_URL'));
   assert.equal((await childEnv(h, ['run'])).env.get('PRODUCTION_DATABASE_URL'), undefined);
 });
 

@@ -8,8 +8,8 @@ import { boundary, decodeBoundary } from '../../../boundaryDecoder';
  *   {
  *     "version": 1,
  *     "doppler": [
- *       { "project": "montlake", "config": "dev", "names": "all" },
- *       { "project": "montlake", "config": "dev_personal", "names": ["OPENROUTER_API_KEY", "R2_*"] }
+ *       { "project": "my-app", "config": "dev", "names": "all" },
+ *       { "project": "my-app", "config": "dev_personal", "names": ["OPENROUTER_API_KEY", "R2_*"] }
  *     ]
  *   }
  *

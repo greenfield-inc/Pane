@@ -8,7 +8,7 @@ import { dropRemoteConnection, emitRemoteDaemonEvent, openConnectedRemotePwa, re
 // daemon. One Node-side fake daemon backs both the desktop (electronAPI mock)
 // and the web client (Remote PWA over the mocked HTTP+SSE host).
 
-const HOST = 'rp-red-zd56pin5.tail03bf19.ts.net';
+const HOST = 'rp-zd56pin5.example.ts.net';
 
 interface FakePort extends JsonObject { name: string; port: number; httpsPort: number; url: string; source: string }
 
@@ -18,7 +18,7 @@ function createFakePortsDaemon() {
     { name: 'taste', port: 8787, httpsPort: 8787, url: url(8787), source: 'manifest' },
     { name: 'pages', port: 8788, httpsPort: 8788, url: url(8788), source: 'user' },
   ];
-  // A plain tcp serve entry already holds tailnet :9000 (like Phase 4's :8787).
+  // A plain tcp serve entry already holds tailnet :9000 (like an app on :8787).
   const tcpServed = new Set([9000]);
   let suggested: JsonObject[] = [
     { port: 5173, address: '127.0.0.1', process: 'vite', pid: 4242 },
@@ -26,7 +26,7 @@ function createFakePortsDaemon() {
   ];
   const calls: Array<{ channel: string; args: JsonValue[] }> = [];
 
-  // The p5-ports PortsListResult shape (iface-p5.md, 22:55Z).
+  // The daemon's PortsListResult shape (runpane:ports:list).
   const list = (): JsonObject => ({
     ok: true, available: true, host: HOST, scheme: 'https', autoOpen: false,
     ports: published.map(item => ({ ...item, scheme: 'https', path: '/', status: 'serving', createdAt: '2026-09-30T23:00:00Z' })),
@@ -45,7 +45,7 @@ function createFakePortsDaemon() {
     handle(channel: string, args: JsonValue[]): JsonValue | undefined {
       if (!channel.startsWith('runpane:ports:')) return undefined;
       calls.push({ channel, args });
-      // SAFETY: the UI sends one request object for open/close (iface-p5.md).
+      // SAFETY: the UI sends one request object for open/close.
       const request = (args[0] ?? {}) as { port?: number; yes?: boolean; target?: number | string };
       if (channel === 'runpane:ports:list') return list();
       if (channel === 'runpane:ports:open') {
@@ -73,11 +73,11 @@ function createFakePortsDaemon() {
 type FakePortsDaemon = ReturnType<typeof createFakePortsDaemon>;
 
 const now = new Date(0).toISOString();
-const project = { id: 7, name: 'montlakev2', path: '/home/user/montlakev2', active: true, created_at: now, updated_at: now };
+const project = { id: 7, name: 'my-app', path: '/home/user/my-app', active: true, created_at: now, updated_at: now };
 const session = {
   id: 'ports-session',
   name: 'taste preview',
-  worktreePath: '/home/user/montlakev2/worktrees/taste',
+  worktreePath: '/home/user/my-app/worktrees/taste',
   prompt: '',
   status: 'stopped',
   createdAt: now,
@@ -143,7 +143,7 @@ async function openDesktopSession(page: Page, daemon: FakePortsDaemon) {
   });
   await installDesktopPorts(page, daemon);
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository montlakev2$/ }).click();
+  await page.getByRole('button', { name: /^Expand repository my-app$/ }).click();
   await page.getByRole('button', { name: 'taste preview', exact: true }).click();
 }
 
@@ -208,7 +208,7 @@ test.describe('Session ports chip row', () => {
       };
     });
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page.getByRole('button', { name: /^Expand repository montlakev2$/ }).click();
+    await page.getByRole('button', { name: /^Expand repository my-app$/ }).click();
     await page.getByRole('button', { name: 'taste preview', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__portsListCalls)).toBeGreaterThan(0);
     await expect(page.getByRole('region', { name: 'Session ports' })).toHaveCount(0);

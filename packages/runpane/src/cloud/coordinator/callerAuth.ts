@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // Caller tokens for the coordinator's HTTP API: `rpc1.<callerId>.<base64url HMAC-SHA256(secret, "rpc1:" + callerId)>`.
-// The coordinator stores no per-caller state (v4 I15): it recomputes the MAC. Revocation is a
+// The coordinator stores no per-caller state: it recomputes the MAC. Revocation is a
 // `revokedCallers` config entry, or rotating the secret for everyone. Peer tokens (callerId = a cloud
 // Session id) are also only valid while that Session is in the directory.
 

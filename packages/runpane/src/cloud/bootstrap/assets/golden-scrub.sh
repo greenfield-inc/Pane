@@ -1,7 +1,7 @@
 #!/bin/bash
 # golden-scrub.sh — identity scrub for a Runpane Cloud golden image. Run as root (sudo) right before
 # `POST /named-snapshots`, and by rp-bootstrap.sh `identity` on every new cloud sandbox (forks skip boot units).
-# Source of truth: packages/runpane/src/cloud/bootstrap/assets (from the M0 m0d-golden experiment). Idempotent. Removes per-user/per-machine identity and installs a first-boot
+# Source of truth: packages/runpane/src/cloud/bootstrap/assets. Idempotent. Removes per-user/per-machine identity and installs a first-boot
 # unit that regenerates /etc/machine-id + SSH host keys on every fork/sandbox created from the image.
 # Env: U=<login user> (default: user).  Usage: sudo U=user bash golden-scrub.sh
 set -u

@@ -5,7 +5,7 @@ import { decodePairingCode } from './pairing';
 import { isNotFound, type CloudHostRecord } from './store';
 
 /**
- * The directory the coordinator reads (iface-coordinator.md; parsed by coordinator/directory.ts).
+ * The directory the coordinator reads (parsed by coordinator/directory.ts).
  * `runpane cloud` on the user's machine is its single writer: it pushes the whole directory after
  * every change (new, destroy, sync), so the coordinator never guesses which Sessions exist.
  */

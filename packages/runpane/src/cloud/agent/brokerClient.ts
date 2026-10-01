@@ -2,7 +2,7 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../..
 import type { CoordinatorRef } from '../../remote/hostDirectory';
 
 /**
- * The GitHub broker on the `runpane cloud` coordinator (phase3-design §3), as a cloud Session calls it:
+ * The GitHub broker on the `runpane cloud` coordinator (coordinator/github/broker.ts), as a cloud Session calls it:
  * with the Session's own `rpc1` caller token from its peers list. The broker holds the GitHub
  * credential; nothing here ever sees more than a read-only, one-repository installation token.
  */
@@ -85,7 +85,7 @@ const itemSchema = boundary.object({
 
 const readSchema = boundary.object({ data: boundary.json });
 
-/** GET /cloud/github/status (p3-broker v1), for Sessions and for the laptop's user caller alike. */
+/** GET /cloud/github/status, for Sessions and for the laptop's user caller alike. */
 export function decodeBrokerStatus(value: JsonValue | undefined): BrokerStatus {
   const body = decodeBoundary(value, statusSchema);
   return {

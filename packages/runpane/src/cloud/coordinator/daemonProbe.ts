@@ -29,7 +29,7 @@ const invokeSchema = boundary.object({
   })),
 });
 
-// m2-safestop-health's result: blockers name the refusing condition; `flush` is non-null once the
+// The daemon's safe-to-stop result: blockers name the refusing condition; `flush` is non-null once the
 // daemon has checkpointed SQLite's WAL and fsynced (which only happens when safe).
 const safeToStopResultSchema = boundary.object({
   safe: boundary.boolean,
@@ -41,9 +41,9 @@ const safeToStopResultSchema = boundary.object({
 });
 
 /**
- * Readiness means "agents are usable", not just "the HTTP server answers". M2 daemons report
+ * Readiness means "agents are usable", not just "the HTTP server answers". Newer daemons report
  * `readiness.state` ("starting" | "ready" | "degraded"; degraded = awake, but some agent panels did
- * not come back). Their `status` stays "ready" for old clients, so it only counts for pre-M2 daemons.
+ * not come back). Their `status` stays "ready" for old clients, so it only counts for daemons without `readiness`.
  */
 export function decodeHealth(body: JsonValue): DaemonHealth {
   const health = decodeBoundary(body, healthSchema);
@@ -57,7 +57,7 @@ export function decodeHealth(body: JsonValue): DaemonHealth {
   }
   const statusReady = health.status === undefined ? health.ok === true : health.status === 'ready';
   const ready = health.ready ?? (statusReady && (health.composersReady ?? true));
-  return { reachable: true, ready, version, detail: 'daemon reports no readiness (pre-M2 build)' };
+  return { reachable: true, ready, version, detail: 'daemon reports no readiness (older build)' };
 }
 
 export function decodeSafeToStop(result: JsonValue): SafeToStopAnswer {

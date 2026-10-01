@@ -9,7 +9,7 @@ const HOUR_MS = 60 * 60 * 1000;
 /**
  * In-memory bookkeeping shared by wake and idle-stop, so the two never act on the same sandbox at once
  * and a freshly woken sandbox is not idle-stopped before the caller that woke it gets to use it.
- * The coordinator stays stateless across restarts (v4 I15): losing this only makes it more cautious
+ * The coordinator stays stateless across restarts: losing this only makes it more cautious
  * for one grace period, because `wokenAt` falls back to "unknown".
  */
 export class SandboxActivity {
@@ -65,7 +65,7 @@ interface ResumeRecord {
 const resumeHistorySchema = boundary.array(boundary.object({ sandboxId: boundary.string, at: boundary.number }));
 
 /**
- * Runaway guard: caps live cloud sandboxes (final-plan §4: 25 per user by default) and how often the
+ * Runaway guard: caps live cloud sandboxes (25 per user by default) and how often the
  * coordinator may resume, per sandbox and overall, so a wake loop can't burn money unnoticed.
  * With `historyFile`, the last hour's resumes live in that file, so the service, each
  * `coordinator wake --local` run and a restarted service all count the same resumes.

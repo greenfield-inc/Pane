@@ -7,7 +7,7 @@ import { createTestHarness, type TestHarness } from './__tests__/fakes';
 // `runpane cloud notes`: the user's guardrails live in settings.json and reach each Session's daemon
 // (runpane:cloud:agent-notes) on new, wake, add/remove and push.
 
-const RED_LINE = 'Never publish, bind or deploy Montlake pages, and never run destructive prod DB operations (deletes, migrations, schema changes, bulk updates), without asking Red first.';
+const GUARDRAIL = 'Never deploy to production or run destructive database operations (deletes, migrations, schema changes, bulk updates) without asking the owner first.';
 
 async function run(harness: TestHarness, argv: string[]): Promise<number> {
   return runCloudCommand(parseCloudArgs(argv), harness.deps);
@@ -47,23 +47,23 @@ test('add saves the guardrail in settings and pushes it to every awake Session',
   const second = await newHost(harness);
   harness.world.agentNotesDown.add(second);
 
-  assert.equal(await run(harness, ['notes', 'add', `  ${RED_LINE}  `]), 0);
-  assert.deepEqual((await harness.deps.store.readSettings()).agentNotes, { guardrails: [RED_LINE] });
-  assert.deepEqual(harness.world.agentNotes.get(first), [RED_LINE]);
+  assert.equal(await run(harness, ['notes', 'add', `  ${GUARDRAIL}  `]), 0);
+  assert.deepEqual((await harness.deps.store.readSettings()).agentNotes, { guardrails: [GUARDRAIL] });
+  assert.deepEqual(harness.world.agentNotes.get(first), [GUARDRAIL]);
   assert.equal(harness.world.agentNotes.has(second), false);
   assert.ok(harness.out.some((line) => line.includes(`${second}: not updated (unreachable (asleep?`)));
 
   // Adding the same line again keeps one copy.
-  assert.equal(await run(harness, ['notes', 'add', RED_LINE, '--no-push']), 0);
+  assert.equal(await run(harness, ['notes', 'add', GUARDRAIL, '--no-push']), 0);
   assert.equal(await run(harness, ['notes', 'list']), 0);
-  assert.deepEqual(harness.out.slice(-1), [`1. ${RED_LINE}`]);
+  assert.deepEqual(harness.out.slice(-1), [`1. ${GUARDRAIL}`]);
 });
 
 test('new hands a fresh Session the configured guardrails', async () => {
   const harness = await createTestHarness();
-  await harness.deps.store.writeSettings({ agentNotes: { guardrails: [RED_LINE] } });
+  await harness.deps.store.writeSettings({ agentNotes: { guardrails: [GUARDRAIL] } });
   const hostname = await newHost(harness);
-  assert.deepEqual(harness.world.agentNotes.get(hostname), [RED_LINE]);
+  assert.deepEqual(harness.world.agentNotes.get(hostname), [GUARDRAIL]);
   assert.deepEqual(lastJson(harness).agentNotes, {
     host: hostname,
     pushed: true,
@@ -74,12 +74,12 @@ test('new hands a fresh Session the configured guardrails', async () => {
 test('a Session that slept through a change gets the list when it wakes; an empty list clears it', async () => {
   const harness = await createTestHarness();
   const hostname = await newHost(harness);
-  assert.equal(await run(harness, ['notes', 'add', RED_LINE]), 0);
+  assert.equal(await run(harness, ['notes', 'add', GUARDRAIL]), 0);
   assert.equal(await run(harness, ['stop', hostname, '--yes', '--json']), 0);
 
   harness.world.agentNotesDown.add(hostname);
   assert.equal(await run(harness, ['notes', 'remove', '1']), 0);
-  assert.deepEqual(harness.world.agentNotes.get(hostname), [RED_LINE]);
+  assert.deepEqual(harness.world.agentNotes.get(hostname), [GUARDRAIL]);
 
   harness.world.agentNotesDown.delete(hostname);
   assert.equal(await run(harness, ['wake', hostname, '--json']), 0);
@@ -90,10 +90,10 @@ test('a Session that slept through a change gets the list when it wakes; an empt
 test('push names one Session and fails when it is not updated', async () => {
   const harness = await createTestHarness();
   const hostname = await newHost(harness);
-  await harness.deps.store.writeSettings({ agentNotes: { guardrails: [RED_LINE] } });
+  await harness.deps.store.writeSettings({ agentNotes: { guardrails: [GUARDRAIL] } });
   assert.equal(await run(harness, ['notes', 'push', hostname, '--json']), 0);
   assert.equal(lastJson(harness).ok, true);
-  assert.deepEqual(harness.world.agentNotes.get(hostname), [RED_LINE]);
+  assert.deepEqual(harness.world.agentNotes.get(hostname), [GUARDRAIL]);
 
   harness.world.agentNotesDown.add(hostname);
   assert.equal(await run(harness, ['notes', 'push', hostname]), 1);

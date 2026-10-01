@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { interpretHealthBody, waitForDaemonHealth } from './health';
 
-test('interpretHealthBody accepts the legacy payload and the M2 readiness payload', () => {
+test('interpretHealthBody accepts the legacy payload and the readiness payload', () => {
   assert.deepEqual(interpretHealthBody({ ok: true, status: 'ready' }),
     { ok: true, version: undefined, readiness: 'ready' });
   assert.equal(interpretHealthBody({ ok: true, status: 'ready', version: '2.4.141', readiness: { state: 'starting' } }).ok, false);

@@ -5,7 +5,7 @@ import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { JsonValue } from '../../boundaryDecoder';
 
 // The laptop side of the coordinator API. `$RUNPANE_CLOUD_DIR/coordinator.json` (0600) holds
-// `{baseUrl, token}` for a `user:<name>` caller; the same shape m3-cli-transport reads.
+// `{baseUrl, token}` for a `user:<name>` caller; the same shape remote/coordinatorClient.ts reads.
 
 const clientConfigSchema = boundary.object({ baseUrl: boundary.nonEmptyString, token: boundary.nonEmptyString });
 

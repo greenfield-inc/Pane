@@ -7,7 +7,7 @@ import { isNotFound, type CloudHostProfile } from './store';
 
 /**
  * Puts cloud host profiles into the desktop Pane's saved remote hosts, so the host switcher (#853)
- * lists them. This is the "existing import path" of final-plan S2 note 3, done on disk: the desktop
+ * lists them. This reuses the existing import path, on disk: the desktop
  * keeps profiles in `<desktop dir>/config.json` under `remoteDaemon.client.profiles`, and its
  * ConfigManager watches that file and reloads outside edits. The desktop never creates or manages
  * machines (#695); it only sees profiles.

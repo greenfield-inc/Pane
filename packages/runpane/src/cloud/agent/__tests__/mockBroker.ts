@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * A stand-in for the coordinator's GitHub broker (phase3-design §3): records every request and answers
+ * A stand-in for the coordinator's GitHub broker (coordinator/github/broker.ts): records every request and answers
  * with the documented shapes. Push bundles are checked with the real git (`git bundle list-heads`).
  */
 

@@ -15,7 +15,7 @@ import {
 } from './provider';
 
 /**
- * boat.dev REST adapter (OpenAPI: https://boat.dev/api/v1). Gotchas it encodes, all seen live in M0:
+ * boat.dev REST adapter (OpenAPI: https://boat.dev/api/v1). Gotchas it encodes, all seen live:
  * - create has no name field, so a create is followed by PATCH { name };
  * - DELETE needs `X-Ascii-Confirm-Delete: <sandboxId>`;
  * - POST /commands takes one command string and caps a synchronous run at 600 s, so scripts are

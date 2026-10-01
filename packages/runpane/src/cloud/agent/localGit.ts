@@ -6,7 +6,7 @@ import { parseRepoSpec } from '../github';
 
 /**
  * The Session's own git checkout, read with the local git: which branch to publish, which GitHub
- * repository it belongs to, and the bundle a broker push uploads (phase3-design §4).
+ * repository it belongs to, and the bundle a broker push uploads.
  */
 
 interface GitResult {
@@ -33,7 +33,7 @@ async function gitText(git: GitRunner, cwd: string, args: readonly string[]): Pr
   return result.code === 0 ? result.stdout.toString('utf8').trim() : null;
 }
 
-/** Branch names the broker accepts: `[A-Za-z0-9._/-]{1,100}`, no `..`, no leading `/` (phase3-design §3). */
+/** Branch names the broker accepts: `[A-Za-z0-9._/-]{1,100}`, no `..`, no leading `/` (coordinator/github/policy.ts). */
 export function assertBrokerBranch(branch: string): string {
   if (!/^[A-Za-z0-9._/-]{1,100}$/u.test(branch) || branch.includes('..') || branch.startsWith('/') || branch.startsWith('-')
     || branch.endsWith('/') || branch.endsWith('.lock') || branch.includes('//')) {

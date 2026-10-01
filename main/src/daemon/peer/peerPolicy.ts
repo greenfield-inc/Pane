@@ -5,7 +5,7 @@ import type { JsonObject, JsonValue } from '../../../../shared/validation/bounda
 /**
  * What a peer (another Pane Session holding a `scope: 'peer'` client record)
  * may do on this host. Everything not listed here is refused before the
- * command registry runs. See final-plan S3 and docs/SELF_HOSTED_REMOTE_DAEMON.md.
+ * command registry runs. See docs/SELF_HOSTED_REMOTE_DAEMON.md.
  */
 const PEER_ALLOWED_CHANNELS = [
   'runpane:panels:list',

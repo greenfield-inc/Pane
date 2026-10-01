@@ -11,7 +11,7 @@ interface WaitForDaemonHealthOptions {
 
 /**
  * Polls `GET <baseUrl>/health` (unauthenticated) until the daemon reports ready or the timeout
- * passes. Ready means HTTP 200 with `ok: true` and, when the daemon reports M2 readiness,
+ * passes. Ready means HTTP 200 with `ok: true` and, when the daemon reports readiness,
  * `readiness.state` "ready" or "degraded" (degraded is usable); older daemons only report
  * `status: "ready"`.
  */
@@ -60,7 +60,7 @@ const healthPayloadSchema = boundary.object({
   readiness: boundary.optional(boundary.object({ state: boundary.optional(boundary.string) })),
 });
 
-/** The `/health` fields bootstrap reads; `readiness` arrives with M2 daemons. */
+/** The `/health` fields bootstrap reads; newer daemons add `readiness`. */
 interface HealthPayload {
   ok?: boolean;
   status?: string;
