@@ -4,6 +4,7 @@ import type { CloudDeps } from './commands';
 import { BUILT_IN_DENY_LIST, DENIED_DOPPLER_CONFIGS, isDeniedConfig, matchingPattern, reservedBy, SECRET_NAME_PATTERN } from './secretPolicy';
 import type { SandboxHandle } from './provider';
 import { coordinatorSecretsEnabled, describeSecretsOutcome, disableSessionSecrets, enableSessionSecrets } from './sessionSecrets';
+import { runSecretsInspect } from './secretsInspect';
 import { findHost, type CloudHostRecord } from './store';
 import { hostProvider } from './wallet';
 
@@ -33,7 +34,7 @@ type SecretsSourceArg =
   | { kind: 'doppler'; project: string; config: string };
 
 interface SecretsArgs {
-  sub: 'set' | 'list' | 'rm' | 'enable' | 'disable';
+  sub: 'set' | 'list' | 'rm' | 'inspect' | 'enable' | 'disable';
   host: string;
   names: string[];
   source: SecretsSourceArg;
@@ -47,6 +48,8 @@ const SECRETS_USAGE = `Usage:
       --from-env VAR and --from-file take one NAME; --from-doppler reads every NAME from that config
       with the local doppler CLI (never prd/prod/stg/staging/production configs).
   runpane cloud secrets list <host> [--json]      names only; values are never shown
+  runpane cloud secrets inspect <host> [--json]   names and counts in every secrets store of the Session (these, the
+                                                   doppler stand-in's, agent sign-in) and their files' modes; never a value
   runpane cloud secrets rm <host> NAME [NAME...] [--json]
 New agent panels load the change at once; panels already open keep their old environment.
 
@@ -57,7 +60,7 @@ Laptop-free (the coordinator holds read-only Doppler tokens: runpane cloud coord
 
 export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
   const [sub, ...rest] = argv;
-  if (sub !== 'set' && sub !== 'list' && sub !== 'rm' && sub !== 'enable' && sub !== 'disable') throw new Error(SECRETS_USAGE);
+  if (sub !== 'set' && sub !== 'list' && sub !== 'rm' && sub !== 'inspect' && sub !== 'enable' && sub !== 'disable') throw new Error(SECRETS_USAGE);
   let json = false;
   let source: SecretsSourceArg | undefined;
   const positionals: string[] = [];
@@ -88,8 +91,9 @@ export function parseSecretsArgs(argv: readonly string[]): SecretsArgs {
   }
   const [host, ...names] = positionals;
   if (!host) throw new Error(SECRETS_USAGE);
-  if ((sub === 'list' || sub === 'enable' || sub === 'disable') && names.length > 0) throw new Error(SECRETS_USAGE);
-  if (sub !== 'list' && sub !== 'enable' && sub !== 'disable' && names.length === 0) throw new Error(`runpane cloud secrets ${sub} needs at least one NAME.\n\n${SECRETS_USAGE}`);
+  const takesNames = sub === 'set' || sub === 'rm';
+  if (!takesNames && names.length > 0) throw new Error(SECRETS_USAGE);
+  if (takesNames && names.length === 0) throw new Error(`runpane cloud secrets ${sub} needs at least one NAME.\n\n${SECRETS_USAGE}`);
   const resolved = source ?? { kind: 'env' };
   if ((resolved.kind === 'file' || (resolved.kind === 'env' && resolved.variable)) && names.length !== 1) {
     throw new Error(`--from-${resolved.kind} gives one value; set one NAME at a time with it.`);
@@ -353,6 +357,8 @@ export async function runSecretsCommand(argv: readonly string[], deps: CloudDeps
     }
     return 0;
   }
+
+  if (args.sub === 'inspect') return runSecretsInspect(handle, host, { json: args.json, userDenyList }, deps);
 
   if (args.sub === 'rm') {
     const outcome = await runInSandbox(handle, secretsScript({ remove: args.names }), 'Removing the secrets');

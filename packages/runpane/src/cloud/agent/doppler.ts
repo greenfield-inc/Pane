@@ -17,8 +17,10 @@ import { sessionBroker, type AgentDeps } from './session';
  * The values live in one 0600 file (~/.runpane-cloud/doppler/secrets.json, 0700 dir), refreshed at
  * every boot or wake (a user unit runs `doppler refresh --boot`), on `doppler refresh`, and before a
  * command when the copy is over an hour old. They reach a process only as the environment of the child
- * of `doppler run`, or on stdout when an agent asks for one with `doppler secrets get`. Nothing here
- * prints a value otherwise, and no value goes into a shell rc file, the daemon's environment or a log.
+ * of `doppler run`, or on stdout when an agent asks for one with `doppler secrets get` or for a whole
+ * config with `doppler secrets download --no-file` (programs that load a set). Listing, status, refresh,
+ * configs, help and every error print names and counts only, and no value goes into a shell rc file,
+ * the daemon's environment or a log.
  */
 
 const REFRESH_AFTER_MS = 60 * 60_000;
@@ -30,10 +32,11 @@ const DOPPLER_USAGE = `doppler (runpane cloud stand-in): Doppler secrets for thi
   doppler run [-p <project>] [-c <config>] [--preserve-env] -- <command> [args...]
   doppler run [-p <project>] [-c <config>] --command "<shell command>"
   doppler secrets [--only-names] [--json]              names only
-  doppler secrets get NAME [NAME...] [--plain | --json] [-p <project>] [-c <config>]
+  doppler secrets get NAME [NAME...] [--plain | --json] [-p <project>] [-c <config>]       prints the values
   doppler secrets download --no-file [--format json|env|env-no-quotes|docker] [-p <project>] [-c <config>]
+                                                       prints every value of the config (for programs only)
   doppler refresh [--json]                             fetch the current set from the coordinator now
-  doppler status [--json]                              where the set came from, names and when
+  doppler status [--json]                              where the set came from, name counts, the store's mode
 Which secrets: the repository's .runpane/secrets.json (names or "all" per Doppler config), filtered by
 your coordinator's secrets policy. Without -p/-c, the manifest's first config is used. The set refreshes
 at every wake and on doppler refresh; doppler login/setup are not needed here.`;
@@ -131,17 +134,52 @@ export function secretsCachePath(env: NodeJS.ProcessEnv): string {
 }
 
 async function readCache(deps: AgentDeps): Promise<SecretsCache | null> {
+  const file = secretsCachePath(deps.env);
   let text: string;
   try {
-    text = await fs.readFile(secretsCachePath(deps.env), 'utf8');
+    text = await fs.readFile(file, 'utf8');
   } catch {
     return null;
   }
+  await keepPrivate(deps, file);
   try {
     return decodeSecrets(JSON.parse(text), '');
   } catch {
     deps.stderr('doppler: the stored secrets file is unreadable; run doppler refresh.');
     return null;
+  }
+}
+
+/**
+ * Puts the store and its directory back to 0600/0700 when something (a restore, a copy, a chmod) widened
+ * them. Any process running as the Session user can still read it: that is the design, the same as a
+ * real Doppler CLI token in ~/.doppler, and the reason values never go to output by default.
+ */
+async function keepPrivate(deps: AgentDeps, file: string): Promise<void> {
+  const targets: Array<{ target: string; mode: number }> = [{ target: file, mode: 0o600 }, { target: path.dirname(file), mode: 0o700 }];
+  for (const { target, mode } of targets) {
+    try {
+      const current = (await fs.stat(target)).mode & 0o777;
+      if ((current & 0o077) === 0) continue;
+      await fs.chmod(target, mode);
+      deps.stderr(`doppler: ${target} was ${modeText(current)}; set it back to ${modeText(mode)}.`);
+    } catch {
+      // Gone or not ours: the read or the next write reports it.
+    }
+  }
+}
+
+function modeText(mode: number): string {
+  return `0${mode.toString(8).padStart(3, '0')}`;
+}
+
+/** The store's path and mode for `doppler status` (never its contents). */
+async function storeInfo(deps: AgentDeps): Promise<{ path: string; mode: string | null }> {
+  const file = secretsCachePath(deps.env);
+  try {
+    return { path: file, mode: modeText((await fs.stat(file)).mode & 0o777) };
+  } catch {
+    return { path: file, mode: null };
   }
 }
 
@@ -437,8 +475,9 @@ function summarize(cache: SecretsCache) {
 async function status(argv: readonly string[], deps: AgentDeps): Promise<number> {
   const flags = parseAgentFlags(argv, { values: [], booleans: [['--json']] });
   const cache = await readCache(deps);
+  const store = await storeInfo(deps);
   if (flags.booleans.has('--json')) {
-    deps.stdout(JSON.stringify(cache ? { ok: true, ...summarize(cache) } : { ok: false, reason: 'nothing fetched yet (doppler refresh)' }, null, 2));
+    deps.stdout(JSON.stringify(cache ? { ok: true, ...summarize(cache), store } : { ok: false, reason: 'nothing fetched yet (doppler refresh)', store }, null, 2));
     return cache ? 0 : 1;
   }
   if (!cache) {
@@ -447,6 +486,7 @@ async function status(argv: readonly string[], deps: AgentDeps): Promise<number>
   }
   const summary = summarize(cache);
   deps.stdout(`doppler (runpane cloud stand-in): secrets from ${summary.source}, fetched ${cache.fetchedAt}, version ${cache.version ?? 'none'}, policy ${cache.policy ?? '?'}.`);
+  deps.stdout(`  stored in ${store.path} (${store.mode ?? 'missing'}; readable by this Session's user only; never print it, use doppler status or doppler secrets --only-names)`);
   if (cache.reason) deps.stdout(`  ${cache.reason}`);
   for (const config of summary.configs) {
     deps.stdout(`  ${config.config}: ${config.refused ? `refused: ${config.refused}` : `${config.names.length} names`}${config.withheld.length > 0 ? `; withheld ${config.withheld.map((item) => item.name).join(', ')}` : ''}${config.missing.length > 0 ? `; not in Doppler ${config.missing.join(', ')}` : ''}`);

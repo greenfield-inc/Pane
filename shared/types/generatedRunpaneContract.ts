@@ -1645,6 +1645,16 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "cloud secrets inspect",
+      "summary": "Report every secrets store of a cloud Session by name, with its files' modes; values are never shown.",
+      "usage": [
+        "runpane cloud secrets inspect <host> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud secrets rm",
       "summary": "Remove agent secrets from a cloud Session; new agent panels no longer see them.",
       "usage": [
@@ -4036,6 +4046,16 @@ export const RUNPANE_CONTRACT = {
         "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
         "  --json                         Print machine-readable output."
       ],
+      "cloud secrets inspect": [
+        "Usage:",
+        "  runpane cloud secrets inspect <host> [--json]",
+        "",
+        "Report every secrets store of a cloud Session by name, with its files' modes; values are never shown.",
+        "",
+        "Options:",
+        "  <host>                         Cloud host: its host name (rp-...), cloud Session id, label or sandbox id.",
+        "  --json                         Print machine-readable output."
+      ],
       "cloud secrets rm": [
         "Usage:",
         "  runpane cloud secrets rm <host> NAME [NAME...] [--json]",
@@ -5693,6 +5713,13 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane cloud secrets list` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud secrets list"
+      ],
+      "cloud secrets inspect": [
+        "Usage:",
+        "  runpane cloud secrets inspect <host> [--json]",
+        "",
+        "`runpane cloud secrets inspect` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud secrets inspect"
       ],
       "cloud secrets rm": [
         "Usage:",
@@ -16699,6 +16726,32 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud secrets inspect": {
+        "name": "cloud secrets inspect",
+        "summary": "Report every secrets store of a cloud Session by name, with its files' modes; values are never shown.",
+        "details": "Runs a script in the sandbox over the provider exec API that reads names and file modes only: the agent secrets (~/.runpane-cloud/secrets.json, secrets.env), the agent sign-in (agent.env), the doppler stand-in's copy (~/.runpane-cloud/doppler/secrets.json, names per config), the peers list and the git credential tokens. Exits 1 when group or others can read one of those files or a staged secrets file was left behind. Any process running as the Session user can read the 0600 files; that is by design. Refuses a sleeping Session.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud host: its host name (rp-...), cloud Session id, label or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud secrets inspect rp-a1b2c3d4"
+        ],
+        "notes": [
+          "Names, counts and modes only: no value leaves the sandbox. Use it instead of reading a secrets file to see what a Session holds.",
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       },

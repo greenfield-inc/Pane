@@ -30,7 +30,7 @@ The repository's \`.runpane/secrets.json\` names which Doppler configs and names
 - **Use them as the repo's docs say:** \`doppler run -- <command>\` (or \`doppler run -p <project> -c <config> -- ...\`) puts them in that command's environment only.
 - **One value:** \`doppler secrets get NAME --plain\`. **Names:** \`doppler secrets --only-names\`. **Where from:** \`doppler status\`.
 - **Refresh** after the manifest or Doppler changed: \`doppler refresh\` (it also refreshes at every wake).
-- Never print, log, commit or paste secret values (in chat, PRs, issues or files).
+- Never print, log, commit or paste secret values (in chat, PRs, issues or files). To see what is here, use \`doppler status\` or \`doppler secrets --only-names\`; never read, cat or dump \`~/.runpane-cloud/doppler/secrets.json\`, \`~/.runpane-cloud/secrets.*\` or \`agent.env\` (those files are the values), and never run \`env\` or \`doppler run -- env\` where the output is seen.
 ${NOTES_END}`;
 }
 
