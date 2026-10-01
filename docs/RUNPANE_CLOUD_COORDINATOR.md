@@ -176,7 +176,8 @@ The directory is a JSON file on the coordinator (0600), written through `PUT /cl
 Cloud Sessions push branches and open pull requests, issues and comments **through the coordinator**, so no
 laptop is needed at runtime and no Session ever holds a credential that can write `master`. The code is in
 `packages/runpane/src/cloud/coordinator/github/` (Node standard library only; the App JWT is RS256 via
-`node:crypto`). It is off until you give the coordinator a credential.
+`node:crypto`). It is off until you give the coordinator a credential. Branches it pushes still run your
+repository's CI, with its secrets: read [CI on cloud branches](#ci-on-cloud-branches) before you turn it on.
 
 ### Turning it on
 
@@ -191,7 +192,8 @@ runpane cloud coordinator github unset --yes     # off; the credential is shredd
 `set` checks the credential with GitHub from your machine, then uploads it through the provider's files API
 to `~/.config/runpane-cloud-coordinator/github/app.pem` (or `pat`), 0600 in a 0700 directory. It is never on
 a command line, in the environment, in the provider's metadata or in this machine's settings. `set` then
-rewrites the config, restarts the unit and asks the broker whether it loaded. `coordinator deploy` rebuilds
+rewrites the config, restarts the unit and asks the broker whether it loaded. Every `set` also prints a
+`WARNING:` line (and `ciWarning` in `--json`) about [CI on cloud branches](#ci-on-cloud-branches). `coordinator deploy` rebuilds
 the config from the saved settings, so an in-place redeploy keeps the broker; the key file is left alone.
 
 - **App mode.** Validation finds the installation (pass `--installation-id` if there are several) and lists
@@ -271,9 +273,11 @@ settings, workflow dispatch, secret, collaborator or review endpoint.
   be expressed. `force` is allowed because the target is always the caller's own branch.
 - **Workflow files.** The coordinator keeps a blobless mirror of each repository's default branch under
   `<stateDir>/github-git/`. It imports the Session's bundle there and computes the merge base of the bundle's
-  head with the default branch. Any path under `.github/workflows/` that differs between the two is 403
-  `workflow-change-refused`, and nothing is pushed. GitHub itself also refuses workflow changes from a
-  credential without the Workflows permission, commit by commit. That refusal gets the same code.
+  head with the default branch. Any path under `.github/workflows/` or `.github/actions/` (local actions the
+  workflows call) that differs between the two is 403 `workflow-change-refused`, and nothing is pushed.
+  GitHub itself also refuses workflow changes from a credential without the Workflows permission, commit by
+  commit. That refusal gets the same code. This keeps a Session from changing *what* CI runs, not from
+  running code in it: see [CI on cloud branches](#ci-on-cloud-branches).
 - **Bundles.** `git bundle create - refs/heads/<b> --not origin/<default>` (exactly one ref, at most 50 MiB).
   Prerequisites the coordinator lacks are fetched from GitHub by id; a bundle built on commits GitHub doesn't
   have is 400. Without a bundle, `sha` must name a commit GitHub already has.
@@ -289,6 +293,32 @@ Errors are `{ok:false, code, message}`, plus `githubStatus` and `githubMessage` 
 `caller-node-mismatch` and `forbidden` 403, `not-found` 404, `read-token-unsupported` and
 `non-fast-forward` 409, `bad-request` 400, `too-large` 413, `github-rate-limited` and
 `broker-rate-limited` 429, `github-error` 502.
+
+### CI on cloud branches
+
+A Session holds no GitHub write credential, and the broker refuses workflow and local-action changes. **That
+does not keep the Session's code out of your CI.** `cloud/<host>/<branch>` is a branch of your repository, so:
+
+- GitHub runs the repository's existing workflows for the push (`on: push` without a branch filter) and for
+  the draft PR (`on: pull_request`). A PR from a branch of the same repository gets the repository's Actions
+  secrets and a `GITHUB_TOKEN` with whatever permissions those workflows grant.
+- Those workflows run code the Session wrote: `package.json` scripts, Makefiles, test files, build config.
+  A prompt-injected agent can use that to read the secrets or write with the `GITHUB_TOKEN`.
+- "Require approval for workflows from outside collaborators" does not apply: the push is not from a fork.
+
+Before you grant a repository to cloud Sessions, pick one of these for every workflow that holds secrets or
+writes:
+
+- **Skip cloud branches.** Add `branches-ignore: ['cloud/**']` to its `push` trigger. A `pull_request`
+  branch filter matches the PR's *base* branch, so for PRs skip the job instead:
+  `if: ${{ !startsWith(github.head_ref, 'cloud/') }}`. Run CI on a Session's work after a person has read it
+  and pushed it to another branch.
+- **Gate the secrets.** Move secrets into an Environment with required reviewers. A job on a cloud branch
+  then waits for a person before it gets them.
+- **Keep it secret-free.** A workflow with no secrets and `permissions: contents: read` (or `{}`) is safe
+  to run on cloud branches as is.
+
+`coordinator github set` prints this as a warning every time. It does not inspect your workflows.
 
 ### Audit
 

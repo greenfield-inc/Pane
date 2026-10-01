@@ -80,6 +80,12 @@ test('github set (App) uploads the key 0600 through the files API, rewrites the 
   assert.ok(!JSON.stringify(await harness.deps.store.readSettings()).includes('PRIVATE KEY'));
   assert.ok(statusCalls.includes('GET /cloud/github/status'));
   assert.doesNotMatch([...harness.out, ...harness.err].join('\n'), /PRIVATE KEY/u);
+  // Even unverified, set says that cloud/ branches and their PRs run the repository's own CI.
+  const ci = harness.err.find((line) => line.startsWith('WARNING: pushes to cloud/<host>/ branches'));
+  assert.ok(ci, harness.err.join('\n'));
+  assert.match(ci, /push and pull_request workflows/u);
+  assert.match(ci, /branches-ignore: \['cloud\/\*\*'\]/u);
+  assert.match(ci, /head_ref starts with cloud\//u);
 
   // An in-place redeploy keeps the broker config (the key file on the box is left alone).
   harness.world.files.delete(`${sandboxId}:${STAGE}/config.json`);
@@ -192,7 +198,9 @@ test('github set warns about an over-privileged App (but proceeds: every token i
     assert.ok(warning, harness.err.join('\n'));
     for (const extra of ['actions:write', 'statuses:write', 'gists:write', 'merge_queues:write', 'issue_fields:write', 'issue_types:write', 'organization_events:read']) assert.ok(warning.includes(extra), extra);
     // The excess grant, and acme/app not granted to any Session yet.
-    assert.equal(JSON.parse(harness.out[harness.out.length - 1]).warnings.length, 2);
+    const summary = JSON.parse(harness.out[harness.out.length - 1]);
+    assert.equal(summary.warnings.length, 2);
+    assert.match(summary.ciWarning, /Actions secrets/u);
   });
 });
 

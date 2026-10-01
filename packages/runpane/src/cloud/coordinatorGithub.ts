@@ -179,6 +179,12 @@ const errorSchema = boundary.object({ message: boundary.optional(boundary.string
 
 type BrokerStatus = ReturnType<typeof brokerStatusSchema.decode>;
 
+/**
+ * Printed on every `set`. The broker refuses workflow and local-action changes, but GitHub still runs
+ * the repository's existing workflows on the pushed branch and its PR, and those run the Session's code.
+ */
+const CI_WARNING = `pushes to cloud/<host>/ branches, and the PRs Sessions open from them, run each repository's existing push and pull_request workflows on code the Session wrote, with the repository's Actions secrets and GITHUB_TOKEN. Add branches-ignore: ['cloud/**'] to their push triggers and skip pull_request jobs whose head_ref starts with cloud/, or keep secrets in Environments with required reviewers. See docs/RUNPANE_CLOUD_COORDINATOR.md (CI on cloud branches).`;
+
 async function verifyApp(args: GitHubArgs, pem: string, deps: CloudDeps): Promise<Verified> {
   const rest = createGitHubRest(args.apiBaseUrl ?? 'https://api.github.com');
   const key = loadAppPrivateKey(pem);
@@ -261,6 +267,7 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
     verified = mode === 'app' ? await verifyApp(args, secret, deps) : await verifyPat(args, secret, deps);
     for (const warning of verified.warnings) deps.stderr(`WARNING: ${warning}`);
   }
+  deps.stderr(`WARNING: ${CI_WARNING}`);
 
   const github: CoordinatorGitHub = {
     mode,
@@ -292,6 +299,7 @@ async function set(args: GitHubArgs, deps: CloudDeps): Promise<number> {
     verifiedWithGitHub: verified !== null,
     repos: verified?.repos ?? null,
     warnings: verified?.warnings ?? [],
+    ciWarning: CI_WARNING,
     coordinator: broker,
   };
   if (args.json) {

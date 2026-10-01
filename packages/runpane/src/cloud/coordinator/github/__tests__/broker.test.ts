@@ -355,7 +355,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     assert.ok(!Object.keys(h.fake.refs('acme/app')).some((ref) => ref.startsWith('refs/tags/') || ref.includes('rp-two')));
   });
 
-  it('refuses any change under .github/workflows/ against the merge base (edit, add, delete, orphan history)', async () => {
+  it('refuses any change under .github/workflows/ or .github/actions/ against the merge base (edit, add, delete, orphan history)', async () => {
     const before = h.fake.refs('acme/app');
     const edit = new Work(h.fake);
     edit.commit('.github/workflows/ci.yml', 'on: push\njobs: { steal: {} }\n');
@@ -369,7 +369,10 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const orphan = new Work(h.fake);
     orphan.git('checkout', '-q', '--orphan', 'fresh');
     orphan.commit('.github/workflows/ci.yml', 'on: push\n', 'orphan');
-    for (const [name, work, range] of [['edit', edit, undefined], ['add', add, undefined], ['delete', remove, undefined], ['orphan', orphan, 'fresh']] as const) {
+    // A local composite action runs inside the existing workflows with their secrets.
+    const action = new Work(h.fake);
+    action.commit('.github/actions/setup/action.yml', 'runs: { using: composite, steps: [] }\n');
+    for (const [name, work, range] of [['edit', edit, undefined], ['add', add, undefined], ['delete', remove, undefined], ['orphan', orphan, 'fresh'], ['action', action, undefined]] as const) {
       const result = await h.call('s1', 'POST', 'push', { repo: 'acme/app', branch: `wf-${name}`, bundle: work.bundle(range) });
       assert.equal(result.status, 403, `${name}: ${JSON.stringify(result.body)}`);
       assert.equal(result.body.code, 'workflow-change-refused');

@@ -759,8 +759,15 @@ per-Session allowlist) and install, in the Session:
 What happens on a push: the Session bundles the branch against `origin/<default branch>` (the whole branch
 when they share no history) and uploads it; the coordinator pushes it to **`cloud/<host>/<branch>`**. It
 refuses the default branch, tags, deletes, other Sessions' namespaces and any change under
-`.github/workflows/`. Pull requests always open as **drafts** and carry a footer naming the Session. A plain
-`git push` to GitHub still fails in the Session: there is no write credential there.
+`.github/workflows/` or `.github/actions/`. Pull requests always open as **drafts** and carry a footer
+naming the Session. A plain `git push` to GitHub still fails in the Session: there is no write credential
+there.
+
+That does not keep the Session's code out of your CI. The pushed branch is in your repository, so GitHub runs
+the repository's existing `push` and `pull_request` workflows on it, and those run the Session's scripts and
+tests with the repository's Actions secrets. Exclude `cloud/**` from those workflows, or keep secrets in
+Environments with required reviewers: see
+[CI on cloud branches](RUNPANE_CLOUD_COORDINATOR.md#ci-on-cloud-branches).
 
 The Session calls the coordinator with its own caller token from its peers list
 (`~/.config/runpane-cloud/peers.json`, written by `new`); nothing new is copied in. The coordinator also
