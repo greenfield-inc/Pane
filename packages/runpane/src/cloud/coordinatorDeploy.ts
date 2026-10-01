@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { CloudDeps } from './commands';
 import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
+import { describeRevocation, repairRevokedCoordinatorClients, revokeSessionCoordinatorClients } from './coordinatorClients';
 import { pushDirectory } from './coordinatorSync';
 import { CloudProviderError, SANDBOX_HOME, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
@@ -278,6 +279,8 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   }));
   await saveDeployment(deps, next);
 
+  // Sessions whose coordinator client was revoked (coordinator destroy, revoke-clients) get a fresh one.
+  const repaired = await repairRevokedCoordinatorClients(deps);
   const coordinator = await pushDirectory(deps);
   const records = await deps.store.listHosts();
   const withoutClient = records.filter((record) => !record.meta.coordinatorPairingPath).map((record) => record.profile.cloud.hostname);
@@ -301,6 +304,8 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     directory: coordinator,
     peersFiles: peers,
     hostsWithoutCoordinatorClient: withoutClient,
+    coordinatorClientsPaired: repaired.done,
+    coordinatorClientsNotPaired: repaired.failed,
     timings,
   };
   if (args.json) {
@@ -313,8 +318,13 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     if (next.secrets) deps.stdout(`  Doppler secrets kept (${next.secrets.configs.map((config) => `${config.project}/${config.config}`).join(', ') || 'no configs'}; policy ${next.secrets.policy.mode}); see runpane cloud coordinator doppler status.`);
     if (next.github) deps.stdout(`  GitHub broker kept (${next.github.mode === 'app' ? `App ${next.github.appId ?? '?'}` : 'fine-grained PAT'}); see runpane cloud coordinator github status.`);
     deps.stdout(`  directory: ${coordinator.pushed ? `${coordinator.sessions} cloud Session${coordinator.sessions === 1 ? '' : 's'}` : `not pushed (${coordinator.reason})`}.`);
-    if (withoutClient.length > 0) {
-      deps.stdout(`  note: ${withoutClient.join(', ')} were created before the coordinator and have no coordinator client, so idle-stop skips them. New Sessions get one automatically.`);
+    if (repaired.done.length > 0) deps.stdout(`  paired a new coordinator client on ${repaired.done.join(', ')} (their old one was revoked).`);
+    for (const failure of repaired.failed) {
+      deps.stdout(`  note: ${failure.host} has no coordinator client yet (${failure.reason}); idle-stop skips it until a deploy pairs one.`);
+    }
+    const preCoordinator = withoutClient.filter((host) => !repaired.failed.some((failure) => failure.host === host));
+    if (preCoordinator.length > 0) {
+      deps.stdout(`  note: ${preCoordinator.join(', ')} were created before the coordinator and have no coordinator client, so idle-stop skips them. New Sessions get one automatically.`);
     }
     deps.stdout('  Stop it with runpane cloud coordinator stop --yes (idle-stop and wake-on-submit pause); start it again with runpane cloud coordinator start.');
   }
@@ -425,6 +435,7 @@ function coordinatorConfig(deployment: CoordinatorDeployment, listenHost: string
     pinnedDebSha256: deployment.pin?.sha256 ?? null,
     idleStop: idleStopConfig(deployment),
     reconcile: { enabled: deployment.reconcile, stopOrphans: deployment.stopOrphans === true },
+    revokedCallers: deployment.revokedCallers ?? [],
     github: githubConfig(deployment),
     secrets: secretsConfig(deployment),
   };
@@ -633,13 +644,15 @@ async function destroy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> 
   const deployment = await requireDeployment(deps);
   const { credentials, provider } = await loadProvider(deps);
   if (!credentials.tailscale) throw new Error('No Tailscale OAuth client saved; cannot delete the coordinator\'s tailnet device.');
+  // First take its token back from every awake Session, so a copy of its directory reaches none of them.
+  const clients = await revokeSessionCoordinatorClients(deps);
   const result = await removeCoordinator(provider, deps.bootstrap.createTailnet(credentials.tailscale), deployment, deps);
   const settings = await deps.store.readSettings();
   await deps.store.writeSettings({ ...settings, coordinator: { enabled: false } });
   await deps.store.removeSecretText('coordinator.json');
   await deps.store.removeSecretText('coordinator-secret');
-  report(args, deps, { ok: true, hostname: deployment.hostname, ...result },
-    `coordinator ${deployment.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${deployment.sandboxId} deleted, scoped key ${result.keyRevoked ? 'revoked' : `NOT revoked (${result.keyError ?? 'unknown'}); revoke ${deployment.scopedKeyId} in the provider dashboard`}. New Sessions no longer get a coordinator client.`);
+  report(args, deps, { ok: true, hostname: deployment.hostname, ...result, coordinatorClientsRevoked: clients.done, coordinatorClientsNotRevoked: clients.failed },
+    `coordinator ${deployment.hostname} destroyed: tailnet device${result.deletedNodeIds.length === 1 ? '' : 's'} ${result.deletedNodeIds.join(', ') || '(none)'} deleted, sandbox ${deployment.sandboxId} deleted, scoped key ${result.keyRevoked ? 'revoked' : `NOT revoked (${result.keyError ?? 'unknown'}); revoke ${deployment.scopedKeyId} in the provider dashboard`}. New Sessions no longer get a coordinator client.\n${describeRevocation(clients)}`);
   return 0;
 }
 

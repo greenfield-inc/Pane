@@ -24,6 +24,12 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   client (`pane --remote-setup --client-scope coordinator`). That token may call only
   `runpane:cloud:safe-to-stop` and `runpane:cloud:upgrade` (403 `ERR_COORDINATOR_CHANNEL_FORBIDDEN`
   otherwise); `/events` and WebSocket upgrades are refused. A leaked directory can't reach panels or shells.
+  The laptop keeps that token (`<host>.coordinator.pairing`) and pushes it in the directory, so taking it back
+  happens on the Sessions: `coordinator destroy` and `coordinator revoke-clients --yes` call
+  `runpane:cloud:coordinator-client:revoke` (full clients only) on every awake Session and forget the token
+  locally. A Session that is asleep keeps accepting the old token until `revoke-clients` reaches it. The next
+  `coordinator deploy` pairs a fresh client (`runpane:cloud:coordinator-client:pair`) on the Sessions it
+  revoked, so a redeploy never reuses a token an old directory held.
 - **The provider key.** It holds a scoped boat key with `sandbox.read`, `sandbox.stop` and
   `sandbox.resume` only (`POST /api-keys/scoped`). There is no create, fork or delete: `runpane cloud new`
   and `destroy` run on the laptop with the unscoped key. Scope the key to the Sessions' sandbox ids when
@@ -132,7 +138,11 @@ Every `/cloud/*` call needs `Authorization: Bearer rpc1.<callerId>.<mac>`, where
 - **Peer callers.** The `callerId` is a cloud Session id. A peer token stops working as soon as that
   Session leaves the directory. Peers are limited to 60 requests a minute.
 - **User callers.** The `callerId` is `user:<name>`, for the laptop CLI.
-- **Revoking.** Revoke one caller with `revokedCallers`, or everyone by rotating the secret.
+- **Revoking.** `runpane cloud coordinator revoke-caller <user:name|host> [--undo]` adds one caller to
+  `revokedCallers` (403 `auth-revoked`). The laptop keeps that list in its deployment record and writes it
+  into every config it rewrites (`deploy`, `github set`, `doppler set`), so a hand edit of the config is not
+  needed and would be overwritten. To revoke everyone, destroy and redeploy the coordinator: `destroy`
+  deletes the caller secret, and the next `deploy` mints a new one and rewrites each awake Session's peers list.
 
 | Endpoint | Callers | Purpose |
 |---|---|---|

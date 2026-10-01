@@ -540,6 +540,8 @@
         "cloud coordinator stop",
         "cloud coordinator start",
         "cloud coordinator destroy",
+        "cloud coordinator revoke-clients",
+        "cloud coordinator revoke-caller",
         "cloud coordinator github set",
         "cloud coordinator github status",
         "cloud coordinator github audit",
@@ -867,6 +869,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud coordinator destroy": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator revoke-clients": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud coordinator revoke-caller": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud coordinator github set": {

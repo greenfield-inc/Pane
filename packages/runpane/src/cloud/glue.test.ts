@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { parseCloudArgs } from './args';
 import { runCloudCommand } from './commands';
 import { isCoordinatorLifecycleCommand, parseCoordinatorArgs } from './coordinatorDeploy';
+import { parseCoordinatorRevokeArgs } from './coordinatorRevoke';
 import { parsePeersArgs } from './peers';
 import { createTestHarness, type TestHarness } from './__tests__/fakes';
 
@@ -24,6 +25,10 @@ interface GlueJson {
   agentCredentials?: string[];
   status?: string;
   repaired?: { oldNodeId: string; nodeId: string } | null;
+  coordinatorClientsRevoked?: string[];
+  coordinatorClientsNotRevoked?: { host: string; reason: string }[];
+  coordinatorClientsPaired?: string[];
+  revoked?: string[];
 }
 
 function lastJson(harness: TestHarness): GlueJson {
@@ -177,6 +182,72 @@ test('coordinator destroy still finishes when boat refuses the key revocation, a
   assert.ok(harness.world.calls.includes('revoke-key sak_fake1'));
   assert.match(harness.out.join('\n'), /scoped key NOT revoked \(boat DELETE .*HTTP 500\); revoke sak_fake1 in the provider dashboard/u);
   assert.equal((await harness.deps.store.readSettings()).coordinator?.enabled, false);
+});
+
+test('coordinator destroy revokes its client on awake Sessions and forgets the token; a redeploy pairs a new one', async () => {
+  const harness = await createTestHarness();
+  harness.world.pushedDirectories = [];
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  const awake = await newHost(harness, 'Awake');
+  const asleep = await newHost(harness, 'Asleep');
+  const old = await newHost(harness, 'Old');
+  harness.world.daemons.set(awake, { sessions: [], peers: [], coordinatorClients: ['coordinator-token-old'] });
+  harness.world.daemons.set(old, { sessions: [], peers: [] });
+  const pairingOf = async (host: string) => (await harness.deps.store.listHosts()).find((record) => record.profile.cloud.hostname === host)?.meta;
+
+  assert.equal(await run(harness, ['coordinator', 'destroy', '--yes', '--json']), 0);
+  const destroyed = lastJson(harness);
+  assert.deepEqual(destroyed.coordinatorClientsRevoked, [awake]);
+  assert.deepEqual(destroyed.coordinatorClientsNotRevoked?.map((failure) => failure.host).sort(), [asleep, old].sort());
+  assert.match(JSON.stringify(destroyed.coordinatorClientsNotRevoked), /predates coordinator-client revocation/u);
+  assert.deepEqual(harness.world.daemons.get(awake)?.coordinatorClients, []);
+  const awakeMeta = await pairingOf(awake);
+  assert.equal(awakeMeta?.coordinatorPairingPath, undefined, 'the revoked token is forgotten here');
+  assert.equal(awakeMeta?.coordinatorClientRevoked, true);
+  await assert.rejects(fs.access(harness.deps.store.coordinatorPairingPath(awake)));
+  assert.ok((await pairingOf(asleep))?.coordinatorPairingPath, 'an unreachable Session keeps its record for a later revoke-clients');
+
+  // The asleep one wakes: revoke-clients finishes the job.
+  harness.world.daemons.set(asleep, { sessions: [], peers: [], coordinatorClients: ['coordinator-token-old'] });
+  await assert.rejects(run(harness, ['coordinator', 'revoke-clients', '--json']), /Rerun with --yes/u);
+  assert.equal(await run(harness, ['coordinator', 'revoke-clients', '--yes', '--json']), 1, 'Old still runs a Pane without the channel');
+  assert.deepEqual(lastJson(harness).revoked, [asleep]);
+  assert.deepEqual(harness.world.daemons.get(asleep)?.coordinatorClients, []);
+
+  // A redeploy pairs a fresh client where this machine revoked one, and the directory carries the new token.
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  assert.deepEqual(lastJson(harness).coordinatorClientsPaired?.sort(), [asleep, awake].sort());
+  const fresh = harness.world.daemons.get(awake)?.coordinatorClients ?? [];
+  assert.equal(fresh.length, 1);
+  assert.notEqual(fresh[0], 'coordinator-token-old');
+  assert.equal((await pairingOf(awake))?.coordinatorClientRevoked, undefined);
+  assert.equal((await fs.stat(harness.deps.store.coordinatorPairingPath(awake))).mode & 0o777, 0o600);
+  const directory = harness.world.pushedDirectories[harness.world.pushedDirectories.length - 1];
+  const sessions = Array.isArray(directory.sessions) ? directory.sessions : [];
+  assert.ok(sessions.some((session) => JSON.stringify(session).includes(fresh[0])));
+  assert.doesNotMatch([...harness.out, ...harness.err].join('\n'), /coordinator-token-/u);
+});
+
+test('coordinator revoke-caller keeps revokedCallers in the config across redeploys, and --undo lifts it', async () => {
+  const harness = await createTestHarness();
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  const host = await newHost(harness, 'Peer');
+  const [record] = await harness.deps.store.listHosts();
+  const deployment = (await harness.deps.store.readSettings()).coordinator?.deployment;
+  assert.ok(deployment);
+  const config = () => JSON.parse(harness.world.files.get(`${deployment.sandboxId}:/home/user/.runpane-cloud/coordinator-stage/config.json`) ?? '{}');
+
+  assert.equal(await run(harness, ['coordinator', 'revoke-caller', 'user:old-laptop', '--json']), 0);
+  assert.equal(await run(harness, ['coordinator', 'revoke-caller', host, '--json']), 0);
+  assert.deepEqual(config().revokedCallers, [record.profile.cloud.sessionId, 'user:old-laptop'].sort());
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  assert.deepEqual(config().revokedCallers, [record.profile.cloud.sessionId, 'user:old-laptop'].sort(), 'a redeploy keeps it');
+  assert.equal(await run(harness, ['coordinator', 'revoke-caller', 'user:old-laptop', '--undo', '--json']), 0);
+  assert.deepEqual(config().revokedCallers, [record.profile.cloud.sessionId]);
+  assert.throws(() => parseCoordinatorRevokeArgs(['revoke-caller']), /revoke-caller <user:name/u);
+  await assert.rejects(run(harness, ['coordinator', 'revoke-caller', 'user:bad name']), /user:<name>/u);
 });
 
 test('new after a deploy gets a coordinator client and a peers list naming the coordinator', async () => {

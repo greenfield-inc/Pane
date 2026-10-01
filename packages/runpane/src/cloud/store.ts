@@ -84,6 +84,8 @@ export interface CoordinatorDeployment {
    * config's read-only service token lives on the coordinator (0600), never on this machine.
    */
   secrets?: CoordinatorSecrets;
+  /** `coordinator revoke-caller`: caller ids (user:<name> or a Session id) the coordinator's API refuses. */
+  revokedCallers?: string[];
 }
 
 export interface CoordinatorSecrets {
@@ -155,6 +157,8 @@ interface CloudHostMeta {
   magicDnsName: string;
   pairingPath: string;
   coordinatorPairingPath?: string;
+  /** This machine revoked the coordinator's client here; the next `coordinator deploy` pairs a new one. */
+  coordinatorClientRevoked?: boolean;
   paneSource: PaneSource;
   daemonVersion?: string;
   pinnedVersion?: string;

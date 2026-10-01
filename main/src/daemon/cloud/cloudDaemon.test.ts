@@ -4,6 +4,8 @@ import { createDefaultRemoteDaemonConfig } from '../../../../shared/types/remote
 import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/panels';
 import type { CloudSafeToStopRequest } from '../../../../shared/types/cloudDaemon';
 import type { AgentState } from '../../../../shared/types/agentStatus';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { hashRemoteDaemonToken } from '../auth';
 import { PaneCommandRegistry } from '../commandRegistry';
 import { UserClientActivityTracker } from './clientActivity';
 import { registerCloudDaemonHandlers, type CloudDaemonDependencies } from './cloudDaemon';
@@ -73,6 +75,9 @@ function setup(overrides: Partial<CloudDaemonDependencies> = {}) {
     pendingPrChecks: async () => [],
     connectedClients: () => connected,
     remoteConfig: () => config,
+    writeRemoteConfig: async (next) => {
+      config.host = next.host;
+    },
     checkpointWal,
     paneDirectory: '/nonexistent-pane-dir',
     databaseFile: '/nonexistent-pane-dir/sessions.db',
@@ -194,5 +199,24 @@ describe('registerCloudDaemonHandlers', () => {
     expect(result.safe).toBe(false);
     expect(result.flush).toMatchObject({ durable: false });
     expect(result.blockers).toEqual([expect.objectContaining({ condition: 'flush-failed' })]);
+  });
+
+  it('revokes the coordinator\'s client records only, and pairs a single new one in their place', async () => {
+    const { commandRegistry, config } = setup();
+    config.host.clients.push({ ...client('coord-old'), scope: 'coordinator' });
+
+    const paired = await commandRegistry.invoke('runpane:cloud:coordinator-client:pair', []);
+    expect(paired).toMatchObject({ ok: true, revokedClientIds: ['coord-old'] });
+    const { clientId, token } = decodeBoundary(paired, boundary.object({ clientId: boundary.string, token: boundary.string }));
+    expect(config.host.clients.map(record => [record.id, record.scope])).toEqual([
+      ['desktop', undefined], ['peer-a', 'peer'], [clientId, 'coordinator'],
+    ]);
+    expect(config.host.clients[2]).toMatchObject({ label: 'runpane-cloud-coordinator', tokenHash: hashRemoteDaemonToken(token) });
+
+    await expect(commandRegistry.invoke('runpane:cloud:coordinator-client:revoke', []))
+      .resolves.toEqual({ ok: true, revokedClientIds: [clientId] });
+    expect(config.host.clients.map(record => record.id)).toEqual(['desktop', 'peer-a']);
+    await expect(commandRegistry.invoke('runpane:cloud:coordinator-client:revoke', []))
+      .resolves.toEqual({ ok: true, revokedClientIds: [] });
   });
 });

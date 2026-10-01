@@ -1458,6 +1458,28 @@
       ]
     },
     {
+      "name": "cloud coordinator revoke-clients",
+      "summary": "Revoke the coordinator's paired client on every awake cloud Session and forget its token on this machine.",
+      "usage": [
+        "runpane cloud coordinator revoke-clients --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "cloud coordinator revoke-caller",
+      "summary": "Refuse one caller of the coordinator's API (a user:<name> token or a cloud Session's peer token), or accept it again.",
+      "usage": [
+        "runpane cloud coordinator revoke-caller <user:name|host|Session id> [--undo] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "cloud coordinator destroy",
       "summary": "Delete the coordinator: its tailnet device, its sandbox, and its scoped provider key.",
       "usage": [
@@ -3769,6 +3791,26 @@
         "Options:",
         "  --json   Print machine-readable output."
       ],
+      "cloud coordinator revoke-clients": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-clients --yes [--json]",
+        "",
+        "Revoke the coordinator's paired client on every awake cloud Session and forget its token here. The next coordinator deploy pairs a fresh one.",
+        "",
+        "Options:",
+        "  --yes    Confirm; idle-stop skips these Sessions until coordinator deploy pairs a new client.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud coordinator revoke-caller": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-caller <user:name|host|Session id> [--undo] [--json]",
+        "",
+        "Refuse one caller of the coordinator's API (403 auth-revoked); --undo accepts it again. Kept across redeploys.",
+        "",
+        "Options:",
+        "  --undo   Accept the caller again.",
+        "  --json   Print machine-readable output."
+      ],
       "cloud coordinator destroy": [
         "Usage:",
         "  runpane cloud coordinator destroy --yes [--json]",
@@ -5442,6 +5484,20 @@
         "",
         "`runpane cloud coordinator start` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest cloud coordinator start"
+      ],
+      "cloud coordinator revoke-clients": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-clients --yes [--json]",
+        "",
+        "`runpane cloud coordinator revoke-clients` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator revoke-clients"
+      ],
+      "cloud coordinator revoke-caller": [
+        "Usage:",
+        "  runpane cloud coordinator revoke-caller <user:name|host|Session id> [--undo] [--json]",
+        "",
+        "`runpane cloud coordinator revoke-caller` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud coordinator revoke-caller"
       ],
       "cloud coordinator destroy": [
         "Usage:",
@@ -15865,10 +15921,65 @@
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
         ]
       },
+      "cloud coordinator revoke-clients": {
+        "name": "cloud coordinator revoke-clients",
+        "summary": "Revoke the coordinator's paired client on every awake cloud Session and forget its token on this machine.",
+        "details": "Calls runpane:cloud:coordinator-client:revoke on each cloud Session this machine paired the coordinator on, deletes the local .coordinator.pairing file and pushes the directory, so a copy of the coordinator's directory no longer reaches those Sessions. coordinator destroy does the same first. A Session that is asleep or unreachable keeps its record and is named; rerun once it is awake. The next coordinator deploy pairs a fresh client on the Sessions revoked here. Exits 1 when any Session was not revoked.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm; idle-stop skips these Sessions until coordinator deploy pairs a new client."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator revoke-clients --yes"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
+      "cloud coordinator revoke-caller": {
+        "name": "cloud coordinator revoke-caller",
+        "summary": "Refuse one caller of the coordinator's API (a user:<name> token or a cloud Session's peer token), or accept it again.",
+        "details": "Adds the caller id to revokedCallers in this machine's deployment record, rewrites the coordinator config and restarts the coordinator; deploy, github set and doppler set keep it. A host label, hostname or Session id names that Session's peer caller. Its calls then get 403 auth-revoked. --undo removes it again. To revoke every caller, destroy and redeploy the coordinator (a new caller secret).",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<caller>",
+            "required": true,
+            "description": "user:<name>, or a cloud host's label, hostname or Session id."
+          },
+          {
+            "name": "--undo",
+            "required": false,
+            "description": "Accept the caller again."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud coordinator revoke-caller user:old-laptop"
+        ],
+        "notes": [
+          "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
+        ]
+      },
       "cloud coordinator destroy": {
         "name": "cloud coordinator destroy",
         "summary": "Delete the coordinator: its tailnet device, its sandbox, and its scoped provider key.",
-        "details": "Deletes the coordinator's tailnet device first, then its sandbox, then revokes its scoped provider key, and removes coordinator.json and the caller secret. Existing cloud Sessions are not touched.",
+        "details": "First revokes the coordinator's paired client on every awake cloud Session (as coordinator revoke-clients does) and names any it could not reach. Then deletes the coordinator's tailnet device, its sandbox, revokes its scoped provider key, and removes coordinator.json and the caller secret. The Sessions themselves keep running.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [

@@ -14,7 +14,10 @@ afterEach(async () => {
 async function startServer() {
   const calls: string[] = [];
   const registry = new PaneCommandRegistry();
-  for (const channel of ['runpane:cloud:safe-to-stop', 'runpane:cloud:upgrade', 'runpane:panels:submit', 'runpane:repos:list']) {
+  for (const channel of [
+    'runpane:cloud:safe-to-stop', 'runpane:cloud:upgrade', 'runpane:cloud:coordinator-client:pair',
+    'runpane:cloud:coordinator-client:revoke', 'runpane:panels:submit', 'runpane:repos:list',
+  ]) {
     registry.register(channel, (..._args: PaneCommandValue[]) => {
       calls.push(channel);
       return { ok: true };
@@ -106,7 +109,8 @@ describe('coordinator-scoped client on the remote HTTP API', () => {
 
   it('is refused every other channel, the event stream and WebSocket upgrades', async () => {
     const { server, calls } = await startServer();
-    for (const channel of ['runpane:panels:submit', 'runpane:repos:list']) {
+    // Nor can it pair itself a fresh token or revoke the record the laptop revokes it by.
+    for (const channel of ['runpane:panels:submit', 'runpane:repos:list', 'runpane:cloud:coordinator-client:pair', 'runpane:cloud:coordinator-client:revoke']) {
       const response = await request(server, 'POST', '/invoke', 'coord-token', { channel, args: [{ panelId: 'shell', input: 'id' }] });
       expect([response.statusCode, errorCode(response.body)]).toEqual([403, 'ERR_COORDINATOR_CHANNEL_FORBIDDEN']);
     }

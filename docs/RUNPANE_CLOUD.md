@@ -656,7 +656,9 @@ runpane cloud coordinator status                # the coordinator itself: sandbo
 runpane cloud coordinator stop --yes            # pause idle-stop and wake-on-submit (billing stops)
 runpane cloud coordinator start                 # bring it back (one boat start)
 runpane cloud coordinator deploy --yes          # run again to update it in place; no new sandbox
-runpane cloud coordinator destroy --yes         # device, sandbox and scoped key; Sessions untouched
+runpane cloud coordinator destroy --yes         # its client on awake Sessions, then device, sandbox and scoped key
+runpane cloud coordinator revoke-clients --yes  # take its client back from Sessions that were asleep at destroy
+runpane cloud coordinator revoke-caller user:old-laptop   # refuse one caller of its API (--undo to lift)
 
 runpane cloud coordinator status "api work"     # its view of one Session, without waking it
 runpane cloud coordinator wake "api work"
