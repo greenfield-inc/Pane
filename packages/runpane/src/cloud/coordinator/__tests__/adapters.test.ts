@@ -149,7 +149,8 @@ describe('daemon probe decoding', () => {
         return jsonResponse(200, { ok: true, status: 'ready', version: '2.4.142', readiness: { state: 'ready' } });
       },
     });
-    assert.equal((await probe.health('https://d', 'tok')).version, '2.4.142');
+    const health = await probe.health('https://d', 'tok');
+    assert.ok(health.reachable && health.version === '2.4.142');
     await probe.health('https://d', null);
     assert.deepEqual(sent, ['Bearer tok', null]);
   });

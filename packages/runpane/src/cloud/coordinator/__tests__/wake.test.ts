@@ -86,9 +86,9 @@ describe('WakeService.wake', () => {
     provider.bootAfterGets = 3;
     let healthChecks = 0;
     const original = probe.health.bind(probe);
-    probe.health = async (baseUrl) => {
+    probe.health = async (baseUrl, token) => {
       healthChecks += 1;
-      return healthChecks < 3 ? { reachable: false, error: 'booting' } : original(baseUrl);
+      return healthChecks < 3 ? { reachable: false, error: 'booting' } : original(baseUrl, token);
     };
     const result = await wake.wake('s1', { wait: true });
     assert.equal(status(result), 'awake');
