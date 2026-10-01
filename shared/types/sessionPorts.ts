@@ -27,7 +27,7 @@ export interface SessionPort {
   httpsPort: number;
   url: string;
   scheme: SessionPortScheme;
-  /** Path appended to the URL (the service is always mounted at `/`). */
+  /** Path appended to the URL. Serve forwards the whole tailnet port, so the service sees this path unchanged. */
   path: string;
   source: SessionPortSource;
   /** For `manifest` ports: the repository directory whose `.runpane/ports.json` declares it. */

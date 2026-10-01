@@ -421,6 +421,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       if (channel === 'archive:get-progress') {
         return success(null);
       }
+      if (channel === 'runpane:ports:list') {
+        // The local daemon off a cloud Session: the Ports row stays hidden.
+        return success({ ok: true, available: false, scheme: 'https', autoOpen: false, ports: [], suggested: [], manifests: [] });
+      }
       return success();
     };
 

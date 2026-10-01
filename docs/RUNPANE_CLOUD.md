@@ -428,14 +428,21 @@ runpane cloud port close "api work" web
 - **A suggested port** (dimmed, dashed) is something a panel started listening on that isn't published. **Open on
   tailnet** publishes it. If that tailnet port is already taken by another Serve entry, the row asks before replacing it.
 - The row follows the daemon you're connected to: it updates when ports change, when the connection comes back, and every
-  30 s. It stays hidden off a cloud Session and on daemons without ports support.
+  30 s. Switching hosts or losing the connection clears it at once, together with any question it was asking, so a
+  Close or Replace never reaches a host other than the one whose chip you clicked. It stays hidden off a cloud Session
+  and on daemons without ports support. If the first read fails, the row says why and offers **Retry**; a copy the
+  clipboard refuses says so too.
 
 #### How a published port behaves
 
 - **The URL.** The tailnet port defaults to the service's own port, so `5173` becomes `https://<host>:5173/`,
   which is stable and guessable. `--https-port` picks another. `:443` stays Pane's own, and so does the
-  daemon's port (42137). `--path /s/demo` only changes the link that is printed and shown. The service is still
-  served from `/`. `--name` defaults to `port-<port>` (lowercase letters, digits and hyphens).
+  daemon's port (42137). `--name` defaults to `port-<port>` (lowercase letters, digits and hyphens).
+- **The path is the service's to handle.** `--path /s/demo` only changes the link that is printed and shown.
+  Tailscale Serve publishes the whole tailnet port (`tailscale serve --https=<tailnet port> http://127.0.0.1:<port>`)
+  and passes every request path through unchanged, so opening the link sends `GET /s/demo` to the service.
+  Nothing strips or rewrites the path: the service must answer `/s/demo` itself (for example a dev server's
+  base path setting). Every other path on that port reaches the service too.
 - **Running `open` again** for a port that is already published prints `Already published` with the same URL.
 - **The service can start later.** A port can be published before anything listens on it. Its URL answers
   502 until the service starts, and the link stays the same.
@@ -492,7 +499,7 @@ secrets, so it's safe to commit.
 | `ports[].name` | yes | Lowercase letters, digits and hyphens, at most 40 characters; unique in the file |
 | `ports[].port` | yes | The local port the service listens on in the Session; unique in the file |
 | `ports[].https_port` | no | The tailnet port of the URL. Defaults to `port`; never `443` |
-| `ports[].path` | no | The path shown in the link (default `/`); the service is still served from `/` |
+| `ports[].path` | no | The path shown in the link (default `/`). Serve forwards it unchanged, so the service must answer it itself |
 
 - **The schema is strict.** Any other key, a duplicate name or port, `https_port: 443`, more than 20 ports or a
   file over 64 KiB makes the whole file invalid. `port list` shows `Manifest ...: INVALID` with the reason, and

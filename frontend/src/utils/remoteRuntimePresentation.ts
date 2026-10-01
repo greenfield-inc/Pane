@@ -205,6 +205,16 @@ export function getCloudSwitchFailure(
   };
 }
 
+/** What to tell the user when "Copy wake command" cannot reach the clipboard: the command itself, to run by hand. */
+export function getCopyWakeCommandFailure(command: string, cause: unknown): CloudSwitchFailure {
+  return {
+    title: 'Could not copy the wake command',
+    error: 'The clipboard refused it. Run this command in a terminal to wake the cloud Session.',
+    command,
+    details: cause instanceof Error ? cause.message : String(cause),
+  };
+}
+
 export function getRemoteFooterStatus(
   connectionState: RemotePaneConnectionState,
   hostState: RemoteDaemonHostRuntimeState,

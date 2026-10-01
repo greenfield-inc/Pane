@@ -3987,7 +3987,7 @@ export const RUNPANE_CONTRACT = {
         "  <port>                       The local port the service listens on (127.0.0.1 or 0.0.0.0).",
         "  --name <name>                A short name (default port-<port>).",
         "  --https-port <port>          The tailnet port of the URL (default: the same port; 443 and the daemon's port stay Pane's).",
-        "  --path </path>               Path shown in the link (the service is still served from /).",
+        "  --path </path>               Path shown in the link; Serve forwards it unchanged, so the service must answer it.",
         "  --scheme <auto|https|http>   auto (default): HTTPS, or plain HTTP inside the tailnet when the Session's name has no TLS certificate.",
         "  --yes                        Replace another Tailscale Serve entry on that tailnet port (e.g. a plain tcp forward).",
         "  --json                       Print JSON output."
@@ -4033,7 +4033,7 @@ export const RUNPANE_CONTRACT = {
         "  <port>                         The local port in the Session.",
         "  --name <name>                  A short name (default port-<port>).",
         "  --https-port <port>            The tailnet port of the URL (default: the same port; 443 and the daemon's port stay Pane's).",
-        "  --path </path>                 Path shown in the link (the service is still served from /).",
+        "  --path </path>                 Path shown in the link; Serve forwards it unchanged, so the service must answer it.",
         "  --scheme <auto|https|http>     auto (default): HTTPS, or plain HTTP inside the tailnet when the Session's name has no TLS certificate.",
         "  --yes                          Replace another Tailscale Serve entry on that tailnet port (e.g. a plain tcp forward).",
         "  --json                         Print machine-readable output."
@@ -16548,7 +16548,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--path",
             "value": "</path>",
             "required": false,
-            "description": "Path shown in the link (the service is still served from /)."
+            "description": "Path shown in the link; Serve forwards it unchanged, so the service must answer it."
           },
           {
             "name": "--scheme",
@@ -16702,7 +16702,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--path",
             "value": "</path>",
             "required": false,
-            "description": "Path shown in the link (the service is still served from /)."
+            "description": "Path shown in the link; Serve forwards it unchanged, so the service must answer it."
           },
           {
             "name": "--scheme",

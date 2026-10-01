@@ -321,6 +321,10 @@ async function installRemoteHostRoute(
       case 'panels:get-output':
         result = TERMINAL_SCROLLBACK;
         break;
+      case 'runpane:ports:list':
+        // A host off a cloud Session: the Ports row stays hidden.
+        result = { ok: true, available: false, scheme: 'https', autoOpen: false, ports: [], suggested: [], manifests: [] };
+        break;
       default:
         // Panel mutations and terminal writes acknowledge without doing work;
         // no clip depends on the host acting on them.
