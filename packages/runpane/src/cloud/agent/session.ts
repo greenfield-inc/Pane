@@ -15,6 +15,8 @@ export interface AgentDeps {
   git: GitRunner;
   /** Overrides the broker from the peers list (tests). */
   broker?: BrokerClient;
+  /** The only host (`host[:port]`) git-credential-runpane answers for; github.com unless a test serves git locally. */
+  gitHost?: string;
 }
 
 export function defaultAgentDeps(): AgentDeps {
