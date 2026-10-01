@@ -54,6 +54,12 @@ export interface SessionPortsDependencies {
   log(message: string): void;
 }
 
+/** The state as listing and detection see it: an unreadable file is no ports plus why. */
+interface PortsStateView {
+  state: PortsState;
+  stateError?: string;
+}
+
 interface OpenOptions {
   source: SessionPortSource;
   repo?: string;
@@ -115,7 +121,7 @@ export class SessionPortsService {
   }
 
   /** For listing and detection: an unreadable state file shows as no ports plus `stateError`. */
-  private readStateForView(): { state: PortsState; stateError?: string } {
+  private readStateForView(): PortsStateView {
     try {
       return { state: readPortsState(this.deps.statePath) };
     } catch (error) {
