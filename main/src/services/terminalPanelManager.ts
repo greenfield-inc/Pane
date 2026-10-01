@@ -86,6 +86,7 @@ import {
 } from './agents/agentIdentity';
 import { detectAgentFromScreen } from './agents/agentScreenSignature';
 import { readForegroundExecutablePath } from '../utils/foregroundProcess';
+import { processTrees, terminateProcesses } from './strayPanelProcesses';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import {
   bracketedPaste,
@@ -2541,6 +2542,18 @@ export class TerminalPanelManager extends EventEmitter {
     this.terminals.clear();
     this.visibleViewersByPanel.clear();
     this.serializedBuffers.clear();
+  }
+
+  /**
+   * Destroy every terminal and wait for its whole process tree to exit
+   * (SIGTERM, then SIGKILL after `graceMs`). `destroyAllTerminals` signals
+   * only each PTY's shell; a daemon stop must not leave agents running under
+   * a shell that ignored it. Returns the pids that survived.
+   */
+  async stopAllTerminalProcesses(graceMs = 5_000): Promise<number[]> {
+    const pids = processTrees([...this.terminals.values()].map(terminal => terminal.pty.pid));
+    this.destroyAllTerminals();
+    return terminateProcesses(pids, { graceMs });
   }
 
   getActiveTerminals(): string[] {

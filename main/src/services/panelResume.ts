@@ -4,14 +4,16 @@
  * A Runpane Cloud sandbox stops with a hard power-off (no SIGTERM), so every
  * headless start is treated as recovery from power loss:
  *
- * 1. `recoverAfterRestart` runs once, before any terminal starts. No PTY
- *    survives a restart, so persisted `isInitialized`/`isCliReady` are stale
- *    and are cleared. An agent panel that was running is marked
+ * 1. `recoverAfterRestart` runs once, before any terminal starts. No PTY of
+ *    this process exists yet, so persisted `isInitialized`/`isCliReady` are
+ *    stale and are cleared. An agent panel that was running is marked
  *    `wasInterrupted`, which the launch resolver in terminalPanelManager
  *    turns into `claude --resume <id>`, `codex resume <id>` and so on.
  * 2. `resumeInterruptedAgents` starts those agent panels right away (for
  *    Panes that are not archived), so a woken sandbox has its agents at their
- *    composers before anyone submits.
+ *    composers before anyone submits. A daemon restart without a power-off
+ *    can leave the old agent running with nobody attached; it is stopped
+ *    before its panel resumes, so one conversation never has two agents.
  * 3. `ensureRunning` starts any other terminal panel on first use (submit,
  *    input, wait). Plain shells cannot be resumed: their processes died with
  *    the machine, so they start fresh in the Pane's worktree.
@@ -42,6 +44,11 @@ export interface PanelResumeDeps {
   waitForLaunch(panelId: string, timeoutMs: number): Promise<boolean>;
   /** True or false when Pane can read Claude's transcripts; undefined when it cannot tell. */
   claudeTranscriptExists(sessionId: string): boolean | undefined;
+  /**
+   * Stop processes an earlier Pane process left running for this panel.
+   * Returns the pids it signalled and any that are still alive.
+   */
+  stopStrayProcesses(panelId: string): Promise<{ stopped: number[]; survivors: number[] }>;
   log(message: string, error?: Error): void;
 }
 
@@ -270,6 +277,7 @@ export class PanelResume {
       // Re-read: recovery or another caller may have updated the state.
       const panel = this.deps.getPanel(panelId);
       if (!panel) throw new Error(`Panel ${panelId} not found`);
+      await this.stopStrayAgent(panel);
       await this.forgetMissingClaudeConversation(panel);
       await this.deps.startTerminal(this.deps.getPanel(panelId) ?? panel, session.worktreePath);
       if (!this.deps.isRunning(panelId)) throw new Error('the terminal did not start');
@@ -280,6 +288,23 @@ export class PanelResume {
       this.setEntry(panelId, { state: 'failed', error: failure.message });
       this.deps.log(`[PanelResume] Could not start panel ${panelId}`, failure);
       throw error;
+    }
+  }
+
+  /**
+   * A daemon that was SIGKILLed (or crashed) can leave the panel's shell and
+   * agent running with nobody attached. Resuming next to it would run two
+   * agents on one conversation, so stop the old one first, and refuse to
+   * start while any of it survives.
+   */
+  private async stopStrayAgent(panel: ToolPanel): Promise<void> {
+    if (!panelAgentType(terminalState(panel))) return;
+    const { stopped, survivors } = await this.deps.stopStrayProcesses(panel.id);
+    if (stopped.length > 0) {
+      this.deps.log(`[PanelResume] Panel ${panel.id} still had ${stopped.length} process(es) from an earlier Pane process (pids ${stopped.join(', ')}); stopped them before resuming`);
+    }
+    if (survivors.length > 0) {
+      throw new Error(`an earlier process for this panel is still running (pids ${survivors.join(', ')})`);
     }
   }
 

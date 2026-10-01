@@ -8,6 +8,12 @@ import {
 import { setupConsoleWrapper } from '../utils/consoleWrapper';
 import { usageManager } from '../services/usage/usageManager';
 
+/**
+ * systemd SIGKILLs a stop that runs past TimeoutStopSec (90 s by default),
+ * and that kill skips the shutdown steps still pending. Exit well before it.
+ */
+const SHUTDOWN_DEADLINE_MS = 30_000;
+
 let daemonHost: PaneDaemonHost | null = null;
 let shutdownInProgress = false;
 let startupRegistered = false;
@@ -31,6 +37,11 @@ async function shutdown(exitCode: number): Promise<void> {
   }
 
   shutdownInProgress = true;
+  console.log('[Pane daemon] Shutting down');
+  setTimeout(() => {
+    console.error(`[Pane daemon] Shutdown did not finish within ${SHUTDOWN_DEADLINE_MS} ms; exiting`);
+    process.exit(exitCode);
+  }, SHUTDOWN_DEADLINE_MS).unref();
   try {
     usageManager.stop();
     await daemonHost?.shutdown();
