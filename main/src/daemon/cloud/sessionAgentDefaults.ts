@@ -26,7 +26,7 @@ export interface AgentDefaults {
 }
 
 /** What happened to Claude Code's `model` in this Session. */
-export type ClaudeModelOutcome =
+type ClaudeModelOutcome =
   | 'set'
   | 'current'
   | 'kept-session-choice'
