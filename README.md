@@ -367,6 +367,11 @@ identity and Git branches separate, choosing a free worktree name for the new
 pane. Creation errors appear in a dismissible error dialog on desktop and Remote
 Pane even if the creation dialog has already closed.
 
+Leaderboard submissions use the selected runtime's last 30 days of agent usage,
+matching the Usage page's source. When connected to a remote backend, Pane submits that
+backend's totals under the desktop app's existing leaderboard identity. If the
+backend is unavailable, the submission fails rather than using desktop totals.
+
 ---
 
 ## The Windows Problem

@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { execFileSync } from 'child_process';
 import * as os from 'os';
 import { usageManager } from './usage/usageManager';
+import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { ShellDetector } from '../utils/shellDetector';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsIdentity } from '../types/config';
@@ -11,12 +12,49 @@ import type {
   LeaderboardResponse,
   LeaderboardStatus,
 } from '../../../shared/types/leaderboard';
-import type { UsageReport } from '../../../shared/types/usage';
+import type { UsageReport, UsageReportRequest } from '../../../shared/types/usage';
+import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 const LEADERBOARD_API_BASE =
   process.env.PANE_LEADERBOARD_URL || 'https://runpane.com';
 const SUBMIT_TIMEOUT_MS = 10_000;
 const SCAN_WAIT_MS = 15_000;
+
+const usageTotalsFields = {
+  totalTokens: boundary.number,
+  inputTokens: boundary.number,
+  outputTokens: boundary.number,
+  cacheReadTokens: boundary.number,
+  cacheCreationTokens: boundary.number,
+  messageCount: boundary.number,
+  estimatedCostUsd: boundary.number,
+  costIncomplete: boundary.boolean,
+  cacheSavingsUsd: boundary.number,
+};
+// Decode only the aggregate fields used in the submission, excluding paths and transcripts.
+const usageReportSchema = boundary.object({
+  totals: boundary.object(usageTotalsFields),
+  byModel: boundary.array(boundary.object({
+    ...usageTotalsFields,
+    model: boundary.string,
+    provider: boundary.enumeration('claude', 'codex'),
+  })),
+});
+const usageStatusSchema = boundary.object({ scanning: boundary.boolean });
+const usageResponseSchema = boundary.object({
+  success: boundary.boolean,
+  data: boundary.optional(boundary.json),
+  error: boundary.optional(boundary.string),
+});
+
+type UsageResponse = ReturnType<typeof usageResponseSchema.decode>;
+
+function readUsageResponse<Value>(result: UsageResponse, schema: BoundarySchema<Value>): Value {
+  if (!result.success || result.data === undefined) {
+    throw new Error(result.error || 'Failed to read usage from the selected runtime');
+  }
+  return decodeBoundary(result.data, schema);
+}
 
 function resolveDoNotTrack(): boolean {
   let value = process.env.DO_NOT_TRACK;
@@ -42,7 +80,7 @@ function resolveDoNotTrack(): boolean {
 }
 
 function buildSubmission(
-  report: UsageReport,
+  report: Pick<UsageReport, 'totals' | 'byModel'>,
   identity: AnalyticsIdentity,
   paneVersion: string,
 ): LeaderboardSubmission {
@@ -79,8 +117,25 @@ function buildSubmission(
 export class LeaderboardService {
   private doNotTrack: boolean;
 
-  constructor(private configManager: ConfigManager) {
+  constructor(private configManager: ConfigManager, private readonly dependencies: {
+    usage?: Pick<typeof usageManager, 'getReport' | 'getStatus'>;
+    runtime?: Pick<typeof remotePaneClientController, 'invoke'>;
+  } = {}) {
     this.doNotTrack = resolveDoNotTrack();
+  }
+
+  private async getUsageReport(request: UsageReportRequest): Promise<Pick<UsageReport, 'totals' | 'byModel'>> {
+    const response = await (this.dependencies.runtime ?? remotePaneClientController).invoke('usage:get-report', [request], async () => ({
+      success: true, data: (this.dependencies.usage ?? usageManager).getReport(request),
+    }));
+    return readUsageResponse(decodeBoundary(response, usageResponseSchema), usageReportSchema);
+  }
+
+  private async getUsageStatus(): Promise<{ scanning: boolean }> {
+    const response = await (this.dependencies.runtime ?? remotePaneClientController).invoke('usage:get-status', [], async () => ({
+      success: true, data: (this.dependencies.usage ?? usageManager).getStatus(),
+    }));
+    return readUsageResponse(decodeBoundary(response, usageResponseSchema), usageStatusSchema);
   }
 
   getStatus(): LeaderboardStatus {
@@ -163,7 +218,7 @@ export class LeaderboardService {
 
     const DAY_MS = 24 * 60 * 60 * 1000;
     const toMs = Date.now();
-    const report = usageManager.getReport({
+    const report = await this.getUsageReport({
       fromMs: toMs - 30 * DAY_MS,
       toMs,
     });
@@ -224,27 +279,19 @@ export class LeaderboardService {
     if (this.doNotTrack) return;
     if (!this.configManager.getConfig().leaderboard?.optIn) return;
 
-    const status = usageManager.getStatus();
-    if (status.scanning) {
-      const started = Date.now();
-      await new Promise<void>(resolve => {
-        const check = () => {
-          if (!usageManager.getStatus().scanning || Date.now() - started > SCAN_WAIT_MS) {
-            resolve();
-            return;
-          }
-          setTimeout(check, 1000);
-        };
-        check();
-      });
-    }
-
-    if (usageManager.getStatus().scanning) {
-      console.log('[Leaderboard] Scan still running after wait bound — skipping app-open submission');
-      return;
-    }
-
     try {
+      let status = await this.getUsageStatus();
+      const started = Date.now();
+      while (status.scanning && Date.now() - started < SCAN_WAIT_MS) {
+        await new Promise<void>(resolve => setTimeout(resolve, 1000));
+        status = await this.getUsageStatus();
+      }
+
+      if (status.scanning) {
+        console.log('[Leaderboard] Scan still running after wait bound — skipping app-open submission');
+        return;
+      }
+
       await this.submit();
       console.log('[Leaderboard] App-open submission succeeded');
     } catch (error) {
