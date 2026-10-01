@@ -41,6 +41,7 @@ import {
   type PeerSessionInfo,
 } from './peer/peerPolicy';
 import { readPeerSessions } from './peer/peerSessions';
+import { INPUT_SEQUENCE_HEADER, InputSequencer, parseInputSequenceHeader } from './inputSequencer';
 
 interface RemoteHttpAddress {
   host: string;
@@ -88,7 +89,13 @@ interface RemoteReadyEventPayload {
   replay: 'none';
   resync: 'refetch-state-after-reconnect';
   timestamp: string;
+  /** What this host supports beyond the base protocol; clients ignore names they do not know. */
+  capabilities: RemoteDaemonCapability[];
 }
+
+/** `input-seq`: terminal input carrying X-Pane-Input-Seq is written in sequence order (inputSequencer.ts). */
+type RemoteDaemonCapability = 'input-seq';
+const REMOTE_DAEMON_CAPABILITIES: RemoteDaemonCapability[] = ['input-seq'];
 
 /**
  * `status` says the HTTP server answers. A paired client (the coordinator's scoped one included) also
@@ -125,6 +132,10 @@ type RemoteRequestAuthResult =
 const MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES = 1024 * 1024;
 const MAX_AUTHENTICATED_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
 const DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS = 5_000;
+// Node closes idle keep-alive connections after 5 s by default, and its client agent after 4 s. A remote
+// client ~150 ms away then pays a new TCP handshake (one more round trip) on the first keystroke or
+// request after every short pause, and on every parallel request of a Pane switch.
+const REMOTE_DAEMON_KEEP_ALIVE_TIMEOUT_MS = 120_000;
 const REMOTE_VISIBILITY_VIEWER_STALE_MS = 15 * 60 * 1000;
 const MIN_GZIP_BODY_BYTES = 1024;
 const GZIP_HEADERS = { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } as const;
@@ -179,6 +190,7 @@ const REMOTE_DAEMON_CORS_HEADERS = {
     'Authorization',
     'Content-Type',
     'X-Pane-Remote-Runtime-Id',
+    'X-Pane-Input-Seq',
     'X-Pane-Remote-Client-Label',
     'X-Pane-Client-Label',
     'X-Pane-Client-Device-Label',
@@ -222,6 +234,7 @@ export class PaneRemoteHttpApiServer {
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly readPeerSessions: () => Promise<PeerSessionInfo[]>;
   private readonly peerRateLimiter: PeerRateLimiter;
+  private readonly inputSequencer = new InputSequencer();
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -320,6 +333,8 @@ export class PaneRemoteHttpApiServer {
         response.destroy(error instanceof Error ? error : new Error(message));
       });
     });
+    server.keepAliveTimeout = REMOTE_DAEMON_KEEP_ALIVE_TIMEOUT_MS;
+    server.headersTimeout = REMOTE_DAEMON_KEEP_ALIVE_TIMEOUT_MS + 5_000;
     const voiceDeepgramWss = new WebSocketServer({ noServer: true });
     this.voiceDeepgramWss = voiceDeepgramWss;
     server.on('upgrade', (request, socket, head) => {
@@ -583,13 +598,24 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    await this.invokeAndRespond(
-      request,
-      response,
-      invokeRequest.channel,
-      this.recordClientInvoke(invokeRequest, auth, request),
-      () => this.getInvokeArgsForRequest(invokeRequest, auth, request),
-    );
+    const sequence = isTerminalInputChannel(invokeRequest.channel)
+      ? parseInputSequenceHeader(request.headers[INPUT_SEQUENCE_HEADER])
+      : null;
+    // Streams are per paired client, so one client cannot hold back another's input.
+    const release = sequence
+      ? await this.inputSequencer.enter(`${auth.client?.id ?? 'unpaired'}:${sequence.stream}`, sequence.seq)
+      : null;
+    try {
+      await this.invokeAndRespond(
+        request,
+        response,
+        invokeRequest.channel,
+        this.recordClientInvoke(invokeRequest, auth, request),
+        () => this.getInvokeArgsForRequest(invokeRequest, auth, request),
+      );
+    } finally {
+      release?.();
+    }
   }
 
   /**
@@ -774,6 +800,7 @@ export class PaneRemoteHttpApiServer {
       replay: 'none',
       resync: 'refetch-state-after-reconnect',
       timestamp: new Date().toISOString(),
+      capabilities: REMOTE_DAEMON_CAPABILITIES,
     } satisfies RemoteReadyEventPayload);
 
     const clientConnectionId = String(this.nextClientConnectionId++);
@@ -1115,6 +1142,10 @@ async function readRequestBody(request: IncomingMessage, maxBodyBytes: number): 
   }
 
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function isTerminalInputChannel(channel: string): boolean {
+  return channel === 'terminal:input' || channel === 'panels:send-terminal-input';
 }
 
 function withCorsHeaders(headers: http.OutgoingHttpHeaders = {}): http.OutgoingHttpHeaders {

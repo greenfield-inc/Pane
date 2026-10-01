@@ -49,8 +49,10 @@ class FakePtyHandle implements PtyHandleLike {
 
 class FakePtyHost implements PtyHostRuntime {
   readonly handles = new Map<string, FakePtyHandle>();
+  readonly spawned: PtyHostSpawnOpts[] = [];
 
-  async spawn(_opts: PtyHostSpawnOpts): Promise<{ ptyId: string; pid: number }> {
+  async spawn(opts: PtyHostSpawnOpts): Promise<{ ptyId: string; pid: number }> {
+    this.spawned.push(opts);
     const ptyId = `pty-${this.handles.size + 1}`;
     const handle = new FakePtyHandle(ptyId);
     this.handles.set(ptyId, handle);
@@ -311,4 +313,49 @@ describe('terminal panel persistence', () => {
     expect(snapshot?.scrollbackBuffer).toBe(oldScrollback);
     expect(snapshot?.alternateScreenBuffer).toBe(saved.alternateScreenBuffer ?? '');
   });
+
+  it('sends the echo of a keystroke within a few ms instead of waiting for the 32 ms batch', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel('panel-echo');
+      const { manager, handle } = await startTerminal(panel);
+      const outputs = () => events.filter((event) => event.channel === 'terminal:output')
+        .map((event) => decodeBoundary(event.args[0], outputEventSchema).output);
+      await vi.advanceTimersByTimeAsync(1_000);
+      events.length = 0;
+
+      // Plain program output keeps the frame-sized batch.
+      handle.emit('tick');
+      await vi.advanceTimersByTimeAsync(20);
+      expect(outputs()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(12);
+      expect(outputs()).toEqual(['tick']);
+
+      // A keystroke's echo goes out at once, and pulls in output already waiting for the batch.
+      await vi.advanceTimersByTimeAsync(500);
+      handle.emit('waiting ');
+      manager.writeToTerminal(panel.id, 'a');
+      handle.emit('a');
+      await vi.advanceTimersByTimeAsync(4);
+      expect(outputs()).toEqual(['tick', 'waiting a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts terminals with Claude Code wheel speed of 3 lines unless the environment sets one', async () => {
+    const saved = process.env.CLAUDE_CODE_SCROLL_SPEED;
+    try {
+      delete process.env.CLAUDE_CODE_SCROLL_SPEED;
+      await startTerminal(makePanel('panel-scroll-default'));
+      expect(ptyHost.spawned.at(-1)?.env.CLAUDE_CODE_SCROLL_SPEED).toBe('3');
+      process.env.CLAUDE_CODE_SCROLL_SPEED = '7';
+      await startTerminal(makePanel('panel-scroll-user'));
+      expect(ptyHost.spawned.at(-1)?.env.CLAUDE_CODE_SCROLL_SPEED).toBe('7');
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CODE_SCROLL_SPEED;
+      else process.env.CLAUDE_CODE_SCROLL_SPEED = saved;
+    }
+  });
 });
+

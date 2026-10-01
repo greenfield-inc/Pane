@@ -41,6 +41,16 @@ import type { PaneEventArgument } from '../core/eventSink';
 const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
 const OUTPUT_BATCH_INTERVAL_HIDDEN = 250; // ms — background / hidden cadence to cut IPC wake-up cost
 const OUTPUT_BATCH_SIZE = 131072; // 128KB — timer-based flush preferred; size trigger is safety net
+// Output within ECHO_WINDOW_MS of a write is the echo of a keystroke: send it after ECHO_FLUSH_MS instead
+// of the 32 ms batch, which a typist (and a remote one even more) feels on every key. A TUI's reply to a
+// key is still one frame in practice: the PTY delivers it in one read well inside these few ms.
+const ECHO_WINDOW_MS = 100;
+// Claude Code's fullscreen UI scrolls 3 lines per wheel notch when its startup XTVERSION probe hears back
+// from xterm.js, and 1 line otherwise. Pane starts and resumes agents with no renderer attached (daemon
+// start, remote hosts, hidden panels), so the probe goes unanswered and the wheel ran at a third of the
+// speed. Pane's renderer is always xterm.js: state the speed up front. A value in the env wins.
+const CLAUDE_WHEEL_LINES_PER_NOTCH = '3';
+const ECHO_FLUSH_MS = 4;
 const OUTPUT_BATCH_SIZE_HIDDEN = 80_000; // 80KB — cap hidden flush size to avoid foreground backpressure churn
 const MAX_CONCURRENT_SPAWNS = 3;
 const AGENT_STATUS_POLL_MS = 500; // cadence for re-deriving blocked/working/done from the live screen
@@ -256,6 +266,10 @@ interface TerminalProcess {
   // Output batching
   outputBuffer: string;
   outputFlushTimer: ReturnType<typeof setTimeout> | null;
+  /** When the flush timer fires (ms epoch), to tell whether an echo should pull it in. */
+  outputFlushAt?: number;
+  /** Last write to the PTY (ms epoch): output soon after it is an echo and is flushed quickly. */
+  lastInputAt?: number;
   // Visibility-driven cadence: true → OUTPUT_BATCH_INTERVAL + renderer writes,
   // false → OUTPUT_BATCH_INTERVAL_HIDDEN + main-process scrollback only.
   isVisible: boolean;
@@ -1171,6 +1185,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_ORCHESTRATION_SESSION_ID',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
+            'CLAUDE_CODE_SCROLL_SPEED',
           ]),
         }
       : {};
@@ -1185,6 +1200,8 @@ export class TerminalPanelManager extends EventEmitter {
     // A Pane launched from an orchestrator must not inherit the parent's role.
     delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
     const baseSpawnEnv = {
+      // A default: a value in Pane's own environment (spread next) wins.
+      CLAUDE_CODE_SCROLL_SPEED: CLAUDE_WHEEL_LINES_PER_NOTCH,
       ...inheritedEnv,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: enhancedPath,
@@ -1550,15 +1567,22 @@ export class TerminalPanelManager extends EventEmitter {
       // Hidden panels cap per-flush size below HIGH_WATERMARK so a single
       // flush on a verbose background build can't alone trip backpressure.
       const sizeThreshold = terminal.isVisible ? OUTPUT_BATCH_SIZE : OUTPUT_BATCH_SIZE_HIDDEN;
+      const now = Date.now();
+      const isEcho = terminal.lastInputAt !== undefined && now - terminal.lastInputAt <= ECHO_WINDOW_MS;
       if (terminal.outputBuffer.length >= sizeThreshold) {
         // Buffer is large enough — flush immediately
         this.flushOutputBuffer(terminal);
-      } else if (!terminal.outputFlushTimer) {
+      } else if (!terminal.outputFlushTimer || (isEcho && (terminal.outputFlushAt ?? 0) > now + ECHO_FLUSH_MS)) {
         // Schedule flush for next frame. Hidden panels use a slower cadence
         // to cut main-process IPC wake-ups; foreground panels keep 32 ms.
-        const interval = terminal.isVisible
-          ? OUTPUT_BATCH_INTERVAL
-          : OUTPUT_BATCH_INTERVAL_HIDDEN;
+        // Echoes go out almost at once in either case: someone is typing here.
+        const interval = isEcho
+          ? ECHO_FLUSH_MS
+          : terminal.isVisible
+            ? OUTPUT_BATCH_INTERVAL
+            : OUTPUT_BATCH_INTERVAL_HIDDEN;
+        if (terminal.outputFlushTimer) clearTimeout(terminal.outputFlushTimer);
+        terminal.outputFlushAt = now + interval;
         terminal.outputFlushTimer = setTimeout(() => {
           this.flushOutputBuffer(terminal);
         }, interval);
@@ -1683,6 +1707,7 @@ export class TerminalPanelManager extends EventEmitter {
       return;
     }
     terminal.lastActivity = new Date();
+    terminal.lastInputAt = Date.now();
   }
   
   async resizeTerminal(
