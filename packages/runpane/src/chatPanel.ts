@@ -222,10 +222,14 @@ async function panelResult(chat: string): Promise<ToolResult> {
 
 async function focusResult(chat: string, pane: string): Promise<ToolResult> {
   const { agents, offline } = await readAgents(readStore()[chat] ?? []);
-  const agent = agents.find((entry) => entry.paneId === pane) ?? agents.find((entry) => entry.name === pane);
+  // An id or exact name wins; otherwise every word the user said must appear in one agent's name.
+  const words = pane.toLowerCase().split(/[\s_-]+/).filter(Boolean);
+  const byWords = agents.filter((entry) => words.every((word) => entry.name.toLowerCase().split(/[\s_-]+/).includes(word)));
+  const agent = agents.find((entry) => entry.paneId === pane || entry.name === pane) ?? (byWords.length === 1 ? byWords[0] : undefined);
   if (!agent) {
     const names = agents.map((entry) => entry.name).join(', ') || 'none yet';
-    return { content: [{ type: 'text', text: `This chat didn't start an agent called ${pane}. Agents this chat started: ${names}.` }], isError: true };
+    const why = byWords.length > 1 ? `More than one agent matches ${pane}` : `This chat didn't start an agent called ${pane}`;
+    return { content: [{ type: 'text', text: `${why}. Agents this chat started: ${names}.` }], isError: true };
   }
   focusByChat.set(chat, agent.paneId);
   return cardResultOf(agent, offline);

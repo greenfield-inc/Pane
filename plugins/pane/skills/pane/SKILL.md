@@ -13,7 +13,7 @@ Pane is a desktop app that runs coding agents side by side, each in its own git 
 3. Tell the user the Pane's name and its `pane://` link. Offer the Chat agents panel (`agents_panel`), which shows every agent this chat started.
 
 ## Check on agents
-- `agents_status` with `pane` returns `working`, `ready`, `blocked`, `idle`, or `exited`, plus the agent's screen. Report what the screen shows; don't guess progress.
+- `agents_status` with `pane` (the Pane id from `agents_start`, `agents_panel` or `panes_list`) returns `working`, `ready`, `blocked`, `idle`, or `exited`, plus the agent's screen. Report what the screen shows; don't guess progress.
 - `blocked` means the agent waits on a prompt. Show the user the question and ask how to answer before sending anything. The same goes for setup, trust, and permission screens, whatever the status says.
 - `workspace_state` returns every Pane and agent at once.
 

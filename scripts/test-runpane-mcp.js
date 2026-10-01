@@ -650,7 +650,7 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         assert.equal(JSON.parse(unconfirmed.content[0].text).delivered, false);
 
         // The model steers the panel to one agent; the panel's next refresh carries the choice.
-        const focused = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'fix-login' }, _meta: chat('chat-a') });
+        const focused = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'login fix' }, _meta: chat('chat-a') });
         assert.deepEqual(focused.structuredContent.agent, card);
         const steered = await client.callTool({ name: 'agents_panel_status', arguments: { chat: 'chat-a' } });
         assert.equal(steered.structuredContent.focus, 'pane-7');
