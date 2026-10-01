@@ -6,7 +6,7 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../bo
 import { RemoteDaemonClient } from '../remote/remoteDaemonClient';
 import { getWrapperVersion } from '../version';
 import { createBoatProvider } from './boat';
-import { cloudHostname, joinSandboxToTailnet, provisionSandbox, repairServeAndGuards, repairTailnetIfLoggedOut, waitForDaemonHealth } from './bootstrap';
+import { cloudHostname, joinSandboxToTailnet, provisionSandbox, repairServeAndGuards, repairTailnetIfLoggedOut, waitForDaemonHealth, writePanePin } from './bootstrap';
 import { runCoordinatorCommand } from './coordinator';
 import type { CloudDeps, CloudSafeToStopAnswer } from './commands';
 import { callCoordinator, readClientConfig } from './coordinator/client';
@@ -37,6 +37,7 @@ export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): Cl
       return { nodeId: node.nodeId, magicDnsName: node.magicDnsName, tailscaleIps: node.tailscaleIps };
     },
     repairServe: (sandbox, request) => repairServeAndGuards(sandbox, request),
+    writePanePin: (sandbox, pin) => writePanePin(sandbox, pin),
     async repairTailnet(sandbox, request, tailnet) {
       const result = await repairTailnetIfLoggedOut(sandbox, { ...request, tailscale: createTailscaleApi(tailnet) });
       return result.reenrolled

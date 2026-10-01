@@ -4,6 +4,7 @@ import path from 'path';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../boundaryDecoder';
 import { RemoteDaemonClient, type RemoteHttpTransport } from '../../remote/remoteDaemonClient';
 import { decodePairingCode, encodePairingCode } from '../pairing';
+import type { PinnedPane } from '../store';
 import { CLOUD_SESSION_TAG, deletableNodeIds, describeForeignDevice, type TailscaleApi, type TailscaleDevice } from '../tailscale';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 import { waitForDaemonHealth } from './health';
@@ -450,6 +451,16 @@ export async function repairServeAndGuards(sandbox: SandboxHandle, options: Serv
   await runner.run('ts-guard', [], envelopeSchema, { timeoutSeconds: 120 });
   const serve = await runner.run('serve-guard', [options.transport], serveGuardStepSchema, { timeoutSeconds: 180 });
   return { backendState, serveApplied: serve.applied === true, detail: serve.detail ?? '' };
+}
+
+/**
+ * Writes the Pane version this Session's daemon may install on `runpane:cloud:upgrade` (root:root 0644
+ * /etc/rp-cloud/pane-pin.json), or removes it for null. The coordinator relays the pin; it can't set it.
+ */
+export async function writePanePin(sandbox: SandboxHandle, pin: PinnedPane | null, sandboxHome = DEFAULT_SANDBOX_HOME): Promise<void> {
+  await uploadScripts(sandbox, sandboxHome);
+  await new StepRunner(sandbox, sandboxHome).run('pin-pane', pin ? [pin.version, pin.debUrl, pin.sha256] : ['--clear'], envelopeSchema,
+    { timeoutSeconds: 60 });
 }
 
 async function registerRepo(pairingCode: string, dir: string, name: string, transport?: RemoteHttpTransport): Promise<void> {

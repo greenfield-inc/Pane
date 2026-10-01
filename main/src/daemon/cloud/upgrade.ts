@@ -5,7 +5,13 @@ import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { CloudUpgradeRequest, CloudUpgradeResult } from '../../../../shared/types/cloudDaemon';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import {
+  CLOUD_PANE_PIN_FILE,
+  isPinnablePaneVersion,
+  MIN_CLOUD_PIN_PANE_VERSION,
+  type CloudPanePin,
+} from './panePin';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { SYSTEMD_UNIT_NAME } from '../remoteDaemonService';
 import type { PaneCommandValue } from '../commandRegistry';
 
@@ -24,6 +30,8 @@ export class CloudUpgradeError extends Error {
 
 export interface CloudUpgradeDependencies {
   currentVersion: string;
+  /** The pin the laptop wrote into this Session (`readPanePinFile`), or null when there is none. */
+  readPin(): CloudPanePin | null;
   /** Where downloaded packages are kept (inside the Pane directory, so snapshots keep them). */
   downloadDirectory: string;
   /** The systemd user unit running this daemon, or null when it runs outside systemd. */
@@ -62,9 +70,41 @@ export function parseCloudUpgradeRequest(value: PaneCommandValue): CloudUpgradeR
 }
 
 /**
+ * The Session's pin, written by the laptop CLI as root (`rp-bootstrap.sh pin-pane`). Null when none was
+ * written. A pin this daemon's user could have written is refused: the daemon would install it as root.
+ */
+export function readPanePinFile(
+  file: string = CLOUD_PANE_PIN_FILE,
+  statFile: (file: string) => { uid: number; mode: number } = fs.statSync,
+): CloudPanePin | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (decodeOptionalBoundary(error, boundary.object({ code: boundary.literal('ENOENT') }))) return null;
+    throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_PIN_INVALID', `Cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const stat = statFile(file);
+  if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) {
+    throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_PIN_UNSAFE', `${file} must be owned by root and writable only by root`);
+  }
+  try {
+    return parseCloudUpgradeRequest(JSON.parse(text));
+  } catch (error) {
+    throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_PIN_INVALID', `${file} is not a valid pin: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function samePin(request: CloudUpgradeRequest, pin: CloudPanePin): boolean {
+  return request.version === pin.version && request.url === pin.url && request.sha256 === pin.sha256;
+}
+
+/**
  * Upgrade-on-wake: headless daemons never update themselves (bootstrap only runs the version
- * checker on the desktop), so the coordinator pins a version and, after a wake, asks the daemon
- * to install that exact .deb. The package is verified against its sha256, then a detached job
+ * checker on the desktop), so after a wake the coordinator asks the daemon to install the pinned
+ * .deb. The Session, not the caller, decides what that is: only a request equal to the pin the
+ * laptop wrote into the Session (`readPin`) is installed, and never a pin older than the first Pane
+ * that enforces client scopes. The package is verified against the pin's sha256, then a detached job
  * installs it with `sudo -n apt-get` and restarts this daemon's systemd unit. The caller polls
  * `/health` until `version` matches.
  */
@@ -76,6 +116,15 @@ export async function runCloudUpgrade(
   const from = dependencies.currentVersion;
   if (request.version === from) {
     return { ok: true, upgraded: false, from, to: request.version };
+  }
+  const pin = dependencies.readPin();
+  if (!pin || !samePin(request, pin)) {
+    throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_NOT_PINNED', pin
+      ? `This Session is pinned to ${pin.version} (${pin.url}); the request does not match the pin`
+      : 'This Session has no pinned Pane version; pin one from the laptop (runpane cloud coordinator deploy --pin-version ...)');
+  }
+  if (!isPinnablePaneVersion(pin.version)) {
+    throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_TOO_OLD', `Pane ${pin.version} is older than ${MIN_CLOUD_PIN_PANE_VERSION}, the first Pane that enforces client scopes`);
   }
   if (process.platform !== 'linux') {
     throw new CloudUpgradeError('ERR_CLOUD_UPGRADE_UNSUPPORTED', 'Upgrade on wake installs a .deb and only runs on Linux');
@@ -106,6 +155,7 @@ export function buildUpgradeScript(packagePath: string, unit: string): string {
     'set -e',
     // Let the invoke response reach the caller before the daemon goes down.
     'sleep 1',
+    // Downgrades are allowed only to a pin, and a pin is never older than MIN_CLOUD_PIN_PANE_VERSION.
     `sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades ${deb} || sudo -n dpkg -i ${deb}`,
     `systemctl --user restart ${shellQuote(unit)}`,
   ].join('\n');

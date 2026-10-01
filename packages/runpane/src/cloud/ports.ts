@@ -1,6 +1,6 @@
 import type { CloudTransport } from './args';
 import type { SandboxHandle } from './provider';
-import type { CloudCredentials, PaneSource } from './store';
+import type { CloudCredentials, PaneSource, PinnedPane } from './store';
 
 /**
  * What the `runpane cloud` commands need from bootstrap (src/cloud/bootstrap/**, src/cloud/tailscale.ts)
@@ -71,6 +71,11 @@ export interface BootstrapPort {
    * if a resume lost it. Never stops anything.
    */
   repairServe(sandbox: SandboxHandle, request: { transport: 'https' | 'http' }): Promise<ServeRepair>;
+  /**
+   * On a running Session: writes the Pane version the daemon may upgrade itself to (root-owned
+   * /etc/rp-cloud/pane-pin.json), or removes it for null. Only the laptop writes it.
+   */
+  writePanePin(sandbox: SandboxHandle, pin: PinnedPane | null): Promise<void>;
 }
 
 interface ServeRepair {

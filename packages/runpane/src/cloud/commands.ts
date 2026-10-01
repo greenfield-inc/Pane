@@ -17,6 +17,7 @@ import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
 import { coordinatorSecretsEnabled, describeSecretsOutcome, enableSessionSecrets } from './sessionSecrets';
 import type { GitHubPort } from './githubApi';
 import { decodePairingCode } from './pairing';
+import { pushPanePin } from './panePin';
 import { pushPeersFile, runPeersCommand } from './peers';
 import { runSecretsCommand } from './secrets';
 import { runCloudPortCommand } from './sessionPorts';
@@ -440,6 +441,13 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     if (outcome.daemonVersion) record.meta.daemonVersion = outcome.daemonVersion;
     if (coordinatorEnabled) record.meta.coordinatorPairingPath = deps.store.coordinatorPairingPath(hostname);
     await deps.store.writeHost(record);
+    if (coordinatorEnabled) {
+      // The daemon upgrades itself only to the pin the laptop wrote; none (cleared) refuses every upgrade.
+      const pin = settings.coordinator?.deployment?.pin ?? null;
+      const pinned = await pushPanePin(record, pin, deps, provider);
+      if (pinned.written) progress(`  - pane-pin done: ${pinned.pinned ?? 'none'}`);
+      else deps.stderr(`runpane cloud: ${hostname}'s Pane pin was not written (${pinned.reason}); the coordinator can't upgrade it until runpane cloud repair ${hostname}.`);
+    }
     // The user's guardrails (settings agentNotes.guardrails): the daemon keeps them and rewrites them at every wake.
     const guardrails = configuredGuardrails(settings);
     if (guardrails?.length) {
@@ -817,6 +825,17 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const guardrails = configuredGuardrails(settings);
   const agentNotes = health.ok && guardrails ? await pushAgentNotes(record, guardrails, deps) : null;
   if (agentNotes && !agentNotes.pushed && !args.json) deps.stderr(`runpane cloud: ${hostname}'s agent guardrails were not updated (${agentNotes.reason}).`);
+  // And the coordinator's Pane pin, so the next coordinator wake can upgrade it.
+  const deployment = settings.coordinator?.deployment;
+  const panePin = health.ok && deployment ? await pushPanePin(record, deployment.pin ?? null, deps, provider) : null;
+  if (panePin && !panePin.written && !args.json) deps.stderr(`runpane cloud: ${hostname}'s Pane pin was not updated (${panePin.reason}).`);
+  // A Session that slept through a new pin refused the coordinator's upgrade; now that it holds the pin, ask again.
+  let pinUpgrade: CoordinatorWakeResult | null = null;
+  if (panePin?.written && deployment?.pin && health.version !== deployment.pin.version) {
+    pinUpgrade = await deps.wakeViaCoordinator(record.profile.cloud.sessionId, remaining());
+    if (pinUpgrade?.status === 'awake' && pinUpgrade.version) health = { ...health, version: pinUpgrade.version };
+    else if (pinUpgrade && !args.json) deps.stderr(`runpane cloud: ${hostname} is not on the pinned Pane ${deployment.pin.version} yet (${pinUpgrade.detail ?? pinUpgrade.status}).`);
+  }
   const summary = {
     ok: health.ok,
     host: hostname,
@@ -831,6 +850,8 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
     serveRepaired,
     peersFile,
     agentNotes,
+    panePin,
+    pinUpgrade,
     timings,
   };
   report(
@@ -867,6 +888,8 @@ async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
   }
   const transport = hostTransport(record) ?? 'https';
   const serve = await deps.bootstrap.repairServe(handle, { transport });
+  const deployment = (await deps.store.readSettings()).coordinator?.deployment;
+  const panePin = deployment ? await pushPanePin(record, deployment.pin ?? null, deps, provider) : null;
   const health = record.profile.baseUrl
     ? await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, { timeoutMs: 60_000, intervalMs: 1_000 })
     : { ok: false, elapsedMs: 0 };
@@ -875,6 +898,7 @@ async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
     serve.serveApplied ? `re-applied the missing ${transport} Serve config` : `${transport} Serve config ok`,
     'tailscaled.state and Serve guards installed',
   ];
+  if (panePin) done.push(panePin.written ? `Pane pin ${panePin.pinned ?? 'none'} written` : `Pane pin NOT written (${panePin.reason})`);
   report(
     args,
     deps,
@@ -885,6 +909,7 @@ async function runRepair(args: CloudArgs, deps: CloudDeps): Promise<number> {
       reenrolled: tailnetRepair.reenrolled,
       serveApplied: serve.serveApplied,
       guards: 'installed',
+      panePin,
       health: { ok: health.ok, status: health.status ?? null, version: health.version ?? null },
     },
     `${hostname}: ${done.join('; ')}. /health ${health.ok ? 'answers' : 'does NOT answer'} at ${record.profile.baseUrl}.`,

@@ -620,8 +620,9 @@ The coordinator is a small always-on service on its own boat `small` sandbox in 
 - answers `/cloud/wake`, so `runpane --host <asleep Session> panels submit` and peer Sessions can wake a
   sleeping Session;
 - holds a scoped boat key (read, stop, resume; creating and deleting stay on your laptop) and, for each
-  Session, a coordinator-scoped Pane token that can only ask safe-to-stop and run the pinned upgrade. It
-  can't reach panels, shells or the event stream.
+  Session, a coordinator-scoped Pane token that can only ask safe-to-stop and ask for the pinned upgrade. It
+  can't reach panels, shells or the event stream, and it can't choose the upgrade: the Session installs only
+  the pin your laptop wrote into it.
 
 <!-- coordinator-deploy:start -->
 Deploy it once from the laptop (one boat start; about 20 s):
@@ -669,9 +670,12 @@ runpane cloud coordinator alerts
 
 Deploy options: `--idle-check-seconds <n>` (default 300; a Session is stopped after two safe answers in a
 row), `--wake-grace-seconds <n>` (default 600) and `--stop-orphans`/`--no-stop-orphans` are kept across
-redeploys; `--no-reconcile` turns the reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version, and
+redeploys; `--no-reconcile` turns the reconciler off; `--pin-version <v> --pin-deb-url <url> --pin-deb-sha256 <hex>` pins the Pane version (an https `.deb`), and
 every Session the coordinator wakes is upgraded to it before it counts as awake (`--no-pin` removes the
-pin). While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
+pin). The deploy writes the pin into every awake Session, and `new`, `wake` and `repair` write it into the
+Session they touch; a Session refuses any other upgrade. A Session that slept through the deploy is upgraded
+when you `runpane cloud wake` it: the wake writes the pin, then asks the coordinator again. A pin older than the first Pane
+that enforces client scopes is refused by the Session. While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
 a sleeping one.
 
 Only a deploy that creates the coordinator sandbox mints its scoped key; a redeploy updates the running

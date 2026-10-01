@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import type { CloudDeps } from './commands';
+import { assertHttpsArtifactUrl } from './bootstrap';
 import { createCallerSecret, mintCallerToken } from './coordinator/callerAuth';
 import { describeRevocation, repairRevokedCoordinatorClients, revokeSessionCoordinatorClients } from './coordinatorClients';
 import { pushDirectory } from './coordinatorSync';
+import { refreshPanePins } from './panePin';
 import { CloudProviderError, SANDBOX_HOME, type CloudProvider, type CloudSize } from './provider';
 import { refreshPeersFiles } from './peers';
 import { deleteOwnedDevices } from './tailscale';
@@ -132,6 +134,7 @@ export function parseCoordinatorArgs(argv: readonly string[]): CoordinatorArgs {
     throw new Error('A pinned version needs all three of --pin-version, --pin-deb-url and --pin-deb-sha256.');
   }
   if (args.pin?.sha256 && !/^[0-9a-f]{64}$/u.test(args.pin.sha256)) throw new Error('--pin-deb-sha256 must be 64 lowercase hex characters.');
+  if (args.pin?.debUrl) assertHttpsArtifactUrl(args.pin.debUrl, '--pin-deb-url');
   return args;
 }
 
@@ -285,6 +288,8 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
   const records = await deps.store.listHosts();
   const withoutClient = records.filter((record) => !record.meta.coordinatorPairingPath).map((record) => record.profile.cloud.hostname);
   const peers = await refreshPeersFiles(records, deps);
+  // Each Session installs only the pin the laptop wrote into it; a sleeping one gets it at its next wake or repair.
+  const panePins = await refreshPanePins(records, next.pin ?? null, deps);
   timings.totalMs = deps.now() - started;
 
   const summary = {
@@ -303,6 +308,7 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     },
     directory: coordinator,
     peersFiles: peers,
+    panePins,
     hostsWithoutCoordinatorClient: withoutClient,
     coordinatorClientsPaired: repaired.done,
     coordinatorClientsNotPaired: repaired.failed,
@@ -314,7 +320,11 @@ async function deploy(args: CoordinatorArgs, deps: CloudDeps): Promise<number> {
     deps.stdout(`runpane cloud: coordinator ${next.hostname} is ${created ? 'up' : 'updated'} at ${next.baseUrl} (${Math.round(timings.totalMs / 1000)} s, version ${summary.coordinator.version}).`);
     deps.stdout(`  manages sandboxes named ${next.managedPrefix}*; idle-stop on; reconcile ${next.reconcile ? `on (${next.stopOrphans ? 'alerts on orphans, stops those still orphaned after 6 h' : 'alerts on orphans, never stops them'})` : 'off'}.`);
     deps.stdout(`  holds a provider key scoped to ${SCOPED_KEY_ACTIONS.join(', ')}${next.scopedKeyTtl ? ` (lifetime ${next.scopedKeyTtl} from ${next.deployedAt.slice(0, 10)}; destroy and redeploy before it expires)` : ''}; this machine's caller token is in ${deps.store.coordinatorClientPath} (0600).`);
-    if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when they wake.`);
+    const unpinned = panePins.filter((result) => !result.written).map((result) => result.host);
+    if (next.pin) deps.stdout(`  pinned Pane ${next.pin.version}: Sessions are upgraded to it when the coordinator wakes them.`);
+    if (unpinned.length > 0) {
+      deps.stdout(`  note: ${next.pin ? 'the pin' : 'removing the pin'} did not reach ${unpinned.join(', ')} (asleep or unreachable); runpane cloud wake or repair writes it.`);
+    }
     if (next.secrets) deps.stdout(`  Doppler secrets kept (${next.secrets.configs.map((config) => `${config.project}/${config.config}`).join(', ') || 'no configs'}; policy ${next.secrets.policy.mode}); see runpane cloud coordinator doppler status.`);
     if (next.github) deps.stdout(`  GitHub broker kept (${next.github.mode === 'app' ? `App ${next.github.appId ?? '?'}` : 'fine-grained PAT'}); see runpane cloud coordinator github status.`);
     deps.stdout(`  directory: ${coordinator.pushed ? `${coordinator.sessions} cloud Session${coordinator.sessions === 1 ? '' : 's'}` : `not pushed (${coordinator.reason})`}.`);
