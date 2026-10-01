@@ -154,4 +154,42 @@ describe('RemotePaneClient latency', () => {
     expect(shortPings.every(entry => entry.headers.authorization === undefined)).toBe(true);
     expect(long.seen.filter(entry => entry.path.startsWith('/health'))).toHaveLength(0);
   });
+
+  it('resends a request whose reused keep-alive connection the host had just closed, without reconnecting', async () => {
+    let connections = 0;
+    let requests = 0;
+    const server = http.createServer((request, response) => {
+      if (request.url?.startsWith('/events')) {
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        response.write(`event: ready\ndata: ${JSON.stringify({ replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString() })}\n\n`);
+        return;
+      }
+      requests += 1;
+      // The second invoke on the first connection: the host closes the idle socket instead of answering.
+      if (requests === 2) {
+        request.socket.destroy();
+        return;
+      }
+      request.resume();
+      request.on('end', () => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ ok: true, result: requests }));
+      });
+    });
+    server.on('connection', () => { connections += 1; });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+    let reconnects = 0;
+    const client = new RemotePaneClient({
+      id: 'stale', label: 'Stale', token: 'test-token', transport: 'http+sse', baseUrl: `http://127.0.0.1:${address.port}`,
+    }, { onConnectionStateChange: (status) => { if (status === 'reconnecting') reconnects += 1; } });
+    clients.push(client);
+    await client.connect();
+    await expect(client.invoke('sessions:get-all', [])).resolves.toBe(1);
+    await expect(client.invoke('sessions:get-all', [])).resolves.toBe(3);
+    expect(reconnects).toBe(0);
+    expect(connections).toBeGreaterThanOrEqual(3);
+  });
 });
+

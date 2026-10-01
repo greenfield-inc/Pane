@@ -174,8 +174,9 @@ export class RemotePaneClient {
     { pipelineDepth: () => (this.supportsInputSeq ? REMOTE_INPUT_PIPELINE_DEPTH : 1) },
   );
   // One keep-alive pool per client: requests reuse warm connections instead of a TCP handshake each.
-  private readonly httpAgent = new http.Agent({ keepAlive: true, scheduling: 'lifo' });
-  private readonly httpsAgent = new https.Agent({ keepAlive: true, scheduling: 'lifo' });
+  // noDelay: Nagle would hold a keystroke's small write for the previous segment's ACK (a full round trip).
+  private readonly httpAgent = new http.Agent({ keepAlive: true, scheduling: 'lifo', noDelay: true });
+  private readonly httpsAgent = new https.Agent({ keepAlive: true, scheduling: 'lifo', noDelay: true });
   private lastInvokeAt = 0;
   private keepAliveHintSeconds: number | null = null;
   private keepWarmTimer: NodeJS.Timeout | null = null;
@@ -299,7 +300,8 @@ export class RemotePaneClient {
         signal,
         headers,
       }), JSON.stringify({ channel, args }));
-      this.keepAliveHintSeconds = response.keepAliveSeconds;
+      // A response without the header (e.g. an error page) must not hide what the host said before.
+      if (response.keepAliveSeconds !== null) this.keepAliveHintSeconds = response.keepAliveSeconds;
     } catch (error) {
       if (signal?.aborted) throw error;
       const message = getErrorMessage(error, 'Failed to invoke remote daemon');
@@ -537,8 +539,9 @@ export class RemotePaneClient {
     this.keepWarmTimer = null;
     if (this.closedByClient || this.suspended || Date.now() - this.lastInvokeAt > KEEP_WARM_ACTIVE_WINDOW_MS) return;
     this.keepWarmTimer = setTimeout(() => this.keepWarm(), KEEP_WARM_INTERVAL_MS);
+    // Unknown counts as short: every host before the 120 s keep-alive closes idle connections after 5 s.
     const hint = this.keepAliveHintSeconds;
-    if (hint === null || hint > KEEP_WARM_MAX_HINT_SECONDS) return;
+    if (hint !== null && hint > KEEP_WARM_MAX_HINT_SECONDS) return;
     const endpoint = new URL('health', this.normalizedBaseUrl);
     try {
       const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET' }), (response) => {
@@ -1075,12 +1078,36 @@ function createRequest(
   return transport.request(url, options, onResponse);
 }
 
+// The host closes an idle keep-alive connection (5 s on hosts before 120 s) and a request sent on it at
+// that moment fails with a reset before any response. The host never read it, so it is safe to send again
+// on a fresh connection, as browsers do. Without this, one such race tore down the event stream (reconnect,
+// full state refetch: the "re-connecting" pause on a tab switch).
+const STALE_SOCKET_CODES = new Set(['ECONNRESET', 'EPIPE', 'ECONNABORTED']);
+const STALE_SOCKET_RETRIES = 2;
+
+class StaleSocketError extends Error {}
+
 async function requestJson(
   url: URL,
   options: RemoteRequestOptions,
   body: string,
 ): Promise<JsonResponse> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await requestJsonOnce(url, options, body);
+    } catch (error) {
+      if (!(error instanceof StaleSocketError) || attempt >= STALE_SOCKET_RETRIES) throw error;
+    }
+  }
+}
+
+async function requestJsonOnce(
+  url: URL,
+  options: RemoteRequestOptions,
+  body: string,
+): Promise<JsonResponse> {
   return await new Promise<JsonResponse>((resolve, reject) => {
+    let responded = false;
     const request = createRequest(url, {
       ...options,
       headers: {
@@ -1088,6 +1115,7 @@ async function requestJson(
         'Content-Length': Buffer.byteLength(body),
       },
     }, (response) => {
+      responded = true;
       void readResponseBody(response).then((responseBody) => {
         resolve({
           statusCode: response.statusCode ?? 500,
@@ -1097,7 +1125,11 @@ async function requestJson(
       }).catch(reject);
     });
 
-    request.on('error', reject);
+    request.on('error', (error: NodeJS.ErrnoException) => {
+      const stale = !responded && request.reusedSocket && STALE_SOCKET_CODES.has(error.code ?? '')
+        && !options.signal?.aborted;
+      reject(stale ? new StaleSocketError(error.message) : error);
+    });
     request.write(body);
     request.end();
   });
