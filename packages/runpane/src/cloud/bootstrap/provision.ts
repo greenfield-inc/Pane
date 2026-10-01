@@ -4,7 +4,7 @@ import path from 'path';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../boundaryDecoder';
 import { RemoteDaemonClient, type RemoteHttpTransport } from '../../remote/remoteDaemonClient';
 import { decodePairingCode, encodePairingCode } from '../pairing';
-import { CLOUD_SESSION_TAG, type TailscaleApi } from '../tailscale';
+import { CLOUD_SESSION_TAG, deletableNodeIds, describeForeignDevice, type TailscaleApi, type TailscaleDevice } from '../tailscale';
 import { cloudBootstrapAssets, type CloudBootstrapAssetName } from './generated/assets';
 import { waitForDaemonHealth } from './health';
 import type {
@@ -80,7 +80,10 @@ interface ProvisionResult extends TailnetIdentity {
 interface ReenrolOptions {
   hostname: string;
   tailscale: TailscaleApi;
-  /** The node id recorded at provision time. Devices under the same hostname are deleted too. */
+  /**
+   * The node id recorded at provision time. Devices under the same hostname tagged like this node are
+   * deleted too; any other device under it stops the re-enrol before the node state is wiped.
+   */
   oldNodeId?: string;
   tags?: string[];
   /** Re-point Tailscale Serve at the daemon (its config lives in the wiped node state). Default true. */
@@ -306,10 +309,13 @@ async function prepareAndJoin(
       await runner.run('ts-guard', [], envelopeSchema, { timeoutSeconds: 120 });
       return parseIdentity(current);
     }
-    // A device left under this hostname would push the new node to "<hostname>-1".
-    for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
-      if (await options.tailscale.deleteDevice(device.nodeId)) {
-        deletedStaleNodeIds.push(device.nodeId);
+    // A device left under this hostname would push the new node to "<hostname>-1". Only a stale node
+    // of ours is deleted; anyone else's device under the name stops the join instead.
+    const stale = deletableNodeIds(await options.tailscale.findDevicesByHostname(hostname), tags);
+    refuseForeignDevices('tailscale-join', hostname, stale.foreign);
+    for (const nodeId of stale.nodeIds) {
+      if (await options.tailscale.deleteDevice(nodeId)) {
+        deletedStaleNodeIds.push(nodeId);
       }
     }
     return joinTailnet(sandbox, runner, options.tailscale, home, hostname, tags);
@@ -365,15 +371,10 @@ export async function reenrolSandbox(sandbox: SandboxHandle, options: ReenrolOpt
   const runner = new StepRunner(sandbox, home);
   await uploadScripts(sandbox, home);
 
-  const doomed = new Set<string>();
-  if (options.oldNodeId) {
-    doomed.add(options.oldNodeId);
-  }
-  for (const device of await options.tailscale.findDevicesByHostname(hostname)) {
-    doomed.add(device.nodeId);
-  }
+  const doomed = deletableNodeIds(await options.tailscale.findDevicesByHostname(hostname), tags, options.oldNodeId);
+  refuseForeignDevices('tailscale-reenrol', hostname, doomed.foreign);
   const deletedNodeIds: string[] = [];
-  for (const nodeId of doomed) {
+  for (const nodeId of doomed.nodeIds) {
     if (await options.tailscale.deleteDevice(nodeId)) {
       deletedNodeIds.push(nodeId);
     }
@@ -479,6 +480,13 @@ async function joinTailnet(
   // The state dir is 0700, so the key is private from the moment it lands; the step chmods and shreds it.
   await sandbox.writeFile(keyPath, key.key);
   return parseIdentity(await runner.run('tailscale-up', [keyPath, hostname], tailnetStepSchema, { timeoutSeconds: 120 }));
+}
+
+/** Runpane never deletes a device it did not create; one holding a managed hostname needs the user. */
+function refuseForeignDevices(step: string, hostname: string, foreign: TailscaleDevice[]): void {
+  if (foreign.length === 0) return;
+  throw new BootstrapError(step, `the tailnet already has ${foreign.map(describeForeignDevice).join(', ')} named ${hostname}, `
+    + `which runpane did not create (only devices tagged like its own nodes are replaced). Rename or remove it in the Tailscale admin console, then retry.`);
 }
 
 function assertTailnetIdentity(identity: TailnetIdentity, hostname: string, tags: string[]): void {

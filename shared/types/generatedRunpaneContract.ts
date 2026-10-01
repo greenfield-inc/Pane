@@ -3721,7 +3721,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Options:",
         "  --yes                          Confirm; the command changes billed cloud resources.",
-        "  --name <host>                  Tailnet and sandbox name (default <name-prefix>-coord).",
+        "  --name <host>                  Tailnet and sandbox name; must start with <name-prefix>- (default <name-prefix>-coord).",
         "  --size <small|default|large>   Machine size (default small).",
         "  --from <snapshot>              Named snapshot to start from (default the saved golden snapshot).",
         "  --no-golden                    Start from the plain image.",
@@ -15777,7 +15777,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--name",
             "value": "<host>",
             "required": false,
-            "description": "Tailnet and sandbox name (default <name-prefix>-coord)."
+            "description": "Tailnet and sandbox name; must start with <name-prefix>- (default <name-prefix>-coord)."
           },
           {
             "name": "--size",

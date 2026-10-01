@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createTailscaleApi, TailscaleApiError } from './tailscale';
+import { CLOUD_SESSION_TAG, createTailscaleApi, deletableNodeIds, describeForeignDevice, TailscaleApiError } from './tailscale';
 
 const SECRET = 'fake-oauth-client-secret-value';
 
@@ -68,6 +68,20 @@ test('findDevicesByHostname matches the hostname or the MagicDNS short name', as
   const found = await api.findDevicesByHostname('rp-abc');
   assert.deepEqual(found.map((device) => device.nodeId), ['nA', 'nB', 'nC']);
   assert.equal(found[0].name, 'rp-abc.tail.ts.net');
+});
+
+test('deletableNodeIds keeps the recorded node and tagged devices, never an untagged or differently tagged one', () => {
+  const devices = [
+    { nodeId: 'nOURS', hostname: 'rp-abc', tags: ['tag:rp-session'] },
+    { nodeId: 'nMEMBER', hostname: 'rp-abc' },
+    { nodeId: 'nSERVER', hostname: 'rp-abc', tags: ['tag:server'] },
+  ];
+  const result = deletableNodeIds(devices, [CLOUD_SESSION_TAG], 'nRECORDED');
+  assert.deepEqual(result.nodeIds, ['nRECORDED', 'nOURS']);
+  assert.deepEqual(result.foreign.map((device) => device.nodeId), ['nMEMBER', 'nSERVER']);
+  // A recorded id that turns out to be someone else's device is not deleted either.
+  assert.deepEqual(deletableNodeIds(devices, [CLOUD_SESSION_TAG], 'nMEMBER').nodeIds, ['nOURS']);
+  assert.equal(describeForeignDevice(devices[1]), 'rp-abc (nMEMBER, untagged)');
 });
 
 test('deleteDevice reports an already-deleted device as false and errors carry no secrets', async () => {

@@ -881,7 +881,9 @@ runpane cloud destroy "api work" --yes
 
 This deletes the Session's GitHub deploy keys, then the tailnet device, then the sandbox and its disk, checks both are gone, then removes the
 local record and the Pane desktop profile. If a deploy key can't be deleted, destroy stops before the tailnet device and
-says which key; fix the credential (or delete the key on GitHub) and rerun it. It can't be undone: push any work first (`runpane cloud git push`).
+says which key; fix the credential (or delete the key on GitHub) and rerun it. Only tailnet devices tagged `tag:rp-session`
+(the recorded node, or one under the Session's hostname) are deleted; a member's device that happens to share the name is left
+alone and named on stderr. It can't be undone: push any work first (`runpane cloud git push`).
 Destroy costs no boat start.
 
 ## Costs

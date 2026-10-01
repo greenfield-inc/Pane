@@ -240,6 +240,18 @@ test('provisionSandbox deletes a stale device holding the hostname before joinin
   assert.deepEqual(tailscale.log, ['delete nSTALE11CNTRL', 'mint']);
 });
 
+test('provisionSandbox never deletes a member device holding the hostname: it stops the join and names it', async () => {
+  const sandbox = new FakeSandbox();
+  const tailscale = new FakeTailscale();
+  tailscale.devices = [{ ...device('nMEMBER', 'rp-k3j9x0q2'), tags: [] }];
+  await assert.rejects(provisionSandbox(sandbox, {
+    sessionId: 'k3j9x0q2m1', label: 'x', tailscale, paneSource: { kind: 'preinstalled' },
+    pairingOutputPath: path.join(tempDir(), 'p'), fetchImpl: healthyFetch,
+  }), /rp-k3j9x0q2\.tailnet-example\.ts\.net \(nMEMBER, untagged\).*did not create/u);
+  assert.deepEqual(tailscale.log, []);
+  assert.equal(tailscale.devices.length, 1);
+});
+
 test('provisionSandbox skips the join when the sandbox is already on the tailnet (retry)', async () => {
   const sandbox = new FakeSandbox();
   sandbox.state = { ...sandbox.state, joined: true, hostname: 'rp-k3j9x0q2' };
@@ -387,6 +399,18 @@ test('reenrolSandbox deletes the old device before wiping state, and keeps the n
   assert.deepEqual(tailscale.log, ['delete nOLD11CNTRL', 'mint']);
   assert.deepEqual(sandbox.steps.map((step) => step[0]), ['tailscale-reset', 'tailscale-up', 'serve-restore']);
   assert.equal(result.magicDnsName, 'rp-k3j9x0q2.tailnet-example.ts.net');
+});
+
+test('reenrolSandbox leaves a differently tagged device alone and stops before wiping state', async () => {
+  const sandbox = new FakeSandbox();
+  sandbox.state = { ...sandbox.state, joined: true, hostname: 'rp-k3j9x0q2' };
+  const tailscale = new FakeTailscale();
+  tailscale.devices = [device('nOLD11CNTRL', 'rp-k3j9x0q2'), { ...device('nSERVER', 'rp-k3j9x0q2'), tags: ['tag:server'] }];
+
+  await assert.rejects(reenrolSandbox(sandbox, { hostname: 'rp-k3j9x0q2', oldNodeId: 'nOLD11CNTRL', tailscale }),
+    /nSERVER, tags tag:server/u);
+  assert.deepEqual(tailscale.deleted, []);
+  assert.deepEqual(sandbox.steps.map((step) => step[0]), []);
 });
 
 test('step results parse from the last RP_RESULT line and errors are redacted', () => {

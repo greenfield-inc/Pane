@@ -21,8 +21,10 @@ The script and the golden scrub/check scripts are embedded in the package
 4. **Tailnet join** with a single-use, pre-authorized, `tag:rp-session` auth key minted through the
    Tailscale OAuth client. The key reaches the sandbox as a file in the 0700 state directory and is
    shredded after `tailscale up --hostname=rp-<id> --ssh=false`. Bootstrap refuses a node with
-   Tailscale SSH on, a missing tag, or a suffixed name. A stale device under the same hostname is
-   deleted through the API first; otherwise the new node would join as `rp-<id>-1`.
+   Tailscale SSH on, a missing tag, or a suffixed name. A stale `tag:rp-session` device under the
+   same hostname is deleted through the API first; otherwise the new node would join as `rp-<id>-1`.
+   Runpane never deletes a device it did not create: if an untagged (member) or differently tagged
+   device holds the name, the join stops and names it.
 5. **Pane daemon.** With Pane on disk (the golden image, or a `.deb` bootstrap installs and checks
    against a sha256), bootstrap runs `pane --remote-setup --prefer-tunnel tailscale` directly.
    Otherwise it runs `runpane install daemon --format deb --prefer-tunnel tailscale`. The node's
@@ -37,7 +39,7 @@ The script and the golden scrub/check scripts are embedded in the package
 ## Repair: `reenrolSandbox()`
 
 Tailscale identity survives a stop and resume, so re-enrolment is a repair path only. It deletes
-the old device through the API first, wipes `tailscaled.state`, rejoins with a new single-use key
+the old device (the recorded node, and `tag:rp-session` devices under the hostname) through the API first, wipes `tailscaled.state`, rejoins with a new single-use key
 under the same hostname, and restores the Serve mapping, which lives in the wiped state. The MagicDNS
 name and the pairing stay the same; the tailnet IPs change.
 

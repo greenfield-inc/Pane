@@ -125,7 +125,7 @@ test('a failed setup removes the tailnet device first, then the sandbox, and for
   harness.world.failProvision = 'daemon install failed';
   const originalProvision = harness.deps.bootstrap.provision;
   harness.deps.bootstrap.provision = async (sandbox, request, tailnet) => {
-    harness.world.devices.push({ nodeId: 'nHALFJOINED', hostname: request.hostname });
+    harness.world.devices.push({ nodeId: 'nHALFJOINED', hostname: request.hostname, tags: ['tag:rp-session'] });
     return originalProvision(sandbox, request, tailnet);
   };
 
@@ -280,6 +280,23 @@ test('destroy deletes the tailnet device before the sandbox, then forgets the ho
   const result = lastJson(harness);
   assert.deepEqual(result.deletedNodeIds, [record.profile.cloud.nodeId]);
   assert.equal(result.sandbox, 'deleted');
+});
+
+test('destroy never deletes a member device that shares the Session hostname, and names it', async () => {
+  const harness = await createTestHarness();
+  const hostname = await newHost(harness);
+  const [record] = await harness.deps.store.listHosts();
+  harness.world.devices.push(
+    { nodeId: 'nMEMBER', hostname, name: `${hostname}-1.tailtest.ts.net` },
+    { nodeId: 'nOTHERTAG', hostname, tags: ['tag:server'] },
+  );
+
+  assert.equal(await run(harness, ['destroy', hostname, '--yes', '--desktop-dir', harness.desktopDir, '--json']), 0);
+  assert.ok(!harness.world.calls.includes('tailnet-delete nMEMBER'), harness.world.calls.join('\n'));
+  assert.ok(!harness.world.calls.includes('tailnet-delete nOTHERTAG'), harness.world.calls.join('\n'));
+  assert.deepEqual(harness.world.devices.map((device) => device.nodeId), ['nMEMBER', 'nOTHERTAG']);
+  assert.deepEqual(lastJson(harness).deletedNodeIds, [record.profile.cloud.nodeId]);
+  assert.match(harness.err.join('\n'), /left .*nMEMBER, untagged.*nOTHERTAG, tags tag:server.* alone/u);
 });
 
 test('destroy requires --yes', async () => {
