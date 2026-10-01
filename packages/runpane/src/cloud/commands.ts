@@ -462,7 +462,12 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     } else {
       deps.stderr(`runpane cloud: setup of ${hostname} failed; removing its tailnet device and sandbox ${sandbox.id}...`);
       try {
-        await revokeGitHubGrants(record, deps);
+        const github = await revokeGitHubGrants(record, deps);
+        if (github.failed.length > 0) {
+          // The record holds the only handle on those keys: keep it, and the sandbox, for a retry.
+          await deps.store.writeHost(record);
+          throw new Error(`deploy key${github.failed.length === 1 ? '' : 's'} ${github.failed.join(', ')} could not be deleted on GitHub, so ${hostname} and sandbox ${sandbox.id} are kept`);
+        }
         await destroyHost(record, provider, deps.bootstrap.createTailnet(tailnetCredentials), deps);
         await deps.store.removeHost(hostname);
         // The broker step may already have told the coordinator about this Session.
@@ -881,6 +886,10 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
   const { provider, tailnet } = await loadCloudWithTailnet(deps, record);
   const github = record.meta.github?.length ? await revokeGitHubGrants(record, deps) : undefined;
+  if (github?.failed.length) {
+    // Nothing is removed yet: the saved record keeps the keys' only handle, and a retry deletes what is left.
+    throw new Error(`${record.profile.cloud.hostname} was not destroyed: GitHub deploy key${github.failed.length === 1 ? '' : 's'} ${github.failed.join(', ')} could not be deleted. Fix the GitHub credential (or delete the key${github.failed.length === 1 ? '' : 's'} as shown above) and rerun runpane cloud destroy ${record.profile.cloud.hostname} --yes.`);
+  }
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);

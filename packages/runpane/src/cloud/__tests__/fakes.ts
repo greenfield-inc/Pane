@@ -84,6 +84,8 @@ export interface FakeGitHub {
   tokenSources: GitHubTokenSource[];
   /** The sandbox's ls-remote with the new credential fails. */
   verifyFails?: boolean;
+  /** DELETE of a deploy key fails with this message (GitHub down, credential lost admin). */
+  deleteKeyFails?: string;
   /** What the sandbox's bundle step finds; `data` is split into parts the provider can read back. */
   bundle?: { head: string; origin: string; prerequisites: string[]; commits: number; data?: Buffer };
 }
@@ -309,6 +311,7 @@ function createFakeGitHub(world: FakeWorld): GitHubPort {
         },
         async deleteDeployKey(repo, keyId) {
           world.calls.push(`github-delete-key ${repo} ${keyId}`);
+          if (github.deleteKeyFails) throw new Error(github.deleteKeyFails);
           const before = github.keys.length;
           github.keys = github.keys.filter((key) => !(key.repo === repo && key.id === keyId));
           return github.keys.length < before;

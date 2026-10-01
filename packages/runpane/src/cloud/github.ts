@@ -339,7 +339,13 @@ export async function connectDeployKey(record: CloudHostRecord, handle: SandboxH
   try {
     await runChecked(handle, verifyScript(deployKeyCloneUrl(repo)), `Reading ${repo} with the deploy key`, 150);
   } catch (error) {
-    await api.deleteDeployKey(repo, key.id).catch(() => undefined);
+    const reason = error instanceof Error ? error.message : String(error);
+    try {
+      await api.deleteDeployKey(repo, key.id);
+    } catch (cleanupError) {
+      // The grant stays in the record: it is the handle disconnect and destroy delete the key with.
+      throw new Error(`${reason}. Deleting deploy key ${key.id} on ${repo} failed too (${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}); ${host} keeps the grant. Retry with: runpane cloud github disconnect ${host} --repo ${repo}`);
+    }
     await handle.runScript(removeDeployKeyScript(repo), { timeoutSeconds: 60 }).catch(() => undefined);
     record.meta.github = (record.meta.github ?? []).filter((existing) => existing !== grant);
     if (record.meta.github.length === 0) delete record.meta.github;
@@ -377,12 +383,15 @@ async function connectPat(record: CloudHostRecord, handle: SandboxHandle, deps: 
 
 /**
  * Deletes every deploy key a Session holds on GitHub (for destroy and failed creates). Never throws:
- * a key it can't delete is reported with the command that deletes it.
+ * a key it can't delete is reported with the command that deletes it, and its grant stays in the
+ * saved record (deleted ones leave it), so the caller can stop before removing the Session and a
+ * retry deletes only what is left.
  */
 export async function revokeGitHubGrants(record: CloudHostRecord, deps: CloudDeps): Promise<{ deletedKeys: string[]; failed: string[]; pats: string[] }> {
   const deletedKeys: string[] = [];
   const failed: string[] = [];
   const pats: string[] = [];
+  const deleted = new Set<GitHubGrant>();
   for (const grant of record.meta.github ?? []) {
     if (grant.mode === 'pat') {
       pats.push(grant.repo);
@@ -393,10 +402,16 @@ export async function revokeGitHubGrants(record: CloudHostRecord, deps: CloudDep
       const api = deps.github.api(await deps.github.resolveToken(grant.tokenSource ?? { kind: 'gh' }));
       await api.deleteDeployKey(grant.repo, grant.keyId);
       deletedKeys.push(`${grant.repo}#${grant.keyId}`);
+      deleted.add(grant);
     } catch (error) {
       failed.push(`${grant.repo}#${grant.keyId}`);
       deps.stderr(`runpane cloud: could not delete deploy key ${grant.keyId} on ${grant.repo} (${error instanceof Error ? error.message : String(error)}); delete it with: gh api -X DELETE repos/${grant.repo}/keys/${grant.keyId}`);
     }
+  }
+  if (deleted.size > 0) {
+    record.meta.github = (record.meta.github ?? []).filter((grant) => !deleted.has(grant));
+    if (record.meta.github.length === 0) delete record.meta.github;
+    await deps.store.writeHost(record);
   }
   return { deletedKeys, failed, pats };
 }
