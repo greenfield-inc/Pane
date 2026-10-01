@@ -189,6 +189,17 @@ async function dismissFirstRun() {
 }
 
 const visibleTerminal = () => page.locator('.xterm:visible').last();
+// Dialogs that can open at any time (the update check) and block clicks.
+async function closeStrayDialogs() {
+  const update = page.getByRole('dialog', { name: 'Software Update' });
+  if (await update.isVisible().catch(() => false)) {
+    await update.getByRole('button', { name: 'Close', exact: true }).click().catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+}
+// A sidebar Pane row: its full-size overlay button is labelled with the Pane's name. (While a modal such as
+// the update dialog is open, the page behind it is aria-hidden and has no such buttons: close it first.)
+const paneRow = (name) => page.getByRole('button', { name, exact: true }).first();
 const outputs = () => page.evaluate(() => window.__lat.out.map((e) => ({ ...e })));
 async function waitForOutput(predicate, timeoutMs, since = 0) {
   const deadline = Date.now() + timeoutMs;
@@ -221,8 +232,9 @@ async function connectHost() {
 }
 
 async function openPane() {
-  const existing = page.getByRole('button', { name: paneName, exact: true });
+  const existing = paneRow(paneName);
   if (await existing.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
+    await closeStrayDialogs();
     await existing.click();
   } else {
     await page.getByRole('button', { name: `New pane in ${repo}` }).click();
@@ -411,30 +423,43 @@ async function tabSwitches(count) {
 // Between two Panes (terminals unmount and remount: the full activation path). The second Pane runs the TUI too.
 async function paneSwitches(count) {
   const other = `${paneName}-b`;
-  const otherButton = page.getByRole('button', { name: other, exact: true });
+  const otherButton = paneRow(other);
   if (!await otherButton.waitFor({ timeout: 3000 }).then(() => true, () => false)) {
     await page.getByRole('button', { name: `New pane in ${repo}` }).click();
     const dialog = page.getByRole('dialog', { name: `New Pane in ${repo}` });
     await dialog.getByRole('textbox', { name: 'Enter a name for your pane' }).fill(other);
     await dialog.getByRole('button', { name: /^Create/ }).click();
   } else {
+    await closeStrayDialogs();
     await otherButton.click();
   }
   const addTerminal = page.getByRole('button', { name: /^Terminal\s*Ctrl\+Alt\+1/ });
+  // The first Pane's terminal stays on screen until the switch renders: let it go before looking.
+  await page.waitForTimeout(4000);
+  log('panes: second Pane open; waiting for a terminal');
   const deadline = Date.now() + 60_000;
   while (!await visibleTerminal().isVisible().catch(() => false) && Date.now() < deadline) {
-    if (await addTerminal.isVisible().catch(() => false)) { await page.waitForTimeout(3000); if (!await visibleTerminal().isVisible().catch(() => false)) await addTerminal.click(); }
+    if (await addTerminal.isVisible().catch(() => false)) {
+      await page.waitForTimeout(3000);
+      if (!await visibleTerminal().isVisible().catch(() => false)) {
+        log('panes: empty stage; opening a terminal');
+        await addTerminal.click();
+      }
+    }
     await page.waitForTimeout(500);
   }
+  log('panes: starting the TUI in the second Pane');
   await visibleTerminal().waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1500);
   await visibleTerminal().click();
   await shellCommand(`${python} ~/.rcl-latency-tui.py 3000`);
+  log('panes: switching');
   await page.waitForTimeout(2000);
   const samples = [];
   for (let i = 0; i < count; i++) {
     await page.waitForTimeout(i === 4 ? 6000 : 1000);
-    const target = page.getByRole('button', { name: i % 2 === 0 ? paneName : other, exact: true });
+    const target = paneRow(i % 2 === 0 ? paneName : other);
+    await closeStrayDialogs();
     const sample = await measureActivation(() => target.click());
     samples.push({ ...sample, afterIdle: i === 4 });
   }
@@ -502,6 +527,7 @@ const phase = async (name, fn) => {
   if (skip.has(name)) { result.phases[name] = { skipped: true }; return; }
   log(`phase ${name}`);
   try {
+    await closeStrayDialogs();
     const measured = await outputRate(fn);
     result.phases[name] = { ...measured.value, renderer: await rendererHealth(measured.t0, measured.t1), allTerminalOutput: { eventsPerSec: measured.outputEventsPerSec, kBps: measured.outputKBps } };
     log(`phase ${name} done`, JSON.stringify(result.phases[name]).slice(0, 400));
@@ -542,7 +568,7 @@ try {
   if (env.SHOTS === '1') await page.screenshot({ path: path.join(out, 'final.png') });
   // Stop the TUIs (Pane A's first terminal tab, Pane B's terminal) so the shells are free for the next run.
   for (const name of [paneName, `${paneName}-b`]) {
-    const button = page.getByRole('button', { name, exact: true });
+    const button = paneRow(name);
     if (!await button.isVisible().catch(() => false)) continue;
     await button.click();
     await page.waitForTimeout(1500);
