@@ -140,6 +140,12 @@ jobs:
       env:
         PANE_DIR: ${{ runner.temp }}/pane-ci
 
+    # Session ports chip row (desktop renderer + Remote PWA, mocked daemon).
+    # Needs only the Vite frontend and the Chromium installed above.
+    - name: Run Session ports UI tests
+      if: ${{ !cancelled() }}
+      run: CI=1 pnpm exec playwright test --config=playwright.ports.config.ts
+
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
   # the runtime floors (Node 20 / Python 3.8) and once at current (Node 22 /
@@ -191,6 +197,17 @@ jobs:
 
     - name: Run package manager smoke tests
       run: node scripts/test-runpane-package-smoke.js
+
+    # The package's unit tests (CLI, cloud bootstrap, coordinator broker and
+    # secrets policy) use `rm -rf` and `node --test` globs (Node 21+), so they
+    # run once, on Linux at the current Node.
+    - name: Run wrapper unit tests
+      if: runner.os == 'Linux' && matrix.node-version == '22.18.0'
+      run: pnpm --filter runpane test
+
+    - name: Check cloud bootstrap assets are current
+      if: runner.os == 'Linux' && matrix.node-version == '22.18.0'
+      run: pnpm --filter runpane run check:cloud-assets
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
