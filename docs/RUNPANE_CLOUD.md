@@ -428,7 +428,10 @@ runpane cloud port close "api work" web
 - **A suggested port** (dimmed, dashed) is something a panel started listening on that isn't published. **Open on
   tailnet** publishes it. If that tailnet port is already taken by another Serve entry, the row asks before replacing it.
 - The row follows the daemon you're connected to: it updates when ports change, when the connection comes back, and every
-  30 s. It stays hidden off a cloud Session and on daemons without ports support.
+  30 s. Switching hosts or losing the connection clears it at once, together with any question it was asking, so a
+  Close or Replace never reaches a host other than the one whose chip you clicked. It stays hidden off a cloud Session
+  and on daemons without ports support. If the first read fails, the row says why and offers **Retry**; a copy the
+  clipboard refuses says so too.
 
 #### How a published port behaves
 
