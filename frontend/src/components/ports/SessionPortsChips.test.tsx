@@ -24,12 +24,12 @@ describe('SessionPortsChips', () => {
 
   it('shows each published port as name and HTTPS port with open, copy and close, and flags an unreachable one', () => {
     const markup = render({
-      ports: [port('taste', 8787, { source: 'manifest', reachable: false }), port('pages', 8788)],
+      ports: [port('site', 8787, { source: 'manifest', reachable: false }), port('pages', 8788)],
       suggested: [],
     });
     expect(markup).toContain('aria-label="Session ports"');
-    expect(markup).toContain('aria-label="Open taste (https://rp-a.tail.ts.net:8787/)"');
-    expect(markup).toContain('aria-label="Copy taste URL"');
+    expect(markup).toContain('aria-label="Open site (https://rp-a.tail.ts.net:8787/)"');
+    expect(markup).toContain('aria-label="Copy site URL"');
     expect(markup).toContain('aria-label="Close pages"');
     expect(markup.match(/data-testid="session-port-chip"/g)).toHaveLength(2);
     expect(markup.match(/aria-label="Not answering on 127.0.0.1:8787"/g)).toHaveLength(1);

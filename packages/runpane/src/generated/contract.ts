@@ -15642,7 +15642,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud repair rp-ck4vp7ki --json"
+          "runpane cloud repair rp-a1b2c3d4 --json"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
@@ -16418,7 +16418,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets set rp-zd56pin5 OPENROUTER_API_KEY --from-doppler my-app/dev"
+          "runpane cloud secrets set rp-a1b2c3d4 OPENROUTER_API_KEY --from-doppler my-app/dev"
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
@@ -16444,7 +16444,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets list rp-zd56pin5"
+          "runpane cloud secrets list rp-a1b2c3d4"
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
@@ -16475,7 +16475,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets rm rp-zd56pin5 OPENROUTER_API_KEY"
+          "runpane cloud secrets rm rp-a1b2c3d4 OPENROUTER_API_KEY"
         ],
         "notes": [
           "Values are resolved on this machine and reach the sandbox only in a 0600 file written over the provider files API: never in sandbox metadata, env, command lines or logs. Production, infrastructure and secret-manager names (PRODUCTION_*, CLOUDFLARE_*, SHOPIFY_ADMIN*, VERCEL_*, NEON_*, DOPPLER_*, *_MANAGEMENT_*, plus settings.json secretsDenyList) are refused.",
@@ -16501,7 +16501,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets enable rp-zd56pin5"
+          "runpane cloud secrets enable rp-a1b2c3d4"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
@@ -16526,7 +16526,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud secrets disable rp-zd56pin5"
+          "runpane cloud secrets disable rp-a1b2c3d4"
         ],
         "notes": [
           "Pane desktop never creates or manages cloud machines; it only lists the saved remote hosts that runpane cloud writes."
@@ -16586,7 +16586,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane port open 8787 --name taste",
+          "runpane port open 8787 --name site",
           "runpane port open 3000 --https-port 8443 --path /health --json"
         ],
         "notes": [
@@ -16648,7 +16648,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane port close taste"
+          "runpane port close site"
         ],
         "notes": []
       },
@@ -16734,7 +16734,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud port open rp-zd56pin5 8787 --name taste --yes"
+          "runpane cloud port open rp-a1b2c3d4 8787 --name site --yes"
         ],
         "notes": [
           "Tailnet only: Tailscale Serve, never Funnel. The URL works from any device on your tailnet with no forwarder."
@@ -16759,7 +16759,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud port list rp-zd56pin5"
+          "runpane cloud port list rp-a1b2c3d4"
         ],
         "notes": []
       },
@@ -16787,7 +16787,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud port close rp-zd56pin5 taste"
+          "runpane cloud port close rp-a1b2c3d4 site"
         ],
         "notes": []
       },
@@ -16884,7 +16884,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane cloud notes push rp-zd56pin5"
+          "runpane cloud notes push rp-a1b2c3d4"
         ],
         "notes": []
       },

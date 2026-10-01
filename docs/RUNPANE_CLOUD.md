@@ -29,24 +29,27 @@ client: it lists cloud Sessions next to your other remote hosts and never create
 
 ## 1. Install the CLI
 
-Runpane Cloud is not in the npm release of `runpane` yet. Install the build from the fork's prereleases
-(https://github.com/jamari-morrison/Pane/releases). Take the newest `rc-*` release whose notes say
-`branch rc/integration` (others are test builds of work branches); its notes carry the exact install line:
+`runpane cloud` is part of the `runpane` CLI:
 
 ```bash
-gh release list -R jamari-morrison/Pane --limit 5      # newest first
-gh release view rc-<sha> -R jamari-morrison/Pane       # check "branch rc/integration", copy the npm line
-npm i -g https://github.com/jamari-morrison/Pane/releases/download/rc-<sha>/runpane-<version>.tgz
-runpane version          # 2.4.141-rc.<date>.g<commit>
+npm i -g runpane
 runpane cloud --help     # lists setup, new, list, status, stop, wake, repair, destroy, pair, sync, coordinator, peers, secrets, port, github, git, agent
 ```
+
+By default each new Session installs the released Pane daemon the same way `runpane install daemon` does.
+To run a specific build in your Sessions instead, pass its `.deb` with `runpane cloud setup --pane-deb-url
+<https url>` (see [Set up your keys](#2-set-up-your-keys-once)).
+
+**Pre-release builds.** A pre-release of the CLI is a `runpane-<version>.tgz` that you install with
+`npm i -g <path or https URL of the .tgz>`, and it comes with a matching Pane `.deb` that you pass to
+`--pane-deb-url`. Use the two from the same build. `runpane version` shows which build you have.
 
 Run `runpane cloud` from a normal terminal, not from a terminal inside Pane desktop. Pane puts its own
 bundled `runpane` first on `PATH` in its terminals, and that build has no `cloud` command. From inside
 Pane, call the global one by path: `"$(npm prefix -g)/bin/runpane" cloud ...`.
 
-To go back to the npm release: `npm i -g runpane@latest`. Your cloud state in `~/.config/runpane-cloud`
-is kept.
+To go back to the npm release after a pre-release: `npm i -g runpane@latest`. Your cloud state in
+`~/.config/runpane-cloud` is kept.
 
 ## 2. Set up your keys (once)
 
@@ -55,11 +58,11 @@ mode 0600) and checks each one live. It takes secrets only as files or stdin (`-
 command-line values, and it never prints them. Leading and trailing whitespace is trimmed, so values with
 a trailing newline are fine.
 
-With the keys in Doppler (here project `my-app`, config `dev_personal`), process substitution passes each
-one as a file without writing it to disk or showing it:
+With the keys in a secrets manager, process substitution passes each one as a file without writing it to
+disk or showing it. With Doppler, for example:
 
 ```bash
-D="doppler secrets get --project my-app --config dev_personal --plain"
+D="doppler secrets get --project <project> --config <config> --plain"
 runpane cloud setup \
   --boat-key-file <($D BOAT_DEV_API_KEY) \
   --tailscale-client-id <oauth-client-id> \
@@ -71,18 +74,16 @@ runpane cloud setup \
 ```
 
 - Agent sign-in for cloud Sessions (see [Agents in a cloud Session](#agents-in-a-cloud-session)):
-  `--claude-token-file` takes a Claude subscription token (from `claude setup-token`; in Doppler it is one of
-  the `CLAUDE_CODE_DEV_*` names: `doppler secrets --project my-app --config dev_personal --only-names`);
+  `--claude-token-file` takes a Claude subscription token (from `claude setup-token`);
   `--anthropic-key-file <($D ANTHROPIC_API_KEY)` takes an Anthropic API key instead. Both are optional.
 - `--name-prefix` names your sandboxes and tailnet hosts `<prefix>-<id>` (default `rp`). The coordinator
   manages every sandbox whose name starts with `<prefix>-`, so pick a prefix no other sandboxes in the
   boat account use: if other tooling names its boxes `rp-ci-*`, the default `rp-` would match them.
 - `--golden` names the image new Sessions start from: a boat named snapshot with the Pane daemon, Tailscale
   and Playwright's Chromium preinstalled. It makes `new` about a minute faster. Without it (`--no-golden`)
-  each `new` installs everything onto the plain image. Fork builds make goldens named
-  `rp-loop-golden-<sha8>` in the boat account (`scripts/cloud-dist/make-golden.sh`; list them in boat's
-  console under snapshots). Releases keep only the newest two, so point `setup --golden` at a recent one:
-  the one named after the `rc/integration` release you installed, or the newest if that release has none.
+  each `new` installs everything onto the plain image. How to make one:
+  [Golden images](RUNPANE_CLOUD_BOOTSTRAP.md#golden-images); list yours in boat's console under snapshots.
+  Use a golden whose Pane matches the CLI you installed, and make a new one when you upgrade.
   `setup` saves the name without checking it exists; a missing snapshot only shows up as a create error in `new`.
 - `--size` sets the default machine size; see [Costs](#costs). The built-in default is `default`
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
@@ -136,11 +137,11 @@ everywhere below.
 `new` already added the host. In Pane desktop, open the remote host switcher in the sidebar and pick it:
 you get an ordinary remote Pane (agent panels, terminals, diffs). One remote host is active at a time.
 
-> **Released (upstream) Pane desktop builds: quit the app first.** `new`, `sync` and `destroy` edit the
-> desktop's saved remote hosts on disk (`~/.pane/config.json`). A released desktop that is running doesn't
+> **Pane desktop releases from before Runpane Cloud: quit the app first.** `new`, `sync` and `destroy` edit
+> the desktop's saved remote hosts on disk (`~/.pane/config.json`). An older desktop that is running doesn't
 > notice that edit, so the host doesn't show up. Worse, the app's next settings save (any toggle) writes its
 > old copy back and **erases the hosts `runpane cloud` added** (`remoteDaemon.client.profiles` becomes empty).
-> Until your desktop has the fix:
+> Until you update the desktop:
 >
 > 1. Quit Pane desktop completely (on macOS: Pane > Quit, not just closing the window).
 > 2. Run `runpane cloud new`, `sync` or `destroy`.
@@ -151,17 +152,7 @@ you get an ordinary remote Pane (agent panels, terminals, diffs). One remote hos
 > --no-import ...`, then `runpane cloud pair <host>` and paste the code into `Settings > Remote Access >
 > Connections > Connection code`, then click **Import & Connect**.
 >
-> The fix (commit `cd190659`: the desktop now picks up outside edits live and never writes over them) is in
-> fork builds from `rc/integration` at `080d3828` or later. The cloud prerelease ships the desktop as a
-> **Linux `.deb` only**, so an installed macOS or Windows desktop needs the workaround until an upstream
-> release has it. A fork `.deb` desktop shows a "Software Update" prompt for the upstream release on launch.
-> Dismiss it: updating would replace the fork build.
->
-> To try the fix on Windows or macOS without touching an installed Pane, use a **side-by-side test build**:
-> the fork prerelease `rc-desktop-<sha8>` from `.github/workflows/rc-desktop.yml` (unsigned zips). It keeps
-> its data in `~/.pane_cloudtest`, runs next to the installed Pane, registers nothing machine-wide (no login
-> item, `pane://` handler, agent MCP servers or skills) and never offers updates. Remove it by deleting its
-> folder and `~/.pane_cloudtest`.
+> A desktop release that has Runpane Cloud picks up these outside edits live and never writes over them.
 
 If Pane desktop was not installed yet, or you use another data directory, add every cloud Session later
 with:

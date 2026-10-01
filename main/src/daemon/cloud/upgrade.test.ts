@@ -104,7 +104,7 @@ describe('resolveOwnSystemdUnit', () => {
   });
 
   it('prefers a service named by the cgroup', () => {
-    expect(resolveOwnSystemdUnit(() => '0::/user.slice/user@1000.service/app.slice/rc-loop-test.service\n', () => undefined)).toBe('rc-loop-test.service');
+    expect(resolveOwnSystemdUnit(() => '0::/user.slice/user@1000.service/app.slice/pane-test.service\n', () => undefined)).toBe('pane-test.service');
   });
 });
 

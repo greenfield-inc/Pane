@@ -89,7 +89,7 @@ describe('writeSessionAgentNotes', () => {
 
 const G_START = '<!-- runpane-cloud-guardrails:start -->';
 const G_END = '<!-- runpane-cloud-guardrails:end -->';
-const GUARDRAIL = 'Never deploy to production or run destructive database operations (deletes, migrations, schema changes, bulk updates) without asking the owner first.';
+const GUARDRAIL = 'Run the test suite (with its output) before you open a pull request.';
 
 describe('removeMarkedBlock', () => {
   it('removes the block and the blank line before it, keeping text on both sides', () => {

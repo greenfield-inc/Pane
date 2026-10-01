@@ -7,7 +7,7 @@ import { createTestHarness, type TestHarness } from './__tests__/fakes';
 // `runpane cloud notes`: the user's guardrails live in settings.json and reach each Session's daemon
 // (runpane:cloud:agent-notes) on new, wake, add/remove and push.
 
-const GUARDRAIL = 'Never deploy to production or run destructive database operations (deletes, migrations, schema changes, bulk updates) without asking the owner first.';
+const GUARDRAIL = 'Run the test suite (with its output) before you open a pull request.';
 
 async function run(harness: TestHarness, argv: string[]): Promise<number> {
   return runCloudCommand(parseCloudArgs(argv), harness.deps);

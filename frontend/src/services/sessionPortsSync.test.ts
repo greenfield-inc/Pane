@@ -5,7 +5,7 @@ import { createSessionPortsSync, isSessionPortConflict, type SessionPortsState, 
 
 const at = '2026-09-30T23:00:00Z';
 const base = { scheme: 'https', path: '/', createdAt: at, status: 'serving' };
-const taste = { ...base, name: 'taste', port: 8787, httpsPort: 8787, url: 'https://rp-a.tail.ts.net:8787/', source: 'manifest' };
+const site = { ...base, name: 'site', port: 8787, httpsPort: 8787, url: 'https://rp-a.tail.ts.net:8787/', source: 'manifest' };
 const pages = { ...base, name: 'pages', port: 8788, httpsPort: 8788, url: 'https://rp-a.tail.ts.net:8788/', source: 'user' };
 const vite = { port: 5173, address: '127.0.0.1', process: 'vite', detectedAt: at };
 // The daemon's PortsListResult (runpane:ports:list).
@@ -16,25 +16,25 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('decodeSessionPortsSnapshot', () => {
   it('accepts the list result and the IPC envelope, sorted by HTTPS port', () => {
-    const bare = decodeSessionPortsSnapshot(list([pages, taste], [vite]));
-    expect(bare?.ports.map(port => port.name)).toEqual(['taste', 'pages']);
+    const bare = decodeSessionPortsSnapshot(list([pages, site], [vite]));
+    expect(bare?.ports.map(port => port.name)).toEqual(['site', 'pages']);
     expect(bare?.suggested).toEqual([vite]);
     expect(bare).toMatchObject({ available: true, host: 'rp-a' });
-    expect(decodeSessionPortsSnapshot({ success: true, data: list([taste]) })?.ports).toHaveLength(1);
+    expect(decodeSessionPortsSnapshot({ success: true, data: list([site]) })?.ports).toHaveLength(1);
   });
 
   it('drops malformed entries, non-http URLs and suggestions that are already published', () => {
     const snapshot = decodeSessionPortsSnapshot(list(
-      [taste, { ...pages, url: 'javascript:alert(1)' }, { ...pages, port: 0 }, { ...pages, status: 'weird' }, 'junk'],
+      [site, { ...pages, url: 'javascript:alert(1)' }, { ...pages, port: 0 }, { ...pages, status: 'weird' }, 'junk'],
       [{ ...vite, port: 8787 }, { port: 3000, address: '0.0.0.0', detectedAt: at, extra: true }, { ...vite, port: 'nope' }],
     ));
-    expect(snapshot?.ports.map(port => port.name)).toEqual(['taste']);
+    expect(snapshot?.ports.map(port => port.name)).toEqual(['site']);
     expect(snapshot?.suggested).toEqual([{ port: 3000, address: '0.0.0.0', detectedAt: at }]);
   });
 
   it('keeps status, detail and scheme, and reports an unavailable daemon', () => {
     const snapshot = decodeSessionPortsSnapshot({
-      ...list([{ ...taste, scheme: 'http', status: 'missing', detail: 'serve entry lost' }]),
+      ...list([{ ...site, scheme: 'http', status: 'missing', detail: 'serve entry lost' }]),
       available: false, unavailableReason: 'no tailscaled',
     });
     expect(snapshot).toMatchObject({ available: false, unavailableReason: 'no tailscaled' });
@@ -78,14 +78,14 @@ describe('createSessionPortsSync', () => {
     const sync = createSessionPortsSync(transport, state => states.push(state));
     expect(last()).toEqual({ status: 'loading' });
     expect(replies[0].channel).toBe('runpane:ports:list');
-    replies[0].resolve(list([taste]));
+    replies[0].resolve(list([site]));
     await flush();
-    expect(last()).toMatchObject({ status: 'ready', host: 'host-a', snapshot: { ports: [{ name: 'taste' }] } });
+    expect(last()).toMatchObject({ status: 'ready', host: 'host-a', snapshot: { ports: [{ name: 'site' }] } });
 
     changed(undefined);
-    replies[1].resolve(list([taste, pages]));
+    replies[1].resolve(list([site, pages]));
     await flush();
-    expect(last()).toMatchObject({ status: 'ready', snapshot: { ports: [{ name: 'taste' }, { name: 'pages' }] } });
+    expect(last()).toMatchObject({ status: 'ready', snapshot: { ports: [{ name: 'site' }, { name: 'pages' }] } });
 
     reconnected();
     replies[2].resolve(list([]));
@@ -100,11 +100,11 @@ describe('createSessionPortsSync', () => {
     replies[0].resolve(list([]));
     await flush();
     reconnected();
-    changed(list([taste, pages]));
-    expect(last()).toMatchObject({ status: 'ready', snapshot: { ports: [{ name: 'taste' }, { name: 'pages' }] } });
+    changed(list([site, pages]));
+    expect(last()).toMatchObject({ status: 'ready', snapshot: { ports: [{ name: 'site' }, { name: 'pages' }] } });
     replies[1].resolve(list([]));
     await flush();
-    expect(last()).toMatchObject({ snapshot: { ports: [{ name: 'taste' }, { name: 'pages' }] } });
+    expect(last()).toMatchObject({ snapshot: { ports: [{ name: 'site' }, { name: 'pages' }] } });
   });
 
   it('keeps only the newest of overlapping reads', async () => {
@@ -112,7 +112,7 @@ describe('createSessionPortsSync', () => {
     reconnected();
     replies[1].resolve(list([pages]));
     await flush();
-    replies[0].resolve(list([taste]));
+    replies[0].resolve(list([site]));
     await flush();
     expect(last()).toMatchObject({ snapshot: { ports: [{ name: 'pages' }] } });
   });
@@ -144,21 +144,21 @@ describe('createSessionPortsSync', () => {
 
     const opening = sync.open('host-a', { port: 5173, yes: true });
     expect(replies[1]).toMatchObject({ channel: 'runpane:ports:open', args: [{ port: 5173, yes: true }] });
-    replies[1].resolve({ port: taste });
+    replies[1].resolve({ port: site });
     await flush();
     expect(replies[2].channel).toBe('runpane:ports:list');
-    replies[2].resolve(list([taste]));
+    replies[2].resolve(list([site]));
     await opening;
 
-    const closing = sync.close('host-a', 'taste');
-    expect(replies[3]).toMatchObject({ channel: 'runpane:ports:close', args: [{ target: 'taste' }] });
+    const closing = sync.close('host-a', 'site');
+    expect(replies[3]).toMatchObject({ channel: 'runpane:ports:close', args: [{ target: 'site' }] });
     replies[3].resolve({ success: false, error: 'serve config locked' });
     await expect(closing).rejects.toThrow('serve config locked');
   });
 
   it('drops the old host\'s list as soon as the connection switches, and discards its read in flight', async () => {
     createSessionPortsSync(transport, state => states.push(state));
-    replies[0].resolve(list([taste]));
+    replies[0].resolve(list([site]));
     await flush();
     changed(undefined);
     expect(replies[1].channel).toBe('runpane:ports:list');
@@ -166,7 +166,7 @@ describe('createSessionPortsSync', () => {
     hostChanged('host-b');
     expect(last()).toEqual({ status: 'loading' });
     expect(replies[2].channel).toBe('runpane:ports:list');
-    replies[1].resolve(list([taste, pages]));
+    replies[1].resolve(list([site, pages]));
     await flush();
     expect(last()).toEqual({ status: 'loading' });
     replies[2].resolve({ ...list([pages]), host: 'rp-b' });
@@ -176,12 +176,12 @@ describe('createSessionPortsSync', () => {
 
   it('hides the list while disconnected and ignores events until the host is back', async () => {
     createSessionPortsSync(transport, state => states.push(state));
-    replies[0].resolve(list([taste]));
+    replies[0].resolve(list([site]));
     await flush();
 
     hostChanged(null);
     expect(last()).toEqual({ status: 'loading' });
-    changed(list([taste, pages]));
+    changed(list([site, pages]));
     changed(undefined);
     reconnected();
     expect(replies).toHaveLength(1);
@@ -196,7 +196,7 @@ describe('createSessionPortsSync', () => {
 
   it('re-reads instead of applying a pushed list from another tailnet host', async () => {
     createSessionPortsSync(transport, state => states.push(state));
-    replies[0].resolve(list([taste]));
+    replies[0].resolve(list([site]));
     await flush();
     const before = states.length;
 
@@ -242,6 +242,6 @@ describe('createSessionPortsSync', () => {
     expect(isSessionPortConflict(new Error('tailnet port 8787 is already served (tcp); pass --yes to replace'))).toBe(true);
     expect(isSessionPortConflict(new Error('ERR_PORTS_CONFLICT: tailnet :8787 is held by a tcp entry'))).toBe(true);
     expect(isSessionPortConflict(new Error('permission denied'))).toBe(false);
-    expect(isSessionPortConflict(new Error('tailnet port 8787 already serves taste (port 8787); pick another with --https-port'))).toBe(false);
+    expect(isSessionPortConflict(new Error('tailnet port 8787 already serves site (port 8787); pick another with --https-port'))).toBe(false);
   });
 });

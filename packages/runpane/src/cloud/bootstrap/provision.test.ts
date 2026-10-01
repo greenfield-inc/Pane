@@ -161,7 +161,7 @@ function tempDir(): string {
 
 test('cloudHostname takes rp- plus eight lowercase alphanumerics', () => {
   assert.equal(cloudHostname('AbC-123_def-XYZ'), 'rp-abc123de');
-  assert.equal(cloudHostname('k3j9x0q2m1', 'rp-loop-cli'), 'rp-loop-cli-k3j9x0q2');
+  assert.equal(cloudHostname('k3j9x0q2m1', 'rp-dev'), 'rp-dev-k3j9x0q2');
   assert.throws(() => cloudHostname('--'));
 });
 

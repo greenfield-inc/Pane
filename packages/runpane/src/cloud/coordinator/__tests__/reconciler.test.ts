@@ -97,7 +97,7 @@ describe('Reconciler', () => {
   it('ignores unmanaged sandboxes, the coordinator itself, and young orphans', async () => {
     const { reconciler, provider } = setup([
       sandbox('bx_a', 'running'),
-      sandbox('bx_devbox', 'running', { name: 'rp-loop-dev-integrator-other' }),
+      sandbox('bx_devbox', 'running', { name: 'rp-ci-other' }),
       sandbox('bx_other', 'running', { name: 'someone-elses-box' }),
       sandbox('bx_coord', 'running', { name: 'rp-coordinator' }),
       sandbox('bx_young', 'running', { createdAt: '2026-09-30T07:55:00Z' }),

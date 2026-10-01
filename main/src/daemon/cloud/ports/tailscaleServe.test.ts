@@ -3,7 +3,7 @@ import type { ExecFileOptions } from 'child_process';
 import { CommandExecutor } from '../../../utils/commandExecutor';
 import { createTailscaleServeBackend, describeListener, parseServeListeners, serveRunner } from './tailscaleServe';
 
-const HOST = 'rp-zd56pin5.example.ts.net';
+const HOST = 'rp-a1b2c3d4.example.ts.net';
 
 describe('parseServeListeners', () => {
   it('reads tcp forwards, TLS-terminated tcp and web handlers', () => {

@@ -137,7 +137,7 @@ print(json.dumps({"ok":sys.argv[1]=="0","failed":[l[5:] for l in lines if l.star
 # tailscale-up <authKeyFile> <hostname>: join with a single-use tagged key. Never --ssh.
 # The key file is shredded whether or not the join works.
 # Tailscale state guard. After a boat stop/resume, /var/lib/tailscale/tailscaled.state sometimes comes
-# back as 2 bytes (seen 2 of 5 cycles, w2-glue-ux) and the node is logged out; a coordinator or peer wake
+# back as 2 bytes (seen in 2 of 5 stop/resume cycles) and the node is logged out; a coordinator or peer wake
 # can't repair that. tailscaled writes the state with temp-file-then-rename; files written in place survive
 # boat's snapshots. So: keep an in-place copy (cp, never rename) in /var/lib/rp-ts-backup, refreshed every
 # 60 s, whenever the state changes, and by the daemon's safe-to-stop flush; restore it before tailscaled
@@ -400,7 +400,7 @@ PY
 }
 
 # install-pane <mode> <debUrl> <debSha256> <runpaneSpec> <label>
-#   mode: deb-url (install the given .deb, e.g. the fork build), preinstalled (the golden image has /opt/Pane),
+#   mode: deb-url (install the given .deb, e.g. a pre-release build), preinstalled (the golden image has /opt/Pane),
 #         runpane-npm (`runpane install daemon --format deb` downloads the release .deb; <runpaneSpec> picks the CLI).
 # With Pane already on disk, setup calls `pane --remote-setup` directly, as `runpane install daemon` does after it
 # resolves and downloads the upstream .deb it then ignores. Setup output (which carries the pairing code) goes to a

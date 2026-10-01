@@ -9,9 +9,9 @@ describe('plain HTTP connection codes over the tailnet', () => {
   it('accepts http to a MagicDNS name or a Tailscale address (WireGuard already encrypts it)', () => {
     // A cloud Session whose Serve has no TLS certificate (Let's Encrypt limit) serves TCP on 42137.
     for (const baseUrl of [
-      'http://rp-loop-w2fx-abc.tailnet-example.ts.net:42137',
-      'http://100.91.108.101:42137',
-      'http://[fd7a:115c:a1e0::8233:ab07]:42137',
+      'http://rp-a1b2c3d4.tailnet-example.ts.net:42137',
+      'http://100.64.0.10:42137',
+      'http://[fd7a:115c:a1e0::10]:42137',
     ]) {
       expect(decodePaneRemoteConnection(code(baseUrl)).baseUrl).toBe(baseUrl);
     }
