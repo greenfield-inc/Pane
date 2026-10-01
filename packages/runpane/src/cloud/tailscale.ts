@@ -27,7 +27,7 @@ export function deletableNodeIds<Device extends DeviceIdentity>(
   devices: Device[],
   tags: string[] = [CLOUD_SESSION_TAG],
   recordedNodeId?: string,
-): { nodeIds: string[]; foreign: Device[] } {
+) {
   const foreign = devices.filter((device) => tags.length === 0 || !tags.every((tag) => (device.tags ?? []).includes(tag)));
   const isForeign = (nodeId: string) => foreign.some((device) => device.nodeId === nodeId);
   const nodeIds = new Set<string>();
