@@ -103,6 +103,8 @@ The following packages are licensed under the MIT license:
   - @capacitor/ios (8.5.1) - Ionic Team <hi@ionic.io> (https://ionic.io)
   - @capacitor/keyboard (8.0.1) - Ionic <hi@ionicframework.com>
   - @capacitor/push-notifications (8.0.1) - Ionic <hi@ionicframework.com>
+  - @clack/core (0.5.0) - Nate Moore
+  - @clack/prompts (0.11.0) - Nate Moore
   - @develar/schema-utils (2.6.5) - webpack Contrib (https://github.com/webpack-contrib)
   - @egjs/hammerjs (2.0.17)
   - @electron/asar (3.4.1)
@@ -234,7 +236,9 @@ The following packages are licensed under the MIT license:
   - @lydell/node-pty-win32-x64 (1.2.0-beta.3)
   - @malept/flatpak-bundler (0.4.0) - Matt Watson <mattdangerw@gmail.com>
   - @mermaid-js/parser (0.6.2) - Yokozuna59
+  - @modelcontextprotocol/core (2.0.0) - Anthropic, PBC (https://anthropic.com)
   - @modelcontextprotocol/sdk (1.16.0) - Anthropic, PBC (https://anthropic.com)
+  - @modelcontextprotocol/server (2.0.0) - Anthropic, PBC (https://anthropic.com)
   - @monaco-editor/loader (1.5.0) - Suren Atoyan <contact@surenatoyan.com>
   - @monaco-editor/react (4.7.0) - Suren Atoyan <contact@surenatoyan.com>
   - @msgpackr-extract/msgpackr-extract-darwin-arm64 (3.0.3) - Kris Zyp
@@ -598,7 +602,6 @@ The following packages are licensed under the MIT license:
   - es-define-property (1.0.1) - Jordan Harband <ljharb@gmail.com>
   - es-errors (1.3.0) - Jordan Harband <ljharb@gmail.com>
   - es-module-lexer (1.7.0) - Guy Bedford
-  - es-module-lexer (2.3.1) - Guy Bedford
   - es-module-lexer (2.3.2) - Guy Bedford
   - es-object-atoms (1.1.1) - Jordan Harband <ljharb@gmail.com>
   - es-object-atoms (1.1.2) - Jordan Harband <ljharb@gmail.com>
@@ -626,6 +629,7 @@ The following packages are licensed under the MIT license:
   - expo-application (57.0.3) - 650 Industries, Inc.
   - expo-asset (57.0.17) - 650 Industries, Inc.
   - expo-audio (57.0.5) - 650 Industries, Inc.
+  - expo-build-properties (57.0.20) - 650 Industries, Inc.
   - expo-camera (57.0.5) - 650 Industries, Inc.
   - expo-clipboard (57.0.2) - 650 Industries, Inc.
   - expo-constants (57.0.18) - 650 Industries, Inc.
@@ -633,12 +637,10 @@ The following packages are licensed under the MIT license:
   - expo-dev-launcher (57.0.20) - 650 Industries, Inc.
   - expo-dev-menu (57.0.18) - 650 Industries, Inc.
   - expo-dev-menu-interface (57.0.0) - 650 Industries, Inc.
-  - expo-device (57.0.2) - 650 Industries, Inc.
   - expo-file-system (57.0.7) - 650 Industries, Inc.
   - expo-font (57.0.4) - 650 Industries, Inc.
   - expo-glass-effect (57.0.3) - 650 Industries, Inc.
   - expo-haptics (57.0.3) - 650 Industries, Inc.
-  - expo-image (57.0.5) - 650 Industries, Inc.
   - expo-json-utils (57.0.2) - 650 Industries, Inc.
   - expo-keep-awake (57.0.2) - 650 Industries, Inc.
   - expo-linking (57.0.10) - 650 Industries, Inc.
@@ -1284,7 +1286,6 @@ The following packages are licensed under the MIT license:
   - typed-array-byte-length (1.0.3) - Jordan Harband <ljharb@gmail.com>
   - typed-array-byte-offset (1.0.4) - Jordan Harband <ljharb@gmail.com>
   - typed-array-length (1.0.8) - Jordan Harband <ljharb@gmail.com>
-  - ua-parser-js (0.7.41) - Faisal Salman <f@faisalman.com> (http://faisalman.com)
   - ufo (1.6.1)
   - uint8array-extras (1.5.0) - Sindre Sorhus
   - unbox-primitive (1.1.0) - Jordan Harband <ljharb@gmail.com>

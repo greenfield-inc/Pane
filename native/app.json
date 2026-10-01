@@ -20,7 +20,7 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "4",
+      "buildNumber": "5",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -33,6 +33,14 @@
       "versionCode": 3
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       [

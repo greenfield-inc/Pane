@@ -15,8 +15,9 @@
   "dependencies": {
     "@legendapp/list": "~3.3.11",
     "@tanstack/react-query": "^5.90.0",
-    "expo": "~57.0.0",
+    "expo": "~57.0.23",
     "expo-audio": "~57.0.5",
+    "expo-build-properties": "57.0.20",
     "expo-camera": "~57.0.5",
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.0",
