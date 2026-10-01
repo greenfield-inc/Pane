@@ -118,6 +118,25 @@ describe('ConfigManager appearance persistence', () => {
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
     rename.mockRestore();
   });
+
+  it('keeps the analytics identity in memory unchanged when saving it fails', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const before = await fs.readFile(configPath, 'utf8');
+    const analyticsBefore = structuredClone(manager.getConfig().analytics);
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValue(new Error('rename failed'));
+    try {
+      await expect(manager.setAnalyticsDistinctId('distinct-after')).rejects.toThrow('rename failed');
+      await expect(manager.setAnalyticsIdentity({ distinctId: 'identity-after', identitySource: 'anonymous' })).rejects.toThrow('rename failed');
+    } finally {
+      rename.mockRestore();
+    }
+    expect(manager.getConfig().analytics).toEqual(analyticsBefore);
+    expect(await fs.readFile(configPath, 'utf8')).toBe(before);
+    await manager.setAnalyticsDistinctId('distinct-after');
+    expect(manager.getConfig().analytics?.distinctId).toBe('distinct-after');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).analytics.distinctId).toBe('distinct-after');
+  });
 });
 
 

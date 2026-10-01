@@ -279,12 +279,17 @@ export class ConfigManager extends EventEmitter {
     return queuedWrite;
   }
 
-  /** Applies an in-place change on top of any outside edits and saves it. */
+  /**
+   * Applies a change to a copy of the config (on top of any outside edits), saves the copy, and only
+   * then makes it the live config, so a failed save leaves memory as it was.
+   */
   private async saveConfigWith(mutate: (config: AppConfig) => void): Promise<void> {
     await this.enqueueConfigWrite(async () => {
       await this.adoptExternalEdits();
-      mutate(this.config);
-      await this.writeConfigToDisk(this.config);
+      const next = structuredClone(this.config);
+      mutate(next);
+      await this.writeConfigToDisk(next);
+      this.config = next;
     });
   }
 
