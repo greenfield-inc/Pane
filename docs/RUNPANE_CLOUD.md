@@ -215,6 +215,14 @@ environment file for the Pane daemon (never on a command line) and pre-answers C
 prompts, so a Claude panel works right away. Without either, open a terminal in the cloud Session and run
 `claude` once to log in; that sign-in lives on the sandbox disk and survives sleep and wake.
 
+Those pre-answered prompts include Claude Code's one-time bypass-permissions warning
+(`bypassPermissionsModeAccepted` in `~/.claude.json`, `skipDangerousModePermissionPrompt` in
+`~/.claude/settings.json`). Pane starts Claude panels with `--dangerously-skip-permissions` unless its
+permission mode is set to approve, on the desktop as well. A cloud Session has no one at the keyboard to accept
+that warning, so it would block every agent after each wake. The pre-answer grants no rights the flag doesn't
+already give: Claude in a cloud Session runs every tool without asking, on the sandbox. It also
+marks `/home/user` and the cloned repository as trusted folders.
+
 `new` marks only the repository it cloned (`--repo`) as trusted for Claude Code. Trust is per repository
 root, and trusting `/home/user` does not cover folders under it. The first Claude panel in a repository you
 add later (`runpane --host <Session> repos add --path ...`) stops at Claude's "Do you trust this folder?"
