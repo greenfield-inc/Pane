@@ -262,7 +262,7 @@ async function readRequiredSecret(deps: CloudDeps, file: string, what: string): 
 function paneSourceFromArgs(args: CloudArgs): PaneSource | undefined {
   if (args.paneDebUrl) {
     assertHttpsArtifactUrl(args.paneDebUrl, '--pane-deb-url');
-    return { kind: 'deb-url', url: args.paneDebUrl };
+    return args.paneDebSha256 ? { kind: 'deb-url', url: args.paneDebUrl, sha256: args.paneDebSha256 } : { kind: 'deb-url', url: args.paneDebUrl };
   }
   if (args.paneNpmSpec) return { kind: 'runpane-npm', spec: args.paneNpmSpec };
   if (args.panePreinstalled) return { kind: 'preinstalled' };
@@ -287,7 +287,14 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   // A golden image already carries the Pane .deb; a plain image needs it installed.
   const paneSource = paneSourceFromArgs(args) ?? settings.paneSource
     ?? (fromSnapshot ? { kind: 'preinstalled' } : DEFAULT_PANE_SOURCE);
-  if (paneSource.kind === 'deb-url') assertHttpsArtifactUrl(paneSource.url, 'The saved Pane .deb URL (runpane cloud setup --pane-deb-url)');
+  if (paneSource.kind === 'deb-url') {
+    assertHttpsArtifactUrl(paneSource.url, 'The saved Pane .deb URL (runpane cloud setup --pane-deb-url)');
+    // Installed as root: without a digest, only https to the URL's host vouches for the package.
+    if (!paneSource.sha256) {
+      deps.stderr(`runpane cloud: WARNING: the Pane .deb from ${paneSource.url} will be installed as root with no sha256 check; `
+        + 'only https to its host vouches for it. Pass --pane-deb-sha256 <hex> (or save it with runpane cloud setup --pane-deb-url <url> --pane-deb-sha256 <hex>).');
+    }
+  }
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
 

@@ -88,6 +88,9 @@ runpane cloud setup \
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
 - `--pane-deb-url <url>` installs the Pane daemon from that `.deb` in every new Session. It must be
   an `https://` URL, and the download in the sandbox refuses a redirect to anything but https.
+  Add `--pane-deb-sha256 <hex>` (saved with it, or given to `new`) and the sandbox checks the download
+  against it before `apt-get` installs it as root. Without one, only https to that host vouches for the
+  package, and `new` prints a warning saying so.
 - Rerun `setup` with any subset of flags to change one setting. The others are kept.
 
 Setup prints what is configured. `runpane cloud list` works after setup and says `No cloud hosts.`

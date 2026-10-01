@@ -114,6 +114,24 @@ test('a Pane .deb URL must be https, from the flag or the saved settings, before
   assert.ok(!harness.world.calls.some((call) => call.startsWith('create')));
 });
 
+test('a Pane .deb URL takes a sha256 the sandbox checks; without one, new warns that only https vouches for it', async () => {
+  const sha = 'AB'.repeat(32);
+  const harness = await createTestHarness();
+  await newHost(harness, ['--no-golden', '--pane-deb-url', 'https://example.test/pane.deb', '--pane-deb-sha256', sha]);
+  assert.deepEqual(harness.world.provisionPaneSources.at(-1), { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: sha.toLowerCase() });
+  assert.doesNotMatch(harness.err.join('\n'), /no sha256 check/u);
+
+  await harness.deps.store.writeSettings({ paneSource: { kind: 'deb-url', url: 'https://example.test/pane.deb' } });
+  await newHost(harness, ['--no-golden']);
+  assert.deepEqual(harness.world.provisionPaneSources.at(-1), { kind: 'deb-url', url: 'https://example.test/pane.deb' });
+  assert.match(harness.err.join('\n'), /WARNING: the Pane \.deb from https:\/\/example\.test\/pane\.deb will be installed as root with no sha256 check.*--pane-deb-sha256/u);
+
+  await assert.rejects(run(harness, ['new', '--pane-deb-url', 'https://example.test/pane.deb', '--pane-deb-sha256', 'abc', '--yes']), /64 hex digit/u);
+  await assert.rejects(run(harness, ['new', '--pane-deb-sha256', sha, '--yes']), /goes with --pane-deb-url/u);
+  assert.equal(await run(harness, ['setup', '--pane-deb-url', 'https://example.test/pane.deb', '--pane-deb-sha256', sha, '--no-verify']), 0);
+  assert.deepEqual((await harness.deps.store.readSettings()).paneSource, { kind: 'deb-url', url: 'https://example.test/pane.deb', sha256: sha.toLowerCase() });
+});
+
 test('new without a Tailscale client explains how to run setup', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeCredentials({ boat: { apiKey: 'k' } });
