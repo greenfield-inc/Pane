@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { boundary, decodeBoundary, type JsonValue } from '../boundaryDecoder';
 import type { BoatOrg, CloudSize } from './provider';
 import type { CloudTransport } from './args';
 
@@ -219,7 +220,14 @@ export interface CloudStore {
   writeCredentials(credentials: CloudCredentials): Promise<void>;
   readSettings(): Promise<CloudSettings>;
   writeSettings(settings: CloudSettings): Promise<void>;
+  /** Host records; one that is not a host record is skipped (commands on other hosts still work). */
   listHosts(): Promise<CloudHostRecord[]>;
+  /**
+   * Every host record, strictly validated, for publishing (the coordinator's directory): throws naming
+   * each invalid file, so a partial directory is never pushed. Empty connection fields are valid: `new`
+   * records the host before its address exists.
+   */
+  readHostSnapshot(): Promise<CloudHostRecord[]>;
   writeHost(record: CloudHostRecord): Promise<void>;
   removeHost(hostname: string): Promise<void>;
   pairingPath(hostname: string): string;
@@ -265,17 +273,26 @@ export function createCloudStore(dir: string = defaultCloudDir()): CloudStore {
       await writePrivateJson(path.join(dir, 'settings.json'), settings);
     },
     async listHosts() {
-      let entries: string[];
-      try {
-        entries = await fs.readdir(hostsDir);
-      } catch (error) {
-        if (isNotFound(error)) return [];
-        throw error;
-      }
       const records: CloudHostRecord[] = [];
-      for (const entry of entries.filter((name) => name.endsWith('.json')).sort()) {
+      for (const entry of await listHostFiles(hostsDir)) {
         const record = await readJsonFile<CloudHostRecord>(path.join(hostsDir, entry));
         if (record?.version === 1 && record.profile?.cloud?.hostname) records.push(record);
+      }
+      return records;
+    },
+    async readHostSnapshot() {
+      const records: CloudHostRecord[] = [];
+      const problems: string[] = [];
+      for (const entry of await listHostFiles(hostsDir)) {
+        const value = await readJsonFile<JsonValue>(path.join(hostsDir, entry));
+        const problem = hostRecordProblem(value, entry);
+        if (problem) problems.push(`hosts/${entry}: ${problem}`);
+        // SAFETY: hostRecordProblem decoded every field readers of the snapshot rely on.
+        else records.push(value as unknown as CloudHostRecord);
+      }
+      problems.push(...duplicateHostProblems(records));
+      if (problems.length > 0) {
+        throw new Error(`invalid cloud host records in ${hostsDir} (fix or remove them, then retry): ${problems.join('; ')}`);
       }
       return records;
     },
@@ -308,6 +325,80 @@ export function createCloudStore(dir: string = defaultCloudDir()): CloudStore {
       await fs.rm(path.join(dir, name), { force: true });
     },
   };
+}
+
+async function listHostFiles(hostsDir: string): Promise<string[]> {
+  try {
+    return (await fs.readdir(hostsDir)).filter((name) => name.endsWith('.json')).sort();
+  } catch (error) {
+    if (isNotFound(error)) return [];
+    throw error;
+  }
+}
+
+// The fields a published snapshot relies on. Connection fields may be empty while `new` sets a host up.
+const hostRecordSchema = boundary.object({
+  version: boundary.literal(1),
+  profile: boundary.object({
+    id: boundary.nonEmptyString,
+    label: boundary.string,
+    baseUrl: boundary.string,
+    token: boundary.string,
+    transport: boundary.literal('http+sse'),
+    cloud: boundary.object({
+      provider: boundary.nonEmptyString,
+      sandboxId: boundary.nonEmptyString,
+      sessionId: boundary.nonEmptyString,
+      nodeId: boundary.string,
+      hostname: boundary.nonEmptyString,
+      version: boundary.number,
+    }),
+  }),
+  meta: boundary.object({
+    coordinatorPairingPath: boundary.optional(boundary.string),
+    pinnedVersion: boundary.optional(boundary.string),
+    repo: boundary.optional(boundary.object({ url: boundary.string, ref: boundary.optional(boundary.string) })),
+    boatOrg: boundary.optional(boundary.object({ id: boundary.nonEmptyString, name: boundary.string })),
+    brokerRepos: boundary.optional(boundary.array(boundary.nonEmptyString)),
+  }),
+});
+
+/** Why `value` (read from `hosts/<file>`) is not a valid host record, or null when it is. */
+function hostRecordProblem(value: JsonValue | undefined, file: string): string | null {
+  try {
+    const record = decodeBoundary(value, hostRecordSchema);
+    const { hostname } = record.profile.cloud;
+    if (!HOSTNAME_PATTERN.test(hostname) || file !== `${hostname}.json`) return `hostname "${hostname}" does not match the file name`;
+    // Provisional: no address yet. Once a host has one, it must be a usable connection.
+    if (record.profile.baseUrl === '') return null;
+    if (!isHttpUrl(record.profile.baseUrl)) return `baseUrl "${record.profile.baseUrl}" is not an http(s) URL`;
+    if (record.profile.token === '') return 'it has a baseUrl but no token';
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function duplicateHostProblems(records: readonly CloudHostRecord[]): string[] {
+  const problems: string[] = [];
+  for (const key of ['sessionId', 'sandboxId'] as const) {
+    const seen = new Set<string>();
+    for (const record of records) {
+      const value = record.profile.cloud[key];
+      if (seen.has(value)) problems.push(`more than one host record has ${key} ${value}`);
+      seen.add(value);
+    }
+  }
+  return problems;
 }
 
 /** Writes JSON through a 0600 temp file and a rename, creating parent dirs 0700. */
