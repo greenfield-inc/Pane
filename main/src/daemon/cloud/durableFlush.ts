@@ -7,7 +7,7 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 const SYNC_TIMEOUT_MS = 30_000;
 
 /** `not-installed`: no tailnet-state guard on this machine (not a cloud sandbox), so nothing to back up. */
-export type TailnetStateBackup = 'backed-up' | 'not-installed' | 'failed';
+type TailnetStateBackup = 'backed-up' | 'not-installed' | 'failed';
 
 export interface DurableFlushDependencies {
   /** Folds the SQLite WAL into the main database file. */
