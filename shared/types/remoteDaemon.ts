@@ -368,7 +368,9 @@ export function isLoopbackRemoteDaemonHost(host: string): boolean {
 /**
  * A host on the tailnet: a MagicDNS name (*.ts.net) or a Tailscale address (100.64.0.0/10,
  * fd7a:115c:a1e0::/48). WireGuard encrypts that traffic end to end, so plain HTTP is acceptable there:
- * a cloud Session whose Tailscale Serve can't get a TLS certificate serves TCP instead.
+ * a cloud Session whose Tailscale Serve can't get a TLS certificate serves TCP instead. This only says
+ * the profile may be saved; the clients check at send time that the request really goes through
+ * Tailscale (main/src/daemon/client/tailnetRoute.ts), since 100.64.0.0/10 is also carrier-grade NAT space.
  */
 export function isTailnetRemoteDaemonHost(host: string): boolean {
   const normalizedHost = host.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');

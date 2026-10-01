@@ -70,7 +70,7 @@ export interface SafeToStopSources {
 }
 
 /** The daemon's stop fence (stopLease.ts) and the calls it can't fence because they already started. */
-export interface SafeToStopLeasing {
+interface SafeToStopLeasing {
   grant(ms: number): { expiresAt: number; ms: number };
   release(): void;
   /** Calls now running, other than safe-to-stop itself and the waits counted as watchers. */

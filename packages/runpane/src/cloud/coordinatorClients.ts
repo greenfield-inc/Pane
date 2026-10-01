@@ -18,7 +18,7 @@ import type { CloudHostRecord } from './store';
 const CLIENT_CALL_TIMEOUT_MS = 20_000;
 const COORDINATOR_CLIENT_LABEL = 'runpane-cloud-coordinator';
 
-export interface CoordinatorClientsOutcome {
+interface CoordinatorClientsOutcome {
   /** Hostnames whose daemon dropped the coordinator's client (or re-paired it). */
   done: string[];
   /** Hostnames left as they were, with the reason (asleep, unreachable, a Pane without the channel). */

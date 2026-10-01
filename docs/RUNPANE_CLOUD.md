@@ -964,6 +964,12 @@ get a certificate. The limit lifts on its own after a few days.
 - `http`: plain HTTP inside the tailnet from the start (uses no certificate).
 
 `runpane cloud status <host>` shows which one a Session uses. Pane desktop and `runpane --host` work with both.
+Over `http://` the token travels without TLS, so Pane desktop and the `runpane` CLI send it only through
+Tailscale: this machine must be on a tailnet (a Tailscale interface carries a Tailscale address), and the host
+name must resolve only to Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48) or to this machine.
+Otherwise the call fails with `ERR_PLAIN_HTTP_OFF_TAILNET` before anything is sent: with Tailscale off, a
+`100.x` address can be a carrier-grade NAT neighbour, and a `*.ts.net` name is only as good as the resolver
+that answered it. The same rule covers the CLI's calls to the coordinator, which is always plain HTTP.
 **The phone app at https://runpane.com/app can't reach an `http://` Session**: a page loaded over HTTPS
 may not call plain HTTP (mixed content). Use Pane desktop or the CLI for such a Session, or create it again
 (`--transport https`) once certificates are available.

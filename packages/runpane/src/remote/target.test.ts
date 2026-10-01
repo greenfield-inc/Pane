@@ -476,9 +476,9 @@ describe('nodeHttpTransport', () => {
   });
 
   it('times out a connection that never opens as a connect error', async () => {
-    // 10.255.255.1 is unroutable, so the SYN goes unanswered like an offline tailnet node.
+    // 10.255.255.1 is unroutable, so the SYN goes unanswered like an offline node (https: plain HTTP there is refused before connecting).
     await assert.rejects(
-      nodeHttpTransport({ url: 'http://10.255.255.1:9/invoke', method: 'GET', headers: { Authorization: 'Bearer t' }, connectTimeoutMs: 300, timeoutMs: 5_000 }),
+      nodeHttpTransport({ url: 'https://10.255.255.1:9/invoke', method: 'GET', headers: { Authorization: 'Bearer t' }, connectTimeoutMs: 300, timeoutMs: 5_000 }),
       { name: 'RemoteConnectError' },
     );
   });

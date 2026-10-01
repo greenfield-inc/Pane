@@ -6,12 +6,12 @@ import { isCoordinatorClient } from './coordinatorScope';
 /** The label `runpane cloud new` pairs the coordinator under (`pane --remote-setup --client-scope coordinator`). */
 const COORDINATOR_CLIENT_LABEL = 'runpane-cloud-coordinator';
 
-export interface CoordinatorClientRevocation {
+interface CoordinatorClientRevocation {
   config: RemoteDaemonConfig;
   revokedClientIds: string[];
 }
 
-export interface CoordinatorClientPairing {
+interface CoordinatorClientPairing {
   config: RemoteDaemonConfig;
   clientId: string;
   /** Returned once; only its hash is stored. */

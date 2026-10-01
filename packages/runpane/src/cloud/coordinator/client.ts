@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { boundary, decodeBoundary } from '../../boundaryDecoder';
 import type { JsonValue } from '../../boundaryDecoder';
+import { DEFAULT_CONNECT_TIMEOUT_MS, nodeHttpTransport, type RemoteHttpHeaders } from '../../remote/remoteDaemonClient';
 
 // The laptop side of the coordinator API. `$RUNPANE_CLOUD_DIR/coordinator.json` (0600) holds
 // `{baseUrl, token}` for a `user:<name>` caller; the same shape remote/coordinatorClient.ts reads.
@@ -37,18 +38,22 @@ export async function callCoordinator(
   body: JsonValue | undefined,
   timeoutMs: number,
 ): Promise<CoordinatorCallResult> {
-  const response = await fetch(`${config.baseUrl}${pathAndQuery}`, {
+  // The coordinator's API is plain HTTP on its tailnet address: the transport refuses to send the
+  // caller token (and a pushed directory's Session tokens) unless the route stays on the tailnet.
+  const headers: RemoteHttpHeaders = { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' };
+  const response = await nodeHttpTransport({
+    url: `${config.baseUrl}${pathAndQuery}`,
     method,
-    headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    connectTimeoutMs: Math.min(DEFAULT_CONNECT_TIMEOUT_MS, timeoutMs),
+    timeoutMs,
   });
-  const text = await response.text();
-  let parsed: JsonValue = text;
+  let parsed: JsonValue = response.body;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(response.body);
   } catch {
-    parsed = text;
+    parsed = response.body;
   }
   return { status: response.status, body: parsed };
 }
