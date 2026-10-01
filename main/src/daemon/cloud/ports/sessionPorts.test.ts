@@ -19,6 +19,8 @@ class FakeServe implements ServeBackend {
   running = true;
   cert = true;
   calls: string[] = [];
+  /** Set to make `tailscale serve` fail to publish (applyWeb throws it). */
+  applyError: Error | undefined;
 
   async self() {
     return { running: this.running, backendState: this.running ? 'Running' : 'Stopped', dnsName: this.running ? HOST : undefined };
@@ -28,6 +30,7 @@ class FakeServe implements ServeBackend {
   }
   async applyWeb(scheme: 'https' | 'http', tailnetPort: number, localPort: number) {
     this.calls.push(`apply ${scheme} :${tailnetPort} -> ${localPort}`);
+    if (this.applyError) throw this.applyError;
     this.entries.set(tailnetPort, { kind: 'web', scheme, proxy: localTarget(localPort) });
   }
   async remove(tailnetPort: number) {
@@ -202,6 +205,16 @@ describe('SessionPortsService.open', () => {
     expect(h.probes).toEqual([`https://${HOST}:8787/`]);
   });
 
+  it('neither records nor announces a port Tailscale Serve failed to publish', async () => {
+    const h = makeHarness();
+    h.serve.applyError = new Error('tailscale serve exited with code 1');
+    await expect(h.service.open({ port: 8787, name: 'taste' })).rejects.toThrow('tailscale serve exited with code 1');
+    expect(h.serve.calls).toEqual(['apply https :8787 -> 8787']);
+    expect(fs.existsSync(h.statePath)).toBe(false);
+    expect(h.events).toEqual([]);
+    expect((await h.service.list()).ports).toEqual([]);
+  });
+
   it('refuses when Tailscale is not running', async () => {
     const h = makeHarness();
     h.serve.running = false;
@@ -243,6 +256,18 @@ describe('SessionPortsService.reconcile', () => {
     expect(h.serve.calls).toEqual(['apply https :8787 -> 8787', 'apply https :8788 -> 3000']);
     expect((await h.service.list()).ports.map(port => port.status)).toEqual(['serving', 'serving']);
     expect(h.probes).toEqual([`https://${HOST}:8787/`, `https://${HOST}:8788/`]);
+  });
+
+  it('keeps a port it could not re-apply as missing, never serving', async () => {
+    const h = makeHarness();
+    await h.service.open({ port: 8787 });
+    h.serve.entries.clear();
+    h.events.length = 0;
+    h.serve.applyError = new Error('tailscale serve exited with code 1');
+    await h.service.reconcile('periodic');
+    expect(h.events.flatMap(event => event.ports.map(port => port.status))).not.toContain('serving');
+    expect((await h.service.list()).ports.map(port => port.status)).toEqual(['missing']);
+    expect(readPortsState(h.statePath).ports.map(port => port.blockedBy)).toEqual([undefined]);
   });
 
   it('opens manifest ports, drops undeclared ones, and does not reopen a dismissed one', async () => {
