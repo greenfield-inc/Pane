@@ -206,7 +206,7 @@ test.describe('Session ports chip row', () => {
 
   test('desktop: switching hosts mid-confirm drops the old host\'s chips and confirmation; nothing reaches either host', async ({ page }, testInfo) => {
     const first = createFakePortsDaemon();
-    const second = createFakePortsDaemon('rp-b.tail03bf19.ts.net', ['docs', 'storybook']);
+    const second = createFakePortsDaemon('rp-b.example.ts.net', ['docs', 'storybook']);
     // The desktop invokes whichever daemon it is connected to.
     let connected = first;
     await openDesktopSession(page, { handle: (channel, args) => connected.handle(channel, args) });
@@ -223,7 +223,7 @@ test.describe('Session ports chip row', () => {
       await window.electronAPI.remoteDaemon.updateClientState({ mode: 'remote', activeProfileId: 'second' });
     });
 
-    await expect(row.getByRole('button', { name: 'Open docs (https://rp-b.tail03bf19.ts.net:8787/)' })).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Open docs (https://rp-b.example.ts.net:8787/)' })).toBeVisible();
     await expect(row.getByRole('group', { name: 'Confirm' })).toHaveCount(0);
     await expect(row.getByRole('button', { name: /^Open pages / })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('desktop-ports-host-switched.png') });
