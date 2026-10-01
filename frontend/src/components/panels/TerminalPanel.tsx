@@ -20,7 +20,7 @@ import {
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
 import { isMac } from '../../utils/platformUtils';
-import { copyTerminalText, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
+import { copyTerminalText, decodeOsc52Copy, isTerminalCopyShortcut, isTerminalSelectionCopyKey } from '../../utils/terminalClipboard';
 import { sendTerminalInput } from '../../utils/terminalInput';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
@@ -506,7 +506,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   useEffect(() => {
     const wasActive = wasActiveRef.current;
     wasActiveRef.current = panelVisible;
-    if (wasActive && !panelVisible && serializeAddonRef.current) {
+    // A remote host restores from its own emulator; uploading the whole buffer on every tab or Pane
+    // switch only queued hundreds of KB ahead of the activation's own requests.
+    if (wasActive && !panelVisible && serializeAddonRef.current && !isRemoteMode) {
       if (Date.now() - lastSnapshotAtRef.current < SNAPSHOT_MIN_INTERVAL_MS) return;
       try {
         const serialized = serializeAddonRef.current.serialize();
@@ -516,7 +518,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         // xterm buffer in a bad state — not worth surfacing
       }
     }
-  }, [panelVisible, panel.id]);
+  }, [panelVisible, panel.id, isRemoteMode]);
 
   // Tell main when this panel's visibility changes so PTY output cadence
   // can drop to 250 ms while hidden and snap back to 32 ms when shown.
@@ -1001,11 +1003,35 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         terminal.loadAddon(fitAddon);
         devLog.debug('[TerminalPanel] FitAddon loaded');
 
+        // OSC 52: apps copy through the terminal. Claude Code's fullscreen UI owns mouse selection and
+        // copies this way; on a remote host it is the only route to this machine's clipboard. Write only.
+        terminal.parser.registerOscHandler(52, (data) => {
+          const text = decodeOsc52Copy(data);
+          if (text) {
+            void copyTerminalText(text).catch(() => {
+              terminalRuntimeRef.current.handleClipboardError();
+            });
+          }
+          return true;
+        });
+
         // Intercept app-level shortcuts before xterm consumes them
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
           if (isTerminalCopyShortcut(e, isMac())) {
             if (e.type === 'keydown' && terminal?.hasSelection()) {
               void copyTerminalText(terminal.getSelection()).catch(() => {
+                terminalRuntimeRef.current.handleClipboardError();
+              });
+            }
+            return false;
+          }
+
+          if (terminal && isTerminalSelectionCopyKey(e, isMac(), terminal.hasSelection())) {
+            if (e.type === 'keydown') {
+              const selection = terminal.getSelection();
+              // Clear it so the next Ctrl+C interrupts again, as in Windows Terminal.
+              terminal.clearSelection();
+              void copyTerminalText(selection).catch(() => {
                 terminalRuntimeRef.current.handleClipboardError();
               });
             }
@@ -1849,8 +1875,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         paneLinksAddonRef.current = null;
       }
 
-      // Save serialized terminal snapshot before disposing
-      if (serializeAddonRef.current && xtermRef.current) {
+      // Save serialized terminal snapshot before disposing (local only, as on hide above)
+      if (serializeAddonRef.current && xtermRef.current && !terminalRuntimeRef.current.isRemoteMode) {
         try {
           const serialized = serializeAddonRef.current.serialize();
           window.electronAPI.invoke('terminal:saveSnapshot', panel.id, serialized);

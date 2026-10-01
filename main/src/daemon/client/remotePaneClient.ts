@@ -4,6 +4,8 @@ import http, { type IncomingMessage, type RequestOptions } from 'http';
 import https from 'https';
 import { isIP, type LookupFunction } from 'net';
 import { hostname as getOsHostname, networkInterfaces } from 'os';
+import type { Readable } from 'stream';
+import { createGunzip } from 'zlib';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
 import type { ConfigManager } from '../../services/configManager';
 import type { AnalyticsManager } from '../../services/analyticsManager';
@@ -22,7 +24,7 @@ import { boundary, decodeBoundary } from '../../../../shared/validation/boundary
 import type { BoundarySchema, JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { PaneSseParser } from './sseParser';
 import { assertTailnetRoute, needsTailnetRoute, tailnetOnlyLookup } from './tailnetRoute';
-import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
+import { RemoteInputQueue, type RemoteInputSequence } from '../../../../shared/remoteInputQueue';
 
 interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
@@ -69,12 +71,16 @@ type RemoteInvokeResponsePayload = RemoteInvokeSuccessPayload | RemoteInvokeErro
 interface JsonResponse {
   statusCode: number;
   body: string;
+  /** The host's `Keep-Alive: timeout=N`, when it sent one. */
+  keepAliveSeconds: number | null;
 }
 
 interface RemoteReadyEventPayload {
   replay: 'none';
   resync: 'refetch-state-after-reconnect';
   timestamp: string;
+  /** Older hosts send none. */
+  capabilities?: string[];
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -97,6 +103,7 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   replay: boundary.literal('none'),
   resync: boundary.literal('refetch-state-after-reconnect'),
   timestamp: boundary.string,
+  capabilities: boundary.optional(boundary.array(boundary.string)),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -113,6 +120,17 @@ const REMOTE_DAEMON_RECONNECT_ERROR_THRESHOLD = 5;
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const TAILSCALE_MAGIC_DNS_SERVER = '100.100.100.100';
+// With the host's `input-seq` capability, up to this many terminal writes per panel are in flight, so a
+// typist ~150 ms away no longer waits a full round trip between keys.
+const REMOTE_INPUT_PIPELINE_DEPTH = 8;
+// Hosts before the 120 s keep-alive close idle connections after 5 s (Node's agent drops them after 4 s),
+// so the first key after a pause paid a TCP handshake. While the user is active, a tiny /health request
+// keeps one connection open on those hosts.
+const KEEP_WARM_MAX_HINT_SECONDS = 10;
+const KEEP_WARM_INTERVAL_MS = 3_000;
+const KEEP_WARM_ACTIVE_WINDOW_MS = 120_000;
+// Sent by a visible terminal on its own (a 60 s visibility refresh, output acks): not user activity.
+const BACKGROUND_CHANNELS = new Set(['terminal:setVisibility', 'terminal:ack']);
 const REMOTE_RUNTIME_ID = createRemoteRuntimeId();
 
 type RemoteRequestOptions = RequestOptions & {
@@ -149,8 +167,19 @@ export class RemotePaneClient {
   private suspended = false;
   /** Bumped per stream and on suspend; callbacks from an older stream are ignored. */
   private streamGeneration = 0;
-  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
-    this.invokeRequest(channel, args, signal));
+  /** Host advertised `input-seq` on the current stream: terminal input may be pipelined. */
+  private supportsInputSeq = false;
+  private readonly inputQueue = new RemoteInputQueue(
+    (channel, args, signal, sequence) => this.invokeRequest(channel, args, signal, sequence),
+    { pipelineDepth: () => (this.supportsInputSeq ? REMOTE_INPUT_PIPELINE_DEPTH : 1) },
+  );
+  // One keep-alive pool per client: requests reuse warm connections instead of a TCP handshake each.
+  // noDelay: Nagle would hold a keystroke's small write for the previous segment's ACK (a full round trip).
+  private readonly httpAgent = new http.Agent({ keepAlive: true, scheduling: 'lifo', noDelay: true });
+  private readonly httpsAgent = new https.Agent({ keepAlive: true, scheduling: 'lifo', noDelay: true });
+  private lastInvokeAt = 0;
+  private keepAliveHintSeconds: number | null = null;
+  private keepWarmTimer: NodeJS.Timeout | null = null;
 
   constructor(
     readonly profile: RemotePaneConnectionProfile,
@@ -200,6 +229,7 @@ export class RemotePaneClient {
   async disconnect(): Promise<void> {
     this.closedByClient = true;
     this.inputQueue.cancel(new Error('Remote Pane disconnected; pending terminal input was discarded'));
+    this.clearKeepWarmTimer();
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
     this.eventParser.reset();
@@ -213,6 +243,8 @@ export class RemotePaneClient {
       this.eventRequest.destroy();
     }
     this.eventRequest = null;
+    this.httpAgent.destroy();
+    this.httpsAgent.destroy();
   }
 
   async invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined> {
@@ -224,6 +256,7 @@ export class RemotePaneClient {
     if (this.closedByClient || this.suspended) return;
     this.suspended = true;
     this.streamGeneration += 1;
+    this.clearKeepWarmTimer();
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
     this.eventParser.reset();
@@ -244,19 +277,31 @@ export class RemotePaneClient {
     });
   }
 
-  private async invokeRequest(channel: string, args: unknown[], signal?: AbortSignal): Promise<JsonValue | undefined> {
+  private async invokeRequest(
+    channel: string,
+    args: unknown[],
+    signal?: AbortSignal,
+    sequence?: RemoteInputSequence,
+  ): Promise<JsonValue | undefined> {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'invoke');
+    if (!BACKGROUND_CHANNELS.has(channel)) this.noteActivity();
+    const headers: http.OutgoingHttpHeaders = {
+      Authorization: `Bearer ${this.profile.token}`,
+      'Content-Type': 'application/json; charset=utf-8',
+      // Pane switches fetch whole terminal screens (100+ KB each); the host compresses them ~10x.
+      'Accept-Encoding': 'gzip',
+      'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
+    };
+    if (sequence) headers['X-Pane-Input-Seq'] = `${sequence.stream}:${sequence.seq}`;
     let response: JsonResponse;
     try {
       response = await requestJson(endpoint, this.buildRequestOptions(endpoint, {
         method: 'POST',
         signal,
-        headers: {
-          Authorization: `Bearer ${this.profile.token}`,
-          'Content-Type': 'application/json; charset=utf-8',
-          'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
-        },
+        headers,
       }), JSON.stringify({ channel, args }));
+      // A response without the header (e.g. an error page) must not hide what the host said before.
+      if (response.keepAliveSeconds !== null) this.keepAliveHintSeconds = response.keepAliveSeconds;
     } catch (error) {
       if (signal?.aborted) throw error;
       const message = getErrorMessage(error, 'Failed to invoke remote daemon');
@@ -344,6 +389,8 @@ export class RemotePaneClient {
         headers: {
           Authorization: `Bearer ${this.profile.token}`,
           Accept: 'text/event-stream',
+          // Terminal output is most of this stream; the host sync-flushes every event, so nothing waits.
+          'Accept-Encoding': 'gzip',
           'X-Pane-Client-Label': this.profile.label,
           'X-Pane-Client-Device-Label': getRemoteClientDeviceLabel(),
           'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
@@ -364,8 +411,16 @@ export class RemotePaneClient {
 
         this.eventResponse = response;
         this.eventParser.reset();
+        const body: Readable = response.headers['content-encoding'] === 'gzip'
+          ? response.pipe(createGunzip())
+          : response;
+        if (body !== response) {
+          body.on('error', (error) => {
+            response.destroy(error);
+          });
+        }
 
-        response.on('data', (chunk: Buffer) => {
+        body.on('data', (chunk: Buffer) => {
           if (isStale()) return;
           const events = this.eventParser.push(chunk);
           for (const event of events) {
@@ -376,6 +431,7 @@ export class RemotePaneClient {
               this.consecutiveReconnectFailures = 0;
               this.reconnectReason = null;
               const readyPayload = parseRemoteReadyEventPayload(event.data);
+              this.supportsInputSeq = readyPayload?.capabilities?.includes('input-seq') ?? false;
               if (readyPayload?.resync === 'refetch-state-after-reconnect') {
                 this.onResyncRequired?.();
               }
@@ -458,7 +514,10 @@ export class RemotePaneClient {
     assertTailnetRoute(endpoint, this.networkInterfaces);
     const fallback = createTailscaleFallbackLookup(this.profile, endpoint, this.lookup);
     const lookup = needsTailnetRoute(endpoint) ? tailnetOnlyLookup(fallback ?? this.lookup, this.networkInterfaces) : fallback;
-    const requestOptions: RemoteRequestOptions = { ...options };
+    const requestOptions: RemoteRequestOptions = {
+      ...options,
+      agent: endpoint.protocol === 'https:' ? this.httpsAgent : this.httpAgent,
+    };
     if (lookup) {
       requestOptions.lookup = lookup;
     }
@@ -466,6 +525,38 @@ export class RemotePaneClient {
       requestOptions.servername = endpoint.hostname;
     }
     return requestOptions;
+  }
+
+  private noteActivity(): void {
+    this.lastInvokeAt = Date.now();
+    if (!this.keepWarmTimer && !this.closedByClient && !this.suspended) {
+      this.keepWarmTimer = setTimeout(() => this.keepWarm(), KEEP_WARM_INTERVAL_MS);
+    }
+  }
+
+  /** On short keep-alive hosts, pings /health (no token) while the user is active so one connection stays open. */
+  private keepWarm(): void {
+    this.keepWarmTimer = null;
+    if (this.closedByClient || this.suspended || Date.now() - this.lastInvokeAt > KEEP_WARM_ACTIVE_WINDOW_MS) return;
+    this.keepWarmTimer = setTimeout(() => this.keepWarm(), KEEP_WARM_INTERVAL_MS);
+    // Unknown counts as short: every host before the 120 s keep-alive closes idle connections after 5 s.
+    const hint = this.keepAliveHintSeconds;
+    if (hint !== null && hint > KEEP_WARM_MAX_HINT_SECONDS) return;
+    const endpoint = new URL('health', this.normalizedBaseUrl);
+    try {
+      const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET' }), (response) => {
+        response.resume();
+      });
+      request.on('error', () => undefined);
+      request.end();
+    } catch {
+      // Not routable right now (e.g. off the tailnet); the next real request reports it.
+    }
+  }
+
+  private clearKeepWarmTimer(): void {
+    if (this.keepWarmTimer) clearTimeout(this.keepWarmTimer);
+    this.keepWarmTimer = null;
   }
 
   private handleInitialConnectionFailure(): void {
@@ -987,12 +1078,36 @@ function createRequest(
   return transport.request(url, options, onResponse);
 }
 
+// The host closes an idle keep-alive connection (5 s on hosts before 120 s) and a request sent on it at
+// that moment fails with a reset before any response. The host never read it, so it is safe to send again
+// on a fresh connection, as browsers do. Without this, one such race tore down the event stream (reconnect,
+// full state refetch: the "re-connecting" pause on a tab switch).
+const STALE_SOCKET_CODES = new Set(['ECONNRESET', 'EPIPE', 'ECONNABORTED']);
+const STALE_SOCKET_RETRIES = 2;
+
+class StaleSocketError extends Error {}
+
 async function requestJson(
   url: URL,
   options: RemoteRequestOptions,
   body: string,
 ): Promise<JsonResponse> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await requestJsonOnce(url, options, body);
+    } catch (error) {
+      if (!(error instanceof StaleSocketError) || attempt >= STALE_SOCKET_RETRIES) throw error;
+    }
+  }
+}
+
+async function requestJsonOnce(
+  url: URL,
+  options: RemoteRequestOptions,
+  body: string,
+): Promise<JsonResponse> {
   return await new Promise<JsonResponse>((resolve, reject) => {
+    let responded = false;
     const request = createRequest(url, {
       ...options,
       headers: {
@@ -1000,23 +1115,39 @@ async function requestJson(
         'Content-Length': Buffer.byteLength(body),
       },
     }, (response) => {
+      responded = true;
       void readResponseBody(response).then((responseBody) => {
         resolve({
           statusCode: response.statusCode ?? 500,
           body: responseBody,
+          keepAliveSeconds: parseKeepAliveSeconds(response.headers['keep-alive']),
         });
       }).catch(reject);
     });
 
-    request.on('error', reject);
+    request.on('error', (error: NodeJS.ErrnoException) => {
+      const stale = !responded && request.reusedSocket && STALE_SOCKET_CODES.has(error.code ?? '')
+        && !options.signal?.aborted;
+      reject(stale ? new StaleSocketError(error.message) : error);
+    });
     request.write(body);
     request.end();
   });
 }
 
+function parseKeepAliveSeconds(header: string | string[] | undefined): number | null {
+  const value = Array.isArray(header) ? header[0] : header;
+  const match = value ? /(?:^|,)\s*timeout=(\d+)/i.exec(value) : null;
+  return match ? Number(match[1]) : null;
+}
+
 async function readResponseBody(response: IncomingMessage): Promise<string> {
+  const body: Readable = response.headers['content-encoding'] === 'gzip' ? response.pipe(createGunzip()) : response;
+  if (body !== response) {
+    response.on('error', (error) => body.destroy(error));
+  }
   const chunks: Buffer[] = [];
-  for await (const chunk of response) {
+  for await (const chunk of body) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
 

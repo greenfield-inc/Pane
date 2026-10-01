@@ -600,6 +600,46 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
+  it('writes sequenced terminal input in sequence order even when the requests arrive out of order', async () => {
+    const registry = new PaneCommandRegistry();
+    const written: string[] = [];
+    registry.register('terminal:input', async (_panelId, data) => {
+      written.push(decodeBoundary(data, boundary.string));
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    const send = (data: string, seq: number) => requestJson(server, 'POST', '/invoke', {
+      channel: 'terminal:input',
+      args: ['panel-1', data],
+    }, 'secret-token', { 'X-Pane-Input-Seq': `stream-a:${seq}` });
+    const third = send('c', 2);
+    const second = send('b', 1);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(written).toEqual([]);
+    await Promise.all([send('a', 0), second, third]);
+    expect(written.join('')).toBe('abc');
+
+    // Input without the header keeps today's behaviour: written as it arrives.
+    await requestJson(server, 'POST', '/invoke', { channel: 'terminal:input', args: ['panel-1', 'd'] }, 'secret-token');
+    expect(written.join('')).toBe('abcd');
+  });
+
+  it('keeps idle client connections open long enough for a remote typist', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const address = server.getAddress();
+    const keepAlive = await new Promise<string | undefined>((resolve, reject) => {
+      http.get({ host: address?.host, port: address?.port, path: '/health' }, (response) => {
+        response.resume();
+        resolve(response.headers['keep-alive']);
+      }).on('error', reject);
+    });
+    expect(keepAlive).toBe('timeout=120');
+  });
+
   it('streams a ready event and daemon-owned runtime events over SSE', async () => {
     const registry = new PaneCommandRegistry();
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
@@ -614,6 +654,7 @@ describe('PaneRemoteHttpApiServer', () => {
     expect(JSON.parse(readyEvent.data.join('\n'))).toMatchObject({
       replay: 'none',
       resync: 'refetch-state-after-reconnect',
+      capabilities: ['input-seq'],
     });
 
     const heartbeatEvent = await stream.nextEvent();
