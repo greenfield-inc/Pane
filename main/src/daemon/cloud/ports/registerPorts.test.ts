@@ -37,7 +37,7 @@ async function until(check: () => boolean, ms = 3_000): Promise<void> {
   }
 }
 
-// A new Session: the bootstrap writes the marker after the daemon started (p5-verify, rc-40f1386c).
+// A new Session: the bootstrap writes the marker after the daemon started (seen live on a fresh Session).
 describe('registerSessionPortsHandlers when the Session marker appears after the daemon started', () => {
   let dir: string;
   let marker: string;

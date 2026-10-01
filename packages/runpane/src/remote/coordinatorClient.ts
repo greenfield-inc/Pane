@@ -34,7 +34,7 @@ export class CoordinatorError extends Error {
 }
 
 /**
- * Talks to the `runpane cloud` coordinator (m4-coordinator):
+ * Talks to the `runpane cloud` coordinator (src/cloud/coordinator):
  * `GET /cloud/status?host=` never wakes; `POST /cloud/wake` resumes and waits for /health.
  */
 export class CoordinatorClient {

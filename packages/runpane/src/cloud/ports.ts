@@ -3,8 +3,8 @@ import type { SandboxHandle } from './provider';
 import type { CloudCredentials, PaneSource } from './store';
 
 /**
- * What the `runpane cloud` commands need from m1-bootstrap (src/cloud/bootstrap/**, src/cloud/tailscale.ts)
- * and from the Tailscale API. The shapes follow ~/rc-loop/ledger/iface-bootstrap.md. `wiring.ts` adapts the
+ * What the `runpane cloud` commands need from bootstrap (src/cloud/bootstrap/**, src/cloud/tailscale.ts)
+ * and from the Tailscale API. `wiring.ts` adapts the
  * real modules to these ports, and tests pass fakes.
  */
 

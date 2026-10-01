@@ -8,7 +8,7 @@ const base = { scheme: 'https', path: '/', createdAt: at, status: 'serving' };
 const taste = { ...base, name: 'taste', port: 8787, httpsPort: 8787, url: 'https://rp-a.tail.ts.net:8787/', source: 'manifest' };
 const pages = { ...base, name: 'pages', port: 8788, httpsPort: 8788, url: 'https://rp-a.tail.ts.net:8788/', source: 'user' };
 const vite = { port: 5173, address: '127.0.0.1', process: 'vite', detectedAt: at };
-// The p5-ports PortsListResult (iface-p5.md 22:55Z).
+// The daemon's PortsListResult (runpane:ports:list).
 const list = (ports: JsonValue[], suggested: JsonValue[] = []) => ({
   ok: true, available: true, host: 'rp-a', scheme: 'https', autoOpen: false, ports, suggested, manifests: [],
 });

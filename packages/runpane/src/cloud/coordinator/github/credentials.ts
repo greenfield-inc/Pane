@@ -6,7 +6,7 @@ import { BrokerError } from './policy';
 import { appJwt, loadAppPrivateKey } from './rest';
 import type { GitHubRest } from './rest';
 
-// Where the broker's GitHub credential comes from (phase3-design.md §2). Both are the user's own:
+// Where the broker's GitHub credential comes from. Both are the user's own:
 // a GitHub App (private key on the coordinator; 1 h installation tokens minted per call, narrowed to
 // one repository and the permissions that call needs) or a fine-grained PAT. Tokens live in memory only.
 

@@ -36,8 +36,8 @@ server answers. New fields:
 
 ## `runpane:cloud:safe-to-stop`
 
-A provider stop is a power-off after a disk snapshot, with no SIGTERM (M0: boat snapshots 3.6–4.7 s after the stop
-call). The daemon therefore has to say whether stopping is safe **and** make its state durable before the coordinator
+A provider stop is a power-off after a disk snapshot, with no SIGTERM (boat snapshots 3.6–4.7 s after the
+stop call). The daemon therefore has to say whether stopping is safe **and** make its state durable before the coordinator
 calls stop.
 
 Request (all optional): `{ "flush": "if-safe" | "always" | "never", "recentOutputMs": 120000, "clientWindowMs": 900000 }`.

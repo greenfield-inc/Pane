@@ -53,7 +53,7 @@ export interface CoordinatorConfig {
   };
   alerts: { webhookUrl: string | null };
   revokedCallers: string[];
-  /** The GitHub broker (phase3-design.md); null: off. The credential files are 0600 on this machine. */
+  /** The GitHub broker (github/broker.ts); null: off. The credential files are 0600 on this machine. */
   github: GitHubConfig | null;
   /** The Doppler secrets service; null: off. The service token files are 0600 on this machine. */
   secrets: SecretsConfig | null;

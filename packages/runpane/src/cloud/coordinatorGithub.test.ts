@@ -201,12 +201,12 @@ test('github set refuses an App installed on all repositories; a wider selected 
     const { code } = await setUp([]);
     assert.ok(code instanceof Error && /installed on ALL repositories/u.test(code.message), String(code));
   });
-  // Red's real shape: selected [montlakev2, Pane] with extra write permissions -> accepted with warnings.
-  await withFakeApp({ permissions: OVER_PRIVILEGED, repos: ['jamari-morrison/montlakev2', 'jamari-morrison/Pane'] }, async (setUp) => {
-    const { code, harness } = await setUp(['--expect-repos', 'jamari-morrison/montlakev2', '--json']);
+  // A real-world shape: two selected repos with extra write permissions -> accepted with warnings.
+  await withFakeApp({ permissions: OVER_PRIVILEGED, repos: ['acme/app', 'acme/tools'] }, async (setUp) => {
+    const { code, harness } = await setUp(['--expect-repos', 'acme/app', '--json']);
     assert.equal(code, 0);
     const warnings: string[] = JSON.parse(harness.out[harness.out.length - 1]).warnings;
-    assert.ok(warnings.some((line) => line.includes('also reaches jamari-morrison/Pane, beyond --expect-repos jamari-morrison/montlakev2')), warnings.join('\n'));
+    assert.ok(warnings.some((line) => line.includes('also reaches acme/tools, beyond --expect-repos acme/app')), warnings.join('\n'));
     assert.ok(warnings.some((line) => line.includes('which no cloud Session is granted')), warnings.join('\n'));
     assert.ok(warnings.some((line) => line.includes('actions:write')), warnings.join('\n'));
     assert.ok(harness.err.filter((line) => line.startsWith('WARNING: ')).length >= 3);

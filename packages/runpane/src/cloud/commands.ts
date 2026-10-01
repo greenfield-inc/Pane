@@ -48,7 +48,7 @@ export interface CloudDeps {
   env: NodeJS.ProcessEnv;
   /** Desktop Pane data dir used when neither --desktop-dir nor $RUNPANE_CLOUD_DESKTOP_DIR is given. */
   defaultDesktopDir: string;
-  /** Runs `runpane cloud coordinator ...` (owned by m4-coordinator). */
+  /** Runs `runpane cloud coordinator ...` (the coordinator CLI in ./coordinator). */
   runCoordinator?(argv: string[]): Promise<number>;
   /**
    * Replaces the coordinator's directory (PUT /cloud/directory). Resolves `pushed: false` when no
@@ -99,7 +99,7 @@ export interface CloudSafeToStopAnswer {
 }
 
 /**
- * The status vocabulary the coordinator's /cloud/wake also uses (iface-coordinator.md):
+ * The status vocabulary the coordinator's /cloud/wake also uses (coordinator/wake.ts):
  * awake = running and /health answers; asleep = stopped; waking = starting or /health not up yet;
  * daemon-down = running but /health does not answer; lost = the provider no longer has it.
  */
@@ -279,7 +279,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const namePrefix = args.namePrefix ?? settings.namePrefix ?? DEFAULT_NAME_PREFIX;
   const size: CloudSize = args.size ?? settings.size ?? 'default';
   const fromSnapshot = args.noGolden ? undefined : args.fromSnapshot ?? settings.goldenSnapshot;
-  // A golden image already carries the Pane .deb (m2-dist); a plain image needs it installed.
+  // A golden image already carries the Pane .deb; a plain image needs it installed.
   const paneSource = paneSourceFromArgs(args) ?? settings.paneSource
     ?? (fromSnapshot ? { kind: 'preinstalled' } : DEFAULT_PANE_SOURCE);
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
@@ -290,7 +290,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const githubRepo = args.github && args.repo ? parseRepoSpec(args.repo) : undefined;
   const githubTokenSource = args.githubTokenFile ? { kind: 'file' as const, path: args.githubTokenFile } : { kind: 'gh' as const };
   if (args.githubTokenFile === '-') throw new Error('new --github-token-file needs a file (the token is read more than once), not stdin.');
-  // With the coordinator's GitHub broker on, the Session publishes through it (phase3-design §4). App mode
+  // With the coordinator's GitHub broker on, the Session publishes through it. App mode
   // also reads through it (no deploy key); PAT mode still reads over a read-only deploy key.
   let brokerMode: 'app' | 'pat' | null = null;
   if (githubRepo && settings.coordinator?.deployment && !args.readWrite) {
@@ -675,7 +675,7 @@ async function runStop(args: CloudArgs, deps: CloudDeps): Promise<number> {
     return 0;
   }
 
-  // boat's stop is a hard power-off about 1 s after a live snapshot, with no SIGTERM (M0), so make the
+  // boat's stop is a hard power-off about 1 s after a live snapshot, with no SIGTERM, so make the
   // daemon's state durable first: its safe-to-stop checkpoints the WAL and fsyncs. The user asked for
   // this stop, so blockers are reported, not obeyed. A daemon that can't answer gets a plain sync.
   let flushed = false;
@@ -755,7 +755,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   timings.runningMs = deps.now() - started;
   if (!record.profile.baseUrl) throw new Error(`${hostname} has no daemon address yet; its setup never finished. Destroy it and create a new one.`);
   const remaining = () => Math.max(timeoutMs - (deps.now() - started), 1_000);
-  // A healthy wake answers in 9-13 s (M0); after that, check the node before waiting out the rest.
+  // A healthy wake answers in 9-13 s; after that, check the node before waiting out the rest.
   let health = await deps.bootstrap.waitForDaemonHealth(record.profile.baseUrl, {
     timeoutMs: Math.min(remaining(), WAKE_REPAIR_CHECK_MS),
     intervalMs: 500,
@@ -788,7 +788,7 @@ async function runWake(args: CloudArgs, deps: CloudDeps): Promise<number> {
   }
   const devices = await tailnet.findDevicesByHostname(hostname);
   const sameNode = devices.some((device) => device.nodeId === record.profile.cloud.nodeId);
-  // Grants changed while it slept are written now (final-plan M1: "sleeping peers get it when they wake").
+  // Grants changed while it slept are written now: a sleeping peer gets them when it wakes.
   const settings = await deps.store.readSettings();
   const peersFile = health.ok && (record.meta.peers?.length || settings.coordinator?.deployment)
     ? await pushPeersFile(record, await deps.store.listHosts(), deps, provider)

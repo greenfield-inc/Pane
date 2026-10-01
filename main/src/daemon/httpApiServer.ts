@@ -591,7 +591,7 @@ export class PaneRemoteHttpApiServer {
   /**
    * A peer is another Pane Session. It reaches only the orchestrator panel of
    * Sessions that allowlist it, plus panels:list and workspace:wait scoped to
-   * those Sessions (final-plan S3, blocking problems 1 and 6).
+   * those Sessions, so a peer can find and wait on the work it was allowed to message.
    */
   private async handlePeerInvoke(
     invokeRequest: RemoteInvokeRequest,

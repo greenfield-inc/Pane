@@ -155,7 +155,7 @@ function getRemoteHostRuntimePresentation(
 }
 
 /**
- * The command that wakes a saved cloud host (a profile `runpane cloud` wrote, final-plan S3). A
+ * The command that wakes a saved cloud host (a profile `runpane cloud` wrote). A
  * sleeping cloud Session's tailnet node is offline, so connecting fails like any unreachable host;
  * the desktop only names the CLI command and never wakes or manages the machine itself (#695).
  */

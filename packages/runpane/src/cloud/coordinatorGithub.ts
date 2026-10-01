@@ -7,7 +7,7 @@ import type { CoordinatorDeployment, CoordinatorGitHub } from './store';
 
 /**
  * `runpane cloud coordinator github set|status|audit|unset`, run on the user's machine at setup time
- * (phase3-design.md §5). `set` checks the credential, uploads it to the coordinator through the
+ * `set` checks the credential, uploads it to the coordinator through the
  * provider's files API (0600 there, never on a command line or in this machine's settings), rewrites
  * the coordinator config and restarts it, then asks the coordinator's broker whether it loaded.
  */

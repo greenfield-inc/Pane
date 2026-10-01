@@ -22,7 +22,7 @@ export interface CloudHealthFields {
  * What `/health` says about this daemon beyond "the HTTP server answers": its version and
  * whether agents are usable yet. A wake returns only once `readiness.state` leaves `starting`.
  *
- * The daemon marks itself ready when bootstrap finishes. The agent-restore step (m2-resume)
+ * The daemon marks itself ready when bootstrap finishes. The agent-restore step
  * reports `pending` while it re-launches agent panels and `done` after; `lazy` means panels
  * start on first use, so a panel with no terminal is expected rather than degraded.
  */

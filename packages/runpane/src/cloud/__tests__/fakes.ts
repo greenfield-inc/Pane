@@ -52,6 +52,8 @@ interface FakeWorld {
   coordinatorWakes?: boolean;
   /** When set, scoped keys longer than this many days are refused like boat does. */
   maxKeyTtlDays?: number;
+  /** When set, revoking a scoped key fails with this message. */
+  revokeKeyError?: string;
   /** boat names sandboxes only through a later PATCH: create returns them unnamed when set. */
   createUnnamed?: boolean;
   /** What the daemon's safe-to-stop answers `cloud stop`; 'unreachable' makes the call fail. */
@@ -229,6 +231,7 @@ function createFakeProvider(world: FakeWorld, org?: string): CloudProvider {
     },
     async revokeKey(keyId) {
       world.calls.push(`revoke-key ${keyId}`);
+      if (world.revokeKeyError) throw new CloudProviderError(world.revokeKeyError, 500);
     },
   };
 }

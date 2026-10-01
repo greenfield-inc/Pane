@@ -9,8 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * A faithful stand-in for GitHub, for the broker's tests and its live proof without real GitHub
- * (phase3-design.md §9 P1/P2). Self-contained (node built-ins only) so it can also run on a box:
+ * A faithful stand-in for GitHub, for the broker's tests and its live proof without real GitHub.
+ * Self-contained (node built-ins only) so it can also run on a box:
  *
  *   node fakeGitHub.js --root <dir> --port 8787 --app-id 42 --public-key app.pub.pem --repo owner/name
  *

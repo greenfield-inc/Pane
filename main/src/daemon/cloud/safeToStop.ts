@@ -11,7 +11,7 @@ import type { PaneCommandValue } from '../commandRegistry';
 
 /** A terminal that printed within this window is not idle. */
 export const DEFAULT_RECENT_OUTPUT_MS = 2 * 60_000;
-/** A user client that invoked within this window is still using the Session (final-plan P7). */
+/** A user client that invoked within this window is still using the Session. */
 export const DEFAULT_CLIENT_WINDOW_MS = 15 * 60_000;
 /** A watch loop re-issues its wait right after one returns; the gap between calls is still watching. */
 export const WATCHER_GAP_GRACE_MS = 30_000;
@@ -160,7 +160,7 @@ async function collectSafeToStopBlockers(
 /**
  * Checks every stop condition and, per the flush mode, makes the daemon's state durable
  * before answering: boat's stop is a power-off after a disk snapshot, so anything still
- * in the page cache or the SQLite WAL at that point is lost (M0).
+ * in the page cache or the SQLite WAL at that point is lost.
  */
 export async function runSafeToStop(
   dependencies: SafeToStopDependencies,

@@ -1,7 +1,7 @@
 import type { DirectoryEntry } from '../types';
 
-// The broker's allowlist rules, kept free of I/O so each one is tested on its own
-// (phase3-design.md §3). Everything not allowed here is refused.
+// The broker's allowlist rules, kept free of I/O so each one is tested on its own.
+// Everything not allowed here is refused.
 
 type BrokerErrorCode =
   | 'github-disabled'
@@ -75,7 +75,7 @@ export function requireAllowedRepo(entry: DirectoryEntry, repo: string): string 
   return allowed;
 }
 
-/** The Session's host name: its tailnet name, the first DNS label of its daemon URL (as in Phase 2). */
+/** The Session's host name: its tailnet name, the first DNS label of its daemon URL. */
 export function sessionHost(entry: DirectoryEntry): string {
   try {
     const host = new URL(entry.baseUrl).hostname.toLowerCase().split('.')[0];

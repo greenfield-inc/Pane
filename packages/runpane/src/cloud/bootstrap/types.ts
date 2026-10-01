@@ -64,6 +64,6 @@ export interface DaemonHealthResult {
   status?: number;
   elapsedMs: number;
   version?: string;
-  /** `readiness.state` when the daemon reports it (M2), else the legacy `status` field. */
+  /** `readiness.state` when the daemon reports it, else the legacy `status` field. */
   readiness?: string;
 }

@@ -6,7 +6,7 @@ import { pushBranch, readBody, resolveDir, resolveRepo, sessionBroker, type Agen
 
 /**
  * `runpane cloud agent github ...`: inside a cloud Session, publish work to GitHub through the
- * coordinator's broker (phase3-design §4). Branches land under `cloud/<host>/`, pull requests are drafts.
+ * coordinator's broker. Branches land under `cloud/<host>/`, pull requests are drafts.
  */
 
 export const AGENT_GITHUB_USAGE = `Usage (inside a runpane cloud Session):

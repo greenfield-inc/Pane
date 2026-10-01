@@ -9,8 +9,8 @@ import { lastValue, parseAgentFlags, UnsupportedFlagError, type FlagSpec, type P
 import { sessionBroker, type AgentDeps } from './session';
 
 /**
- * A `doppler` stand-in for cloud Sessions (installed as ~/.local/bin/doppler): the commands Montlake's
- * skills use (`doppler run [-p P -c C] -- cmd`, `doppler secrets get NAME --plain`, `doppler secrets
+ * A `doppler` stand-in for cloud Sessions (installed as ~/.local/bin/doppler): the commands agent
+ * skills commonly use (`doppler run [-p P -c C] -- cmd`, `doppler secrets get NAME --plain`, `doppler secrets
  * download --no-file --format json`), answered from values the coordinator delivered for this
  * Session's repository manifest (`.runpane/secrets.json`). No Doppler credential exists in the Session.
  *
@@ -147,7 +147,7 @@ async function readCache(deps: AgentDeps): Promise<SecretsCache | null> {
 
 /**
  * Written in place with mode 0600 in a 0700 directory, never renamed into place: a boat restore can
- * truncate a file that was renamed shortly before the snapshot (M0).
+ * truncate a file that was renamed shortly before the snapshot.
  */
 async function writeCache(deps: AgentDeps, cache: SecretsCache): Promise<void> {
   const file = secretsCachePath(deps.env);

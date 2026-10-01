@@ -563,7 +563,7 @@ async function brokerConnect(record: CloudHostRecord, repo: string, flags: Flags
   const status = await requireBroker(deps, repo);
   const provider = await hostProvider(deps, await deps.store.readCredentials(), record);
   const handle = await requireRunning(record, provider);
-  // PAT mode can't mint read tokens: the Session reads over a Phase 2 read-only deploy key.
+  // PAT mode can't mint read tokens: the Session reads over a read-only deploy key.
   let deployKey: GitHubGrant | undefined = record.meta.github?.find((grant) => grant.repo.toLowerCase() === repo.toLowerCase());
   if (status.mode === 'pat' && !deployKey) {
     deployKey = await connectDeployKey(record, handle, deps, { repo, readWrite: false, tokenSource: tokenSourceFrom(flags.values.get('--token-file')), onStep: progress });

@@ -231,7 +231,7 @@ describe('broker units', () => {
   it('parses tailscale whois --json', () => {
     const node = parseWhois(JSON.stringify({ Node: { StableID: 'nX', Name: 'RP-One.tail.ts.net.', Tags: ['tag:rp-session'] }, UserProfile: {} }));
     assert.deepEqual(node, { stableId: 'nX', name: 'rp-one.tail.ts.net', tags: ['tag:rp-session'] });
-    assert.deepEqual(parseWhois(JSON.stringify({ Node: { StableID: 'nY', Name: 'agentbox.tail.ts.net.' } })).tags, []);
+    assert.deepEqual(parseWhois(JSON.stringify({ Node: { StableID: 'nY', Name: 'laptop.tail.ts.net.' } })).tags, []);
   });
 
   it('strips spoofed markers and appends the caller\'s own footer', () => {
@@ -275,7 +275,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
   });
 
   it('status: mode, app, installed repos and the caller namespace, never a token', async () => {
-    const user = await h.call('user:red', 'GET', 'status');
+    const user = await h.call('user:owner', 'GET', 'status');
     assert.equal(user.status, 200);
     assert.equal(user.body.mode, 'app');
     assert.deepEqual(user.body.app, {
@@ -291,7 +291,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     assert.ok(!JSON.stringify(peer.body).includes('ghs_'));
     // status is polled: the App, installations and repositories are cached, not re-minted per call.
     const minted = h.fake.minted.length;
-    await h.call('user:red', 'GET', 'status');
+    await h.call('user:owner', 'GET', 'status');
     assert.equal(h.fake.minted.length, minted);
   });
 
@@ -414,7 +414,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
   it('refuses repos outside the Session allowlist, users on write endpoints, and unknown endpoints', async () => {
     const outside = await h.call('s1', 'POST', 'push', { repo: 'acme/other', branch: 'x', sha: 'a'.repeat(40) });
     assert.deepEqual([outside.status, outside.body.code], [403, 'repo-not-allowed']);
-    const user = await h.call('user:red', 'POST', 'push', { repo: 'acme/app', branch: 'x', sha: 'a'.repeat(40) });
+    const user = await h.call('user:owner', 'POST', 'push', { repo: 'acme/app', branch: 'x', sha: 'a'.repeat(40) });
     assert.deepEqual([user.status, user.body.code], [403, 'forbidden']);
     for (const [method, route] of [['PUT', 'pulls/1/merge'], ['POST', 'merge'], ['DELETE', 'refs/heads/x'], ['POST', 'releases'], ['POST', 'pulls/1/reviews'], ['GET', 'repos/acme/app']] as const) {
       const result = await h.call('s1', method, route, {});
@@ -429,7 +429,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
       NODES.s2,
       { ...NODES.s1, tags: [] },
       { ...NODES.s1, stableId: 'nImpostor' },
-      { stableId: 'nFNi', name: 'agentbox.tail.ts.net', tags: [] },
+      { stableId: 'nFNi', name: 'laptop.tail.ts.net', tags: [] },
       null,
     ];
     for (const node of attempts) {
@@ -483,7 +483,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const late = await h.call('s1', 'POST', 'push', { repo: 'acme/app', branch: 'cache', bundle: work.bundle() });
     assert.equal(late.status, 200, JSON.stringify(late.body));
     assert.equal(count(), afterFirst + 1);
-    const status = await h.call('user:red', 'GET', 'status');
+    const status = await h.call('user:owner', 'GET', 'status');
     assert.ok(jsonList(status.body.tokens).some((token) => token.repo === 'acme/app' && token.access === 'write'));
   });
 
@@ -584,7 +584,7 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const pushed = decodeBoundary(push, auditLineSchema);
     assert.match(pushed.bundleSha ?? '', /^[0-9a-f]{40}$/u);
     assert.ok((pushed.node ?? '').startsWith('rp-one.tail.ts.net'));
-    const audit = await h.call('user:red', 'GET', 'audit?limit=5');
+    const audit = await h.call('user:owner', 'GET', 'audit?limit=5');
     assert.equal(jsonList(audit.body.entries).length, 5);
     // A Session must not read other Sessions' calls.
     const peer = await h.call('s1', 'GET', 'audit');
@@ -630,7 +630,7 @@ describe('GitHub broker limits, PAT mode and off', () => {
   it('PAT mode: pushes with the PAT; no read tokens; a repo the PAT cannot see fails at GitHub', async () => {
     const h = await harness({ mode: 'pat' });
     try {
-      const status = await h.call('user:red', 'GET', 'status');
+      const status = await h.call('user:owner', 'GET', 'status');
       assert.equal(status.body.mode, 'pat');
       assert.ok(!JSON.stringify(status.body).includes(PAT));
       const work = new Work(h.fake);
@@ -661,7 +661,7 @@ describe('GitHub broker limits, PAT mode and off', () => {
     assert.equal(answer.body.code, 'github-disabled');
     assert.match(String(answer.body.message), /refusing a ghp_/u);
     assert.ok(!String(answer.body.message).includes('classicclassic'));
-    const status = await broker.handle({ method: 'GET', path: 'status', query: new URLSearchParams(), caller: { id: 'user:red', role: 'user' }, remoteAddress: '100.64.0.9', readBody: async () => ({}) });
+    const status = await broker.handle({ method: 'GET', path: 'status', query: new URLSearchParams(), caller: { id: 'user:owner', role: 'user' }, remoteAddress: '100.64.0.9', readBody: async () => ({}) });
     assert.equal(status.body.mode, 'pat');
     assert.match(String(status.body.error), /refusing a ghp_/u);
   });
@@ -669,7 +669,7 @@ describe('GitHub broker limits, PAT mode and off', () => {
   it('off: status says so and writes answer github-disabled', async () => {
     const h = await harness({ mode: 'off' });
     try {
-      const status = await h.call('user:red', 'GET', 'status');
+      const status = await h.call('user:owner', 'GET', 'status');
       assert.equal(status.body.mode, 'off');
       const push = await h.call('s1', 'POST', 'push', { repo: 'acme/app', branch: 'x', sha: 'a'.repeat(40) });
       assert.deepEqual([push.status, push.body.code], [503, 'github-disabled']);
@@ -694,7 +694,7 @@ describe('GitHub broker limits, PAT mode and off', () => {
   });
 });
 
-// Red's first real App was granted more than the broker needs. Whatever the grant, every token the
+// A real App installation can be granted more than the broker needs. Whatever the grant, every token the
 // broker mints must be capped: explicit permissions within the ceiling, never write for checks,
 // statuses or actions, and one repository for anything beyond metadata.
 describe('GitHub broker with an over-privileged App installation', () => {
@@ -723,7 +723,7 @@ describe('GitHub broker with an over-privileged App installation', () => {
         return result;
       };
       // status as user and as a Session (describe), then every Session endpoint.
-      const status = await call('user:red', 'GET', 'status');
+      const status = await call('user:owner', 'GET', 'status');
       await call('s1', 'GET', 'status');
       await call('s1', 'POST', 'token', { repo: 'acme/app' });
       const work = new Work(h.fake);
@@ -779,7 +779,7 @@ describe('GitHub broker with an over-privileged App installation', () => {
   });
 });
 
-// P4 on real montlakev2: POST pulls answered 422 "not all refs are readable" because the token had
+// Seen on real GitHub: POST pulls answered 422 "not all refs are readable" because the token had
 // only pull_requests:write. GitHub reads the head and base refs, which needs contents:read.
 describe('pull requests need contents:read (real-GitHub regression)', () => {
   it('the fake refuses a PR without contents:read like GitHub; the broker mints contents:read + pull_requests:write', async () => {

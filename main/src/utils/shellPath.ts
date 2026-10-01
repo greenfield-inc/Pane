@@ -112,8 +112,8 @@ function getProbePlan(): ShellPathProbePlan {
 
   // Use minimal base PATH - just enough to find the shell
   // A login on Linux starts from PAM's /etc/environment, and profile files only prepend to it. Starting
-  // from /usr/bin:/bin instead let system copies shadow tools in /usr/local/bin (M2-safestop gate: a
-  // gh in /usr/local/bin lost to /usr/bin/gh). macOS gets its system PATH from path_helper in /etc/zprofile.
+  // from /usr/bin:/bin instead let system copies shadow tools in /usr/local/bin (seen live:
+  // a gh in /usr/local/bin lost to /usr/bin/gh). macOS gets its system PATH from path_helper in /etc/zprofile.
   const minimalPath = isLinux ? linuxLoginBasePath() : '/usr/bin:/bin';
   const homeDir = os.homedir();
 

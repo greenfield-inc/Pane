@@ -25,7 +25,7 @@ import { nodeMismatch } from './whois';
 import type { TailnetNode, WhoisResolver } from './whois';
 
 /**
- * The coordinator's GitHub broker (phase3-design.md §1-3): cloud Sessions push branches and open
+ * The coordinator's GitHub broker: cloud Sessions push branches and open
  * PRs, issues and comments through it, with the user's GitHub App or fine-grained PAT, which never
  * leaves the coordinator. It is an allowlist: a Session writes only branches under its own
  * `cloud/<host>/`, only in the repos its directory entry names, and never the default branch,
@@ -85,7 +85,7 @@ interface BrokerAnswer {
 
 /**
  * Creating or updating a pull request makes GitHub read its head and base refs: with only
- * pull_requests:write it answers 422 "not all refs are readable" (seen live on montlakev2).
+ * pull_requests:write it answers 422 "not all refs are readable" (seen live).
  */
 const PULL_WRITE = { pull_requests: 'write', contents: 'read' } as const satisfies Permissions;
 

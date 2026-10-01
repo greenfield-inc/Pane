@@ -226,7 +226,7 @@ describe('ConfigManager agent context defaults', () => {
 
 describe('ConfigManager edits from other processes', () => {
   // `runpane cloud new|sync|destroy` write saved remote hosts straight into config.json while the
-  // desktop runs (final-plan S2). The desktop must neither revert them nor wait for a restart.
+  // desktop runs. The desktop must neither revert them nor wait for a restart.
   const cloudProfile = {
     id: 'cloud-abc', label: 'cloud box', baseUrl: 'https://rp-abc.example.ts.net', token: 'synthetic', transport: 'http+sse',
   };

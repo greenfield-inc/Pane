@@ -39,7 +39,7 @@ async function deployed(options: { failMintFor?: string } = {}): Promise<Deploye
     const config = args[args.indexOf('--config') + 1];
     if (args[0] === 'configs' && args[1] === 'tokens' && args[2] === 'create') {
       if (config === options.failMintFor) return { exitCode: 1, stdout: '', stderr: 'Doppler Error: forbidden' };
-      return { exitCode: 0, stdout: JSON.stringify({ name: args[3], token: minted(config), slug: `slug-${config}`, config, project: 'montlake', access: 'read' }), stderr: '' };
+      return { exitCode: 0, stdout: JSON.stringify({ name: args[3], token: minted(config), slug: `slug-${config}`, config, project: 'my-app', access: 'read' }), stderr: '' };
     }
     if (args[0] === 'configs' && args[1] === 'tokens' && args[2] === 'revoke') return { exitCode: 0, stdout: '', stderr: '' };
     if (args[0] === 'configs' && args[1] === '--project') return { exitCode: 0, stdout: JSON.stringify([{ name: 'dev' }, { name: 'dev_personal' }, { name: 'stg' }, { name: 'prd' }]), stderr: '' };
@@ -48,7 +48,7 @@ async function deployed(options: { failMintFor?: string } = {}): Promise<Deploye
   harness.deps.callCoordinatorApi = async (method, pathAndQuery): Promise<{ status: number; body: JsonValue }> => {
     apiCalls.push(`${method} ${pathAndQuery}`);
     if (pathAndQuery.startsWith('/cloud/secrets/status')) {
-      return { status: 200, body: { ok: true, enabled: true, configs: [{ project: 'montlake', config: 'dev', loaded: true, names: 91 }], policy: { mode: 'allow-all', deniedNames: [], deniedConfigs: [] } } };
+      return { status: 200, body: { ok: true, enabled: true, configs: [{ project: 'my-app', config: 'dev', loaded: true, names: 91 }], policy: { mode: 'allow-all', deniedNames: [], deniedConfigs: [] } } };
     }
     return { status: 200, body: { ok: true, mode: 'off', repos: [] } };
   };
@@ -75,12 +75,12 @@ test('coordinator doppler args', () => {
   assert.throws(() => parseCoordinatorDopplerArgs(['policy', '--default', '--allow-all']), /one policy/u);
   assert.deepEqual(parseCoordinatorDopplerArgs(['policy', '--deny-names', 'A_*, B', '--deny-configs', 'prd']).policy, { mode: 'custom', deniedNames: ['A_*', 'B'], deniedConfigs: ['prd'] });
   assert.throws(() => parseCoordinatorDopplerArgs(['unset', '--yes']), /--all/u);
-  assert.equal(parseCoordinatorDopplerArgs(['set', '--project', 'montlake', '--all-configs', '--policy', 'allow-all']).policy?.mode, 'allow-all');
+  assert.equal(parseCoordinatorDopplerArgs(['set', '--project', 'my-app', '--all-configs', '--policy', 'allow-all']).policy?.mode, 'allow-all');
 });
 
 test('doppler set mints read-only tokens locally, installs them 0600 via the files API, and never prints or saves them', async () => {
   const { harness, sandboxId, dopplerCalls, apiCalls } = await deployed();
-  assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'montlake', '--all-configs', '--policy', 'allow-all']), 0);
+  assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--all-configs', '--policy', 'allow-all']), 0);
 
   const creates = dopplerCalls.filter((args) => args[2] === 'create');
   assert.deepEqual(creates.map((args) => args[args.indexOf('--config') + 1]), ['dev', 'dev_personal', 'stg', 'prd']);
@@ -91,7 +91,7 @@ test('doppler set mints read-only tokens locally, installs them 0600 via the fil
   // Each token is staged through the files API; the script installs it 0600 and shreds the staged copy.
   assert.equal(harness.world.files.get(`${sandboxId}:${STAGE}/doppler-token-0`), `${minted('dev')}\n`);
   const script = lastScript(harness, sandboxId);
-  assert.match(script, new RegExp(`install -m 600 "\\$S/doppler-token-3" '${DOPPLER_DIR}/montlake\\.prd\\.token'; shred -u "\\$S/doppler-token-3"`, 'u'));
+  assert.match(script, new RegExp(`install -m 600 "\\$S/doppler-token-3" '${DOPPLER_DIR}/my-app\\.prd\\.token'; shred -u "\\$S/doppler-token-3"`, 'u'));
   for (const config of ['dev', 'dev_personal', 'stg', 'prd']) {
     assert.ok(!script.includes(minted(config)), 'no token in any script');
     assert.ok(![...harness.out, ...harness.err].join('\n').includes(minted(config)), 'no token printed');
@@ -101,27 +101,27 @@ test('doppler set mints read-only tokens locally, installs them 0600 via the fil
   assert.deepEqual(stagedSecrets(harness, sandboxId), {
     doppler: {
       apiBaseUrl: 'https://api.doppler.com',
-      tokens: ['dev', 'dev_personal', 'stg', 'prd'].map((config) => ({ project: 'montlake', config, tokenFile: `${DOPPLER_DIR}/montlake.${config}.token` })),
+      tokens: ['dev', 'dev_personal', 'stg', 'prd'].map((config) => ({ project: 'my-app', config, tokenFile: `${DOPPLER_DIR}/my-app.${config}.token` })),
     },
     policy: { mode: 'allow-all' },
   });
   assert.ok(apiCalls.includes('GET /cloud/secrets/status?check=1'));
-  assert.match(harness.out.join('\n'), /montlake\/dev: 91 names readable/u);
+  assert.match(harness.out.join('\n'), /my-app\/dev: 91 names readable/u);
 
   // An in-place redeploy keeps the secrets config and leaves the token files alone.
   assert.equal(await run(harness, ['coordinator', 'deploy', '--yes']), 0);
   assert.deepEqual(stagedSecrets(harness, sandboxId), {
     doppler: {
       apiBaseUrl: 'https://api.doppler.com',
-      tokens: ['dev', 'dev_personal', 'stg', 'prd'].map((config) => ({ project: 'montlake', config, tokenFile: `${DOPPLER_DIR}/montlake.${config}.token` })),
+      tokens: ['dev', 'dev_personal', 'stg', 'prd'].map((config) => ({ project: 'my-app', config, tokenFile: `${DOPPLER_DIR}/my-app.${config}.token` })),
     },
     policy: { mode: 'allow-all' },
   });
   assert.doesNotMatch(lastScript(harness, sandboxId), /doppler/u);
-  assert.match(harness.out.join('\n'), /Doppler secrets kept \(montlake\/dev, montlake\/dev_personal, montlake\/stg, montlake\/prd; policy allow-all\)/u);
+  assert.match(harness.out.join('\n'), /Doppler secrets kept \(my-app\/dev, my-app\/dev_personal, my-app\/stg, my-app\/prd; policy allow-all\)/u);
 
   // Re-setting one config revokes the token it replaces.
-  assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'montlake', '--config', 'dev']), 0);
+  assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev']), 0);
   assert.deepEqual(dopplerCalls.filter((args) => args[2] === 'revoke').map((args) => args[args.indexOf('--slug') + 1]), ['slug-dev']);
 
   // The policy command rewrites only the policy.
@@ -139,7 +139,7 @@ test('doppler set mints read-only tokens locally, installs them 0600 via the fil
 test('doppler set revokes what it minted when a later config fails, and installs nothing', async () => {
   const { harness, sandboxId, dopplerCalls } = await deployed({ failMintFor: 'stg' });
   const before = harness.world.scripts.length;
-  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'montlake', '--config', 'dev', '--config', 'stg']), /forbidden/u);
+  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--config', 'stg']), /forbidden/u);
   assert.deepEqual(dopplerCalls.filter((args) => args[2] === 'revoke').map((args) => args[args.indexOf('--slug') + 1]), ['slug-dev']);
   assert.equal(harness.world.scripts.length, before);
   assert.equal(harness.world.files.get(`${sandboxId}:${STAGE}/doppler-token-0`), undefined);
@@ -150,11 +150,11 @@ test('doppler set --token-file refuses personal and CLI tokens before touching t
   const before = harness.world.scripts.length;
   const personal = path.join(harness.root, 'personal');
   await fs.writeFile(personal, 'dp.pt.0123456789abcdefghijklmnopqrstuvwxyz\n', { mode: 0o600 });
-  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'montlake', '--config', 'dev', '--token-file', personal]), /Personal and CLI tokens are refused/u);
+  await assert.rejects(run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--token-file', personal]), /Personal and CLI tokens are refused/u);
   assert.equal(harness.world.scripts.length, before);
   const service = path.join(harness.root, 'service');
   await fs.writeFile(service, `${minted('dev')}\n`, { mode: 0o600 });
-  assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'montlake', '--config', 'dev', '--token-file', service]), 0);
+  assert.equal(await run(harness, ['coordinator', 'doppler', 'set', '--project', 'my-app', '--config', 'dev', '--token-file', service]), 0);
   // Not minted here, so unset cannot revoke it and says so.
   assert.equal(await run(harness, ['coordinator', 'doppler', 'unset', '--config', 'dev', '--yes']), 1);
   assert.match(harness.err.join('\n'), /not minted by this machine/u);

@@ -1,6 +1,6 @@
 #!/bin/bash
 # golden-check.sh — assert the Runpane Cloud identity strip list is absent. Run as root.
-# Source of truth: packages/runpane/src/cloud/bootstrap/assets (from the M0 m0d-golden experiment).
+# Source of truth: packages/runpane/src/cloud/bootstrap/assets.
 # Modes:  golden (default) — right after golden-scrub.sh, before the named snapshot:
 #                            machine-id must be EMPTY and there must be NO ssh host keys.
 #         fork             — on a sandbox created from the golden: machine-id must be a fresh

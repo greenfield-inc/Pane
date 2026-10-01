@@ -17,7 +17,7 @@ import type { BootstrapPort } from './ports';
 import { createCloudStore } from './store';
 import { createTailscaleApi } from './tailscale';
 
-/** The real dependencies behind `runpane cloud`: boat REST, m1-bootstrap, the Tailscale API, local files. */
+/** The real dependencies behind `runpane cloud`: boat REST, bootstrap, the Tailscale API, local files. */
 export function createDefaultCloudDeps(env: NodeJS.ProcessEnv = process.env): CloudDeps {
   const store = createCloudStore();
   const bootstrap: BootstrapPort = {
@@ -172,7 +172,7 @@ function runLocal(file: string, args: readonly string[], timeoutMs: number): Pro
 
 /**
  * This CLI's package root (dist/cloud/wiring.js -> ../..), packed without maps and type declarations.
- * The coordinator is m4's zero-dependency service inside this same package, so the deployed
+ * The coordinator is a zero-dependency service inside this same package, so the deployed
  * coordinator always matches the CLI that deployed it.
  */
 async function packCoordinatorApp(): Promise<{ archiveBase64: string; version: string }> {

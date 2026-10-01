@@ -19,7 +19,7 @@ import {
  * The coordinator (m4, ./coordinator/) is the always-on part of `runpane cloud`: idle-stop, reconcile
  * (stop + alert only) and /cloud/wake. It runs on a tiny sandbox joined to the tailnet as
  * tag:rp-session, so cloud Sessions can reach it, and holds a provider key scoped to read, stop and
- * resume. This file creates and manages that sandbox; the service itself is m4's code, shipped from
+ * resume. This file creates and manages that sandbox; the service itself is ./coordinator, shipped from
  * this very CLI package so the coordinator always matches the CLI that deployed it.
  */
 
@@ -34,7 +34,7 @@ const HEALTH_TIMEOUT_MS = 60_000;
 const POLL_MS = 1_500;
 const START_REPAIR_CHECK_MS = 30_000;
 
-/** Subcommands handled here; every other `cloud coordinator <sub>` goes to m4's coordinator CLI. */
+/** Subcommands handled here; every other `cloud coordinator <sub>` goes to the coordinator CLI in ./coordinator. */
 const LIFECYCLE = new Set(['deploy', 'stop', 'start', 'destroy']);
 
 export function isCoordinatorLifecycleCommand(argv: readonly string[]): boolean {

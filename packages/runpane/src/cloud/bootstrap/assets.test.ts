@@ -23,7 +23,7 @@ test('the bootstrap never enables Tailscale SSH and never mv-s into kept paths',
   for (const name of names) {
     const text = cloudBootstrapAssets[name];
     assert.ok(!/tailscale up[^\n]*--ssh(?!=false)/.test(text), `${name} must not run tailscale up --ssh`);
-    assert.ok(!/^\s*(sudo )?mv /m.test(text), `${name} must not mv files (M0: mv into kept paths arrives empty)`);
+    assert.ok(!/^\s*(sudo )?mv /m.test(text), `${name} must not mv files (an mv into kept paths arrives empty after a boat restore)`);
   }
 });
 
@@ -40,7 +40,7 @@ test('an unknown step fails with a parsable result', () => {
 });
 
 // Wake: the CLI's repair runs tailnet-identity while the resumed box is still booting, and re-enrols the
-// node unless it reports Running (p5-verify, rc-40f1386c). Seen live: first an empty status (json.loads('')
+// node unless it reports Running. Seen live: first an empty status (json.loads('')
 // threw, the wake exited 1), and with a plain "wait until it answers" the transient NoState of tailscaled's
 // first second, which re-enrolled a healthy node. The step must wait until the state settles.
 test('tailnet-identity waits until tailscaled answers and settles past NoState and Starting', () => {

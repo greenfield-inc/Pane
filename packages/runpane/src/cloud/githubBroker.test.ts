@@ -26,7 +26,7 @@ async function brokerHarness(broker?: { mode: 'app' | 'pat' | 'off'; repos?: str
   const harness = await createTestHarness();
   harness.world.github.repos.set(REPO, { fullName: REPO, private: true, defaultBranch: 'master', admin: true });
   harness.world.pushedDirectories = [];
-  if (broker) harness.world.broker = { mode: broker.mode, app: broker.mode === 'app' ? 'runpane-cloud-red' : null, repos: broker.repos ?? [REPO] };
+  if (broker) harness.world.broker = { mode: broker.mode, app: broker.mode === 'app' ? 'runpane-cloud-app' : null, repos: broker.repos ?? [REPO] };
   await harness.deps.store.writeSettings({
     coordinator: {
       enabled: true,
@@ -96,7 +96,7 @@ test('new --github with the broker in PAT mode keeps the read-only deploy key an
   assert.deepEqual(scriptsFor(harness, "printf 'RP_HEAD"), [], 'provision cloned over the deploy key');
 });
 
-test('new --github falls back to Phase 2 when the broker is off, does not reach the repo, or --read-write is asked', async () => {
+test('new --github falls back to deploy keys when the broker is off, does not reach the repo, or --read-write is asked', async () => {
   const cases: [{ mode: 'app' | 'off'; repos?: string[] }, string[]][] = [[{ mode: 'off' }, []], [{ mode: 'app', repos: ['acme/other'] }, []], [{ mode: 'app' }, ['--read-write']]];
   for (const [broker, extra] of cases) {
     const harness = await brokerHarness(broker);

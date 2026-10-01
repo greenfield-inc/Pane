@@ -399,6 +399,6 @@ test('coordinator subcommands are delegated with their raw arguments', async () 
     seen = argv;
     return 0;
   };
-  assert.equal(await run(harness, ['coordinator', 'mint-token', 'user:red', '--json']), 0);
-  assert.deepEqual(seen, ['mint-token', 'user:red', '--json']);
+  assert.equal(await run(harness, ['coordinator', 'mint-token', 'user:owner', '--json']), 0);
+  assert.deepEqual(seen, ['mint-token', 'user:owner', '--json']);
 });

@@ -55,28 +55,28 @@ mode 0600) and checks each one live. It takes secrets only as files or stdin (`-
 command-line values, and it never prints them. Leading and trailing whitespace is trimmed, so values with
 a trailing newline are fine.
 
-With the keys in Doppler (project `montlake`, config `dev_personal`), process substitution passes each
+With the keys in Doppler (here project `my-app`, config `dev_personal`), process substitution passes each
 one as a file without writing it to disk or showing it:
 
 ```bash
-D="doppler secrets get --project montlake --config dev_personal --plain"
+D="doppler secrets get --project my-app --config dev_personal --plain"
 runpane cloud setup \
   --boat-key-file <($D BOAT_DEV_API_KEY) \
-  --tailscale-client-id krreHuCr3M11CNTRL \
+  --tailscale-client-id <oauth-client-id> \
   --tailscale-secret-file <($D TAILSCALE_OAUTH_SECRET) \
   --claude-token-file <($D <Claude token name>) \
-  --golden rp-loop-golden-<sha8> \
-  --name-prefix rp-red \
+  --golden <golden-snapshot-name> \
+  --name-prefix rp-dev \
   --size large
 ```
 
 - Agent sign-in for cloud Sessions (see [Agents in a cloud Session](#agents-in-a-cloud-session)):
   `--claude-token-file` takes a Claude subscription token (from `claude setup-token`; in Doppler it is one of
-  the `CLAUDE_CODE_DEV_*` names: `doppler secrets --project montlake --config dev_personal --only-names`);
+  the `CLAUDE_CODE_DEV_*` names: `doppler secrets --project my-app --config dev_personal --only-names`);
   `--anthropic-key-file <($D ANTHROPIC_API_KEY)` takes an Anthropic API key instead. Both are optional.
 - `--name-prefix` names your sandboxes and tailnet hosts `<prefix>-<id>` (default `rp`). The coordinator
   manages every sandbox whose name starts with `<prefix>-`, so pick a prefix no other sandboxes in the
-  boat account use: the build loop's boxes are all `rp-loop-*`, which `rp-` would match.
+  boat account use: if other tooling names its boxes `rp-ci-*`, the default `rp-` would match them.
 - `--golden` names the image new Sessions start from: a boat named snapshot with the Pane daemon, Tailscale
   and Playwright's Chromium preinstalled. It makes `new` about a minute faster. Without it (`--no-golden`)
   each `new` installs everything onto the plain image. Fork builds make goldens named
@@ -642,7 +642,7 @@ runpane cloud coordinator status                # the coordinator itself: sandbo
 runpane cloud coordinator stop --yes            # pause idle-stop and wake-on-submit (billing stops)
 runpane cloud coordinator start                 # bring it back (one boat start)
 runpane cloud coordinator deploy --yes          # run again to update it in place; no new sandbox
-runpane cloud coordinator destroy --yes         # device and sandbox; Sessions untouched (see below for the key)
+runpane cloud coordinator destroy --yes         # device, sandbox and scoped key; Sessions untouched
 
 runpane cloud coordinator status "api work"     # its view of one Session, without waking it
 runpane cloud coordinator wake "api work"
@@ -658,8 +658,11 @@ every Session the coordinator wakes is upgraded to it before it counts as awake 
 pin). While the coordinator is stopped, idle Sessions just stay awake and only `runpane cloud wake` wakes
 a sleeping one.
 
-boat only lets its dashboard revoke API keys, so `destroy` can't revoke the coordinator's scoped key: it
-prints the key id, and you revoke it under API Keys in boat's dashboard (it also expires on its own).
+Only a deploy that creates the coordinator sandbox mints its scoped key; a redeploy updates the running
+coordinator in place and mints none. `destroy` revokes the key through boat's API after deleting the
+sandbox. If that call fails, `destroy` still finishes, names the key id it could not revoke, and you revoke
+it under API Keys in boat's dashboard (it also expires on its own). A deploy that fails partway revokes
+the key it minted the same way.
 <!-- coordinator-deploy:end -->
 
 ## 7. Let one Session message another (peers)

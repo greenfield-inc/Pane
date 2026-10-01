@@ -28,7 +28,7 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   `sandbox.resume` only (`POST /api-keys/scoped`). There is no create, fork or delete: `runpane cloud new`
   and `destroy` run on the laptop with the unscoped key. Scope the key to the Sessions' sandbox ids when
   you can. The provider interface also has no delete method, so the code can't destroy a sandbox either.
-- **State.** The coordinator keeps no state that must persist (v4 I15). The provider and the directory
+- **State.** The coordinator keeps no state that must persist. The provider and the directory
   are the truth. Wake times and safe-to-stop streaks live in memory; losing them only makes it more
   cautious after a restart. The runaway guard's resume history (last hour) is kept in
   `<stateDir>/resumes.json`, so the service, a restarted service and `coordinator wake --local` all count
@@ -78,16 +78,16 @@ alert.
 ### Runaway guard
 
 - **Live sandboxes.** The coordinator alerts when live managed sandboxes exceed `maxLiveSandboxes`
-  (default 25, final-plan §4). At that count it also refuses to wake more.
+  (default 25). At that count it also refuses to wake more.
 - **Resume rate.** It caps resumes per sandbox (default 6 per hour) and overall (default 60 per hour).
 
 ### Wake
 
-The wake API returns final-plan's statuses plus `awake`, which is the success answer:
+The wake API returns one of five statuses; `awake` is the success answer:
 
 | Status | Meaning |
 |---|---|
-| `awake` | Running, and `/health` is ready. For M2 daemons that means `readiness.state` is not `starting`. `degraded` counts as awake and is named in `detail`. |
+| `awake` | Running, and `/health` is ready. For a daemon that reports readiness, that means `readiness.state` is not `starting`. `degraded` counts as awake and is named in `detail`. |
 | `asleep` | Stopped, or stopping. |
 | `waking` | A resume was sent, the sandbox is booting, or `/health` isn't ready yet. A wait that times out also returns this. |
 | `daemon-down` | Running for longer than `daemonDownGraceSeconds` (default 60), but `/health` doesn't answer. |
@@ -324,7 +324,7 @@ runpane cloud coordinator doppler unset --all --yes    # shred on the coordinato
 - **The credential: one read-only service token per config.** Doppler scopes a service token to exactly one
   config, and `set` mints each with the laptop's logged-in `doppler` CLI (`doppler configs tokens create
   runpane-cloud-<coordinator> --access read --json`), keeping the token in memory only. A workplace with a
-  handful of configs (Montlake: `dev`, `dev_personal`, `stg`, `prd`) needs a handful of tokens; `--all-configs`
+  handful of configs (say `dev`, `dev_personal`, `stg`, `prd`) needs a handful of tokens; `--all-configs`
   lists and mints them all. If any mint fails, the ones already minted are revoked and nothing is installed.
   `--token-file` accepts a `dp.st.` service token or a `dp.sa.` service account token (give the account a
   read-only role); personal (`dp.pt.`) and CLI (`dp.ct.`) tokens are refused, since they can write and reach
@@ -386,7 +386,7 @@ per fetch has config names and counts only. Read it with `runpane cloud coordina
 
 ```json
 "secrets": { "doppler": { "apiBaseUrl": "https://api.doppler.com",
-                          "tokens": [ { "project": "montlake", "config": "dev", "tokenFile": "…/doppler/montlake.dev.token" } ] },
+                          "tokens": [ { "project": "my-app", "config": "dev", "tokenFile": "…/doppler/my-app.dev.token" } ] },
              "policy": { "mode": "default" },
              "limits": { "fetchesPerSessionPerHour": 120 } }
 ```

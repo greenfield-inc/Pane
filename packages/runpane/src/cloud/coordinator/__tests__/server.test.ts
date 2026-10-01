@@ -14,20 +14,20 @@ describe('caller tokens', () => {
   const options = { secret: SECRET, revokedCallers: ['user:old'], isKnownPeer: async (id: string) => id === 's1' };
 
   it('accepts minted user and known-peer tokens', async () => {
-    const user = await authenticateCaller(`Bearer ${mintCallerToken(SECRET, 'user:red')}`, options);
-    assert.deepEqual(user, { ok: true, caller: { id: 'user:red', role: 'user' } });
+    const user = await authenticateCaller(`Bearer ${mintCallerToken(SECRET, 'user:owner')}`, options);
+    assert.deepEqual(user, { ok: true, caller: { id: 'user:owner', role: 'user' } });
     const peer = await authenticateCaller(`Bearer ${mintCallerToken(SECRET, 's1')}`, options);
     assert.deepEqual(peer, { ok: true, caller: { id: 's1', role: 'peer' } });
   });
 
   it('rejects missing, forged, revoked and unknown-peer tokens', async () => {
     assert.equal((await authenticateCaller(undefined, options)).ok, false);
-    const forged = mintCallerToken('other-secret', 'user:red');
+    const forged = mintCallerToken('other-secret', 'user:owner');
     const results = await Promise.all([
       authenticateCaller(`Bearer ${forged}`, options),
       authenticateCaller(`Bearer ${mintCallerToken(SECRET, 'user:old')}`, options),
       authenticateCaller(`Bearer ${mintCallerToken(SECRET, 's-removed')}`, options),
-      authenticateCaller(`Bearer ${mintCallerToken(SECRET, 'user:red').replace('user:red', 'user:eve')}`, options),
+      authenticateCaller(`Bearer ${mintCallerToken(SECRET, 'user:owner').replace('user:owner', 'user:eve')}`, options),
     ]);
     assert.deepEqual(results.map((result) => (result.ok ? 'ok' : result.code)), [
       'auth-invalid',
@@ -114,26 +114,26 @@ describe('coordinator HTTP server', () => {
 
   it('keeps reconcile and alerts for user callers only', async () => {
     assert.equal((await request('/cloud/reconcile', { method: 'POST', caller: 's1', body: '{}' })).status, 403);
-    const reconcile = await request('/cloud/reconcile', { method: 'POST', caller: 'user:red', body: '{"dryRun":true}' });
+    const reconcile = await request('/cloud/reconcile', { method: 'POST', caller: 'user:owner', body: '{"dryRun":true}' });
     assert.equal(reconcile.status, 200);
     assert.equal(reconcile.body.report.aborted, 'directory-empty');
-    assert.equal((await request('/cloud/alerts', { caller: 'user:red' })).status, 200);
+    assert.equal((await request('/cloud/alerts', { caller: 'user:owner' })).status, 200);
   });
 
   it('lets only user callers replace the directory, and validates it', async () => {
     const directory = { version: 1, sessions: [{ sessionId: 's1', provider: 'boat', sandboxId: 'bx_a', baseUrl: 'https://a' }] };
     assert.equal((await request('/cloud/directory', { method: 'PUT', caller: 's1', body: JSON.stringify(directory) })).status, 403);
-    const ok = await request('/cloud/directory', { method: 'PUT', caller: 'user:red', body: JSON.stringify(directory) });
+    const ok = await request('/cloud/directory', { method: 'PUT', caller: 'user:owner', body: JSON.stringify(directory) });
     assert.deepEqual([ok.status, ok.body.sessions], [200, 1]);
-    const bad = await request('/cloud/directory', { method: 'PUT', caller: 'user:red', body: '{"version":1}' });
+    const bad = await request('/cloud/directory', { method: 'PUT', caller: 'user:owner', body: '{"version":1}' });
     assert.equal(bad.status, 400);
     assert.deepEqual(replaced, [1]);
   });
 
   it('rejects malformed wake bodies with 400', async () => {
-    const response = await request('/cloud/wake', { method: 'POST', caller: 'user:red', body: '{"host":' });
+    const response = await request('/cloud/wake', { method: 'POST', caller: 'user:owner', body: '{"host":' });
     assert.equal(response.status, 400);
-    const missingHost = await request('/cloud/wake', { method: 'POST', caller: 'user:red', body: '{}' });
+    const missingHost = await request('/cloud/wake', { method: 'POST', caller: 'user:owner', body: '{}' });
     assert.equal(missingHost.status, 400);
   });
 });

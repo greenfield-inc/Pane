@@ -150,6 +150,21 @@ test('coordinator stop, status, start and destroy', async () => {
   await assert.rejects(fs.access(harness.deps.store.coordinatorClientPath));
 });
 
+test('coordinator destroy still finishes when boat refuses the key revocation, and names the key to revoke by hand', async () => {
+  const harness = await createTestHarness();
+  await harness.deps.store.writeSettings({ namePrefix: 'rp-test' });
+  assert.equal(await run(harness, ['coordinator', 'deploy', '--yes', '--json']), 0);
+  const deployment = (await harness.deps.store.readSettings()).coordinator?.deployment;
+  assert.ok(deployment);
+  harness.world.revokeKeyError = 'boat DELETE /api-keys/sak_fake1 failed with HTTP 500';
+
+  assert.equal(await run(harness, ['coordinator', 'destroy', '--yes']), 0);
+  assert.ok(harness.world.calls.includes(`destroy ${deployment.sandboxId}`));
+  assert.ok(harness.world.calls.includes('revoke-key sak_fake1'));
+  assert.match(harness.out.join('\n'), /scoped key NOT revoked \(boat DELETE .*HTTP 500\); revoke sak_fake1 in the provider dashboard/u);
+  assert.equal((await harness.deps.store.readSettings()).coordinator?.enabled, false);
+});
+
 test('new after a deploy gets a coordinator client and a peers list naming the coordinator', async () => {
   const harness = await createTestHarness();
   harness.world.pushedDirectories = [];

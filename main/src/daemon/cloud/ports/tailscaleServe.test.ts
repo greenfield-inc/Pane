@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createTailscaleServeBackend, describeListener, parseServeListeners } from './tailscaleServe';
 
-const HOST = 'rp-red-zd56pin5.tail03bf19.ts.net';
+const HOST = 'rp-zd56pin5.example.ts.net';
 
 describe('parseServeListeners', () => {
   it('reads tcp forwards, TLS-terminated tcp and web handlers', () => {
