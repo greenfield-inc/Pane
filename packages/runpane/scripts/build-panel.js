@@ -19,7 +19,6 @@ const result = esbuild.buildSync({
   jsx: 'automatic',
   define: {
     'process.env.NODE_ENV': '"production"',
-    __PANEL_DIRECTION__: JSON.stringify(process.env.PANEL_DIRECTION ?? 'sidebar'),
   },
   logLevel: 'warning',
 });
@@ -33,4 +32,4 @@ const html = fs.readFileSync(path.join(panelDir, 'index.html'), 'utf8')
   .replace('<!-- PANEL_STYLE -->', () => `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`)
   .replace('<!-- PANEL_SCRIPT -->', () => `<script>${script.text.replace(/<\/script/gi, '<\\/script')}</script>`);
 fs.mkdirSync(path.join(packageDir, 'dist'), { recursive: true });
-fs.writeFileSync(path.join(packageDir, 'dist', process.env.PANEL_OUT ?? 'panel.html'), html);
+fs.writeFileSync(path.join(packageDir, 'dist', 'panel.html'), html);
