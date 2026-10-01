@@ -14,7 +14,7 @@ import { createCoordinatorServer } from '../../server';
 import type { CoordinatorApi } from '../../server';
 import { buildGitHubBroker, buildSecretsService } from '../../service';
 import { entry, FakeClock, FakeDirectory } from '../../__tests__/fakes';
-import type { FetchLike } from '../../github/rest';
+import type { FetchLike } from '../../../githubTransport';
 import type { TailnetNode, WhoisResolver } from '../../github/whois';
 import { FakeGitHub } from '../../github/__tests__/fakeGitHub';
 import { MANIFEST_PATH, parseManifest } from '../manifest';

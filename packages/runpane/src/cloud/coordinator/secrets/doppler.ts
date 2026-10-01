@@ -1,5 +1,5 @@
 import { boundary, decodeBoundary } from '../../../boundaryDecoder';
-import type { FetchLike } from '../github/rest';
+import type { FetchLike } from '../../githubTransport';
 
 /**
  * Reads one Doppler config's secrets with a read-only service token (scoped to that config by
