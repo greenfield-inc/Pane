@@ -530,6 +530,12 @@ const phase = async (name, fn) => {
     await closeStrayDialogs();
     const measured = await outputRate(fn);
     result.phases[name] = { ...measured.value, renderer: await rendererHealth(measured.t0, measured.t1), allTerminalOutput: { eventsPerSec: measured.outputEventsPerSec, kBps: measured.outputKBps } };
+    // DUMP_REQ=1: the phase's raw request timeline (offset from phase start, channel, new/reused connection, ms).
+    if (env.DUMP_REQ === '1') {
+      result.phases[name].requestTimeline = (await requestsSince(measured.t0, measured.t1)).map((r) => ({
+        at: Math.round(r.t0 - measured.t0), channel: r.channel ?? r.path, reused: r.reused, ms: r.ms === null ? null : Math.round(r.ms),
+      }));
+    }
     log(`phase ${name} done`, JSON.stringify(result.phases[name]).slice(0, 400));
   } catch (error) {
     const message = error instanceof Error ? error.message.split('\n')[0] : String(error);
