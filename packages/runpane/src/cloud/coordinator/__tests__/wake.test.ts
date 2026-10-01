@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { MemoryAlertSink } from '../alerts';
 import { BoatProviderError } from '../boatProvider';
@@ -11,14 +14,19 @@ import { entry, FakeClock, FakeDirectory, FakeProbe, FakeProvider, sandbox } fro
 
 const URL_A = 'https://rp-s1.tail.ts.net';
 
-function setup(sandboxes: ProviderSandbox[], options: Partial<WakeOptions> = {}, limits = { maxLiveSandboxes: 25, maxResumesPerSandboxPerHour: 6, maxResumesPerHour: 60 }) {
+function setup(
+  sandboxes: ProviderSandbox[],
+  options: Partial<WakeOptions> = {},
+  limits = { maxLiveSandboxes: 25, maxResumesPerSandboxPerHour: 6, maxResumesPerHour: 60 },
+  historyFile?: string,
+) {
   const clock = new FakeClock();
   const provider = new FakeProvider(sandboxes);
   const probe = new FakeProbe();
   const directory = FakeDirectory.of([entry('s1', 'bx_a')]);
   const activity = new SandboxActivity(clock);
   const alerts = new MemoryAlertSink();
-  const guard = new RunawayGuard(clock, limits);
+  const guard = new RunawayGuard(clock, limits, historyFile);
   const wake = new WakeService({ directory, provider, probe, activity, guard, alerts, clock }, {
     managedNamePrefix: 'rp-',
     selfSandboxId: null,
@@ -142,6 +150,25 @@ describe('WakeService.wake', () => {
       await provider.stop('bx_a');
     }
     assert.equal(status(await wake.wake('s1', { wait: true })), 'error:wake-rate-limited');
+  });
+
+  it('refuses to resume while the shared resume history is invalid, and alerts', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rp-wake-')), 'resumes.json');
+    fs.writeFileSync(file, '{torn');
+    const { wake, provider, alerts } = setup([sandbox('bx_a', 'stopped')], {}, undefined, file);
+    assert.equal(status(await wake.wake('s1', { wait: true })), 'error:resume-history-invalid');
+    assert.deepEqual(provider.mutations(), []);
+    assert.equal(alerts.alerts[0].code, 'resume-history-invalid');
+  });
+
+  it('records a resume in the shared history only once the provider accepted it', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rp-wake-')), 'resumes.json');
+    const { wake, provider } = setup([sandbox('bx_a', 'stopped')], {}, undefined, file);
+    provider.resumeErrors = [new Error('boat: HTTP 500')];
+    assert.equal(status(await wake.wake('s1', { wait: true })), 'error:provider-error');
+    assert.equal(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '[]', '[]');
+    assert.equal(status(await wake.wake('s1', { wait: true })), 'awake');
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).length, 1);
   });
 
   it('upgrades to the pinned version after wake when the daemon supports it', async () => {

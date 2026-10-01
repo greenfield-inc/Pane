@@ -68,6 +68,8 @@ const FAILURE_STATUS = {
   'directory-unreadable': 503,
   'runaway-guard': 429,
   'wake-rate-limited': 429,
+  'resume-history-invalid': 503,
+  'resume-history-busy': 503,
   'peer-wake-refused': 403,
   'provider-rate-limited': 429,
   'provider-error': 502,

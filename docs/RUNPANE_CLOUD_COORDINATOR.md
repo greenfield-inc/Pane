@@ -32,7 +32,11 @@ It runs on a tiny sandbox of its own (boat `small`), joined to the tailnet as `t
   are the truth. Wake times and safe-to-stop streaks live in memory; losing them only makes it more
   cautious after a restart. The runaway guard's resume history (last hour) is kept in
   `<stateDir>/resumes.json`, so the service, a restarted service and `coordinator wake --local` all count
-  the same resumes.
+  the same resumes. Each resume holds `<stateDir>/resumes.json.lock` from reading the history through the
+  cap check and the provider call until it is recorded, so two processes can't both pass a cap; a lock left
+  by a dead process is broken. A history that can't be read or decoded refuses every wake
+  (`resume-history-invalid`) until you fix or remove the file; a lock held past 30 s refuses with
+  `resume-history-busy`.
 
 ## What it does
 
@@ -135,7 +139,7 @@ Failure responses have the form `{ok:false, code, message}`:
 | HTTP status | `code` |
 |---|---|
 | 404 | `unknown-host` |
-| 503 | `directory-unreadable` |
+| 503 | `directory-unreadable`, `resume-history-invalid`, `resume-history-busy` |
 | 429 | `runaway-guard`, `wake-rate-limited`, `provider-rate-limited` |
 | 502 | `provider-error` |
 

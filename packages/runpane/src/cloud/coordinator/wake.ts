@@ -33,6 +33,8 @@ type WakeFailureCode =
   | 'directory-unreadable'
   | 'runaway-guard'
   | 'wake-rate-limited'
+  | 'resume-history-invalid'
+  | 'resume-history-busy'
   | 'peer-wake-refused'
   | 'provider-rate-limited'
   | 'provider-error';
@@ -186,37 +188,33 @@ export class WakeService {
         message: `peer ${caller?.id ?? ''} already resumed ${PEER_RESUMES_PER_HOUR} sandbox(es) this hour; ask the user to wake ${entry.label}`,
       };
     }
-    let managed: ProviderSandbox[];
-    try {
-      managed = (await this.deps.provider.list()).filter((sandbox) => isManagedSandbox(sandbox, this.options));
-    } catch (error) {
-      return { ok: false, code: 'provider-error', message: describeError(error) };
-    }
-    const verdict = this.deps.guard.checkResume(entry.sandboxId, managed);
-    if (!verdict.ok) {
-      this.deps.alerts.emit({
-        level: 'error',
-        code: verdict.code,
-        message: `${entry.label}: ${verdict.message}`,
-        sandboxId: entry.sandboxId,
-        sessionId: entry.sessionId,
-      });
-      return { ok: false, code: verdict.code, message: verdict.message };
-    }
     let rateLimited = 0;
     let busyWaits = 0;
     for (;;) {
       // Idle-stop may hold the sandbox for a few seconds; wait for it rather than racing its stop call.
-      const outcome = await this.deps.activity.exclusive(entry.sandboxId, async () => {
-        await this.deps.provider.resume(entry.sandboxId, entry.org);
-      }).catch((cause: unknown) => ({ ran: true as const, error: cause }));
+      // The guard re-reads the shared resume history and records the resume under its lock each attempt.
+      const outcome = await this.deps.activity.exclusive(entry.sandboxId, () => this.deps.guard.resumeWithinCaps(entry.sandboxId, {
+        listManaged: async () => (await this.deps.provider.list()).filter((sandbox) => isManagedSandbox(sandbox, this.options)),
+        resume: () => this.deps.provider.resume(entry.sandboxId, entry.org),
+      })).catch((cause: unknown) => ({ ran: true as const, error: cause }));
       if (!outcome.ran) {
         busyWaits += 1;
         if (busyWaits > 120) return { ok: false, code: 'provider-error', message: 'sandbox stayed busy; resume not sent' };
         await this.deps.clock.sleep(500);
         continue;
       }
-      if (!('error' in outcome)) break;
+      if (!('error' in outcome)) {
+        const verdict = outcome.value;
+        if (verdict.ok) break;
+        this.deps.alerts.emit({
+          level: 'error',
+          code: verdict.code,
+          message: `${entry.label}: ${verdict.message}`,
+          sandboxId: entry.sandboxId,
+          sessionId: entry.sessionId,
+        });
+        return { ok: false, code: verdict.code, message: verdict.message };
+      }
       const error = outcome.error;
       // 409: a resume is already in progress; the readiness loop picks it up.
       if (error instanceof BoatProviderError && error.status === 409) return null;
@@ -245,7 +243,6 @@ export class WakeService {
       }
       await this.deps.clock.sleep(backoff);
     }
-    this.deps.guard.recordResume(entry.sandboxId);
     if (caller?.role === 'peer' && peerWindow) this.peerResumes.set(caller.id, [...peerWindow, this.deps.clock.now()]);
     this.deps.activity.markWoken(entry.sandboxId);
     this.deps.alerts.emit({
