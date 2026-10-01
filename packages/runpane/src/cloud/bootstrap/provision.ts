@@ -111,12 +111,27 @@ export function cloudHostname(sessionId: string, prefix = 'rp'): string {
 }
 
 /**
+ * The sandbox installs a Pane .deb it downloads with curl, as root: only an https:// URL is accepted (the
+ * download also refuses redirects to anything else), so nothing between the sandbox and the server can swap it.
+ */
+export function assertHttpsArtifactUrl(url: string, what: string): void {
+  let protocol = '';
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    // reported below
+  }
+  if (protocol !== 'https:') throw new Error(`${what} must be an https:// URL${protocol ? ` (got ${protocol}//)` : ''}.`);
+}
+
+/**
  * Provisions one cloud sandbox for a Pane Session: identity reset, strip-list check, tailnet join
  * with a single-use tagged key (never Tailscale SSH), Pane daemon install, pairing capture to a
  * local 0600 file, optional repo clone, and a /health wait over the tailnet. Safe to re-run for
  * the same session: finished steps are detected and skipped.
  */
 export async function provisionSandbox(sandbox: SandboxHandle, options: ProvisionOptions): Promise<ProvisionResult> {
+  if (options.paneSource.kind === 'deb-url') assertHttpsArtifactUrl(options.paneSource.url, 'The Pane .deb URL');
   const home = options.sandboxHome ?? DEFAULT_SANDBOX_HOME;
   const hostname = assertHostname(options.hostname ?? cloudHostname(options.sessionId));
   const tags = options.tags ?? [CLOUD_SESSION_TAG];

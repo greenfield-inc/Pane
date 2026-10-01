@@ -3,7 +3,8 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema, type JsonObject, type JsonValue } from '../boundaryDecoder';
+import { githubErrorMessage, githubJsonRequest, type FetchLike } from './githubTransport';
 import type { GitHubTokenSource } from './store';
 
 /**
@@ -82,8 +83,6 @@ const deployKeySchema = boundary.object({
 
 const metaSchema = boundary.object({ ssh_keys: boundary.array(boundary.nonEmptyString) });
 
-const errorSchema = boundary.object({ message: boundary.optional(boundary.string) });
-
 class GitHubApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -91,38 +90,14 @@ class GitHubApiError extends Error {
   }
 }
 
-function createGitHubApi(token: string, fetchImpl: typeof fetch = fetch): GitHubApi {
-  async function request(method: 'GET' | 'POST' | 'DELETE', route: string, body?: Record<string, string | boolean>, okStatuses = [200, 201, 204]) {
-    const headers = new Headers({
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'runpane-cloud',
-    });
-    if (body) headers.set('Content-Type', 'application/json');
-    const response = await fetchImpl(`${GITHUB_API}${route}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
-    });
-    const text = await response.text();
-    let parsed: JsonValue | undefined;
-    try {
-      parsed = text ? decodeBoundary(JSON.parse(text), boundary.json) : undefined;
-    } catch {
-      parsed = undefined;
-    }
+export function createGitHubApi(token: string, fetchImpl: FetchLike = fetch): GitHubApi {
+  async function request(method: 'GET' | 'POST' | 'DELETE', route: string, body?: JsonObject, okStatuses = [200, 201, 204]) {
+    const response = await githubJsonRequest(fetchImpl, { method, url: `${GITHUB_API}${route}`, token, userAgent: 'runpane-cloud', body, timeoutMs: API_TIMEOUT_MS });
     if (!okStatuses.includes(response.status)) {
-      let message = '';
-      try {
-        message = decodeBoundary(parsed, errorSchema).message ?? '';
-      } catch {
-        // informational only
-      }
+      const message = githubErrorMessage(response.body);
       throw new GitHubApiError(`GitHub ${method} ${route} failed with HTTP ${response.status}${message ? `: ${message}` : ''}`, response.status);
     }
-    return { status: response.status, body: parsed };
+    return { status: response.status, body: response.body };
   }
 
   function decode<Value>(body: JsonValue | undefined, schema: BoundarySchema<Value>, route: string): Value {

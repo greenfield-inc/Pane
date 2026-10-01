@@ -12,7 +12,7 @@ import { GitHubAppCredential, GitHubPatCredential } from './github/credentials';
 import type { GitHubCredential } from './github/credentials';
 import { GitPusher } from './github/gitPush';
 import { createGitHubRest } from './github/rest';
-import type { FetchLike } from './github/rest';
+import type { FetchLike } from '../githubTransport';
 import { TailscaleWhois } from './github/whois';
 import type { WhoisResolver } from './github/whois';
 import type { DirectoryWriter } from './directory';

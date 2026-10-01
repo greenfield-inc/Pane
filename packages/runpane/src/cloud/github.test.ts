@@ -99,6 +99,22 @@ test('connect removes the key again when the sandbox cannot read the repository 
   assert.equal(record.meta.github, undefined);
 });
 
+test('connect keeps the grant when the sandbox cannot read with the key and GitHub refuses to delete it', async () => {
+  const { harness, host } = await harnessWithHost();
+  harness.world.github.verifyFails = true;
+  harness.world.github.deleteKeyFails = 'GitHub DELETE failed with HTTP 503';
+  await assert.rejects(run(harness, ['github', 'connect', host, '--repo', REPO]),
+    (error: Error) => /Permission denied/u.test(error.message) && /HTTP 503/u.test(error.message)
+      && error.message.includes(`runpane cloud github disconnect ${host} --repo ${REPO}`));
+  assert.equal(harness.world.github.keys.length, 1);
+  const [record] = await harness.deps.store.listHosts();
+  assert.deepEqual(record.meta.github?.map((grant) => [grant.repo, grant.keyId]), [[REPO, 100]]);
+
+  harness.world.github.deleteKeyFails = undefined;
+  assert.equal(await run(harness, ['github', 'disconnect', host, '--repo', REPO, '--json']), 0);
+  assert.equal(harness.world.github.keys.length, 0);
+});
+
 test('connect refuses without repository admin, and on a sleeping Session, before touching anything', async () => {
   const { harness, host } = await harnessWithHost({ admin: false });
   await assert.rejects(run(harness, ['github', 'connect', host, '--repo', REPO]), /needs admin/u);
@@ -147,6 +163,26 @@ test('destroy deletes the Session\'s deploy keys', async () => {
   assert.deepEqual(lastJson<{ github: { deletedKeys: string[] } }>(harness).github.deletedKeys, [`${REPO}#100`]);
 });
 
+test('destroy keeps the Session and its record when a deploy key cannot be deleted, and a retry finishes', async () => {
+  const { harness, host } = await harnessWithHost();
+  assert.equal(await run(harness, ['github', 'connect', host, '--repo', REPO]), 0);
+  const devices = harness.world.devices.length;
+  harness.world.github.deleteKeyFails = 'GitHub DELETE failed with HTTP 403: Must have admin rights';
+  await assert.rejects(run(harness, ['destroy', host, '--yes', '--json']),
+    (error: Error) => error.message.includes(`${REPO}#100`) && error.message.includes(`runpane cloud destroy ${host} --yes`));
+  assert.equal(harness.world.sandboxes.size, 1);
+  assert.equal(harness.world.devices.length, devices);
+  assert.ok(!harness.world.calls.some((call) => call.startsWith('destroy ')));
+  const [record] = await harness.deps.store.listHosts();
+  assert.deepEqual(record.meta.github?.map((grant) => grant.keyId), [100]);
+
+  harness.world.github.deleteKeyFails = undefined;
+  assert.equal(await run(harness, ['destroy', host, '--yes', '--json']), 0);
+  assert.deepEqual(lastJson<{ github: { deletedKeys: string[] } }>(harness).github.deletedKeys, [`${REPO}#100`]);
+  assert.equal(harness.world.sandboxes.size, 0);
+  assert.deepEqual(await harness.deps.store.listHosts(), []);
+});
+
 test('new --github clones a private repository over a deploy key made before the clone', async () => {
   const harness = await createTestHarness();
   harness.world.github.repos.set(REPO, { fullName: REPO, private: true, defaultBranch: 'main', admin: true });
@@ -171,6 +207,25 @@ test('new --github checks the credential before creating a sandbox, and revokes 
   await assert.rejects(run(harness, ['new', '--repo', REPO, '--github', '--yes']), /boom/u);
   assert.equal(harness.world.github.keys.length, 0);
   assert.ok(harness.world.calls.some((call) => call.startsWith('github-delete-key')));
+});
+
+test('a failed new --github keeps the sandbox and the grant when the deploy key cannot be deleted', async () => {
+  const harness = await createTestHarness();
+  harness.world.github.repos.set(REPO, { fullName: REPO, private: true, defaultBranch: 'main', admin: true });
+  harness.world.failProvision = 'boom';
+  harness.world.github.deleteKeyFails = 'GitHub DELETE failed with HTTP 503';
+  await assert.rejects(run(harness, ['new', '--repo', REPO, '--github', '--yes']), /boom/u);
+  assert.equal(harness.world.github.keys.length, 1);
+  assert.equal(harness.world.sandboxes.size, 1);
+  const [record] = await harness.deps.store.listHosts();
+  const host = record.profile.cloud.hostname;
+  assert.deepEqual(record.meta.github?.map((grant) => grant.keyId), [100]);
+  assert.ok(harness.err.some((line) => line.includes(`${REPO}#100`) && line.includes(`runpane cloud destroy ${host} --yes`)));
+
+  harness.world.github.deleteKeyFails = undefined;
+  assert.equal(await run(harness, ['destroy', host, '--yes']), 0);
+  assert.equal(harness.world.github.keys.length, 0);
+  assert.equal(harness.world.sandboxes.size, 0);
 });
 
 test('new rejects --read-write without --github', () => {

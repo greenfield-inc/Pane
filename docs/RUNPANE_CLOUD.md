@@ -86,6 +86,8 @@ runpane cloud setup \
   `setup` saves the name without checking it exists; a missing snapshot only shows up as a create error in `new`.
 - `--size` sets the default machine size; see [Costs](#costs). The built-in default is `default`
   (4 vCPU / 8 GB); `large` (8 vCPU / 16 GB) is the one to use for more than one agent with browser tests.
+- `--pane-deb-url <url>` installs the Pane daemon from that `.deb` in every new Session. It must be
+  an `https://` URL, and the download in the sandbox refuses a redirect to anything but https.
 - Rerun `setup` with any subset of flags to change one setting. The others are kept.
 
 Setup prints what is configured. `runpane cloud list` works after setup and says `No cloud hosts.`
@@ -816,7 +818,9 @@ runpane cloud github disconnect "api work" [--repo <owner>/<repo>]
 ```
 
 `disconnect` deletes the deploy key on GitHub (also while the Session sleeps) and removes the key files from
-the Session. `runpane cloud destroy` deletes a Session's deploy keys first. The key is listed on GitHub
+the Session. `runpane cloud destroy` deletes a Session's deploy keys first. If GitHub refuses (for example
+your credential lost admin), nothing else is removed: the Session and its local record, which holds the key
+id, stay until a rerun deletes the key. A failed `new --github` or `github connect` does the same. The key is listed on GitHub
 under the repository's Settings > Deploy keys as `runpane-cloud <host> (read-only)`.
 
 `--read-write` registers a writable deploy key instead. Anything in the Session (any agent) could then push
@@ -876,7 +880,8 @@ runpane cloud destroy "api work" --yes
 ```
 
 This deletes the Session's GitHub deploy keys, then the tailnet device, then the sandbox and its disk, checks both are gone, then removes the
-local record and the Pane desktop profile. It can't be undone: push any work first (`runpane cloud git push`).
+local record and the Pane desktop profile. If a deploy key can't be deleted, destroy stops before the tailnet device and
+says which key; fix the credential (or delete the key on GitHub) and rerun it. It can't be undone: push any work first (`runpane cloud git push`).
 Destroy costs no boat start.
 
 ## Costs

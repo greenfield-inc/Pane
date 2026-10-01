@@ -279,6 +279,20 @@ test('provisionSandbox refuses a failed strip-list check, Tailscale SSH, and a s
   );
 });
 
+test('provisionSandbox refuses a Pane .deb that is not served over https before touching the sandbox', async () => {
+  for (const url of ['http://example.test/pane.deb', 'file:///tmp/pane.deb', 'not a url']) {
+    const sandbox = new FakeSandbox();
+    await assert.rejects(
+      provisionSandbox(sandbox, {
+        sessionId: 'k3j9x0q2m1', label: 'x', tailscale: new FakeTailscale(), fetchImpl: healthyFetch,
+        paneSource: { kind: 'deb-url', url }, pairingOutputPath: path.join(tempDir(), 'p'),
+      }),
+      /must be an https:\/\/ URL/,
+    );
+    assert.deepEqual(sandbox.steps, [], url);
+  }
+});
+
 test('auto transport: when Let\'s Encrypt refuses the Serve certificate, it switches to plain HTTP inside the tailnet', async () => {
   const sandbox = new FakeSandbox();
   sandbox.certRateLimited = true;

@@ -546,8 +546,16 @@ describe('GitHub broker (App mode) against a fake GitHub', () => {
     const pulls = await h.call('s1', 'GET', 'read/acme/app/pulls?state=all&per_page=5');
     assert.equal(pulls.status, 200, JSON.stringify(pulls.body));
     assert.ok(Array.isArray(pulls.body.data));
-    const issue = await h.call('s1', 'GET', 'read/acme/app/issues/1');
-    assert.ok([200, 502].includes(issue.status));
+    const seeded = await h.call('s1', 'POST', 'issues', { repo: 'acme/app', title: 'seeded for read', body: 'read me' });
+    assert.equal(seeded.status, 200, JSON.stringify(seeded.body));
+    const issue = await h.call('s1', 'GET', `read/acme/app/issues/${String(seeded.body.number)}`);
+    assert.equal(issue.status, 200, JSON.stringify(issue.body));
+    assert.equal(issue.body.status, 200);
+    const data = json(issue.body.data);
+    assert.equal(data.number, seeded.body.number);
+    assert.equal(data.title, 'seeded for read');
+    assert.equal(data.state, 'open');
+    assert.ok(String(data.body).startsWith('read me'));
     for (const route of ['read/acme/app/collaborators', 'read/acme/app/pulls/1/merge', 'read/acme/app/git/refs', 'read/acme/app/issues?access_token=x', 'read/acme/app/../../user']) {
       const refused = await h.call('s1', 'GET', route);
       assert.ok(['forbidden', 'bad-request', 'not-found'].includes(String(refused.body.code)), `${route}: ${JSON.stringify(refused.body)}`);

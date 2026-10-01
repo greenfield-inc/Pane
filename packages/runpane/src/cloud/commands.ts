@@ -9,6 +9,7 @@ import { COORDINATOR_DOPPLER_USAGE, runCoordinatorDoppler } from './coordinatorD
 import { COORDINATOR_GITHUB_USAGE, runCoordinatorGitHub } from './coordinatorGithub';
 import { NO_COORDINATOR, pushDirectory, type CoordinatorPushResult } from './coordinatorSync';
 import { syncDesktopProfiles, type DesktopImportResult } from './desktop';
+import { assertHttpsArtifactUrl } from './bootstrap';
 import { cloneThroughBroker, connectDeployKey, deployKeyCloneUrl, parseRepoSpec, revokeGitHubGrants, runGitCommand, runGitHubCommand } from './github';
 import { brokerReaches, enableBroker, readBrokerStatus } from './githubBroker';
 import { coordinatorSecretsEnabled, describeSecretsOutcome, enableSessionSecrets } from './sessionSecrets';
@@ -258,7 +259,10 @@ async function readRequiredSecret(deps: CloudDeps, file: string, what: string): 
 }
 
 function paneSourceFromArgs(args: CloudArgs): PaneSource | undefined {
-  if (args.paneDebUrl) return { kind: 'deb-url', url: args.paneDebUrl };
+  if (args.paneDebUrl) {
+    assertHttpsArtifactUrl(args.paneDebUrl, '--pane-deb-url');
+    return { kind: 'deb-url', url: args.paneDebUrl };
+  }
   if (args.paneNpmSpec) return { kind: 'runpane-npm', spec: args.paneNpmSpec };
   if (args.panePreinstalled) return { kind: 'preinstalled' };
   return undefined;
@@ -282,6 +286,7 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
   // A golden image already carries the Pane .deb; a plain image needs it installed.
   const paneSource = paneSourceFromArgs(args) ?? settings.paneSource
     ?? (fromSnapshot ? { kind: 'preinstalled' } : DEFAULT_PANE_SOURCE);
+  if (paneSource.kind === 'deb-url') assertHttpsArtifactUrl(paneSource.url, 'The saved Pane .deb URL (runpane cloud setup --pane-deb-url)');
   const maxLive = settings.maxLiveSandboxes ?? DEFAULT_MAX_LIVE_SANDBOXES;
   const progress = (line: string) => (args.json ? deps.stderr(line) : deps.stdout(line));
 
@@ -462,7 +467,12 @@ async function runNew(args: CloudArgs, deps: CloudDeps): Promise<number> {
     } else {
       deps.stderr(`runpane cloud: setup of ${hostname} failed; removing its tailnet device and sandbox ${sandbox.id}...`);
       try {
-        await revokeGitHubGrants(record, deps);
+        const github = await revokeGitHubGrants(record, deps);
+        if (github.failed.length > 0) {
+          // The record holds the only handle on those keys: keep it, and the sandbox, for a retry.
+          await deps.store.writeHost(record);
+          throw new Error(`deploy key${github.failed.length === 1 ? '' : 's'} ${github.failed.join(', ')} could not be deleted on GitHub, so ${hostname} and sandbox ${sandbox.id} are kept`);
+        }
         await destroyHost(record, provider, deps.bootstrap.createTailnet(tailnetCredentials), deps);
         await deps.store.removeHost(hostname);
         // The broker step may already have told the coordinator about this Session.
@@ -881,6 +891,10 @@ async function runDestroy(args: CloudArgs, deps: CloudDeps): Promise<number> {
   const record = findHost(await deps.store.listHosts(), requiredHost(args));
   const { provider, tailnet } = await loadCloudWithTailnet(deps, record);
   const github = record.meta.github?.length ? await revokeGitHubGrants(record, deps) : undefined;
+  if (github?.failed.length) {
+    // Nothing is removed yet: the saved record keeps the keys' only handle, and a retry deletes what is left.
+    throw new Error(`${record.profile.cloud.hostname} was not destroyed: GitHub deploy key${github.failed.length === 1 ? '' : 's'} ${github.failed.join(', ')} could not be deleted. Fix the GitHub credential (or delete the key${github.failed.length === 1 ? '' : 's'} as shown above) and rerun runpane cloud destroy ${record.profile.cloud.hostname} --yes.`);
+  }
   const result = await destroyHost(record, provider, tailnet, deps);
   const desktop = await importIntoDesktop(args, deps, [], [record.profile.cloud.sessionId]);
   await deps.store.removeHost(record.profile.cloud.hostname);

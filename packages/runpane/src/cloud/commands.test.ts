@@ -103,6 +103,17 @@ test('new without --yes refuses before touching the provider', async () => {
   assert.deepEqual(harness.world.calls, []);
 });
 
+test('a Pane .deb URL must be https, from the flag or the saved settings, before any sandbox exists', async () => {
+  const harness = await createTestHarness();
+  await assert.rejects(run(harness, ['new', '--pane-deb-url', 'http://example.test/pane.deb', '--no-golden', '--yes']), /must be an https:\/\/ URL/u);
+  await assert.rejects(run(harness, ['setup', '--pane-deb-url', 'ftp://example.test/pane.deb']), /must be an https:\/\/ URL/u);
+  assert.equal((await harness.deps.store.readSettings()).paneSource, undefined);
+  await harness.deps.store.writeSettings({ paneSource: { kind: 'deb-url', url: 'http://example.test/pane.deb' } });
+  await assert.rejects(run(harness, ['new', '--no-golden', '--yes']), /must be an https:\/\/ URL/u);
+  assert.equal(harness.world.sandboxes.size, 0);
+  assert.ok(!harness.world.calls.some((call) => call.startsWith('create')));
+});
+
 test('new without a Tailscale client explains how to run setup', async () => {
   const harness = await createTestHarness();
   await harness.deps.store.writeCredentials({ boat: { apiKey: 'k' } });
