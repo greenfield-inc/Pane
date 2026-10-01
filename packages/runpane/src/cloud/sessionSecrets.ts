@@ -1,7 +1,7 @@
 import { boundary, decodeBoundary } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
-import { launcher, SANDBOX_HOME } from './githubBroker';
-import type { SandboxHandle } from './provider';
+import { launcher } from './githubBroker';
+import { SANDBOX_HOME, type SandboxHandle } from './provider';
 
 /**
  * Laptop side of the coordinator's Doppler secrets (setup time only): installs the Session's `doppler`

@@ -3,17 +3,17 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { BrokerError, isSha, parseBundleHeader, refusedPaths } from './policy';
+import { BrokerError, isSha, parseBundleHeader, REFUSED_PATH_PREFIXES, refusedPaths } from './policy';
 
 /**
  * The broker's git side of `POST /cloud/github/push`. It keeps one blobless (commits and trees only)
  * mirror of each repository's default branch under the state dir, so it can compute the merge base
- * of the Session's head with the default branch and refuse any change under `.github/workflows/`
- * between them before anything reaches GitHub. The token reaches git only through the environment
- * of an inline credential helper, never argv, a remote URL or the repository's config.
+ * of the Session's head with the default branch and refuse any change under `.github/workflows/` or
+ * `.github/actions/` between them before anything reaches GitHub. The token reaches git only through
+ * the environment of an inline credential helper, never argv, a remote URL or the repository's config.
  *
- * Not reusing the laptop's `githubApi.ts pushBundle` (design §3 suggested it): that one fetches the
- * prerequisites shallowly into a throwaway repository, which has no history to find a merge base in.
+ * Not reusing the laptop's `githubApi.ts pushBundle`: that one fetches the prerequisites shallowly
+ * into a throwaway repository, which has no history to find a merge base in.
  */
 
 type PushOutcome = 'created' | 'fast-forward' | 'forced' | 'up-to-date';
@@ -154,7 +154,7 @@ export class GitPusher {
       const changed = listed.split('\0').filter(Boolean);
       const refused = refusedPaths(changed);
       if (refused.length > 0) {
-        throw new BrokerError('workflow-change-refused', `the push changes ${refused.length} file(s) under .github/workflows/ relative to ${mergeBase ? `the merge base ${mergeBase.slice(0, 12)} with ${request.defaultBranch}` : 'an empty tree (no merge base)'}: ${refused.slice(0, 5).join(', ')}`);
+        throw new BrokerError('workflow-change-refused', `the push changes ${refused.length} file(s) under ${REFUSED_PATH_PREFIXES.join(' or ')} relative to ${mergeBase ? `the merge base ${mergeBase.slice(0, 12)} with ${request.defaultBranch}` : 'an empty tree (no merge base)'}: ${refused.slice(0, 5).join(', ')}`);
       }
       const outcome = await this.pushHead(dir, request, head);
       return { sha: head, outcome, mergeBase, changedFiles: changed.length };

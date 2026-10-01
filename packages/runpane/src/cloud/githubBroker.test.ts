@@ -8,7 +8,8 @@ import { boundary, decodeBoundary, type JsonObject } from '../boundaryDecoder';
 import { parseCloudArgs } from './args';
 import { runCloudCommand } from './commands';
 import { parseDirectory } from './coordinator';
-import { agentNotes, installBrokerToolsScript, removeBrokerToolsScript, SANDBOX_HOME } from './githubBroker';
+import { agentNotes, installBrokerToolsScript, removeBrokerToolsScript } from './githubBroker';
+import { SANDBOX_HOME } from './provider';
 import { createTestHarness, type TestHarness } from './__tests__/fakes';
 
 const REPO = 'acme/private-app';

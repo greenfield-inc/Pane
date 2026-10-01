@@ -124,7 +124,7 @@ export interface GitHubCredential {
   cachedTokens(): CachedTokenInfo[];
 }
 
-/** Reuse a cached installation token until 5 minutes before it expires (design §3). */
+/** Reuse a cached installation token until 5 minutes before it expires. */
 const TOKEN_REUSE_MARGIN_MS = 5 * 60_000;
 const INSTALLATION_CACHE_MS = 10 * 60_000;
 

@@ -14,6 +14,32 @@ the scripts refuse a `greenfield-inc/*` repo.
 | `desktop-switcher-proof.mjs` | a Linux box on the tailnet, repo root, under `xvfb-run` | drives a packaged desktop (no mocks) against a live cloud Session: live `cloud sync` import, the host switcher, connect, a remote terminal, the asleep state; writes screenshots, a Playwright trace and `results.json` (settings in the file header) |
 | `ports-row-proof.mjs` | a Linux box on the tailnet, repo root, under `xvfb-run` | drives a packaged desktop and the built web client (no mocks) against a live cloud Session's ports: the Ports chip row, opening a URL, a port opened from the CLI appearing live, close from the chip, a suggested listener published with one click; writes screenshots and `results.json` (settings in the file header) |
 
+## Installing a fork build
+
+`docs/RUNPANE_CLOUD.md` documents the upstream install path. To use a fork prerelease instead, take the
+newest `rc-*` release whose notes say `branch rc/integration` (others are test builds of work branches); its
+notes carry the exact install lines:
+
+```bash
+gh release list -R "$FORK_REPO" --limit 5      # newest first
+gh release view rc-<sha> -R "$FORK_REPO"       # check "branch rc/integration", copy the npm line
+npm i -g "https://github.com/$FORK_REPO/releases/download/rc-<sha>/runpane-<version>.tgz"
+runpane version                                # <base>-rc.<date>.g<commit>
+```
+
+Point `runpane cloud setup --pane-deb-url` at the same release's `.deb`, and `--golden` at the
+`rp-loop-golden-<sha8>` named after it (or the newest if that release has none; `release.sh` keeps two).
+
+Desktop: the fix for outside edits to the saved hosts (`cd190659`, live reload, never written over) is in fork
+builds from `rc/integration` at `080d3828` or later. The cloud prerelease ships the desktop as a Linux `.deb`
+only, so an installed macOS or Windows desktop needs the quit-first workaround in `docs/RUNPANE_CLOUD.md`. A
+fork `.deb` desktop shows a "Software Update" prompt for the upstream release on launch; dismiss it, since
+updating would replace the fork build. To try the fix on Windows or macOS without touching an installed Pane,
+use the side-by-side test build `rc-desktop-<sha8>` from `.github/workflows/rc-desktop.yml` (unsigned zips). It
+keeps its data in `~/.pane_cloudtest`, runs next to the installed Pane, registers nothing machine-wide (no
+login item, `pane://` handler, agent MCP servers or skills) and never offers updates. Remove it by deleting
+its folder and `~/.pane_cloudtest`.
+
 ## GitHub Actions (no devbox)
 
 `.github/workflows/rc-integration.yml` (fork only) runs the integrator suite on every push to `rc/integration`

@@ -2,7 +2,7 @@ import { boundary, decodeBoundary, type JsonObject } from '../boundaryDecoder';
 import type { CloudDeps } from './commands';
 import { mintCallerToken } from './coordinator/callerAuth';
 import { decodePairingCode } from './pairing';
-import type { CloudProvider } from './provider';
+import { SANDBOX_HOME, type CloudProvider } from './provider';
 import { hostProvider } from './wallet';
 import { findHost, type CloudHostRecord, type PeerGrant } from './store';
 
@@ -17,7 +17,7 @@ import { findHost, type CloudHostRecord, type PeerGrant } from './store';
  */
 
 /** Where `runpane` inside a cloud Session looks for its peers list (default RUNPANE_CLOUD_DIR). */
-const SANDBOX_PEERS_DIR = '/home/user/.config/runpane-cloud';
+const SANDBOX_PEERS_DIR = `${SANDBOX_HOME}/.config/runpane-cloud`;
 const SANDBOX_PEERS_FILE = `${SANDBOX_PEERS_DIR}/peers.json`;
 const INVOKE_TIMEOUT_MS = 30_000;
 const PANE_CHAT_SESSION_ID = 'legacy-pane-chat';
@@ -193,7 +193,7 @@ export async function pushPeersFile(
     if (sandbox.state !== 'running') return { host, written: false, reason: `sandbox is ${sandbox.providerState}` };
     const file = await renderPeersFile(record, records, deps);
     const handle = provider.handle(record.profile.cloud.sandboxId);
-    const staged = `/home/user/.runpane-cloud/peers.json.${Date.now().toString(36)}`;
+    const staged = `${SANDBOX_HOME}/.runpane-cloud/peers.json.${Date.now().toString(36)}`;
     await handle.writeFile(staged, `${JSON.stringify(file, null, 2)}\n`);
     const result = await handle.runScript(
       `set -e; umask 077; mkdir -p ${SANDBOX_PEERS_DIR}; chmod 700 ${SANDBOX_PEERS_DIR}; install -m 600 ${staged} ${SANDBOX_PEERS_FILE}; rm -f ${staged}`,

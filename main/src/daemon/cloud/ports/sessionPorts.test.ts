@@ -117,12 +117,12 @@ afterEach(() => {
 describe('SessionPortsService.open', () => {
   it('publishes a local port on the same tailnet port over HTTPS and records it 0600', async () => {
     const h = makeHarness();
-    const result = await h.service.open({ port: 8787, name: 'taste' });
-    expect(result.port).toMatchObject({ name: 'taste', port: 8787, httpsPort: 8787, scheme: 'https', status: 'serving', source: 'user' });
+    const result = await h.service.open({ port: 8787, name: 'site' });
+    expect(result.port).toMatchObject({ name: 'site', port: 8787, httpsPort: 8787, scheme: 'https', status: 'serving', source: 'user' });
     expect(result.port.url).toBe(`https://${HOST}:8787/`);
     expect(h.serve.calls).toEqual(['apply https :8787 -> 8787']);
     expect(fs.statSync(h.statePath).mode & 0o777).toBe(0o600);
-    expect(readPortsState(h.statePath).ports.map(port => port.name)).toEqual(['taste']);
+    expect(readPortsState(h.statePath).ports.map(port => port.name)).toEqual(['site']);
     expect(h.events.at(-1)?.ports).toHaveLength(1);
   });
 
@@ -208,7 +208,7 @@ describe('SessionPortsService.open', () => {
   it('neither records nor announces a port Tailscale Serve failed to publish', async () => {
     const h = makeHarness();
     h.serve.applyError = new Error('tailscale serve exited with code 1');
-    await expect(h.service.open({ port: 8787, name: 'taste' })).rejects.toThrow('tailscale serve exited with code 1');
+    await expect(h.service.open({ port: 8787, name: 'site' })).rejects.toThrow('tailscale serve exited with code 1');
     expect(h.serve.calls).toEqual(['apply https :8787 -> 8787']);
     expect(fs.existsSync(h.statePath)).toBe(false);
     expect(h.events).toEqual([]);
@@ -226,9 +226,9 @@ describe('SessionPortsService.open', () => {
 describe('SessionPortsService.close and list', () => {
   it('closes by name or port and removes only its own Serve entry', async () => {
     const h = makeHarness();
-    await h.service.open({ port: 8787, name: 'taste' });
+    await h.service.open({ port: 8787, name: 'site' });
     await h.service.open({ port: 3000 });
-    expect((await h.service.close('taste')).closed?.name).toBe('taste');
+    expect((await h.service.close('site')).closed?.name).toBe('site');
     expect((await h.service.close(3000)).closed?.port).toBe(3000);
     expect((await h.service.close('nothing')).closed).toBeNull();
     expect(h.serve.entries.size).toBe(0);
@@ -311,18 +311,18 @@ describe('SessionPortsService.reconcile', () => {
   it('never replaces a foreign Serve entry for a manifest; it waits and opens once the port is free', async () => {
     const h = makeHarness();
     h.projects = ['/r'];
-    h.manifests.set('/r', { kind: 'ok', ports: [{ name: 'taste', port: 8787, path: '/' }] });
+    h.manifests.set('/r', { kind: 'ok', ports: [{ name: 'site', port: 8787, path: '/' }] });
     h.serve.entries.set(8787, { kind: 'tcp', forward: '127.0.0.1:8787', terminateTls: false });
     await h.service.reconcile('boot');
     let [port] = (await h.service.list()).ports;
-    expect(port).toMatchObject({ name: 'taste', status: 'error' });
+    expect(port).toMatchObject({ name: 'site', status: 'error' });
     expect(port?.detail).toMatch(/plain tcp -> 127\.0\.0\.1:8787/u);
     expect(h.serve.entries.get(8787)?.kind).toBe('tcp');
 
     h.serve.entries.delete(8787);
     await h.service.reconcile('periodic');
     [port] = (await h.service.list()).ports;
-    expect(port).toMatchObject({ name: 'taste', status: 'serving', scheme: 'https' });
+    expect(port).toMatchObject({ name: 'site', status: 'serving', scheme: 'https' });
   });
 
   it('marks a user port another Serve entry took over, and frees it when that leaves', async () => {
@@ -448,7 +448,7 @@ describe('SessionPortsService.stop', () => {
 describe('SessionPortsService with an unreadable state file', () => {
   const unreadable: Array<[string, string]> = [
     ['not JSON', '{"version": 1, "ports": ['],
-    ['JSON with the wrong shape', JSON.stringify({ version: 1, ports: [{ name: 'taste', port: 'eight' }] })],
+    ['JSON with the wrong shape', JSON.stringify({ version: 1, ports: [{ name: 'site', port: 'eight' }] })],
   ];
 
   for (const [label, content] of unreadable) {

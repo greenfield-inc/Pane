@@ -12,7 +12,7 @@ const HOST = 'rp-zd56pin5.example.ts.net';
 
 interface FakePort extends JsonObject { name: string; port: number; httpsPort: number; url: string; source: string }
 
-function createFakePortsDaemon(host = HOST, names: [string, string] = ['taste', 'pages']) {
+function createFakePortsDaemon(host = HOST, names: [string, string] = ['site', 'pages']) {
   const url = (httpsPort: number) => `https://${host}:${httpsPort}/`;
   const published: FakePort[] = [
     { name: names[0], port: 8787, httpsPort: 8787, url: url(8787), source: 'manifest' },
@@ -84,8 +84,8 @@ const now = new Date(0).toISOString();
 const project = { id: 7, name: 'my-app', path: '/home/user/my-app', active: true, created_at: now, updated_at: now };
 const session = {
   id: 'ports-session',
-  name: 'taste preview',
-  worktreePath: '/home/user/my-app/worktrees/taste',
+  name: 'site preview',
+  worktreePath: '/home/user/my-app/worktrees/site',
   prompt: '',
   status: 'stopped',
   createdAt: now,
@@ -152,7 +152,7 @@ async function openDesktopSession(page: Page, daemon: Pick<FakePortsDaemon, 'han
   await installDesktopPorts(page, daemon);
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: /^Expand repository my-app$/ }).click();
-  await page.getByRole('button', { name: 'taste preview', exact: true }).click();
+  await page.getByRole('button', { name: 'site preview', exact: true }).click();
 }
 
 test.describe('Session ports chip row', () => {
@@ -169,7 +169,7 @@ test.describe('Session ports chip row', () => {
     await row.screenshot({ path: testInfo.outputPath('desktop-ports-row-closeup.png') });
 
     // Name -> URL in the default browser (shell.openExternal through preload).
-    await row.getByRole('button', { name: `Open taste (https://${HOST}:8787/)` }).click();
+    await row.getByRole('button', { name: `Open site (https://${HOST}:8787/)` }).click();
     await expect.poll(() => page.evaluate(() => window.__paneTestElectronMock.getOpenedExternalUrls()))
       .toEqual([`https://${HOST}:8787/`]);
 
@@ -231,7 +231,7 @@ test.describe('Session ports chip row', () => {
     // A late change event carrying the old host's list is not shown as the new host's.
     await page.evaluate(payload => window.__portsEmitChanged(payload), first.list());
     await expect.poll(() => second.calls.filter(call => call.channel === 'runpane:ports:list').length).toBeGreaterThan(1);
-    await expect(row.getByRole('button', { name: /^Open taste / })).toHaveCount(0);
+    await expect(row.getByRole('button', { name: /^Open site / })).toHaveCount(0);
     await expect(row.getByRole('button', { name: /^Open docs / })).toBeVisible();
 
     expect([...first.calls, ...second.calls].filter(call => call.channel !== 'runpane:ports:list')).toEqual([]);
@@ -255,7 +255,7 @@ test.describe('Session ports chip row', () => {
         value: { writeText: () => Promise.reject(new Error('Write permission denied.')) },
       });
     });
-    await row.getByRole('button', { name: 'Copy taste URL' }).click();
+    await row.getByRole('button', { name: 'Copy site URL' }).click();
     await expect(row.getByRole('alert')).toHaveText('Copy failed: Write permission denied.');
   });
 
@@ -272,7 +272,7 @@ test.describe('Session ports chip row', () => {
     });
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.getByRole('button', { name: /^Expand repository my-app$/ }).click();
-    await page.getByRole('button', { name: 'taste preview', exact: true }).click();
+    await page.getByRole('button', { name: 'site preview', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__portsListCalls)).toBeGreaterThan(0);
     await expect(page.getByRole('region', { name: 'Session ports' })).toHaveCount(0);
   });
@@ -287,10 +287,10 @@ test.describe('Session ports chip row', () => {
     await page.screenshot({ path: testInfo.outputPath('web-ports-row.png') });
 
     // Name -> URL in a new tab; the PWA keeps its own tab and connection.
-    await context.route(`https://${HOST}:8787/**`, route => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>taste</title>ok' }));
+    await context.route(`https://${HOST}:8787/**`, route => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>site</title>ok' }));
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
-      row.getByRole('button', { name: `Open taste (https://${HOST}:8787/)` }).click(),
+      row.getByRole('button', { name: `Open site (https://${HOST}:8787/)` }).click(),
     ]);
     await expect.poll(() => popup.url()).toBe(`https://${HOST}:8787/`);
     await popup.close();

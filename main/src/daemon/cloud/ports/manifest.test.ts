@@ -8,10 +8,10 @@ describe('parsePortsManifest', () => {
   it('reads version 1 with defaults for https_port and path', () => {
     expect(parsePortsManifest(JSON.stringify({
       version: 1,
-      ports: [{ name: 'taste', port: 8787, https_port: 8787, path: '/s/ultra-feedback' }, { name: 'api', port: 3000 }],
+      ports: [{ name: 'site', port: 8787, https_port: 8787, path: '/s/ultra-feedback' }, { name: 'api', port: 3000 }],
     }))).toEqual({
       kind: 'ok',
-      ports: [{ name: 'taste', port: 8787, httpsPort: 8787, path: '/s/ultra-feedback' }, { name: 'api', port: 3000, httpsPort: undefined, path: '/' }],
+      ports: [{ name: 'site', port: 8787, httpsPort: 8787, path: '/s/ultra-feedback' }, { name: 'api', port: 3000, httpsPort: undefined, path: '/' }],
     });
   });
 

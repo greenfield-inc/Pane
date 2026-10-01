@@ -11,7 +11,7 @@ const HOST = 'rp-a1b2c3d4.tail-example.ts.net';
 
 function port(overrides: JsonObject = {}): JsonObject {
   return {
-    name: 'taste', port: 8787, httpsPort: 8787, url: `https://${HOST}:8787/`, scheme: 'https', path: '/',
+    name: 'site', port: 8787, httpsPort: 8787, url: `https://${HOST}:8787/`, scheme: 'https', path: '/',
     source: 'user', createdAt: '2026-09-30T23:00:00.000Z', status: 'serving', ...overrides,
   };
 }
@@ -25,12 +25,12 @@ function listResult(ports: JsonObject[]): JsonObject {
 }
 
 test('runpane port: parses open, list, close and auto-open', () => {
-  assert.deepEqual(parsePortsArgv(['open', '8787', '--name', 'taste', '--https-port=8443', '--path', '/s/x', '--yes', '--json'], { withHost: false, usage: PORT_USAGE }), {
+  assert.deepEqual(parsePortsArgv(['open', '8787', '--name', 'site', '--https-port=8443', '--path', '/s/x', '--yes', '--json'], { withHost: false, usage: PORT_USAGE }), {
     host: undefined,
-    command: { sub: 'open', request: { name: 'taste', httpsPort: 8443, path: '/s/x', yes: true, port: 8787 }, json: true },
+    command: { sub: 'open', request: { name: 'site', httpsPort: 8443, path: '/s/x', yes: true, port: 8787 }, json: true },
   });
   assert.deepEqual(parsePortsArgv(['list', '--verify'], { withHost: false, usage: PORT_USAGE }).command, { sub: 'list', verify: true, json: false });
-  assert.deepEqual(parsePortsArgv(['close', 'taste'], { withHost: false, usage: PORT_USAGE }).command, { sub: 'close', target: 'taste', json: false });
+  assert.deepEqual(parsePortsArgv(['close', 'site'], { withHost: false, usage: PORT_USAGE }).command, { sub: 'close', target: 'site', json: false });
   assert.deepEqual(parsePortsArgv(['close', '8787'], { withHost: false, usage: PORT_USAGE }).command, { sub: 'close', target: 8787, json: false });
   assert.deepEqual(parsePortsArgv(['auto-open', 'on'], { withHost: false, usage: PORT_USAGE }).command, { sub: 'auto-open', autoOpen: true, json: false });
   assert.deepEqual(parsePortsArgv(['open', 'rp-x', '3000'], { withHost: true, usage: CLOUD_PORT_USAGE }).host, 'rp-x');
@@ -64,7 +64,7 @@ test('runpane port list prints URLs, suggestions and manifests', async () => {
   assert.equal(code, 0);
   assert.deepEqual(calls, [['runpane:ports:list', [{ verify: true }]]]);
   const text = out.join('\n');
-  assert.match(text, /taste\s+8787\s+https:\/\/rp-a1b2c3d4\.tail-example\.ts\.net:8787\/\s+user\s+serving\s+yes/u);
+  assert.match(text, /site\s+8787\s+https:\/\/rp-a1b2c3d4\.tail-example\.ts\.net:8787\/\s+user\s+serving\s+yes/u);
   assert.match(text, /api\s+3000\s+.*NO/u);
   assert.match(text, /5173 on 127\.0\.0\.1 \(node\): runpane port open 5173/u);
   assert.match(text, /Manifest \/home\/user\/app\/\.runpane\/ports\.json: 1 port/u);
@@ -87,7 +87,7 @@ test('runpane port open prints the URL and what it replaced', async () => {
     invoke: async () => ({ ok: true, port: port(), alreadyOpen: false, replaced: { httpsPort: 8787, was: 'plain tcp -> 127.0.0.1:8787' } }),
     stdout: (line) => out.push(line),
   });
-  assert.deepEqual(out, ['Replaced the Tailscale Serve entry on :8787 (plain tcp -> 127.0.0.1:8787).', `Published taste: https://${HOST}:8787/`]);
+  assert.deepEqual(out, ['Replaced the Tailscale Serve entry on :8787 (plain tcp -> 127.0.0.1:8787).', `Published site: https://${HOST}:8787/`]);
 });
 
 test('runpane cloud port list calls the host daemon and checks each URL from this machine', async () => {
@@ -101,10 +101,10 @@ test('runpane cloud port list calls the host daemon and checks each URL from thi
     return listResult([port(), port({ name: 'down', port: 3000, status: 'missing' })]);
   };
   harness.out.length = 0;
-  assert.equal(await runCloudCommand(parseCloudArgs(['port', 'open', created.host.hostname, '8787', '--name', 'taste']), harness.deps), 0);
+  assert.equal(await runCloudCommand(parseCloudArgs(['port', 'open', created.host.hostname, '8787', '--name', 'site']), harness.deps), 0);
   assert.equal(await runCloudCommand(parseCloudArgs(['port', 'list', created.host.hostname, '--json']), harness.deps), 0);
   assert.deepEqual(channels, ['runpane:ports:open', 'runpane:ports:list']);
   const listed: { ports: Array<{ name: string; reachable: boolean }> } = JSON.parse(harness.out[harness.out.length - 1] ?? '{}');
   // The fake URL does not resolve from here; a missing entry is not even tried.
-  assert.deepEqual(listed.ports.map((entry) => [entry.name, entry.reachable]), [['taste', false], ['down', false]]);
+  assert.deepEqual(listed.ports.map((entry) => [entry.name, entry.reachable]), [['site', false], ['down', false]]);
 });

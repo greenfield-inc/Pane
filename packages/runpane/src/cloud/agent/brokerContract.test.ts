@@ -215,7 +215,7 @@ test('Pane\'s own gh calls (PR badge, PR monitor, archive) answer through the re
   assert.equal(await runCloudAgent(['gh', 'pr', 'view', String(number), '--json', 'number,url,state,mergeable,statusCheckRollup,headRefOid'], monitor.deps), 0, monitor.err.join('\n'));
   const viewed = JSON.parse(monitor.out[0]);
   assert.deepEqual([viewed.number, viewed.state, viewed.headRefOid, viewed.mergeable], [number, 'OPEN', head, 'UNKNOWN']);
-  // Design §6's App has no Checks/Statuses read: the broker says so, and the rollup is empty rather than an error.
+  // An App without Checks/Statuses read: the broker says so, and the rollup is empty rather than an error.
   assert.deepEqual(viewed.statusCheckRollup, []);
   assert.match(monitor.err.join('\n'), /check runs unavailable through the broker/u);
 

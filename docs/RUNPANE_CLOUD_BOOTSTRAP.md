@@ -43,7 +43,8 @@ name and the pairing stay the same; the tailnet IPs change.
 
 ## Golden images
 
-The golden image recipe (`scripts/cloud-dist/make-golden.sh`) bakes in the Pane `.deb` (unpaired),
-Tailscale (not joined) and Playwright Chromium in `/opt/ms-playwright`, then runs
-`golden-scrub.sh` and `golden-check.sh golden`. Never `mv` files into kept paths while building:
-files moved in from `~/.cache` or `/tmp` arrive empty on forks.
+A golden image is a boat named snapshot of a plain sandbox with the Pane `.deb` installed (unpaired),
+Tailscale installed (not joined) and Playwright Chromium in `/opt/ms-playwright`. After installing those, run
+`golden-scrub.sh` and then `golden-check.sh golden` on it, and save the snapshot only if the check passes.
+Never `mv` files into kept paths while building: files moved in from `~/.cache` or `/tmp` arrive empty on
+forks.

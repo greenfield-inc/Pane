@@ -52,8 +52,12 @@ export class BrokerError extends Error {
   }
 }
 
-/** Paths a push may never change: GitHub runs these with the repository's secrets. */
-const REFUSED_PATH_PREFIXES = ['.github/workflows/'] as const;
+/**
+ * Paths a push may never change: workflows, and the local actions they run, both execute with the
+ * repository's secrets. The repository's existing workflows still run the rest of a pushed branch
+ * (scripts, tests) on push and pull_request; only the repository's own workflow filters stop that.
+ */
+export const REFUSED_PATH_PREFIXES = ['.github/workflows/', '.github/actions/'] as const;
 
 const REPO_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/u;
 const BRANCH_PATTERN = /^[A-Za-z0-9._/-]{1,100}$/u;
