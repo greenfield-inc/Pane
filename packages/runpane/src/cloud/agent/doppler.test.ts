@@ -193,3 +193,45 @@ test('a stored copy over an hour old is refreshed before a command', async () =>
   await childEnv(h, ['run']);
   assert.equal(h.requests.length, 2);
 });
+
+test('listing, status, refresh, configs, help and every error print names and counts, never a value', async () => {
+  const h = await harness();
+  const values = [...Object.values(DEV), ...Object.values(PERSONAL)];
+  const quiet: string[][] = [
+    ['refresh'], ['refresh', '--json'], ['status'], ['status', '--json'], ['me'], ['configure'],
+    ['secrets'], ['secrets', '--json'], ['secrets', '--only-names'], ['secrets', '--raw'], ['secrets', '-c', 'dev_personal', '--json'],
+    ['configs'], ['configs', '--json'], ['help'], ['--version'], ['setup'], ['login'],
+    // Errors: a refused or unknown config, absent names, unsupported commands and flags.
+    ['secrets', 'get', 'NOPE', '--plain'], ['secrets', 'get', 'PATH'], ['secrets', 'get', 'OPENROUTER_API_KEY', '--copy'],
+    ['secrets', 'get', 'OPENROUTER_API_KEY', '-c', 'prd'], ['secrets', 'download'], ['secrets', 'download', 'file.json'],
+    ['secrets', 'download', '--no-file', '--format', 'yaml'], ['secrets', 'set', 'OPENROUTER_API_KEY=x'], ['run', '-c', 'stg', '--', 'true'],
+    ['run'], ['projects'], ['secrets', 'upload'],
+  ];
+  for (const argv of quiet) await runDopplerStandIn(argv, h.deps);
+  // A store that no longer decodes says so without echoing what is in it.
+  const file = secretsCachePath(h.deps.env);
+  const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+  stored.configs[0].values.OPENROUTER_API_KEY = 42;
+  await fs.writeFile(file, JSON.stringify(stored));
+  await runDopplerStandIn(['status'], h.deps);
+  await runDopplerStandIn(['secrets', '--only-names'], h.deps);
+  const printed = [...h.out, ...h.err].join('\n');
+  assert.match(printed, /OPENROUTER_API_KEY/u, 'names are shown');
+  for (const value of values) assert.equal(printed.includes(value), false, `a value of length ${value.length} was printed`);
+});
+
+test('status shows where the set is stored and its mode, and a widened store goes back to 0600/0700', async () => {
+  const h = await harness();
+  assert.equal(await runDopplerStandIn(['refresh'], h.deps), 0);
+  const file = secretsCachePath(h.deps.env);
+  await fs.chmod(file, 0o644);
+  await fs.chmod(path.dirname(file), 0o755);
+  assert.equal(await runDopplerStandIn(['status', '--json'], h.deps), 0);
+  const status = JSON.parse(h.out.pop() ?? '{}');
+  assert.deepEqual(status.store, { path: file, mode: '0600' });
+  assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+  assert.equal((await fs.stat(path.dirname(file))).mode & 0o777, 0o700);
+  assert.match(h.err.join('\n'), /was 0644; set it back to 0600/u);
+  assert.equal(await runDopplerStandIn(['status'], h.deps), 0);
+  assert.match(h.out.join('\n'), /stored in .*secrets\.json \(0600; readable by this Session's user only/u);
+});

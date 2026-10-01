@@ -556,6 +556,7 @@
         "cloud peers list",
         "cloud secrets set",
         "cloud secrets list",
+        "cloud secrets inspect",
         "cloud secrets rm",
         "cloud secrets enable",
         "cloud secrets disable",
@@ -921,6 +922,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "cloud secrets list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud secrets inspect": {
           "$ref": "#/$defs/helpLines"
         },
         "cloud secrets rm": {

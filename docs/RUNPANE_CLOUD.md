@@ -316,7 +316,7 @@ doppler run -- bun test                        # the config's secrets in that co
 doppler run -p my-app -c dev_personal -- node x.js
 doppler secrets get OPENROUTER_API_KEY --plain  # one value, when a tool needs it on stdin
 doppler secrets --only-names                   # names only
-doppler status                                 # which manifest (repo, ref, sha), fetched when, what was withheld
+doppler status                                 # which manifest (repo, ref, sha), fetched when, name counts, what was withheld, the store's mode
 doppler refresh                                # fetch again now (after a manifest or Doppler change)
 ```
 
@@ -331,8 +331,16 @@ else exits 2.
   with the broker's credential, at the ref the Session was created from, reads each config from Doppler with
   its service token, applies your policy and answers over the tailnet. The Session keeps the set in
   `~/.runpane-cloud/doppler/secrets.json` (0600, 0700 directory). Values reach a process only as the
-  environment of the child of `doppler run`, or on stdout for `doppler secrets get`: never a shell rc file,
-  the daemon's environment, boat metadata, a command line or a log. They never pass through your laptop.
+  environment of the child of `doppler run`, or on stdout for `doppler secrets get` and `doppler secrets
+  download --no-file` (for programs that load a set): never a shell rc file, the daemon's environment, boat
+  metadata, a command line or a log. They never pass through your laptop. Listing (`doppler secrets`, with or
+  without `--only-names` or `--json`), `status`, `refresh`, `configs`, help and every error print names and
+  counts only.
+- **Inspecting without values:** use `doppler status` in the Session, or `runpane cloud secrets inspect <host>`
+  from your machine. Never read or dump `~/.runpane-cloud/doppler/secrets.json` (or any store below) to see
+  what it holds: the file is the values. If something widened its mode, the next `doppler` command sets it
+  back to 0600 (0700 for its directory) and says so. Any process running as the Session user can read these
+  0600 files; that is by design (the agents need them), the same as a Doppler CLI token in `~/.doppler`.
 - **When it refreshes:** at every boot, which includes every wake (a user unit,
   `runpane-cloud-secrets.service`, runs `doppler refresh --boot`); on `doppler refresh`; and before a
   `doppler` command when the copy is over an hour old. If the coordinator or Doppler is briefly away, the
@@ -368,6 +376,7 @@ runpane cloud secrets set rp-a1b2c3d4 SENTRY_DSN LINEAR_API_KEY
 runpane cloud secrets set rp-a1b2c3d4 GITHUB_READ_TOKEN --from-env MY_READ_ONLY_PAT
 runpane cloud secrets set rp-a1b2c3d4 SERVICE_ACCOUNT_JSON --from-file ./sa.json
 runpane cloud secrets list rp-a1b2c3d4          # names only; values are never shown
+runpane cloud secrets inspect rp-a1b2c3d4       # every store in the Session by name (these, doppler, sign-in) and file modes
 runpane cloud secrets rm rp-a1b2c3d4 LINEAR_API_KEY
 ```
 

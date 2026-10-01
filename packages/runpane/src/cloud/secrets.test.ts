@@ -184,3 +184,48 @@ test('secrets need an awake Session and a value', async () => {
   sandbox.state = 'stopped';
   await assert.rejects(run(harness, ['secrets', 'list', hostname]), /wake it first: runpane cloud wake/u);
 });
+
+test('secrets inspect reports every store by name and flags a file group or others can read, never printing a value', async () => {
+  const harness = await createTestHarness();
+  const { hostname, sandbox } = await hostWithRealSandbox(harness);
+  const values = ['byok-synthetic-value-1', 'anthropic-synthetic-key-2', 'doppler-synthetic-value-3', 'peer-synthetic-token-4', 'git-synthetic-token-5'];
+  harness.deps.env = { SERVICE_KEY: values[0] };
+  assert.equal(await run(harness, ['secrets', 'set', hostname, 'SERVICE_KEY']), 0);
+  const home = sandbox.home;
+  const write = async (rel: string, content: string, mode = 0o600) => {
+    await fs.mkdir(path.dirname(path.join(home, rel)), { recursive: true, mode: 0o700 });
+    await fs.writeFile(path.join(home, rel), content, { mode });
+    await fs.chmod(path.join(home, rel), mode);
+  };
+  await write('.runpane-cloud/agent.env', `ANTHROPIC_API_KEY=${values[1]}\n`);
+  await write('.runpane-cloud/doppler/secrets.json', JSON.stringify({
+    version: 'v1', fetchedAt: '2026-10-01T00:00:00.000Z', storedAt: '2026-10-01T00:00:00.000Z', reason: null, policy: 'default', manifest: null,
+    configs: [{ project: 'my-app', config: 'dev', values: { OPENROUTER_API_KEY: values[2] }, withheld: [{ name: 'PATH', reason: 'reserved' }], missing: [], refused: null }],
+  }));
+  await write('.config/runpane-cloud/peers.json', JSON.stringify({ coordinator: { token: values[3] } }), 0o644);
+  await write('.config/runpane-cloud-git/github-acme-app.token', values[4]);
+  await write('.runpane-cloud/secrets.stage-abc123.json', JSON.stringify({ set: { LEFT: values[0] } }));
+  harness.out.length = 0;
+  harness.err.length = 0;
+
+  assert.equal(await run(harness, ['secrets', 'inspect', hostname]), 1, 'a readable file or a leftover staged file fails the check');
+  const text = harness.out.join('\n');
+  assert.match(text, /agent secrets \(runpane cloud secrets set\): 1 \(SERVICE_KEY\)/u);
+  assert.match(text, /agent sign-in: 1 \(ANTHROPIC_API_KEY\)/u);
+  assert.match(text, /my-app\/dev: 1 \(OPENROUTER_API_KEY\); withheld PATH/u);
+  assert.match(text, /0644 {2}~\/\.config\/runpane-cloud\/peers\.json .*WARNING: group or others can read it/u);
+  assert.match(text, /0600 {2}~\/\.config\/runpane-cloud-git\/github-acme-app\.token/u);
+  assert.match(text, /1 staged secrets file\(s\) were not shredded/u);
+
+  await fs.chmod(path.join(home, '.config/runpane-cloud/peers.json'), 0o600);
+  await fs.rm(path.join(home, '.runpane-cloud/secrets.stage-abc123.json'));
+  assert.equal(await run(harness, ['secrets', 'inspect', hostname, '--json']), 0);
+  const report = JSON.parse(harness.out[harness.out.length - 1]);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.exposed, []);
+  assert.deepEqual(report.agentSecrets, ['SERVICE_KEY']);
+  assert.deepEqual(report.doppler.configs[0].names, ['OPENROUTER_API_KEY']);
+
+  const printed = [...harness.out, ...harness.err, ...sandbox.scripts.filter((script) => script.includes('RP_SECRETS_INSPECT'))].join('\n');
+  for (const value of values) assert.equal(printed.includes(value), false, `a value of length ${value.length} was printed or scripted`);
+});
