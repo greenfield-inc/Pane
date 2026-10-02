@@ -192,12 +192,6 @@ export async function restoreHostNavigation(): Promise<void> {
     return;
   }
 
-  if (memory.view === 'usage') {
-    await setActiveSession(null);
-    navigation.navigateToUsage();
-    return;
-  }
-
   navigation.navigateToSessions();
   const remembered = memory.paneId !== null
     && useSessionStore.getState().sessions.some(session => session.id === memory.paneId);

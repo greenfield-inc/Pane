@@ -53,7 +53,6 @@ interface NavigationState {
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
-  navigateToUsage: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -133,12 +132,6 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   navigateToPaneChat: () => set({
     activeView: 'pane-chat',
-    activeProjectId: null
-  }),
-
-  // Usage is reported per host, not per project.
-  navigateToUsage: () => set({
-    activeView: 'usage',
     activeProjectId: null
   }),
 }));

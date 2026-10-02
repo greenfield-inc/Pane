@@ -126,11 +126,11 @@ describe('restoreHostNavigation', () => {
 
   it('does nothing for a host that has never been visited', async () => {
     const { restoreHostNavigation, useNavigationStore } = await loadHostNavigationMemory();
-    useNavigationStore.getState().navigateToUsage();
+    useNavigationStore.getState().navigateToPaneChat();
 
     await restoreHostNavigation();
 
-    expect(useNavigationStore.getState().activeView).toBe('usage');
+    expect(useNavigationStore.getState().activeView).toBe('pane-chat');
   });
 });
 
@@ -145,7 +145,7 @@ describe('withHostNavigationWritesPaused', () => {
       await withHostNavigationWritesPaused(async () => {
         // Stands in for the clearing a host switch does before restoring.
         useNavigationStore.getState().navigateToSessions();
-        useNavigationStore.getState().navigateToUsage();
+        useNavigationStore.getState().navigateToPaneChat();
       });
       expect(saveNavigationMemory).not.toHaveBeenCalled();
 
@@ -153,7 +153,7 @@ describe('withHostNavigationWritesPaused', () => {
       stop();
 
       expect(savedMemories).toEqual([
-        { hostId: REMOTE_HOST_ID, memory: { view: 'usage', projectId: null, paneId: null } },
+        { hostId: REMOTE_HOST_ID, memory: { view: 'pane-chat', projectId: null, paneId: null } },
       ]);
     } finally {
       vi.useRealTimers();
@@ -166,7 +166,7 @@ describe('withHostNavigationWritesPaused', () => {
       const { startHostNavigationMemoryWrites, useNavigationStore, setHost } = await loadHostNavigationMemory();
       const stop = startHostNavigationMemoryWrites();
 
-      useNavigationStore.getState().navigateToUsage();
+      useNavigationStore.getState().navigateToPaneChat();
       // Main flips the runtime before the renderer is told to resync, so config
       // already names the incoming host while this location belongs to Host B.
       setHost(null);
@@ -174,7 +174,7 @@ describe('withHostNavigationWritesPaused', () => {
       stop();
 
       expect(savedMemories).toEqual([
-        { hostId: REMOTE_HOST_ID, memory: { view: 'usage', projectId: null, paneId: null } },
+        { hostId: REMOTE_HOST_ID, memory: { view: 'pane-chat', projectId: null, paneId: null } },
       ]);
     } finally {
       vi.useRealTimers();
