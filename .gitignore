@@ -57,6 +57,7 @@ coverage/
 
 # Claude Code session data
 sessions/
+!native/src/features/sessions/
 .claude-sessions/
 .claude-images/
 **/tmp/done-plans/
