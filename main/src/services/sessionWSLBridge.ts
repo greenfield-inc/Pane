@@ -42,9 +42,12 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     "  arg=${arg//\\'/\\'\\'}",
     '  command+="\'$arg\',"',
     'done',
-    `command+=${escapeForBash(`${quotePowerShell('--pane-dir')},${quotePowerShell(appDirectory)}); $env:PANE_WSL_RUNPANE_ARGS = ConvertTo-Json -InputObject $paneArgs -Compress; & ${quotePowerShell(execPath)} ${quotePowerShell(launcherPath)}; exit $LASTEXITCODE`)}`,
-    'encoded=$(printf %s "$command" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)',
-    'exec powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand "$encoded"',
+    `command+=${escapeForBash(`${quotePowerShell('--pane-dir')},${quotePowerShell(appDirectory)}); $env:PANE_WSL_RUNPANE_ARGS_FILE = $PSCommandPath + '.json'; [System.IO.File]::WriteAllText($env:PANE_WSL_RUNPANE_ARGS_FILE, (ConvertTo-Json -InputObject $paneArgs -Compress), [System.Text.UTF8Encoding]::new($false)); & ${quotePowerShell(execPath)} ${quotePowerShell(launcherPath)}; exit $LASTEXITCODE`)}`,
+    // Keep payloads off the Windows command line and preserve stdin for the CLI.
+    `script=$(mktemp ${escapeForBash(`${sessionRuntimePath(path.dirname(launcherPath), record)}/bridge-XXXXXX.ps1`)})`,
+    'trap \'rm -f -- "$script" "$script.json"\' EXIT',
+    String.raw`{ printf '\xff\xfe'; printf %s "$command" | iconv -f UTF-8 -t UTF-16LE; } > "$script"`,
+    'powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(wslpath -aw "$script")"',
     '',
   ].join('\n');
 }
@@ -52,8 +55,8 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
 /** JSON avoids Windows PowerShell's lossy native argument quoting. */
 export function sessionWSLLauncher(appDirectory: string): string {
   return [
-    "const args = JSON.parse(process.env.PANE_WSL_RUNPANE_ARGS);",
-    'delete process.env.PANE_WSL_RUNPANE_ARGS;',
+    "const args = JSON.parse(require('node:fs').readFileSync(process.env.PANE_WSL_RUNPANE_ARGS_FILE, 'utf8'));",
+    'delete process.env.PANE_WSL_RUNPANE_ARGS_FILE;',
     `const cli = require(${JSON.stringify(path.join(appDirectory, 'bin', 'runpane.cjs'))});`,
     'cli.main(args).then(code => { process.exitCode = code; }).catch(error => { console.error(error.message); process.exitCode = 1; });',
     '',

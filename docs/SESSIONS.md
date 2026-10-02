@@ -84,7 +84,9 @@ context takes precedence over the shared Pane Chat routing instructions.
 Each WSL Session gets a managed `.pane-runtime/runpane` wrapper on PATH, also
 available as `$PANE_RUNPANE_BIN`. It invokes this build's bundled Windows CLI via
 PowerShell interop from Windows TEMP, so the CLI can reach this Pane instance's
-named pipe. Arguments cross as JSON to preserve quotes and Unicode. File flags
+named pipe. Arguments cross as JSON to preserve quotes and Unicode. Temporary
+files beside the bridge carry payloads without Windows command-line size limits
+and are removed when the call exits; stdin remains available to the CLI. File flags
 accept relative or absolute Linux paths (including `--flag=value`); `-` retains
 stdin semantics. Paths inside JSON request bodies must use Windows paths, and
 Windows paths returned by the CLI can be read in WSL after `wslpath -u` conversion.
