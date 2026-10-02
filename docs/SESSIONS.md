@@ -538,6 +538,8 @@ group. Layouts are saved with the Session.
 
 ## Tiling Sessions side by side
 
+![Two Sessions tiled side by side, both streaming](screenshots/session-tiling.png)
+
 Sessions tile with the same gesture as tabs, one level up. Drag a Session — from
 its sidebar row or by its title row — onto another Session and drop it against
 an edge to put the two beside each other; drop it in the middle to show it in
