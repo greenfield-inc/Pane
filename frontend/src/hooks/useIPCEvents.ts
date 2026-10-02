@@ -488,7 +488,10 @@ export function useIPCEvents() {
     const unsubscribeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
       // Destroy outgoing guests before async resync. Hosts can share panel IDs,
       // but their file URLs and Electron partitions must never be reused.
-      if (hostChanged) usePanelStore.getState().removeBrowserPanelsForHostSwitch();
+      if (hostChanged) {
+        panelApi.invalidateHostLoads();
+        usePanelStore.getState().removeBrowserPanelsForHostSwitch();
+      }
       void (async () => {
         try {
           await resyncRemoteRuntimeState(loadSessions, hostChanged);

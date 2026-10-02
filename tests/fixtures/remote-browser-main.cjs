@@ -70,7 +70,19 @@ app.whenReady().then(async () => {
     await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(updated)} }))`);
   });
   ipcMain.handle('preview-test:remote-command', (_event, channel, args) => remotePaneClientController.invoke(channel, args, async () => null));
-  ipcMain.handle('browser-panel:prepare-file', (_event, panelId) => prepareRemoteBrowserFiles(panelId));
+  let releasePreparation;
+  let preparationReady = new Promise(resolve => { releasePreparation = resolve; });
+  ipcMain.handle('preview-test:release-preparation', () => releasePreparation());
+  ipcMain.handle('preview-test:host-file-delayed', async () => {
+    preparationReady = new Promise(resolve => { releasePreparation = resolve; });
+    await panelManager.updatePanel(panel.id, { state: { customState: { currentUrl: pathToFileURL(path.join(bundle, 'index.html')).href } } });
+    const updated = panelManager.getPanel(panel.id);
+    await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(updated)} }))`);
+  });
+  ipcMain.handle('browser-panel:prepare-file', async (_event, panelId) => {
+    await preparationReady;
+    return prepareRemoteBrowserFiles(panelId);
+  });
   ipcMain.handle('browser-panel:register-webview', () => ({ success: true }));
   ipcMain.handle('browser-panel:close-devtools', () => ({ success: true }));
   ipcMain.handle('panels:update', async (_event, ...args) => {

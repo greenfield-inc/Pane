@@ -42,15 +42,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // Ask main before mounting a file webview: remote host paths must never be
   // loaded from this computer, even briefly while connection state is fetched.
   useEffect(() => {
-    if (!isFileUrl) {
+    if (!isFileUrl && !isHostFileUrl) {
       // A host-authored HTTP panel uses ordinary project cookies and writes.
       // Client-only links away from a file keep the host's file entry grant.
-      if (!isHostFileUrl) {
-        remoteFileRef.current = false;
-        setFileSession(null);
-      }
+      remoteFileRef.current = false;
+      setFileSession(null);
       return;
     }
+    remoteFileRef.current = null;
+    clearTimeout(persistTimeoutRef.current);
     let cancelled = false;
     void window.electronAPI.invoke('browser-panel:prepare-file', panel.id).then(
       (result: { partition: string | null }) => {
@@ -120,7 +120,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     clearTimeout(persistTimeoutRef.current);
     // Browsing a remote bundle is client-local. Keep the host's entry URL as
     // the access boundary instead of replacing it with a link/directory URL.
-    if (remoteFileRef.current === true || (remoteFileRef.current === null && hasFileProtocol(newUrl))) return;
+    if (remoteFileRef.current !== false) return;
     persistTimeoutRef.current = setTimeout(() => {
       window.electron?.invoke('panels:update', panelIdRef.current, {
         state: { customState: { currentUrl: newUrl } }
@@ -163,10 +163,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     // Reassigning src here resets the guest's navigation history.
     // A host changing its file entry to HTTP also changes the guest's session,
     // even if the client already followed a link to that exact HTTP page.
-    const endsRemoteFileSession = remoteFileRef.current === true && !isHostFileUrl;
+    const endsRemoteFileSession = Boolean(fileSession?.partition) && !isHostFileUrl;
     if (!currentUrlFromPanelState || (currentUrlFromPanelState === lastNavigationUrlRef.current && !endsRemoteFileSession)) return;
     navigateTo(currentUrlFromPanelState);
-  }, [currentUrlFromPanelState, isHostFileUrl, navigateTo]);
+  }, [currentUrlFromPanelState, isHostFileUrl, fileSession?.partition, navigateTo]);
 
   // An agent reopened this page after rewriting it; show the new content.
   const lastReopenedAt = useRef(reopenedAt);
@@ -491,7 +491,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       ) : (
         <div className="flex-1 flex flex-row min-h-0">
           {/* Page webview */}
-          {(!isFileUrl || fileSession?.panelId === panel.id) && <webview
+          {((!isFileUrl && !isHostFileUrl) || fileSession?.panelId === panel.id) && <webview
             key={fileSession?.partition ?? 'local'}
             ref={webviewRef}
             src={url}

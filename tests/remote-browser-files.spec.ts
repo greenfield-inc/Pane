@@ -28,11 +28,23 @@ test('remote browser loads host HTML, assets and linked pages through the remote
       </script></body></html>`,
     }));
     await page.goto(`${baseURL}/remote-preview-test`);
+    const externalUrl: string = await page.evaluate(() => window.electronAPI.invoke('preview-test:host-url'));
+    await expect(page.locator('input')).toHaveValue(/\/index\.html$/);
+    const initialEntryUrl = await page.locator('input').inputValue();
+    await page.locator('input').fill(externalUrl);
+    await page.locator('input').press('Enter');
+    await expect(page.locator('webview')).toHaveCount(0);
+    await page.waitForTimeout(2200);
+    expect((await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted).toEqual([]);
+    await page.evaluate(() => window.electronAPI.invoke('preview-test:release-preparation'));
     await expect(page.locator('webview')).toBeVisible();
     const guest = async <T>(script: string): Promise<T> => page.locator('webview').evaluate(
       // SAFETY: This locator selects Electron's webview tag in the Electron client fixture.
       (element, code) => (element as Electron.WebviewTag).executeJavaScript(code, true), script,
     );
+    await expect.poll(() => guest('location.href')).toBe(externalUrl);
+    await page.locator('input').fill(initialEntryUrl);
+    await page.locator('input').press('Enter');
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
     expect(await guest('getComputedStyle(document.body).backgroundColor')).toBe('rgb(238, 245, 240)');
     await expect.poll(() => guest('document.querySelector("img").naturalWidth')).toBe(100);
@@ -43,7 +55,6 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await expect.poll(() => guest('document.body.innerText')).toContain('Sibling navigation works');
     await guest('document.querySelector("a").click()');
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
-    const externalUrl: string = await page.evaluate(() => window.electronAPI.invoke('preview-test:host-url'));
     await guest(`location.href = ${JSON.stringify(externalUrl)}`);
     await expect.poll(() => guest('location.href')).toBe(externalUrl);
     // Wait past the URL-persistence debounce to catch an external link replacing
@@ -114,6 +125,21 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await page.locator('input').fill(nextHttpUrl);
     await page.locator('input').press('Enter');
     await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted.at(-1)?.[1].state.customState.currentUrl).toBe(nextHttpUrl);
+    const persistedBeforeRetarget = (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted.length;
+    await page.locator('input').fill(`${externalUrl}?pending=1`);
+    await page.locator('input').press('Enter');
+    await page.evaluate(() => window.electronAPI.invoke('preview-test:host-file-delayed'));
+    await expect(page.locator('input')).toHaveValue(/\/index\.html$/);
+    await page.locator('input').fill(externalUrl);
+    await page.locator('input').press('Enter');
+    await expect(page.locator('webview')).toHaveCount(0);
+    await page.waitForTimeout(2200);
+    expect((await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted.length).toBe(persistedBeforeRetarget);
+    await page.evaluate(() => window.electronAPI.invoke('preview-test:release-preparation'));
+    await expect.poll(() => guest('location.href')).toBe(externalUrl);
+    await page.locator('input').fill(initialEntryUrl);
+    await page.locator('input').press('Enter');
+    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
   } finally {
     await app.close();
     await fs.rm(paneDir, { recursive: true, force: true });
