@@ -93,7 +93,7 @@ export function ArchivedRow({ item, onRestore, onDelete }: {
   onDelete?: () => void;
 }) {
   return (
-    <View testID={`archived-row-${item.id}`} style={styles.archived}>
+    <View style={styles.archived}>
       <Icon ios={item.kind === 'session' ? 'bubble.left' : 'archivebox'} android={item.kind === 'session' ? 'chat_bubble' : 'archive'} size={14} />
       <Text variant="callout" tone="muted" numberOfLines={1} style={styles.name}>
         {item.label}
