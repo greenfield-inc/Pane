@@ -39,6 +39,8 @@ export interface PanelTabStripProps {
   isFocused?: boolean;
   /** Show shortcut hints (only for primary group in PanelTabBar). */
   showShortcutHints?: boolean;
+  /** Keep close buttons visible when the strip lives in window chrome. */
+  alwaysShowClose?: boolean;
   /**
    * Visual variant: 'bar' is the full-size strip used by the primary tab bar;
    * 'compact' is the slim treatment used by the group strip rows on split
@@ -105,6 +107,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   isPrimary = false,
   isFocused = false,
   showShortcutHints = false,
+  alwaysShowClose = false,
   variant = 'bar',
   onDragStart,
   onDragEnd,
@@ -376,7 +379,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               if (!isPermanent && !isDiffPanel) handleStartRename(event, panel);
             }}
             onKeyDown={(event) => handleTabKeyDown(event, index)}
-            className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle"
+            className={cn(
+              'absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
+              !compact && isActive && 'rounded-t-md border border-border-primary border-b-0 bg-bg-primary',
+            )}
           />
         ) : null;
 
@@ -384,14 +390,14 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           <div
             className={cn(
               "group relative inline-flex items-center justify-center whitespace-nowrap select-none",
-              isDisabled ? "cursor-not-allowed" : "cursor-pointer",
+              isDisabled ? "cursor-not-allowed" : "cursor-default",
               compact
                 ? cn(
                     "h-6 text-[11px]",
                     isPermanent ? "px-2" : "px-2 pr-7",
                   )
                 : cn(
-                    "h-[var(--panel-tab-height)]",
+                    isPrimary && isActive ? 'relative z-10 -mb-px h-[39px]' : 'h-[38px]',
                     isCompactTab
                       ? cn("min-w-[5rem] text-xs", isPermanent ? "px-2" : "px-2 pr-8")
                       : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-8"),
@@ -460,7 +466,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 type="button"
                 aria-label={`Close ${displayTitle}`}
                 className={cn(
-                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  "absolute z-20 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded transition-opacity transition-colors text-text-muted hover:bg-surface-hover hover:text-status-error focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                  alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                   compact ? "right-1" : "right-1.5",
                 )}
                 onClick={(e) => handlePanelClose(e, panel)}

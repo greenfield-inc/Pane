@@ -56,10 +56,10 @@ def run_doctor(parsed, source: str = "pip") -> int:
 
     if parsed.json:
         print(json.dumps(without_none(report), indent=2))
-        return 0
+        return 0 if report["ok"] else 1
 
     render_doctor_text(report)
-    return 0 if report["release"]["ok"] else 1
+    return 0 if report["ok"] else 1
 
 
 def prepare_doctor_failure_report(parsed, doctor: Dict[str, Any]) -> Dict[str, Any]:

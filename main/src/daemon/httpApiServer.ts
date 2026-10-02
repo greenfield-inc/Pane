@@ -528,7 +528,7 @@ export class PaneRemoteHttpApiServer {
     }
 
     try {
-      const result = await this.commandRegistry.invoke(
+      const result = await this.commandRegistry.invokeRemote(
         invokeRequest.channel,
         this.getInvokeArgsForRequest(invokeRequest, auth, request),
       );

@@ -29,8 +29,10 @@ external requests of any kind: no CDN, no web fonts, no remote images,
 no scripts unless the page genuinely needs interaction, and then only
 vanilla inline JS. System font stacks only. Target well under 200KB.
 Write it to `./tmp/` (or the caller's stated destination), then open it
-in the browser (`open` on macOS, `xdg-open` on Linux) unless the caller
-says not to.
+unless the caller says not to. Inside Pane (`PANE_SESSION_ID` is set), run
+`runpane panels open --file <path> --source agent --yes --json`; it opens a
+browser tab in split view beside the conversation. Elsewhere use the system
+browser (`open` on macOS, `xdg-open` on Linux).
 
 ## Tokens
 

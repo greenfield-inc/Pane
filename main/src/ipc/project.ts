@@ -6,19 +6,33 @@ import type { AppServices } from './types';
 import type { CreateProjectRequest, UpdateProjectRequest } from '../../../frontend/src/types/project';
 import { scriptExecutionTracker } from '../services/scriptExecutionTracker';
 import { panelManager } from '../services/panelManager';
-import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
-import { PathResolver, expandUserRepoPath } from '../utils/pathResolver';
-import { CommandRunner } from '../utils/commandRunner';
+import { validateWSLAvailable } from '../utils/wslUtils';
+import { PathResolver } from '../utils/pathResolver';
+import { resolveProjectRegistration } from '../services/projectRegistration';
 import { detectProjectBranch } from '../utils/detectProjectBranch';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
+import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import type { ConfigManager } from '../services/configManager';
 import type { Project } from '../database/models';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { createRequire } from 'node:module';
 
 const loadProjectDependency = createRequire(__filename);
+
+interface ProjectScriptRuntime {
+  getPanelsForSession(sessionId: string): Promise<Array<{ id: string; type: string }>>;
+  stopScript(panelId: string): Promise<void>;
+}
+
+const projectScriptRuntime: ProjectScriptRuntime = {
+  getPanelsForSession: async sessionId => panelManager.getPanelsForSession(sessionId),
+  stopScript: async panelId => {
+    const { logsManager } = loadProjectDependency('../services/panels/logPanel/logsManager');
+    await logsManager.stopScript(panelId);
+  },
+};
 
 // Helper function to stop a running project script
 async function stopProjectScriptInternal(projectId?: number): Promise<{ success: boolean; error?: string }> {
@@ -80,6 +94,7 @@ export function registerProjectHandlers(
   ipcMain: IpcMain,
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
+  scriptRuntime: ProjectScriptRuntime = projectScriptRuntime,
 ): void {
   const { databaseService, sessionManager, worktreeManager, analyticsManager, configManager } = services;
 
@@ -115,34 +130,13 @@ export function registerProjectHandlers(
     try {
       console.log('[Main] Creating project:', projectData);
 
-      const requestedPath = expandUserRepoPath(projectData.path);
-
-      // Parse WSL path if applicable
-      const wslInfo = parseWSLPath(requestedPath);
-      let actualPath = requestedPath;
-      let wslEnabled = false;
-      let wslDistribution: string | null = null;
+      const registration = resolveProjectRegistration(projectData.path);
+      const { path: actualPath, wsl_enabled: wslEnabled, wsl_distribution: wslDistribution, pathResolver, commandRunner } = registration;
       let isGitRepo = false;
-
-      if (wslInfo) {
-        const wslError = validateWSLAvailable(wslInfo.distro);
-        if (wslError) {
-          return { success: false, error: wslError };
-        }
-        wslEnabled = true;
-        wslDistribution = wslInfo.distro;
-        actualPath = wslInfo.linuxPath;
-        console.log(`[Main] WSL project detected: ${wslInfo.distro}:${wslInfo.linuxPath}`);
+      if (wslDistribution) {
+        const wslError = await validateWSLAvailable(wslDistribution);
+        if (wslError) return { success: false, error: wslError };
       }
-
-      // Create CommandRunner and PathResolver — handles WSL/non-WSL transparently
-      const tempProject = {
-        path: actualPath,
-        wsl_enabled: wslEnabled,
-        wsl_distribution: wslDistribution
-      };
-      const pathResolver = new PathResolver(tempProject);
-      const commandRunner = new CommandRunner(tempProject);
 
       // Create directory if needed (recursive: true is a no-op if it already exists)
       await mkdir(pathResolver.toFileSystem(actualPath), { recursive: true });
@@ -378,18 +372,22 @@ export function registerProjectHandlers(
       
       console.log(`[Main] Deleting project ${project.name} with ${allProjectSessions.length} total sessions`);
       
-      // Check if any session from this project has a running script
+      // Stop the logs process before removing its working directory.
       const runningScript = scriptExecutionTracker.getRunningScript();
       if (runningScript) {
-        const runningSession = projectSessions.find(s => s.id === runningScript.id);
-        if (runningSession && runningScript.type === 'session') {
-          console.log(`[Main] Stopping running script for session ${runningScript.id} before deleting project`);
-          await sessionManager.stopRunningScript();
-          // Ensure tracker is updated even if sessionManager's internal update fails
-          scriptExecutionTracker.stop('session', runningScript.id);
+        const runningSessionId = runningScript.type === 'session'
+          ? allProjectSessions.find(session => session.id === runningScript.id)?.id
+          : runningScript.id === projectIdNum ? runningScript.sessionId : undefined;
+        if (runningSessionId) {
+          scriptExecutionTracker.markClosing(runningScript.type, runningScript.id);
+          const panels = await scriptRuntime.getPanelsForSession(runningSessionId);
+          for (const panel of panels.filter(panel => panel.type === 'logs')) {
+            await scriptRuntime.stopScript(panel.id);
+          }
+          scriptExecutionTracker.stop(runningScript.type, runningScript.id);
         }
       }
-      
+
       // Close all terminal sessions for this project
       for (const session of projectSessions) {
         if (sessionManager.hasTerminalSession(session.id)) {
@@ -721,8 +719,6 @@ export function registerProjectHandlers(
             const { logsManager } = loadProjectDependency('../services/panels/logPanel/logsManager');
             await logsManager.stopScript(logsPanel.id);
           }
-          // Also try old mechanism as fallback
-          await sessionManager.stopRunningScript();
           // Mark as stopped in tracker
           scriptExecutionTracker.stop('session', sessionIdToStop);
         }
@@ -765,6 +761,9 @@ async function updateProjectAgentContextBestEffort(
 ): Promise<void> {
   try {
     await ensureProjectAgentContext(project, configManager.getConfig());
+    if (project.wsl_enabled && project.wsl_distribution) {
+      await syncPaneHomeSkill(configManager.getConfig(), [], [project.wsl_distribution]);
+    }
   } catch (error) {
     console.warn(`[Main] Failed to update Pane agent context during ${source}:`, error);
   }

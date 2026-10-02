@@ -28,10 +28,11 @@ import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
-import { rollupSessionAgentState } from './utils/agentStatus';
+import { subscribePanelStatus } from './services/panelStatusSync';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
+import { startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
 
@@ -150,36 +151,8 @@ function App() {
   useIPCEvents();
   const { showNotification } = useNotifications();
 
-  // Global panel activity status listener
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.events?.onPanelActivityStatus?.((data) => {
-      usePanelStore.getState().setActivityStatus(data.panelId, data.status, data.lastActivityAt);
-    });
-    return () => unsubscribe?.();
-  }, []);
-
-  // Global agent status listener (blocked / working / done) for terminal panels.
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.events?.onPanelAgentStatus?.((data) => {
-      const store = usePanelStore.getState();
-      const prevState = store.agentStatus[data.panelId];
-      store.setAgentStatus(data.panelId, data.sessionId, data.state);
-
-      // A background agent finishing should read as done (blue) right away —
-      // mark unseen completion from the unified working -> idle transition
-      // instead of waiting for the legacy 30s activity flip.
-      if (prevState === 'working' && data.state === 'idle') {
-        const next = usePanelStore.getState();
-        const activeSessionId = useSessionStore.getState().activeSessionId;
-        const sessionSettled =
-          rollupSessionAgentState(next.agentStatus, next.agentStatusSession, data.sessionId) === 'idle';
-        if (sessionSettled && activeSessionId !== data.sessionId) {
-          next.markUnviewedCompletedActivity(data.sessionId);
-        }
-      }
-    });
-    return () => unsubscribe?.();
-  }, []);
+  // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
+  useEffect(() => subscribePanelStatus(), []);
 
   useEffect(() => {
     const clearViewedCompletedActivity = (event: Event) => {
@@ -275,6 +248,9 @@ function App() {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  // Remember where the user is on the active host, so a host switch can return here.
+  useEffect(() => startHostNavigationMemoryWrites(), []);
 
   // Detect unclean shutdown from previous session and notify user
   useEffect(() => {
@@ -673,29 +649,46 @@ function App() {
     isWelcomeOpen,
   ]);
 
-  // Check for resumable sessions on startup (auto-resume feature)
+  // Check for resumable sessions on startup and on each host switch (auto-resume feature).
+  // A reconnect to the same host does not prompt again.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
 
     const checkResumableSessions = async () => {
+      let sessions: ResumableSession[] = [];
       try {
         const result = await window.electronAPI.sessions.getResumable();
-        if (cancelled) return;
-        if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-          setResumableSessions(result.data);
-          setIsResumeDialogOpen(true);
-        }
+        if (result.success && Array.isArray(result.data)) sessions = result.data;
       } catch (error) {
         console.error('[App] Failed to check for resumable sessions:', error);
       }
+      if (cancelled) return;
+      setResumableSessions(sessions);
+      setIsResumeDialogOpen(sessions.length > 0);
     };
 
     void checkResumableSessions();
+    const removeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
+      if (hostChanged) void checkResumableSessions();
+    });
     return () => {
       cancelled = true;
+      removeRemoteResync?.();
     };
   }, [isLoaded]);
+
+  // Main keeps the window hidden until the first frame with sessions is painted.
+  useEffect(() => {
+    if (!isLoaded) return;
+    const frame = requestAnimationFrame(() => window.electronAPI?.notifyRendererReady?.());
+    return () => cancelAnimationFrame(frame);
+  }, [isLoaded]);
+
+  useEffect(() => window.electronAPI?.events?.onAppMenuAction?.((action) => {
+    if (action === 'open-settings') openSettings();
+    else setIsAboutOpen(true);
+  }), [openSettings]);
 
   const loadNextPendingPermission = useCallback(async () => {
     try {
@@ -725,11 +718,17 @@ function App() {
       void loadNextPendingPermission();
     });
 
+    // Another host has its own prompts, and a reconnect may have missed some.
+    const removeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(() => {
+      void loadNextPendingPermission();
+    });
+
     void loadNextPendingPermission();
 
     return () => {
       removePermissionRequest();
       removePermissionResolved();
+      removeRemoteResync?.();
     };
   }, [loadNextPendingPermission]);
 
@@ -791,10 +790,29 @@ function App() {
 
   return (
     <ContextMenuProvider>
-      <div className="pane-app-shell h-screen flex flex-col overflow-hidden bg-bg-primary">
-        <WindowTitleBar projects={projects} controlsSlotRef={setTitleBarControlsSlot} />
+      <div className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
+        <div className={isSettingsOpen ? 'hidden' : 'contents'}>
+          <WindowTitleBar projects={projects} sidebarWidth={sidebarWidth} sidebarCollapsed={sidebarCollapsed} controlsSlotRef={setTitleBarControlsSlot} />
+        </div>
         <div className="pane-main-layout flex flex-1 min-h-0">
         <MainProcessLogger />
+        {isSettingsOpen && (
+          <Settings
+            isOpen={isSettingsOpen}
+            onClose={closeSettings}
+            category={settingsCategory}
+            onCategoryChange={setSettingsCategory}
+            openRequest={settingsOpenRequest}
+            onOpenRequestHandled={() => setSettingsOpenRequest(undefined)}
+            onShowKeyboardShortcuts={() => {
+              closeSettings();
+              setIsKeyboardShortcutsOpen(true);
+            }}
+            onUpdate={handleUpdateRequest}
+            onSendFeedback={() => setIsFeedbackOpen(true)}
+          />
+        )}
+        <div className={isSettingsOpen ? 'hidden' : 'contents'}>
         <div
           className="pane-sidebar-slot pane-reveal flex-shrink-0 overflow-hidden transition-[width] duration-reveal ease-out-strong"
           style={{ width: sidebarCollapsed ? '48px' : `${sidebarWidth}px` }}
@@ -803,6 +821,7 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
+            onManageRemoteConnectionsClick={() => openSettings({ category: 'remote-access', subview: 'connections' })}
             width={sidebarWidth}
             onResize={startResize}
             collapsed={sidebarCollapsed}
@@ -818,20 +837,7 @@ function App() {
           />
         </div>
         <SessionView />
-        <Settings
-          isOpen={isSettingsOpen}
-          onClose={closeSettings}
-          category={settingsCategory}
-          onCategoryChange={setSettingsCategory}
-          openRequest={settingsOpenRequest}
-          onOpenRequestHandled={() => setSettingsOpenRequest(undefined)}
-          onShowKeyboardShortcuts={() => {
-            closeSettings();
-            setIsKeyboardShortcutsOpen(true);
-          }}
-          onUpdate={handleUpdateRequest}
-          onSendFeedback={() => setIsFeedbackOpen(true)}
-        />
+        </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
           onClose={() => {

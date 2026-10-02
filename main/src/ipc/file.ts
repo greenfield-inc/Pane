@@ -1,3 +1,6 @@
+import { PathResolver } from '../utils/pathResolver';
+import { CommandRunner } from '../utils/commandRunner';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import { shell } from 'electron';
 import * as fs from 'fs/promises';
@@ -8,9 +11,7 @@ import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { Session } from '../types/session';
-import { getGitAttributionEnv } from '../utils/attribution';
-import { commandExecutor } from '../utils/commandExecutor';
-import { buildGitCommitCommand } from '../utils/shellEscape';
+import { commitGitMessage } from '../utils/gitCommit';
 import { revealInFileManager } from '../utils/revealInFileManager';
 
 interface FileReadRequest {
@@ -113,6 +114,17 @@ export function registerFileHandlers(
 ): void {
   const { sessionManager, gitStatusManager, configManager } = services;
 
+  function getFileContext(sessionId: string) {
+    const context = sessionManager.getProjectContext(sessionId);
+    if (context) return context;
+    const session = sessionManager.getSession(sessionId);
+    if (!session || !session.isHidden || !isOrchestrationInternalSessionId(sessionId)) {
+      throw new Error('Project not found for session');
+    }
+    const workspace = { path: session.worktreePath };
+    return { pathResolver: new PathResolver(workspace), commandRunner: new CommandRunner(workspace) };
+  }
+
   async function resolveWorktreePath(sessionId: string, relativePath = ''): Promise<{
     session: Session;
     basePath: string;
@@ -124,8 +136,7 @@ export function registerFileHandlers(
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    const ctx = sessionManager.getProjectContext(sessionId);
-    if (!ctx) throw new Error('Project not found for session');
+    const ctx = getFileContext(sessionId);
     const { pathResolver } = ctx;
 
     const normalizedPath = relativePath ? path.normalize(relativePath) : '';
@@ -179,9 +190,7 @@ export function registerFileHandlers(
         throw new Error(`Session not found: ${request.sessionId}`);
       }
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
+      const { pathResolver } = getFileContext(request.sessionId);
 
       // Ensure the file path is relative and safe
       const normalizedPath = path.normalize(request.filePath);
@@ -217,9 +226,7 @@ export function registerFileHandlers(
         throw new Error(`Session not found: ${request.sessionId}`);
       }
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
+      const { pathResolver } = getFileContext(request.sessionId);
 
       const normalizedPath = path.normalize(request.filePath);
       if (normalizedPath.startsWith('..') || path.isAbsolute(normalizedPath)) {
@@ -252,9 +259,7 @@ export function registerFileHandlers(
         return false;
       }
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) return false;
-      const { pathResolver } = ctx;
+      const { pathResolver } = getFileContext(request.sessionId);
 
       // Ensure the file path is relative and safe
       const normalizedPath = path.normalize(request.filePath);
@@ -290,9 +295,7 @@ export function registerFileHandlers(
         throw new Error(`Session not found: ${request.sessionId}`);
       }
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
+      const { pathResolver } = getFileContext(request.sessionId);
 
       if (!session.worktreePath) {
         throw new Error(`Session worktree path is undefined for session: ${request.sessionId}`);
@@ -351,9 +354,7 @@ export function registerFileHandlers(
         throw new Error(`Session not found: ${request.sessionId}`);
       }
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
+      const { pathResolver } = getFileContext(request.sessionId);
 
       if (!session.worktreePath) {
         throw new Error(`Session worktree path is undefined for session: ${request.sessionId}`);
@@ -448,17 +449,9 @@ export function registerFileHandlers(
         // Stage all changes
         await commandRunner.execAsync('git add -A', session.worktreePath);
 
-        // Check if Pane footer is enabled (default: true)
-        const config = configManager.getConfig();
-        const enableCommitFooter = config?.enableCommitFooter !== false;
-
-        // Build platform-safe git commit command
-        const commitCommand = buildGitCommitCommand(request.message, enableCommitFooter);
-        await commandExecutor.execAsync(commitCommand, {
-          cwd: session.worktreePath,
+        await commitGitMessage(commandRunner, session.worktreePath, request.message, configManager.getConfig(), {
           timeout: 120_000,
-          env: { ...process.env, ...getGitAttributionEnv(config) }
-        }, commandRunner.wslContext);
+        });
 
         // Refresh git status for this session after commit
         try {
@@ -476,17 +469,9 @@ export function registerFileHandlers(
           try {
             await commandRunner.execAsync('git add -A', session.worktreePath);
 
-            // Check if Pane footer is enabled (default: true)
-            const config = configManager.getConfig();
-            const enableCommitFooter = config?.enableCommitFooter !== false;
-
-            // Build platform-safe git commit command
-            const retryCommitCommand = buildGitCommitCommand(request.message, enableCommitFooter);
-            await commandExecutor.execAsync(retryCommitCommand, {
-              cwd: session.worktreePath,
+            await commitGitMessage(commandRunner, session.worktreePath, request.message, configManager.getConfig(), {
               timeout: 120_000,
-              env: { ...process.env, ...getGitAttributionEnv(config) }
-            }, commandRunner.wslContext);
+            });
 
             // Refresh git status for this session after commit
             try {
@@ -633,9 +618,7 @@ export function registerFileHandlers(
         throw new Error(`Session not found: ${request.sessionId}`);
       }
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
-      const { pathResolver } = ctx;
+      const { pathResolver } = getFileContext(request.sessionId);
 
       // Check if session is archived - worktree won't exist
       if (session.archived) {
@@ -655,6 +638,7 @@ export function registerFileHandlers(
 
       const basePath = pathResolver.toFileSystem(session.worktreePath);
       const targetPath = relativePath ? path.join(basePath, relativePath) : basePath;
+      if (!await pathResolver.isWithin(basePath, targetPath)) throw new Error('File path is outside worktree');
 
       // Read directory contents
       const entries = await fs.readdir(targetPath, { withFileTypes: true });
@@ -878,8 +862,7 @@ export function registerFileHandlers(
         if (!session) {
           throw new Error(`Session not found: ${request.sessionId}`);
         }
-        const ctx = sessionManager.getProjectContext(request.sessionId);
-        if (!ctx) throw new Error('Project not found for session');
+        const ctx = getFileContext(request.sessionId);
         pathResolver = ctx.pathResolver;
         commandRunner = ctx.commandRunner;
         storedDir = session.worktreePath;
@@ -1169,8 +1152,7 @@ export function registerFileHandlers(
       const session = sessionManager.getSession(request.sessionId);
       if (!session) throw new Error(`Session not found: ${request.sessionId}`);
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
+      const ctx = getFileContext(request.sessionId);
 
       const relativePath = request.path || '';
       if (relativePath) {
@@ -1197,8 +1179,7 @@ export function registerFileHandlers(
       const session = sessionManager.getSession(request.sessionId);
       if (!session) throw new Error(`Session not found: ${request.sessionId}`);
 
-      const ctx = sessionManager.getProjectContext(request.sessionId);
-      if (!ctx) throw new Error('Project not found for session');
+      const ctx = getFileContext(request.sessionId);
 
       const relativePath = request.path || '';
       if (relativePath) {

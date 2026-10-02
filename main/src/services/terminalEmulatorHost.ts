@@ -11,8 +11,10 @@ import { TerminalStateEmulator } from './terminalStateEmulator';
 /** What the main process can read synchronously from its cached copy. */
 export interface ScreenState {
   screenText: string;
-  /** screenText with dim cells blanked, so placeholder hints do not read as typed input. */
+  /** screenText with ghost cells (dim or placeholder grey) blanked, so placeholder hints do not read as typed input. */
   inputScreenText: string;
+  /** Only the ghost cells of screenText, row for row with inputScreenText. */
+  ghostScreenText: string;
   isAlternateScreen: boolean;
   oscTitle: string;
   oscProgress: string;
@@ -65,7 +67,8 @@ const HOST_MARKER = 'pane-terminal-emulators';
 function readState(emulator: TerminalStateEmulator): ScreenState {
   return {
     screenText: emulator.getScreenText(),
-    inputScreenText: emulator.getScreenText({ omitDim: true }),
+    inputScreenText: emulator.getScreenText({ cells: 'typed' }),
+    ghostScreenText: emulator.getScreenText({ cells: 'ghost' }),
     isAlternateScreen: emulator.isAlternateScreen,
     oscTitle: emulator.getOscTitle(),
     oscProgress: emulator.getOscProgress(),
@@ -76,6 +79,7 @@ function sameState(a: ScreenState | undefined, b: ScreenState): boolean {
   return a !== undefined
     && a.screenText === b.screenText
     && a.inputScreenText === b.inputScreenText
+    && a.ghostScreenText === b.ghostScreenText
     && a.isAlternateScreen === b.isAlternateScreen
     && a.oscTitle === b.oscTitle
     && a.oscProgress === b.oscProgress;

@@ -20,9 +20,13 @@ import {
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
 import { isMac } from '../../utils/platformUtils';
-import { copyTerminalText, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
+import { copyTerminalText, decodeOsc52Write, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
+import { sendTerminalInput } from '../../utils/terminalInput';
+import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
+import { openPaneLink } from '../terminal/openPaneLink';
+import { PANE_LINK_REGEX } from '../terminal/paneLink';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
 import { TerminalPopover, PopoverButton } from '../terminal/TerminalPopover';
 import { SelectionPopover } from '../terminal/SelectionPopover';
@@ -246,10 +250,15 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const fitAddonRef = useRef<FitAddon | null>(null);
   const webglAddonRef = useRef<WebglAddon | null>(null);
   const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
+  const paneLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
+  // Restored output still being parsed. OSC 52 copies in it are history, not new copies.
+  const pendingReplayWritesRef = useRef(0);
   const unicode11AddonRef = useRef<Unicode11Addon | null>(null);
   const imageAddonRef = useRef<ImageAddon | null>(null);
   const isActiveRef = useRef(isActive);
+  const pasteFilesRef = useRef<((files: File[]) => void) | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const isNearBottomRef = useRef(true); // Track if user is scrolled near the bottom
   const [showScrollDown, setShowScrollDown] = useState(false); // Show jump-to-bottom pill
   const tuiActiveRef = useRef(false);
@@ -389,15 +398,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
   // Listen for the ptyHost ptyId assignment. The main process fires this
   // once per spawn when the `usePtyHost` setting is on; fires again on auto-reattach
-  // after a supervisor restart with a new ptyId.
+  // after a supervisor restart with a new ptyId. A remote host's ptyHost is not
+  // behind this window's port, so remote terminals keep acking over `terminal:ack`.
   useEffect(() => {
     const cleanup = window.electronAPI.events.onTerminalPtyReady((data) => {
       if (data.panelId === panel.id) {
-        currentPtyIdRef.current = data.ptyId;
+        currentPtyIdRef.current = isRemoteMode ? null : data.ptyId;
       }
     });
     return cleanup;
-  }, [panel.id]);
+  }, [panel.id, isRemoteMode]);
 
   // Get session data from context using the safe hook
   const sessionContext = useSession();
@@ -617,6 +627,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   } = useTerminalLinks(terminalInstance, {
     workingDirectory: workingDirectory || '',
     sessionId: sessionId || panel.sessionId,
+    onCopyError: handleClipboardError,
   });
 
   // Terminal search hook
@@ -741,13 +752,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       // width — resizing after getState would replay a stale-width snapshot,
       // and the normal-buffer path has no forced app redraw left to repair it.
       await resizePtyToFit();
+      // Switching sessions can dispose this xterm while a resize reply is pending.
+      if (xtermRef.current !== terminal) return;
       const state = await window.electronAPI.invoke('terminal:getState', panel.id);
+      if (xtermRef.current !== terminal) return;
       if (state?.isAlternateScreen) {
         // Renderer refresh alone cannot repair an application frame that was
         // restored before the visible grid settled. Ask main for a forced resize
         // (single PTY row nudge) so the foreground app receives a real resize
         // notification and repaints at the settled grid.
         await resizePtyToFit(true);
+        if (xtermRef.current !== terminal) return;
         if (terminal.rows > 0) {
           terminal.refresh(0, terminal.rows - 1);
         }
@@ -768,8 +783,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           ? state.scrollbackBuffer.join('\n')
           : state.scrollbackBuffer;
         if (content) {
+          pendingReplayWritesRef.current += 1;
           await new Promise<void>((resolve, reject) => {
             terminal.write(content, () => {
+              pendingReplayWritesRef.current -= 1;
               void finishRefresh().then(resolve, reject);
             });
           });
@@ -807,6 +824,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     const wasNearBottom = isNearBottomRef.current || distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_ROWS;
 
     await resizePtyToFit();
+    // A refocus refresh may finish after switching to another session's terminal.
+    if (xtermRef.current !== terminal) return;
     if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
 
     if (wasNearBottom) {
@@ -974,6 +993,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           macOptionIsMeta: false,
           linkHandler: {
             activate: (_event, uri) => {
+              if (uri.startsWith('pane://')) {
+                void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
+                return;
+              }
               void window.electronAPI.openExternal(uri).catch((error) => {
                 console.error('[TerminalPanel] Failed to open terminal link:', error);
               });
@@ -986,6 +1009,23 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
         devLog.debug('[TerminalPanel] FitAddon loaded');
+
+        // OSC 52 lets programs in the terminal (Claude Code, tmux, vim over ssh) copy
+        // text. This renderer runs on the machine the user is at, so the text lands on
+        // that clipboard even when the program runs on a remote host.
+        // A disposed terminal never runs its replay callbacks, so start the count fresh.
+        pendingReplayWritesRef.current = 0;
+        terminal.parser.registerOscHandler(52, (data) => {
+          const text = decodeOsc52Write(data);
+          // Only while the user is in this window: output arriving in the background
+          // cannot silently replace what they copied elsewhere.
+          if (text && pendingReplayWritesRef.current === 0 && document.hasFocus()) {
+            void copyTerminalText(text).catch(() => {
+              terminalRuntimeRef.current.handleClipboardError();
+            });
+          }
+          return true;
+        });
 
         // Intercept app-level shortcuts before xterm consumes them
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
@@ -1043,7 +1083,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // passthrough, while ordinary TUIs still receive Shift+Enter directly.
           if (terminalKeyDecision.action === 'send-input') {
             if (e.type === 'keydown') {
-              window.electronAPI.invoke('terminal:input', panel.id, terminalKeyDecision.input);
+              sendTerminalInput(panel.id, terminalKeyDecision.input);
             }
             return false;
           }
@@ -1180,6 +1220,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               });
               terminal.loadAddon(webLinksAddon);
               webLinksAddonRef.current = webLinksAddon;
+              const paneLinksAddon = new WebLinksAddonImpl((event, uri) => {
+                if (isMac ? event.metaKey : event.ctrlKey) {
+                  void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
+                }
+              }, { urlRegex: PANE_LINK_REGEX });
+              terminal.loadAddon(paneLinksAddon);
+              paneLinksAddonRef.current = paneLinksAddon;
               devLog.debug('[TerminalPanel] WebLinksAddon loaded for panel', panel.id);
             }
           } catch (e) {
@@ -1290,16 +1337,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (pendingAckBytes > 0) {
               const bytes = pendingAckBytes;
               pendingAckBytes = 0;
-              // Under the ptyHost flag, ack over the per-window MessagePort so it
-              // bypasses the main IPC invoke queue. Flag-off keeps the legacy
-              // IPC path. `currentPtyIdRef` is a ref because the ptyId can change
-              // across auto-reattach after a supervisor restart.
-              const activePtyId = currentPtyIdRef.current;
-              if (activePtyId) {
-                window.electronAPI.ptyHost.ack(activePtyId, bytes);
-              } else {
-                window.electronAPI.invoke('terminal:ack', panel.id, bytes);
-              }
+              // Read the current mode at flush time, including when a local
+              // ptyId survived a switch to a remote host.
+              acknowledgeTerminalOutput(
+                panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode,
+              );
             }
           };
 
@@ -1315,7 +1357,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             const restore = selectTerminalRestoreContent(terminalStateForThisPanel);
             if (restore) {
               devLog.debug('[TerminalPanel] Restoring', restore.content.length, 'chars from', restore.source);
-              terminal.write(restore.content);
+              pendingReplayWritesRef.current += 1;
+              terminal.write(restore.content, () => {
+                pendingReplayWritesRef.current -= 1;
+              });
             }
             // Force WebGL renderer to redraw after buffer content changes.
             // Without this, macOS WebGL canvas shows stale/stuttered content until
@@ -1355,11 +1400,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (!terminal) return;
             const shouldProtectMultilinePaste = isCliPanelRef.current && !tuiActiveRef.current && /[\r\n]/.test(text);
             if (shouldProtectMultilinePaste) {
-              window.electronAPI.invoke(
-                'terminal:input',
-                panel.id,
-                text.replace(/\r\n|\r|\n/g, '\x1b\r'),
-              );
+              sendTerminalInput(panel.id, text.replace(/\r\n|\r|\n/g, '\x1b\r'));
               return;
             }
 
@@ -1471,18 +1512,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
           };
-          const handleDrop = (e: DragEvent) => {
-            e.preventDefault();
-            if (!e.dataTransfer?.files.length || disposed || !terminal) return;
-
-            // Save all dropped files to disk and paste the resolved path
-            const files = Array.from(e.dataTransfer.files);
+          // Save files on the terminal's host and paste each resolved path. Shared by
+          // drag-and-drop and the upload button's file picker.
+          const pasteFiles = (files: File[]) => {
+            if (!files.length || disposed || !terminal) return;
             (async () => {
               for (const file of files) {
                 if (file.size > 50 * 1024 * 1024) {
                   const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
                   if (!disposed && terminal) {
-                    terminal.paste(`[Drop failed] File too large (${sizeMB} MB), max 50 MB\n`);
+                    terminal.paste(`[Upload failed] File too large (${sizeMB} MB), max 50 MB\n`);
                   }
                   continue;
                 }
@@ -1525,16 +1564,21 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                     terminal.paste(`${resolvedPath}\n`);
                   }
                 } catch (err) {
-                  console.error('[TerminalPanel] Failed to drop file:', err);
+                  console.error('[TerminalPanel] Failed to upload file:', err);
                   if (!disposed && terminal) {
                     // Strip Electron's IPC wrapper so the user sees the backend reason
                     const raw = err instanceof Error ? err.message : String(err);
                     const reason = raw.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
-                    terminal.paste(`[Drop failed] ${reason || 'Unknown error'}\n`);
+                    terminal.paste(`[Upload failed] ${reason || 'Unknown error'}\n`);
                   }
                 }
               }
             })();
+          };
+          pasteFilesRef.current = pasteFiles;
+          const handleDrop = (e: DragEvent) => {
+            e.preventDefault();
+            pasteFiles(Array.from(e.dataTransfer?.files ?? []));
           };
           terminalRef.current.addEventListener('dragover', handleDragOver);
           terminalRef.current.addEventListener('drop', handleDrop);
@@ -1647,7 +1691,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Create interceptor for @ mentions and future trigger handlers
           const interceptor = new TerminalInterceptor({
             onStateChange: (state) => setInterceptorState(state.active ? state : null),
-            onFlush: (data) => window.electronAPI.invoke('terminal:input', panel.id, data),
+            onFlush: (data) => sendTerminalInput(panel.id, data),
           });
           interceptorRef.current = interceptor;
 
@@ -1738,12 +1782,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             // Skip interception for AltGr-produced @ (e.g. German keyboard)
             if (skipNextInterceptRef.current) {
               skipNextInterceptRef.current = false;
-              window.electronAPI.invoke('terminal:input', panel.id, data);
+              sendTerminalInput(panel.id, data);
               return;
             }
             const result = interceptor.handleInput(data);
             if (!result.consumed) {
-              window.electronAPI.invoke('terminal:input', panel.id, data);
+              sendTerminalInput(panel.id, data);
             }
           });
 
@@ -1785,6 +1829,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             terminalElement?.removeEventListener('paste', handlePaste, { capture: true });
             terminalElement?.removeEventListener('dragover', handleDragOver);
             terminalElement?.removeEventListener('drop', handleDrop);
+            if (pasteFilesRef.current === pasteFiles) pasteFilesRef.current = null;
           };
         }
       } catch (error) {
@@ -1826,6 +1871,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (webLinksAddonRef.current) {
         try { webLinksAddonRef.current.dispose(); } catch { /* ignore */ }
         webLinksAddonRef.current = null;
+      }
+      if (paneLinksAddonRef.current) {
+        try { paneLinksAddonRef.current.dispose(); } catch { /* ignore */ }
+        paneLinksAddonRef.current = null;
       }
 
       // Save serialized terminal snapshot before disposing
@@ -2078,6 +2127,29 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       {/* Terminal scroll buttons — compact, revealed on hover */}
       {isInitialized && (
         <div className="absolute top-2 right-5 z-30 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto transition-opacity">
+          <input
+            ref={uploadInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              pasteFilesRef.current?.(Array.from(e.target.files ?? []));
+              e.target.value = '';
+              xtermRef.current?.focus();
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => uploadInputRef.current?.click()}
+            className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
+            title="Upload files"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 8V2" />
+              <path d="M3.5 4.5L6 2l2.5 2.5" />
+              <path d="M2 8.5v1.5h8V8.5" />
+            </svg>
+          </button>
           <button
             onClick={() => { void handleManualRefresh(); }}
             className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"

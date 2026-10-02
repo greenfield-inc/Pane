@@ -55,7 +55,7 @@ export function ConfirmDialog({
           {icon && <div className="flex-shrink-0">{icon}</div>}
           <h3 className="text-lg font-medium text-text-primary">{title}</h3>
         </div>
-        <p className="text-text-secondary whitespace-pre-line leading-relaxed mb-6">
+        <p className="select-text text-text-secondary whitespace-pre-line leading-relaxed mb-6">
           {message}
         </p>
         <div className="flex justify-end gap-3">

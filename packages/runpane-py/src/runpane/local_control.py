@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -134,7 +135,131 @@ def run_sessions_overview(parsed: Any) -> int:
                 for panel in pane.get("panels", [])
             ) or "no terminal panels"
         print(f"  {pane.get('name')}: {details}")
+        report = pane.get("report")
+        if report:
+            print(f"    report {describe_report(report)} (panel {report.get('panelId')}, {report.get('reportedAt')})")
+    for lock in result.get("locks") or []:
+        print(f"  lock {format_lock_line(lock)}")
     return 0
+
+
+# One daemon call waits at most this long; longer waits chain calls, each blocking in the daemon.
+LOCK_WAIT_PER_CALL_MS = 120_000
+
+
+def run_lock_acquire(parsed: Any) -> int:
+    name = _require_lock_name(parsed, "acquire")
+    if parsed.lock_ttl_ms is None:
+        raise ValueError("runpane lock acquire requires --ttl <duration>, such as --ttl 30m.")
+    request: Dict[str, Any] = {
+        "name": name,
+        "ttlMs": parsed.lock_ttl_ms,
+        **optional_value("note", parsed.note),
+        "owner": _lock_owner(parsed, False),
+    }
+    wait_ms = parsed.lock_wait_ms or 0
+    started_at = time.monotonic()
+    while True:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        call_wait_ms = min(max(0, wait_ms - elapsed_ms), LOCK_WAIT_PER_CALL_MS)
+        result = invoke_daemon(
+            "runpane:locks:acquire",
+            [{**request, "waitMs": call_wait_ms}],
+            pane_dir=parsed.pane_dir,
+            timeout_ms=call_wait_ms + 15_000,
+        )
+        # Only a call that waited out its whole window without the lock coming free chains another.
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        if result.get("ok") or not result.get("timedOut") or elapsed_ms >= wait_ms:
+            break
+    result = {**result, "waitedMs": int((time.monotonic() - started_at) * 1000)}
+    if parsed.json:
+        print_json(result)
+    elif result.get("ok"):
+        action = "Renewed" if result.get("renewed") else "Acquired"
+        print(f"{action} lock {format_lock_line(result.get('lock') or {})}")
+    else:
+        lock = result.get("lock") or {}
+        note = f" ({lock.get('note')})" if lock.get("note") else ""
+        print(f"Lock {lock.get('name')} is held by {format_lock_owner(result.get('heldBy') or {})} until {result.get('expiresAt')}{note}.")
+    return 0 if result.get("ok") else 1
+
+
+def run_lock_release(parsed: Any) -> int:
+    name = _require_lock_name(parsed, "release")
+    request: Dict[str, Any] = {
+        "name": name,
+        **optional_value("force", True if parsed.force else None),
+        **optional_value("sessionId", (parsed.session_id or "").strip() or None),
+        "owner": _lock_owner(parsed, bool(parsed.force)),
+    }
+    result = invoke_daemon("runpane:locks:release", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    elif not result.get("ok"):
+        print(
+            f"Lock {name} is held by {format_lock_owner(result.get('heldBy') or {})} until {result.get('expiresAt')}; "
+            "only its owner can release it. Rerun with --force to release it anyway."
+        )
+    elif result.get("released"):
+        print(f"{'Force-released' if result.get('forced') else 'Released'} lock {name}.")
+    else:
+        print(f"Lock {name} was not held.")
+    return 0 if result.get("ok") else 1
+
+
+def run_lock_list(parsed: Any) -> int:
+    request = optional_value("sessionId", (parsed.session_id or "").strip() or None)
+    result = invoke_daemon("runpane:locks:list", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+        return 0
+    locks = result.get("locks") or []
+    for lock in locks:
+        print(format_lock_line(lock))
+    if not locks:
+        print("No locks held.")
+    return 0
+
+
+def _require_lock_name(parsed: Any, action: str) -> str:
+    name = (parsed.name or "").strip()
+    if not name:
+        raise ValueError(f"runpane lock {action} requires --name <name>.")
+    return name
+
+
+def _lock_owner(parsed: Any, forced: bool) -> Dict[str, Any]:
+    """The caller owns the lock: --pane/--panel, else $PANE_SESSION_ID/$PANE_PANEL_ID; outside Pane, --note."""
+    explicit = bool(parsed.pane_id or parsed.panel_id)
+    pane_id = parsed.pane_id if explicit else (os.environ.get("PANE_SESSION_ID") or "").strip() or None
+    panel_id = parsed.panel_id if explicit else (os.environ.get("PANE_PANEL_ID") or "").strip() or None
+    if pane_id or panel_id:
+        return {**optional_value("paneId", pane_id), **optional_value("panelId", panel_id)}
+    label = (parsed.note or "").strip()
+    if not label and not forced:
+        raise ValueError(
+            "Outside a Pane terminal, pass --note <text> to say who holds the lock "
+            "(or --pane/--panel to act for a Pane)."
+        )
+    return optional_value("label", label or None)
+
+
+def format_lock_owner(owner: Dict[str, Any]) -> str:
+    if owner.get("kind") == "external":
+        return f'external "{owner.get("label") or ""}"'
+    if owner.get("panelId"):
+        return f"pane {owner.get('paneId')} panel {owner.get('panelId')}"
+    return f"pane {owner.get('paneId')}"
+
+
+def format_lock_line(lock: Dict[str, Any]) -> str:
+    scope = f"session {lock.get('sessionId')}" if lock.get("scope") == "session" else "global"
+    note = f" ({lock.get('note')})" if lock.get("note") else ""
+    return (
+        f"{lock.get('name')} [{scope}] held by {format_lock_owner(lock.get('owner') or {})} "
+        f"until {lock.get('expiresAt')}{note}"
+    )
 
 
 def _session_selector(parsed: Any) -> Dict[str, str]:
@@ -236,15 +361,22 @@ def run_watch(parsed: Any) -> int:
         idle_after_ms = defaults["idleAfterMs"] if parsed.follow else 0
     effective_agents_only = None if parsed.include_shells else (True if parsed.agents_only or parsed.follow else None)
     include_held_input = True if parsed.include_held_input and not parsed.no_held_input else None
+    # Lines mode turns presence into STUCK; JSON mode passes heldInputPresent through as the equivalent.
     include_held_input_presence = (
         True if defaults["includeHeldInputPresence"]
-        and not parsed.no_held_input and parsed.follow and output_format == "lines" else None
+        and not parsed.no_held_input and parsed.follow else None
     )
     cadence_value_flag_present = has_cadence_value_flag(parsed)
     # Cadence state lives in the daemon per named consumer, so an anonymous follower names itself.
+    # A Session watch is named after the Session, so it survives an orchestrator agent switch.
     watch_as = parsed.watch_as
     if watch_as is None and parsed.follow:
-        watch_as = os.environ.get("PANE_PANEL_ID") or (f"follow-{os.getpid()}" if cadence_value_flag_present else None)
+        session_cursor = session_watch_cursor_name(parsed.session_id) if parsed.session_id else None
+        panel_id = os.environ.get("PANE_PANEL_ID")
+        panel_cursor = derived_watch_cursor_name("panel", panel_id) if panel_id else None
+        watch_as = session_cursor or panel_cursor or (f"follow-{os.getpid()}" if cadence_value_flag_present else None)
+    # --quiet drops lines that only prove liveness; --self-test still prints its WATCH OK result.
+    quiet = bool(parsed.quiet)
     request: Dict[str, Any] = {
         **optional_value("as", watch_as),
         **optional_value("since", parsed.watch_since),
@@ -253,6 +385,8 @@ def run_watch(parsed: Any) -> int:
         **optional_value("limit", parsed.limit),
         **optional_value("kinds", parsed.watch_kinds or None),
         **optional_value("paneIds", parsed.watch_pane_ids or None),
+        # The daemon resolves the Session (id or exact name) and re-reads its Panes on every read.
+        **optional_value("session", parsed.session_id),
         **optional_value("excludePaneIds", parsed.watch_exclude_pane_ids or None),
         **optional_value("repo", parsed.repo),
         **optional_value("nameContains", parsed.name_contains),
@@ -313,28 +447,40 @@ def run_watch(parsed: Any) -> int:
                 failing_code = code
                 time.sleep(1)
                 continue
+            if request.get("session") and not result.get("session"):
+                # An older daemon ignores the unknown field and would watch every Pane instead.
+                return emit_watch_failure(
+                    RuntimeError(
+                        "This Pane daemon does not support runpane watch --session; "
+                        "update Pane, or pass one --pane per Session Pane."
+                    ),
+                    output_format,
+                )
             if failing_code:
-                emit_watch_non_entry("_reconnected", output_format, generation=result.get("generation"))
+                if not quiet:
+                    emit_watch_non_entry("_reconnected", output_format, generation=result.get("generation"))
                 failing_code = None
             if not armed and (parsed.follow or parsed.self_test):
-                emit_watch_non_entry(
-                    "_ok",
-                    output_format,
-                    generation=result.get("generation"),
-                    epoch=result.get("epoch"),
-                )
+                if parsed.self_test or not quiet:
+                    emit_watch_non_entry(
+                        "_ok",
+                        output_format,
+                        generation=result.get("generation"),
+                        epoch=result.get("epoch"),
+                    )
                 armed = True
                 if parsed.self_test:
                     return 0
             print_workspace_wait_result(result, output_format)
             now_ms = time.monotonic() * 1_000
             if heartbeat_ms > 0 and now_ms - last_heartbeat_at >= heartbeat_ms:
-                emit_watch_non_entry(
-                    "_heartbeat",
-                    output_format,
-                    generation=result.get("generation"),
-                    at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                )
+                if not quiet:
+                    emit_watch_non_entry(
+                        "_heartbeat",
+                        output_format,
+                        generation=result.get("generation"),
+                        at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    )
                 last_heartbeat_at = now_ms
             if not watch_as:
                 request["since"] = result.get("generation")
@@ -346,6 +492,29 @@ def run_watch(parsed: Any) -> int:
         return 0
 
     return 0
+
+
+# Names older daemons accept; the daemon itself allows up to 128 characters.
+PORTABLE_WATCH_CURSOR_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def derived_watch_cursor_name(prefix: str, name: str) -> str:
+    """Return a derived watch cursor name (built from an ID, not typed by the user) that every daemon accepts.
+
+    A name that is too long or has other characters becomes `<prefix>-<first 12 hex chars of its sha256>`.
+    """
+    if PORTABLE_WATCH_CURSOR_PATTERN.fullmatch(name):
+        return name
+    return f"{prefix}-{hashlib.sha256(name.encode('utf-8')).hexdigest()[:12]}"
+
+
+def session_watch_cursor_name(session: str) -> str:
+    """Default cursor for `watch --session`: `session-<uuid>` for a Session id, `session-<name>` for a name.
+
+    Shortened like any derived name when it is longer than 64 characters or has other characters.
+    """
+    match = re.fullmatch(r"__orchestration_session_(.+)__", session)
+    return derived_watch_cursor_name("session", f"session-{match.group(1) if match else session}")
 
 
 def effective_watch_heartbeat_ms(seconds: float) -> float:
@@ -372,17 +541,21 @@ def run_panes_create(parsed: Any) -> int:
 
 
 def run_panes_archive(parsed: Any) -> int:
+    if parsed.session_id:
+        return run_panes_archive_session(parsed, parsed.session_id)
     if not parsed.pane_id:
-        raise ValueError("runpane panes archive requires --pane.")
+        raise ValueError("runpane panes archive requires --pane (or --session with --merged).")
 
     request: Dict[str, Any] = {
         "paneId": parsed.pane_id,
         **optional_value("force", True if parsed.force else None),
         **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
         **optional_value("dryRun", True if parsed.dry_run else None),
+        **optional_value("removeWorktree", True if parsed.remove_worktree else None),
     }
 
-    confirm_pane_archive(parsed, request)
+    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
+    confirm_pane_archive(parsed, f"Archive pane {request.get('paneId')}{suffix}")
 
     result = invoke_daemon(
         "runpane:panes:archive",
@@ -395,6 +568,35 @@ def run_panes_archive(parsed: Any) -> int:
         print_json(result)
     else:
         print_pane_archive_result(result)
+
+    return 0 if result.get("ok") else 1
+
+
+def run_panes_archive_session(parsed: Any, session_id: str) -> int:
+    if not parsed.merged:
+        raise ValueError("runpane panes archive --session requires --merged.")
+    request: Dict[str, Any] = {
+        "sessionId": session_id,
+        "merged": True,
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+        **optional_value("dryRun", True if parsed.dry_run else None),
+        **optional_value("removeWorktree", True if parsed.remove_worktree else None),
+    }
+
+    confirm_pane_archive(parsed, f"Archive every merged or pushed Pane in Session {session_id}")
+
+    result = invoke_daemon(
+        "runpane:panes:archive",
+        [request],
+        pane_dir=parsed.pane_dir,
+        # Each Pane refreshes its upstream and may wait for its worktree removal.
+        timeout_ms=600_000,
+    )
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print_pane_archive_bulk_result(result)
 
     return 0 if result.get("ok") else 1
 
@@ -511,6 +713,37 @@ def run_panels_create(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_panels_open(parsed: Any) -> int:
+    pane_id = parsed.pane_id or os.environ.get("PANE_SESSION_ID")
+    if not pane_id:
+        raise ValueError("runpane panels open requires --pane (or PANE_SESSION_ID from a Pane terminal).")
+    if bool(parsed.url) == bool(parsed.file):
+        raise ValueError("runpane panels open requires exactly one of --url or --file.")
+    if parsed.no_focus and parsed.focus:
+        raise ValueError("Use either --focus or --no-focus, not both.")
+
+    request = {
+        "paneId": pane_id,
+        **optional_value("url", parsed.url),
+        **optional_value("filePath", parsed.file),
+        **optional_value("title", parsed.title),
+        "placement": parsed.placement or "split",
+        **optional_value("noFocus", True if parsed.no_focus else None),
+        **optional_value("focus", True if parsed.focus else None),
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+    }
+    confirm_panel_open(parsed, request)
+    result = invoke_daemon("runpane:panels:open", [request], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        target = result.get("url") or result.get("filePath") or result.get("title")
+        action = "Reused" if result.get("reused") else "Opened"
+        print(f"{action} {result.get('type')} panel {result.get('panelId')} in pane {result.get('paneId')} ({result.get('placement')}): {target}")
+    return 0
+
+
 def run_panels_output(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels output requires --panel.")
@@ -559,10 +792,77 @@ def run_panels_screen(parsed: Any) -> int:
         print_json(result)
         return 0
 
-    text = result.get("text") or ""
+    text = mark_suggestion_line(result.get("text") or "", (result.get("composer") or {}).get("ghostText"))
     sys.stdout.write(text)
     if text and not text.endswith("\n"):
         sys.stdout.write("\n")
+    return 0
+
+
+def run_panels_last_message(parsed: Any) -> int:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels last-message requires --panel.")
+
+    result = invoke_daemon("runpane:panels:last-message", [{
+        "panelId": parsed.panel_id,
+        "limit": parsed.limit,
+    }], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    elif result.get("ok"):
+        text = result.get("text") or ""
+        sys.stdout.write(text)
+        if text and not text.endswith("\n"):
+            sys.stdout.write("\n")
+        if result.get("truncated"):
+            print(f"(showing the last {result.get('limit')} of {result.get('length')} characters)", file=sys.stderr)
+    else:
+        print(f"{result.get('reason')}: {result.get('message')}", file=sys.stderr)
+    return 0 if result.get("ok") else 1
+
+
+def resolve_report_identity(parsed: Any, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Where a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel."""
+    env = os.environ if env is None else env
+    if parsed.pane_id or parsed.panel_id:
+        if not parsed.panel_id:
+            raise ValueError("runpane report --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.")
+        return {"paneId": parsed.pane_id, "panelId": parsed.panel_id} if parsed.pane_id else {"panelId": parsed.panel_id}
+    panel_id = (env.get("PANE_PANEL_ID") or "").strip()
+    if not panel_id:
+        raise ValueError(
+            "runpane report cannot tell which panel is reporting. Run it inside a Pane terminal "
+            "(which sets PANE_SESSION_ID and PANE_PANEL_ID), or pass --pane <pane-id> --panel <panel-id>."
+        )
+    pane_id = (env.get("PANE_SESSION_ID") or "").strip()
+    return {"paneId": pane_id, "panelId": panel_id} if pane_id else {"panelId": panel_id}
+
+
+# The CLIs send one character past the daemon's 16,000 so it still marks an overlong summary truncated.
+MAX_SENT_SUMMARY_LENGTH = 16_001
+
+
+def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
+    identity = resolve_report_identity(parsed, env)
+    summary = strip_utf8_bom(read_input_source(parsed.summary_file)) if parsed.summary_file is not None else parsed.summary
+    summary_path = os.path.abspath(parsed.summary_file) if parsed.summary_file not in (None, "-") else None
+    request: Dict[str, Any] = {
+        **identity,
+        "state": parsed.report_state,
+        **optional_value("pr", parsed.report_pr),
+        **optional_value("head", parsed.report_head),
+        **optional_value("summary", summary[:MAX_SENT_SUMMARY_LENGTH] if summary is not None else None),
+        **optional_value("summaryPath", summary_path),
+        **optional_value("question", parsed.question),
+    }
+    result = invoke_daemon("runpane:report", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        session_ids = result.get("sessionIds") or []
+        sessions = f" Recorded on Session {', '.join(session_ids)}." if session_ids else ""
+        print(f"Reported {describe_report(result.get('report') or {})} for panel {result.get('panelId')}.{sessions}")
     return 0
 
 
@@ -582,11 +882,41 @@ def run_panels_submit(parsed: Any) -> int:
             f"{verb} {input_bytes} byte{suffix} via {result.get('sequenceName')} "
             f"to panel {result.get('panelId')}.{verified}"
         )
+        print_delivery(result.get("delivery"))
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
+        print_prompt_notes(result)
         if result.get("nextCommand"):
             print(f"Next: {result.get('nextCommand')}")
     return 0 if result.get("ok") else 1
+
+
+def print_delivery(delivery: Optional[Dict[str, Any]], prefix: str = "") -> None:
+    """Where the prompt went, for human output: `Delivery: queued (transcript)`."""
+    if delivery:
+        print(f"{prefix}Delivery: {delivery.get('state')} ({delivery.get('evidence')})")
+
+
+def mark_suggestion_line(text: str, ghost_text: Optional[str]) -> str:
+    """Mark the composer line that shows ghost text (a placeholder or suggested prompt)."""
+    ghost = (ghost_text or "").split("\n")[0].strip()
+    if not ghost:
+        return text
+    lines = text.split("\n")
+    for index in range(len(lines) - 1, -1, -1):
+        line = lines[index].strip()
+        if line[:1] in ("❯", "›", ">") and ghost in line:
+            lines[index] = f"{lines[index].rstrip()}  ⟨suggestion⟩"
+            break
+    return "\n".join(lines)
+
+
+def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
+    """The prompt file Pane wrote and any leading-character warnings, for human output."""
+    if result.get("promptFile"):
+        print(f"{prefix}Prompt file: {result.get('promptFile')}")
+    for warning in result.get("warnings") or []:
+        print(f"{prefix}Warning ({warning.get('code')}): {warning.get('message')}")
 
 
 def run_panels_submit_composer(parsed: Any) -> int:
@@ -605,6 +935,7 @@ def run_panels_submit_composer(parsed: Any) -> int:
         verb = "Submitted" if result.get("ok") else "Could not verify"
         verified = " verified" if result.get("verifiedSubmitted") else " unverified"
         print(f"{verb} composer with {result.get('sequenceName')} to panel {result.get('panelId')}.{verified}")
+        print_delivery(result.get("delivery"))
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
         if result.get("nextCommand"):
@@ -662,15 +993,38 @@ def build_repo_add_request(parsed: Any) -> Dict[str, Any]:
 def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, Any]:
     if not parsed.panel_id:
         raise ValueError(f"runpane panels {command} requires --panel.")
-    if parsed.panel_input is not None and parsed.panel_input_file:
-        raise ValueError("Use either --text or --input-file, not both.")
-    if parsed.panel_input is None and not parsed.panel_input_file:
-        raise ValueError(f"runpane panels {command} requires --text or --input-file.")
+    sources = sum([parsed.panel_input is not None, bool(parsed.panel_input_file), parsed.keys is not None])
+    if sources > 1:
+        raise ValueError("Use only one of --text, --keys, or --input-file.")
+    if sources == 0:
+        raise ValueError(f"runpane panels {command} requires --text, --keys, or --input-file.")
+    if parsed.keys is not None and command != "input":
+        raise ValueError("--keys is for panels input; panels submit sends text followed by Enter.")
+    if parsed.as_file_pointer and command != "submit":
+        raise ValueError("--as-file-pointer is for panels submit; panels input sends exact bytes.")
 
+    if parsed.keys is not None:
+        text = keys_to_bytes(parsed.keys)
+    elif parsed.panel_input_file:
+        text = read_input_source(parsed.panel_input_file)
+    else:
+        text = parsed.panel_input or ""
     return {
         "panelId": parsed.panel_id,
-        "input": read_input_source(parsed.panel_input_file) if parsed.panel_input_file else parsed.panel_input or "",
+        "input": text,
+        **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
     }
+
+
+def keys_to_bytes(keys: Any) -> str:
+    named = RUNPANE_CONTRACT["terminalKeys"]
+    out = []
+    for key in keys:
+        value = named.get(key.lower(), key if len(key) == 1 else None)
+        if value is None:
+            raise ValueError(f'Unknown key "{key}". Use {", ".join(named)}, or a single character.')
+        out.append(value)
+    return "".join(out)
 
 
 def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
@@ -715,12 +1069,16 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         if parsed.concurrency is not None:
             payload["concurrency"] = parsed.concurrency
         pinned_override = resolve_pinned_override(parsed)
-        if pinned_override is not None:
-            payload["panes"] = [
-                {**item, "pinned": pinned_override} if isinstance(item, dict) else item
-                for item in payload.get("panes", [])
-            ]
+        payload["panes"] = [
+            {**item, "pinned": pinned_override if pinned_override is not None else item.get("pinned", not bool(os.environ.get("PANE_ORCHESTRATION_SESSION_ID")))}
+            if isinstance(item, dict) else item
+            for item in payload.get("panes", [])
+        ]
         apply_pane_focus_options(parsed, payload)
+        if parsed.no_associate:
+            payload.pop("associateSession", None)
+        else:
+            payload.update(optional_value("associateSession", resolve_associate_session(parsed)))
         return payload
 
     if not parsed.repo:
@@ -731,13 +1089,14 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         raise ValueError("Use either --focus or --no-focus, not both.")
 
     pinned_override = resolve_pinned_override(parsed)
-    pinned = True if pinned_override is None else pinned_override
+    pinned = not bool(os.environ.get("PANE_ORCHESTRATION_SESSION_ID")) if pinned_override is None else pinned_override
 
     return {
         "repo": parsed.repo,
         "panes": [{
             "name": parsed.name,
             **optional_value("worktreeName", parsed.worktree_name),
+            **optional_value("branch", parsed.branch),
             **optional_value("baseBranch", parsed.base_branch),
             "pinned": pinned,
             "tool": build_tool_spec(parsed),
@@ -750,7 +1109,15 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)) else None),
         **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source),
+        **optional_value("associateSession", resolve_associate_session(parsed)),
     }
+
+
+def resolve_associate_session(parsed: Any) -> Optional[str]:
+    """Inside a Session orchestrator, new Panes join that Session unless --no-associate."""
+    if parsed.no_associate:
+        return None
+    return (os.environ.get("PANE_ORCHESTRATION_SESSION_ID") or "").strip() or None
 
 
 def apply_pane_focus_options(parsed: Any, request: Dict[str, Any]) -> None:
@@ -765,10 +1132,21 @@ def apply_pane_focus_options(parsed: Any, request: Dict[str, Any]) -> None:
 
 
 def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any]:
-    if parsed.agent and parsed.tool_command:
-        raise ValueError("Use either --agent or --tool-command, not both.")
-
     initial_input = resolve_initial_input(parsed)
+    if parsed.as_file_pointer and initial_input is None:
+        raise ValueError(f"--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane {command}.")
+    file_pointer = optional_value("initialInputAsFilePointer", True if parsed.as_file_pointer else None)
+
+    # With --tool-command, --agent names the agent the command runs (a wrapper
+    # such as `agent-farm run`); Pane launches the command unchanged.
+    if parsed.tool_command and parsed.agent:
+        return {
+            "command": parsed.tool_command,
+            "agentType": parsed.agent,
+            **optional_value("title", parsed.title),
+            **optional_value("initialInput", initial_input),
+            **file_pointer,
+        }
     agent = parsed.agent
 
     if not agent and not parsed.tool_command:
@@ -781,6 +1159,7 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
             "agent": agent,
             **optional_value("title", parsed.title),
             **optional_value("initialInput", initial_input),
+            **file_pointer,
         }
 
     if not parsed.tool_command:
@@ -790,12 +1169,13 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
         "command": parsed.tool_command,
         **optional_value("title", parsed.title),
         **optional_value("initialInput", initial_input),
+        **file_pointer,
     }
 
 
 def resolve_initial_input(parsed: Any) -> Optional[str]:
     if parsed.initial_input and parsed.initial_input_file:
-        raise ValueError("Use either --initial-input/--prompt or --initial-input-file, not both.")
+        raise ValueError("Use either --initial-input/--prompt or --initial-input-file/--prompt-file, not both.")
     if parsed.initial_input_file:
         return read_input_source(parsed.initial_input_file)
     return parsed.initial_input
@@ -825,14 +1205,13 @@ def confirm_pane_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
-def confirm_pane_archive(parsed: Any, request: Dict[str, Any]) -> None:
+def confirm_pane_archive(parsed: Any, question: str) -> None:
     if parsed.dry_run or parsed.yes:
         return
     if not is_interactive_shell():
         raise ValueError("runpane panes archive mutates Pane state. Rerun with --yes in non-interactive shells.")
 
-    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
-    answer = input(f"Archive pane {request.get('paneId')}{suffix}? [y/N] ").strip().lower()
+    answer = input(f"{question}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 
@@ -869,6 +1248,18 @@ def confirm_pane_focus(parsed: Any, request: Dict[str, Any]) -> None:
 
     panel_suffix = f" (panel {request.get('panelId')})" if request.get("panelId") else ""
     answer = input(f"Focus pane {request.get('paneId')}{panel_suffix}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def confirm_panel_open(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels open mutates Pane state. Rerun with --yes in non-interactive shells.")
+
+    target = request.get("url") or request.get("filePath")
+    answer = input(f"Open {target} in pane {request.get('paneId')}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 
@@ -998,7 +1389,43 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"EXIT {name} {pane}{panel} code {code}"
     if kind in {"pane.created", "pane.gone"}:
         return f"{workspace_label(kind)} {name} {pane}"
+    if kind in {"pane.associated", "pane.detached"}:
+        return f"{workspace_label(kind)} {name} {pane} session {sanitize_watch_value(entry.get('sessionId') or '')}"
+    if kind in {"pr.conflicted", "pr.checks", "pr.merged"}:
+        return format_pr_entry_line(kind, f"PR {name} {pane} #{(entry.get('pr') or {}).get('number', '?')}", entry)
+    if kind == "agent.report":
+        report = entry.get("report")
+        return f"REPORT {name} {pane}{panel} {describe_report(report) if report else 'unknown'}"
     return f"{workspace_label(kind)} {name} {pane}{panel}"
+
+
+def format_pr_entry_line(kind: str, prefix: str, entry: Dict[str, Any]) -> str:
+    if kind == "pr.conflicted":
+        return f"{prefix} CONFLICTED"
+    if kind == "pr.merged":
+        return f"{prefix} MERGED"
+    if entry.get("checks") != "failed":
+        return f"{prefix} CHECKS PASSED"
+    # Failing names are joined by commas, so their own spaces and commas become underscores.
+    names = [re.sub(r"[ ,]", "_", sanitize_watch_value(check)) for check in entry.get("failingChecks") or []]
+    return f"{prefix} CHECKS FAILED" + (f" {','.join(names)}" if names else "")
+
+
+MAX_LINE_QUESTION_LENGTH = 200
+
+
+def describe_report(report: Dict[str, Any]) -> str:
+    """`ready pr#747 fc5dce9`, or `blocked pr#747: <question>` cut to 200 characters."""
+    parts = [sanitize_watch_value(report.get("state"))]
+    if report.get("pr") is not None:
+        parts.append(f"pr#{report.get('pr')}")
+    if report.get("head"):
+        parts.append(sanitize_watch_value(report.get("head"))[:7])
+    question = sanitize_watch_value(report.get("question")) if report.get("question") else ""
+    if not question:
+        return " ".join(parts)
+    shown = f"{question[:MAX_LINE_QUESTION_LENGTH - 1]}…" if len(question) > MAX_LINE_QUESTION_LENGTH else question
+    return f"{' '.join(parts)}: {shown}"
 
 
 def emit_watch_non_entry(kind: str, output_format: str, **fields: Any) -> None:
@@ -1036,6 +1463,12 @@ def workspace_label(kind: Any) -> str:
         "pane.created": "NEW",
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
+        "pane.associated": "JOINED",
+        "pane.detached": "LEFT",
+        "pr.conflicted": "PR CONFLICTED",
+        "pr.checks": "PR CHECKS",
+        "pr.merged": "PR MERGED",
+        "agent.report": "REPORT",
     }.get(kind, str(kind).upper())
 
 
@@ -1112,6 +1545,14 @@ def print_pane_create_result(result: Dict[str, Any]) -> None:
                 blocked = readiness.get("blocked")
                 if blocked:
                     print(f"  Blocked: {blocked.get('message')}")
+            association = item.get("association")
+            if association:
+                if association.get("ok"):
+                    print(f"  Associated with Session {association.get('sessionId')}")
+                else:
+                    print(f"  Not associated with Session {association.get('sessionId')}: {association.get('error', 'unknown error')}")
+            print_delivery((item.get("initialInput") or {}).get("delivery"), "  ")
+            print_prompt_notes(item, "  ")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")
         else:
@@ -1138,15 +1579,55 @@ def print_pane_archive_result(result: Dict[str, Any]) -> None:
         return
 
     forced = " (forced)" if result.get("forced") else ""
-    print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}.")
+    trash = " (files are still being deleted in the background)" if result.get("trashDeletion") == "pending" else ""
+    print(f"Archived pane {result.get('paneId')}{forced}. Worktree cleanup: {result.get('worktreeCleanup')}{trash}.")
+    print_archive_skip_reason(result.get("safetyCheck") or {})
+    merged = (result.get("safetyCheck") or {}).get("mergedViaPr")
+    if merged:
+        print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')}).")
+
+
+def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
+    verb = "Would archive" if result.get("dryRun") else "Archived"
+    print(
+        f"{verb} {result.get('archived')} Pane(s) in Session {result.get('sessionId')}; "
+        f"skipped {result.get('skipped')}; failed {result.get('failed')}."
+    )
+    for item in result.get("items") or []:
+        label = f"{item.get('name')} ({item.get('paneId')})" if item.get("name") else item.get("paneId")
+        outcome = item.get("outcome")
+        if outcome == "skipped":
+            skipped = item.get("skipped") or {}
+            print(f"  skipped {label}: {skipped.get('code', 'unknown')} - {skipped.get('message', '')}")
+        elif outcome == "failed":
+            print(f"  failed {label}: {item.get('error') or 'unknown error'}", file=sys.stderr)
+        else:
+            merged_pr = (item.get("safetyCheck") or {}).get("mergedViaPr")
+            merged = f" merged via PR #{merged_pr.get('number')}" if merged_pr else ""
+            trash = ", files deleting in background" if item.get("trashDeletion") == "pending" else ""
+            cleanup = f" worktree {item.get('worktreeCleanup')}{trash}" if item.get("worktreeCleanup") else ""
+            print(f"  {outcome} {label}{merged}{cleanup}")
+
+
+def print_archive_skip_reason(safety_check: Dict[str, Any], file: Any = None) -> None:
+    reason = safety_check.get("reason")
+    if not reason:
+        return
+    remains = "; the worktree stays on disk" if safety_check.get("worktreeWillRemain") else ""
+    print(f"Safety check skipped: {reason}{remains}.", file=file if file is not None else sys.stdout)
 
 
 def print_archive_commit_evidence(safety_check: Dict[str, Any], file: Any = None) -> None:
     destination = file if file is not None else sys.stdout
+    print_archive_skip_reason(safety_check, destination)
     upstream = safety_check.get("upstream")
     if upstream:
         refreshed = " (refreshed)" if safety_check.get("upstreamRefreshed") else ""
-        print(f"Upstream: {upstream}{refreshed}", file=destination)
+        gone = " (gone from the remote)" if safety_check.get("upstreamGone") else ""
+        print(f"Upstream: {upstream}{refreshed}{gone}", file=destination)
+    merged = safety_check.get("mergedViaPr")
+    if merged:
+        print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')})", file=destination)
     for commit in safety_check.get("unpushedCommitDetails") or []:
         print(f"Unpushed: {commit.get('sha')} {commit.get('subject')}", file=destination)
 
@@ -1161,6 +1642,7 @@ def print_panel_create_result(result: Dict[str, Any]) -> None:
         blocked = readiness.get("blocked")
         if blocked:
             print(f"Blocked: {blocked.get('message')}")
+    print_prompt_notes(result)
     if result.get("nextCommand"):
         print(f"Next: {result.get('nextCommand')}")
 
@@ -1219,7 +1701,9 @@ def print_panel_list_result(result: Dict[str, Any]) -> None:
         if panel.get("initialized") is not None:
             initialized = " initialized" if panel.get("initialized") else " not-initialized"
         agent = f" {panel.get('agentType')}" if panel.get("agentType") else ""
-        print(f"{marker} {panel.get('id')}\t{panel.get('type')}\t{panel.get('title')}{initialized}{agent}")
+        detection = panel.get("agentDetection")
+        detection_label = f" ({detection})" if detection and detection != "command" else ""
+        print(f"{marker} {panel.get('id')}\t{panel.get('type')}\t{panel.get('title')}{initialized}{agent}{detection_label}")
 
 
 def optional_value(key: str, value: Any) -> Dict[str, Any]:

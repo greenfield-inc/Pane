@@ -73,7 +73,7 @@ export class CommandExecutor {
       if (!silentMode) {
         console.log(`[CommandExecutor] Executing async (WSL): ${file} ${args.join(' ')} in ${cwd}`);
       }
-      const timeout = cleanOptions?.timeout || 60_000;
+      const timeout = cleanOptions?.timeout ?? 60_000;
       const maxBuffer = cleanOptions?.maxBuffer || 10 * 1024 * 1024;
       const wslOptions: ExecFileOptions = {
         ...cleanOptions,
@@ -107,7 +107,7 @@ export class CommandExecutor {
       console.log(`[CommandExecutor] Executing async: ${command} in ${cwd}`);
     }
 
-    const timeout = options?.timeout || 60_000;
+    const timeout = options?.timeout ?? 60_000;
     const maxBuffer = options?.maxBuffer || 10 * 1024 * 1024;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { silent: _silent, ...cleanOptions } = options || {};

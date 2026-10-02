@@ -107,7 +107,7 @@ const CommitRow = memo(function CommitRow({
   const row = (
       <Row
         {...(onClick ? { type: 'button' as const } : {})}
-        className={`flex items-stretch gap-1.5 w-full text-left rounded-sm min-w-0 ${layout === 'wide' ? (onClick ? 'hover:bg-surface-secondary cursor-pointer transition-colors' : '') : `hover:bg-surface-secondary ${onClick ? 'cursor-pointer' : 'cursor-default'} transition-colors`}`}
+        className={`flex items-stretch gap-1.5 w-full text-left rounded-sm min-w-0 ${layout === 'wide' ? (onClick ? 'hover:bg-surface-secondary cursor-default transition-colors' : '') : `hover:bg-surface-secondary cursor-default transition-colors`}`}
         onClick={onClick ? () => onClick(entry.hash) : undefined}
       >
         {/* Graph rail: vertical line with commit node */}

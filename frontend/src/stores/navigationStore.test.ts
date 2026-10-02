@@ -68,4 +68,16 @@ describe('navigationStore project expansion', () => {
     expect(useNavigationStore.getState().toggleProjectExpanded(1)).toEqual([1, 3]);
     expect(useNavigationStore.getState().toggleProjectExpanded(3)).toEqual([1]);
   });
+
+  it('adopts the new host expansion after a host switch without auto-expanding its repositories', async () => {
+    const { useNavigationStore } = await loadNavigationStore();
+    useNavigationStore.getState().hydrateExpandedProjects([1]);
+    useNavigationStore.getState().registerProjectIds([1, 2]);
+
+    useNavigationStore.getState().resetExpandedProjectsForHost([7]);
+
+    expect(useNavigationStore.getState().registerProjectIds([5, 6, 7])).toBeNull();
+    expect(Array.from(useNavigationStore.getState().expandedProjects)).toEqual([7]);
+    expect(useNavigationStore.getState().registerProjectIds([5, 6, 7, 8])).toEqual([7, 8]);
+  });
 });

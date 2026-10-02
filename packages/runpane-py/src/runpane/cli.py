@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import os
+import re
 import socket
 import sys
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from .agent_context import run_agent_context
+from .daemon_actions import contract_command, run_daemon_action, run_links_create
 from .doctor import run_doctor
 from .download import download_artifact
 from .generated_contract import RUNPANE_CONTRACT
@@ -22,8 +24,12 @@ from .installers import (
 from .local_control import (
     has_cadence_value_flag,
     run_agents_doctor,
+    run_lock_acquire,
+    run_lock_list,
+    run_lock_release,
     run_panels_create,
     run_panels_input,
+    run_panels_last_message,
     run_panels_list,
     run_panels_output,
     run_panels_screen,
@@ -33,12 +39,14 @@ from .local_control import (
     run_panes_archive,
     run_panes_create,
     run_panes_focus,
+    run_panels_open,
     run_panes_cost,
     run_panes_list,
     run_panes_pin,
     run_panes_rename,
     run_repos_add,
     run_repos_list,
+    run_report,
     run_sessions_associate,
     run_sessions_create,
     run_sessions_detach,
@@ -75,6 +83,10 @@ CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
+COMMAND_GROUP_HELP_TOPICS.add("lock")
+LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
+LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
+MAX_LOCK_DURATION_MS = 86_400_000
 
 REMOTE_VALUE_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteValue"]}
 REMOTE_BOOLEAN_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteBoolean"]}
@@ -88,7 +100,14 @@ LOCAL_BOOLEAN_FLAGS = {
     for flag in RUNPANE_CONTRACT["flags"]["localBoolean"]
     for value in [flag["name"], *flag.get("aliases", [])]
 }
+INLINE_VALUE_FLAGS = {
+    *LOCAL_VALUE_FLAGS,
+    *(flag["name"] for flag in RUNPANE_CONTRACT["flags"]["wrapper"] if "value" in flag),
+    "--command",
+}
 DEFAULTS = RUNPANE_CONTRACT["defaults"]
+REPORT_STATES = ["ready", "blocked", "failed", "done"]
+HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
 @dataclass
@@ -113,12 +132,17 @@ class ParsedArgs:
     repo_path: Optional[str] = None
     name: Optional[str] = None
     worktree_name: Optional[str] = None
+    branch: Optional[str] = None
     base_branch: Optional[str] = None
     agent: Optional[str] = None
     tool_command: Optional[str] = None
     title: Optional[str] = None
+    url: Optional[str] = None
+    file: Optional[str] = None
+    placement: Optional[str] = None
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
+    as_file_pointer: bool = False
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
@@ -135,8 +159,11 @@ class ParsedArgs:
     focus: bool = False
     pinned: bool = False
     no_pinned: bool = False
+    no_associate: bool = False
     composer_strategy: Optional[str] = None
     force: bool = False
+    remove_worktree: bool = False
+    merged: bool = False
     watch_as: Optional[str] = None
     watch_since: Optional[int] = None
     watch_from: Optional[str] = None
@@ -159,8 +186,26 @@ class ParsedArgs:
     include_shells: bool = False
     no_held_input: bool = False
     self_test: bool = False
+    quiet: bool = False
     report: bool = False
     body_file: Optional[str] = None
+    message: Optional[str] = None
+    query: Optional[str] = None
+    doc: Optional[str] = None
+    url: Optional[str] = None
+    folder: Optional[str] = None
+    keys: Optional[List[str]] = None
+    toolsets: Optional[List[str]] = None
+    read_only: bool = False
+    report_state: Optional[str] = None
+    report_pr: Optional[int] = None
+    report_head: Optional[str] = None
+    summary: Optional[str] = None
+    summary_file: Optional[str] = None
+    question: Optional[str] = None
+    lock_ttl_ms: Optional[int] = None
+    lock_wait_ms: Optional[int] = None
+    note: Optional[str] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -215,6 +260,15 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_daemon_repair(parsed)
     if parsed.command == "agent-context":
         return run_agent_context(parsed)
+    command_spec = contract_command(parsed.command)
+    if "pip" not in command_spec.get("wrappers", ["npm", "pip"]):
+        # Contract-documented npm-only commands (the MCP server, docs search, agent tasks).
+        print(help_text(parsed.command), file=sys.stderr)
+        return 2
+    if "daemonAction" in command_spec:
+        return run_daemon_action(parsed, command_spec["daemonAction"])
+    if parsed.command == "links create":
+        return run_links_create(parsed)
     if parsed.command == "repos list":
         return run_repos_list(parsed)
     if parsed.command == "repos add":
@@ -235,6 +289,12 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_sessions_detach(parsed)
     if parsed.command == "sessions overview":
         return run_sessions_overview(parsed)
+    if parsed.command == "lock acquire":
+        return run_lock_acquire(parsed)
+    if parsed.command == "lock release":
+        return run_lock_release(parsed)
+    if parsed.command == "lock list":
+        return run_lock_list(parsed)
     if parsed.command == "panes list":
         return run_panes_list(parsed)
     if parsed.command == "panes cost":
@@ -259,6 +319,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_list(parsed)
     if parsed.command == "panels create":
         return run_panels_create(parsed)
+    if parsed.command == "panels open":
+        return run_panels_open(parsed)
     if parsed.command == "panels output":
         return run_panels_output(parsed)
     if parsed.command == "panels input":
@@ -271,6 +333,10 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_submit_composer(parsed)
     if parsed.command == "panels wait":
         return run_panels_wait(parsed)
+    if parsed.command == "panels last-message":
+        return run_panels_last_message(parsed)
+    if parsed.command == "report":
+        return run_report(parsed)
     if parsed.command == "agents doctor":
         return run_agents_doctor(parsed)
     if parsed.command in {"install", "update"}:
@@ -369,30 +435,14 @@ def run_interactive_wizard(telemetry_context: WrapperTelemetryContext) -> int:
     label = input(f"Remote host label [{default_label}]: ").strip() or default_label
 
     print()
-    print("Connection method:")
-    print("1) auto")
-    print("2) tailscale")
-    print("3) ssh")
-    print("4) manual")
-    print()
-    print("Use auto unless you already know you want Tailscale, SSH, or a manual URL.")
-    print()
-
-    tunnel = ask_choice("Choose a connection method [1]: ", {
-        "": "auto",
-        "1": "auto",
-        "auto": "auto",
-        "2": "tailscale",
-        "tailscale": "tailscale",
-        "3": "ssh",
-        "ssh": "ssh",
-        "4": "manual",
-        "manual": "manual",
-    })
-
-    remote_setup_args = ["--label", label]
-    if tunnel != "auto":
-        remote_setup_args.extend(["--prefer-tunnel", tunnel])
+    print("Pane will install Tailscale if needed and guide you through signing in.")
+    print("For SSH or a manual URL, use runpane install daemon --help.")
+    remote_setup_args = [
+        "--label", label,
+        "--prefer-tunnel", "tailscale",
+        "--interactive-tailscale-setup",
+        "--auto-listen-port",
+    ]
 
     print()
     print("Setting up this machine as a Pane remote host...")
@@ -458,6 +508,17 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         parsed.target = "client"
 
     parse_flags(args, parsed)
+    if parsed.command == "panes archive":
+        validate_panes_archive_args(parsed)
+    if parsed.command == "watch" and parsed.follow and parsed.timeout_ms == 0:
+        raise ValueError("--timeout-ms must be greater than 0 with --follow.")
+    if parsed.command == "watch" and parsed.session_id is not None and parsed.watch_pane_ids:
+        raise ValueError(
+            "runpane watch accepts either --session or --pane, not both; "
+            "--session already follows every Pane in the Session."
+        )
+    if parsed.command == "watch" and parsed.session_id is not None and parsed.all_managed:
+        raise ValueError("runpane watch accepts either --session or --all-managed, not both.")
     if parsed.command == "watch" and parsed.all_managed and parsed.watch_pane_ids:
         raise ValueError("runpane watch accepts either --all-managed or --pane, not both.")
     if parsed.command == "watch" and parsed.json and parsed.watch_format == "lines":
@@ -469,7 +530,42 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         raise ValueError(
             "runpane watch accepts either --since or --settle/--blocked-settle/--min-interval, not both (cadence needs a named cursor)."
         )
+    if parsed.command == "report":
+        validate_report_args(parsed)
     return parsed
+
+
+def validate_report_args(parsed: ParsedArgs) -> None:
+    if not parsed.report_state:
+        raise ValueError(f"runpane report requires --state <{'|'.join(REPORT_STATES)}>.")
+    if parsed.summary is not None and parsed.summary_file is not None:
+        raise ValueError("runpane report accepts either --summary or --summary-file, not both.")
+    if parsed.report_state == "blocked" and not (parsed.question or "").strip():
+        raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
+
+
+def validate_panes_archive_args(parsed: ParsedArgs) -> None:
+    if parsed.pane_id and parsed.session_id:
+        raise ValueError("runpane panes archive accepts either --pane or --session, not both.")
+    if parsed.merged and not parsed.session_id:
+        raise ValueError("--merged requires --session.")
+    if parsed.session_id and not parsed.merged:
+        raise ValueError("runpane panes archive --session requires --merged.")
+    if parsed.session_id and parsed.force:
+        raise ValueError(
+            "runpane panes archive --session does not accept --force; archive one Pane with --pane to discard its work."
+        )
+
+
+def parse_lock_ttl(value: str) -> int:
+    """A lock TTL such as 90s, 30m, or 2h; a bare number is milliseconds."""
+    match = LOCK_DURATION_PATTERN.match(value.strip())
+    if not match:
+        raise ValueError("--ttl must be a duration such as 90s, 30m, or 2h (a bare number is milliseconds).")
+    ttl_ms = int(match.group(1)) * LOCK_DURATION_UNIT_MS[match.group(2) or "ms"]
+    if ttl_ms < 1_000 or ttl_ms > MAX_LOCK_DURATION_MS:
+        raise ValueError("--ttl must be between 1s and 24h.")
+    return ttl_ms
 
 
 def parse_non_negative_int_flag(flag: str, value: str) -> int:
@@ -482,7 +578,23 @@ def parse_non_negative_int_flag(flag: str, value: str) -> int:
     return parsed
 
 
-def parse_flags(args: List[str], parsed: ParsedArgs) -> None:
+def split_inline_values(raw_args: List[str]) -> Tuple[List[str], Set[int]]:
+    """Split `--flag=value` for runpane's own value flags; such values are literal even if they start with "-"."""
+    args: List[str] = []
+    literal_values: Set[int] = set()
+    for arg in raw_args:
+        flag, separator, value = arg.partition("=")
+        if separator and flag in INLINE_VALUE_FLAGS:
+            args.append(flag)
+            literal_values.add(len(args))
+            args.append(value)
+        else:
+            args.append(arg)
+    return args, literal_values
+
+
+def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
+    args, literal_values = split_inline_values(raw_args)
     index = 0
     while index < len(args):
         arg = args[index]
@@ -501,30 +613,34 @@ def parse_flags(args: List[str], parsed: ParsedArgs) -> None:
             parsed.json = True
         elif is_agent_context_command and arg == "--command":
             index += 1
-            parsed.context_command = read_value(args, index, arg)
+            parsed.context_command = read_value(args, index, arg, literal_values)
+        elif (is_agent_context_command or parsed.command == "version") and arg == "--pane-dir":
+            # Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
+            index += 1
+            parsed.pane_dir = read_value(args, index, arg, literal_values)
         elif is_local_command and arg in LOCAL_BOOLEAN_FLAGS:
             parse_local_boolean_flag(parsed, arg)
         elif is_local_command and arg in LOCAL_VALUE_FLAGS:
             index += 1
-            parse_local_value_flag(parsed, arg, read_value(args, index, arg))
+            parse_local_value_flag(parsed, arg, read_value(args, index, arg, literal_values))
         elif arg == "--version":
             index += 1
-            parsed.pane_version = read_value(args, index, arg)
+            parsed.pane_version = read_value(args, index, arg, literal_values)
         elif arg == "--download-dir":
             index += 1
-            parsed.download_dir = read_value(args, index, arg)
+            parsed.download_dir = read_value(args, index, arg, literal_values)
         elif arg == "--pane-path":
             index += 1
-            parsed.pane_path = read_value(args, index, arg)
+            parsed.pane_path = read_value(args, index, arg, literal_values)
         elif arg == "--format":
             index += 1
-            value = read_value(args, index, arg)
+            value = read_value(args, index, arg, literal_values)
             if value not in FORMATS:
                 raise ValueError(f"Invalid --format {value}. Expected one of: {', '.join(sorted(FORMATS))}")
             parsed.format = value
         elif arg in REMOTE_VALUE_FLAGS:
             index += 1
-            value = read_value(args, index, arg)
+            value = read_value(args, index, arg, literal_values)
             if arg == "--channel":
                 if value not in CHANNELS:
                     raise ValueError(f"Invalid --channel {value}. Expected stable or nightly.")
@@ -568,14 +684,32 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--focus":
         parsed.focus = True
         return
+    if flag in {"--split", "--tab"}:
+        placement = flag[2:]
+        if parsed.placement and parsed.placement != placement:
+            raise ValueError("Use either --split or --tab, not both.")
+        parsed.placement = placement
+        return
     if flag == "--pinned":
         parsed.pinned = True
         return
     if flag == "--no-pinned":
         parsed.no_pinned = True
         return
+    if flag == "--no-associate":
+        parsed.no_associate = True
+        return
     if flag == "--force":
         parsed.force = True
+        return
+    if flag == "--as-file-pointer":
+        parsed.as_file_pointer = True
+        return
+    if flag == "--remove-worktree":
+        parsed.remove_worktree = True
+        return
+    if flag == "--merged":
+        parsed.merged = True
         return
     if flag == "--follow":
         parsed.follow = True
@@ -604,8 +738,16 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--self-test":
         parsed.self_test = True
         return
+    if flag in {"--quiet", "--no-control-lines"}:
+        if parsed.command != "watch":
+            raise ValueError(f"{flag} is only valid with runpane watch.")
+        parsed.quiet = True
+        return
     if flag == "--report":
         parsed.report = True
+        return
+    if flag == "--read-only":
+        parsed.read_only = True
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
@@ -635,13 +777,22 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--path":
         parsed.repo_path = value
         return
+    if flag == "--url":
+        parsed.url = value
+        return
+    if flag == "--file":
+        parsed.file = value
+        return
     if flag == "--name":
         parsed.name = value
         return
     if flag == "--worktree-name":
         parsed.worktree_name = value
         return
-    if flag == "--base-branch":
+    if flag == "--branch":
+        parsed.branch = value
+        return
+    if flag in {"--base-branch", "--base"}:
         parsed.base_branch = value
         return
     if flag == "--agent":
@@ -664,7 +815,7 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--input-file":
         parsed.panel_input_file = value
         return
-    if flag == "--initial-input-file":
+    if flag in {"--initial-input-file", "--prompt-file"}:
         parsed.initial_input_file = value
         return
     if flag == "--from-json":
@@ -784,10 +935,70 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--body-file":
         parsed.body_file = value
         return
+    if flag == "--message":
+        parsed.message = value
+        return
+    if flag == "--query":
+        parsed.query = value
+        return
+    if flag == "--doc":
+        parsed.doc = value
+        return
+    if flag == "--url":
+        parsed.url = value
+        return
+    if flag == "--folder":
+        parsed.folder = value
+        return
+    if flag == "--keys":
+        parsed.keys = [key.strip() for key in value.split(",") if key.strip()]
+        return
+    if flag == "--toolsets":
+        parsed.toolsets = [name.strip() for name in value.split(",") if name.strip()]
+        return
+    if flag == "--state":
+        if value not in REPORT_STATES:
+            raise ValueError(f"--state must be one of: {', '.join(REPORT_STATES)}.")
+        parsed.report_state = value
+        return
+    if flag == "--pr":
+        if not re.fullmatch(r"[0-9]+", value) or int(value) <= 0 or int(value) > 9007199254740991:
+            raise ValueError("--pr must be a positive integer.")
+        parsed.report_pr = int(value)
+        return
+    if flag == "--head":
+        if not HEAD_PATTERN.fullmatch(value):
+            raise ValueError("--head must be a commit SHA of 7 to 40 hex characters.")
+        parsed.report_head = value.lower()
+        return
+    if flag == "--summary":
+        parsed.summary = value
+        return
+    if flag == "--summary-file":
+        parsed.summary_file = value
+        return
+    if flag == "--question":
+        parsed.question = value
+        return
+    if flag == "--ttl":
+        parsed.lock_ttl_ms = parse_lock_ttl(value)
+        return
+    if flag == "--wait":
+        wait_ms = parse_non_negative_int_flag(flag, value)
+        if wait_ms > MAX_LOCK_DURATION_MS:
+            raise ValueError("--wait must be at most 86400000 (24h).")
+        parsed.lock_wait_ms = wait_ms
+        return
+    if flag == "--note":
+        parsed.note = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
 def is_runpane_local_command(command: str) -> bool:
+    # Every command that maps to a daemon channel takes local flags.
+    if any(entry["name"] == command and "daemonAction" in entry for entry in RUNPANE_CONTRACT["commands"]):
+        return True
     return command in {
         "doctor",
         "daemon repair",
@@ -801,6 +1012,9 @@ def is_runpane_local_command(command: str) -> bool:
         "sessions associate",
         "sessions detach",
         "sessions overview",
+        "lock acquire",
+        "lock release",
+        "lock list",
         "workspace state",
         "watch",
         "panes list",
@@ -812,6 +1026,7 @@ def is_runpane_local_command(command: str) -> bool:
         "panes rename",
         "panes focus",
         "panels create",
+        "panels open",
         "panels list",
         "panels output",
         "panels input",
@@ -819,7 +1034,16 @@ def is_runpane_local_command(command: str) -> bool:
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels last-message",
+        "report",
         "agents doctor",
+        "agents start",
+        "agents status",
+        "agents send",
+        "links create",
+        "docs search",
+        "docs read",
+        "mcp",
     }
 
 
@@ -832,7 +1056,9 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
     raise ValueError(f'{flag} is only valid with "runpane install daemon".')
 
 
-def read_value(args: List[str], index: int, flag: str) -> str:
+def read_value(args: List[str], index: int, flag: str, literal_values: Set[int]) -> str:
+    if index in literal_values:
+        return args[index]
     if index >= len(args) or (args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]

@@ -59,7 +59,7 @@ async function applyFastGitConfig(repoPath: string, commandRunner: CommandRunner
  * Stops the worktree's fsmonitor daemon so removing the worktree leaves no
  * daemon behind and, on Windows, nothing holds the directory open.
  */
-async function stopFsmonitorDaemon(worktreePath: string, commandRunner: CommandRunner): Promise<void> {
+export async function stopFsmonitorDaemon(worktreePath: string, commandRunner: CommandRunner): Promise<void> {
   if (!await hasFsmonitorDaemon(commandRunner, worktreePath)) return;
   try {
     await commandRunner.execFile('git', ['fsmonitor--daemon', 'stop'], worktreePath, { silent: true, timeout: 10000 });

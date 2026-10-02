@@ -8,6 +8,8 @@ const CHAT_ID_PATTERN = new RegExp(
 interface CursorLaunchOptions {
   baseCommand: string;
   promptArgument?: string;
+  /** A ready-made shell word for the prompt, such as `"$(cat '<file>')"`; wins over promptArgument. */
+  promptWord?: string;
   resumeChatId?: string;
   shellType?: string;
 }
@@ -30,8 +32,10 @@ function stripAnsiSequences(output: string): string {
  * untracked instead of blocking the pane.
  */
 export function buildCursorLaunchCommand(options: CursorLaunchOptions): string {
-  const { baseCommand, promptArgument, resumeChatId } = options;
-  const promptSuffix = promptArgument ? ` ${quoteShellArgument(promptArgument)}` : '';
+  const { baseCommand, promptArgument, promptWord, resumeChatId } = options;
+  const promptSuffix = promptWord
+    ? ` ${promptWord}`
+    : promptArgument ? ` ${quoteShellArgument(promptArgument)}` : '';
 
   if (resumeChatId) {
     return `${baseCommand} --resume ${quoteShellArgument(resumeChatId)}${promptSuffix}`;

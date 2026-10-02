@@ -763,8 +763,8 @@
   --color-scrollbar-thumb: var(--gh-light-200);
   --color-scrollbar-thumb-hover: var(--gh-light-300);
 
-  /* Structural tokens — chrome uses secondary for contrast with white active tabs */
-  --color-bg-chrome: var(--color-surface-secondary);
+  /* Keep the tab strip as light as the content in the default light theme. */
+  --color-bg-chrome: var(--color-surface-primary);
   --color-bg-editor: var(--color-bg-primary);
   --tab-indicator-color: transparent;
   --tab-indicator-height: 0px;
@@ -3470,7 +3470,7 @@
   --color-bg-tertiary: var(--haar-200);
   --color-bg-hover: var(--haar-200);
   --color-bg-active: var(--haar-300);
-  --color-bg-chrome: var(--haar-150);
+  --color-bg-chrome: var(--haar-50);
   --color-bg-editor: var(--haar-50);   /* brightest — the clearing */
 
   /* Surfaces */

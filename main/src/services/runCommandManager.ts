@@ -1,3 +1,4 @@
+import { withRunpaneBinOnPath } from './runpaneShim';
 import { EventEmitter } from 'events';
 import * as pty from '@lydell/node-pty';
 import { getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
@@ -154,12 +155,12 @@ export class RunCommandManager extends EventEmitter {
             // For Linux, use current PATH to avoid slow shell detection
             const isLinux = process.platform === 'linux';
             const shellPath = isLinux ? (process.env.PATH || '') : getShellPath();
-            const env = {
+            const env = withRunpaneBinOnPath({
               ...inheritedProcessEnv(),
               ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
               WORKTREE_PATH: worktreePath,
               PATH: shellPath
-            } satisfies Record<string, string>;
+            } satisfies Record<string, string>);
             
             // Log environment details for debugging
             if (j === 0) {

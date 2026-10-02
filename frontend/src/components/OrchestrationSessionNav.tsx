@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ChevronDown, ChevronRight, MessageSquare, Pin, PinOff, Plus, RefreshCw, Terminal } from 'lucide-react';
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Archive, ChevronDown, ChevronRight, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useConfigStore } from '../stores/configStore';
@@ -10,8 +11,8 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { DEFAULT_PANE_CHAT_AGENT, type PaneChatAgent } from '../../../shared/types/paneChat';
-import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -19,6 +20,12 @@ import { Tooltip } from './ui/Tooltip';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
+import { useOrchestrationSessionActivity } from '../hooks/useAgentStatus';
+import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
+import { startSessionDrag } from '../utils/sessionDrag';
+import { SessionLaunchFields } from './SessionLaunchFields';
+import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
+import type { AppConfig } from '../types/config';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -48,17 +55,32 @@ function statusLabel(session: OrchestrationSessionRecord): string {
   return 'No report yet';
 }
 
+/** Rolled-up agent status for a Session: its orchestrator plus child Panes. */
+function SessionActivityDot({ session, paneIds }: { session: OrchestrationSessionRecord; paneIds: readonly string[] }) {
+  const { status } = useOrchestrationSessionActivity(session.internalSessionId, paneIds);
+  return status === 'unknown'
+    ? <AgentActivityDot active={false} size="sm" className="flex-shrink-0" />
+    : <AgentStatusDot status={status} size="sm" className="flex-shrink-0" />;
+}
+
+/** How much delegated work is in flight, in place of the plain child count. */
+function SessionActivitySummary({ session, paneIds }: { session: OrchestrationSessionRecord; paneIds: readonly string[] }) {
+  const { working, blocked } = useOrchestrationSessionActivity(session.internalSessionId, paneIds);
+  if (blocked > 0) return <span className="pr-1 text-[10px] tabular-nums text-status-error">{blocked} need{blocked === 1 ? 's' : ''} input</span>;
+  if (working > 0) return <span className="pr-1 text-[10px] tabular-nums text-text-secondary">{working} working</span>;
+  if (paneIds.length === 0) return null;
+  return <span className="pr-1 text-[10px] tabular-nums text-text-muted">{paneIds.length}</span>;
+}
+
 function availabilityIsVisible(availability: OrchestrationSessionAvailability): boolean {
   return availability === 'ready' || availability === 'loading' || availability === 'error';
 }
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' },
-];
+const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
+  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
-function availableSessionAgents(): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
+function availableSessionAgents(wsl = false): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
+  if (wsl) return SESSION_AGENT_OPTIONS;
   const visible = new Set(visibleAgentPresets().map(preset => preset.id));
   return SESSION_AGENT_OPTIONS.filter(option => visible.has(option.id));
 }
@@ -67,15 +89,6 @@ function supportedSessionAgent(preferred?: PaneChatAgent): PaneChatAgent {
   const options = availableSessionAgents();
   if (preferred && options.some(option => option.id === preferred)) return preferred;
   return options[0]?.id ?? DEFAULT_PANE_CHAT_AGENT;
-}
-
-function nextSessionName(sessions: readonly OrchestrationSessionRecord[]): string {
-  const existingNames = new Set(sessions.map(session => session.name.trim().toLocaleLowerCase()));
-  if (!existingNames.has('new chat')) return 'New chat';
-
-  let suffix = 2;
-  while (existingNames.has(`new chat ${suffix}`)) suffix += 1;
-  return `New chat ${suffix}`;
 }
 
 export function OrchestrationSessionNav({
@@ -107,7 +120,7 @@ export function OrchestrationSessionNav({
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const [showCreate, setShowCreate] = useState(false);
-  const [collapsedSessionIds, setCollapsedSessionIds] = useState<Set<string>>(new Set());
+  const [sessionExpansionOverrides, setSessionExpansionOverrides] = useState<Map<string, boolean>>(new Map());
   const [sectionExpanded, setSectionExpanded] = useState(true);
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
@@ -115,10 +128,10 @@ export function OrchestrationSessionNav({
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
 
-  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string) => {
+  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => {
     await load();
-    const name = requestedName?.trim() || nextSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ name, agent });
+    const name = requestedName?.trim() || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+    await create({ name, agent, launchCommand, profile, customResume, runtime: wslDistribution ? 'wsl' : 'windows', wslDistribution });
     setShowCreate(false);
     setActiveSession(null);
     navigateToPaneChat();
@@ -152,11 +165,10 @@ export function OrchestrationSessionNav({
     }
   }, [navigateToPaneChat, select, setActiveSession]);
 
-  const toggleSessionExpanded = useCallback((sessionId: string) => {
-    setCollapsedSessionIds(current => {
-      const next = new Set(current);
-      if (next.has(sessionId)) next.delete(sessionId);
-      else next.add(sessionId);
+  const toggleSessionExpanded = useCallback((sessionId: string, expanded: boolean) => {
+    setSessionExpansionOverrides(current => {
+      const next = new Map(current);
+      next.set(sessionId, !expanded);
       return next;
     });
   }, []);
@@ -225,7 +237,8 @@ export function OrchestrationSessionNav({
         .map((association, index) => renderPane(association.paneId, session.id, index))
         .filter((row): row is ReactNode => row !== null && row !== undefined)
       : [];
-    const expanded = !collapsedSessionIds.has(session.id);
+    const visiblePaneIds = paneRows.length > 0 ? visibleAssociations.map(association => association.paneId) : [];
+    const expanded = sessionExpansionOverrides.get(session.id) ?? paneRows.length > 0;
     const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
     const label = session.name || 'Pane Chat';
     const rowId = isLegacy
@@ -236,36 +249,39 @@ export function OrchestrationSessionNav({
     return (
       <div key={`${placement}-${session.id}`} className="group/orchestration-session">
         <div className={cn(
-          'flex h-8 w-full items-center text-[13px] transition-colors',
+          'mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           activeView === 'pane-chat' && session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
+          <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
+            aria-expanded={expanded} aria-controls={panesId}
+            onClick={() => toggleSessionExpanded(session.id, expanded)}
+            className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
           <button
             type="button"
             data-testid={rowId}
             aria-label={isLegacy ? label : `Open Session ${session.name}`}
-            aria-expanded={paneRows.length > 0 ? expanded : undefined}
-            aria-controls={paneRows.length > 0 ? panesId : undefined}
-            onClick={() => {
-              if (paneRows.length > 0) toggleSessionExpanded(session.id);
-              void openSession(session.id);
-            }}
+            // Dragging a row tiles the Session beside another, the same gesture
+            // as dragging a tab. Repository rows carry only text/plain, so the
+            // two drags never answer each other's drop targets.
+            draggable
+            onDragStart={event => startSessionDrag(event.dataTransfer, session.id)}
+            onClick={() => void openSession(session.id)}
             onContextMenu={event => handleSessionContextMenu(event, session)}
             onKeyDown={event => handleSessionKeyDown(event, session)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded px-3 py-1 text-left focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
           >
-            <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-            {paneRows.length > 0 && <span className="pr-1 text-[10px] tabular-nums text-text-muted">{paneRows.length}</span>}
+            <SessionActivityDot session={session} paneIds={visiblePaneIds} />
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
+            <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
           </button>
         </div>
-        {paneRows.length > 0 && (
-          <div
-            id={panesId}
-            className={cn('ml-8 border-l border-border-primary', !expanded && 'hidden')}
-          >
-            {paneRows}
-          </div>
-        )}
+        <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>
+          {paneRows.length > 0 ? paneRows : (
+            <p className="py-1 pl-2 text-[11px] text-text-tertiary">No child sessions</p>
+          )}
+        </div>
       </div>
     );
   };
@@ -296,6 +312,8 @@ export function OrchestrationSessionNav({
               data-compact-rail-item
               aria-label={session.id === LEGACY_ORCHESTRATION_SESSION_ID ? 'Pane Chat' : `Open Session ${session.name}`}
               title={session.name}
+              draggable
+              onDragStart={event => startSessionDrag(event.dataTransfer, session.id)}
               onClick={() => void openSession(session.id)}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session)}
@@ -341,14 +359,14 @@ export function OrchestrationSessionNav({
   return (
     <>
       {hasPinnedContent && (
-        <div className="mt-1" role="group" aria-label="Pinned">
-          <div data-testid="orchestration-pinned-section-header" className="group/section flex items-center justify-between gap-2 pl-3.5 pr-2 py-0.5">
+        <div className="mt-3" role="group" aria-label="Pinned">
+          <div data-testid="orchestration-pinned-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
             <button
               type="button"
               aria-expanded={isPinnedSectionExpanded}
               aria-controls="orchestration-pinned-list"
               onClick={() => setPinnedSectionExpanded(!isPinnedSectionExpanded)}
-              className="min-w-0 flex-1 flex items-center justify-between gap-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wide leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
+              className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
             >
               <span className="truncate">Pinned</span>
               <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
@@ -361,21 +379,21 @@ export function OrchestrationSessionNav({
             </button>
           </div>
           {isPinnedSectionExpanded && (
-            <div id="orchestration-pinned-list" className="mt-0.5">
+            <div id="orchestration-pinned-list">
               {pinnedSessions.map(session => renderSessionRow(session, 'pinned'))}
               {pinnedPaneRows}
             </div>
           )}
         </div>
       )}
-      {sessionsVisible && <div className="mt-1" role="group" aria-label="Sessions">
-        <div data-testid="sessions-section-header" className="group/section flex items-center justify-between gap-2 pl-3.5 pr-2 py-0.5">
+      {sessionsVisible && <div className="mt-3" role="group" aria-label="Sessions">
+        <div data-testid="sessions-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
           <button
             type="button"
             aria-expanded={sectionExpanded}
             aria-controls="orchestration-sessions-list"
             onClick={() => setSectionExpanded(current => !current)}
-            className="min-w-0 flex-1 flex items-center justify-between gap-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wide leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
+            className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
           >
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate">Sessions</span>
@@ -446,12 +464,17 @@ interface SessionContextMenuProps {
 }
 
 function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextMenuProps) {
-  return (
+  const [renaming, setRenaming] = useState<SessionContextMenuState | null>(null);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (<>
     <TerminalPopover
       visible={menu !== null}
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={onClose}
+      className="w-48"
     >
       <div role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`}>
         <PopoverButton role="menuitem" onClick={onPin}>
@@ -459,6 +482,12 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
             {menu?.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
             {menu?.isPinned ? 'Unpin Session' : 'Pin Session'}
           </span>
+        </PopoverButton>
+        <PopoverButton role="menuitem" onClick={() => {
+          if (!menu) return;
+          setRenaming(menu); setName(menu.sessionName); setError(null); onClose();
+        }}>
+          <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename Session…</span>
         </PopoverButton>
         <PopoverButton role="menuitem" variant="danger" onClick={onArchive}>
           <span className="flex items-center gap-2">
@@ -468,19 +497,79 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
         </PopoverButton>
       </div>
     </TerminalPopover>
-  );
+    <Modal isOpen={renaming !== null} onClose={() => { if (!busy) setRenaming(null); }} ariaLabel="Rename Session">
+      <form onSubmit={event => {
+        event.preventDefault();
+        if (!renaming || busy || !name.trim()) return;
+        setBusy(true); setError(null);
+        void useOrchestrationSessionStore.getState().update({ sessionId: renaming.sessionId }, { name: name.trim() })
+          .then(() => setRenaming(null))
+          .catch(failure => setError(failure instanceof Error ? failure.message : 'Could not rename Session'))
+          .finally(() => setBusy(false));
+      }}>
+        <ModalHeader title="Rename Session" />
+        <ModalBody>
+          <Input label="Session name" autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} fullWidth />
+          {error && <p role="alert" className="mt-2 text-sm text-status-error">{error}</p>}
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => setRenaming(null)}>Cancel</Button>
+          <Button type="submit" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save name'}</Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  </>);
 }
 
 interface CreateOrchestrationSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (agent: PaneChatAgent, name?: string) => Promise<void>;
+  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => Promise<void>;
+}
+
+interface SessionCreationForm {
+  agent: PaneChatAgent;
+  name: string;
+  launchCommand: string;
+  customResume: CustomCommandResume | null;
+  profile: string;
+  error: string | null;
+}
+
+type SessionCreationAction =
+  | { type: 'reset'; config: AppConfig | null }
+  | { type: 'update'; values: Partial<SessionCreationForm> };
+
+function initialSessionCreationForm(config: AppConfig | null): SessionCreationForm {
+  return {
+    agent: supportedSessionAgent(config?.defaultOrchestratorAgent),
+    name: '',
+    launchCommand: config?.defaultSessionCommand ?? '',
+    customResume: config?.defaultSessionResume ?? null,
+    profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
+    error: null,
+  };
+}
+
+function sessionCreationReducer(state: SessionCreationForm, action: SessionCreationAction): SessionCreationForm {
+  return action.type === 'reset' ? initialSessionCreationForm(action.config) : { ...state, ...action.values };
 }
 
 function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateOrchestrationSessionDialogProps) {
-  const [agent, setAgent] = useState<PaneChatAgent>(DEFAULT_PANE_CHAT_AGENT);
-  const [name, setName] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [distributions, setDistributions] = useState<string[]>([]);
+  const [wslDistribution, setWslDistribution] = useState('');
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setWslDistribution('');
+    setDistributions([]);
+    void window.electronAPI?.orchestrationSessions.runtimes?.().then(result => {
+      if (!cancelled && result.success) setDistributions(result.data?.distributions ?? []);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isOpen]);
+  const [{ agent, name, launchCommand, customResume, profile, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
+  const userEditedLaunch = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
   const fetchConfig = useConfigStore(state => state.fetchConfig);
@@ -488,15 +577,28 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   const userSelectedAgent = useRef(false);
 
   useEffect(() => {
+    if (!isOpen || userSelectedAgent.current) return;
+    dispatch({ type: 'update', values: { agent: wslDistribution
+      ? config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT
+      : supportedSessionAgent(config?.defaultOrchestratorAgent) } });
+  }, [isOpen, wslDistribution, config?.defaultOrchestratorAgent]);
+
+  useEffect(() => {
     if (!isOpen) return;
     userSelectedAgent.current = false;
+    userEditedLaunch.current = false;
     const savedConfig = useConfigStore.getState().config;
-    setAgent(supportedSessionAgent(savedConfig?.defaultOrchestratorAgent));
-    setName('');
-    setError(null);
+    dispatch({ type: 'reset', config: savedConfig });
     if (!savedConfig) {
       void fetchConfig().then(nextConfig => {
-        if (!userSelectedAgent.current) setAgent(supportedSessionAgent(nextConfig.defaultOrchestratorAgent));
+        if (!userSelectedAgent.current) dispatch({ type: 'update', values: { agent: supportedSessionAgent(nextConfig.defaultOrchestratorAgent) } });
+        if (!userEditedLaunch.current) {
+          dispatch({ type: 'update', values: {
+            launchCommand: nextConfig.defaultSessionCommand ?? '',
+            customResume: nextConfig.defaultSessionResume ?? null,
+            profile: nextConfig.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
+          } });
+        }
       }).catch(() => undefined);
     }
   }, [fetchConfig, isOpen]);
@@ -504,29 +606,31 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
-    setError(null);
+    dispatch({ type: 'update', values: { error: null } });
     try {
-      if (config?.defaultOrchestratorAgent !== agent) {
-        await updateConfig({ defaultOrchestratorAgent: agent });
-      }
-      await onCreate(agent, name.trim() || undefined);
+      const defaults: Partial<AppConfig> = {};
+      if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
+      if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
+      if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
+      if (Object.keys(defaults).length > 0) await updateConfig(defaults);
+      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume, wslDistribution || undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to create Session');
+      dispatch({ type: 'update', values: { error: cause instanceof Error ? cause.message : 'Failed to create Session' } });
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="sm" ariaLabel="Create Session">
-      <form onSubmit={submit}>
+    <Modal isOpen={isOpen} onClose={onClose} size="md" ariaLabel="Create Session">
+      <form onSubmit={submit} className="flex min-h-0 flex-col">
         <ModalHeader title="Create Session" />
-        <ModalBody>
-          <Input label="Name your chat (optional)" value={name} onChange={event => setName(event.target.value)} placeholder="New chat" autoFocus fullWidth />
+        <ModalBody className="min-h-0 space-y-4">
+          <Input label="Name your chat (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="New chat" autoFocus fullWidth />
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
             <div className="grid gap-2" role="radiogroup" aria-label="Session agent">
-              {availableSessionAgents().map(option => {
+              {availableSessionAgents(Boolean(wslDistribution)).map(option => {
                 const selected = agent === option.id;
                 const isDefault = config?.defaultOrchestratorAgent === option.id;
                 return (
@@ -535,7 +639,7 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
                     data-testid={`create-session-agent-${option.id}`}
                     htmlFor={`create-session-agent-input-${option.id}`}
                     className={cn(
-                      'flex cursor-pointer items-center justify-between rounded border px-3 py-2 text-left text-sm transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-interactive',
+                      'flex cursor-default items-center justify-between rounded border px-3 py-2 text-left text-sm transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-interactive',
                       selected ? 'border-interactive bg-surface-selected text-text-primary' : 'border-border-primary text-text-secondary hover:bg-surface-hover hover:text-text-primary',
                     )}
                   >
@@ -548,7 +652,7 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
                       checked={selected}
                       onChange={() => {
                         userSelectedAgent.current = true;
-                        setAgent(option.id);
+                        dispatch({ type: 'update', values: { agent: option.id } });
                       }}
                       className="sr-only"
                     />
@@ -559,9 +663,35 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
               })}
             </div>
           </fieldset>
+          {distributions.length > 0 && (
+            <div className="space-y-2">
+              <label htmlFor="session-runtime" className="text-label font-medium text-text-primary">Run agent in</label>
+              <select id="session-runtime" value={wslDistribution} onChange={event => {
+                setWslDistribution(event.target.value);
+                if (!event.target.value) dispatch({ type: 'update', values: { agent: supportedSessionAgent(agent) } });
+              }} disabled={isSubmitting}
+                className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus:ring-2 focus:ring-interactive">
+                <option value="">Windows</option>
+                {distributions.map(distribution => <option key={distribution} value={distribution}>WSL · {distribution}</option>)}
+              </select>
+              {wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
+            </div>
+          )}
+          <details className="space-y-3">
+            <summary className="cursor-default text-sm font-medium text-text-secondary">Launch command and behavior</summary>
+            <SessionLaunchFields
+              resume={customResume}
+              onResumeChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { customResume: value } }); }}
+              command={launchCommand}
+              profile={profile}
+              customCommands={config?.customCommands}
+              onCommandChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { launchCommand: value } }); }}
+              onProfileChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { profile: value } }); }}
+            />
+          </details>
           {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
         </ModalBody>
-        <ModalFooter>
+        <ModalFooter className="shrink-0">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={isSubmitting} loadingText="Creating…">Create Session</Button>
         </ModalFooter>

@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional
+import sys
+from typing import Any, Dict, List, Optional, Sequence
 
 from .generated_contract import RUNPANE_CONTRACT
 
+MAX_COMMAND_CANDIDATES = 5
+
 
 def run_agent_context(parsed: Any) -> int:
+    if parsed.context_command is not None and find_command_detail(parsed.context_command) is None:
+        return print_unknown_command(parsed.context_command, parsed.json)
     result = build_agent_context_result(parsed.context_command)
     if parsed.json:
         print(json.dumps(result, indent=2))
@@ -41,13 +46,69 @@ def build_agent_context_result(command_name: Optional[str] = None) -> Dict[str, 
     }
 
 
-def get_command_detail(command_name: str) -> Dict[str, Any]:
+def find_command_detail(command_name: str) -> Optional[Dict[str, Any]]:
     normalized = normalize_command_name(command_name)
     for command in RUNPANE_CONTRACT["agentContext"]["commands"].values():
         if normalize_command_name(command["name"]) == normalized:
             return command
+    return None
+
+
+def get_command_detail(command_name: str) -> Dict[str, Any]:
+    detail = find_command_detail(command_name)
+    if detail is not None:
+        return detail
 
     raise ValueError(f"Unknown runpane command: {command_name}. Expected one of: {', '.join(command_names())}")
+
+
+def print_unknown_command(command_name: str, as_json: bool) -> int:
+    error = {
+        "ok": False,
+        "code": "unknown_command",
+        "message": f"Unknown runpane command: {command_name}. Run `runpane agent-context --json` to list every command.",
+        "candidates": rank_command_candidates(command_name),
+    }
+    if as_json:
+        print(json.dumps(error, indent=2))
+    else:
+        print(error["message"], file=sys.stderr)
+        if error["candidates"]:
+            print(f"Closest commands: {', '.join(error['candidates'])}", file=sys.stderr)
+    return 2
+
+
+def rank_command_candidates(query: str, names: Optional[Sequence[str]] = None) -> List[str]:
+    """Command names closest to `query`: most shared words, then smallest edit distance, then alphabetical."""
+    query_words = command_words(query)
+    query_word_set = set(query_words)
+    query_compact = "".join(query_words)
+    ranked = []
+    for name in command_names() if names is None else names:
+        words = command_words(name)
+        compact = "".join(words)
+        shared = len({word for word in words if word in query_word_set})
+        distance = edit_distance(query_compact, compact)
+        if shared > 0 or distance <= max(2, len(compact) // 3):
+            ranked.append((-shared, distance, name))
+    ranked.sort()
+    return [name for _, _, name in ranked[:MAX_COMMAND_CANDIDATES]]
+
+
+def command_words(command_name: str) -> List[str]:
+    without_binary = re.sub(r"^runpane\s+", "", command_name.strip(), flags=re.IGNORECASE)
+    return [word for word in re.split(r"[._\s-]+", without_binary.lower()) if word]
+
+
+def edit_distance(left: str, right: str) -> int:
+    previous = list(range(len(right) + 1))
+    for row in range(1, len(left) + 1):
+        current = [row]
+        for column in range(1, len(right) + 1):
+            substitution = previous[column - 1] + (0 if left[row - 1] == right[column - 1] else 1)
+            current.append(min(previous[column] + 1, current[column - 1] + 1, substitution))
+        previous = current
+    return previous[len(right)]
 
 
 def normalize_command_name(command_name: str) -> str:

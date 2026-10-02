@@ -12,10 +12,14 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService } from '../services/database';
 import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type PanelLayoutNode } from '../../../shared/types/panels';
 import type { AppServices } from './types';
+import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
-import { getWSLHome, linuxToUNCPath, posixJoin } from '../utils/wslUtils';
+import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '../utils/wslUtils';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { readBrowserPanelFile } from '../services/browserPanelFiles';
+import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
 
 const execFileAsync = promisify(execFile);
 
@@ -45,18 +49,6 @@ const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.ob
   focusedGroupId: boundary.optional(boundary.string),
   zoomedGroupId: boundary.optional(boundary.nullable(boundary.string)),
 });
-
-/**
- * Convert a Windows path to a WSL mount path.
- * C:\Users\khaza\.pane\images\file.png → /mnt/c/Users/khaza/.pane/images/file.png
- */
-function windowsPathToWSLMount(winPath: string): string {
-  const match = winPath.match(/^([a-zA-Z]):\\(.*)/);
-  if (!match) return winPath;
-  const drive = match[1].toLowerCase();
-  const rest = match[2].replace(/\\/g, '/');
-  return `/mnt/${drive}/${rest}`;
-}
 
 /**
  * Check if a session's project is WSL-enabled and convert path if needed.
@@ -375,10 +367,12 @@ async function readClipboardImageFallback(sessionId: string): Promise<{ filePath
 }
 
 const DAEMON_PANEL_CHANNELS = [
+  'panels:read-browser-file',
   'panels:create',
   'panels:delete',
   'panels:update',
   'panels:list',
+  'panels:agent-statuses',
   'panels:set-active',
   'panels:getActive',
   'panels:get-layout',
@@ -410,6 +404,10 @@ export function registerPanelHandlers(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
 ) {
+  commandRegistry.register('panels:read-browser-file', async (panelId: string, url: string) => {
+    return readBrowserPanelFile(panelManager.getPanel(panelId), url);
+  });
+  ipcMain.handle('browser-panel:prepare-file', (_event, panelId: string) => prepareRemoteBrowserFiles(panelId));
   // Panel CRUD operations
   commandRegistry.register('panels:create', async (request: CreatePanelRequest) => {
     try {
@@ -426,7 +424,7 @@ export function registerPanelHandlers(
       // Clean up terminal process if it's a terminal panel
       const panel = panelManager.getPanel(panelId);
       if (panel?.type === 'terminal') {
-        terminalPanelManager.destroyTerminal(panelId);
+        await terminalPanelManager.destroyTerminal(panelId, { saveState: false });
       }
 
       await panelManager.deletePanel(panelId);
@@ -457,6 +455,28 @@ export function registerPanelHandlers(
     }
   });
   
+  // Renderer baseline includes hidden Pane Chat, which the public workspace
+  // snapshot deliberately omits. Read the same authoritative monitor state.
+  commandRegistry.register('panels:agent-statuses', () => {
+    const sessionIds = new Set(services.sessionManager.getAllSessions()
+      .filter(session => !session.archived)
+      .map(session => session.id));
+    sessionIds.add(PANE_CHAT_SESSION_ID);
+    const statuses: PanelAgentStatusEvent[] = [];
+    for (const sessionId of sessionIds) {
+      for (const panel of panelManager.getPanelsForSession(sessionId)) {
+        if (panel.type !== 'terminal') continue;
+        statuses.push({
+          panelId: panel.id,
+          sessionId,
+          state: terminalPanelManager.getAgentStatus(panel.id) ?? 'unknown',
+          reason: null,
+        });
+      }
+    }
+    return { success: true, data: statuses };
+  });
+
   commandRegistry.register('panels:list', async (sessionId: string) => {
     try {
       const panels = panelManager.getPanelsForSession(sessionId);

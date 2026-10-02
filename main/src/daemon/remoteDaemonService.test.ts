@@ -238,3 +238,23 @@ describe('remote daemon service launchers', () => {
     await expect(fs.stat(path.join(paneDir, 'remote-daemon', 'start.sh'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
+
+it('awaits desktop service commands without blocking the event loop', async () => {
+  const homeDir = await makeTempDir('pane-async-service-');
+  let finishLoad = () => {};
+  const loading = new Promise<void>(resolve => { finishLoad = resolve; });
+  let notifyLoad = () => {};
+  const started = new Promise<void>(resolve => { notifyLoad = resolve; });
+  const installation = installRemoteDaemonService(path.join(homeDir, '.pane'), {
+    platform: 'darwin', homeDir, sourceRoot: '/fixture/source',
+    runCommand: () => { throw new Error('Desktop service commands must be asynchronous'); },
+    asyncCommandRunner: async (_command, args) => {
+      if (args[0] === 'load') { notifyLoad(); await loading; }
+      return { ok: true, stdout: '', stderr: '' };
+    },
+  });
+  await started;
+  await new Promise<void>(resolve => setImmediate(resolve));
+  finishLoad();
+  expect(await installation).toMatchObject({ strategy: 'launch-agent', installed: true, started: true });
+});

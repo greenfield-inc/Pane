@@ -10,15 +10,34 @@ The intended flow is:
 
 Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
 
+## Guided quick start
+
+On the host machine, run `npx --yes runpane@latest` in an interactive terminal.
+Choose **Set up a remote host**, enter a name (or press Enter),
+and follow the Tailscale installation/login prompts. The wizard picks an available
+port and prints a connection code. Sign your other device into the same Tailscale
+network, then paste the code into Pane or [runpane.com/app](https://runpane.com/app/).
+
+SSH and manual URL setups remain available through the explicit commands below.
+The no-argument and `setup` commands print help in non-interactive shells; they
+do not start a login prompt.
+
+## Creating a code in desktop Settings
+
+Desktop setup uses an installed, signed-in Tailscale client. If Tailscale is
+missing, Pane shows installation instructions; use the setup terminal to install
+it. Tailscale discovery, Serve configuration and requested daemon service setup
+run asynchronously so the desktop stays responsive while they finish.
+
 ## One-Command Setup
 
-Recommended package-manager commands:
+To skip the wizard menu, run interactive remote setup directly:
 
 ```bash
-npx --yes runpane@latest install daemon --label "VM"
-pnpm dlx runpane@latest install daemon --label "VM"
-pipx run runpane install daemon --label "VM"
-uvx runpane@latest install daemon --label "VM"
+npx --yes runpane@latest install daemon --interactive-tailscale-setup --auto-listen-port --label "VM"
+pnpm dlx runpane@latest install daemon --interactive-tailscale-setup --auto-listen-port --label "VM"
+pipx run runpane install daemon --interactive-tailscale-setup --auto-listen-port --label "VM"
+uvx runpane@latest install daemon --interactive-tailscale-setup --auto-listen-port --label "VM"
 ```
 
 SSH tunnel mode:
@@ -31,10 +50,10 @@ Persistent installs are also supported:
 
 ```bash
 npm i -g runpane
-runpane install daemon --label "VM"
+runpane install daemon --interactive-tailscale-setup --auto-listen-port --label "VM"
 
 python -m pip install runpane
-runpane install daemon --label "VM"
+runpane install daemon --interactive-tailscale-setup --auto-listen-port --label "VM"
 ```
 
 From a source checkout:
@@ -340,6 +359,10 @@ Some actions operate on the local desktop client machine rather than the remote 
 - opening a local IDE from the client
 - revealing files in the client OS file manager
 - the native clipboard-image fallback path
+
+### Where does copied terminal text go?
+
+To the clipboard of the machine you are sitting at. In remote mode, dragging to select text in a terminal copies it right away, with no Copy popover. Programs that copy with OSC 52, such as Claude Code, tmux, and vim, also copy to your machine. Programs in the terminal cannot read your clipboard through OSC 52.
 
 ## Current Limitations
 

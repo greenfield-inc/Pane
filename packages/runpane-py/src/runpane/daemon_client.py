@@ -53,14 +53,12 @@ def invoke_daemon(
         "channel": channel,
         "args": args or [],
     }
-    encoded = b""
-    if event_include is not None:
-        encoded += encode_frame({
-            "type": "request",
-            "id": 0,
-            "channel": "daemon:events",
-            "args": [{"include": event_include}],
-        })
+    encoded = encode_frame({
+        "type": "request",
+        "id": 0,
+        "channel": "daemon:events",
+        "args": [{"include": event_include or []}],
+    })
     encoded += encode_frame(request)
 
     if endpoint["transport"] == "pipe":

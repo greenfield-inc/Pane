@@ -176,7 +176,7 @@ export function FeedbackDialog({ isOpen, onClose }: FeedbackDialogProps) {
               />
             </label>
 
-            <label className="flex cursor-pointer items-start gap-2 text-sm text-text-primary">
+            <label className="flex cursor-default items-start gap-2 text-sm text-text-primary">
               <input
                 type="checkbox"
                 checked={state.includeAppDetails}

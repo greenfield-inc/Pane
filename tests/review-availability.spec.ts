@@ -144,7 +144,7 @@ async function openSession(
     initialConfig: options.initialConfig,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Review fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
   const paneButton = page.getByRole('button', {
     name: gitStatus.prTitle ?? 'Review changes before PR',
     exact: true,
@@ -220,7 +220,7 @@ test('New panes start with the inspector shown and the toggle hides it', async (
   await expect(detailPanel).toHaveCSS('width', '0px');
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /^Expand repository Review fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
   await page.getByRole('button', { name: 'Review changes before PR', exact: true }).click();
   await page.getByRole('tab', { name: 'Logs', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Show details', exact: true })).toBeVisible();

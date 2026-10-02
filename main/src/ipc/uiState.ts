@@ -1,9 +1,17 @@
 import { ipcMain } from 'electron';
 import { UIStateManager } from '../services/uiStateManager';
 import type { AppServices } from './types';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
+import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 
 export function registerUIStateHandlers(services: AppServices) {
-  const uiStateManager = new UIStateManager(services.databaseService);
+  const uiStateManager = new UIStateManager(
+    services.databaseService,
+    () => getActiveRemoteHostId(services.configManager.getConfig().remoteDaemon),
+  );
 
   ipcMain.handle('ui-state:get-expanded', async () => {
     try {
@@ -92,6 +100,79 @@ export function registerUIStateHandlers(services: AppServices) {
       };
     } catch (error) {
       console.error('Error saving sidebar section expanded state:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  // The renderer names the host: it can still be showing the outgoing one while
+  // this process has already switched runtimes. Null means this computer.
+  ipcMain.handle('ui-state:get-navigation-memory', async (_, hostId: string | null) => {
+    try {
+      return {
+        success: true,
+        data: uiStateManager.getNavigationMemory(hostId)
+      };
+    } catch (error) {
+      console.error('Error getting host navigation memory:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:get-session-workspace-layout', async (_, hostId: string | null) => {
+    try {
+      return {
+        success: true,
+        data: uiStateManager.getSessionWorkspaceLayout(hostId)
+      };
+    } catch (error) {
+      console.error('Error getting Session workspace layout:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:save-session-workspace-layout', async (_, hostId: string | null, layout: SessionWorkspaceLayout | null) => {
+    try {
+      // Decoded on the way in, so a stored layout is always readable back and a
+      // tree past the tile or depth bounds never reaches the database.
+      const decoded = layout === null ? null : decodeSessionWorkspaceLayout(layout);
+      if (layout !== null && !decoded) {
+        throw new Error('Invalid Session workspace layout');
+      }
+      uiStateManager.saveSessionWorkspaceLayout(hostId, decoded);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving Session workspace layout:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:save-navigation-memory', async (_, hostId: string | null, memory: HostNavigationMemory) => {
+    try {
+      // Decoded on the way in so a stored location is always readable back.
+      const decoded = decodeHostNavigationMemory(memory);
+      if (!decoded) {
+        throw new Error('Invalid host navigation memory');
+      }
+      uiStateManager.saveNavigationMemory(hostId, decoded);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving host navigation memory:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

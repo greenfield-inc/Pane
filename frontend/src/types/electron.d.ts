@@ -1,9 +1,12 @@
+/// <reference types="electron" />
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
 import type { Project } from './project';
 import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
+import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type {
   RemoteDaemonClientRecord,
   RemoteDaemonConnectionPair,
@@ -51,6 +54,8 @@ import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } 
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
+import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
+import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type {
   ProjectDashboardData,
@@ -109,6 +114,7 @@ interface ElectronAPI {
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
   setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').Theme; color: string }) => Promise<IPCResponse>;
+  notifyRendererReady: () => void;
 
   // Version checking
   checkForUpdates: () => Promise<IPCResponse<VersionInfo>>;
@@ -143,6 +149,7 @@ interface ElectronAPI {
   };
 
   orchestrationSessions: {
+    runtimes: () => Promise<IPCResponse<{ distributions: string[] }>>;
     list: () => Promise<IPCResponse<OrchestrationSessionListResult>>;
     select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult>>;
     create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
@@ -209,7 +216,6 @@ interface ElectronAPI {
 
     // Script operations
     hasRunScript: (sessionId: string) => Promise<IPCResponse>;
-    getRunningSession: () => Promise<IPCResponse>;
     runScript: (sessionId: string) => Promise<IPCResponse>;
     stopScript: (sessionId?: string) => Promise<IPCResponse>;
     runTerminalCommand: (sessionId: string, command: string) => Promise<IPCResponse>;
@@ -323,7 +329,6 @@ interface ElectronAPI {
     update: (updates: UpdateConfigRequest) => Promise<IPCResponse<AppConfig>>;
     getSessionPreferences: () => Promise<IPCResponse>;
     updateSessionPreferences: (preferences: SessionCreationPreferences) => Promise<IPCResponse>;
-    getAvailableShells: () => Promise<IPCResponse>;
     getMonospaceFonts: () => Promise<IPCResponse>;
   };
 
@@ -396,6 +401,10 @@ interface ElectronAPI {
     saveExpandedFolders: (folderIds: string[]) => Promise<IPCResponse>;
     saveSessionSortAscending: (ascending: boolean) => Promise<IPCResponse>;
     saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean) => Promise<IPCResponse>;
+    getNavigationMemory: (hostId: string | null) => Promise<IPCResponse<HostNavigationMemory | null>>;
+    saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
+    getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;
+    saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null) => Promise<IPCResponse>;
   };
 
   // Event listeners for real-time updates
@@ -406,6 +415,8 @@ interface ElectronAPI {
     onSessionCreated: (callback: (session: Session) => void) => () => void;
     onSessionUpdated: (callback: (session: Session) => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
+    onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
+    onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     onSessionDeleted: (callback: (session: Pick<Session, 'id'>) => void) => () => void;
     onSessionsLoaded: (callback: (sessions: Session[]) => void) => () => void;
     onSessionOutput: (callback: (output: SessionOutput) => void) => () => void;
@@ -463,8 +474,9 @@ interface ElectronAPI {
     onZombieProcessesDetected: (callback: (data: { sessionId?: string | null; pids?: number[]; message: string }) => void) => () => void;
 
     // Window focus state from BrowserWindow (more reliable than document.hasFocus())
+    onAppMenuAction: (callback: (action: 'open-about' | 'open-settings') => void) => () => void;
     onWindowFocusChanged: (callback: (focused: boolean) => void) => () => void;
-    onRemoteDaemonResyncRequested: (callback: () => void) => () => void;
+    onRemoteDaemonResyncRequested: (callback: (event: { hostChanged: boolean }) => void) => () => void;
 
     // Spotlight events
     onSpotlightStatusChanged?: (callback: (data: { sessionId: string; projectId: number; active: boolean }) => void) => () => void;

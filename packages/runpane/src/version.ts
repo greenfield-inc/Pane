@@ -7,6 +7,10 @@ const PANE_VERSION_TIMEOUT_MS = 2_000;
 const POWERSHELL_TIMEOUT_MS = 2_000;
 
 export function getWrapperVersion(): string {
+  // Pane's single-file bundle (main/build-runpane-cli.js) has no package.json
+  // beside it; its build replaces this expression with the package version.
+  const bundledVersion = process.env.RUNPANE_BUNDLED_VERSION;
+  if (bundledVersion) return bundledVersion;
   const packagePath = path.resolve(__dirname, '..', 'package.json');
   try {
     const pkg = decodeBoundary(
