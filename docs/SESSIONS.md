@@ -88,7 +88,9 @@ named pipe. Arguments cross as JSON to preserve quotes and Unicode. Temporary
 files beside the bridge carry payloads without Windows command-line size limits
 and are removed when the call exits; stdin remains available to the CLI. File flags
 accept relative or absolute Linux paths (including `--flag=value`); `-` retains
-stdin semantics. Paths inside JSON request bodies must use Windows paths, and
+stdin semantics. `--repo` translates absolute Linux paths and explicit relative
+paths (`.`, `..`, `./...`, `../...`) while preserving repository names and IDs.
+Paths inside JSON request bodies must use Windows paths, and
 Windows paths returned by the CLI can be read in WSL after `wslpath -u` conversion.
 The bridge pins `--pane-dir` to this instance and preserves the calling Session
 and panel identities. PowerShell is invoked by its mounted Windows path, so

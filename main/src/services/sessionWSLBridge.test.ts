@@ -59,7 +59,8 @@ describe('WSL Session RunPane bridge', () => {
       execFileSync('wsl.exe', ['-d', process.env.PANE_TEST_WSL_DISTRO!, '--exec', 'env', 'PANE_PANEL_ID=calling-panel', 'PATH=/usr/bin:/bin',
         'bash', windowsPathToWSLMount(script), '--summary', literal, '--file', windowsPathToWSLMount(script),
         '--input-file', '-', `--from-json=${windowsPathToWSLMount(script)}`, '--path', directory,
-        `--pane-path=${windowsPathToWSLMount(launcher)}`, '--download-dir', 'relative downloads'],
+        `--pane-path=${windowsPathToWSLMount(launcher)}`, '--download-dir', 'relative downloads',
+        '--repo', windowsPathToWSLMount(directory), '--repo=.', '--repo', 'my-repo', '--repo=active'],
       { input: 'piped input stays available', encoding: 'utf8', timeout: 30000 });
       throw new Error('Expected CLI exit code 7');
     } catch (error) {
@@ -68,7 +69,8 @@ describe('WSL Session RunPane bridge', () => {
       const output = JSON.parse((error as { stdout: string }).stdout);
       expect(output).toMatchObject({ session: 'session', panel: 'calling-panel', stdin: 'piped input stays available' });
       expect(output.args).toEqual(['--summary', literal, '--file', script, '--input-file', '-', `--from-json=${script}`, '--path', directory,
-        `--pane-path=${launcher}`, '--download-dir', path.resolve('relative downloads'), '--pane-dir', directory]);
+        `--pane-path=${launcher}`, '--download-dir', path.resolve('relative downloads'),
+        '--repo', directory, `--repo=${process.cwd()}`, '--repo', 'my-repo', '--repo=active', '--pane-dir', directory]);
       expect(fs.readdirSync(directory).filter(name => name.startsWith('bridge-'))).toEqual([]);
     }
   });
