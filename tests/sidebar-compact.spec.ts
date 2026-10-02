@@ -157,10 +157,12 @@ test.describe('compact sidebar', () => {
     await expect(fullSidebarPane.locator('..')).toHaveClass(/bg-surface-selected/);
     await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
     await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
+    // A pointer press shows shading only, but keyboard focus keeps a visible ring:
+    // the rows are the one way to reach a Pane without a mouse.
     await page.keyboard.press('Tab');
     await fullSidebarPane.focus();
-    await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
-    await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
+    await expect(fullSidebarPane).toHaveCSS('outline-style', 'solid');
+    await expect(fullSidebarPane).toHaveCSS('outline-width', '2px');
     await fullSidebarPane.evaluate(element => element.blur());
     await page.mouse.move(640, 360);
     await page.screenshot({

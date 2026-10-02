@@ -319,10 +319,17 @@ body.understory {
   user-select: text;
 }
 
-/* Sidebar selection is indicated by row shading, without a focus outline. */
-.pane-sidebar-shell :is(button, a, [role="button"]):focus {
+/* Sidebar selection is indicated by row shading, so a pointer press leaves no
+   ring. Keyboard focus keeps one: the rows and their Archive and Pin buttons are
+   only reachable without a mouse. The ring is inset so dense rows never clip it. */
+.pane-sidebar-shell :is(button, a, [role="button"]):focus:not(:focus-visible) {
   outline: none;
   box-shadow: none;
+}
+
+.pane-sidebar-shell :is(button, a, [role="button"]):focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
 }
 
 .panel-tab-bar {
