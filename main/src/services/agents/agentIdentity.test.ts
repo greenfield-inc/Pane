@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { CLI_AGENT_TYPES, isCliAgentType, resolveAgentTypeFromCommand } from './agentIdentity';
+import {
+  CLI_AGENT_TYPES,
+  isCliAgentType,
+  isShellProcessName,
+  isVersionedExecutableName,
+  resolveAgentTypeFromCommand,
+  resolveAgentTypeFromExecutablePath,
+  resolveAgentTypeFromProcessName,
+} from './agentIdentity';
 
 type CommandClassificationCase = {
   name: string;
@@ -158,5 +166,41 @@ describe('isCliAgentType', () => {
 describe('resolveAgentTypeFromCommand', () => {
   it.each(COMMAND_CLASSIFICATION_CASES)('$name', ({ command, platformHint, expected }) => {
     expect(resolveAgentTypeFromCommand(command, platformHint)).toBe(expected);
+  });
+});
+
+describe('foreground process identity', () => {
+  it.each([
+    ['claude', 'claude'],
+    ['codex', 'codex'],
+    ['cursor-agent', 'cursor'],
+    ['/usr/local/bin/codex', 'codex'],
+    ['codex.exe', 'codex'],
+    ['node', undefined],
+    ['agent-farm', undefined],
+    ['2.1.283', undefined],
+    [undefined, undefined],
+  ] as const)('maps process %s to %s', (name, expected) => {
+    expect(resolveAgentTypeFromProcessName(name)).toBe(expected);
+  });
+
+  it('recognises interactive and login shells, not programs', () => {
+    expect(isShellProcessName('zsh')).toBe(true);
+    expect(isShellProcessName('-zsh')).toBe(true);
+    expect(isShellProcessName('/bin/bash')).toBe(true);
+    expect(isShellProcessName('pwsh.exe')).toBe(true);
+    expect(isShellProcessName('node')).toBe(false);
+    expect(isShellProcessName('claude')).toBe(false);
+    expect(isShellProcessName(undefined)).toBe(false);
+  });
+
+  it('resolves Claude Code\'s versioned native binary only from its path', () => {
+    expect(isVersionedExecutableName('2.1.283')).toBe(true);
+    expect(isVersionedExecutableName('1.0.0-beta.2')).toBe(true);
+    expect(isVersionedExecutableName('claude')).toBe(false);
+    expect(resolveAgentTypeFromExecutablePath('/Users/me/.local/share/claude/versions/2.1.283')).toBe('claude');
+    expect(resolveAgentTypeFromExecutablePath('/opt/homebrew/Caskroom/codex/0.157.1/bin/codex')).toBe('codex');
+    expect(resolveAgentTypeFromExecutablePath('/Users/me/tools/versions/2.1.283')).toBeUndefined();
+    expect(resolveAgentTypeFromExecutablePath(undefined)).toBeUndefined();
   });
 });

@@ -6,7 +6,13 @@ import {
 } from '../../../shared/types/panels';
 import { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
+let hostGeneration = 0;
+
 export const panelApi = {
+  invalidateHostLoads(): void {
+    hostGeneration += 1;
+  },
+
   async createPanel(request: CreatePanelRequest): Promise<ToolPanel> {
     const response = await window.electronAPI.panels.createPanel(
       request.sessionId, 
@@ -44,11 +50,17 @@ export const panelApi = {
   },
   
   async loadPanelsForSession(sessionId: string): Promise<ToolPanel[]> {
-    const response = await window.electronAPI.panels.getSessionPanels(sessionId);
-    if (!response.success || !response.data) {
-      throw new Error(response.error || 'Failed to load panels');
+    for (;;) {
+      const generation = hostGeneration;
+      const response = await window.electronAPI.panels.getSessionPanels(sessionId);
+      // Existing callers apply this list to the store immediately. Never let
+      // an outgoing host's delayed response repopulate it after a switch.
+      if (generation !== hostGeneration) continue;
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'Failed to load panels');
+      }
+      return response.data;
     }
-    return response.data;
   },
   
   async getActivePanel(sessionId: string): Promise<ToolPanel | null> {

@@ -1,3 +1,4 @@
+import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { startupPanelBufferMigration, startupRetentionResult } from '../services/database';
@@ -19,10 +20,12 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
+import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
+import { isLockOwnerLive } from '../ipc/runpane';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
@@ -41,6 +44,9 @@ import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { WorkspaceJournal } from '../services/workspaceJournal';
+import { SessionPrMonitor } from '../services/sessionPrMonitor';
+import { NamedLockService } from '../services/namedLockService';
+import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { extractWorkspaceHeldInput } from '../services/workspaceHeldInput';
@@ -199,10 +205,25 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
   const versionChecker = new VersionChecker(configManager, logger);
+  // Terminals launched below find this build's runpane first on PATH.
+  installRunpaneShimBestEffort(getAppDirectory());
   const skillCacheManager = new SkillCacheManager();
   await skillCacheManager.start().catch(error => {
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
   });
+  await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
+  if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
+    // Retry until all saved repositories are available, without delaying startup.
+    const migrationConfig = configManager.getConfig();
+    void applyManagedAgentsMdSetting(migrationConfig, {
+      all: () => databaseService.getAllProjects(),
+      active: () => sessionManager.getActiveProject(),
+    }).then(async succeeded => {
+      if (succeeded && configManager.getConfig() === migrationConfig) {
+        await configManager.updateConfig({ agentContext: { cleanupPending: false } });
+      }
+    }).catch(error => console.warn('[AgentContext] Could not finish startup cleanup:', error));
+  }
   const paneChatManager = new PaneChatManager(configManager, sessionManager, skillCacheManager);
   await paneChatManager.getOrCreate().catch(error => {
     logger.warn('[PaneChat] Failed to ensure startup Pane Chat session', error instanceof Error ? error : undefined);
@@ -260,6 +281,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         heldInput: snapshot?.screenText ? extractWorkspaceHeldInput(snapshot.screenText) : undefined,
       };
     },
+    resolveSessionMembership: sessionId => orchestrationSessionManager.workspaceMembership(sessionId),
   });
   for (const session of sessionManager.getAllSessions()) {
     const project = sessionManager.getProjectForSession(session.id);
@@ -271,6 +293,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       worktreePath: session.worktreePath,
     });
   }
+  // Polls GitHub only for Panes in a live Session with an open PR; idle rounds run no gh.
+  const sessionPrMonitor = new SessionPrMonitor({
+    sessions: orchestrationSessionManager,
+    panes: sessionManager,
+    gitStatus: gitStatusManager,
+    journal: workspaceJournal,
+    logger,
+  });
   const workspaceStateReader = new WorkspaceStateReader(
     sessionManager,
     () => workspaceJournal.epoch,
@@ -279,6 +309,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const workspaceCursorStore = new WorkspaceCursorStore(
     path.join(getAppDirectory(), 'workspace-cursors.json'),
   );
+  const namedLockService = new NamedLockService(new NamedLockStore(path.join(getAppDirectory(), 'locks.json')), {
+    isOwnerLive: owner => isLockOwnerLive({ sessionManager }, owner),
+    log: (message, error) => logger.warn(message, error),
+  });
 
   const daemonServices: DaemonHostServices = {
     configManager,
@@ -305,6 +339,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     workspaceJournal,
     workspaceStateReader,
     workspaceCursorStore,
+    namedLockService,
   };
 
   const services: AppServices = {
@@ -337,7 +372,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     });
   }
 
-  const daemonSinks: PaneEventSink[] = [workspaceJournal];
+  const daemonSinks: PaneEventSink[] = [workspaceJournal, namedLockService];
   if (paneDaemonServer) {
     daemonSinks.push(paneDaemonServer.getEventSink());
   }
@@ -359,6 +394,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   logsManager.setAnalyticsManager(analyticsManager);
 
   gitStatusManager.startPolling();
+  sessionPrMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
   }
@@ -391,11 +427,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      // Before terminals stop: their exits during shutdown must not release locks.
+      namedLockService.dispose();
       resourceMonitorService.stop();
       await spotlightManager.disableAll();
       await sessionManager.cleanup();
       await runCommandManager.stopAllRunCommands();
       gitStatusManager.stopPolling();
+      sessionPrMonitor.stop();
       configManager.stopWatching();
       await cliManagerFactory.shutdown();
       await taskQueue.close();

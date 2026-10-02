@@ -91,7 +91,7 @@ export function ResumeSessionsDialog({ isOpen, onClose, sessions }: ResumeSessio
           {sessions.map(session => (
             <label
               key={session.sessionId}
-              className="flex items-center gap-3 p-3 rounded-lg bg-surface-secondary hover:bg-surface-hover cursor-pointer transition-colors"
+              className="flex items-center gap-3 p-3 rounded-lg bg-surface-secondary hover:bg-surface-hover cursor-default transition-colors"
             >
               <input
                 type="checkbox"

@@ -7,6 +7,7 @@ import { usePanelStore } from '../../../stores/panelStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useResizable } from '../../../hooks/useResizable';
 import { normalizeUrl } from './browserUrl';
+import { hasFileProtocol } from '../../../../../shared/utils/browserUrl';
 
 interface BrowserPanelProps {
   panel: ToolPanel;
@@ -22,13 +23,45 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
+  const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
+  const isHostFileUrl = hasFileProtocol(currentUrlFromPanelState);
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const panelIdRef = useRef(panel.id);
+  const remoteFileRef = useRef<boolean | null>(null);
+  const lastNavigationUrlRef = useRef(currentUrlFromPanelState);
+  const sourceUrlRef = useRef('');
+
+  // Ask main before mounting a file webview: remote host paths must never be
+  // loaded from this computer, even briefly while connection state is fetched.
+  useEffect(() => {
+    if (!isFileUrl && !isHostFileUrl) {
+      // A host-authored HTTP panel uses ordinary project cookies and writes.
+      // Client-only links away from a file keep the host's file entry grant.
+      remoteFileRef.current = false;
+      setFileSession(null);
+      return;
+    }
+    remoteFileRef.current = null;
+    clearTimeout(persistTimeoutRef.current);
+    let cancelled = false;
+    void window.electronAPI.invoke('browser-panel:prepare-file', panel.id).then(
+      (result: { partition: string | null }) => {
+        if (cancelled) return;
+        remoteFileRef.current = result.partition !== null;
+        setFileSession({ panelId: panel.id, partition: result.partition });
+      },
+      () => { if (!cancelled) setUrlError('Unable to prepare this file. Check the host connection and try again.'); },
+    );
+    return () => { cancelled = true; };
+  }, [panel.id, isFileUrl, isHostFileUrl]);
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);
@@ -61,6 +94,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
       const savedState = panel.state.customState as BrowserPanelState | undefined;
       if (savedState?.currentUrl) {
+        sourceUrlRef.current = savedState.currentUrl;
         setUrl(savedState.currentUrl);
         setInputUrl(savedState.currentUrl);
       }
@@ -84,6 +118,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
   const persistState = useCallback((newUrl: string) => {
     clearTimeout(persistTimeoutRef.current);
+    // Browsing a remote bundle is client-local. Keep the host's entry URL as
+    // the access boundary instead of replacing it with a link/directory URL.
+    if (remoteFileRef.current !== false) return;
     persistTimeoutRef.current = setTimeout(() => {
       window.electron?.invoke('panels:update', panelIdRef.current, {
         state: { customState: { currentUrl: newUrl } }
@@ -105,15 +142,43 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     }
     setUrlError('');
     setIsLoading(true);
+    const webview = webviewRef.current;
+    if (webview && sourceUrlRef.current === normalized && lastNavigationUrlRef.current !== normalized) {
+      // Following a link changes the guest URL without changing its src attribute.
+      // An explicit return to that src still needs a navigation request.
+      try {
+        void webview.loadURL(normalized).catch(() => setUrlError('Unable to load this page'));
+      } catch {
+        // Before dom-ready, the initial src load is already targeting this URL.
+      }
+    }
+    sourceUrlRef.current = normalized;
     setUrl(normalized);
     setInputUrl(normalized);
     persistState(normalized);
   }, [persistState]);
 
   useEffect(() => {
-    if (!currentUrlFromPanelState || currentUrlFromPanelState === url) return;
+    // A navigation's debounced persistence is an echo, not a new load request.
+    // Reassigning src here resets the guest's navigation history.
+    // A host changing its file entry to HTTP also changes the guest's session,
+    // even if the client already followed a link to that exact HTTP page.
+    const endsRemoteFileSession = Boolean(fileSession?.partition) && !isHostFileUrl;
+    if (!currentUrlFromPanelState || (currentUrlFromPanelState === lastNavigationUrlRef.current && !endsRemoteFileSession)) return;
     navigateTo(currentUrlFromPanelState);
-  }, [currentUrlFromPanelState, navigateTo, url]);
+  }, [currentUrlFromPanelState, isHostFileUrl, fileSession?.partition, navigateTo]);
+
+  // An agent reopened this page after rewriting it; show the new content.
+  const lastReopenedAt = useRef(reopenedAt);
+  useEffect(() => {
+    if (!reopenedAt || reopenedAt === lastReopenedAt.current) return;
+    lastReopenedAt.current = reopenedAt;
+    try {
+      webviewRef.current?.reload();
+    } catch {
+      // Not dom-ready yet: the load in flight already reads the rewritten file.
+    }
+  }, [reopenedAt]);
 
   const handleBack = () => {
     webviewRef.current?.goBack();
@@ -217,6 +282,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const onDidNavigate = () => {
       const currentUrl = webview.getURL();
       if (currentUrl && currentUrl !== 'about:blank') {
+        lastNavigationUrlRef.current = currentUrl;
         setInputUrl(currentUrl);
         persistState(currentUrl);
       }
@@ -226,6 +292,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     };
 
     const onDidStartLoading = () => setIsLoading(true);
+    const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
+      if (!event.isMainFrame || event.errorCode === -3) return;
+      setIsLoading(false);
+      setUrlError(`Unable to load this page: ${event.errorDescription}`);
+    };
     const onDidStopLoading = () => {
       setIsLoading(false);
       setCanGoBack(webview.canGoBack());
@@ -236,6 +307,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     webview.addEventListener('did-navigate', onDidNavigate);
     webview.addEventListener('did-navigate-in-page', onDidNavigate);
     webview.addEventListener('did-start-loading', onDidStartLoading);
+    webview.addEventListener('did-fail-load', onDidFailLoad);
     webview.addEventListener('did-stop-loading', onDidStopLoading);
 
     return () => {
@@ -243,10 +315,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('did-navigate', onDidNavigate);
       webview.removeEventListener('did-navigate-in-page', onDidNavigate);
       webview.removeEventListener('did-start-loading', onDidStartLoading);
+      webview.removeEventListener('did-fail-load', onDidFailLoad);
       webview.removeEventListener('did-stop-loading', onDidStopLoading);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run when url becomes non-empty (webview mounts); persistState reads from refs
-  }, [panel.id, url]);
+  }, [panel.id, url, fileSession]);
 
   // Listen for popup-requested events from the main process.
   // Uses stopImmediatePropagation so only the originating browser panel handles the event,
@@ -418,14 +491,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       ) : (
         <div className="flex-1 flex flex-row min-h-0">
           {/* Page webview */}
-          <webview
+          {((!isFileUrl && !isHostFileUrl) || fileSession?.panelId === panel.id) && <webview
+            key={fileSession?.partition ?? 'local'}
             ref={webviewRef}
             src={url}
-            partition={`persist:project-${projectId ?? panel.sessionId}`}
+            partition={fileSession?.partition ?? `persist:project-${projectId ?? panel.sessionId}`}
             allowpopups
             className="flex-1 border-0"
             style={{ display: 'inline-flex' }}
-          />
+          />}
 
           {/* DevTools resize handle + placeholder div (overlaid by WebContentsView from main process) */}
           {devToolsOpen && (

@@ -11,6 +11,8 @@ interface RemoteAccessSettingsProps {
 }
 
 export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccessSettingsProps) {
+  // A client's next move is to disconnect or switch hosts, not to host.
+  const isClient = controller.connectionState.mode === 'remote';
   const remoteStatus = controller.connectionState.status === 'connected'
     ? `Connected to ${controller.connectionState.activeProfileLabel ?? 'remote Pane'}`
     : controller.connectionState.mode === 'remote'
@@ -36,12 +38,28 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
           align="start"
         >
           <div className="flex max-w-md flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" icon={<Server className="h-4 w-4" />} onClick={() => onOpenSubview('host-setup')}>
-              Set Up Host
-            </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => onOpenSubview('connections')}>
-              Connections
-            </Button>
+            {isClient ? (
+              <>
+                <Button type="button" variant="secondary" size="sm" disabled={controller.busy} onClick={() => void controller.useLocal()}>
+                  Disconnect
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => onOpenSubview('connections')}>
+                  Switch Host
+                </Button>
+                <Button type="button" variant="ghost" size="sm" icon={<Server className="h-4 w-4" />} onClick={() => onOpenSubview('host-setup')}>
+                  Set Up Host
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" size="sm" icon={<Server className="h-4 w-4" />} onClick={() => onOpenSubview('host-setup')}>
+                  Set Up Host
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => onOpenSubview('connections')}>
+                  Connections
+                </Button>
+              </>
+            )}
             <Button type="button" variant="ghost" size="sm" onClick={() => onOpenSubview('advanced-host')}>
               Advanced
             </Button>

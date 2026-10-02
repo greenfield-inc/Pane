@@ -7,10 +7,12 @@ import { openFileInEditor } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
 import { useConfigStore } from '../../../stores/configStore';
 import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
+import { copyTerminalText } from '../../../utils/terminalClipboard';
 
 export interface UseTerminalLinksConfig {
   workingDirectory: string;
   sessionId: string;
+  onCopyError: () => void;
 }
 
 interface TooltipState {
@@ -70,6 +72,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
+  const { onCopyError } = config;
   const mousePositionRef = useRef({ x: 0, y: 0 });
 
   // Track mouse position for selection popover
@@ -124,6 +127,28 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   useEffect(() => {
     if (!terminal) return;
 
+    // Remote mode copies a finished mouse selection straight to this machine's
+    // clipboard instead of offering the selection popover.
+    if (isRemoteMode) {
+      const element = terminal.element;
+      if (!element) return;
+      const doc = element.ownerDocument;
+      const copySelection = () => {
+        if (!terminal.hasSelection()) return;
+        void copyTerminalText(terminal.getSelection()).catch(onCopyError);
+      };
+      // A drag can end outside the terminal (auto-scroll, overshoot), so the
+      // release is caught on the document, as xterm does to finish the selection.
+      const watchRelease = () => {
+        doc.addEventListener('mouseup', copySelection, { once: true });
+      };
+      element.addEventListener('mousedown', watchRelease);
+      return () => {
+        element.removeEventListener('mousedown', watchRelease);
+        doc.removeEventListener('mouseup', copySelection);
+      };
+    }
+
     const disposable = terminal.onSelectionChange(() => {
       if (terminal.hasSelection()) {
         const text = terminal.getSelection();
@@ -137,7 +162,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposable.dispose();
     };
-  }, [terminal]);
+  }, [terminal, isRemoteMode, onCopyError]);
 
   // Get panel store methods
   const addPanel = usePanelStore((state) => state.addPanel);

@@ -1,6 +1,7 @@
+import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
-import type { ToolPanel } from './panels';
+import type { TerminalAgentReport, ToolPanel } from './panels';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
 export const LEGACY_ORCHESTRATION_SESSION_ID = 'legacy-pane-chat';
@@ -12,6 +13,16 @@ export const MAX_ORCHESTRATION_TEXT_LENGTH = 16_000;
 
 export function isOrchestrationInternalSessionId(sessionId: string): boolean {
   return sessionId === '__pane_chat_session__' || sessionId.startsWith(ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX);
+}
+
+/** Default name for a new Session: "New chat", then "New chat 2", "New chat 3", ... */
+export function nextOrchestrationSessionName(sessions: readonly { name: string }[]): string {
+  const existingNames = new Set(sessions.map(session => session.name.trim().toLocaleLowerCase()));
+  if (!existingNames.has('new chat')) return 'New chat';
+
+  let suffix = 2;
+  while (existingNames.has(`new chat ${suffix}`)) suffix += 1;
+  return `New chat ${suffix}`;
 }
 
 export type OrchestrationSessionStatus = 'working' | 'blocked' | 'idle' | 'unknown' | 'unassociated';
@@ -48,6 +59,7 @@ export type OrchestrationActivityKind =
   | 'blocked'
   | 'idle'
   | 'unknown'
+  /** The Session's own report, or (with a panelId) a worker's `runpane report`. */
   | 'report';
 
 export interface OrchestrationActivity {
@@ -61,6 +73,11 @@ export interface OrchestrationActivity {
 }
 
 export interface OrchestrationSessionRecord {
+  /** Omitted in older stores; migrated to the host runtime on read. */
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
+  /** Durable recovery anchor for an in-place conversation transfer. */
+  promotedFrom?: { paneId: string; panelId: string };
   id: string;
   name: string;
   /** Durable UI archive marker. Older records omit this field and read as active. */
@@ -68,6 +85,11 @@ export interface OrchestrationSessionRecord {
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
   isPinned?: boolean;
   agent: PaneChatAgent;
+  /** Empty uses the selected built-in agent command. */
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  /** Snapshot of the behavior profile, independent of app defaults. */
+  profile?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
   internalSessionId: string;
   /** Deterministic terminal panel for each supported agent. */
@@ -143,6 +165,8 @@ export interface OrchestrationPaneOverview {
   missing: boolean;
   panels: OrchestrationPanelOverview[];
   git?: OrchestrationGitSummary;
+  /** The newest `runpane report` among the Pane's panels, with the panel that sent it. */
+  report?: TerminalAgentReport & { panelId: string };
 }
 
 export interface OrchestrationSessionOverview {
@@ -155,8 +179,13 @@ export interface OrchestrationSessionOverview {
 }
 
 export interface OrchestrationSessionCreateInput {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   name: string;
   agent?: PaneChatAgent;
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  profile?: string;
   goal?: string;
   context?: string;
   decisions?: string[];
@@ -171,6 +200,9 @@ export interface OrchestrationSessionUpdateInput {
   archived?: boolean;
   isPinned?: boolean;
   agent?: PaneChatAgent;
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  profile?: string;
   goal?: string;
   context?: string;
   decisions?: string[];

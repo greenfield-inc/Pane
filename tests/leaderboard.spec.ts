@@ -21,6 +21,18 @@ const leaderboardEntries = {
   generatedAtMs: Date.now(),
 };
 
+/**
+ * Usage & Limits is a Settings category: the sidebar's Settings button (in the
+ * footer when expanded, on the rail when collapsed) opens it.
+ */
+async function openUsageAndLimits(page: Page): Promise<void> {
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Settings categories' })
+    .getByRole('button', { name: 'Usage & Limits', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
+}
+
 async function capture(page: Page, testInfo: TestInfo, filename: string): Promise<void> {
   const path = testInfo.outputPath(filename);
   await page.screenshot({ path, fullPage: true });
@@ -36,8 +48,7 @@ test('leaderboard tab shows join banner and table before opt-in', async ({ page 
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
-  await expect(page.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
+  await openUsageAndLimits(page);
 
   // Click the Leaderboard tab
   await page.getByRole('tab', { name: 'Leaderboard' }).click();
@@ -86,7 +97,7 @@ test('leaderboard tab shows joined banner when opted in', async ({ page }, testI
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await openUsageAndLimits(page);
   await page.getByRole('tab', { name: 'Leaderboard' }).click();
 
   // Joined banner — sendNow auto-fires on tab visit and the mock returns rank 1
@@ -115,7 +126,7 @@ test('tab navigation switches between My usage and Leaderboard', async ({ page }
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await openUsageAndLimits(page);
 
   // Default is My usage tab
   const myUsageTab = page.getByRole('tab', { name: 'My usage' });
@@ -149,7 +160,7 @@ test('DO_NOT_TRACK disables join button', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  await page.getByTestId('usage-nav').click();
+  await openUsageAndLimits(page);
   await page.getByRole('tab', { name: 'Leaderboard' }).click();
 
   // Join button is disabled

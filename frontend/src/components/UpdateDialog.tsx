@@ -650,7 +650,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
             <div className="mt-6">
               <h3 className="text-lg font-medium text-text-primary mb-3">Release Notes</h3>
               <div className="bg-surface-secondary rounded-lg p-4 max-h-64 overflow-y-auto">
-                <div className="text-sm">
+                <div className="select-text text-sm">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{

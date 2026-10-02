@@ -8,8 +8,8 @@ description: Drive Pane through the runpane CLI. Covers dispatching work to agen
 Use RunPane as the control plane. Keep every authorized workstream moving until
 its pull request is ready to merge or it reaches a real blocker: a missing
 decision, a scope question, or a hard stop. Advance every step that is ready,
-then yield to the watcher; a READY, BLOCKED, or IDLE line is the cue to check
-on an agent.
+then yield to the watcher; a REPORT, READY, BLOCKED, or IDLE line is the cue
+to check on an agent.
 
 `pane-orchestrator` says what a Pane Session does and when; `orchestrate-sessions`
 covers routing work to planning, implementation, and bug-report sessions. This
@@ -81,6 +81,12 @@ While one workstream waits, continue the others.
 - Create panes and panels in the background with `--source agent` and
   `--no-focus` where supported. Check the returned focus state. If a pane
   steals focus anyway, report it with `runpane doctor --report`.
+- For work on a named branch,
+  `runpane panes create --base <ref> --branch <name> --prompt-file <file>`
+  replaces `git worktree add` plus `panes adopt`. Pane creates the worktree on
+  exactly that branch, slashes included, and fails if the branch already
+  exists. Adopt only a worktree that already exists; to send it a prompt,
+  pass `--launch --prompt-file <file>`.
 
 ## Dispatch
 
@@ -89,8 +95,18 @@ record an output baseline (cursor or hash) and a timestamp. Put the prompt in a
 file and submit it:
 
 ```bash
-runpane panels submit --panel <panel-id> --input-file <prompt-file> --yes --json
+runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --yes --json
 ```
+
+Prefer `--as-file-pointer` for long prompts. Pane writes a private copy under
+`<pane-dir>/prompts/` and submits the single line `Read and follow <path>`
+(the result's `promptFile`), so nothing long passes through the terminal.
+Without it, multi-line or long text still goes to a Claude or Codex
+composer as one bracketed paste with a separate Enter, and `panes create`
+launches a long prompt from a file rather than typing it into the shell.
+A `warnings` entry such as `leading-bang-runs-shell` means Claude Code gives
+the text's first character a meaning of its own (`!` runs a shell command);
+reword the prompt or send it as a file pointer.
 
 Agents in other repositories don't have Pane's skills installed. When a prompt
 asks for a skill, give its absolute path from the skills folder that
@@ -102,8 +118,13 @@ in every implementation prompt:
 
 - The ticket is the plan. Its acceptance criteria are the agreed behaviors and
   test seams, so `tdd` starts from them; review checks against them.
-- Questions for the user come back to this Session: stop and state the
-  question, and it arrives here as BLOCKED.
+- Questions for the user come back to this Session: stop and run
+  `runpane report --state blocked --question "<question>"`, and it arrives
+  here as a REPORT with the question.
+- End every worker prompt with: "When finished or blocked, run
+  `runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>`
+  (add `--question "<question>"` when blocked)." Inside a Pane terminal the
+  report finds its own panel; the worker needs no ids.
 - Save pages and records to Grain when connected, otherwise as `page`
   describes.
 - Review and QA post nothing. They render their findings as a page (see
@@ -114,13 +135,12 @@ in every implementation prompt:
 - The `reviewer` and `qa-and-verify` subagents exist only in Pane Chat. In
   another repository, run `review` or `pr-test-automation` directly.
 
-A stage has started when both hold:
+A stage has started when the result reports `delivery.state: "taken"`, or
+`"queued"` for an agent that was busy (it runs the message after its current
+turn); `verifiedSubmitted: true` means the same. See "Confirm delivery" below.
 
-- the result reports `verifiedSubmitted: true`
-- you have delivery evidence, as described under "Confirm delivery" below
-
-When the text is still in the composer (`panels screen` reports
-`composer.hasUndeliveredText: true`), run
+When the text is still in the composer (`delivery.state: "in-composer"`, or
+`panels screen` reports `composer.hasUndeliveredText: true`), run
 `runpane panels submit-composer --panel <panel-id> --strategy auto --yes --json`
 once, then check again.
 
@@ -140,14 +160,21 @@ After clearing a blocker, repeat the submit check.
 
 ### Confirm delivery
 
-`verifiedSubmitted` means the text left the composer. Delivery evidence shows
-the agent took the turn; either of these counts:
+For Claude and Codex, submit results carry `delivery`:
 
-- the instruction appears as a received turn in the agent's own session log,
-  where its harness keeps one
-- an activity transition or output change against your baseline
+- `state`: `taken` (the agent started a turn with the text), `queued` (a busy
+  agent holds it for after its current turn), `in-composer` (the text is still
+  in the composer), or `unknown`.
+- `evidence`: `transcript` (Pane found the turn in the agent's own session
+  log), `screen`, or `argv` (a create prompt passed at launch).
 
-Advance a workstream only on that evidence.
+`verifiedSubmitted` is true exactly for `taken` or `queued`; never resend
+those. For `unknown`, delivery evidence is an activity transition or output
+change against your baseline. Advance a workstream only on that evidence.
+
+`panels screen` reports placeholder and suggestion text (such as Claude's
+suggested next prompt, drawn dim or grey) as `composer.ghostText`, not as held
+input; text output marks that line `⟨suggestion⟩`.
 
 An agent finishing an earlier turn can hold a received prompt with no visible
 change, so a resend on missing evidence can run the work twice. Resend only
@@ -231,6 +258,28 @@ through review, QA, and required checks. When feedback needs only an
 authorized reply or resolution, post it, read it back, and continue. Keep
 working while a review is pending.
 
+## Worker reports
+
+A worker's `runpane report` is its hand-back, like a background subagent's
+result. Watch for it by adding `agent.report` to `--kinds`; watchers that
+don't list it never receive it. Each REPORT line
+(`REPORT <pane> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`, or
+`... blocked: <question>`) arrives at once, skipping the `--min-interval`
+batch.
+
+- Treat a REPORT as the completion signal. Read the whole report (state, PR,
+  head, summary up to 16,000 characters, `summaryPath`, question) with
+  `runpane agents status --panel <panel-id> --json`, or from
+  `sessions overview` under `panes[].report`, instead of scraping the screen.
+- A report is a claim. Check it as the PR-ready check says before you
+  advance the workstream: the PR, head, and checks must match.
+- `blocked` carries the worker's question; answer it or take it to the user.
+  `failed` means the worker gave up; read its summary before retrying.
+- A READY without a report means look, and maybe nudge. Read the worker's last
+  reply with `runpane panels last-message --panel <panel-id> --json` (from its
+  transcript; `transcript-unavailable` means fall back to `panels screen`),
+  then, if it finished, ask it to run `runpane report`.
+
 ## Monitor and report
 
 While authorized work remains, rotate fairly across workstreams, advance every
@@ -245,3 +294,14 @@ Report one dashboard line set per workstream:
 
 A workstream is done when it is ready to merge. Merging needs its own exact
 authorization.
+
+## Close out
+
+Archiving removes a Pane's worktree, so it needs the user's cleanup approval.
+Once PRs merge, preview with
+`runpane panes archive --session <id|name> --merged --dry-run --json`, then
+rerun with `--yes`. It archives only Panes that are clean and pushed, or whose
+branch merged through a PR whose head is `HEAD` (`safetyCheck.mergedViaPr`),
+and gives every other Pane a `skipped.code`. Adopted worktrees are kept unless
+you add `--remove-worktree`. Local branches are always kept. Never add
+`--force` to discard work without the user's approval.

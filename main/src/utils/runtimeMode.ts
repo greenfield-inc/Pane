@@ -15,3 +15,7 @@ export function hasHeadlessDaemonLaunchArg(args = process.argv): boolean {
 export function hasRemoteSetupLaunchArg(args = process.argv): boolean {
   return args.some((arg) => REMOTE_SETUP_ARGS.has(arg));
 }
+
+export function hasVersionQueryArg(args = process.argv): boolean {
+  return args.includes('--version');
+}

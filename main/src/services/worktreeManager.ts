@@ -5,9 +5,11 @@ import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
+import { commitGitMessage } from '../utils/gitCommit';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
+import { removeWorktreeViaTrash, sweepWorktreeTrash, type WorktreeTrashDeletion } from './worktreeTrash';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
@@ -187,6 +189,44 @@ export async function resolveDefaultWorktreeBase(
   return 'HEAD';
 }
 
+// Worktree commands still run through a shell, so a requested branch keeps to
+// characters that need no quoting on top of Git's own ref-name rules.
+const REQUESTED_BRANCH_PATTERN = /^[A-Za-z0-9._/+,=@%-]+$/;
+
+/**
+ * Checks a caller-requested branch name before a worktree is created on it.
+ * The name must be a valid new branch (`git check-ref-format --branch`) that
+ * does not exist yet; Pane never renames or reuses a branch that was asked for
+ * by name. Returns the name exactly as requested.
+ */
+export async function assertNewBranchName(
+  projectPath: string,
+  branchName: string,
+  commandRunner: CommandRunner,
+): Promise<string> {
+  if (!branchName || branchName.trim() !== branchName) {
+    throw new Error(`Invalid branch name '${branchName}': it must be non-empty with no surrounding whitespace.`);
+  }
+  if (!REQUESTED_BRANCH_PATTERN.test(branchName) || branchName.startsWith('-')) {
+    throw new Error(`Invalid branch name '${branchName}': use letters, digits, and . _ / + , = @ % -.`);
+  }
+  try {
+    await commandRunner.execFile('git', ['check-ref-format', '--branch', branchName], projectPath);
+  } catch {
+    throw new Error(`Invalid branch name '${branchName}': git check-ref-format --branch rejected it.`);
+  }
+  let exists = true;
+  try {
+    await commandRunner.execFile('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], projectPath);
+  } catch {
+    exists = false;
+  }
+  if (exists) {
+    throw new Error(`Branch '${branchName}' already exists. Choose a new --branch name, or adopt an existing worktree with \`runpane panes adopt\`.`);
+  }
+  return branchName;
+}
+
 export class WorktreeManager {
   private projectsCache: Map<string, { baseDir: string }> = new Map();
 
@@ -218,6 +258,8 @@ export class WorktreeManager {
   async initializeProject(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
     const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
     void ensureFastGitConfig(projectPath, commandRunner);
+    // Finish deleting worktrees that an earlier run moved to the trash.
+    void sweepWorktreeTrash(projectPath, pathResolver, commandRunner);
     try {
       await mkdir(pathResolver.toFileSystem(baseDir), { recursive: true });
     } catch (error) {
@@ -294,7 +336,7 @@ export class WorktreeManager {
         } catch {
           // Ignore add errors (no files to add)
         }
-        await commandRunner.execAsync('git commit -m "Initial commit" --allow-empty', projectPath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
+        await commandRunner.execFile('git', ['commit', '-m', 'Initial commit', '--allow-empty'], projectPath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
       }
 
       await ensureFastGitConfig(projectPath, commandRunner);
@@ -372,6 +414,10 @@ export class WorktreeManager {
    * Resolves the working directory for a session. When useWorktree is true, creates
    * an isolated git worktree. When false, uses the project directory directly and
    * optionally checks out the specified branch.
+   *
+   * `branchName` names the new worktree branch exactly (for example
+   * `agents/w5a`); it must not exist yet. Without it the branch is the
+   * worktree name.
    */
   async resolveWorkingDirectory(
     projectPath: string,
@@ -380,14 +426,21 @@ export class WorktreeManager {
     useWorktree: boolean,
     worktreeFolder: string | undefined,
     pathResolver: PathResolver,
-    commandRunner: CommandRunner
+    commandRunner: CommandRunner,
+    options: { branchName?: string } = {},
   ): Promise<{ worktreePath: string; baseCommit: string | undefined; baseBranch: string | undefined }> {
+    if (!useWorktree && options.branchName) {
+      throw new Error('A branch name can only be requested for a Pane with its own worktree.');
+    }
     if (useWorktree) {
+      const requestedBranch = options.branchName
+        ? await assertNewBranchName(projectPath, options.branchName, commandRunner)
+        : undefined;
       const effectiveBase = baseBranch || await resolveDefaultWorktreeBase(projectPath, commandRunner);
 
       // Try claiming a pre-created reserve worktree for instant creation
       try {
-        const branchName = worktreeName; // worktreeName is used as both dir name and branch name
+        const branchName = requestedBranch ?? worktreeName;
         const claimed = await worktreePoolManager.claimReserve(
           projectPath,
           effectiveBase,
@@ -407,7 +460,7 @@ export class WorktreeManager {
       }
 
       // Fall back to standard worktree creation
-      const result = await this.createWorktree(projectPath, worktreeName, undefined, effectiveBase, worktreeFolder, pathResolver, commandRunner);
+      const result = await this.createWorktree(projectPath, worktreeName, requestedBranch, effectiveBase, worktreeFolder, pathResolver, commandRunner);
 
       // Trigger background replenishment after successful creation
       worktreePoolManager.createReserve(projectPath, effectiveBase, worktreeFolder, pathResolver, commandRunner).catch(err => {
@@ -422,23 +475,34 @@ export class WorktreeManager {
     return { worktreePath: projectPath, baseCommit, baseBranch: detectedBranch };
   }
 
-  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<void> {
-    return await withLock(`worktree-remove-${projectPath}-${name}`, async () => {
-      const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
-      const worktreePath = pathResolver.join(baseDir, name);
+  async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
+    const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
+    return this.removeWorktreeAtPath(projectPath, pathResolver.join(baseDir, name), sessionCreatedAt, pathResolver, commandRunner, auditContext);
+  }
+
+  /**
+   * Removes the linked worktree at `worktreePath`, keeping its branch. Large
+   * worktrees finish deleting in the background (`pending`). Adopted worktrees
+   * can live outside the project's worktree folder, so callers pass the
+   * stored path rather than a name.
+   */
+  async removeWorktreeAtPath(projectPath: string, worktreePath: string, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
+    return await withLock(`worktree-remove-${projectPath}-${worktreePath}`, async () => {
       const auditDetails = {
         source: auditContext?.source,
         sessionId: auditContext?.sessionId,
         projectId: auditContext?.projectId,
         projectPath,
-        worktreeName: name,
+        worktreeName: worktreePath.replace(/\\/g, '/').split('/').pop(),
         worktreePath,
       };
 
       try {
         logWorktreeAudit('remove_started', auditDetails);
-        await forceRemoveWorktree(worktreePath, projectPath, commandRunner);
-        logWorktreeAudit('remove_succeeded', auditDetails);
+        const outcome = await removeWorktreeViaTrash(worktreePath, projectPath, pathResolver, commandRunner, {
+          label: auditContext?.sessionId,
+        });
+        logWorktreeAudit('remove_succeeded', { ...auditDetails, reason: outcome });
 
         // Track worktree cleanup
         if (this.analyticsManager && sessionCreatedAt) {
@@ -447,6 +511,7 @@ export class WorktreeManager {
             session_age_days: sessionAgeDays
           });
         }
+        return outcome;
       } catch (error: unknown) {
         const err = decodeBoundary(error, commandErrorSchema);
         const errorMessage = err.stderr || err.stdout || err.message || String(err);
@@ -459,7 +524,7 @@ export class WorktreeManager {
             ...auditDetails,
             reason: errorMessage,
           });
-          return;
+          return 'done';
         }
 
         logWorktreeAudit('remove_failed', {
@@ -1031,20 +1096,8 @@ export class WorktreeManager {
         const resetResult = await commandRunner.execAsync(command, worktreePath);
         lastOutput = resetResult.stdout || resetResult.stderr || '';
 
-        // Get config to check if Pane footer is enabled (default: true)
-        const config = this.configManager?.getConfig();
-        const enableCommitFooter = config?.enableCommitFooter !== false;
-
-        // Add Pane footer if enabled
-        const fullMessage = enableCommitFooter ? `${commitMessage}
-
-Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
-
-        // Properly escape commit message for cross-platform compatibility
-        const escapedMessage = fullMessage.replace(/"/g, '\\"');
-        command = `git commit -m "${escapedMessage}"`;
         executedCommands.push(`git commit -m "..." (in ${worktreePath})`);
-        const commitResult = await commandRunner.execAsync(command, worktreePath, { env: getGitAttributionEnv(config) });
+        const commitResult = await commitGitMessage(commandRunner, worktreePath, commitMessage, this.configManager?.getConfig());
         lastOutput = commitResult.stdout || commitResult.stderr || '';
 
         // Switch to main branch in the main repository
@@ -1303,8 +1356,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
   async gitStash(worktreePath: string, message: string | undefined, commandRunner: CommandRunner): Promise<{ output: string }> {
     try {
       const stashMessage = message || 'pane stash';
-      const escapedMessage = stashMessage.replace(/"/g, '\\"');
-      const { stdout, stderr } = await commandRunner.execAsync(`git stash push -m "${escapedMessage}"`, worktreePath);
+      const { stdout, stderr } = await commandRunner.execFile('git', ['stash', 'push', '-m', stashMessage], worktreePath);
       const output = stdout || stderr || 'Changes stashed successfully';
 
       return { output };
@@ -1415,9 +1467,7 @@ Co-Authored-By: Pane <runpane@users.noreply.github.com>` : commitMessage;
       // Stage all changes including untracked files
       await commandRunner.execAsync('git add -A', worktreePath);
 
-      // Commit with message
-      const escapedMessage = message.replace(/"/g, '\\"');
-      const { stdout, stderr } = await commandRunner.execAsync(`git commit -m "${escapedMessage}"`, worktreePath, { env: getGitAttributionEnv(this.configManager?.getConfig()) });
+      const { stdout, stderr } = await commitGitMessage(commandRunner, worktreePath, message, this.configManager?.getConfig());
       const output = stdout || stderr || 'Committed successfully';
 
       return { output };

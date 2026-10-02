@@ -378,7 +378,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
       <div 
         ref={setLogContainerRef}
         tabIndex={-1}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-auto font-mono text-sm p-4 bg-bg-primary text-text-primary whitespace-pre-wrap break-all"
+        className="select-text flex-1 min-h-0 overflow-y-auto overflow-x-auto font-mono text-sm p-4 bg-bg-primary text-text-primary whitespace-pre-wrap break-all"
         onScroll={(e) => {
           // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
           const target = e.target as HTMLDivElement;

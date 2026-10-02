@@ -132,7 +132,7 @@ test('selection popover works in restored bottom and tab terminals', async ({ pa
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   await page.getByRole('button', { name: 'Expand terminal', exact: true }).click();
@@ -179,7 +179,7 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
@@ -187,4 +187,73 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
   await terminal.locator('.xterm-helper-textarea').focus();
   await page.keyboard.press('Control+Shift+C');
   await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);
+});
+
+test('copies OSC 52 writes from live output but not from restored scrollback', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialTerminalStates: Object.fromEntries(panels.map((panel) => [
+      panel.id,
+      // "stale" in base64: copied in a past run, so replaying it must not copy again.
+      { scrollbackBuffer: 'restored\x1b]52;c;c3RhbGU=\x07\r\n' },
+    ])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+  await expect(page.getByRole('tabpanel').locator('.xterm-screen')).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines __paneTestElectronMock with this emitter.
+    const mock = (window as typeof window & { __paneTestElectronMock: {
+      emitPanelTerminalOutput: (sessionId: string, panelId: string, output: string) => void;
+    } }).__paneTestElectronMock;
+    // "fresh" in base64.
+    mock.emitPanelTerminalOutput('terminal-selection-session', 'terminal-1', '\x1b]52;c;ZnJlc2g=\x07');
+  });
+  await expect.poll(() => clipboardWrites(page)).toEqual(['fresh']);
+});
+
+test('remote mode copies a mouse selection without the selection popover', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    initialConfig: {
+      remoteDaemon: {
+        host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
+        client: { profiles: [], activeProfileId: null, mode: 'remote' },
+      },
+    },
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialTerminalStates: Object.fromEntries(panels.map((panel, index) => [
+      panel.id,
+      { scrollbackBuffer: `selection-${index}\r\n` },
+    ])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+
+  const viewport = page.getByRole('tabpanel').locator('.xterm-screen').first();
+  await expect(viewport).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  const box = await viewport.boundingBox();
+  if (!box) throw new Error('Terminal viewport has no bounding box');
+
+  await page.mouse.move(box.x + 1, box.y + 8);
+  await page.mouse.down();
+  // Release outside the terminal, as when a drag overshoots into the next panel.
+  await page.mouse.move(box.x + 300, box.y + 8, { steps: 8 });
+  await page.mouse.move(box.x + box.width + 40, box.y + 8, { steps: 4 });
+  await page.mouse.up();
+
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);
+  await expect(page.getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
 });

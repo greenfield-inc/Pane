@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
 
 /**
@@ -25,6 +26,28 @@ export interface ToolPanelState {
   customState?: TerminalPanelState | DiffPanelState | ExplorerPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | BrowserPanelState | object;
 }
 
+export type TerminalAgentDetection = 'declared' | 'command' | 'process' | 'screen';
+
+/** What a worker says about its task when it runs `runpane report`. */
+export type TerminalAgentReportState = 'ready' | 'blocked' | 'failed' | 'done';
+
+/** The latest `runpane report` from an agent panel, kept in its custom state so it survives restarts. */
+export interface TerminalAgentReport {
+  state: TerminalAgentReportState;
+  /** Pull request number the work is in. */
+  pr?: number;
+  /** Commit the report is about (lowercase hex, 7-40 characters). */
+  head?: string;
+  /** Up to 16,000 characters; a longer summary ends with a truncation marker and sets `summaryTruncated`. */
+  summary?: string;
+  summaryTruncated?: true;
+  /** Absolute path of the file the summary was read from (`--summary-file`). */
+  summaryPath?: string;
+  /** What the worker needs answered; present when `state` is `blocked`. */
+  question?: string;
+  reportedAt: string;
+}
+
 export interface TerminalPanelState {
   // Basic state (implemented in Phase 1-2)
   isInitialized?: boolean;       // Whether PTY process has been started
@@ -33,6 +56,7 @@ export interface TerminalPanelState {
   initialCommand?: string;       // Command to run on terminal init (e.g., "claude --dangerously-skip-permissions")
   initialInput?: string;         // First input to send once the initial command is ready
   initialInputMode?: 'stdin' | 'argument'; // How initialInput is delivered to the initial command
+  initialInputFile?: string;     // Prompt file an argument launch reads with "$(cat '<file>')" instead of inlining initialInput
   initialInputSubmitStrategy?: 'enter' | 'codex-ctrl-enter'; // How stdin initialInput should be submitted
   initialInputDeliveryVersion?: number; // Bumps when a feature changes delivery semantics
   initialInputSentAt?: string;   // Set after initialInput has been written once
@@ -59,9 +83,28 @@ export interface TerminalPanelState {
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
   agentType?: 'claude' | 'codex' | 'cursor'; // CLI agent type for panel-local resume behavior
+  /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
+  agentDetection?: TerminalAgentDetection;
+  /** The command the panel was launched (or staged) with, as the user gave it. */
+  launchCommand?: string;
+  /**
+   * `wrapped`: the launch command is a wrapper (or unknown command) that runs the agent.
+   * Pane runs it unchanged — no `--session-id`, resume, or prompt-argument rewrites.
+   */
+  launchMode?: 'wrapped';
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
+  /** Latest `runpane report` from this panel's agent. */
+  agentReport?: TerminalAgentReport;
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
+  /** Session-owned working directory, also used by legacy shared terminal owners. */
+  orchestrationWorkspace?: string;
+  /** Applied when the terminal next starts, not while its agent is running. */
+  orchestrationProfile?: string;
+  /** Wrapper/custom commands own their flags and resume behavior. */
+  preserveLaunchCommand?: boolean;
+  customResume?: CustomCommandResume | null;
+  customResumeStarted?: boolean;
 
   // CLI tool init state
   isCliPanel?: boolean;              // True if this terminal runs a CLI tool (claude/codex)
@@ -155,6 +198,9 @@ export type EditorDiffRef = { kind: 'scope'; scope: DiffScope; previousPath?: st
 
 export interface EditorPanelState {
   filePath: string;
+  /** Reload an agent-reopened file when this editor has no pending edits. */
+  reopenedAt?: string;
+  reopenedWithFocus?: boolean;
   /** When set, the tab shows this file's diff instead of an editable file. */
   diff?: EditorDiffRef;
   isPreview?: boolean;
@@ -192,6 +238,9 @@ export interface SetupTasksPanelState {
 export interface BrowserPanelState {
   currentUrl?: string;
   isPopup?: boolean;
+  /** Set when an agent reopens this page (runpane panels open); the tab reloads to show the latest file. */
+  reopenedAt?: string;
+  reopenedWithFocus?: boolean;
 }
 
 export interface ToolPanelMetadata {
@@ -199,6 +248,12 @@ export interface ToolPanelMetadata {
   lastActiveAt: string;
   position: number;              // Tab order
   permanent?: boolean;           // Cannot be closed (for diff panel)
+  /**
+   * Where the renderer places this panel the first time it enters the layout.
+   * 'split' opens it beside the primary group (reusing an existing side group
+   * as tabs). Ignored once the panel is in the stored layout.
+   */
+  openPlacement?: 'split' | 'tab';
 }
 
 export interface CreatePanelRequest {

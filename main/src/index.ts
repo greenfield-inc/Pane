@@ -1,3 +1,5 @@
+// Answer --version before any import below logs or touches the database.
+import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
 
@@ -7,6 +9,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { boundary, decodeBoundary } from '../../shared/validation/boundaryDecoder';
 import type { PaneEventArgument } from './core/eventSink';
+import { customCommandResumeSchema } from '../../shared/types/customCommandResume';
 
 const launchHeadlessDaemon = hasHeadlessDaemonLaunchArg();
 const launchRemoteSetup = hasRemoteSetupLaunchArg();
@@ -60,7 +63,7 @@ if (process.platform === 'win32') {
 }
 
 // Now import the rest of electron
-import { BrowserWindow, Menu, ipcMain, shell, dialog, session, WebContents, webContents, WebContentsView, type BrowserWindowConstructorOptions } from 'electron';
+import { autoUpdater as nativeAutoUpdater, BrowserWindow, ipcMain, screen, shell, dialog, session, WebContents, webContents, WebContentsView, type BrowserWindowConstructorOptions, type IpcMainEvent } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
@@ -94,7 +97,7 @@ import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
-import { applyAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
+import { applyAppDirectoryOverrideFromArgs, getAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import type { CliManagerFactory } from './services/cliManagerFactory';
@@ -108,12 +111,16 @@ import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
+import { syncPaneMcpForApp } from './services/paneMcpRegistration';
+import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
+import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
+import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
 
 export let mainWindow: BrowserWindow | null = null;
 
@@ -132,6 +139,14 @@ const registeredPartitions = new Set<string>();
 
 // Module-level shutdown guard to prevent multiple shutdown attempts
 let shutdownInProgress = false;
+// On macOS, closing the window hides it unless Pane is quitting.
+let appIsQuitting = false;
+let mainWindowRevealed = false;
+let flushWindowState: (() => void) | null = null;
+// A menu action chosen before the window is revealed waits for the renderer.
+let pendingMenuAction: AppMenuAction | null = null;
+const RENDERER_READY_CHANNEL = 'window:renderer-ready';
+const RENDERER_READY_TIMEOUT_MS = 3_000;
 interface AnalyticsLaunchContext {
   appVersion?: string;
   previousVersion?: string | null;
@@ -225,7 +240,59 @@ let archiveProgressManager: ArchiveProgressManager;
 let leaderboardService: LeaderboardService;
 let analyticsManager: AnalyticsManager;
 let paneDaemonHost: PaneDaemonHost | null = null;
+let pendingPaneLink: string | undefined;
+let paneLinksReady = false;
+
+function openPaneLink(link: string): void {
+  if (!paneLinksReady || !paneDaemonHost) {
+    pendingPaneLink = link;
+    return;
+  }
+  pendingPaneLink = undefined;
+  if (remotePaneClientController.isRemoteModeActive()) {
+    // The link names the active host's Panes, which only the renderer holds in remote mode.
+    try {
+      const target = parsePaneLink(link);
+      showMainWindow();
+      mainWindow?.webContents.send('pane:open-link', target);
+    } catch (error) {
+      console.warn('[Main] Could not open pane link:', error);
+    }
+    return;
+  }
+  void paneDaemonHost.commandRegistry.invoke(OPEN_PANE_LINK_CHANNEL, [link]).then((result) => {
+    console.log('[Main] Opened pane link:', JSON.stringify(result));
+  }).catch((error) => console.warn('[Main] Could not open pane link:', error));
+}
 let powerSaveManager: PowerSaveManager | null = null;
+
+function sendMenuAction(action: AppMenuAction): void {
+  if (!mainWindowRevealed || !mainWindow || mainWindow.isDestroyed()) {
+    pendingMenuAction = action;
+    return;
+  }
+  showMainWindow();
+  mainWindow.webContents.send(APP_MENU_ACTION_CHANNEL, action);
+}
+
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/**
+ * The installed Pane runs once per data directory. Chromium keeps the lock in
+ * userData, which unpackaged builds and --pane-dir/PANE_DIR instances share with
+ * the installed app, so those run beside it without taking the lock.
+ */
+function acquireSingleInstanceLock(): boolean {
+  if (!app.isPackaged || getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR) {
+    return true;
+  }
+  return app.requestSingleInstanceLock();
+}
 
 // ptyHost supervisor — forked as an Electron UtilityProcess on app ready,
 // but only when the `usePtyHost` setting is enabled (default: on for Windows). When
@@ -318,6 +385,15 @@ function readStoredBackgroundColors() {
   }
 }
 
+function readSavedWindowState() {
+  try {
+    return parseSavedWindowState(databaseService?.getUserPreference(WINDOW_STATE_KEY) ?? null);
+  } catch (error) {
+    console.error('Failed to read saved window state:', error);
+    return null;
+  }
+}
+
 async function createWindow() {
   // Strip iframe-blocking headers for localhost URLs (enables embedded browser panel)
   session.defaultSession.webRequest.onHeadersReceived(
@@ -345,11 +421,6 @@ async function createWindow() {
     }
   );
 
-  // Remove the default menu bar on Windows/Linux for a cleaner look
-  if (process.platform !== 'darwin') {
-    Menu.setApplicationMenu(null);
-  }
-
   const windowControlsOverlay = shouldEnableWindowControlsOverlay(process.platform, process.env);
   const appearance = normalizeAppearance(configManager.getConfig()).appearance;
   const osPrefersDark = resolveOsPrefersDark();
@@ -376,9 +447,14 @@ async function createWindow() {
   // ever missing again, so this only guards a broken tree.
   const windowIconPath = path.join(__dirname, '../assets/icon.png');
 
+  const savedWindowState = readSavedWindowState();
+  const restoredBounds = savedWindowState
+    && fitBoundsToWorkAreas(savedWindowState.bounds, screen.getAllDisplays().map((display) => display.workArea));
+
   const mainWindowOptions: BrowserWindowConstructorOptions = {
-    width: 1400,
-    height: 900,
+    ...(restoredBounds ?? { width: 1400, height: 900 }),
+    // Shown once the renderer has painted its first frame with data.
+    show: false,
     backgroundColor: appearanceOptions.backgroundColor,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -410,8 +486,53 @@ async function createWindow() {
       ? { ...storedColors, height: WINDOW_CONTROLS_OVERLAY_HEIGHT }
       : { height: WINDOW_CONTROLS_OVERLAY_HEIGHT };
   }
-  mainWindow = new BrowserWindow(mainWindowOptions);
+  const win = new BrowserWindow(mainWindowOptions);
+  mainWindow = win;
   ensureNativeThemeForwarding(() => mainWindow);
+
+  const revealWindow = (reason: 'renderer ready' | 'timeout') => {
+    clearTimeout(revealFallback);
+    ipcMain.removeListener(RENDERER_READY_CHANNEL, onRendererReady);
+    if (mainWindowRevealed || win.isDestroyed()) return;
+    mainWindowRevealed = true;
+    console.log(`[Main] Showing window (${reason})`);
+    // maximize() also shows the window.
+    if (savedWindowState?.isMaximized) win.maximize();
+    else win.show();
+    if (savedWindowState?.isFullScreen) win.setFullScreen(true);
+    if (pendingMenuAction) {
+      win.webContents.send(APP_MENU_ACTION_CHANNEL, pendingMenuAction);
+      pendingMenuAction = null;
+    }
+  };
+  const onRendererReady = (event: IpcMainEvent) => {
+    if (event.sender === win.webContents) revealWindow('renderer ready');
+  };
+  ipcMain.on(RENDERER_READY_CHANNEL, onRendererReady);
+  // A renderer that fails before its first render must not leave the window hidden.
+  const revealFallback = setTimeout(() => revealWindow('timeout'), RENDERER_READY_TIMEOUT_MS);
+
+  flushWindowState = trackWindowState(win, (state) => {
+    try {
+      databaseService?.setUserPreference(WINDOW_STATE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.error('Failed to save window state:', error);
+    }
+  });
+
+  win.on('close', (event) => {
+    if (process.platform !== 'darwin' || appIsQuitting) return;
+    // Keep the window and its renderer so reopening from the Dock is instant.
+    event.preventDefault();
+    if (win.isFullScreen()) {
+      win.once('leave-full-screen', () => win.hide());
+      win.setFullScreen(false);
+    } else {
+      win.hide();
+    }
+  });
+
+  attachEditContextMenu(win.webContents);
 
   // Set main window on analytics manager for IPC forwarding
   if (analyticsManager) {
@@ -445,6 +566,7 @@ async function createWindow() {
   // This prevents the race condition where a page calls window.open() before dom-ready fires.
   // The context map (panelId/sessionId) is populated later by the browser-panel:register-webview IPC.
   mainWindow.webContents.on('did-attach-webview', (_event, wvContents: WebContents) => {
+    attachEditContextMenu(wvContents);
     wvContents.setWindowOpenHandler(({ url, disposition }) => {
       // Auth popups (Firebase signInWithPopup, OAuth providers, etc.) use window.open()
       // with explicit features (width, height, toolbar=no), which Chromium reports as
@@ -705,11 +827,9 @@ async function createWindow() {
   // Set the app title based on development mode and worktree
   setAppTitle();
 
-  // Apply persisted UI scale
-  const uiScale = configManager.getConfig().uiScale;
-  if (uiScale && uiScale !== 1.0) {
-    mainWindow.webContents.setZoomFactor(uiScale);
-  }
+  // Always apply the configured scale. Chromium can retain a zoom level for
+  // this origin across windows, including when the configured scale is 1x.
+  mainWindow.webContents.setZoomFactor(configManager.getConfig().uiScale ?? 1);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('about:')) {
@@ -724,6 +844,7 @@ async function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    mainWindowRevealed = false;
   });
 
   // Log any console messages from the renderer
@@ -1152,9 +1273,44 @@ if (launchRemoteSetup) {
   });
 } else if (launchHeadlessDaemon) {
   startHeadlessPaneProcess();
+} else if (!acquireSingleInstanceLock()) {
+  // The running Pane gets this launch's argv through second-instance.
+  app.quit();
 } else {
+  // pane:// links: macOS delivers them as open-url (also before ready); Windows and Linux
+  // start Pane with the link in argv. Links wait for the window, then go through the daemon.
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    openPaneLink(url);
+  });
+  pendingPaneLink = findPaneLinkArg(process.argv);
+  app.on('second-instance', (_event, argv) => {
+    showMainWindow();
+    const link = findPaneLinkArg(argv);
+    if (link) openPaneLink(link);
+  });
+  if (process.platform === 'darwin') {
+    // Squirrel closes every window before it installs an update.
+    nativeAutoUpdater.on('before-quit-for-update', () => {
+      appIsQuitting = true;
+    });
+  }
+
   app.whenReady().then(async () => {
     appStartTime = Date.now();
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
+    }
+    installApplicationMenu({ isPackaged: app.isPackaged, onAction: sendMenuAction });
+
+    // A second Pane launched only to open a link hands it to the running Pane and exits.
+    if (pendingPaneLink && process.platform !== 'darwin' && await forwardPaneLinkToRunningPane(pendingPaneLink, getAppDirectory())) {
+      app.exit(0);
+      return;
+    }
+    if (app.isPackaged && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
+      app.setAsDefaultProtocolClient(PANE_LINK_SCHEME);
+    }
 
     console.log('[Main] App is ready, initializing services...');
     // Probe the login-shell PATH while services start, so the first command
@@ -1162,6 +1318,11 @@ if (launchRemoteSetup) {
     void warmShellPath();
     await initializeServices();
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    setTimeout(() => syncPaneMcpForApp({
+      isPackaged: app.isPackaged,
+      config: configManager.getConfig(),
+      getProjects: () => databaseService.getAllProjects(),
+    }), 5_000);
     console.log('[Main] Services initialized, creating window...');
 
   // Register before any renderer loads. useNotifications pulls this on mount
@@ -1219,6 +1380,8 @@ if (launchRemoteSetup) {
 
   await createWindow();
   console.log('[Main] Window created successfully');
+  paneLinksReady = true;
+  if (pendingPaneLink) openPaneLink(pendingPaneLink);
 
   // Crash sentinel: detect if the previous session ended uncleanly.
   // We write a file on startup and delete it on clean shutdown.
@@ -1335,6 +1498,11 @@ if (launchRemoteSetup) {
   }, 8000);
 
     app.on('activate', () => {
+      if (mainWindow) {
+        // Before the first reveal, the renderer-ready gate decides when to show.
+        if (mainWindowRevealed) showMainWindow();
+        return;
+      }
       if (BrowserWindow.getAllWindows().length === 0) {
         console.log('[Main] Activating app, creating new window...');
         createWindow();
@@ -1370,6 +1538,8 @@ if (launchRemoteSetup) {
   // Prevent default quit behavior - we'll manually exit when ready
   event.preventDefault();
   shutdownInProgress = true;
+  appIsQuitting = true;
+  flushWindowState?.();
   logToFile('shutdown started');
 
   // Check if there are active archive tasks (before try/finally so "Wait" can cancel quit)
@@ -1399,6 +1569,7 @@ if (launchRemoteSetup) {
     if (choice === 0) {
       // User chose to wait - reset guard and cancel quit
       shutdownInProgress = false;
+      appIsQuitting = false;
       return;
     }
 
@@ -1426,6 +1597,10 @@ if (launchRemoteSetup) {
 
     // Stop resource monitoring
     resourceMonitorService.stop();
+
+    // Terminals exiting because Pane is quitting are not owners releasing their
+    // named locks; resumed agents still hold them after the restart.
+    paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
 
     // Phase 1: Send Ctrl+C to all terminals to gracefully exit Claude instances
     // Claude needs to exit cleanly so it releases the session ID lock, allowing
@@ -1463,10 +1638,11 @@ if (launchRemoteSetup) {
       const resumeState = decodeBoundary(customState, boundary.object({
         agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
         initialCommand: boundary.optional(boundary.string),
+        customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
       }));
       const agentType = resumeState.agentType ?? resolveAgentTypeFromCommand(resumeState.initialCommand);
 
-      if (isCliAgentType(agentType)) {
+      if (isCliAgentType(agentType) || resumeState.customResume) {
         panel.state.customState = { ...customState, wasInterrupted: true, agentType };
         await panelManager.updatePanel(panelId, { state: panel.state });
 

@@ -7,7 +7,7 @@ Pane release artifact only when you run `runpane install` or `runpane update`.
 
 ## Quick Start
 
-Run the guided setup:
+Run the guided setup (Node 20 or newer):
 
 ```bash
 npx --yes runpane@latest
@@ -20,8 +20,27 @@ npm i -g runpane
 runpane setup
 ```
 
+Use the arrow keys and Enter to choose an action; Esc or Ctrl+C cancels.
+
 The wizard can install Pane on this machine, configure this machine as a remote
-host, update Pane, or run diagnostics.
+host, update Pane, or run diagnostics. For remote access, choose **Set up a remote
+host**, accept or enter a name, and follow the Tailscale login
+prompts. Copy the connection code into Pane on your other device or
+[runpane.com/app](https://runpane.com/app/). Sign that device into the same
+Tailscale network first. No tunnel flags are needed in the wizard.
+
+## MCP Server
+
+`runpane mcp` runs a stdio MCP server whose tools mirror the `runpane`
+commands, generated from the CLI contract. The Pane desktop app registers it
+with Claude Code, Codex, and Cursor automatically. To register it yourself:
+
+```bash
+claude mcp add --scope user pane -- npx --yes runpane@latest mcp
+codex mcp add pane -- npx --yes runpane@latest mcp
+```
+
+See [docs/PANE_MCP.md](https://github.com/greenfield-inc/Pane/blob/main/docs/PANE_MCP.md).
 
 ## Developing This Repository
 
@@ -127,8 +146,29 @@ worst case, usually 1 to 3:
 
 ```bash
 runpane watch --self-test
-runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 ```
+
+When someone is waiting on the result, use the user-present profile instead:
+`--settle 60000 --blocked-settle 15000 --min-interval 120000` with no
+`--idle-backoff`, so `READY` arrives within about 3 minutes rather than 13.
+
+A Session orchestrator watches its whole Session with one command instead of
+one `--pane` per Pane. The daemon re-reads the Session's Panes on every read,
+so `sessions associate` and `sessions detach` need no re-arm, and `JOINED` and
+`LEFT` (`pane.associated`, `pane.detached`) report the change. For Session
+members with an open PR, the daemon also polls GitHub about every 3 minutes
+and reports `PR <pane-name> pane <pane-id> #<number> CONFLICTED`, `CHECKS
+PASSED` or `CHECKS FAILED <names>`, and `MERGED` (`pr.conflicted`,
+`pr.checks`, `pr.merged`) on transitions only. The cursor defaults to
+`session-<uuid>`:
+
+```bash
+runpane watch --session <session-id> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+```
+
+After a `RESET`, JSON baseline entries carry `replay: true`. They restate
+current state, so a replayed `agent.ready` is never `READY`.
 
 - `--kinds` drops `agent.busy`; `BUSY` carries no action.
 - `--settle <ms>` emits `READY` only after the panel stays idle that long. A
@@ -142,10 +182,20 @@ runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited
   daily, and resets on any activity.
 
 These flags require `--follow`. Pane Chat arms them automatically through its
-pane-orchestrator skill, so you only need them for your own scripts. Filter
-`HEARTBEAT` out of any monitor that wakes an agent, and judge a dead watch by a
+pane-orchestrator skill, so you only need them for your own scripts. Pass
+`--quiet` to any monitor that wakes an agent: it drops `WATCH OK`, `HEARTBEAT`,
+and `WATCH RECONNECTED` (`_ok`, `_heartbeat`, `_reconnected` in JSON), while
+`WATCH ERROR`, `RESET`, and `DROPPED` always print. Judge a dead watch by a
 non-zero exit or a `WATCH ERROR` line, not by silence. `runpane agent-context
 --command watch --json` lists every flag with its default.
+
+Workers can hand back a structured report with `runpane report --state
+ready|blocked|failed|done [--pr <n>] [--head <sha>] [--summary-file <path>]
+[--question <text>]`. Watchers receive it as `agent.report`
+(`REPORT <pane> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`) only
+when `--kinds` lists it, and it skips the `--min-interval` batch.
+`runpane panels last-message --panel <panel-id>` reads an agent's last reply
+from its transcript.
 
 ## Attribution
 

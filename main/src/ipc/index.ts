@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
 import { registerUpdaterHandlers } from './updater';
@@ -35,6 +35,8 @@ import { registerAgentUsageHandlers } from './agentUsage';
 import { registerFeedbackHandlers } from './feedback';
 import { registerMobilePushHandlers } from './mobilePush';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { registerPaneLinkHandler } from '../services/paneLinks';
+import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 
 
@@ -55,6 +57,9 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     rendererEventSink,
     analyticsManager: services.analyticsManager,
   });
+  // Pause the remote connection while the system sleeps and reconnect on wake.
+  powerMonitor.on('suspend', () => remotePaneClientController.suspend());
+  powerMonitor.on('resume', () => remotePaneClientController.resume());
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);
@@ -82,6 +87,18 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerJourneyTimingHandlers(ipcMain, services);
   registerRemoteDaemonHandlers(ipcMain, services);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
+  registerPaneLinkHandler(commandRegistry, {
+    repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
+    navigate: (target) => {
+      const window = services.getMainWindow();
+      if (window && !window.isDestroyed()) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+      getPaneEventSink().send('pane:open-link', target);
+    },
+  });
   registerClipboardHandlers(ipcMain, services);
   registerResourceMonitorHandlers(ipcMain, services, commandRegistry);
   registerAgentUsageHandlers(ipcMain, services, commandRegistry);

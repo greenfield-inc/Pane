@@ -22,7 +22,12 @@ const BUNDLED_PRICES: ModelPrice[] = [
   { model: 'claude-opus-5', inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.5, cacheWritePerMTok: 18.75 },
   { model: 'claude-sonnet-5', inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 },
   { model: 'claude-fable-5', inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 },
-  // Claude 4.x family
+  // Claude 4.x family (standard rates, verified 2026-09-25):
+  // https://platform.claude.com/docs/en/about-claude/pricing
+  { model: 'claude-opus-4-8', inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 },
+  { model: 'claude-opus-4-7', inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 },
+  { model: 'claude-opus-4-6', inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 },
+  { model: 'claude-opus-4-5', inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 },
   { model: 'claude-opus-4', inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.5, cacheWritePerMTok: 18.75 },
   { model: 'claude-sonnet-4', inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 },
   { model: 'claude-haiku-4-5', inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25 },
@@ -76,19 +81,23 @@ export function getPricingSource(): string {
 // Lookup
 // ---------------------------------------------------------------------------
 
+function normalizeModelId(model: string): string {
+  return model.toLowerCase().replace(/(claude-[a-z]+-\d+)\.(\d+)/g, '$1-$2');
+}
+
 function findInTable(model: string, table: readonly ModelPrice[]): ModelPrice | null {
-  const normalized = model.toLowerCase();
+  const normalized = normalizeModelId(model);
   let best: ModelPrice | null = null;
   for (const price of table) {
     // Substring matching lets short router ids like "auto" capture ids such as "codex-auto-review".
-    if (!normalized.includes(price.model)) continue;
+    if (!normalized.includes(normalizeModelId(price.model))) continue;
     if (!best || price.model.length > best.model.length) best = price;
   }
   return best;
 }
 
 /**
- * Match by longest prefix so dated ids (`claude-sonnet-5-20260101`) and
+ * Match the longest model substring, normalizing Claude version separators, so dated ids (`claude-sonnet-5-20260101`) and
  * region-prefixed ids resolve to their base model.
  *
  * Checks live (OpenRouter) prices first, then falls back to the bundled table.

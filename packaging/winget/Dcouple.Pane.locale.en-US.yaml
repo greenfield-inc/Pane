@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+PackageIdentifier: Dcouple.Pane
+PackageVersion: "@VERSION@"
+PackageLocale: en-US
+Publisher: Dcouple, Inc.
+PublisherUrl: https://runpane.com
+PublisherSupportUrl: https://github.com/greenfield-inc/Pane/issues
+PackageName: Pane
+PackageUrl: https://runpane.com
+License: AGPL-3.0
+LicenseUrl: https://github.com/greenfield-inc/Pane/blob/main/LICENSE
+ShortDescription: Run any coding agent in terminals, from desktop or phone.
+Moniker: pane
+Tags:
+  - ai
+  - coding-agent
+  - terminal
+  - git-worktree
+ReleaseNotesUrl: https://github.com/greenfield-inc/Pane/releases/tag/v@VERSION@
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

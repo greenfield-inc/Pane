@@ -8,6 +8,7 @@ import {
   type RemotePaneConnectionStatus,
 } from '../types/remoteDaemon';
 import { boundary, decodeBoundary, type JsonValue } from '../validation/boundaryDecoder';
+import { RemoteInputQueue } from '../remoteInputQueue';
 
 // Structural fetch types, so browser fetch, Node fetch and `expo/fetch` all fit.
 interface RemoteFetchInit {
@@ -158,6 +159,8 @@ export class RemoteDaemonClient {
   private reconnectAttempt = 0;
   private eventListeners = new Set<(event: RemoteDaemonClientEvent) => void>();
   private statusListeners = new Set<(state: RemoteDaemonConnectionState) => void>();
+  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
+    this.invokeRequest(channel, args, signal));
   private state: RemoteDaemonConnectionState = {
     status: 'local',
     lastError: null,
@@ -190,6 +193,7 @@ export class RemoteDaemonClient {
 
   /** Waits for the health check, then opens the event stream in the background. */
   async connect(): Promise<void> {
+    this.inputQueue.cancel(new Error('Remote Pane reconnecting; pending terminal input was discarded'));
     this.clearReconnectTimer();
     this.abortController?.abort();
     this.abortController = new AbortController();
@@ -210,6 +214,7 @@ export class RemoteDaemonClient {
   }
 
   disconnect(): void {
+    this.inputQueue.cancel(new Error('Remote Pane disconnected; pending terminal input was discarded'));
     this.clearReconnectTimer();
     this.abortController?.abort();
     this.abortController = null;
@@ -218,8 +223,13 @@ export class RemoteDaemonClient {
   }
 
   async invoke<T = unknown>(channel: string, args: unknown[] = []): Promise<T> {
+    // SAFETY: The named IPC/API channel contract establishes this response payload type.
+    return this.inputQueue.invoke(channel, args) as Promise<T>;
+  }
+
+  private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal): Promise<T> {
     let lastError: Error | null = null;
-    const signal = this.abortController?.signal;
+    const signal = inputSignal ?? this.abortController?.signal;
     const retryableRead = RETRYABLE_READ_CHANNELS.has(channel);
     const attempts = retryableRead ? INVOKE_ATTEMPTS : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -391,6 +401,7 @@ export class RemoteDaemonClient {
   }
 
   private scheduleReconnect(message: string): void {
+    this.inputQueue.cancel(new Error(message));
     if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
       this.setState({ status: 'error', lastError: message });
       return;

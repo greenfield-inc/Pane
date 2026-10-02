@@ -221,7 +221,7 @@ async function runOnce(browser: Browser, workload: string) {
     activeProjectId: project.id,
   });
   await page.goto(getPlaywrightBaseURL(), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.getByRole('button', { name: /^Expand repository Frame harness$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Frame harness$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   const tab = page.getByRole('tabpanel', { name: panel.title });
   await expect(tab.locator('.xterm-screen')).toBeVisible({ timeout: 30_000 });

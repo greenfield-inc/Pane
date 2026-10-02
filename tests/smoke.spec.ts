@@ -75,7 +75,9 @@ async function openSettings(page: Page) {
   await expect(settingsButton).toBeVisible({ timeout: 5000 });
   await clickDomNode(settingsButton);
 
-  await expect(page.getByText('Pane Settings')).toBeVisible({ timeout: 5000 });
+  // Settings opens as a full page in place of the workspace.
+  await expect(page.getByTestId('settings-page')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
 }
 
 async function openRemotePaneSettings(page: Page) {
@@ -116,7 +118,8 @@ test.describe('Smoke Tests', () => {
     const sidebar = page.locator('[data-testid="sidebar"]').first();
     await expect(sidebar).toBeVisible({ timeout: 10000 });
 
-    const sidebarMenuButton = page.getByRole('button', { name: 'Sidebar menu' });
+    // The expanded sidebar's menu opens from its Home footer button.
+    const sidebarMenuButton = page.getByRole('button', { name: 'Home menu' });
     await expect(sidebarMenuButton).toBeVisible();
   });
 
@@ -157,7 +160,7 @@ test.describe('Smoke Tests', () => {
 
     await dismissStartupDialogs(page);
 
-    const repoActionsButton = page.getByRole('button', { name: 'Repository actions for Mock Repo' });
+    const repoActionsButton = page.getByRole('button', { name: 'Project actions for Mock Repo' });
     await expect(repoActionsButton).toBeVisible({ timeout: 5000 });
     await clickDomNode(repoActionsButton);
 

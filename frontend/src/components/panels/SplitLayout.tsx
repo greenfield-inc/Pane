@@ -10,7 +10,7 @@
  * Imports allotment/dist/style.css and overrides theme tokens.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
 import { PanelGroupView } from './PanelGroupView';
@@ -23,6 +23,7 @@ import type {
 import { containsGroup } from '../../utils/panelLayout';
 import type { DropZone } from '../../utils/panelLayout';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
+import { useAllotmentSizeSync } from '../../hooks/useAllotmentSizeSync';
 
 // ---------------------------------------------------------------------------
 // Allotment theme overrides (inlined as a style element on first render)
@@ -73,6 +74,18 @@ export interface SplitLayoutProps {
   getPanelTabPresentation?: PanelTabPresentationResolver;
   /** Rendered in a group that has no working panels. */
   emptyState?: React.ReactNode;
+  /** Group strips show the "+" add-tool button (default true). */
+  showAddTool?: boolean;
+  /** Group strips keep tab close buttons visible instead of on hover. */
+  alwaysShowClose?: boolean;
+  /**
+   * Permanent tabs stay in their group's strip instead of being hoisted to a
+   * top bar. For views with no top bar while split (the Session workspace), so
+   * every tab sits on the same row.
+   */
+  keepPermanentTabsInGroups?: boolean;
+  /** Replaces each group strip's "+" button (see PanelGroupView). */
+  renderAddTool?: (groupId: string) => React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +111,10 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   onStripDrop,
   getPanelTabPresentation,
   emptyState,
+  showAddTool,
+  alwaysShowClose,
+  keepPermanentTabsInGroups,
+  renderAddTool,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -128,44 +145,9 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   // Focus chrome only exists once a real split does (pixel-identical rule)
   const multiGroup = layout.root.type === 'split';
 
-  // Allotment's defaultSizes is mount-only, so when a sibling is added to or
-  // removed from an existing split (n-ary tab drop), the on-screen
-  // distribution diverges from the stored model until the next sash drag.
-  // onChange keeps a live snapshot per split (ref only, no re-render); when a
-  // split's child count changes, the model syncs from that snapshot once.
-  const liveSizesRef = useRef(new Map<string, number[]>());
-  const childCountsRef = useRef(new Map<string, number>());
-  useEffect(() => {
-    const changed: string[] = [];
-    const seen = new Set<string>();
-    (function walk(node: PanelLayoutNode) {
-      if (node.type !== 'split') return;
-      seen.add(node.id);
-      const prev = childCountsRef.current.get(node.id);
-      if (prev !== undefined && prev !== node.children.length) changed.push(node.id);
-      childCountsRef.current.set(node.id, node.children.length);
-      node.children.forEach(walk);
-    })(layout.root);
-    for (const id of Array.from(childCountsRef.current.keys())) {
-      if (!seen.has(id)) {
-        childCountsRef.current.delete(id);
-        liveSizesRef.current.delete(id);
-      }
-    }
-    if (changed.length === 0) return;
-    // Allotment re-lays out the new pane set after this render; read the
-    // snapshot on the next tick. The length guard skips stale pre-change
-    // snapshots if onChange has not fired yet (no sync beats a wrong one).
-    const timer = setTimeout(() => {
-      for (const id of changed) {
-        const sizes = liveSizesRef.current.get(id);
-        if (sizes && sizes.length === childCountsRef.current.get(id)) {
-          onSizesChange(id, sizes);
-        }
-      }
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [layout.root, onSizesChange]);
+  // Allotment's defaultSizes is mount-only, so an n-ary tab drop that adds or
+  // removes a sibling needs the model synced from what was actually drawn.
+  const recordLiveSizes = useAllotmentSizeSync<PanelGroupNode>(layout.root, onSizesChange);
 
   // Recursive render
   const renderNode = useCallback((node: PanelLayoutNode): React.ReactNode => {
@@ -193,7 +175,11 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           onDragEnd={onDragEnd}
           onStripDrop={onStripDrop ? (panelId, idx) => onStripDrop(node.id, panelId, idx) : undefined}
           getPanelTabPresentation={getPanelTabPresentation}
-              emptyState={emptyState}
+          emptyState={emptyState}
+          showAddTool={showAddTool}
+          alwaysShowClose={alwaysShowClose}
+          keepPermanentTabsInGroups={keepPermanentTabsInGroups}
+          renderAddTool={renderAddTool}
         />
       );
     }
@@ -207,7 +193,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
       onSizesChange(node.id, sizes);
     };
     const handleChange = (sizes: number[]) => {
-      liveSizesRef.current.set(node.id, sizes);
+      recordLiveSizes(node.id, sizes);
     };
 
     return (
@@ -235,9 +221,10 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     );
   }, [
     resolvePanels, primaryGroupId, focusedGroupId, multiGroup, isMainRepo,
-    onPanelSelect, onPanelClose, onFocusGroup, onSizesChange,
+    onPanelSelect, onPanelClose, onFocusGroup, onSizesChange, recordLiveSizes,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
+    showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
   ]);
 
   // Single-group root: render directly without Allotment

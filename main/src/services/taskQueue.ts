@@ -43,6 +43,8 @@ interface CreateSessionJob {
   folderId?: string;
   isMainRepo?: boolean;
   baseBranch?: string;
+  /** Exact new branch for the worktree; defaults to the (sanitized, uniquified) worktree name. */
+  branchName?: string;
   toolType?: 'claude' | 'none';
   startPinned?: boolean;
   activateOnCreate?: boolean;
@@ -249,13 +251,14 @@ export class TaskQueue {
 
         // Reserve names through persistence, including concurrent creates on macOS/Windows.
         const { session, worktreePath } = await withLock(`session-create-${targetProject.path}`, async () => {
-          const names = await this.ensureUniqueNames(sessionName, worktreeName, targetProject, index, !job.data.isMainRepo);
+          const names = await this.ensureUniqueNames(sessionName, worktreeName, targetProject, index, !job.data.isMainRepo, !job.data.branchName);
           sessionName = names.sessionName;
           worktreeName = names.worktreeName;
 
           // Resolve working directory — worktree or project directory
           const { worktreePath, baseCommit, baseBranch: actualBaseBranch } = await worktreeManager.resolveWorkingDirectory(
-            targetProject.path, worktreeName, baseBranch, !job.data.isMainRepo, targetProject.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner
+            targetProject.path, worktreeName, baseBranch, !job.data.isMainRepo, targetProject.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner,
+            { branchName: job.data.branchName }
           );
 
           // For non-worktree sessions, clear worktree_name so archival cleanup
@@ -451,7 +454,7 @@ export class TaskQueue {
           });
 
           const buildCommands = buildScript.split('\n').filter(cmd => cmd.trim());
-          const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath);
+          const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath, ctx.commandRunner);
           console.log(`[TaskQueue] Build script completed. Success: ${buildResult.success}`);
         }
 
@@ -751,7 +754,7 @@ export class TaskQueue {
     return uniqueName;
   }
 
-  private async ensureUniqueNames(baseSessionName: string, baseWorktreeName: string, project: Project, index?: number, useWorktree = true): Promise<{ sessionName: string; worktreeName: string }> {
+  private async ensureUniqueNames(baseSessionName: string, baseWorktreeName: string, project: Project, index?: number, useWorktree = true, worktreeNameIsBranch = true): Promise<{ sessionName: string; worktreeName: string }> {
     const { sessionManager } = this.options;
     const db = sessionManager.db;
     
@@ -777,13 +780,16 @@ export class TaskQueue {
 
     const ctx = sessionManager.getProjectContextByProjectId(project.id);
     if (!ctx) throw new Error(`Failed to get project context for project ${project.id}`);
+    // A requested branch is checked on its own; the worktree name then only names the directory.
     let branches: string[] = [];
-    try {
-      const result = await ctx.commandRunner.execFile('git', ['for-each-ref', '--format=%(refname)', 'refs/heads/'], project.path);
-      branches = result.stdout.trim().split('\n').map(branch => branch.trim().slice('refs/heads/'.length).toLowerCase());
-    } catch (error) {
-      // WorktreeManager initializes folders that are not Git repositories yet.
-      if (!(error instanceof Error) || !error.message.includes('not a git repository')) throw error;
+    if (worktreeNameIsBranch) {
+      try {
+        const result = await ctx.commandRunner.execFile('git', ['for-each-ref', '--format=%(refname)', 'refs/heads/'], project.path);
+        branches = result.stdout.trim().split('\n').map(branch => branch.trim().slice('refs/heads/'.length).toLowerCase());
+      } catch (error) {
+        // WorktreeManager initializes folders that are not Git repositories yet.
+        if (!(error instanceof Error) || !error.message.includes('not a git repository')) throw error;
+      }
     }
     const resolver = new PathResolver(project);
     counter = 1;

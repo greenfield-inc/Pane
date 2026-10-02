@@ -18,67 +18,10 @@ import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
-import { dropZoneFor, subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
+import { subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
+import { DropOverlay } from './DropOverlay';
 import { cn } from '../../utils/cn';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
-
-// ---------------------------------------------------------------------------
-// DropOverlay
-// ---------------------------------------------------------------------------
-
-interface DropOverlayProps {
-  onZoneChange: (zone: DropZone | null) => void;
-  onDrop: (zone: DropZone) => void;
-  activeZone: DropZone | null;
-}
-
-const DropOverlay: React.FC<DropOverlayProps> = React.memo(({ onZoneChange, onDrop, activeZone }) => {
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    const rect = e.currentTarget.getBoundingClientRect();
-    onZoneChange(dropZoneFor(e.clientX, e.clientY, rect));
-  }, [onZoneChange]);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (activeZone) {
-      onDrop(activeZone);
-    }
-  }, [activeZone, onDrop]);
-
-  const handleDragLeave = useCallback(() => {
-    onZoneChange(null);
-  }, [onZoneChange]);
-
-  return (
-    <div
-      className="absolute inset-0 z-20"
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      onDragLeave={handleDragLeave}
-    >
-      {/* Zone highlight overlays */}
-      {activeZone === 'center' && (
-        <div className="absolute inset-4 border-2 border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-interactive-primary)_10%,transparent)] rounded pointer-events-none" />
-      )}
-      {activeZone === 'left' && (
-        <div className="absolute inset-y-0 left-0 w-1/4 border-2 border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-interactive-primary)_10%,transparent)] pointer-events-none" />
-      )}
-      {activeZone === 'right' && (
-        <div className="absolute inset-y-0 right-0 w-1/4 border-2 border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-interactive-primary)_10%,transparent)] pointer-events-none" />
-      )}
-      {activeZone === 'top' && (
-        <div className="absolute inset-x-0 top-0 h-1/4 border-2 border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-interactive-primary)_10%,transparent)] pointer-events-none" />
-      )}
-      {activeZone === 'bottom' && (
-        <div className="absolute inset-x-0 bottom-0 h-1/4 border-2 border-[color-mix(in_srgb,var(--color-interactive-primary)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-interactive-primary)_10%,transparent)] pointer-events-none" />
-      )}
-    </div>
-  );
-});
-
-DropOverlay.displayName = 'DropOverlay';
 
 // ---------------------------------------------------------------------------
 // PanelGroupView
@@ -119,6 +62,11 @@ export interface PanelGroupViewProps {
   onStripDrop?: (panelId: string, insertIndex: number) => void;
   getPanelTabPresentation?: PanelTabPresentationResolver;
   emptyState?: React.ReactNode;
+  showAddTool?: boolean;
+  alwaysShowClose?: boolean;
+  keepPermanentTabsInGroups?: boolean;
+  /** Replaces the strip's "+" button, for views with their own Add tool menu. */
+  renderAddTool?: (groupId: string) => React.ReactNode;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -141,6 +89,10 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   onStripDrop,
   getPanelTabPresentation,
   emptyState,
+  showAddTool = true,
+  alwaysShowClose = false,
+  keepPermanentTabsInGroups = false,
+  renderAddTool,
 }) => {
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
@@ -162,10 +114,11 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
 
   // Permanent tool tabs (Diff/Explorer/Browser) are hoisted to PanelTabBar
   // from EVERY group while split, so strips carry only working tabs. Their
-  // content still renders inside whichever group owns them.
+  // content still renders inside whichever group owns them. Views without a
+  // top bar keep them here instead.
   const stripPanels = useMemo(
-    () => orderedPanels.filter(p => p.metadata?.permanent !== true),
-    [orderedPanels],
+    () => keepPermanentTabsInGroups ? orderedPanels : orderedPanels.filter(p => p.metadata?.permanent !== true),
+    [orderedPanels, keepPermanentTabsInGroups],
   );
 
   // Strip drop indexes are relative to the displayed subset; translate to the
@@ -218,8 +171,9 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             isTabDragging={isTabDragging}
             draggedPanelId={draggedPanelId}
             getPanelTabPresentation={getPanelTabPresentation}
+            alwaysShowClose={alwaysShowClose}
           />
-          <button
+          {renderAddTool ? renderAddTool(group.id) : showAddTool && <button
             ref={addButtonRef}
             type="button"
             aria-label="Add tool"
@@ -228,7 +182,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             onClick={handleAddTool}
           >
             <Plus className="w-4 h-4" />
-          </button>
+          </button>}
         </div>
       )}
 
@@ -239,7 +193,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
         {orderedPanels.map(panel => {
           const isActiveTab = panel.id === group.activePanelId;
           const keepAlive = panel.type === 'terminal' || panel.type === 'diff';
-          const panelTabNamespace = !multiGroup || panel.metadata?.permanent === true ? 'top' : group.id;
+          const panelTabNamespace = !multiGroup || (panel.metadata?.permanent === true && !keepPermanentTabsInGroups) ? 'top' : group.id;
           if (!isActiveTab && !keepAlive) return null;
           return (
             <div

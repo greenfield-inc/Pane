@@ -215,6 +215,36 @@ describe('pane creation name reuse', () => {
     expect(created.worktree_path).toBe(project.path);
   });
 
+  it('creates the worktree on an exact requested branch name off a non-default base', async () => {
+    await runner.execFile('git', ['branch', 'release/foo'], project.path);
+    // A branch that shares the directory name doesn't matter once the branch is named explicitly.
+    await runner.execFile('git', ['branch', 'w5a'], project.path);
+
+    const result = await queue.createSessionAndWait({
+      projectId: project.id, worktreeTemplate: 'W5a', prompt: '', toolType: 'none',
+      baseBranch: 'release/foo', branchName: 'agents/W5a-fix',
+    });
+    const created = database.getSession(result.sessionId)!;
+
+    expect(created.worktree_name).toBe('w5a');
+    expect((await runner.execFile('git', ['branch', '--show-current'], created.worktree_path)).stdout.trim()).toBe('agents/W5a-fix');
+    expect((await runner.execFile('git', ['rev-parse', 'HEAD'], created.worktree_path)).stdout)
+      .toBe((await runner.execFile('git', ['rev-parse', 'release/foo'], project.path)).stdout);
+    await expect(runner.execFile('git', ['rev-parse', '--abbrev-ref', 'agents/W5a-fix@{upstream}'], project.path)).rejects.toThrow();
+  });
+
+  it('refuses an existing requested branch instead of renaming it', async () => {
+    await runner.execFile('git', ['branch', 'agents/taken'], project.path);
+    const request = {
+      projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none' as const,
+      baseBranch: 'main', branchName: 'agents/taken',
+    };
+
+    await expect(queue.createSessionAndWait(request)).rejects.toThrow("Branch 'agents/taken' already exists");
+    expect((await runner.execFile('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads/agents/'], project.path)).stdout.trim())
+      .toBe('agents/taken');
+  });
+
   it('emits a visible creation failure when Git rejects a queued job', async () => {
     const request = {
       projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none' as const, baseBranch: 'missing-branch',

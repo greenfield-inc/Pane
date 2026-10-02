@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -6,7 +8,7 @@ import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
-import { effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
+import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
 
 interface OrchestrationLink {
   label: string;
@@ -41,6 +43,8 @@ interface OrchestrationActivity {
 }
 
 interface OrchestrationSessionRecord {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   id: string;
   name: string;
   archived?: boolean;
@@ -83,6 +87,8 @@ interface SessionSelectorValue {
 }
 
 interface SessionCreatePayload {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   name: string;
   agent?: RunpaneAgent;
   goal?: string;
@@ -140,6 +146,8 @@ interface OrchestrationPaneOverview {
     prTitle?: string;
     prState?: string;
   };
+  /** The newest `runpane report` among the Pane's panels, with the panel that sent it. */
+  report?: AgentReport & { panelId: string };
 }
 
 interface RunpaneSessionOverviewResult {
@@ -150,6 +158,45 @@ interface RunpaneSessionOverviewResult {
   activity: OrchestrationActivity[];
   report?: OrchestrationReport & { freshness: 'current' | 'stale' };
   refreshedAt: string;
+  /** Absent from daemons that predate named locks. */
+  locks?: LockRecord[];
+}
+
+interface LockOwner {
+  kind: 'pane' | 'external';
+  paneId?: string;
+  panelId?: string;
+  label?: string;
+}
+
+interface LockRecord {
+  name: string;
+  scope: 'session' | 'global';
+  sessionId?: string;
+  owner: LockOwner;
+  note?: string;
+  acquiredAt: string;
+  expiresAt: string;
+  ttlMs: number;
+}
+
+interface LockOwnerInput {
+  paneId?: string;
+  panelId?: string;
+  label?: string;
+}
+
+type LockAcquireResult =
+  | { ok: true; acquired: true; renewed: boolean; waitedMs: number; lock: LockRecord }
+  | { ok: false; acquired: false; timedOut: boolean; waitedMs: number; heldBy: LockOwner; expiresAt: string; lock: LockRecord };
+
+type LockReleaseResult =
+  | { ok: true; released: boolean; forced: boolean; lock?: LockRecord }
+  | { ok: false; released: false; reason: 'not-owner'; heldBy: LockOwner; expiresAt: string; lock: LockRecord };
+
+interface LockListResult {
+  ok: true;
+  locks: LockRecord[];
 }
 
 interface RepoSummary {
@@ -199,6 +246,7 @@ interface PaneCreateRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
+  associateSession?: string;
 }
 
 interface PaneAdoptRequest {
@@ -214,14 +262,18 @@ interface PaneAdoptRequest {
     launch?: boolean;
   }>;
   dryRun?: boolean;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
+  associateSession?: string;
 }
 
 interface PaneCreateItem {
   name: string;
   worktreeName?: string;
+  branch?: string;
   baseBranch?: string;
   sessionPrompt?: string;
   pinned?: boolean;
@@ -229,11 +281,17 @@ interface PaneCreateItem {
 }
 
 type PaneToolSpec =
-  | { agent: RunpaneAgent; title?: string; initialInput?: string }
-  | { command: string; title?: string; initialInput?: string };
+  | { agent: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean }
+  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean };
+
+interface PromptWarning {
+  code: 'leading-bang-runs-shell' | 'leading-hash-memory' | 'leading-slash-command' | 'leading-at-mention';
+  message: string;
+}
 
 interface PaneCreateSuccessItem {
-  ok: true;
+  /** False when the pane was created but did not become ready or take its initial input. */
+  ok: boolean;
   index: number;
   name?: string;
   pinned: boolean;
@@ -243,6 +301,9 @@ interface PaneCreateSuccessItem {
   nextCommand?: string;
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
+  association?: { sessionId: string; ok: boolean; error?: string };
+  promptFile?: string;
+  warnings?: PromptWarning[];
 }
 
 interface PaneCreateFailureItem {
@@ -270,6 +331,7 @@ interface InitialInputDeliveryResult {
   sequenceName?: 'codex-ctrl-enter-cr' | 'enter-cr' | 'argument';
   verifiedSubmitted?: boolean;
   verification?: 'observed' | 'unverifiable';
+  delivery?: Delivery;
   staged?: boolean;
   attempts?: number;
   sentAt?: string;
@@ -284,6 +346,7 @@ interface PaneSummary {
   name: string;
   status: string;
   agentStatus: 'active' | 'idle';
+  agentState?: 'ready' | 'working' | 'blocked' | 'none';
   worktreePath: string;
   repoId: number;
   repoName?: string;
@@ -349,6 +412,15 @@ interface PaneArchiveRequest {
   force?: boolean;
   source?: 'user' | 'agent';
   dryRun?: boolean;
+  removeWorktree?: boolean;
+}
+
+interface PaneArchiveBulkRequest {
+  sessionId: string;
+  merged: true;
+  source?: 'user' | 'agent';
+  dryRun?: boolean;
+  removeWorktree?: boolean;
 }
 
 interface PanePinRequest {
@@ -392,6 +464,30 @@ interface PaneFocusResult {
   focused: true;
 }
 
+interface PanelOpenRequest {
+  paneId: string;
+  url?: string;
+  filePath?: string;
+  title?: string;
+  placement: 'split' | 'tab';
+  noFocus?: boolean;
+  focus?: boolean;
+  source?: 'user' | 'agent';
+}
+
+interface PanelOpenResult {
+  ok: true;
+  paneId: string;
+  panelId: string;
+  type: 'browser' | 'editor';
+  title: string;
+  url?: string;
+  filePath?: string;
+  placement: 'split' | 'tab';
+  active: boolean;
+  reused: boolean;
+}
+
 interface PaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -401,19 +497,29 @@ interface PaneArchiveSafetyCheck {
   upstreamRefreshed?: boolean;
   unpushedCommits?: number;
   unpushedCommitDetails?: Array<{ sha: string; subject: string }>;
+  reason?: 'external-worktree' | 'main-repo' | 'missing-project-context' | 'git-error';
+  worktreeWillRemain?: true;
+  upstreamGone?: boolean;
+  mergedViaPr?: { number: number; headOid: string };
 }
+
+type PaneArchiveBlockCode = 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown';
 
 interface PaneArchiveBlockedResult {
   ok: false;
   generation?: number;
   paneId: string;
   blocked: {
-    code: 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown';
+    code: PaneArchiveBlockCode;
     message: string;
     safetyCheck: PaneArchiveSafetyCheck;
   };
   nextCommand: string;
 }
+
+/** Released CLIs decode exactly these values; new detail goes in new optional fields such as `trashDeletion`. */
+type WorktreeCleanupState = 'completed' | 'failed' | 'timeout' | 'not-applicable';
+type WorktreeTrashDeletion = 'pending' | 'done';
 
 interface PaneArchiveSuccessResult {
   ok: boolean;
@@ -421,9 +527,34 @@ interface PaneArchiveSuccessResult {
   paneId: string;
   archived: true;
   forced: boolean;
-  worktreeCleanup: 'completed' | 'failed' | 'timeout' | 'not-applicable';
+  worktreeCleanup: WorktreeCleanupState;
+  trashDeletion?: WorktreeTrashDeletion;
   worktreePath?: string;
   safetyCheck: PaneArchiveSafetyCheck;
+}
+
+interface PaneArchiveBulkItem {
+  paneId: string;
+  name?: string;
+  outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
+  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo'; message: string };
+  error?: string;
+  safetyCheck?: PaneArchiveSafetyCheck;
+  worktreeCleanup?: WorktreeCleanupState;
+  trashDeletion?: WorktreeTrashDeletion;
+  worktreePath?: string;
+}
+
+interface PaneArchiveBulkResult {
+  ok: boolean;
+  sessionId: string;
+  merged: true;
+  dryRun?: true;
+  removeWorktree: boolean;
+  archived: number;
+  skipped: number;
+  failed: number;
+  items: PaneArchiveBulkItem[];
 }
 
 interface PaneArchiveDryRunResult {
@@ -438,6 +569,46 @@ interface PaneArchiveDryRunResult {
 
 type PaneArchiveResult = PaneArchiveSuccessResult | PaneArchiveBlockedResult | PaneArchiveDryRunResult;
 
+/** The latest `runpane report` from an agent panel. */
+export interface AgentReport {
+  state: 'ready' | 'blocked' | 'failed' | 'done';
+  pr?: number;
+  head?: string;
+  summary?: string;
+  summaryTruncated?: true;
+  summaryPath?: string;
+  question?: string;
+  reportedAt: string;
+}
+
+interface ReportResult {
+  ok: true;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  report: AgentReport;
+  sessionIds: string[];
+}
+
+type PanelLastMessageResult =
+  | {
+    ok: true;
+    panelId: string;
+    paneId: string;
+    agentType: 'claude' | 'codex';
+    text: string;
+    length: number;
+    limit: number;
+    truncated: boolean;
+  }
+  | {
+    ok: false;
+    panelId: string;
+    paneId: string;
+    reason: 'transcript-unavailable';
+    message: string;
+  };
+
 interface PanelSummary {
   id: string;
   panelId: string;
@@ -447,10 +618,13 @@ interface PanelSummary {
   active: boolean;
   initialized?: boolean;
   agentType?: string;
+  agentDetection?: 'declared' | 'command' | 'process' | 'screen';
+  launchCommand?: string;
   isCliPanel?: boolean;
   position?: number;
   createdAt?: string;
   lastActiveAt?: string;
+  report?: AgentReport;
 }
 
 interface PanelListResult {
@@ -485,6 +659,8 @@ interface PanelCreateResult {
   };
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
+  promptFile?: string;
+  warnings?: PromptWarning[];
   nextCommand?: string;
 }
 
@@ -508,6 +684,8 @@ interface PanelOutputResult {
 interface PanelInputRequest {
   panelId: string;
   input: string;
+  /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
+  asFilePointer?: boolean;
 }
 
 interface PanelInputResult {
@@ -530,8 +708,14 @@ interface PanelStateSummary {
   lastActivity?: string;
 }
 
+/** Where a prompt sent to a Claude or Codex composer went, and what Pane read to know. */
+interface Delivery {
+  state: 'taken' | 'queued' | 'in-composer' | 'unknown';
+  evidence: 'transcript' | 'screen' | 'argv';
+}
+
 interface PanelBlockedState {
-  kind: 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'unknown';
+  kind: 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'composer-unknown' | 'unknown';
   message: string;
   suggestedCommand?: string;
 }
@@ -560,6 +744,7 @@ interface PanelScreenResult {
   composer: {
     isPresent: boolean;
     hasUndeliveredText: boolean;
+    ghostText?: string;
   };
   nextCommand?: string;
 }
@@ -570,12 +755,15 @@ interface PanelSubmitResult {
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  enter: 'cr';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  enter: 'cr' | 'tab';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
   verifiedSubmitted: boolean;
   verification?: 'observed' | 'unverifiable';
+  delivery?: Delivery;
   sentAt: string;
   blocked?: PanelBlockedState;
+  promptFile?: string;
+  warnings?: PromptWarning[];
   nextCommand?: string;
 }
 
@@ -585,10 +773,11 @@ interface PanelSubmitComposerResult {
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  strategy: 'codex-ctrl-enter' | 'enter';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr';
+  strategy: 'codex-ctrl-enter' | 'enter' | 'tab';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
   verifiedSubmitted: boolean;
   verification?: 'observed' | 'unverifiable';
+  delivery?: Delivery;
   sentAt: string;
   blocked?: PanelBlockedState;
   nextCommand?: string;
@@ -629,7 +818,13 @@ type WorkspaceEntryKind =
   | 'agent.idle'
   | 'pane.created'
   | 'pane.gone'
-  | 'panel.exited';
+  | 'panel.exited'
+  | 'agent.report'
+  | 'pane.associated'
+  | 'pane.detached'
+  | 'pr.conflicted'
+  | 'pr.checks'
+  | 'pr.merged';
 
 interface WorkspacePanelSummary {
   panelId: string;
@@ -652,7 +847,7 @@ interface WorkspaceEntry {
   agentType?: string;
   from?: 'blocked' | 'working' | 'idle' | 'unknown';
   to?: 'blocked' | 'working' | 'idle' | 'unknown';
-  source: 'agent' | 'exit' | 'session';
+  source: 'agent' | 'exit' | 'session' | 'github';
   reason?: string | null;
   settledMs?: number;
   idleMs?: number;
@@ -661,8 +856,15 @@ interface WorkspaceEntry {
   heldInputPresent?: boolean;
   exitCode?: number;
   baseline?: true;
+  replay?: true;
   changedWhileAway?: boolean;
+  sessionId?: string;
+  sessionName?: string;
+  pr?: { number: number; url: string; headOid: string };
+  checks?: 'passed' | 'failed';
+  failingChecks?: string[];
   panels?: WorkspacePanelSummary[];
+  report?: AgentReport;
 }
 
 interface WorkspaceStateResult {
@@ -676,19 +878,23 @@ interface WorkspaceWaitResult extends WorkspaceStateResult {
   timedOut: boolean;
   dropped?: number;
   reset?: { reason: 'first-use' | 'epoch-changed' | 'cursor-truncated' | 'unknown-consumer' };
+  session?: { id: string; name: string };
   nextCommand: string;
 }
 
 interface PaneToolInput {
   agent?: string;
   command?: string;
+  agentType?: string;
   title?: string;
   initialInput?: string;
+  initialInputAsFilePointer?: boolean;
 }
 
 interface PaneCreateItemInput {
   name: string;
   worktreeName?: string;
+  branch?: string;
   baseBranch?: string;
   sessionPrompt?: string;
   pinned?: boolean;
@@ -706,6 +912,7 @@ interface PaneCreateRequestInput {
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
+  associateSession?: string;
 }
 
 interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
@@ -734,6 +941,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   name: boundary.string,
   status: boundary.string,
   agentStatus: boundary.enumeration('active', 'idle'),
+  agentState: boundary.optional(boundary.enumeration('ready', 'working', 'blocked', 'none')),
   worktreePath: boundary.string,
   repoId: boundary.number,
   repoName: boundary.optional(boundary.string),
@@ -745,7 +953,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   ownership: boundary.enumeration('pane', 'external'),
 });
 const panelBlockedSchema: BoundarySchema<PanelBlockedState> = boundary.object({
-  kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'unknown'),
+  kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'composer-unknown', 'unknown'),
   message: boundary.string,
   suggestedCommand: boundary.optional(boundary.string),
 });
@@ -769,6 +977,14 @@ const panelReadinessSchema: BoundarySchema<PanelReadiness> = boundary.object({
   nextCommand: boundary.optional(boundary.string),
 });
 const verificationSchema = boundary.optional(boundary.enumeration('observed', 'unverifiable'));
+const deliverySchema: BoundarySchema<Delivery | undefined> = boundary.optional(boundary.object({
+  state: boundary.enumeration('taken', 'queued', 'in-composer', 'unknown'),
+  evidence: boundary.enumeration('transcript', 'screen', 'argv'),
+}));
+const promptWarningsSchema = boundary.optional(boundary.array(boundary.object({
+  code: boundary.enumeration('leading-bang-runs-shell', 'leading-hash-memory', 'leading-slash-command', 'leading-at-mention'),
+  message: boundary.string,
+})));
 const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.object({
   delivered: boundary.boolean,
   submitted: boundary.boolean,
@@ -777,6 +993,7 @@ const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.
   sequenceName: boundary.optional(boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr', 'argument')),
   verifiedSubmitted: boundary.optional(boundary.boolean),
   verification: verificationSchema,
+  delivery: deliverySchema,
   staged: boundary.optional(boundary.boolean),
   attempts: boundary.optional(boundary.number),
   sentAt: boundary.optional(boundary.string),
@@ -799,7 +1016,55 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     sha: boundary.string,
     subject: boundary.string,
   }))),
+  reason: boundary.optional(boundary.enumeration('external-worktree', 'main-repo', 'missing-project-context', 'git-error')),
+  worktreeWillRemain: boundary.optional(boundary.literal(true)),
+  upstreamGone: boundary.optional(boundary.boolean),
+  mergedViaPr: boundary.optional(boundary.object({
+    number: boundary.number,
+    headOid: boundary.string,
+  })),
 });
+const agentReportFields = {
+  state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
+  pr: boundary.optional(boundary.number),
+  head: boundary.optional(boundary.string),
+  summary: boundary.optional(boundary.string),
+  summaryTruncated: boundary.optional(boundary.literal(true)),
+  summaryPath: boundary.optional(boundary.string),
+  question: boundary.optional(boundary.string),
+  reportedAt: boundary.string,
+};
+const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);
+const reportResultSchema: BoundarySchema<ReportResult> = boundary.object({
+  ok: boundary.literal(true),
+  generation: boundary.optional(boundary.number),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  report: agentReportSchema,
+  sessionIds: boundary.array(boundary.string),
+});
+const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    panelId: boundary.string,
+    paneId: boundary.string,
+    agentType: boundary.enumeration('claude', 'codex'),
+    text: boundary.string,
+    length: boundary.number,
+    limit: boundary.number,
+    truncated: boundary.boolean,
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    panelId: boundary.string,
+    paneId: boundary.string,
+    reason: boundary.literal('transcript-unavailable'),
+    message: boundary.string,
+  }),
+);
+const archiveBlockCodeSchema = boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown');
+const worktreeCleanupSchema = boundary.enumeration('completed', 'failed', 'timeout', 'not-applicable');
+const trashDeletionSchema = boundary.enumeration('pending', 'done');
 const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   id: boundary.string,
   panelId: boundary.string,
@@ -809,10 +1074,13 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   active: boundary.boolean,
   initialized: boundary.optional(boundary.boolean),
   agentType: boundary.optional(boundary.string),
+  agentDetection: boundary.optional(boundary.enumeration('declared', 'command', 'process', 'screen')),
+  launchCommand: boundary.optional(boundary.string),
   isCliPanel: boundary.optional(boundary.boolean),
   position: boundary.optional(boundary.number),
   createdAt: boundary.optional(boundary.string),
   lastActiveAt: boundary.optional(boundary.string),
+  report: boundary.optional(agentReportSchema),
 });
 
 const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
@@ -860,6 +1128,8 @@ const orchestrationActivitySchema: BoundarySchema<OrchestrationActivity> = bound
   panelId: boundary.optional(boundary.nonEmptyString),
 });
 const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.object({
+  runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
+  wslDistribution: boundary.optional(boundary.nonEmptyString),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
@@ -871,6 +1141,8 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
   }),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
   goal: boundary.string,
   context: boundary.string,
   decisions: boundary.array(boundary.string),
@@ -926,6 +1198,61 @@ const orchestrationPaneOverviewSchema: BoundarySchema<OrchestrationPaneOverview>
     prTitle: boundary.optional(boundary.string),
     prState: boundary.optional(boundary.string),
   })),
+  report: boundary.optional(boundary.object({ ...agentReportFields, panelId: boundary.nonEmptyString })),
+});
+const lockOwnerSchema: BoundarySchema<LockOwner> = boundary.object({
+  kind: boundary.enumeration('pane', 'external'),
+  paneId: boundary.optional(boundary.nonEmptyString),
+  panelId: boundary.optional(boundary.nonEmptyString),
+  label: boundary.optional(boundary.string),
+});
+const lockRecordSchema: BoundarySchema<LockRecord> = boundary.object({
+  name: boundary.nonEmptyString,
+  scope: boundary.enumeration('session', 'global'),
+  sessionId: boundary.optional(boundary.nonEmptyString),
+  owner: lockOwnerSchema,
+  note: boundary.optional(boundary.string),
+  acquiredAt: boundary.nonEmptyString,
+  expiresAt: boundary.nonEmptyString,
+  ttlMs: boundary.number,
+});
+const lockAcquireResultSchema: BoundarySchema<LockAcquireResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    acquired: boundary.literal(true),
+    renewed: boundary.boolean,
+    waitedMs: boundary.number,
+    lock: lockRecordSchema,
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    acquired: boundary.literal(false),
+    timedOut: boundary.boolean,
+    waitedMs: boundary.number,
+    heldBy: lockOwnerSchema,
+    expiresAt: boundary.nonEmptyString,
+    lock: lockRecordSchema,
+  }),
+);
+const lockReleaseResultSchema: BoundarySchema<LockReleaseResult> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    released: boundary.boolean,
+    forced: boundary.boolean,
+    lock: boundary.optional(lockRecordSchema),
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    released: boundary.literal(false),
+    reason: boundary.literal('not-owner'),
+    heldBy: lockOwnerSchema,
+    expiresAt: boundary.nonEmptyString,
+    lock: lockRecordSchema,
+  }),
+);
+const lockListResultSchema: BoundarySchema<LockListResult> = boundary.object({
+  ok: boundary.literal(true),
+  locks: boundary.array(lockRecordSchema),
 });
 const runpaneSessionOverviewResultSchema: BoundarySchema<RunpaneSessionOverviewResult> = boundary.object({
   ok: boundary.literal(true),
@@ -938,6 +1265,7 @@ const runpaneSessionOverviewResultSchema: BoundarySchema<RunpaneSessionOverviewR
     freshness: boundary.enumeration('current', 'stale'),
   })),
   refreshedAt: boundary.nonEmptyString,
+  locks: boundary.optional(boundary.array(lockRecordSchema)),
 });
 
 function orchestrationReportSchemaFields() {
@@ -1018,13 +1346,13 @@ const paneCostResultSchema: BoundarySchema<PaneCostResult> = boundary.object({
   unattributed: boundary.optional(paneCostSliceResultSchema),
   totals: boundary.optional(usageTotalsResultSchema),
 });
-const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object({
+export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object({
   ok: boundary.boolean,
   generation: boundary.optional(boundary.number),
   repo: repoSummarySchema,
   items: boundary.array(boundary.union(
     boundary.object({
-      ok: boundary.literal(true),
+      ok: boundary.boolean,
       index: boundary.number,
       name: boundary.optional(boundary.string),
       pinned: boundary.boolean,
@@ -1034,6 +1362,13 @@ const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object
       nextCommand: boundary.optional(boundary.string),
       readiness: boundary.optional(panelReadinessSchema),
       initialInput: boundary.optional(initialInputSchema),
+      association: boundary.optional(boundary.object({
+        sessionId: boundary.string,
+        ok: boundary.boolean,
+        error: boundary.optional(boundary.string),
+      })),
+      promptFile: boundary.optional(boundary.string),
+      warnings: promptWarningsSchema,
     }),
     boundary.object({
       ok: boundary.literal(false),
@@ -1055,7 +1390,7 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
     generation: boundary.optional(boundary.number),
     paneId: boundary.string,
     blocked: boundary.object({
-      code: boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown'),
+      code: archiveBlockCodeSchema,
       message: boundary.string,
       safetyCheck: archiveSafetySchema,
     }),
@@ -1069,7 +1404,7 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
     forced: boundary.boolean,
     safetyCheck: archiveSafetySchema,
     blocked: boundary.optional(boundary.object({
-      code: boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown'),
+      code: archiveBlockCodeSchema,
       message: boundary.string,
       safetyCheck: archiveSafetySchema,
     })),
@@ -1080,11 +1415,44 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
     paneId: boundary.string,
     archived: boundary.literal(true),
     forced: boundary.boolean,
-    worktreeCleanup: boundary.enumeration('completed', 'failed', 'timeout', 'not-applicable'),
+    worktreeCleanup: worktreeCleanupSchema,
+    trashDeletion: boundary.optional(trashDeletionSchema),
     worktreePath: boundary.optional(boundary.string),
     safetyCheck: archiveSafetySchema,
   }),
 );
+const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = boundary.object({
+  ok: boundary.boolean,
+  sessionId: boundary.string,
+  merged: boundary.literal(true),
+  dryRun: boundary.optional(boundary.literal(true)),
+  removeWorktree: boundary.boolean,
+  archived: boundary.number,
+  skipped: boundary.number,
+  failed: boundary.number,
+  items: boundary.array(boundary.object({
+    paneId: boundary.string,
+    name: boundary.optional(boundary.string),
+    outcome: boundary.enumeration('archived', 'would-archive', 'skipped', 'failed'),
+    skipped: boundary.optional(boundary.object({
+      code: boundary.enumeration(
+        'uncommitted-changes',
+        'unpushed-commits',
+        'uncommitted-and-unpushed',
+        'status-unknown',
+        'missing-pane',
+        'already-archived',
+        'main-repo',
+      ),
+      message: boundary.string,
+    })),
+    error: boundary.optional(boundary.string),
+    safetyCheck: boundary.optional(archiveSafetySchema),
+    worktreeCleanup: boundary.optional(worktreeCleanupSchema),
+    trashDeletion: boundary.optional(trashDeletionSchema),
+    worktreePath: boundary.optional(boundary.string),
+  })),
+});
 const panePinResultSchema: BoundarySchema<PanePinResult> = boundary.object({
   ok: boundary.literal(true),
   generation: boundary.optional(boundary.number),
@@ -1105,7 +1473,19 @@ const paneFocusResultSchema: BoundarySchema<PaneFocusResult> = boundary.object({
   panelId: boundary.optional(boundary.string),
   focused: boundary.literal(true),
 });
-const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
+const panelOpenResultSchema: BoundarySchema<PanelOpenResult> = boundary.object({
+  ok: boundary.literal(true),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  type: boundary.enumeration('browser', 'editor'),
+  title: boundary.string,
+  url: boundary.optional(boundary.string),
+  filePath: boundary.optional(boundary.string),
+  placement: boundary.enumeration('split', 'tab'),
+  active: boundary.boolean,
+  reused: boundary.boolean,
+});
+export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
   paneId: boundary.string,
   panels: boundary.array(panelSummarySchema),
@@ -1125,6 +1505,8 @@ const panelCreateResultSchema: BoundarySchema<PanelCreateResult> = boundary.obje
   }),
   readiness: boundary.optional(panelReadinessSchema),
   initialInput: boundary.optional(initialInputSchema),
+  promptFile: boundary.optional(boundary.string),
+  warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
 });
 const panelOutputResultSchema: BoundarySchema<PanelOutputResult> = boundary.object({
@@ -1150,7 +1532,7 @@ const panelInputResultSchema: BoundarySchema<PanelInputResult> = boundary.object
   sentAt: boundary.string,
   nextCommand: boundary.optional(boundary.string),
 });
-const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = boundary.object({
+export const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = boundary.object({
   ok: boundary.literal(true),
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
@@ -1163,21 +1545,25 @@ const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = boundary.obje
   composer: boundary.object({
     isPresent: boundary.boolean,
     hasUndeliveredText: boundary.boolean,
+    ghostText: boundary.optional(boundary.string),
   }),
   nextCommand: boundary.optional(boundary.string),
 });
-const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = boundary.object({
+export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = boundary.object({
   ok: boundary.boolean,
   generation: boundary.optional(boundary.number),
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
   inputBytes: boundary.number,
-  enter: boundary.literal('cr'),
-  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr'),
+  enter: boundary.enumeration('cr', 'tab'),
+  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr', 'tab'),
   verifiedSubmitted: boundary.boolean,
   verification: verificationSchema,
+  delivery: deliverySchema,
   sentAt: boundary.string,
   blocked: boundary.optional(panelBlockedSchema),
+  promptFile: boundary.optional(boundary.string),
+  warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
 });
 const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult> = boundary.object({
@@ -1186,10 +1572,11 @@ const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult>
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
   inputBytes: boundary.number,
-  strategy: boundary.enumeration('codex-ctrl-enter', 'enter'),
-  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr'),
+  strategy: boundary.enumeration('codex-ctrl-enter', 'enter', 'tab'),
+  sequenceName: boundary.enumeration('codex-ctrl-enter-cr', 'enter-cr', 'tab'),
   verifiedSubmitted: boundary.boolean,
   verification: verificationSchema,
+  delivery: deliverySchema,
   sentAt: boundary.string,
   blocked: boundary.optional(panelBlockedSchema),
   nextCommand: boundary.optional(boundary.string),
@@ -1236,6 +1623,12 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.created',
   'pane.gone',
   'panel.exited',
+  'pane.associated',
+  'pane.detached',
+  'pr.conflicted',
+  'pr.checks',
+  'pr.merged',
+  'agent.report',
 );
 const agentStateSchema = boundary.enumeration('blocked', 'working', 'idle', 'unknown');
 const workspacePanelSummarySchema: BoundarySchema<WorkspacePanelSummary> = boundary.object({
@@ -1258,7 +1651,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   agentType: boundary.optional(boundary.string),
   from: boundary.optional(agentStateSchema),
   to: boundary.optional(agentStateSchema),
-  source: boundary.enumeration('agent', 'exit', 'session'),
+  source: boundary.enumeration('agent', 'exit', 'session', 'github'),
   reason: boundary.optional(boundary.nullable(boundary.string)),
   settledMs: boundary.optional(boundary.number),
   idleMs: boundary.optional(boundary.number),
@@ -1267,10 +1660,17 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   heldInputPresent: boundary.optional(boundary.boolean),
   exitCode: boundary.optional(boundary.number),
   baseline: boundary.optional(boundary.literal(true)),
+  replay: boundary.optional(boundary.literal(true)),
   changedWhileAway: boundary.optional(boundary.boolean),
+  sessionId: boundary.optional(boundary.string),
+  sessionName: boundary.optional(boundary.string),
+  pr: boundary.optional(boundary.object({ number: boundary.number, url: boundary.string, headOid: boundary.string })),
+  checks: boundary.optional(boundary.enumeration('passed', 'failed')),
+  failingChecks: boundary.optional(boundary.array(boundary.string)),
+  report: boundary.optional(agentReportSchema),
   panels: boundary.optional(boundary.array(workspacePanelSummarySchema)),
 });
-const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
+export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
   ok: boundary.literal(true),
   epoch: boundary.string,
   generation: boundary.number,
@@ -1286,6 +1686,7 @@ const workspaceWaitResultSchema: BoundarySchema<WorkspaceWaitResult> = boundary.
   reset: boundary.optional(boundary.object({
     reason: boundary.enumeration('first-use', 'epoch-changed', 'cursor-truncated', 'unknown-consumer'),
   })),
+  session: boundary.optional(boundary.object({ id: boundary.string, name: boundary.string })),
   nextCommand: boundary.string,
 });
 const repoSelectorSchema: BoundarySchema<PaneCreateRequest['repo']> = boundary.union(
@@ -1298,14 +1699,17 @@ const repoSelectorSchema: BoundarySchema<PaneCreateRequest['repo']> = boundary.u
 const paneToolInputSchema: BoundarySchema<PaneToolInput> = boundary.object({
   agent: boundary.optional(boundary.string),
   command: boundary.optional(boundary.string),
+  agentType: boundary.optional(boundary.string),
   title: boundary.optional(boundary.string),
   initialInput: boundary.optional(boundary.string),
+  initialInputAsFilePointer: boundary.optional(boundary.boolean),
 });
 const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = boundary.object({
   repo: repoSelectorSchema,
   panes: boundary.array(boundary.object({
     name: boundary.string,
     worktreeName: boundary.optional(boundary.string),
+    branch: boundary.optional(boundary.string),
     baseBranch: boundary.optional(boundary.string),
     sessionPrompt: boundary.optional(boundary.string),
     pinned: boundary.optional(boundary.boolean),
@@ -1319,6 +1723,7 @@ const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = bou
   noFocus: boundary.optional(boundary.boolean),
   focus: boundary.optional(boundary.boolean),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
+  associateSession: boundary.optional(boundary.string),
 });
 const paneAdoptRequestInputSchema: BoundarySchema<PaneAdoptRequestInput> = boundary.object({
   repo: repoSelectorSchema,
@@ -1333,9 +1738,12 @@ const paneAdoptRequestInputSchema: BoundarySchema<PaneAdoptRequestInput> = bound
     launch: boundary.optional(boundary.boolean),
   })),
   dryRun: boundary.optional(boundary.boolean),
+  waitReady: boundary.optional(boundary.boolean),
+  readyTimeoutMs: boundary.optional(boundary.number),
   noFocus: boundary.optional(boundary.boolean),
   focus: boundary.optional(boundary.boolean),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
+  associateSession: boundary.optional(boundary.string),
 });
 
 export async function runReposList(parsed: ParsedArgs): Promise<number> {
@@ -1475,8 +1883,116 @@ export async function runSessionsOverview(parsed: ParsedArgs): Promise<number> {
   for (const pane of result.panes) {
     const details = pane.missing ? 'missing' : pane.archived ? 'archived' : pane.panels.map(panel => `${panel.title}=${panel.state}`).join(', ') || 'no terminal panels';
     console.log(`  ${pane.name}: ${details}`);
+    if (pane.report) {
+      console.log(`    report ${describeReport(pane.report)} (panel ${pane.report.panelId}, ${pane.report.reportedAt})`);
+    }
+  }
+  for (const lock of result.locks ?? []) {
+    console.log(`  lock ${formatLockLine(lock)}`);
   }
   return 0;
+}
+
+/** One daemon call waits at most this long; longer waits chain calls, each blocking in the daemon. */
+const LOCK_WAIT_PER_CALL_MS = 120_000;
+
+export async function runLockAcquire(parsed: ParsedArgs): Promise<number> {
+  const name = requireLockName(parsed, 'acquire');
+  if (parsed.lockTtlMs === undefined) throw new Error('runpane lock acquire requires --ttl <duration>, such as --ttl 30m.');
+  const request = { name, ttlMs: parsed.lockTtlMs, note: parsed.note, owner: lockOwnerFromParsed(parsed, false) };
+  const waitMs = parsed.lockWaitMs ?? 0;
+  const startedAt = Date.now();
+  let result: LockAcquireResult;
+  for (;;) {
+    const callWaitMs = Math.min(Math.max(0, waitMs - (Date.now() - startedAt)), LOCK_WAIT_PER_CALL_MS);
+    result = await invokeDaemon('runpane:locks:acquire', [{ ...request, waitMs: callWaitMs }], lockAcquireResultSchema, {
+      paneDir: parsed.paneDir,
+      timeoutMs: callWaitMs + 15_000,
+    });
+    // Only a call that waited out its whole window without the lock coming free chains another.
+    if (result.ok || !result.timedOut || Date.now() - startedAt >= waitMs) break;
+  }
+  const final: LockAcquireResult = { ...result, waitedMs: Date.now() - startedAt };
+  if (parsed.json) {
+    printJson(final);
+  } else if (final.ok) {
+    console.log(`${final.renewed ? 'Renewed' : 'Acquired'} lock ${formatLockLine(final.lock)}`);
+  } else {
+    console.log(`Lock ${final.lock.name} is held by ${formatLockOwner(final.heldBy)} until ${final.expiresAt}${final.lock.note ? ` (${final.lock.note})` : ''}.`);
+  }
+  return final.ok ? 0 : 1;
+}
+
+export async function runLockRelease(parsed: ParsedArgs): Promise<number> {
+  const name = requireLockName(parsed, 'release');
+  const request = {
+    name,
+    force: parsed.force || undefined,
+    sessionId: parsed.sessionId?.trim() || undefined,
+    owner: lockOwnerFromParsed(parsed, parsed.force === true),
+  };
+  const result = await invokeDaemon('runpane:locks:release', [request], lockReleaseResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+  } else if (!result.ok) {
+    console.log(`Lock ${name} is held by ${formatLockOwner(result.heldBy)} until ${result.expiresAt}; only its owner can release it. Rerun with --force to release it anyway.`);
+  } else if (result.released) {
+    console.log(`${result.forced ? 'Force-released' : 'Released'} lock ${name}.`);
+  } else {
+    console.log(`Lock ${name} was not held.`);
+  }
+  return result.ok ? 0 : 1;
+}
+
+export async function runLockList(parsed: ParsedArgs): Promise<number> {
+  const sessionId = parsed.sessionId?.trim() || undefined;
+  const result = await invokeDaemon('runpane:locks:list', [{ sessionId }], lockListResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  for (const lock of result.locks) console.log(formatLockLine(lock));
+  if (result.locks.length === 0) console.log('No locks held.');
+  return 0;
+}
+
+function requireLockName(parsed: ParsedArgs, action: 'acquire' | 'release'): string {
+  const name = parsed.name?.trim();
+  if (!name) throw new Error(`runpane lock ${action} requires --name <name>.`);
+  return name;
+}
+
+/**
+ * The caller owns the lock: --pane/--panel when given, else the Pane terminal
+ * it runs in ($PANE_SESSION_ID/$PANE_PANEL_ID). Outside Pane, --note names the owner.
+ */
+function lockOwnerFromParsed(parsed: ParsedArgs, forced: boolean): LockOwnerInput {
+  const explicit = Boolean(parsed.paneId || parsed.panelId);
+  const paneId = explicit ? parsed.paneId : process.env.PANE_SESSION_ID?.trim() || undefined;
+  const panelId = explicit ? parsed.panelId : process.env.PANE_PANEL_ID?.trim() || undefined;
+  const owner: LockOwnerInput = {};
+  if (paneId || panelId) {
+    if (paneId) owner.paneId = paneId;
+    if (panelId) owner.panelId = panelId;
+    return owner;
+  }
+  const label = parsed.note?.trim();
+  if (!label && !forced) {
+    throw new Error('Outside a Pane terminal, pass --note <text> to say who holds the lock (or --pane/--panel to act for a Pane).');
+  }
+  if (label) owner.label = label;
+  return owner;
+}
+
+function formatLockOwner(owner: LockOwner): string {
+  if (owner.kind === 'external') return `external "${owner.label ?? ''}"`;
+  return owner.panelId ? `pane ${owner.paneId} panel ${owner.panelId}` : `pane ${owner.paneId}`;
+}
+
+function formatLockLine(lock: LockRecord): string {
+  const scope = lock.scope === 'session' ? `session ${lock.sessionId}` : 'global';
+  const note = lock.note ? ` (${lock.note})` : '';
+  return `${lock.name} [${scope}] held by ${formatLockOwner(lock.owner)} until ${lock.expiresAt}${note}`;
 }
 
 function sessionSelectorFromParsed(parsed: ParsedArgs): SessionSelectorValue {
@@ -1487,8 +2003,12 @@ function sessionSelectorFromParsed(parsed: ParsedArgs): SessionSelectorValue {
 
 function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
   return decodeBoundary(value, boundary.object({
+    runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
+    wslDistribution: boundary.optional(boundary.nonEmptyString),
     name: boundary.nonEmptyString,
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -1505,6 +2025,8 @@ function parseSessionUpdatePayload(value: JsonValue): SessionUpdatePayload {
     archived: boundary.optional(boundary.boolean),
     isPinned: boundary.optional(boundary.boolean),
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
+  launchCommand: boundary.optional(boundary.string),
+  profile: boundary.optional(boundary.string),
     goal: boundary.optional(boundary.string),
     context: boundary.optional(boundary.string),
     decisions: boundary.optional(boundary.array(boundary.string)),
@@ -1575,12 +2097,20 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
     ? undefined
     : parsed.agentsOnly || parsed.follow ? true : undefined;
   const includeHeldInput = parsed.includeHeldInput && !parsed.noHeldInput ? true : undefined;
+  // Lines mode turns presence into STUCK; JSON mode passes heldInputPresent through as the equivalent.
   const includeHeldInputPresence = defaults.includeHeldInputPresence
-    && !parsed.noHeldInput && parsed.follow && format === 'lines' ? true : undefined;
+    && !parsed.noHeldInput && parsed.follow ? true : undefined;
   const cadenceValueFlagPresent = hasCadenceValueFlag(parsed);
   // Cadence state lives in the daemon per named consumer, so an anonymous follower names itself.
+  // A Session watch is named after the Session, so it survives an orchestrator agent switch.
+  const sessionCursor = parsed.sessionId ? sessionWatchCursorName(parsed.sessionId) : undefined;
+  const panelCursor = process.env.PANE_PANEL_ID ? derivedWatchCursorName('panel', process.env.PANE_PANEL_ID) : undefined;
   const watchAs = parsed.watchAs
-    ?? (parsed.follow ? process.env.PANE_PANEL_ID || (cadenceValueFlagPresent ? `follow-${process.pid}` : undefined) : undefined);
+    ?? (parsed.follow ? sessionCursor || panelCursor || (cadenceValueFlagPresent ? `follow-${process.pid}` : undefined) : undefined);
+  // --quiet drops lines that only prove liveness; --self-test still prints its WATCH OK result.
+  const emitControlLine = (line: string): void => {
+    if (!parsed.quiet) emitWatchLine(line);
+  };
   const request = {
     as: watchAs,
     since: parsed.watchSince,
@@ -1589,6 +2119,8 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
     limit: parsed.limit,
     kinds: parsed.watchKinds,
     paneIds: parsed.watchPaneIds,
+    // The daemon resolves the Session (id or exact name) and re-reads its Panes on every read.
+    session: parsed.sessionId,
     excludePaneIds: parsed.watchExcludePaneIds,
     repo: parsed.repo,
     nameContains: parsed.nameContains,
@@ -1623,18 +2155,24 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
         timeoutMs: timeoutMs + 5_000,
         eventInclude: [],
       });
+      if (request.session && !result.session) {
+        // An older daemon ignores the unknown field and would watch every Pane instead.
+        throw new Error('This Pane daemon does not support runpane watch --session; update Pane, or pass one --pane per Session Pane.');
+      }
       if (failingCode) {
-        emitWatchLine(formatNonEntry('_reconnected', { generation: result.generation }, format));
+        emitControlLine(formatNonEntry('_reconnected', { generation: result.generation }, format));
         failingCode = undefined;
       }
       if (!armed && (parsed.follow || parsed.selfTest)) {
-        emitWatchLine(formatNonEntry('_ok', { generation: result.generation, epoch: result.epoch }, format));
+        const okLine = formatNonEntry('_ok', { generation: result.generation, epoch: result.epoch }, format);
+        if (parsed.selfTest) emitWatchLine(okLine);
+        else emitControlLine(okLine);
         armed = true;
         if (parsed.selfTest) return 0;
       }
       for (const line of formatWaitResult(result, format)) emitWatchLine(line);
       if (heartbeatMs > 0 && Date.now() - lastHeartbeatAt >= heartbeatMs) {
-        emitWatchLine(formatNonEntry('_heartbeat', {
+        emitControlLine(formatNonEntry('_heartbeat', {
           generation: result.generation,
           at: new Date().toISOString(),
         }, format));
@@ -1664,6 +2202,29 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
 
 function emitWatchLine(line: string): void {
   output.write(`${line}\n`);
+}
+
+/** Names older daemons accept; the daemon itself allows up to 128 characters. */
+const PORTABLE_WATCH_CURSOR_PATTERN = /^[A-Za-z0-9._-]{1,64}$/u;
+
+/**
+ * Returns a derived watch cursor name (one runpane builds from an ID, not one the user typed)
+ * that every daemon accepts. A name that is too long or has other characters becomes
+ * `<prefix>-<first 12 hex chars of its sha256>`, which is stable across runs.
+ */
+function derivedWatchCursorName(prefix: string, name: string): string {
+  if (PORTABLE_WATCH_CURSOR_PATTERN.test(name)) return name;
+  return `${prefix}-${createHash('sha256').update(name).digest('hex').slice(0, 12)}`;
+}
+
+/**
+ * Default cursor for `watch --session`: `session-<uuid>` for a Session id
+ * (`__orchestration_session_<uuid>__`), `session-<name>` for a name, shortened like any
+ * derived name when it is longer than 64 characters or has other characters.
+ */
+function sessionWatchCursorName(session: string): string {
+  const uuid = /^__orchestration_session_(.+)__$/u.exec(session)?.[1];
+  return derivedWatchCursorName('session', `session-${uuid ?? session}`);
 }
 
 function watchErrorCode(error: Error): string {
@@ -1715,12 +2276,17 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
       ...decoded,
       panes: decoded.panes.map((pane, index) => ({
         ...pane,
+        pinned: resolvePinnedOverride(parsed) ?? pane.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
         tool: parsePaneToolSpecPayload(pane.tool, index),
       })),
+      associateSession: parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? decoded.associateSession,
     };
   } else {
     if (!parsed.repo || !parsed.repoPath || !parsed.name) {
       throw new Error('runpane panes adopt requires --repo, --path, and --name.');
+    }
+    if (!parsed.launch && (parsed.initialInput !== undefined || parsed.initialInputFile !== undefined || parsed.waitReady)) {
+      throw new Error('runpane panes adopt only sends a prompt or waits for readiness with --launch. Add --launch to start the agent now.');
     }
     const tool = await buildToolSpec(parsed, 'panes adopt');
     request = {
@@ -1730,21 +2296,24 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
       name: parsed.name,
       baseBranch: parsed.baseBranch,
       folder: parsed.folder,
-      pinned: resolvePinnedOverride(parsed) ?? true,
+      pinned: resolvePinnedOverride(parsed) ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
       tool,
       resume: parsed.resume,
       launch: parsed.launch || undefined,
     }],
     dryRun: parsed.dryRun || undefined,
+    waitReady: parsed.waitReady || undefined,
+    readyTimeoutMs: parsed.readyTimeoutMs,
     noFocus: parsed.noFocus || undefined,
     focus: parsed.focus || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+    associateSession: resolveAssociateSession(parsed),
     };
   }
   await confirmPaneAdopt(parsed, request);
   const result = await invokeDaemon('runpane:panes:adopt', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
-    timeoutMs: 120_000,
+    timeoutMs: 120_000 + (request.waitReady ? (request.readyTimeoutMs ?? 30_000) : 0),
   });
   if (parsed.json) printJson(result);
   else printPaneCreateResult(result);
@@ -1752,8 +2321,11 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
+  if (parsed.sessionId) {
+    return runPanesArchiveSession(parsed, parsed.sessionId);
+  }
   if (!parsed.paneId) {
-    throw new Error('runpane panes archive requires --pane.');
+    throw new Error('runpane panes archive requires --pane (or --session with --merged).');
   }
 
   const request: PaneArchiveRequest = {
@@ -1762,8 +2334,9 @@ export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
   if (parsed.force) request.force = true;
   if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
   if (parsed.dryRun) request.dryRun = true;
+  if (parsed.removeWorktree) request.removeWorktree = true;
 
-  await confirmPaneArchive(parsed, request);
+  await confirmPaneArchive(parsed, `Archive pane ${request.paneId}${request.force ? ' (including any uncommitted or unpushed work)' : ''}`);
 
   const result = await invokeDaemon('runpane:panes:archive', [request], paneArchiveResultSchema, {
     paneDir: parsed.paneDir,
@@ -1774,6 +2347,32 @@ export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
     printJson(result);
   } else {
     printPaneArchiveResult(result);
+  }
+
+  return result.ok ? 0 : 1;
+}
+
+async function runPanesArchiveSession(parsed: ParsedArgs, sessionId: string): Promise<number> {
+  if (!parsed.merged) {
+    throw new Error('runpane panes archive --session requires --merged.');
+  }
+  const request: PaneArchiveBulkRequest = { sessionId, merged: true };
+  if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
+  if (parsed.dryRun) request.dryRun = true;
+  if (parsed.removeWorktree) request.removeWorktree = true;
+
+  await confirmPaneArchive(parsed, `Archive every merged or pushed Pane in Session ${sessionId}`);
+
+  const result = await invokeDaemon('runpane:panes:archive', [request], paneArchiveBulkResultSchema, {
+    paneDir: parsed.paneDir,
+    // Each Pane refreshes its upstream and may wait for its worktree removal.
+    timeoutMs: 600_000,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    printPaneArchiveBulkResult(result);
   }
 
   return result.ok ? 0 : 1;
@@ -1898,6 +2497,45 @@ export async function runPanelsCreate(parsed: ParsedArgs): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+export async function runPanelsOpen(parsed: ParsedArgs): Promise<number> {
+  const paneId = parsed.paneId || process.env.PANE_SESSION_ID;
+  if (!paneId) {
+    throw new Error('runpane panels open requires --pane (or PANE_SESSION_ID from a Pane terminal).');
+  }
+  if (Boolean(parsed.url) === Boolean(parsed.file)) {
+    throw new Error('runpane panels open requires exactly one of --url or --file.');
+  }
+  if (parsed.noFocus && parsed.focus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+
+  const request: PanelOpenRequest = {
+    paneId,
+    url: parsed.url || undefined,
+    filePath: parsed.file || undefined,
+    title: parsed.title || undefined,
+    placement: parsed.placement ?? 'split',
+    noFocus: parsed.noFocus || undefined,
+    focus: parsed.focus || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+  };
+
+  await confirmPanelOpen(parsed, request);
+
+  const result = await invokeDaemon('runpane:panels:open', [request], panelOpenResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const target = result.url ?? result.filePath ?? result.title;
+    console.log(`${result.reused ? 'Reused' : 'Opened'} ${result.type} panel ${result.panelId} in pane ${result.paneId} (${result.placement}): ${target}`);
+  }
+
+  return 0;
+}
+
 export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
   if (!parsed.panelId) {
     throw new Error('runpane panels output requires --panel.');
@@ -1956,9 +2594,86 @@ export async function runPanelsScreen(parsed: ParsedArgs): Promise<number> {
     return 0;
   }
 
-  output.write(result.text);
-  if (result.text && !result.text.endsWith('\n')) {
+  const text = markSuggestionLine(result.text, result.composer.ghostText);
+  output.write(text);
+  if (text && !text.endsWith('\n')) {
     output.write('\n');
+  }
+  return 0;
+}
+
+export async function runPanelsLastMessage(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.panelId) {
+    throw new Error('runpane panels last-message requires --panel.');
+  }
+
+  const result = await invokeDaemon('runpane:panels:last-message', [{
+    panelId: parsed.panelId,
+    limit: parsed.limit,
+  }], panelLastMessageResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else if (result.ok) {
+    output.write(result.text);
+    if (result.text && !result.text.endsWith('\n')) output.write('\n');
+    if (result.truncated) console.error(`(showing the last ${result.limit} of ${result.length} characters)`);
+  } else {
+    console.error(`${result.reason}: ${result.message}`);
+  }
+  return result.ok ? 0 : 1;
+}
+
+/** Where a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel. */
+function resolveReportIdentity(
+  parsed: Pick<ParsedArgs, 'paneId' | 'panelId'>,
+  env: NodeJS.ProcessEnv = process.env,
+): { paneId?: string; panelId: string } {
+  if (parsed.paneId || parsed.panelId) {
+    if (!parsed.panelId) {
+      throw new Error('runpane report --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.');
+    }
+    return parsed.paneId ? { paneId: parsed.paneId, panelId: parsed.panelId } : { panelId: parsed.panelId };
+  }
+  const panelId = env.PANE_PANEL_ID?.trim();
+  if (!panelId) {
+    throw new Error('runpane report cannot tell which panel is reporting. Run it inside a Pane terminal '
+      + '(which sets PANE_SESSION_ID and PANE_PANEL_ID), or pass --pane <pane-id> --panel <panel-id>.');
+  }
+  const paneId = env.PANE_SESSION_ID?.trim();
+  return paneId ? { paneId, panelId } : { panelId };
+}
+
+/** The CLIs send one character past the daemon's 16,000 so it still marks an overlong summary truncated. */
+const MAX_SENT_SUMMARY_LENGTH = 16_001;
+
+export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const identity = resolveReportIdentity(parsed, env);
+  const summaryText = parsed.summaryFile !== undefined
+    ? stripUtf8Bom(readInputSource(parsed.summaryFile))
+    : parsed.summary;
+  const summaryPath = parsed.summaryFile !== undefined && parsed.summaryFile !== '-'
+    ? path.resolve(parsed.summaryFile)
+    : undefined;
+  const result = await invokeDaemon('runpane:report', [{
+    ...identity,
+    state: parsed.reportState,
+    pr: parsed.reportPr,
+    head: parsed.reportHead,
+    summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
+    summaryPath,
+    question: parsed.question,
+  }], reportResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    const sessions = result.sessionIds.length > 0 ? ` Recorded on Session ${result.sessionIds.join(', ')}.` : '';
+    console.log(`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}`);
   }
   return 0;
 }
@@ -1977,15 +2692,52 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
     const verb = result.ok ? 'Submitted' : 'Could not verify';
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${verb} ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} via ${result.sequenceName} to panel ${result.panelId}.${verified}`);
+    printDelivery(result.delivery);
     if (result.blocked) {
       console.log(`Blocked: ${result.blocked.message}`);
     }
+    printPromptNotes(result);
     if (result.nextCommand) {
       console.log(`Next: ${result.nextCommand}`);
     }
   }
 
   return result.ok ? 0 : 1;
+}
+
+/** Where the prompt went, for human output: `Delivery: queued (transcript)`. */
+function printDelivery(delivery: Delivery | undefined, prefix = ''): void {
+  if (delivery) {
+    console.log(`${prefix}Delivery: ${delivery.state} (${delivery.evidence})`);
+  }
+}
+
+/**
+ * Mark the composer line that shows ghost text (a placeholder or the agent's
+ * suggested next prompt), so it does not read as typed input.
+ */
+export function markSuggestionLine(text: string, ghostText: string | undefined): string {
+  const ghost = ghostText?.split('\n')[0]?.trim();
+  if (!ghost) return text;
+  const lines = text.split('\n');
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (/^[❯›>]/u.test(line) && line.includes(ghost)) {
+      lines[index] = `${lines[index].trimEnd()}  ⟨suggestion⟩`;
+      break;
+    }
+  }
+  return lines.join('\n');
+}
+
+/** The prompt file Pane wrote and any leading-character warnings, for human output. */
+export function printPromptNotes(result: { promptFile?: string; warnings?: PromptWarning[] }, prefix = ''): void {
+  if (result.promptFile) {
+    console.log(`${prefix}Prompt file: ${result.promptFile}`);
+  }
+  for (const warning of result.warnings ?? []) {
+    console.log(`${prefix}Warning (${warning.code}): ${warning.message}`);
+  }
 }
 
 export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<number> {
@@ -2006,6 +2758,7 @@ export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<numbe
   } else {
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${result.ok ? 'Submitted' : 'Could not verify'} composer with ${result.sequenceName} to panel ${result.panelId}.${verified}`);
+    printDelivery(result.delivery);
     if (result.blocked) {
       console.log(`Blocked: ${result.blocked.message}`);
     }
@@ -2075,21 +2828,41 @@ function buildRepoAddRequest(parsed: ParsedArgs): RepoAddRequest {
   };
 }
 
-function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 'submit' = 'input'): PanelInputRequest {
+export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 'submit' = 'input'): PanelInputRequest {
   if (!parsed.panelId) {
     throw new Error(`runpane panels ${command} requires --panel.`);
   }
-  if (parsed.panelInput !== undefined && parsed.panelInputFile) {
-    throw new Error('Use either --text or --input-file, not both.');
+  const sources = [parsed.panelInput !== undefined, Boolean(parsed.panelInputFile), parsed.keys !== undefined].filter(Boolean).length;
+  if (sources > 1) {
+    throw new Error('Use only one of --text, --keys, or --input-file.');
   }
-  if (parsed.panelInput === undefined && !parsed.panelInputFile) {
-    throw new Error(`runpane panels ${command} requires --text or --input-file.`);
+  if (sources === 0) {
+    throw new Error(`runpane panels ${command} requires --text, --keys, or --input-file.`);
+  }
+  if (parsed.keys !== undefined && command !== 'input') {
+    throw new Error('--keys is for panels input; panels submit sends text followed by the agent submit key.');
+  }
+  if (parsed.asFilePointer && command !== 'submit') {
+    throw new Error('--as-file-pointer is for panels submit; panels input sends exact bytes.');
   }
 
   return {
     panelId: parsed.panelId,
-    input: parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
+    input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
+    asFilePointer: parsed.asFilePointer || undefined,
   };
+}
+
+/** `--keys down,enter`: named keys from the contract, or a single literal character each. */
+function keysToBytes(keys: string[]): string {
+  const named = new Map<string, string>(Object.entries(RUNPANE_CONTRACT.terminalKeys));
+  return keys.map((key) => {
+    const bytes = named.get(key.toLowerCase()) ?? ([...key].length === 1 ? key : undefined);
+    if (bytes === undefined) {
+      throw new Error(`Unknown key "${key}". Use ${[...named.keys()].join(', ')}, or a single character.`);
+    }
+    return bytes;
+  }).join('');
 }
 
 async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateRequest> {
@@ -2123,7 +2896,7 @@ function resolvePinnedOverride(parsed: ParsedArgs): boolean | undefined {
   return parsed.pinned ? true : undefined;
 }
 
-async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateRequest> {
+export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateRequest> {
   if (parsed.fromJson) {
     const payload = JSON.parse(stripUtf8Bom(readInputSource(parsed.fromJson)));
     const request = parsePaneCreateRequestPayload(payload);
@@ -2143,10 +2916,11 @@ async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateReq
       request.concurrency = parsed.concurrency;
     }
     const pinnedOverride = resolvePinnedOverride(parsed);
-    if (pinnedOverride !== undefined) {
-      request.panes = request.panes.map(item => ({ ...item, pinned: pinnedOverride }));
-    }
+    request.panes = request.panes.map(item => ({
+      ...item, pinned: pinnedOverride ?? item.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
+    }));
     applyPaneFocusOptions(parsed, request);
+    request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
     return request;
   }
 
@@ -2167,8 +2941,9 @@ async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateReq
     panes: [{
       name: parsed.name,
       worktreeName: parsed.worktreeName,
+      branch: parsed.branch,
       baseBranch: parsed.baseBranch,
-      pinned: resolvePinnedOverride(parsed) ?? true,
+      pinned: resolvePinnedOverride(parsed) ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
       tool,
     }],
     dryRun: parsed.dryRun || undefined,
@@ -2179,9 +2954,16 @@ async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCreateReq
     noFocus: !parsed.focus && (parsed.noFocus || source === 'agent' || Boolean(parsed.agent)) ? true : undefined,
     focus: parsed.focus || undefined,
     source,
+    associateSession: resolveAssociateSession(parsed),
   };
 
   return request;
+}
+
+/** Inside a Session orchestrator, new Panes join that Session unless --no-associate. */
+function resolveAssociateSession(parsed: ParsedArgs): string | undefined {
+  if (parsed.noAssociate) return undefined;
+  return process.env.PANE_ORCHESTRATION_SESSION_ID?.trim() || undefined;
 }
 
 function applyPaneFocusOptions(parsed: ParsedArgs, request: PaneCreateRequest): void {
@@ -2222,11 +3004,24 @@ async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Prom
 }
 
 async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Promise<PaneToolSpec> {
-  if (parsed.agent && parsed.toolCommand) {
-    throw new Error('Use either --agent or --tool-command, not both.');
+  const initialInput = resolveInitialInput(parsed);
+  if (parsed.asFilePointer && initialInput === undefined) {
+    throw new Error(`--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane ${command}.`);
+  }
+  const initialInputAsFilePointer = parsed.asFilePointer || undefined;
+
+  // With --tool-command, --agent names the agent the command runs (a wrapper
+  // such as `agent-farm run`); Pane launches the command unchanged.
+  if (parsed.toolCommand && parsed.agent) {
+    return {
+      command: parsed.toolCommand,
+      agentType: parsed.agent,
+      title: parsed.title,
+      initialInput,
+      initialInputAsFilePointer,
+    };
   }
 
-  const initialInput = resolveInitialInput(parsed);
   let agent = parsed.agent;
 
   if (!agent && !parsed.toolCommand) {
@@ -2241,6 +3036,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       agent,
       title: parsed.title,
       initialInput,
+      initialInputAsFilePointer,
     };
   }
 
@@ -2252,12 +3048,13 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
     command: parsed.toolCommand,
     title: parsed.title,
     initialInput,
+    initialInputAsFilePointer,
   };
 }
 
 function resolveInitialInput(parsed: ParsedArgs): string | undefined {
   if (parsed.initialInput && parsed.initialInputFile) {
-    throw new Error('Use either --initial-input/--prompt or --initial-input-file, not both.');
+    throw new Error('Use either --initial-input/--prompt or --initial-input-file/--prompt-file, not both.');
   }
 
   if (parsed.initialInputFile) {
@@ -2302,7 +3099,7 @@ async function confirmPaneAdopt(parsed: ParsedArgs, request: PaneAdoptRequest): 
   }
 }
 
-async function confirmPaneArchive(parsed: ParsedArgs, request: PaneArchiveRequest): Promise<void> {
+async function confirmPaneArchive(parsed: ParsedArgs, question: string): Promise<void> {
   if (parsed.dryRun || parsed.yes) {
     return;
   }
@@ -2313,8 +3110,7 @@ async function confirmPaneArchive(parsed: ParsedArgs, request: PaneArchiveReques
 
   const rl = createInterface({ input, output });
   try {
-    const suffix = request.force ? ' (including any uncommitted or unpushed work)' : '';
-    const answer = (await rl.question(`Archive pane ${request.paneId}${suffix}? [y/N] `)).trim().toLowerCase();
+    const answer = (await rl.question(`${question}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }
@@ -2377,6 +3173,26 @@ async function confirmPaneFocus(parsed: ParsedArgs, request: PaneFocusRequest): 
   try {
     const panelSuffix = request.panelId ? ` (panel ${request.panelId})` : '';
     const answer = (await rl.question(`Focus pane ${request.paneId}${panelSuffix}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmPanelOpen(parsed: ParsedArgs, request: PanelOpenRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane panels open mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Open ${request.url ?? request.filePath} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }
@@ -2509,6 +3325,12 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'pane.created': 'NEW',
     'pane.gone': 'GONE',
     'panel.exited': 'EXIT',
+    'pane.associated': 'JOINED',
+    'pane.detached': 'LEFT',
+    'pr.conflicted': 'PR CONFLICTED',
+    'pr.checks': 'PR CHECKS',
+    'pr.merged': 'PR MERGED',
+    'agent.report': 'REPORT',
   } satisfies Record<WorkspaceEntryKind, string>;
   return labels[kind];
 }
@@ -2572,7 +3394,7 @@ function printPaneCostModels(models: UsageByModelResult[]): void {
 
 function printPaneCreateResult(result: PaneCreateResult): void {
   for (const item of result.items) {
-    if (item.ok) {
+    if (!('error' in item)) {
       const worktree = item.worktreePath ? ` at ${item.worktreePath}` : '';
       console.log(`Created ${item.name ?? `pane ${item.index}`}: session ${item.sessionId ?? 'unknown'} panel ${item.panelId ?? 'unknown'}${worktree}`);
       if (item.readiness) {
@@ -2582,6 +3404,12 @@ function printPaneCreateResult(result: PaneCreateResult): void {
         }
       }
       printInitialInputDelivery(item.initialInput, '  ');
+      if (item.association) {
+        console.log(item.association.ok
+          ? `  Associated with Session ${item.association.sessionId}`
+          : `  Not associated with Session ${item.association.sessionId}: ${item.association.error ?? 'unknown error'}`);
+      }
+      printPromptNotes(item, '  ');
       if (item.nextCommand) {
         console.log(`  Next: ${item.nextCommand}`);
       }
@@ -2608,15 +3436,50 @@ function printPaneArchiveResult(result: PaneArchiveResult): void {
     return;
   }
 
-  console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}.`);
+  const trash = result.trashDeletion === 'pending' ? ' (files are still being deleted in the background)' : '';
+  console.log(`Archived pane ${result.paneId}${result.forced ? ' (forced)' : ''}. Worktree cleanup: ${result.worktreeCleanup}${trash}.`);
+  printArchiveSkipReason(result.safetyCheck);
+  if (result.safetyCheck.mergedViaPr) {
+    console.log(`Merged via PR #${result.safetyCheck.mergedViaPr.number} (head ${result.safetyCheck.mergedViaPr.headOid}).`);
+  }
+}
+
+function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
+  const verb = result.dryRun ? 'Would archive' : 'Archived';
+  console.log(`${verb} ${result.archived} Pane(s) in Session ${result.sessionId}; skipped ${result.skipped}; failed ${result.failed}.`);
+  for (const item of result.items) {
+    const label = item.name ? `${item.name} (${item.paneId})` : item.paneId;
+    if (item.outcome === 'skipped') {
+      console.log(`  skipped ${label}: ${item.skipped?.code ?? 'unknown'} - ${item.skipped?.message ?? ''}`);
+    } else if (item.outcome === 'failed') {
+      console.error(`  failed ${label}: ${item.error ?? 'unknown error'}`);
+    } else {
+      const merged = item.safetyCheck?.mergedViaPr ? ` merged via PR #${item.safetyCheck.mergedViaPr.number}` : '';
+      const trash = item.trashDeletion === 'pending' ? ', files deleting in background' : '';
+      const cleanup = item.worktreeCleanup ? ` worktree ${item.worktreeCleanup}${trash}` : '';
+      console.log(`  ${item.outcome} ${label}${merged}${cleanup}`);
+    }
+  }
+}
+
+function printArchiveSkipReason(
+  safetyCheck: PaneArchiveSafetyCheck,
+  print: (message: string) => void = console.log,
+): void {
+  if (!safetyCheck.reason) return;
+  print(`Safety check skipped: ${safetyCheck.reason}${safetyCheck.worktreeWillRemain ? '; the worktree stays on disk' : ''}.`);
 }
 
 function printArchiveCommitEvidence(
   safetyCheck: PaneArchiveSafetyCheck,
   print: (message: string) => void = console.log,
 ): void {
+  printArchiveSkipReason(safetyCheck, print);
   if (safetyCheck.upstream) {
-    print(`Upstream: ${safetyCheck.upstream}${safetyCheck.upstreamRefreshed ? ' (refreshed)' : ''}`);
+    print(`Upstream: ${safetyCheck.upstream}${safetyCheck.upstreamRefreshed ? ' (refreshed)' : ''}${safetyCheck.upstreamGone ? ' (gone from the remote)' : ''}`);
+  }
+  if (safetyCheck.mergedViaPr) {
+    print(`Merged via PR #${safetyCheck.mergedViaPr.number} (head ${safetyCheck.mergedViaPr.headOid})`);
   }
   for (const commit of safetyCheck.unpushedCommitDetails ?? []) {
     print(`Unpushed: ${commit.sha} ${commit.subject}`);
@@ -2632,6 +3495,7 @@ function printPanelCreateResult(result: PanelCreateResult): void {
     }
   }
   printInitialInputDelivery(result.initialInput);
+  printPromptNotes(result);
   if (result.nextCommand) {
     console.log(`Next: ${result.nextCommand}`);
   }
@@ -2651,6 +3515,7 @@ function printInitialInputDelivery(initialInput: InitialInputDeliveryResult | un
   const attempts = initialInput.attempts === undefined ? '' : ` after ${initialInput.attempts} attempt${initialInput.attempts === 1 ? '' : 's'}`;
   const staged = initialInput.staged === undefined ? '' : `; staged: ${initialInput.staged ? 'yes' : 'no'}`;
   console.log(`${prefix}Initial input: ${status}${strategy}${attempts}${staged}`);
+  printDelivery(initialInput.delivery, prefix);
   if (initialInput.blocked) {
     console.log(`${prefix}Initial input blocked: ${initialInput.blocked.message}`);
   }
@@ -2712,7 +3577,8 @@ function printPanelListResult(result: PanelListResult): void {
     const marker = panel.active ? '*' : ' ';
     const initialized = panel.initialized === undefined ? '' : panel.initialized ? ' initialized' : ' not-initialized';
     const agent = panel.agentType ? ` ${panel.agentType}` : '';
-    console.log(`${marker} ${panel.id}\t${panel.type}\t${panel.title}${initialized}${agent}`);
+    const detection = panel.agentDetection && panel.agentDetection !== 'command' ? ` (${panel.agentDetection})` : '';
+    console.log(`${marker} ${panel.id}\t${panel.type}\t${panel.title}${initialized}${agent}${detection}`);
   }
 }
 
@@ -2721,12 +3587,7 @@ function isInteractiveShell(): boolean {
 }
 
 function parsePaneCreateRequestPayload(value: JsonValue): PaneCreateRequest {
-  let decoded: PaneCreateRequestInput;
-  try {
-    decoded = decodeBoundary(value, paneCreateRequestInputSchema);
-  } catch {
-    throw new Error('--from-json payload must be an object.');
-  }
+  const decoded = decodeBoundary(value, paneCreateRequestInputSchema);
 
   if (decoded.panes.length === 0) {
     throw new Error('--from-json payload must include at least one pane.');
@@ -2749,6 +3610,7 @@ function parsePaneCreateItemPayload(value: PaneCreateItemInput, index: number): 
   return {
     name: value.name,
     worktreeName: value.worktreeName,
+    branch: value.branch,
     baseBranch: value.baseBranch,
     sessionPrompt: value.sessionPrompt,
     pinned: value.pinned,
@@ -2768,14 +3630,23 @@ function parsePaneToolSpecPayload(value: PaneToolInput, index: number): PaneTool
       agent,
       title: value.title,
       initialInput: value.initialInput,
+      initialInputAsFilePointer: value.initialInputAsFilePointer,
     };
   }
 
   if (value.command !== undefined && value.command.trim().length > 0) {
+    let agentType: RunpaneAgent | undefined;
+    try {
+      agentType = value.agentType === undefined ? undefined : decodeBoundary(value.agentType, agentSchema);
+    } catch {
+      throw new Error(`--from-json pane ${index} includes an unsupported agentType.`);
+    }
     return {
       command: value.command,
+      agentType,
       title: value.title,
       initialInput: value.initialInput,
+      initialInputAsFilePointer: value.initialInputAsFilePointer,
     };
   }
 

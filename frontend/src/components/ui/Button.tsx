@@ -11,6 +11,14 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   children: React.ReactNode;
 }
 
+const buttonVariants = {
+  primary: 'bg-interactive text-text-on-interactive hover:bg-interactive-hover focus-visible:ring-interactive shadow-button hover:shadow-button-hover',
+  secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus-visible:ring-border-primary',
+  ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus-visible:ring-border-primary',
+  danger: 'bg-status-error text-text-on-status-error hover:bg-status-error-hover focus-visible:ring-status-error',
+  warning: 'bg-status-warning text-text-on-status-warning hover:bg-status-warning-hover focus-visible:ring-status-warning',
+};
+
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ 
     className, 
@@ -28,15 +36,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     // `pane-press` carries the transition and the :active scale — see index.css.
     // It also replaces the `transition-all` that used to live here, which
     // animated layout properties off the compositor on every colour change.
-    const baseStyles = 'pane-press inline-flex items-center justify-center font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg-primary disabled:cursor-not-allowed disabled:opacity-50';
-    
-    const variants = {
-      primary: 'bg-interactive text-text-on-interactive hover:bg-interactive-hover focus:ring-interactive shadow-button hover:shadow-button-hover',
-      secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus:ring-border-primary',
-      ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus:ring-border-primary',
-      danger: 'bg-status-error text-text-on-status-error hover:bg-status-error-hover focus:ring-status-error',
-      warning: 'bg-status-warning text-text-on-status-warning hover:bg-status-warning-hover focus:ring-status-warning',
-    };
+    const baseStyles = 'pane-press inline-flex items-center justify-center font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary disabled:cursor-not-allowed disabled:opacity-50';
 
     const sizes = {
       sm: 'px-button-x-sm py-button-y-sm text-sm rounded-button',
@@ -51,7 +51,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         className={cn(
           baseStyles,
-          variants[variant],
+          buttonVariants[variant],
           sizes[size],
           widthStyles,
           className
@@ -99,6 +99,14 @@ export interface IconButtonProps extends Omit<ButtonProps, 'children' | 'fullWid
   'aria-label': string;
 }
 
+const iconButtonVariants = {
+  primary: 'bg-interactive text-text-on-interactive hover:bg-interactive-hover focus-visible:ring-interactive',
+  secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus-visible:ring-border-primary',
+  ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus-visible:ring-border-primary',
+  danger: 'bg-status-error text-text-on-status-error hover:bg-status-error-hover focus-visible:ring-status-error',
+  warning: 'bg-status-warning text-text-on-status-warning hover:bg-status-warning-hover focus-visible:ring-status-warning',
+};
+
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
   ({ 
     className, 
@@ -107,15 +115,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
     icon,
     ...props 
   }, ref) => {
-    const baseStyles = 'pane-press inline-flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg-primary disabled:cursor-not-allowed disabled:opacity-50';
-    
-    const variants = {
-      primary: 'bg-interactive text-text-on-interactive hover:bg-interactive-hover focus:ring-interactive',
-      secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus:ring-border-primary',
-      ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus:ring-border-primary',
-      danger: 'bg-status-error text-text-on-status-error hover:bg-status-error-hover focus:ring-status-error',
-      warning: 'bg-status-warning text-text-on-status-warning hover:bg-status-warning-hover focus:ring-status-warning',
-    };
+    const baseStyles = 'pane-press inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary disabled:cursor-not-allowed disabled:opacity-50';
 
     const sizes = {
       sm: 'p-1 rounded',
@@ -128,7 +128,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
         ref={ref}
         className={cn(
           baseStyles,
-          variants[variant],
+          iconButtonVariants[variant],
           sizes[size],
           className
         )}

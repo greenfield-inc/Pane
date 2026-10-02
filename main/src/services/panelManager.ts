@@ -8,6 +8,7 @@ import { withLock } from '../utils/mutex';
 import type { AnalyticsManager } from './analyticsManager';
 import type { PaneEventArgument } from '../core/eventSink';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { assertHostBrowserFileNavigation } from './browserPanelFiles';
 
 function logsPanelState(panel: ToolPanel): LogsPanelState {
   // SAFETY: Callers first discriminate `panel.type === 'logs'`; this state is
@@ -102,6 +103,7 @@ class PanelManager {
         hasBeenViewed: false,
         customState
       };
+      assertHostBrowserFileNavigation(request.type, state);
       
       // Create metadata (merge with any provided overrides)
       const metadata: ToolPanelMetadata = {
@@ -272,6 +274,17 @@ class PanelManager {
     });
   }
   
+  async movePanel(panelId: string, sourceId: string, targetId: string): Promise<void> {
+    await withLock(`panel-update-${panelId}`, async () => {
+      const panel = this.getPanel(panelId);
+      if (!panel || panel.sessionId !== sourceId) throw new Error('Chat ownership changed');
+      databaseService.movePanel(panelId, sourceId, targetId);
+      panel.sessionId = targetId;
+      this.sendRendererEvent('panel:deleted', { panelId, sessionId: sourceId });
+      this.sendRendererEvent('panel:created', panel);
+    });
+  }
+
   async updatePanel(panelId: string, updates: Partial<ToolPanel>): Promise<void> {
     return await withLock(`panel-update-${panelId}`, async () => {
       const panel = this.getPanel(panelId);
@@ -283,6 +296,7 @@ class PanelManager {
       // Update in database. A refused write (state over the ceiling) is
       // already logged there with the panel, size and largest key; the cache
       // and renderer keep the last accepted state.
+      assertHostBrowserFileNavigation(panel.type, updates.state ?? panel.state, panel.state);
       const written = databaseService.updatePanel(panelId, {
         title: updates.title,
         state: updates.state,

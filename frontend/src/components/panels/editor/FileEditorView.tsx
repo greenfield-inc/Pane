@@ -56,6 +56,7 @@ export function FileEditorView({
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   // Monotonic load id: a load that finishes after the tab was re-targeted is stale.
   const loadSeqRef = useRef(0);
+  const editRevision = useRef(0);
   // Debounced cursor/scroll saves, so a re-target can drop the old file's.
   const positionTrackerRef = useRef<PositionTracker | null>(null);
 
@@ -92,7 +93,8 @@ export function FileEditorView({
     });
   }, [sessionId, selectedFilePathRef]);
 
-  const loadFile = useCallback(async (file: FileItem) => {
+  const loadFile = useCallback(async (file: FileItem, preserveEdits = false) => {
+    const revision = editRevision.current;
     const seq = ++loadSeqRef.current;
     dispatch({ type: 'load-start' });
     try {
@@ -100,6 +102,12 @@ export function FileEditorView({
       if (seq !== loadSeqRef.current) {
         // Superseded by a re-target: nothing will own this blob, release it.
         if (loaded.kind === 'binary') URL.revokeObjectURL(loaded.blobUrl);
+        return;
+      }
+
+      if (preserveEdits && revision !== editRevision.current) {
+        if (loaded.kind === 'binary') URL.revokeObjectURL(loaded.blobUrl);
+        dispatch({ type: 'load-cancelled' });
         return;
       }
 
@@ -205,6 +213,7 @@ export function FileEditorView({
   }, [autoSaveRef, onUserEdit]);
 
   const handleEditorChange = (value: string | undefined) => {
+    editRevision.current += 1;
     const content = value || '';
     dispatch({ type: 'edit', content });
     if (!selectedFile || selectedFile.isDirectory) return;
@@ -236,6 +245,18 @@ export function FileEditorView({
     void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
+
+  // Reopening an agent-written file refreshes clean buffers; pending user edits win.
+  const lastReopenedAt = useRef(initialState?.reopenedAt);
+  useEffect(() => {
+    const reopenedAt = initialState?.reopenedAt;
+    if (reopenedAt === lastReopenedAt.current) return;
+    if (loading) return;
+    lastReopenedAt.current = reopenedAt;
+    if (!reopenedAt || hasUnsavedChanges) return;
+    void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialState?.reopenedAt, loading]);
 
   // Terminal links / re-opens can ask for a specific position. Matched by
   // file path; a tab that mounts after the request restores the position

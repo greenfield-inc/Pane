@@ -50,6 +50,9 @@ importers:
       glob:
         specifier: ^11.0.0
         version: 11.0.3
+      smol-toml:
+        specifier: 1.7.1
+        version: 1.7.1
       web-streams-polyfill:
         specifier: ^3.3.3
         version: 3.3.3
@@ -69,6 +72,9 @@ importers:
       '@playwright/test':
         specifier: ^1.52.0
         version: 1.54.1
+      ajv:
+        specifier: 6.12.6
+        version: 6.12.6
       concurrently:
         specifier: ^9.1.0
         version: 9.2.0
@@ -301,6 +307,9 @@ importers:
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
+      smol-toml:
+        specifier: 1.7.1
+        version: 1.7.1
       uuid:
         specifier: ^13.0.0
         version: 13.0.2
@@ -502,12 +511,24 @@ importers:
 
   packages/runpane:
     devDependencies:
+      '@clack/prompts':
+        specifier: 0.11.0
+        version: 0.11.0
       '@eslint/js':
         specifier: ^9.17.0
         version: 9.31.0
+      '@modelcontextprotocol/sdk':
+        specifier: 1.16.0
+        version: 1.16.0
+      '@modelcontextprotocol/server':
+        specifier: 2.0.0
+        version: 2.0.0
       '@types/node':
         specifier: ^22.10.2
         version: 22.16.5
+      esbuild:
+        specifier: 0.25.7
+        version: 0.25.7
       eslint:
         specifier: ^9.17.0
         version: 9.31.0(jiti@2.7.0)
@@ -1022,6 +1043,12 @@ packages:
 
   '@chevrotain/utils@11.0.3':
     resolution: {integrity: sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ==}
+
+  '@clack/core@0.5.0':
+    resolution: {integrity: sha512-p3y0FIOwaYRUPRcMO7+dlmLh8PSRcrjuTndsiA0WAFbWES0mLZlrjVoBRZ9DzkPFJZG6KGkJmoEAY0ZcVWTkow==}
+
+  '@clack/prompts@0.11.0':
+    resolution: {integrity: sha512-pMN5FcrEw9hUkZA4f+zLlzivQSeQf5dRGJjSUbvVYDLvpKCdQx5OaknvKzgbtXOizhP+SJJJjqEbOe55uKKfAw==}
 
   '@develar/schema-utils@2.6.5':
     resolution: {integrity: sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==}
@@ -2166,9 +2193,17 @@ packages:
   '@mermaid-js/parser@0.6.2':
     resolution: {integrity: sha512-+PO02uGF6L6Cs0Bw8RpGhikVvMWEysfAyl27qTlroUB8jSWr1lL0Sf6zi78ZxlSnmgSY2AMMKVgghnN9jTtwkQ==}
 
+  '@modelcontextprotocol/core@2.0.0':
+    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+    engines: {node: '>=20'}
+
   '@modelcontextprotocol/sdk@1.16.0':
     resolution: {integrity: sha512-8ofX7gkZcLj9H9rSd50mCgm3SSF8C7XoclxJuLoV0Cz3rEQ1tv9MZRYYvJtm9n1BiEQQMzSmE/w2AEkNacLYfg==}
     engines: {node: '>=18'}
+
+  '@modelcontextprotocol/server@2.0.0':
+    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+    engines: {node: '>=20'}
 
   '@monaco-editor/loader@1.5.0':
     resolution: {integrity: sha512-hKoGSM+7aAc7eRTRjpqAZucPmoNOC4UUbknb/VNoTkEIkCPhqV8LfbsgM1webRM7S/z21eHEx9Fkwx8Z/C/+Xw==}
@@ -10262,6 +10297,17 @@ snapshots:
 
   '@chevrotain/utils@11.0.3': {}
 
+  '@clack/core@0.5.0':
+    dependencies:
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+
+  '@clack/prompts@0.11.0':
+    dependencies:
+      '@clack/core': 0.5.0
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+
   '@develar/schema-utils@2.6.5':
     dependencies:
       ajv: 6.12.6
@@ -11603,6 +11649,10 @@ snapshots:
     dependencies:
       langium: 3.3.1
 
+  '@modelcontextprotocol/core@2.0.0':
+    dependencies:
+      zod: 4.4.3
+
   '@modelcontextprotocol/sdk@1.16.0':
     dependencies:
       ajv: 6.12.6
@@ -11619,6 +11669,11 @@ snapshots:
       zod-to-json-schema: 3.24.6(zod@3.25.76)
     transitivePeerDependencies:
       - supports-color
+
+  '@modelcontextprotocol/server@2.0.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.0.0
+      zod: 4.4.3
 
   '@monaco-editor/loader@1.5.0':
     dependencies:

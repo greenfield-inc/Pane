@@ -309,11 +309,6 @@ export class API {
       return window.electronAPI.sessions.hasRunScript(sessionId);
     },
 
-    async getRunningSession() {
-      if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.sessions.getRunningSession();
-    },
-
     async runScript(sessionId: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.sessions.runScript(sessionId);
@@ -599,11 +594,6 @@ export class API {
     async updateSessionPreferences(preferences: SessionCreationPreferences) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.config.updateSessionPreferences(preferences);
-    },
-
-    async getAvailableShells() {
-      if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.config.getAvailableShells();
     },
   };
 

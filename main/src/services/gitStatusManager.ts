@@ -40,7 +40,8 @@ type PrData = {
 
 type PrLookupResult =
   | { ok: true; pr?: PrData }
-  | { ok: false };
+  /** `error` is the failed `gh` call's rejection, for callers that back off when `gh` is unavailable. */
+  | { ok: false; error: unknown };
 
 const PR_FIELDS = ['prNumber', 'prUrl', 'prTitle', 'prState', 'prIsDraft', 'prBody'] as const;
 
@@ -643,8 +644,8 @@ export class GitStatusManager extends EventEmitter {
           ? { prNumber: entry.prNumber, prUrl: entry.prUrl, prTitle: entry.prTitle, prState: entry.prState, prIsDraft: entry.prIsDraft, prBody: entry.prBody }
           : undefined,
       };
-    } catch {
-      return { ok: false };
+    } catch (error) {
+      return { ok: false, error };
     }
   }
 
@@ -708,24 +709,34 @@ export class GitStatusManager extends EventEmitter {
     this.prEnrichmentTimers.set(sessionId, timer);
   }
 
-  private async enrichWithPrData(sessionId: string): Promise<void> {
+  /**
+   * Looks up a Pane's PR by its current branch now (`gh pr list --head`), through the shared PR
+   * cache and one-at-a-time `gh` slot, and records it in the Pane's cached status. The Session PR
+   * monitor uses it for Panes nobody is looking at, whose status may never refresh on its own.
+   * Undefined when the Pane has no worktree, project, or branch.
+   */
+  async lookupPrForPane(sessionId: string): Promise<PrLookupResult | undefined> {
+    return this.executePrEnrichmentWithLimit(() => this.enrichWithPrData(sessionId));
+  }
+
+  private async enrichWithPrData(sessionId: string): Promise<PrLookupResult | undefined> {
     const session = await this.sessionManager.getSession(sessionId);
-    if (!session?.worktreePath) return;
+    if (!session?.worktreePath) return undefined;
 
     const project = this.sessionManager.getProjectForSession(sessionId);
-    if (!project?.path) return;
+    if (!project?.path) return undefined;
 
     const ctx = this.sessionManager.getProjectContext(sessionId);
-    if (!ctx) return;
+    if (!ctx) return undefined;
 
     const branchName = await this.getCurrentBranchName(session.worktreePath, ctx.commandRunner);
-    if (!branchName) return;
+    if (!branchName) return undefined;
 
     const prResult = await this.fetchPrForSessionResult(branchName, project.path, ctx.commandRunner);
-    if (!prResult.ok) return;
+    if (!prResult.ok) return prResult;
 
     const currentStatus = this.cache[sessionId]?.status;
-    if (!currentStatus) return;
+    if (!currentStatus) return prResult;
 
     const prData = prResult.pr;
     if (prData?.prNumber !== undefined) {
@@ -753,7 +764,7 @@ export class GitStatusManager extends EventEmitter {
         this.persistCachedStatus(sessionId, enrichedStatus, lastChecked);
         this.emit('git-status-updated', sessionId, enrichedStatus);
       }
-      return;
+      return prResult;
     }
 
     if (currentStatus.prNumber !== undefined) {
@@ -766,6 +777,7 @@ export class GitStatusManager extends EventEmitter {
       this.persistCachedStatus(sessionId, clearedStatus, lastChecked);
       this.emit('git-status-updated', sessionId, clearedStatus);
     }
+    return prResult;
   }
 
   /**
@@ -1246,6 +1258,14 @@ export class GitStatusManager extends EventEmitter {
         }
       }
     }
+  }
+
+  /**
+   * Runs a GitHub CLI operation in the same one-at-a-time slot as PR enrichment, so other
+   * services' `gh` calls (the Session PR monitor) never overlap Pane's own PR lookups.
+   */
+  async withGithubSlot<T>(operation: () => Promise<T>): Promise<T> {
+    return this.executePrEnrichmentWithLimit(operation);
   }
 
   private async executePrEnrichmentWithLimit<T>(operation: () => Promise<T>): Promise<T> {

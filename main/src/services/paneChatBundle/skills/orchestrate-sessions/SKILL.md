@@ -26,11 +26,22 @@ they win where the two differ:
   options, and the ticket happen there; start a separate planning session only
   when the user asks. The ticket from `create-ticket` is the plan.
 - Pane refreshes Session state and arms its watcher at startup.
+- Workers end with `runpane report`. Its REPORT event (`agent.report`) is the
+  completion and blocker signal; a READY without one is only a cue to look.
+  `runpane` has the prompt line and how to read a report.
 - Review and QA run as `runpane` describes: fresh panels or the `reviewer` and
   `qa-and-verify` subagents, returning findings to the implementation
   authority.
 - Durable records live where `runpane` says. The status board is optional,
   on request.
+- A new workspace on a named branch comes from
+  `runpane panes create --base <ref> --branch <name> --prompt-file <file>`,
+  which replaces `git worktree add` plus `panes adopt`.
+- When workers share a resource only one may use at a time, such as a test
+  account, name a lock in their prompts: each worker runs
+  `runpane lock acquire --name <name> --ttl 30m --wait 1800000 --note "<what for>" --json`
+  before using the shared account and `runpane lock release --name <name>`
+  after. `runpane sessions overview` shows who holds it.
 
 ## Intake and routing
 

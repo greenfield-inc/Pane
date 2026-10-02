@@ -1,4 +1,4 @@
-import { execSync as nodeExecSync, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -99,6 +99,16 @@ export function linuxToUNCPath(linuxPath: string, distro: string): string {
 }
 
 /**
+ * Convert a Windows drive path to its default WSL mount path.
+ * Example: 'C:\\Users\\me\\file.png' → '/mnt/c/Users/me/file.png'
+ */
+export function windowsPathToWSLMount(windowsPath: string): string {
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
+  if (!match) return windowsPath;
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
+}
+
+/**
  * Join path segments with forward slashes (for Linux paths on Windows).
  * NEVER use Node's path.join() for WSL Linux paths.
  */
@@ -107,18 +117,6 @@ export function posixJoin(...segments: string[]): string {
     .join('/')
     .replace(/\/+/g, '/')  // collapse multiple slashes
     .replace(/\/$/, '');    // remove trailing slash
-}
-
-/**
- * Escape a string for use inside a bash -c "..." double-quoted context.
- * Only escapes bash special characters (\, ", `, $).
- */
-export function escapeForBashDoubleQuote(str: string): string {
-  return str
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
 }
 
 /**
@@ -170,12 +168,13 @@ export function buildWSLENV(varNames: readonly string[]): string {
 export function getWSLShellSpawn(distro: string, cwd?: string): WSLShellSpawn {
   // Use bash -c "cd ... && exec bash" instead of --cd flag.
   // The --cd flag is broken on many WSL versions (e.g., 2.5.9.0) for Linux paths.
-  const args = ['-d', distro, '--'];
+  // --exec runs bash directly; `--` would pass the command line through the
+  // user's default shell first, which re-parses the quoting.
+  const args = ['-d', distro, '--exec', 'bash'];
   if (cwd) {
-    const escapedCwd = escapeForBashDoubleQuote(cwd);
-    args.push('bash', '-c', `cd '${escapedCwd}' && exec bash --login`);
+    args.push('-c', `cd ${escapeForBash(cwd)} && exec bash --login`);
   } else {
-    args.push('bash', '--login');
+    args.push('--login');
   }
   return { path: 'wsl.exe', name: 'wsl', args };
 }
@@ -222,32 +221,38 @@ export async function bumpWSLInotifyLimits(distros: string[]): Promise<void> {
   );
 }
 
+type RunWSL = (args: string[]) => Promise<Buffer>;
+
+const runWSL: RunWSL = async args =>
+  (await execFileAsync('wsl.exe', args, { encoding: 'buffer', timeout: 5000 })).stdout;
+
+export async function listWSLDistributions(run: RunWSL = runWSL): Promise<string[]> {
+  const output = await run(['-l', '-q']);
+  return (output.includes(0) ? output.toString('utf16le') : output.toString('utf8'))
+    .replace(/^\uFEFF/, '').replaceAll('\0', '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+}
+
 /**
  * Validate that WSL is available and the specified distro is installed.
  * Returns error message if invalid, null if OK.
  */
-export function validateWSLAvailable(distro: string): string | null {
+export async function validateWSLAvailable(distro: string, run: RunWSL = runWSL): Promise<string | null> {
   try {
-    nodeExecSync('wsl.exe --version', { encoding: 'utf-8', timeout: 5000 });
+    await run(['--version']);
   } catch {
     return 'WSL is not installed or not available on this system.';
   }
 
+  let distros: string[];
   try {
-    const output = nodeExecSync('wsl.exe -l -q', { encoding: 'utf-8', timeout: 5000 });
-    // wsl -l -q outputs distro names, one per line (may have UTF-16 BOM/null chars)
-    const distros = output
-      .replaceAll('\0', '') // strip null chars from UTF-16
-      .split('\n')
-      .map(d => d.trim())
-      .filter(Boolean);
-    const found = distros.some(d => d.toLowerCase() === distro.toLowerCase());
-    if (!found) {
-      return `WSL distribution '${distro}' is not installed. Available: ${distros.join(', ')}`;
-    }
+    distros = await listWSLDistributions(run);
   } catch {
     return 'Failed to list WSL distributions.';
   }
 
-  return null; // All good
+  const found = distros.some(d => d.toLowerCase() === distro.toLowerCase());
+  if (!found) {
+    return `WSL distribution '${distro}' is not installed. Available: ${distros.join(', ')}`;
+  }
+  return null;
 }

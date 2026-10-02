@@ -22,6 +22,8 @@ import type {
   RemotePaneConnectionState,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
+import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
+import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { ToolPanel } from '../../shared/types/panels';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
@@ -35,6 +37,8 @@ import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
+import type { PaneLinkTarget } from '../../shared/types/paneLinks';
+import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -349,6 +353,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invokeIpc('window:set-title-bar-overlay', colors),
   setBackgroundColor: (payload: { theme: Theme; color: string }): Promise<IPCResponse> =>
     invokeIpc('window:set-background-color', payload),
+  // The window stays hidden until the first render with data; see createWindow.
+  notifyRendererReady: (): void => ipcRenderer.send('window:renderer-ready'),
 
   // Version checking
   checkForUpdates: (): Promise<IPCResponse> => invokeIpc('version:check-for-updates'),
@@ -389,6 +395,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   orchestrationSessions: {
+    runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
     list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
     select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input),
@@ -460,7 +467,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // Script operations
     hasRunScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:has-run-script', sessionId),
-    getRunningSession: (): Promise<IPCResponse> => invokeIpc('sessions:get-running-session'),
     runScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:run-script', sessionId),
     stopScript: (sessionId?: string): Promise<IPCResponse> => invokeIpc('sessions:stop-script', sessionId),
     runTerminalCommand: (sessionId: string, command: string): Promise<IPCResponse> => invokeIpc('sessions:run-terminal-command', sessionId, command),
@@ -582,7 +588,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     update: (updates: UpdateConfigRequest): Promise<IPCResponse> => invokeIpc('config:update', updates),
     getSessionPreferences: (): Promise<IPCResponse> => invokeIpc('config:get-session-preferences'),
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
-    getAvailableShells: (): Promise<IPCResponse> => invokeIpc('config:get-available-shells'),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
   },
 
@@ -716,6 +721,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveExpandedFolders: (folderIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-folders', folderIds),
     saveSessionSortAscending: (ascending: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-session-sort-ascending', ascending),
     saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-sidebar-section-expanded', section, expanded),
+    // Per-host navigation memory. The caller names the host because the renderer
+    // can still be showing the outgoing host while main has switched runtimes.
+    getNavigationMemory: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-navigation-memory', hostId),
+    saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory): Promise<IPCResponse> => invokeIpc('ui-state:save-navigation-memory', hostId, memory),
+    // Per-host Session tiling, the layout counterpart of navigation memory.
+    getSessionWorkspaceLayout: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-session-workspace-layout', hostId),
+    saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null): Promise<IPCResponse> => invokeIpc('ui-state:save-session-workspace-layout', hostId, layout),
   },
 
   // Event listeners for real-time updates
@@ -745,6 +757,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, session: Session) => callback(session);
       ipcRenderer.on('session:updated', wrappedCallback);
       return () => ipcRenderer.removeListener('session:updated', wrappedCallback);
+    },
+    onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: ArchiveProgressSnapshot) => callback(progress);
+      ipcRenderer.on('archive:progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('archive:progress', wrappedCallback);
+    },
+    onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
+      ipcRenderer.on('pane:open-link', wrappedCallback);
+      return () => ipcRenderer.removeListener('pane:open-link', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);
@@ -994,13 +1016,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // Window focus state from BrowserWindow (more reliable than document.hasFocus())
+    onAppMenuAction: (callback: (action: 'open-about' | 'open-settings') => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, action: 'open-about' | 'open-settings') => callback(action);
+      ipcRenderer.on('app:menu-action', wrappedCallback);
+      return () => ipcRenderer.removeListener('app:menu-action', wrappedCallback);
+    },
     onWindowFocusChanged: (callback: (focused: boolean) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, focused: boolean) => callback(focused);
       ipcRenderer.on('window:focus-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('window:focus-changed', wrappedCallback);
     },
-    onRemoteDaemonResyncRequested: (callback: () => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
+    onRemoteDaemonResyncRequested: (callback: (event: { hostChanged: boolean }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, payload?: { hostChanged?: boolean }) => callback({ hostChanged: payload?.hostChanged === true });
       ipcRenderer.on('remote-daemon:resync-required', wrappedCallback);
       return () => ipcRenderer.removeListener('remote-daemon:resync-required', wrappedCallback);
     },

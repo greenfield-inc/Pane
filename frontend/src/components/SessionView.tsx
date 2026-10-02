@@ -16,7 +16,6 @@ import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectView } from './ProjectView';
-import { UsageView } from './usage/UsageView';
 import { API } from '../utils/api';
 import { markPaneViewShown } from '../utils/journeyTimings';
 import { useObservedContentBox } from '../hooks/useObservedContentBox';
@@ -29,9 +28,10 @@ import { panelApi } from '../services/panelApi';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
+import { getDockTerminalPanel } from '../utils/terminalDock';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionProvider } from '../contexts/SessionContext';
-import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, SessionPanelLayout, PanelGroupNode } from '../../../shared/types/panels';
+import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES, SessionPanelLayout, PanelGroupNode, type TerminalPanelState } from '../../../shared/types/panels';
 import { PanelCreateOptions, type PanelTabPresentationResolver } from '../types/panelComponents';
 import {
   createSingleGroupLayout,
@@ -40,6 +40,7 @@ import {
   movePanel as movePanelInLayout,
   removePanelFromLayout,
   addPanelToGroup,
+  placePanelInSplit,
   findGroup,
   primaryGroup,
   allGroups,
@@ -48,6 +49,7 @@ import {
   updateSizes,
   findGroupContainingPanel,
   activatePanelInLayout,
+  shouldActivateReopenedPanel,
   subsetInsertIndex,
   mergeAllGroups,
   type DropZone,
@@ -178,6 +180,13 @@ export const SessionView = memo(() => {
   // repaired centrally instead of in each caller. A collapse that removed the
   // focused group falls back to the primary group; a dead zoom target clears.
   const applyLayout = useCallback((sessionId: string, next: SessionPanelLayout) => {
+    // Closing the dock can promote a working shell. Remove its old tab before
+    // repairing focus/zoom and persisting, for both local and backend deletes.
+    const dock = getDockTerminalPanel(usePanelStore.getState().panels[sessionId] || []);
+    if (dock && findGroupContainingPanel(next.root, dock.id)) {
+      const root = removePanelFromLayout(next.root, dock.id);
+      next = root ? { ...next, root } : createSingleGroupLayout([], null);
+    }
     let focusedGid = next.focusedGroupId;
     if (!focusedGid || !findGroup(next.root, focusedGid)) {
       focusedGid = primaryGroup(next.root).id;
@@ -265,7 +274,7 @@ export const SessionView = memo(() => {
         // The pinned terminal (first terminal) is excluded from the layout tree
         // and so are the inspector panels (Explorer / Review), which never
         // sit on the stage — otherwise a close could hand the group to one.
-        const pinned = loadedPanels.find(p => p.type === 'terminal');
+        const pinned = getDockTerminalPanel(loadedPanels);
         const livePanels = loadedPanels.filter(p => p.id !== pinned?.id && !isInspectorPanelType(p.type));
 
         // Sort for initial layout creation (explorer first, diff second, then position)
@@ -280,40 +289,38 @@ export const SessionView = memo(() => {
           return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
         });
 
+        let stored: SessionPanelLayout | null = null;
         try {
-          const stored = await panelApi.getLayout(sid);
-          // Recompute live ids from the store at set time: panel:created
-          // events that landed while this load was in flight are in the store
-          // but not in the loadedPanels snapshot. Reconciling against the
-          // current store adopts them as orphans instead of dropping them.
-          const nowPanels = usePanelStore.getState().panels[sid] || [];
-          const pinnedNow = nowPanels.find(p => p.type === 'terminal');
-          const liveIdsNow: string[] = [];
-          for (const p of nowPanels) {
-            if (p.id !== pinnedNow?.id && !isInspectorPanelType(p.type)) liveIdsNow.push(p.id);
-          }
-          // Treat unknown future layout versions as no stored layout rather
-          // than reconciling a shape this build doesn't understand.
-          const versionOk = stored?.version === 1;
-          const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
-            sortedLive.map(p => p.id),
-            fallbackActiveId,
-          );
-          const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow);
-          const layout = fallbackActiveId
-            ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
-            : reconciledLayout;
-          setLayoutInStore(sid, layout);
-          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+          stored = await panelApi.getLayout(sid);
         } catch (err) {
           console.warn('[SessionView] Failed to load layout, creating default:', err);
-          const layout = createSingleGroupLayout(
-            sortedLive.map(p => p.id),
-            fallbackActiveId,
-          );
-          setLayoutInStore(sid, layout);
-          setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
         }
+        // Recompute live ids from the store at set time: panel:created
+        // events that landed while this load was in flight are in the store
+        // but not in the loadedPanels snapshot. Reconciling against the
+        // current store adopts them as orphans instead of dropping them.
+        const nowPanels = usePanelStore.getState().panels[sid] || [];
+        const pinnedNow = getDockTerminalPanel(nowPanels);
+        const liveIdsNow: string[] = [];
+        const splitIdsNow = new Set<string>();
+        for (const p of nowPanels) {
+          if (p.id === pinnedNow?.id || isInspectorPanelType(p.type)) continue;
+          liveIdsNow.push(p.id);
+          if (p.metadata?.openPlacement === 'split') splitIdsNow.add(p.id);
+        }
+        // Treat unknown future layout versions as no stored layout rather
+        // than reconciling a shape this build doesn't understand.
+        const versionOk = stored?.version === 1;
+        const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
+          sortedLive.filter(p => !splitIdsNow.has(p.id)).map(p => p.id),
+          fallbackActiveId,
+        );
+        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, splitIdsNow);
+        const layout = fallbackActiveId
+          ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
+          : reconciledLayout;
+        setLayoutInStore(sid, layout);
+        setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
       });
     }
 
@@ -341,7 +348,7 @@ export const SessionView = memo(() => {
           // The pinned terminal (first terminal in the session) never enters
           // the layout tree
           const sessionPanelsList = usePanelStore.getState().panels[sid] || [];
-          const pinnedTerminal = sessionPanelsList.find(p => p.type === 'terminal');
+          const pinnedTerminal = getDockTerminalPanel(sessionPanelsList);
           if (pinnedTerminal && panel.id === pinnedTerminal.id) {
             return;
           }
@@ -355,9 +362,12 @@ export const SessionView = memo(() => {
             const focusedGid = usePanelStore.getState().focusedGroupIds[sid];
             const group = (focusedGid && findGroup(currentLayout.root, focusedGid))
               || primaryGroup(currentLayout.root);
-            const nextRoot = addPanelToGroup(currentLayout.root, group.id, panel.id, {
-              activate: panel.state.isActive,
-            });
+            // Agents open pages and files beside their conversation.
+            const nextRoot = panel.metadata?.openPlacement === 'split'
+              ? placePanelInSplit(currentLayout.root, panel.id, panel.state.isActive)
+              : addPanelToGroup(currentLayout.root, group.id, panel.id, {
+                activate: panel.state.isActive,
+              });
             if (nextRoot !== currentLayout.root) {
               applyLayout(sid, { ...currentLayout, root: nextRoot });
             }
@@ -368,7 +378,13 @@ export const SessionView = memo(() => {
 
     const handlePanelUpdated = (updatedPanel: ToolPanel) => {
       if (updatedPanel.sessionId === sid) {
+        const previous = usePanelStore.getState().panels[sid]?.find(panel => panel.id === updatedPanel.id);
+        const shouldFocus = shouldActivateReopenedPanel(updatedPanel, previous);
         updatePanelState(updatedPanel);
+        if (shouldFocus) {
+          const current = usePanelStore.getState().layouts[sid];
+          if (current) applyLayout(sid, activatePanelInLayout(current, updatedPanel.id));
+        }
       }
     };
 
@@ -412,9 +428,9 @@ export const SessionView = memo(() => {
     if (activeSession?.id && activeSessionPanelsLoaded) markPaneViewShown(activeSession.id);
   }, [activeSession?.id, activeSessionPanelsLoaded]);
 
-  // Bottom terminal panel (first terminal panel in session)
+  // The bottom dock holds the first plain shell, never an agent or command panel.
   const defaultTerminalPanel = useMemo(
-    () => sessionPanels.find(p => p.type === 'terminal'),
+    () => getDockTerminalPanel(sessionPanels),
     [sessionPanels]
   );
 
@@ -967,18 +983,12 @@ export const SessionView = memo(() => {
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
       let initialState = options?.initialState;
       if (type === 'terminal' && options?.initialCommand) {
-        initialState = {
-          customState: {
-            initialCommand: options.initialCommand
-          }
+        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = {
+          initialCommand: options.initialCommand,
         };
+        if (options.customResume !== undefined) customState.customResume = options.customResume;
+        initialState = { customState };
       }
-
-      // Captured BEFORE the create: if the session has no terminal yet, the
-      // panel we are about to create becomes the pinned dock terminal and
-      // must never enter the layout tree.
-      const hadTerminalBefore = (usePanelStore.getState().panels[sid] || [])
-        .some(p => p.type === 'terminal');
 
       const newPanel = await panelApi.createPanel({
         sessionId: sid,
@@ -991,8 +1001,10 @@ export const SessionView = memo(() => {
       addPanel(newPanel);
       setActivePanelInStore(sid, newPanel.id);
 
-      const becomesPinnedTerminal = type === 'terminal' && !hadTerminalBefore;
-      if (becomesPinnedTerminal) return newPanel;
+      // A new plain shell with no shell before it becomes the dock and never
+      // enters the layout tree.
+      const dock = getDockTerminalPanel(usePanelStore.getState().panels[sid] || []);
+      if (dock?.id === newPanel.id) return newPanel;
 
       // Add to layout (into the focused group, falling back to the primary
       // group if focus is stale). addPanelToGroup is idempotent, so racing
@@ -1204,7 +1216,7 @@ export const SessionView = memo(() => {
             label: cmd.name,
             icon: getCliBrandIcon(cmd.command, 'h-3.5 w-3.5') || <TerminalSquare className="h-3.5 w-3.5" />,
             hotkeyId: `add-tool-custom-${index}`,
-            onClick: () => handlePanelCreate('terminal', { initialCommand: cmd.command, title: cmd.name }),
+            onClick: () => handlePanelCreate('terminal', { initialCommand: cmd.command, title: cmd.name, customResume: cmd.resume }),
           })),
         ].map(item => (
           <button
@@ -1297,6 +1309,7 @@ export const SessionView = memo(() => {
         action: () => handlePanelCreateRef.current('terminal', {
           initialCommand: cmd.command,
           title: cmd.name,
+          customResume: cmd.resume,
         }),
       });
     }
@@ -1493,7 +1506,8 @@ export const SessionView = memo(() => {
   // Unless the user has explicitly closed it previously
   const hasTriedCreatingTerminal = useRef(false);
   useEffect(() => {
-    if (!activeSession?.id || defaultTerminalPanel || hasTriedCreatingTerminal.current) return;
+    // Any terminal counts, so an agent-only pane gains no shell.
+    if (!activeSession?.id || sessionPanels.some(p => p.type === 'terminal') || hasTriedCreatingTerminal.current) return;
     // Only attempt once per session to avoid loops
     hasTriedCreatingTerminal.current = true;
 
@@ -1512,7 +1526,7 @@ export const SessionView = memo(() => {
         console.error('[SessionView] Failed to auto-create terminal panel:', err);
       });
     });
-  }, [activeSession?.id, defaultTerminalPanel, addPanel]);
+  }, [activeSession?.id, sessionPanels, addPanel]);
 
   // Reset the flag when session changes
   useEffect(() => {
@@ -1748,11 +1762,6 @@ export const SessionView = memo(() => {
   })();
   
   // Removed unused variables - now handled by panels
-
-  // Token usage, cost and rate limits — reported per host.
-  if (activeView === 'usage') {
-    return <UsageView />;
-  }
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {

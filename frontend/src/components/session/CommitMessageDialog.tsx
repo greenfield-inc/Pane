@@ -122,13 +122,13 @@ export const CommitMessageDialog: React.FC<CommitMessageDialogProps> = ({
                 <div className="space-y-1">
                   {shouldSquash ? (
                     gitCommands?.squashCommands?.map((cmd, idx) => (
-                      <Card key={idx} variant="bordered" padding="sm" className="bg-surface-tertiary text-text-primary font-mono text-xs">
+                      <Card key={idx} variant="bordered" padding="sm" className="select-text bg-surface-tertiary text-text-primary font-mono text-xs">
                         {cmd}
                       </Card>
                     ))
                   ) : (
                     gitCommands?.mergeCommands?.map((cmd, idx) => (
-                      <Card key={idx} variant="bordered" padding="sm" className="bg-surface-tertiary text-text-primary font-mono text-xs">
+                      <Card key={idx} variant="bordered" padding="sm" className="select-text bg-surface-tertiary text-text-primary font-mono text-xs">
                         {cmd}
                       </Card>
                     ))

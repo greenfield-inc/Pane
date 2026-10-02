@@ -6,6 +6,7 @@ import {
   extractLegacyRemoteDaemonExecutablePath,
   getRemoteDaemonExecutableCandidates,
   resolveRemoteDaemonExecutablePath,
+  resolveRemoteDaemonExecutablePathAsync,
 } from './remoteDaemonService';
 
 const LAUNCHER_MARKER = 'pane-remote-daemon-launcher-v2';
@@ -18,6 +19,15 @@ export interface ExecutableHealthDependencies {
   candidates?: string[];
   readLink?: (filePath: string) => string;
   resolveCommandPath?: (command: string) => string | null;
+}
+
+/** Resolve login-shell executable discovery asynchronously for the desktop host. */
+export async function collectRemoteDaemonExecutableHealthAsync(paneDir: string): Promise<RemoteDaemonExecutableHealth> {
+  const installed = await resolveRemoteDaemonExecutablePathAsync(process.platform, getRemoteDaemonExecutableCandidates());
+  return collectRemoteDaemonExecutableHealth(paneDir, {
+    candidates: installed ? [installed] : [],
+    resolveCommandPath: () => null,
+  });
 }
 
 export function collectRemoteDaemonExecutableHealth(

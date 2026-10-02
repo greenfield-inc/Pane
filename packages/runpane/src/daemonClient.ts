@@ -136,9 +136,9 @@ export async function invokeDaemon<T>(
     channel,
     args,
   };
-  const eventFilterRequest: PaneDaemonRequestFrame | undefined = options.eventInclude === undefined
-    ? undefined
-    : { type: 'request', id: 0, channel: 'daemon:events', args: [{ include: options.eventInclude }] };
+  const eventFilterRequest: PaneDaemonRequestFrame = {
+    type: 'request', id: 0, channel: 'daemon:events', args: [{ include: options.eventInclude ?? [] }],
+  };
 
   return new Promise<T>((resolve, reject) => {
     const socket = net.createConnection(endpoint.path);
@@ -170,7 +170,7 @@ export async function invokeDaemon<T>(
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     socket.once('connect', () => {
-      if (eventFilterRequest) socket.write(encodePaneDaemonFrame(eventFilterRequest));
+      socket.write(encodePaneDaemonFrame(eventFilterRequest));
       socket.write(encodePaneDaemonFrame(request));
     });
 

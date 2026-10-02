@@ -145,7 +145,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
 
           {/* Version */}
           <div className="flex items-center justify-center gap-3 mb-6">
-            <span className="text-sm text-text-secondary font-mono">
+            <span className="select-text text-sm text-text-secondary font-mono">
               v{versionInfo?.current || '...'}
             </span>
             {!versionInfo?.hasUpdate && versionInfo?.current && !isChecking && (

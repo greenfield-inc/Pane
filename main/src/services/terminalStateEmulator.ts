@@ -11,6 +11,41 @@ const HEADLESS_SCROLLBACK_LINES = 2500;
 const RESTORE_CACHE_LIMIT = 4;
 const restoreCache = new Map<TerminalStateEmulator, { includeScrollback: boolean; serialized: string }>();
 
+/** Which cells a screen read keeps: all of them, typed (non-ghost) cells, or only ghost cells. */
+type ScreenTextCells = 'all' | 'typed' | 'ghost';
+
+type BufferCell = ReturnType<Terminal['buffer']['active']['getNullCell']>;
+
+// Frame and prompt glyphs agents draw in grey (Claude's composer rules, and
+// its `❯` while it works) are structure, not placeholder text.
+const STRUCTURAL_GLYPH = /^[─-╿❯›>▌]$/u;
+
+/**
+ * A cell agent TUIs draw as placeholder or suggestion text rather than input:
+ * dim (SGR 2), or a mid-grey foreground. Claude Code 2.1.283 draws its
+ * composer placeholder and prompt suggestions dim, and hints, queued messages
+ * and its busy `❯` in theme grey (#999999 dark; #666666 light, 241-246 on 256
+ * colours, bright black on 16); Codex draws its placeholders dim. Typed input
+ * uses the default foreground.
+ */
+function isGhostCell(cell: BufferCell): boolean {
+  if (cell.isDim()) return true;
+  return isGreyForeground(cell) && !STRUCTURAL_GLYPH.test(cell.getChars());
+}
+
+function isGreyForeground(cell: BufferCell): boolean {
+  if (cell.isFgDefault()) return false;
+  const color = cell.getFgColor();
+  if (cell.isFgPalette()) return color === 8 || (color >= 240 && color <= 250);
+  if (!cell.isFgRGB()) return false;
+  const red = (color >> 16) & 0xff;
+  const green = (color >> 8) & 0xff;
+  const blue = color & 0xff;
+  const spread = Math.max(red, green, blue) - Math.min(red, green, blue);
+  const level = (red + green + blue) / 3;
+  return spread <= 24 && level >= 0x60 && level <= 0xb8;
+}
+
 /**
  * Maintains an xterm-compatible terminal model for state restoration and
  * local-control screen reads. PTY output parsing is asynchronous, so callers
@@ -30,6 +65,7 @@ export class TerminalStateEmulator {
   private currentTitle = '';
   private currentProgress = '';
   private win32InputMode = false;
+  private mouseEncoding: 1006 | 1016 | undefined;
 
   constructor(cols: number, rows: number) {
     this.terminal = new Terminal({
@@ -47,14 +83,22 @@ export class TerminalStateEmulator {
     this.terminal.unicode.activeVersion = '11';
     // The headless 6.0 model/serializer does not know DECSET 9001. Retain it
     // explicitly so a renderer reset or remount does not lose ConPTY's request.
+    // The serializer also omits SGR/SGR-pixel mouse encoding; preserve xterm's
+    // active encoding separately from its serialized mouse tracking protocol.
     for (const [final, enabled] of [['h', true], ['l', false]] as const) {
       this.terminal.parser.registerCsiHandler({ prefix: '?', final }, (params) => {
-        if (params.includes(9001)) this.win32InputMode = enabled;
+        for (const param of params) {
+          if (param === 9001) this.win32InputMode = enabled;
+          // xterm has one active encoding: the last SET wins, while either
+          // RESET returns to DEFAULT, even when resetting the other encoding.
+          if (param === 1006 || param === 1016) this.mouseEncoding = enabled ? param : undefined;
+        }
         return false;
       });
     }
     this.terminal.parser.registerEscHandler({ final: 'c' }, () => {
       this.win32InputMode = false;
+      this.mouseEncoding = undefined;
       return false;
     });
     this.terminal.parser.registerCsiHandler({ intermediates: '!', final: 'p' }, () => {
@@ -120,7 +164,9 @@ export class TerminalStateEmulator {
       ? cached.serialized
       : this.serializeAddon.serialize({
           scrollback: includeScrollback ? HEADLESS_SCROLLBACK_LINES : 0,
-        }) + (this.win32InputMode ? '\x1b[?9001h' : '');
+        }) + (this.win32InputMode ? '\x1b[?9001h' : '')
+          // Append after buffer activation and serialized tracking modes.
+          + (this.mouseEncoding ? `\x1b[?${this.mouseEncoding}h` : '');
     // Only a fully parsed buffer is safe to reuse; mid-parse reads are partial.
     if (this.pendingWrites === 0) restoreCache.set(this, { includeScrollback, serialized });
     const oldest = restoreCache.size > RESTORE_CACHE_LIMIT ? restoreCache.keys().next().value : undefined;
@@ -129,11 +175,13 @@ export class TerminalStateEmulator {
   }
 
   /**
-   * Return plain text for the currently visible viewport. omitDim blanks dim
-   * cells, which agent TUIs use for placeholder suggestions in their composer.
+   * Return plain text for the currently visible viewport. `cells: 'typed'`
+   * blanks ghost cells (dim or placeholder grey, see isGhostCell), which agent
+   * TUIs use for placeholder hints and suggestions in their composer;
+   * `cells: 'ghost'` keeps only those cells, row for row.
    */
-  getScreenText({ omitDim = false }: { omitDim?: boolean } = {}): string {
-    if (this.disposed) return this.finalScreenText;
+  getScreenText({ cells = 'all' }: { cells?: ScreenTextCells } = {}): string {
+    if (this.disposed) return cells === 'ghost' ? '' : this.finalScreenText;
 
     const buffer = this.terminal.buffer.active;
     const lines: string[] = [];
@@ -142,7 +190,7 @@ export class TerminalStateEmulator {
 
     for (let index = buffer.viewportY; index < end; index += 1) {
       const line = buffer.getLine(index);
-      if (!line || !omitDim) {
+      if (!line || cells === 'all') {
         lines.push(line?.translateToString(true) ?? '');
         continue;
       }
@@ -150,7 +198,8 @@ export class TerminalStateEmulator {
       for (let column = 0; column < line.length; column += 1) {
         line.getCell(column, cell);
         if (cell.getWidth() === 0) continue;
-        text += cell.isDim() ? ' '.repeat(cell.getWidth()) : cell.getChars() || ' ';
+        const keep = isGhostCell(cell) === (cells === 'ghost');
+        text += keep ? cell.getChars() || ' ' : ' '.repeat(cell.getWidth());
       }
       lines.push(text.trimEnd());
     }
@@ -212,9 +261,8 @@ export class TerminalStateEmulator {
   dispose(): void {
     if (this.disposed) return;
     this.finalIsAlternateScreen = this.isAlternateScreen;
-    // Capture WITH scrollback: destroyTerminal fires saveTerminalState without
-    // awaiting it, so the save usually reads this snapshot after disposal — a
-    // viewport-only capture would silently drop the session's history.
+    // Preserve scrollback for reads that resume after natural exit or shutdown.
+    // Explicit destruction drains and saves the model before disposal.
     this.finalSerializedBuffer = this.serializeForRestore(true);
     restoreCache.delete(this);
     this.finalScreenText = this.getScreenText();
