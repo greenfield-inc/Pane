@@ -536,6 +536,39 @@ While the stage is split, each group has its own tab strip and the agent tab
 stays in the top bar. Closing the last tab in the side group returns to a single
 group. Layouts are saved with the Session.
 
+## Tiling Sessions side by side
+
+Sessions tile with the same gesture as tabs, one level up. Drag a Session — from
+its sidebar row or by its title row — onto another Session and drop it against
+an edge to put the two beside each other; drop it in the middle to show it in
+that slot instead. Edge bands are the outer quarter of the target, as they are
+for tabs, and the layout nests as deeply as you take it: a row of Sessions with
+one of them split into a column is an ordinary shape, not a special case.
+
+Both halves stay fully live. A tile that is not focused keeps its agent running
+and its output streaming; nothing is throttled or suspended, so a Session you
+are watching out of the corner of your eye is the same Session you were just
+typing in. Each tile keeps its own tab splits, its own Terminal dock, its own
+Files and Changes sidebar, and its own navigation.
+
+The focused tile's Session is the selected one: its title row carries the focus
+ring, and clicking a Session in the sidebar focuses its tile when it already has
+one, or shows it in the focused tile when it does not. With one tile that is
+exactly the old behaviour — switching Sessions replaces the view.
+
+The `X` on a tile's title row stops tiling that Session; the Session itself,
+its conversation and its panels are untouched, and the layout collapses back
+around the space. The last tile has no close button, since a window with no
+Session in it has nothing to show. The command palette carries the same actions
+for the keyboard: focus the Session left, right, above or below, and stop tiling
+the focused one.
+
+A layout belongs to the host it was built on, like the remembered location it
+sits beside: Session ids only mean anything on their own host, so switching
+hosts loads that host's layout and every tile is revalidated against the
+Sessions that still exist there. Archiving or deleting a tiled Session retires
+its tile and collapses the split.
+
 ## Reaching Pane and delegating work
 
 The generated Session instructions tell the orchestrator how to reach

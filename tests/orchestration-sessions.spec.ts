@@ -659,8 +659,11 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
     mockWindow.__paneTestElectronMock.emitOrchestrationChanged('updated');
   });
   await page.getByRole('button', { name: 'Open Session Beta', exact: true }).click();
+  // Switching Session no longer reloads the whole list — each tile fetches its
+  // own Session — so the sidebar spinner only appears for a refresh already in
+  // flight. What matters here is unchanged: the delayed refresh lands without
+  // moving the sidebar or stealing the newer selection.
   const loadingStatus = page.getByRole('status', { name: 'Loading Sessions', exact: true });
-  await expect(loadingStatus).toBeVisible();
   expect(await layoutBox(sessionsHeader)).toEqual(beforeHeaderBox);
   expect(await layoutBox(firstSessionRow)).toEqual(beforeFirstRowBox);
   await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
@@ -1700,4 +1703,97 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await groupStrips.nth(1).getByRole('button', { name: 'Close plan.html' }).click();
   await expect(groupStrips).toHaveCount(0);
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
+});
+
+
+/**
+ * Drag a Session from the sidebar onto a tile.
+ *
+ * HTML5 drag and drop has no Playwright primitive that carries a custom MIME
+ * type, so the gesture is dispatched by hand with one DataTransfer, exactly as
+ * the browser would: dragstart on the source, then dragover and drop on
+ * whatever is under the cursor inside the target tile.
+ */
+async function dragSessionOntoTile(
+  page: Page,
+  sourceTestId: string,
+  target: { x: number; y: number },
+): Promise<void> {
+  await page.evaluate((sourceId: string) => {
+    const source = document.querySelector(`[data-testid="${sourceId}"]`);
+    if (!source) throw new Error(`Missing drag source ${sourceId}`);
+    const transfer = new DataTransfer();
+    // SAFETY: only this helper reads or writes that window property, as the DataTransfer it just created.
+    (window as typeof window & { __paneDragTransfer?: DataTransfer }).__paneDragTransfer = transfer;
+    source.dispatchEvent(new DragEvent('dragstart', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  }, sourceTestId);
+  // The drop targets mount only once a Session drag is in flight.
+  await expect(page.locator('[data-pane-session-drop-target="true"]').first()).toBeAttached();
+  const dispatchAt = async (type: 'dragover' | 'drop') => {
+    await page.evaluate(({ x, y, eventType }: { x: number; y: number; eventType: string }) => {
+      // SAFETY: the dragstart above parked this DataTransfer on that window property.
+      const transfer = (window as typeof window & { __paneDragTransfer?: DataTransfer }).__paneDragTransfer;
+      if (!transfer) throw new Error('Missing drag payload');
+      const over = document.elementFromPoint(x, y);
+      if (!over) throw new Error('Nothing under the drop point');
+      over.dispatchEvent(new DragEvent(eventType, { dataTransfer: transfer, bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    }, { ...target, eventType: type });
+  };
+  // The hovered zone has to render before the drop reads it, exactly as a real
+  // drag gives the page a frame between dragover and drop.
+  await dispatchAt('dragover');
+  await page.waitForTimeout(50);
+  await dispatchAt('drop');
+  await page.evaluate(() => {
+    // SAFETY: the dragstart above parked this DataTransfer on that window property.
+    const transfer = (window as typeof window & { __paneDragTransfer?: DataTransfer }).__paneDragTransfer;
+    document.dispatchEvent(new DragEvent('dragend', { dataTransfer: transfer ?? null, bubbles: true }));
+  });
+}
+
+test('a Session dropped on another tiles beside it, survives a reload, and closes back to one', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+
+  await page.getByTestId('orchestration-session-alpha').click();
+  const tiles = page.getByTestId('session-tile-header');
+  await expect(tiles).toHaveCount(1, { timeout: 10_000 });
+  await expect(tiles.first()).toContainText('Alpha');
+
+  // Drop Beta on the right quarter of Alpha's tile: an edge drop splits.
+  const stage = await layoutBox(page.getByTestId('session-tile-layout'));
+  await dragSessionOntoTile(page, 'orchestration-session-beta', {
+    x: stage.x + stage.width - 20,
+    y: stage.y + stage.height / 2,
+  });
+
+  await expect(tiles).toHaveCount(2);
+  await expect(tiles.nth(0)).toContainText('Alpha');
+  await expect(tiles.nth(1)).toContainText('Beta');
+  // Both tiles stay mounted and live; neither is a placeholder for the other.
+  await expect(page.getByTestId('session-workspace-tabs')).toHaveCount(2);
+
+  // The layout is remembered per host, so reopening Sessions brings it back
+  // whole rather than dropping to the one Session that was selected. Writes are
+  // debounced like every other layout write, so wait for it to land.
+  await expect.poll(() => page.evaluate(
+    () => window.localStorage.getItem('__pane_test_session_workspace_layouts__') !== null,
+  )).toBe(true);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await dismissStartupDialogs(page);
+  await page.getByTestId('orchestration-session-alpha').click();
+  await expect(tiles).toHaveCount(2, { timeout: 10_000 });
+  await expect(tiles.nth(0)).toContainText('Alpha');
+  await expect(tiles.nth(1)).toContainText('Beta');
+
+  // Closing a tile stops tiling that Session without touching the Session.
+  await page.getByRole('button', { name: 'Stop tiling Beta', exact: true }).click();
+  await expect(tiles).toHaveCount(1);
+  await expect(tiles.first()).toContainText('Alpha');
+  await expect(page.getByTestId('orchestration-session-beta')).toBeVisible();
 });

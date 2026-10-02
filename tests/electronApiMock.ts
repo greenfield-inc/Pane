@@ -244,6 +244,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     // Per-host navigation memory, keyed the way main keys it: '' is this computer.
     const navigationMemories = new Map<string, JsonObject>();
+    // Per-host Session tiling, keyed the same way. Kept in localStorage so a
+    // reload reads back what the previous page wrote, as the real per-host
+    // ui-state store does.
+    const sessionWorkspaceLayoutKey = '__pane_test_session_workspace_layouts__';
+    const readSessionWorkspaceLayouts = (): Record<string, JsonObject> => {
+      const raw = window.localStorage.getItem(sessionWorkspaceLayoutKey);
+      if (!raw) return {};
+      try {
+        // SAFETY: only this mock writes that key, with the record below.
+        return JSON.parse(raw) as Record<string, JsonObject>;
+      } catch {
+        return {};
+      }
+    };
+    const writeSessionWorkspaceLayouts = (layouts: Record<string, JsonObject>): void => {
+      window.localStorage.setItem(sessionWorkspaceLayoutKey, JSON.stringify(layouts));
+    };
     const uiState = {
       expandedProjects: [] satisfies number[],
       expandedFolders: [] satisfies string[],
@@ -1049,6 +1066,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean) => {
           if (section === 'pinned') uiState.pinnedSectionExpanded = expanded;
           else uiState.repositoriesSectionExpanded = expanded;
+          return success();
+        },
+        getSessionWorkspaceLayout: (hostId: string | null) =>
+          success(readSessionWorkspaceLayouts()[hostId ?? ''] ?? null),
+        saveSessionWorkspaceLayout: (hostId: string | null, layout: JsonObject | null) => {
+            const layouts = readSessionWorkspaceLayouts();
+          if (layout === null) delete layouts[hostId ?? ''];
+          else layouts[hostId ?? ''] = clone(layout);
+          writeSessionWorkspaceLayouts(layouts);
           return success();
         },
         getNavigationMemory: (hostId: string | null) =>
