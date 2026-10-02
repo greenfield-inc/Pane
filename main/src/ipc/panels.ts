@@ -18,6 +18,8 @@ import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '../utils/wslUtils';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { readBrowserPanelFile } from '../services/browserPanelFiles';
+import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
 
 const execFileAsync = promisify(execFile);
 
@@ -365,6 +367,7 @@ async function readClipboardImageFallback(sessionId: string): Promise<{ filePath
 }
 
 const DAEMON_PANEL_CHANNELS = [
+  'panels:read-browser-file',
   'panels:create',
   'panels:delete',
   'panels:update',
@@ -401,6 +404,10 @@ export function registerPanelHandlers(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
 ) {
+  commandRegistry.register('panels:read-browser-file', async (panelId: string, url: string) => {
+    return readBrowserPanelFile(panelManager.getPanel(panelId), url);
+  });
+  ipcMain.handle('browser-panel:prepare-file', (_event, panelId: string) => prepareRemoteBrowserFiles(panelId));
   // Panel CRUD operations
   commandRegistry.register('panels:create', async (request: CreatePanelRequest) => {
     try {

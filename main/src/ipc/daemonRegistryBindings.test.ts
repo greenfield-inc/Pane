@@ -106,6 +106,7 @@ const FILE_CHANNELS = [
 ] as const;
 
 const PANEL_CHANNELS = [
+  'panels:read-browser-file',
   'panels:create',
   'panels:delete',
   'panels:update',
@@ -473,7 +474,8 @@ describe('daemon registry IPC bindings', () => {
     expect(ipcMain.boundChannels).toContain('browser-panel:register-webview');
     expect(
       ipcMain.boundChannels.filter(
-        channel => channel !== 'terminal:clipboard-paste-image' && channel !== 'browser-panel:register-webview',
+        channel => channel !== 'terminal:clipboard-paste-image' && channel !== 'browser-panel:register-webview'
+          && channel !== 'browser-panel:prepare-file',
       ).sort(),
     ).toEqual([...PANEL_CHANNELS].sort());
     expect(registry.has('terminal:clipboard-paste-image')).toBe(false);
