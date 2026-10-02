@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -9,10 +9,31 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 
 const directories: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(directories.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe('browser panel file reads', () => {
+  it('uses the requested asset extension after resolving an allowed symlink', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-browser-'));
+    directories.push(root);
+    await fs.writeFile(path.join(root, 'index.html'), 'Entry');
+    const target = path.join(root, 'generated-content');
+    await fs.writeFile(target, 'export const loaded = true;');
+    const entry = pathToFileURL(path.join(root, 'index.html')).href;
+    const panel: ToolPanel = {
+      id: 'preview', sessionId: 'pane', type: 'browser', title: 'index.html',
+      state: { isActive: true, customState: { currentUrl: entry } },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    };
+    // Model a file symlink without requiring Windows symlink privileges.
+    // Reading still opens the real, extensionless canonical target.
+    vi.spyOn(fs, 'realpath').mockResolvedValueOnce(root).mockResolvedValueOnce(target);
+    const asset = await readBrowserPanelFile(panel, new URL('app.js', entry).href);
+    expect(asset.contentType).toBe('text/javascript; charset=utf-8');
+    expect(Buffer.from(asset.data, 'base64').toString()).toBe('export const loaded = true;');
+  });
+
   it('does not let remote commands create or retarget a file preview grant', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('panels:test-navigation', (next: string, previous?: string) => {

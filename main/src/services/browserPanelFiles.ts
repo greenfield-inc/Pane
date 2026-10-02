@@ -37,7 +37,8 @@ export async function readBrowserPanelFile(panel: ToolPanel | undefined, request
   const entryPath = fileURLToPath(entryUrl);
   if (!(await fs.stat(entryPath)).isFile()) throw new Error('The host entry page is not a regular file');
   const root = await fs.realpath(path.dirname(entryPath));
-  const requestedPath = await fs.realpath(fileURLToPath(requestedUrl));
+  const requestedFilePath = fileURLToPath(requestedUrl);
+  const requestedPath = await fs.realpath(requestedFilePath);
   const relative = path.relative(root, requestedPath);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error('File is outside the opened browser bundle');
@@ -50,7 +51,7 @@ export async function readBrowserPanelFile(panel: ToolPanel | undefined, request
     }
     return {
       data: (await file.readFile()).toString('base64'),
-      contentType: CONTENT_TYPES[path.extname(requestedPath).toLowerCase()] ?? 'application/octet-stream',
+      contentType: CONTENT_TYPES[path.extname(requestedFilePath).toLowerCase()] ?? 'application/octet-stream',
     };
   } finally {
     await file.close();
