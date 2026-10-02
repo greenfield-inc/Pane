@@ -9,6 +9,7 @@ function quotePowerShell(value: string): string {
 
 /** Run the bundled Windows CLI, which can open this instance's named pipe. */
 export function sessionWSLBridge(appDirectory: string, record: OrchestrationSessionRecord, launcherPath: string, execPath = process.execPath): string {
+  const powershell = sessionRuntimePath(path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), record);
   const command = [
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
@@ -47,7 +48,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     `script=$(mktemp ${escapeForBash(`${sessionRuntimePath(path.dirname(launcherPath), record)}/bridge-XXXXXX.ps1`)})`,
     'trap \'rm -f -- "$script" "$script.json"\' EXIT',
     String.raw`{ printf '\xff\xfe'; printf %s "$command" | iconv -f UTF-8 -t UTF-16LE; } > "$script"`,
-    'powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(wslpath -aw "$script")"',
+    `${escapeForBash(powershell)} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(wslpath -aw "$script")"`,
     '',
   ].join('\n');
 }

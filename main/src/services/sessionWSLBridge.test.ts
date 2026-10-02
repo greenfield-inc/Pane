@@ -56,7 +56,7 @@ describe('WSL Session RunPane bridge', () => {
     fs.writeFileSync(script, sessionWSLBridge(directory, record, launcher));
     const literal = 'quotes " and \' $dollar `tick`; Unicode é' + 'x'.repeat(16_001);
     try {
-      execFileSync('wsl.exe', ['-d', process.env.PANE_TEST_WSL_DISTRO!, '--exec', 'env', 'PANE_PANEL_ID=calling-panel',
+      execFileSync('wsl.exe', ['-d', process.env.PANE_TEST_WSL_DISTRO!, '--exec', 'env', 'PANE_PANEL_ID=calling-panel', 'PATH=/usr/bin:/bin',
         'bash', windowsPathToWSLMount(script), '--summary', literal, '--file', windowsPathToWSLMount(script),
         '--input-file', '-', `--from-json=${windowsPathToWSLMount(script)}`, '--path', directory,
         `--pane-path=${windowsPathToWSLMount(launcher)}`, '--download-dir', 'relative downloads'],

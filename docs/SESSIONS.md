@@ -91,7 +91,8 @@ accept relative or absolute Linux paths (including `--flag=value`); `-` retains
 stdin semantics. Paths inside JSON request bodies must use Windows paths, and
 Windows paths returned by the CLI can be read in WSL after `wslpath -u` conversion.
 The bridge pins `--pane-dir` to this instance and preserves the calling Session
-and panel identities. WSL interop must be enabled; a Linux-installed RunPane CLI
+and panel identities. PowerShell is invoked by its mounted Windows path, so
+`appendWindowsPath=false` is supported. WSL interop must be enabled; a Linux-installed RunPane CLI
 cannot replace this bridge for a Windows daemon.
 
 For CLI JSON creation, `runtime: "wsl"` and `wslDistribution: "Ubuntu-24.04"`
