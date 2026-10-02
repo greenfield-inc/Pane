@@ -55,14 +55,17 @@ describe('WSL Session RunPane bridge', () => {
     try {
       execFileSync('wsl.exe', ['-d', process.env.PANE_TEST_WSL_DISTRO!, '--exec', 'env', 'PANE_PANEL_ID=calling-panel',
         'bash', windowsPathToWSLMount(script), '--summary', literal, '--file', windowsPathToWSLMount(script),
-        '--input-file', '-', `--from-json=${windowsPathToWSLMount(script)}`, '--path', directory], { encoding: 'utf8', timeout: 30000 });
+        '--input-file', '-', `--from-json=${windowsPathToWSLMount(script)}`, '--path', directory,
+        `--pane-path=${windowsPathToWSLMount(launcher)}`, '--download-dir', 'relative downloads'],
+      { encoding: 'utf8', timeout: 30000 });
       throw new Error('Expected CLI exit code 7');
     } catch (error) {
       expect(error).toMatchObject({ status: 7 });
       // SAFETY: execFileSync errors with the asserted exit status include captured UTF-8 stdout.
       const output = JSON.parse((error as { stdout: string }).stdout);
       expect(output).toMatchObject({ session: 'session', panel: 'calling-panel' });
-      expect(output.args).toEqual(['--summary', literal, '--file', script, '--input-file', '-', `--from-json=${script}`, '--path', directory, '--pane-dir', directory]);
+      expect(output.args).toEqual(['--summary', literal, '--file', script, '--input-file', '-', `--from-json=${script}`, '--path', directory,
+        `--pane-path=${launcher}`, '--download-dir', path.resolve('relative downloads'), '--pane-dir', directory]);
     }
   });
 });

@@ -35,7 +35,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     '  path_arg=false',
     '  key=${arg%%=*}',
     '  case "$key" in',
-    '    --pane-dir|--file|--path|--input-file|--initial-input-file|--prompt-file|--body-file|--summary-file|--from-json)',
+    '    --pane-dir|--pane-path|--download-dir|--file|--path|--input-file|--initial-input-file|--prompt-file|--body-file|--summary-file|--from-json)',
     '      if [[ "$arg" == *=* ]]; then arg="$key=$(pane_windows_path "${arg#*=}")"; else path_arg=true; fi ;;',
     '  esac',
     // PowerShell single-quoted strings escape an apostrophe by doubling it.
