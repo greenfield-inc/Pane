@@ -256,7 +256,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         }
         this.store.write(next);
       } catch (error) {
-        if (sourcePanel) discardSessionScaffold(record.id);
+        if (sourcePanel) discardSessionScaffold(record);
         throw error;
       }
       try {
@@ -274,7 +274,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         // an unrecoverable duplicate-name orphan.
         const ownerExists = this.sessionManager.getSession(record.internalSessionId) !== undefined;
         const panelExists = panelManager.getPanel(record.panelIds[record.agent]) !== undefined;
-        if (!ownerExists && !panelExists && discardSessionScaffold(record.id)) {
+        if (!ownerExists && !panelExists && discardSessionScaffold(record)) {
           this.store.write(data);
           throw error;
         }

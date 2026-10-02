@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold } from './sessionWorkspace';
 
 describe('Session workspace instructions', () => {
   const previousPaneDir = process.env.PANE_DIR;
@@ -31,6 +31,22 @@ describe('Session workspace instructions', () => {
     expect(prepareSessionWorkspace('session-a', 'Updated behavior.')).toBe(first);
     expect(sessionWorkspacePath('session-a')).toBe(first);
     await expect(fs.readFile(path.join(first, 'notes.md'), 'utf8')).resolves.toBe('Keep this artifact.');
+  });
+
+  it.each(['runtime-context.md', '.pane-runtime/runpane', '.pane-runtime/notes.txt', 'notes.txt'])('retains failed WSL scaffolds with user content in %s', async fileName => {
+    const record: OrchestrationSessionRecord = {
+      id: 'failed-wsl', name: 'WSL', agent: 'codex', internalSessionId: 'owner', runtime: 'wsl', wslDistribution: 'Ubuntu',
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-09-21', updatedAt: '2026-09-21',
+    };
+    const cwd = prepareSessionWorkspace(record.id, undefined, record);
+    const file = path.join(cwd, fileName);
+    await fs.appendFile(file, 'Keep this user content');
+    const edited = await fs.readFile(file, 'utf8');
+    expect(discardSessionScaffold(record)).toBe(false);
+    expect(await fs.readFile(file, 'utf8')).toBe(edited);
+    await expect(fs.access(path.join(cwd, 'AGENTS.md'))).resolves.toBeUndefined();
   });
 
   it.each(['AGENTS.md', 'CLAUDE.md', 'progress.html', 'notes.txt'])('preserves imports with user content in %s', async fileName => {

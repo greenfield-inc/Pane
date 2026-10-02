@@ -762,7 +762,11 @@ describe('OrchestrationSessionManager', () => {
     expect(panelManager.getPanel(firstRecord.panelIds.claude)).toBeDefined();
   });
 
-  it('rolls back metadata when hidden owner provisioning fails before publication', async () => {
+  it.each(['windows', 'wsl'] as const)('rolls back %s metadata when hidden owner provisioning fails before publication', async runtime => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.spyOn(wslUtils, 'validateWSLAvailable').mockResolvedValue(null);
+    const input: OrchestrationSessionCreateInput = { name: 'Recoverable Session', runtime };
+    if (runtime === 'wsl') input.wslDistribution = 'Ubuntu';
     const fixture = createFixture();
     await fixture.manager.initialize();
     const changedEvents: Array<{ sessionId: string; kind: string }> = [];
@@ -771,13 +775,13 @@ describe('OrchestrationSessionManager', () => {
       throw new Error('hidden owner provisioning failed');
     });
 
-    await expect(fixture.manager.create({ name: 'Recoverable Session' })).rejects.toThrow('hidden owner provisioning failed');
+    await expect(fixture.manager.create(input)).rejects.toThrow('hidden owner provisioning failed');
     const afterFailure = await fixture.manager.list();
     expect(afterFailure.sessions.some(session => session.name === 'Recoverable Session')).toBe(false);
     expect(afterFailure.selectedSessionId).toBe(LEGACY_ORCHESTRATION_SESSION_ID);
     expect(changedEvents).toEqual([]);
 
-    const retried = await fixture.manager.create({ name: 'Recoverable Session' });
+    const retried = await fixture.manager.create(input);
     expect(retried.session.name).toBe('Recoverable Session');
   });
 

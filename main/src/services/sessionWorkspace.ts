@@ -66,11 +66,7 @@ export function prepareSessionWorkspace(
     const runtimeDirectory = path.join(cwd, '.pane-runtime');
     fs.mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 });
     if (fs.lstatSync(runtimeDirectory).isSymbolicLink()) throw new Error('Session runtime directory must not be a symbolic link');
-    for (const [name, content] of Object.entries({
-      runpane: sessionWSLBridge(getAppDirectory(), record, path.join(runtimeDirectory, 'runpane.cjs')),
-      'runpane.cjs': sessionWSLLauncher(getAppDirectory()),
-      bashrc: sessionWSLRcFile(cwd, record),
-    })) {
+    for (const [name, content] of Object.entries(runtimeFiles(cwd, record))) {
       const file = path.join(runtimeDirectory, name);
       if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) throw new Error('Session runtime file must not be a symbolic link');
       fs.writeFileSync(file, content, { mode: 0o700 });
@@ -78,6 +74,14 @@ export function prepareSessionWorkspace(
     writeManagedInstructions(path.join(cwd, 'runtime-context.md'), wslRouting(record));
   }
   return cwd;
+}
+
+function runtimeFiles(cwd: string, record: OrchestrationSessionRecord) {
+  return {
+    runpane: sessionWSLBridge(getAppDirectory(), record, path.join(cwd, '.pane-runtime', 'runpane.cjs')),
+    'runpane.cjs': sessionWSLLauncher(getAppDirectory()),
+    bashrc: sessionWSLRcFile(cwd, record),
+  };
 }
 
 function sessionInstructions(
@@ -147,23 +151,45 @@ export function isPristineSessionWorkspace(record: OrchestrationSessionRecord): 
 }
 
 /** Roll back only our unpublished scaffold; retain a record if user files appeared. */
-export function discardSessionScaffold(sessionId: string): boolean {
-  const cwd = sessionWorkspacePath(sessionId);
+export function discardSessionScaffold(record: OrchestrationSessionRecord): boolean {
+  const cwd = sessionWorkspacePath(record.id);
   if (!fs.existsSync(cwd)) return true;
   if (fs.lstatSync(cwd).isSymbolicLink()) return false;
   const names = fs.readdirSync(cwd);
+  const files: string[] = [];
+  let runtimeDirectory: string | undefined;
   for (const name of names) {
-    if (name !== 'AGENTS.md' && name !== 'CLAUDE.md' && name !== LEGACY_PROGRESS_STATUS) return false;
     const file = path.join(cwd, name);
-    if (!fs.lstatSync(file).isFile()) return false;
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink()) return false;
+    if (name === '.pane-runtime' && record.runtime === 'wsl') {
+      if (!stat.isDirectory()) return false;
+      const expected = new Map(Object.entries(runtimeFiles(cwd, record)));
+      for (const child of fs.readdirSync(file)) {
+        const childPath = path.join(file, child);
+        if (!expected.has(child) || !fs.lstatSync(childPath).isFile()) return false;
+        if (fs.readFileSync(childPath, 'utf8') !== expected.get(child)) return false;
+        files.push(childPath);
+      }
+      runtimeDirectory = file;
+      continue;
+    }
+    if (!stat.isFile()) return false;
     const content = fs.readFileSync(file, 'utf8').trim();
+    files.push(file);
+    if (name === 'runtime-context.md' && record.runtime === 'wsl') {
+      if (content !== `${START}\n${escapeMarkers(wslRouting(record))}\n${END}`) return false;
+      continue;
+    }
+    if (name !== 'AGENTS.md' && name !== 'CLAUDE.md' && name !== LEGACY_PROGRESS_STATUS) return false;
     if (name === LEGACY_PROGRESS_STATUS) {
       if (content !== '{"enabled":true}' && content !== '{"enabled":false}') return false;
       continue;
     }
     if (!content.startsWith(START) || !content.endsWith(END)) return false;
   }
-  for (const name of names) fs.unlinkSync(path.join(cwd, name));
+  for (const file of files) fs.unlinkSync(file);
+  if (runtimeDirectory) fs.rmdirSync(runtimeDirectory);
   fs.rmdirSync(cwd);
   return true;
 }

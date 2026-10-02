@@ -75,6 +75,8 @@ inside that distribution first. Cursor is available when WSL is selected.
 The runtime and distribution belong to the Session and survive reopening,
 application restart, and terminal supervisor restart. Existing records retain
 their host runtime through an additive store migration.
+If creation fails before publishing a terminal owner, Pane removes untouched
+generated files so the name can be retried; user files or edits prevent rollback.
 
 WSL Sessions retain their durable files under the Windows Pane data directory.
 Their agent sees Linux paths such as `/mnt/c/Users/.../.pane/sessions/...`.
