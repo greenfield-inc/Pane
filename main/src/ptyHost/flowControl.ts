@@ -187,6 +187,10 @@ function armSafetyTimer(record: FlowControlRecord, onResume: ResumeCallback): vo
     if (!record.isPaused) {
       return;
     }
+    // A timeout abandons the unacknowledged backlog. Keeping it would pause
+    // again on the very next byte forever. Fresh output still has to respect
+    // the high watermark, so a slow viewer retains bounded backpressure.
+    record.pendingBytes = 0;
     record.isPaused = false;
     onResume();
   }, PAUSE_SAFETY_TIMEOUT);

@@ -1285,7 +1285,9 @@ export class TerminalPanelManager extends EventEmitter {
       flowControl: createFlowControlRecord(),
       outputBuffer: '',
       outputFlushTimer: null,
-      isVisible: true,
+      // No viewer means nobody can ACK. Preserve registered viewers on a
+      // supervisor respawn; new panels become visible when a client attaches.
+      isVisible: (this.visibleViewersByPanel.get(panel.id)?.size ?? 0) > 0,
       isAlternateScreen: false,
       inSyncBlock: false,
       filterInAltScreen: false,
@@ -2391,7 +2393,6 @@ export class TerminalPanelManager extends EventEmitter {
       disposeFlowControlRecord(terminal.flowControl);
       terminal.screenEmulator?.dispose();
       this.terminals.delete(panelId);
-      this.visibleViewersByPanel.delete(panelId);
     }
 
     if (snapshots.length === 0) {

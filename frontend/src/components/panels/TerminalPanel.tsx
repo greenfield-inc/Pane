@@ -22,6 +22,7 @@ import {
 import { isMac } from '../../utils/platformUtils';
 import { copyTerminalText, decodeOsc52Write, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
 import { sendTerminalInput } from '../../utils/terminalInput';
+import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
 import { openPaneLink } from '../terminal/openPaneLink';
@@ -1336,16 +1337,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (pendingAckBytes > 0) {
               const bytes = pendingAckBytes;
               pendingAckBytes = 0;
-              // Under the ptyHost flag, ack over the per-window MessagePort so it
-              // bypasses the main IPC invoke queue. Flag-off keeps the legacy
-              // IPC path. `currentPtyIdRef` is a ref because the ptyId can change
-              // across auto-reattach after a supervisor restart.
-              const activePtyId = currentPtyIdRef.current;
-              if (activePtyId) {
-                window.electronAPI.ptyHost.ack(activePtyId, bytes);
-              } else {
-                window.electronAPI.invoke('terminal:ack', panel.id, bytes);
-              }
+              // Read the current mode at flush time, including when a local
+              // ptyId survived a switch to a remote host.
+              acknowledgeTerminalOutput(
+                panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode,
+              );
             }
           };
 
