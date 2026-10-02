@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg } from './runtimeMode';
+import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg, hasVersionQueryArg } from './runtimeMode';
 
 describe('hasHeadlessDaemonLaunchArg', () => {
   it('detects the primary headless daemon flag', () => {
@@ -32,5 +32,15 @@ describe('hasRemoteSetupLaunchArg', () => {
       '--pane-dir',
       '/tmp/.pane_remote',
     ])).toBe(true);
+  });
+});
+
+describe('hasVersionQueryArg', () => {
+  it('detects the version query runpane doctor sends to the installed app', () => {
+    expect(hasVersionQueryArg(['/home/user/.local/bin/pane', '--version'])).toBe(true);
+  });
+
+  it('ignores normal and headless daemon launches', () => {
+    expect(hasVersionQueryArg(['pane', '--daemon-headless', '--pane-dir', '/tmp/pane'])).toBe(false);
   });
 });

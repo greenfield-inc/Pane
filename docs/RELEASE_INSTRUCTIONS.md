@@ -70,6 +70,8 @@ Pull requests to `main` run:
   - main process tests on Linux, macOS, and Windows
   - frontend unit tests
   - maintained Playwright smoke tests
+  - `CI result`, the one check branch protection requires; it fails when any
+    other `Code Quality` job fails or is cancelled
 
 Pushes to `main` run:
 
@@ -87,7 +89,15 @@ Pushes to `main` run:
   - `SHA256SUMS.txt`
   - npm `runpane` publish
   - PyPI `runpane` publish
+  - Homebrew cask `pane` pushed to `greenfield-inc/homebrew-tap`
+  - winget manifests for `Dcouple.Pane` in the `packaging-vX.Y.Z` artifact
 - `Notify website on release`
+
+`scripts/render-packaging.sh` fills the templates in `packaging/` with the
+version and the checksums of the macOS `.dmg` and Windows `.exe` files. A manual
+`Build & Release` run with **publish** unchecked is a dry run: it builds,
+renders and audits the cask, uploads the `packaging-<release_tag>` artifact,
+and publishes nothing.
 
 The release is not considered complete until the tag-triggered `Build & Release`
 run succeeds and the GitHub release is published.
@@ -112,9 +122,16 @@ Confirm:
 - `Build & Release` succeeded for the tag.
 - `npm view runpane version` reports `X.Y.Z`.
 - `python3 -m pip index versions runpane` includes `X.Y.Z`.
+- `brew info --cask greenfield-inc/tap/pane` reports `X.Y.Z`.
 - `Notify website on release` succeeded for the tag.
 - `Code Quality` succeeded for the release commit on `main`.
 - `Deploy Remote PWA Preview` succeeded for the release commit on `main`.
+
+## winget
+
+Submit the manifests in the tag run's `packaging-vX.Y.Z` artifact (the
+`winget/` folder) to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs),
+for example with `wingetcreate submit <folder>`. Submissions are manual.
 
 ## Required Secrets
 
@@ -133,14 +150,15 @@ manual recovery. Use `NPM_TOKEN` or `PYPI_API_TOKEN` as local environment
 variables or GitHub Actions secrets, do not commit token files such as `.npmrc`
 or `.pypirc`, and revoke or rotate the tokens after use.
 
-If the source repository remains private, do not promise npm provenance:
-npm trusted publishing can still be used, but npm provenance attestations are
-not generated for private repositories.
+The npm publish passes `--provenance`, so each version carries a provenance
+attestation linking it to this workflow run.
 
 The release and preview workflows also depend on repository secrets and
 variables configured in GitHub Actions. Relevant examples include:
 
 - `SITE_REPO_DISPATCH_TOKEN` for website release notification.
+- `HOMEBREW_TAP_TOKEN` to push the cask to `greenfield-inc/homebrew-tap`. Without
+  it the `homebrew` job logs a notice and skips.
 - Google Cloud workload identity, service account, project, and region values
   for the remote PWA preview deploy.
 - Platform signing or publishing credentials if signing is re-enabled.

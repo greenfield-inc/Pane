@@ -16,6 +16,8 @@ interface RendererErrorDetails {
 
 type RendererErrorValue = Error | string | RendererErrorDetails | null | undefined;
 
+const REMOTE_HOST_UNREACHABLE = /'daemon:invoke'.*\b(?:ENETUNREACH|EHOSTUNREACH|ENETDOWN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)\b/;
+
 function getErrorMessage(value: RendererErrorValue): string {
   if (value instanceof Error) return value.message;
   try {
@@ -46,6 +48,13 @@ export function mountDesktopRenderer(): void {
 
   // Global error handlers catch failures outside React error boundaries.
   window.addEventListener('unhandledrejection', (event) => {
+    if (REMOTE_HOST_UNREACHABLE.test(getErrorMessage(event.reason))) {
+      // The remote host dropped (sleep, a network change). The connection
+      // status reports it and the client reconnects; this is not a crash.
+      console.warn('Remote host unreachable:', event.reason);
+      event.preventDefault();
+      return;
+    }
     console.error('Unhandled promise rejection:', event.reason);
     reportRendererFatal({
       kind: 'unhandledrejection',

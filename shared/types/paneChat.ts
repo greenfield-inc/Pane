@@ -4,6 +4,12 @@ import type { JsonValue } from '../validation/boundaryDecoder';
 
 export type PaneChatAgent = 'claude' | 'codex' | 'cursor';
 
+export const PANE_CHAT_AGENT_LABELS = {
+  claude: 'Claude',
+  codex: 'Codex',
+  cursor: 'Cursor',
+} satisfies Record<PaneChatAgent, string>;
+
 export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = 'claude';
 export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';
 export const PANE_CHAT_PANEL_ID = '__pane_chat_terminal__';

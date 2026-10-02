@@ -172,7 +172,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                   'w-full flex items-center justify-between px-4 py-2 text-sm',
                   item.disabled
                     ? 'text-text-tertiary opacity-60 cursor-not-allowed'
-                    : 'cursor-pointer',
+                    : 'cursor-default',
                   isSelected && !item.disabled && 'bg-interactive/15 text-text-primary',
                   isSelected && item.disabled && 'bg-surface-hover/60',
                   !isSelected && !item.disabled && 'text-text-secondary hover:bg-surface-hover'

@@ -1,4 +1,4 @@
-import { ChevronDown, GitBranch, GitFork, Pin, Search, X } from 'lucide-react';
+import { ChevronDown, FolderGit2, GitBranch, GitFork, Pin, Search, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { generatePaneName, sanitizePaneName } from '../../utils/paneName';
@@ -14,21 +14,25 @@ const EMPTY_REMOTE_BRANCHES: RemoteBranchInfo[] = [];
 
 interface RemoteCreateSessionDialogProps {
   adapter: RemoteRuntimeAdapter;
-  project: RemoteProjectWithSessions;
+  projects: RemoteProjectWithSessions[];
+  initialProject: RemoteProjectWithSessions;
   restoreFocusRef: RefObject<HTMLElement | null>;
   fallbackFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
-  onCreated: (sessionName: string) => Promise<void>;
+  onCreated: (projectId: number, sessionName: string) => Promise<void>;
 }
 
 export function RemoteCreateSessionDialog({
   adapter,
-  project,
+  projects,
+  initialProject,
   restoreFocusRef,
   fallbackFocusRef,
   onClose,
   onCreated,
 }: RemoteCreateSessionDialogProps) {
+  // A snapshot: host refreshes must not reload branches while the person edits.
+  const [project, setProject] = useState(initialProject);
   const [loadedBranches, setLoadedBranches] = useState<RemoteBranchInfo[] | null>(null);
   const [baseBranch, setBaseBranch] = useState('');
   const [paneName, setPaneName] = useState('');
@@ -201,7 +205,7 @@ export function RemoteCreateSessionDialog({
         baseBranch,
         startPinned,
       });
-      await onCreated(cleanedName);
+      await onCreated(project.id, cleanedName);
       onClose();
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Failed to create pane');
@@ -254,6 +258,26 @@ export function RemoteCreateSessionDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
+          <section className="border-b border-border-primary p-5">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary">
+              <FolderGit2 className="h-4 w-4 text-text-tertiary" aria-hidden="true" />
+              <label htmlFor="remote-create-repository">Repository</label>
+            </div>
+            <select
+              id="remote-create-repository"
+              value={project.id}
+              disabled={submitting}
+              onChange={(event) => {
+                const picked = projects.find(candidate => candidate.id === Number(event.target.value));
+                if (picked) setProject(picked);
+                setUserEditedName(false);
+              }}
+              className="h-12 w-full rounded-md border border-border-primary bg-surface-secondary px-3 text-sm text-text-primary outline-none focus:border-interactive focus:ring-2 focus:ring-interactive disabled:opacity-60"
+            >
+              {projects.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+            </select>
+          </section>
+
           <section className="border-b border-border-primary p-5">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-text-primary">
               <GitBranch className="h-4 w-4 text-text-tertiary" aria-hidden="true" />

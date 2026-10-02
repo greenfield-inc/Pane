@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConfigManager } from './configManager';
+import { AGENT_CONTEXT_DEFAULTS_VERSION, ConfigManager } from './configManager';
 
 describe('ConfigManager appearance persistence', () => {
   let paneDir: string;
@@ -37,6 +37,13 @@ describe('ConfigManager appearance persistence', () => {
     const manager = new ConfigManager();
     await manager.initialize();
     expect(manager.getConfig().analytics?.enabled).toBe(false);
+  });
+
+  it('turns off AGENTS.md publishing and turns on MCP registration for existing installs', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: true } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext).toMatchObject({ managedAgentsMd: false, registerMcp: true });
   });
 
   it('migrates a legacy theme once', async () => {
@@ -154,5 +161,65 @@ describe('ConfigManager freeze prevention defaults', () => {
     expect(new ConfigManager(os.homedir()).getGitRepoPath()).toBe('');
     const repoPath = path.join(os.homedir(), 'project');
     expect(new ConfigManager(repoPath).getGitRepoPath()).toBe(repoPath);
+  });
+});
+
+describe('ConfigManager agent context defaults', () => {
+  let paneDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-agent-context-'));
+    process.env.PANE_DIR = paneDir;
+    configPath = path.join(paneDir, 'config.json');
+  });
+
+  afterEach(async () => {
+    delete process.env.PANE_DIR;
+    await fs.rm(paneDir, { recursive: true, force: true });
+  });
+
+  it('keeps repositories untouched and installs the home skill on new installs', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext).toEqual({
+      managedAgentsMd: false, homeSkill: true, defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION,
+      registerMcp: true, cleanupPending: false,
+    });
+  });
+
+  it('persists pending AGENTS.md cleanup until it succeeds', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: true } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext).toMatchObject({
+      managedAgentsMd: false, defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION, cleanupPending: true,
+    });
+    const restarted = new ConfigManager();
+    await restarted.initialize();
+    expect(restarted.getConfig().agentContext?.cleanupPending).toBe(true);
+    await restarted.updateConfig({ agentContext: { cleanupPending: false } });
+    const completed = new ConfigManager();
+    await completed.initialize();
+    expect(completed.getConfig().agentContext?.cleanupPending).toBe(false);
+  });
+
+  it('keeps a later opt-in across restarts', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: true } }));
+    const first = new ConfigManager();
+    await first.initialize();
+    await first.updateConfig({ agentContext: { managedAgentsMd: true } });
+    const second = new ConfigManager();
+    await second.initialize();
+    expect(second.getConfig().agentContext?.managedAgentsMd).toBe(true);
+    expect(second.getConfig().agentContext?.cleanupPending).toBe(true);
+  });
+
+  it('retries cleanup for old configs that already turned publishing off', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ agentContext: { managedAgentsMd: false } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().agentContext?.defaultsVersion).toBe(AGENT_CONTEXT_DEFAULTS_VERSION);
+    expect(manager.getConfig().agentContext?.cleanupPending).toBe(true);
   });
 });

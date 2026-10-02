@@ -2,7 +2,12 @@
 import * as os from 'node:os';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
+import * as prompts from './setupPrompts';
 import { runAgentContext } from './agentContext';
+import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
+import { daemonActionFor, runDaemonAction } from './daemonActions';
+import { runDocsRead, runDocsSearch } from './docs';
+import { runLinksCreate } from './links';
 import { helpText, parseRunpaneArgs, type ParsedArgs } from './commands';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
@@ -19,6 +24,7 @@ import {
   runAgentsDoctor,
   runPanelsCreate,
   runPanelsInput,
+  runPanelsLastMessage,
   runPanelsList,
   runPanelsOutput,
   runPanelsScreen,
@@ -33,12 +39,17 @@ import {
   runPanesPin,
   runPanesRename,
   runPanesFocus,
+  runReport,
+  runPanelsOpen,
   runSessionsAssociate,
   runSessionsCreate,
   runSessionsDetach,
   runSessionsGet,
   runSessionsList,
   runSessionsOverview,
+  runLockAcquire,
+  runLockList,
+  runLockRelease,
   runSessionsSetAgent,
   runSessionsUpdate,
   runReposAdd,
@@ -117,6 +128,40 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return runAgentContext(parsed);
   }
 
+  if (parsed.command === 'mcp') {
+    const { runMcpServer } = await import('./mcp');
+    return runMcpServer({ toolsets: parsed.toolsets, readOnly: parsed.readOnly === true });
+  }
+
+  const daemonAction = daemonActionFor(parsed.command);
+  if (daemonAction) {
+    return runDaemonAction(parsed, daemonAction);
+  }
+
+  if (parsed.command === 'links create') {
+    return runLinksCreate(parsed);
+  }
+
+  if (parsed.command === 'docs search') {
+    return runDocsSearch(parsed);
+  }
+
+  if (parsed.command === 'docs read') {
+    return runDocsRead(parsed);
+  }
+
+  if (parsed.command === 'agents start') {
+    return runAgentsStart(parsed);
+  }
+
+  if (parsed.command === 'agents status') {
+    return runAgentsStatus(parsed);
+  }
+
+  if (parsed.command === 'agents send') {
+    return runAgentsSend(parsed);
+  }
+
   if (parsed.command === 'repos list') {
     return runReposList(parsed);
   }
@@ -165,6 +210,18 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return runSessionsOverview(parsed);
   }
 
+  if (parsed.command === 'lock acquire') {
+    return runLockAcquire(parsed);
+  }
+
+  if (parsed.command === 'lock release') {
+    return runLockRelease(parsed);
+  }
+
+  if (parsed.command === 'lock list') {
+    return runLockList(parsed);
+  }
+
   if (parsed.command === 'workspace state') {
     return runWorkspaceState(parsed);
   }
@@ -209,6 +266,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
     return runPanelsCreate(parsed);
   }
 
+  if (parsed.command === 'panels open') {
+    return runPanelsOpen(parsed);
+  }
+
   if (parsed.command === 'panels output') {
     return runPanelsOutput(parsed);
   }
@@ -231,6 +292,14 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panels wait') {
     return runPanelsWait(parsed);
+  }
+
+  if (parsed.command === 'panels last-message') {
+    return runPanelsLastMessage(parsed);
+  }
+
+  if (parsed.command === 'report') {
+    return runReport(parsed);
   }
 
   if (parsed.command === 'agents doctor') {
@@ -341,118 +410,71 @@ function isInteractiveShell(): boolean {
 }
 
 async function runInteractiveWizard(telemetryContext: WrapperTelemetryContext): Promise<number> {
-  const rl = createInterface({ input, output });
+  prompts.intro('Pane setup');
+  const action = await prompts.select({
+    message: 'What should this machine do?',
+    options: [
+      { value: 'client', label: 'Install Pane desktop', hint: 'work on this machine' },
+      { value: 'daemon', label: 'Set up a remote host', hint: 'run agents here, connect from another device' },
+      { value: 'update', label: 'Update Pane', hint: 'install the latest desktop release' },
+      { value: 'doctor', label: 'Check this machine', hint: 'diagnose an existing setup' }
+    ]
+  });
+  if (prompts.isCancel(action)) {
+    prompts.cancel('Setup cancelled.');
+    return 0;
+  }
 
-  try {
-    console.log('Pane setup');
-    console.log('Choose what this machine should do. You can rerun setup any time.');
-    console.log('Commands: runpane help, runpane doctor, runpane doctor --json, runpane agent-context --json');
-    console.log('');
-    console.log('1) Install Pane desktop app on this machine');
-    console.log('2) Set up this machine as a remote host');
-    console.log('3) Update Pane desktop app');
-    console.log('4) Run diagnostics');
-    console.log('');
+  if (action === 'doctor') {
+    prompts.outro('Checking your Pane installation…');
+    setSetupSelection(telemetryContext, 'doctor');
+    return runDoctor(createParsedArgs('doctor'), SOURCE);
+  }
 
-    const action = await askChoice(rl, 'Choose an action [1]: ', {
-      '': 'client',
-      '1': 'client',
-      client: 'client',
-      install: 'client',
-      desktop: 'client',
-      '2': 'daemon',
-      daemon: 'daemon',
-      remote: 'daemon',
-      host: 'daemon',
-      '3': 'update',
-      update: 'update',
-      '4': 'doctor',
-      doctor: 'doctor',
-      diagnostics: 'doctor'
-    });
-
-    if (action === 'client') {
-      console.log('');
-      console.log('Installing Pane desktop app on this machine...');
-      setSetupSelection(telemetryContext, 'install', 'client');
-      return installOrUpdate(createParsedArgs('install', { target: 'client' }), telemetryContext);
-    }
-
-    if (action === 'update') {
-      console.log('');
-      console.log('Updating Pane desktop app on this machine...');
-      setSetupSelection(telemetryContext, 'update', 'client');
-      return installOrUpdate(createParsedArgs('update', { target: 'client' }), telemetryContext);
-    }
-
-    if (action === 'doctor') {
-      console.log('');
-      console.log('Running runpane diagnostics...');
-      setSetupSelection(telemetryContext, 'doctor');
-      return runDoctor(createParsedArgs('doctor'), SOURCE);
-    }
-
-    console.log('');
-    console.log('A remote host runs your repos, terminals, agents, and git state.');
-    console.log('Your desktop Pane or browser client connects with the generated pane-remote:// code.');
-
+  let parsed: ParsedArgs;
+  if (action === 'daemon') {
     const defaultLabel = os.hostname() || 'Remote Host';
-    const label = (await rl.question(`Remote host label [${defaultLabel}]: `)).trim() || defaultLabel;
-
-    console.log('');
-    console.log('Connection method:');
-    console.log('1) auto');
-    console.log('2) tailscale');
-    console.log('3) ssh');
-    console.log('4) manual');
-    console.log('');
-    console.log('Use auto unless you already know you want Tailscale, SSH, or a manual URL.');
-    console.log('');
-
-    const tunnel = await askChoice(rl, 'Choose a connection method [1]: ', {
-      '': 'auto',
-      '1': 'auto',
-      auto: 'auto',
-      '2': 'tailscale',
-      tailscale: 'tailscale',
-      '3': 'ssh',
-      ssh: 'ssh',
-      '4': 'manual',
-      manual: 'manual'
+    const label = await prompts.text({
+      message: 'Name this host',
+      placeholder: defaultLabel,
+      defaultValue: defaultLabel,
+      validate: value => value && !value.trim() ? 'Enter a name, or leave blank to use this computer’s name.' : undefined
     });
-
-    const remoteSetupArgs = ['--label', label];
-    if (tunnel !== 'auto') {
-      remoteSetupArgs.push('--prefer-tunnel', tunnel);
+    if (prompts.isCancel(label)) {
+      prompts.cancel('Setup cancelled.');
+      return 0;
     }
-
-    console.log('');
-    console.log('Setting up this machine as a Pane remote host...');
-    console.log('When setup finishes, paste the printed pane-remote:// code into Pane or runpane.com/app.');
-
-    setSetupSelection(telemetryContext, 'install', 'daemon');
-    return installOrUpdate(createParsedArgs('install', {
+    prompts.log.info('Pane will install Tailscale if needed and guide you through signing in.');
+    prompts.log.info('For SSH or a manual URL: runpane install daemon --help');
+    parsed = createParsedArgs('install', {
       target: 'daemon',
-      remoteSetupArgs
-    }), telemetryContext);
-  } finally {
-    rl.close();
+      remoteSetupArgs: [
+        '--label', label.trim() || defaultLabel,
+        '--prefer-tunnel', 'tailscale',
+        '--interactive-tailscale-setup',
+        '--auto-listen-port'
+      ]
+    });
+    prompts.outro('Setting up your remote host. Follow the login prompts below.');
+  } else {
+    parsed = createParsedArgs(action === 'update' ? 'update' : 'install', { target: 'client' });
+    prompts.outro(action === 'update' ? 'Updating Pane…' : 'Installing Pane…');
   }
-}
 
-async function askChoice<T extends string>(
-  rl: ReturnType<typeof createInterface>,
-  prompt: string,
-  choices: Record<string, T>
-): Promise<T> {
-  while (true) {
-    const answer = (await rl.question(prompt)).trim().toLowerCase();
-    const choice = choices[answer];
-    if (choice) {
-      return choice;
+  // All prompts have finished before the child inherits stdin for login/sudo.
+  setSetupSelection(telemetryContext, action === 'update' ? 'update' : 'install', parsed.target);
+  const code = await installOrUpdate(parsed, telemetryContext);
+  if (code === 0) {
+    if (parsed.target === 'daemon') {
+      prompts.log.success('Remote host setup finished.');
+      prompts.log.info('Sign your other device into the same Tailscale network, then paste the connection code above into Pane or https://runpane.com/app/.');
+    } else {
+      prompts.log.success('Pane is ready.');
     }
-    console.log(`Choose one of: ${Object.keys(choices).filter(Boolean).join(', ')}`);
+  } else {
+    prompts.log.error('Setup did not finish. Review the error above, then rerun runpane setup.');
   }
+  return code;
 }
 
 function createParsedArgs(command: ParsedArgs['command'], overrides: Partial<ParsedArgs> = {}): ParsedArgs {

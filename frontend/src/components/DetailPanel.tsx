@@ -38,16 +38,16 @@ interface DetailPanelProps {
   isMainRepo?: boolean;
 }
 
-const sidebarButtonClass = 'w-full justify-start text-sm !px-2';
+const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
 const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs uppercase text-text-tertiary font-medium mb-2 px-1">{children}</h3>;
+  return <h3 className="mb-1 px-2 text-[10px] font-semibold uppercase leading-4 tracking-wider text-text-tertiary">{children}</h3>;
 }
 
 function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="px-2 py-2 border-b border-border-primary">
+    <div className="px-2 pt-3 pb-1">
       <SectionHeader>{title}</SectionHeader>
       {children}
     </div>
@@ -178,15 +178,15 @@ export function DetailPanel({
         ))}
         {showDetails && (<>
         <div className="flex-shrink-0 overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border-primary min-w-0">
+          <div className="mx-2 flex min-w-0 items-center gap-2 rounded-md px-2 py-2">
             <GitBranch className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
             <span className="flex flex-col leading-tight min-w-0 flex-1">
-              <span className="text-sm text-text-primary font-medium truncate">
+              <span className="truncate text-[12px] font-semibold text-text-primary">
                 {gitCommands?.currentBranch?.trim() || session.baseBranch?.replace(/^origin\//, '') || 'unknown'}
               </span>
               {session.baseBranch && gitCommands?.currentBranch
                 && gitCommands.currentBranch !== session.baseBranch.replace(/^origin\//, '') && (
-                <span className="text-xs text-text-tertiary truncate">
+                <span className="truncate text-[10px] text-text-tertiary">
                   from {session.baseBranch.replace(/^origin\//, '')}
                 </span>
               )}
@@ -207,27 +207,27 @@ export function DetailPanel({
 
           {gitStatus && (
             <DetailSection title="Changes">
-              <div className="space-y-1 text-sm px-1">
+              <div className="space-y-0.5 px-1 text-[12px]">
                 {!!gitStatus.ahead && (
-                  <div className="flex justify-between text-text-secondary">
+                  <div className="flex min-h-7 items-center justify-between rounded-md px-1 text-text-secondary">
                     <span>Commits ahead</span>
                     <span className="text-status-success font-medium">{gitStatus.ahead}</span>
                   </div>
                 )}
                 {!!gitStatus.behind && (
-                  <div className="flex justify-between text-text-secondary">
+                  <div className="flex min-h-7 items-center justify-between rounded-md px-1 text-text-secondary">
                     <span>Commits behind</span>
                     <span className="text-status-warning font-medium">{gitStatus.behind}</span>
                   </div>
                 )}
                 {gitStatus.hasUncommittedChanges && !!gitStatus.filesChanged && (
-                  <div className="flex justify-between text-text-secondary">
+                  <div className="flex min-h-7 items-center justify-between rounded-md px-1 text-text-secondary">
                     <span>Uncommitted files</span>
                     <span className="text-status-info font-medium">{gitStatus.filesChanged}</span>
                   </div>
                 )}
                 {!gitStatus.ahead && !gitStatus.behind && !gitStatus.hasUncommittedChanges && (
-                  <div className="text-text-tertiary text-xs">No changes detected</div>
+                  <div className="px-1 text-[12px] text-text-tertiary">No changes detected</div>
                 )}
               </div>
             </DetailSection>
@@ -239,10 +239,10 @@ export function DetailPanel({
                 {!gitUnavailable && onSetTracking && (
                   <Tooltip content="Set upstream tracking branch for git pull/push" side="left">
                     <Button variant="ghost" size="sm" className={sidebarButtonClass} onClick={onSetTracking} disabled={isMerging}>
-                      <Link className="w-4 h-4 mr-2 flex-shrink-0" />
+                      <Link className="mr-2 h-3.5 w-3.5 flex-shrink-0" />
                       <span className="flex flex-col items-start leading-tight min-w-0">
                         <span>Set Tracking</span>
-                        {trackingBranch && <span className="text-xs text-text-tertiary truncate max-w-full">{trackingBranch}</span>}
+                        {trackingBranch && <span className="max-w-full truncate text-[10px] text-text-tertiary">{trackingBranch}</span>}
                       </span>
                     </Button>
                   </Tooltip>
@@ -251,7 +251,7 @@ export function DetailPanel({
                   <Tooltip content={remoteIdeTooltip} side="left">
                     <span>
                       <Button variant="ghost" size="sm" className={sidebarButtonClass} disabled>
-                        <Code2 className="w-4 h-4 mr-2 flex-shrink-0" />
+                        <Code2 className="mr-2 h-3.5 w-3.5 flex-shrink-0" />
                         <span className="truncate">Open in IDE</span>
                       </Button>
                     </span>
@@ -260,7 +260,7 @@ export function DetailPanel({
                   <Dropdown
                     trigger={(
                       <Button variant="ghost" size="sm" className={sidebarButtonClass}>
-                        <Code2 className="w-4 h-4 mr-2 flex-shrink-0" />
+                        <Code2 className="mr-2 h-3.5 w-3.5 flex-shrink-0" />
                         <span className="truncate">Open in IDE</span>
                       </Button>
                     )}
@@ -286,8 +286,8 @@ export function DetailPanel({
           )}
 
           {gitUnavailable ? (
-            <div className="px-3 py-4 border-b border-border-primary">
-              <p className="text-xs text-text-tertiary">
+            <div className="px-4 py-3">
+              <p className="text-[12px] text-text-tertiary">
                 Git features unavailable. Initialize a git repository to enable history, branches, and sync.
               </p>
             </div>

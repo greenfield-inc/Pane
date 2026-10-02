@@ -36,6 +36,7 @@ The tool panel system consists of several key components:
 - XTerm.js instances mount/unmount based on panel visibility to save memory
 - Working directories are maintained independently per panel
 - Command history and environment variables can be preserved across restarts
+- Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional.
 
 ## Database Schema
 
@@ -105,3 +106,15 @@ Each panel type has specific capabilities defined in `PANEL_CAPABILITIES`:
 - **canConsume**: Events this panel listens to
 
 Example: Diff panels are singleton + permanent + worktree-only, consuming `files:changed` and `terminal:command_executed` events to auto-refresh.
+
+### Named custom launch profiles
+
+In a worktree's **Add Tool (+)** menu, choose **Add custom command…** and enter
+an optional **Name** alongside the command. **Save & launch** saves the profile
+and opens a terminal tab with that name. Leaving the name blank uses the first
+three words of the command. Saved profiles are shared through app configuration.
+Use the pencil beside a saved profile to rename it; the menu and future tabs use
+the new name. Existing tabs keep their titles. Hover a profile to see its full
+name and command.
+
+Resume commands retain the original shell quoting and environment assignments when removing a launch prompt. Custom Claude launchers may choose a separate configuration directory; Pane trusts their recorded conversation IDs instead of checking the app configuration for their transcripts.

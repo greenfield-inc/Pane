@@ -172,7 +172,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
     const checkboxId = id || `checkbox-${generatedId}`;
     
     return (
-      <label htmlFor={checkboxId} className="flex items-center space-x-2 cursor-pointer">
+      <label htmlFor={checkboxId} className="flex items-center space-x-2 cursor-default">
         <input
           ref={ref}
           id={checkboxId}

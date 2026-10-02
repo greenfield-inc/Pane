@@ -92,4 +92,24 @@ describe('ptyHost flowControl', () => {
 
     disposeFlowControlRecord(record);
   });
+
+  it('forgives stale bytes on timeout but still pauses for a fresh full backlog', async () => {
+    const record = createFlowControlRecord();
+    const pause = vi.fn().mockResolvedValue(undefined);
+    const resume = vi.fn();
+
+    onPtyBytes(record, HIGH_WATERMARK + 1, pause, resume);
+    await vi.advanceTimersByTimeAsync(PAUSE_SAFETY_TIMEOUT);
+    onPtyBytes(record, 1, pause, resume);
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(record.isPaused).toBe(false);
+
+    onPtyBytes(record, HIGH_WATERMARK - 1, pause, resume);
+    expect(pause).toHaveBeenCalledTimes(2);
+    expect(record.isPaused).toBe(true);
+    await flushMicrotasks();
+    onAck(record, HIGH_WATERMARK, resume);
+    expect(resume).toHaveBeenCalledTimes(2);
+    disposeFlowControlRecord(record);
+  });
 });

@@ -623,6 +623,24 @@ describe('GitStatusManager', () => {
       expect(mockDatabaseService.saveSessionGitStatusCache).not.toHaveBeenCalled();
     });
 
+    it('looks up a Pane PR on demand, even without a cached status, and returns gh failures', async () => {
+      vi.mocked(projectGitOutput).mockReturnValue('feature-branch\n');
+      projectGithubCommand.mockResolvedValue({
+        stdout: JSON.stringify([{ number: 31, url: 'https://github.com/example/repo/pull/31', state: 'OPEN' }]),
+        stderr: '',
+      });
+
+      await expect(gitStatusManager.lookupPrForPane('test-session')).resolves.toMatchObject({
+        ok: true,
+        pr: { prNumber: 31, prState: 'OPEN' },
+      });
+
+      gitStatusManager.invalidatePrCache();
+      const failure = Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+      projectGithubCommand.mockRejectedValue(failure);
+      await expect(gitStatusManager.lookupPrForPane('test-session')).resolves.toEqual({ ok: false, error: failure });
+    });
+
     it('schedules staggered PR enrichment for non-active relevant initial-load status', async () => {
       const privates = managerPrivates(gitStatusManager);
       privates.initialLoadQueue.push('test-session');

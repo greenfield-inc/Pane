@@ -29,6 +29,42 @@ describe('TerminalStateEmulator', () => {
     emulator.dispose();
   });
 
+  it.each([1006, 1016])('restores mouse encoding %i after alternate buffer activation', async (mode) => {
+    const emulator = new TerminalStateEmulator(20, 5);
+    emulator.write('\x1b[?10');
+    emulator.write(`${mode === 1006 ? '06' : '16'}h\x1b[?1049h\x1b[?1003h`);
+    await emulator.waitForIdle();
+    const snapshot = emulator.serializeForRestore();
+    expect(snapshot).toContain('\x1b[?1003h');
+    expect(snapshot.endsWith(`\x1b[?${mode}h`)).toBe(true);
+    expect(snapshot.indexOf(`\x1b[?${mode}h`)).toBeGreaterThan(snapshot.indexOf('\x1b[?1049h'));
+    const restored = new TerminalStateEmulator(20, 5);
+    restored.write(snapshot);
+    await restored.waitForIdle();
+    expect(restored.serializeForRestore()).toContain(`\x1b[?${mode}h`);
+    restored.dispose();
+    emulator.dispose();
+    expect(emulator.serializeForRestore()).toContain(`\x1b[?${mode}h`);
+  });
+
+  it.each<[string, 1006 | 1016 | undefined]>([
+    ['\x1b[?1006;1016h', 1016],
+    ['\x1b[?1016;1006h', 1006],
+    ['\x1b[?1006h\x1b[?1016l', undefined],
+    ['\x1b[?1016h\x1b[?1006l', undefined],
+    ['\x1b[?1006h\x1bc', undefined],
+    // DECSTR does not reset xterm's mouse service.
+    ['\x1b[?1016h\x1b[!p', 1016],
+  ])('honors ordered encoding transitions %j', async (stream, mode) => {
+    const emulator = new TerminalStateEmulator(20, 5);
+    emulator.write(stream);
+    await emulator.waitForIdle();
+    const snapshot = emulator.serializeForRestore();
+    expect(snapshot.includes('\x1b[?1006h')).toBe(mode === 1006);
+    expect(snapshot.includes('\x1b[?1016h')).toBe(mode === 1016);
+    emulator.dispose();
+  });
+
   it('renders cursor-addressed alternate-screen output as a coherent screen', async () => {
     const emulator = new TerminalStateEmulator(20, 5);
 
@@ -56,7 +92,39 @@ describe('TerminalStateEmulator', () => {
     await emulator.waitForIdle();
 
     expect(emulator.getScreenText()).toBe('❯ Try "fix the tests"\ntyped hint kept');
-    expect(emulator.getScreenText({ omitDim: true })).toBe('❯\ntyped      kept');
+    expect(emulator.getScreenText({ cells: 'typed' })).toBe('❯\ntyped      kept');
+    expect(emulator.getScreenText({ cells: 'ghost' })).toBe('  Try "fix the tests"\n      hint');
+    emulator.dispose();
+  });
+
+  it('treats placeholder-grey text as ghost text but keeps grey frame glyphs and typed text', async () => {
+    const emulator = new TerminalStateEmulator(60, 8);
+    const rule = '─'.repeat(10);
+    // Captured from Claude Code 2.1.283 (dark theme): rules in #888888, a busy
+    // composer's `❯` and hints in #999999, a queued message above the box.
+    emulator.write([
+      `\x1b[38;2;80;80;80m❯\x1b[39m \x1b[38;2;153;153;153mReply with QUEUED\x1b[39m`,
+      `\x1b[38;2;136;136;136m${rule}\x1b[39m`,
+      `\x1b[38;2;153;153;153m❯ merge it\x1b[39m`,
+      `\x1b[38;2;136;136;136m${rule}\x1b[39m`,
+      `❯ typed \x1b[38;5;246msuggested\x1b[39m \x1b[90mgrey16\x1b[39m \x1b[38;2;255;255;255mwhite\x1b[39m \x1b[38;2;215;119;87mcoral\x1b[39m`,
+    ].join('\r\n'));
+    await emulator.waitForIdle();
+
+    expect(emulator.getScreenText({ cells: 'typed' })).toBe([
+      '❯',
+      rule,
+      '❯',
+      rule,
+      '❯ typed                  white coral',
+    ].join('\n'));
+    expect(emulator.getScreenText({ cells: 'ghost' })).toBe([
+      '  Reply with QUEUED',
+      '',
+      '  merge it',
+      '',
+      '        suggested grey16',
+    ].join('\n'));
     emulator.dispose();
   });
 

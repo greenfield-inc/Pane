@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+PackageIdentifier: Dcouple.Pane
+PackageVersion: "@VERSION@"
+InstallerType: nullsoft
+UpgradeBehavior: install
+Protocols:
+  - pane
+Installers:
+  - Architecture: x64
+    Scope: user
+    InstallerUrl: https://github.com/greenfield-inc/Pane/releases/download/v@VERSION@/Pane-@VERSION@-Windows-x64.exe
+    InstallerSha256: "@SHA256:Pane-@VERSION@-Windows-x64.exe@"
+    InstallerSwitches:
+      Custom: /currentuser
+  - Architecture: x64
+    Scope: machine
+    InstallerUrl: https://github.com/greenfield-inc/Pane/releases/download/v@VERSION@/Pane-@VERSION@-Windows-x64.exe
+    InstallerSha256: "@SHA256:Pane-@VERSION@-Windows-x64.exe@"
+    InstallerSwitches:
+      Custom: /allusers
+  - Architecture: arm64
+    Scope: user
+    InstallerUrl: https://github.com/greenfield-inc/Pane/releases/download/v@VERSION@/Pane-@VERSION@-Windows-arm64.exe
+    InstallerSha256: "@SHA256:Pane-@VERSION@-Windows-arm64.exe@"
+    InstallerSwitches:
+      Custom: /currentuser
+  - Architecture: arm64
+    Scope: machine
+    InstallerUrl: https://github.com/greenfield-inc/Pane/releases/download/v@VERSION@/Pane-@VERSION@-Windows-arm64.exe
+    InstallerSha256: "@SHA256:Pane-@VERSION@-Windows-arm64.exe@"
+    InstallerSwitches:
+      Custom: /allusers
+ManifestType: installer
+ManifestVersion: 1.12.0

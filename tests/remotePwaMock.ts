@@ -1,4 +1,6 @@
 import type { Page } from '@playwright/test';
+import type { OrchestrationSessionRecord } from '../shared/types/orchestrationSession';
+import { PANE_CHAT_AGENT_LABELS } from '../shared/types/paneChat';
 import type { JsonValue } from '../shared/validation/boundaryDecoder';
 
 // Test harness for the Remote Pane PWA — the browser-served surface at
@@ -13,6 +15,20 @@ export interface RemotePwaMockOptions {
   panelTitles?: string[];
   /** Host-defined terminal shortcuts offered in the mobile input bar. */
   shortcuts?: Array<{ id: string; key: string; label: string; text: string }>;
+  /** Index of the panel the host reports as active. */
+  activePanelIndex?: number;
+  /** Orchestration Sessions the mock host reports. */
+  orchestrationSessionNames?: string[];
+}
+
+/**
+ * The mock host's mutable state. Tests change it to stand in for work done on
+ * the host (desktop, CLI or another device) while the PWA is not listening.
+ */
+export interface RemotePwaMockHost {
+  panes: MockPane[];
+  archivedPanes: MockPane[];
+  sessions: OrchestrationSessionRecord[];
 }
 
 const PROFILE = {
@@ -59,6 +75,8 @@ const baseSession = {
   archived: false,
 };
 
+type MockPane = typeof baseSession & { id: string; name: string; worktreePath: string; displayOrder: number };
+
 function buildFixtures(options: RemotePwaMockOptions) {
   const sessionNames = options.sessionNames ?? [
     'scrub Sentry request bodies',
@@ -67,7 +85,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
   ];
   const panelTitles = options.panelTitles ?? ['claude', 'shell'];
 
-  const sessions = sessionNames.map((name, index) => ({
+  const sessions: MockPane[] = sessionNames.map((name, index) => ({
     ...baseSession,
     id: `anim-remote-${index}`,
     name,
@@ -107,6 +125,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     customCommands: [
       { name: 'Codex', command: 'codex' },
     ],
+    sessionAgents: { agents: ['claude', 'codex'], defaultAgent: 'codex' },
     voiceTranscription: {
       availableModes: [],
       defaultMode: 'streaming',
@@ -121,7 +140,69 @@ function buildFixtures(options: RemotePwaMockOptions) {
     },
   };
 
-  return { project, panels, affordances };
+  const host: RemotePwaMockHost = {
+    panes: sessions,
+    archivedPanes: [],
+    sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
+  };
+
+  return { project, panels, affordances, host, activePanel: panels[options.activePanelIndex ?? 0] };
+}
+
+function buildOrchestrationSession(name: string, index: number): OrchestrationSessionRecord {
+  const id = `__orchestration_session_mock-${index}__`;
+  return {
+    id,
+    name,
+    archived: false,
+    isPinned: false,
+    agent: 'claude',
+    internalSessionId: `${id}terminal__`,
+    panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor` },
+    goal: '',
+    context: '',
+    decisions: [],
+    blockers: [],
+    nextAction: '',
+    evidence: [],
+    outputs: [],
+    associations: [],
+    activity: [],
+    revision: 1,
+    createdAt: new Date(index * 1000).toISOString(),
+    updatedAt: new Date(index * 1000).toISOString(),
+  };
+}
+
+/** The agent chat a mock Session opens on, shaped like the host's Session view. */
+function orchestrationSessionView(session: OrchestrationSessionRecord) {
+  const panel = {
+    id: session.panelIds[session.agent],
+    sessionId: session.internalSessionId,
+    type: 'terminal',
+    title: PANE_CHAT_AGENT_LABELS[session.agent],
+    state: { isActive: true, hasBeenViewed: true },
+    metadata: {
+      createdAt: session.createdAt,
+      lastActiveAt: session.createdAt,
+      position: 0,
+    },
+  };
+  return {
+    session,
+    internalSession: {
+      ...baseSession,
+      id: session.internalSessionId,
+      name: session.name,
+      worktreePath: `/Users/dev/.pane/sessions/${session.id}`,
+      isHidden: true,
+    },
+    panel,
+    agent: session.agent,
+    cwd: `/Users/dev/.pane/sessions/${session.id}`,
+    guidePath: '/Users/dev/.pane/guide.md',
+    started: true,
+  };
 }
 
 /**
@@ -132,8 +213,8 @@ function buildFixtures(options: RemotePwaMockOptions) {
 export async function openConnectedRemotePwa(
   page: Page,
   options: RemotePwaMockOptions = {},
-): Promise<void> {
-  const { project, panels, affordances } = buildFixtures(options);
+): Promise<RemotePwaMockHost> {
+  const fixtures = buildFixtures(options);
 
   await page.addInitScript((profile) => {
     window.localStorage.setItem('pane.remotePwa.savedProfiles', JSON.stringify([profile]));
@@ -189,10 +270,11 @@ export async function openConnectedRemotePwa(
     });
   }, PROFILE);
 
-  await installRemoteHostRoute(page, { project, panels, affordances });
+  await installRemoteHostRoute(page, fixtures);
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  return fixtures.host;
 }
 
 /**
@@ -243,19 +325,69 @@ async function installRemoteHostRoute(
     }
 
     // SAFETY: the test route receives the remote invoke envelope emitted by this fixture.
-    const body = JSON.parse(request.postData() ?? '{}') as { channel?: string };
+    const body = JSON.parse(request.postData() ?? '{}') as { channel?: string; args?: JsonValue[] };
+    const { host } = fixtures;
+    const args = body.args ?? [];
+    // SAFETY: the PWA sends a `{ sessionId }` selector first on every orchestration channel.
+    const sessionId = (args[0] as { sessionId?: string } | null)?.sessionId;
+    const session = host.sessions.find(candidate => candidate.id === sessionId);
+    const ownerSession = host.sessions.find(candidate => candidate.internalSessionId === args[0]);
     let result: JsonValue = null;
 
     switch (body.channel) {
       case 'sessions:get-all-with-projects':
-        result = [fixtures.project];
+        result = [{ ...fixtures.project, sessions: host.panes }];
+        break;
+      case 'sessions:get-archived-with-projects':
+        result = host.archivedPanes.length > 0 ? [{ ...fixtures.project, sessions: host.archivedPanes }] : [];
+        break;
+      case 'sessions:delete':
+        host.archivedPanes.push(...host.panes.filter(pane => pane.id === args[0]));
+        host.panes = host.panes.filter(pane => pane.id !== args[0]);
+        break;
+      case 'sessions:toggle-favorite':
+        for (const pane of host.panes) {
+          if (pane.id !== args[0]) continue;
+          pane.isFavorite = !pane.isFavorite;
+          result = { isFavorite: pane.isFavorite, favoritePinnedAt: new Date().toISOString() };
+        }
+        break;
+      case 'sessions:restore':
+        host.panes.push(...host.archivedPanes.filter(pane => pane.id === args[0]));
+        host.archivedPanes = host.archivedPanes.filter(pane => pane.id !== args[0]);
         break;
       case 'panels:list':
-        result = fixtures.panels;
+        result = ownerSession ? [orchestrationSessionView(ownerSession).panel] : fixtures.panels;
         break;
       case 'panels:getActive':
-        result = fixtures.panels[0];
+        result = ownerSession ? orchestrationSessionView(ownerSession).panel : fixtures.activePanel;
         break;
+      case 'orchestration-sessions:list':
+        result = { success: true, data: { sessions: host.sessions } };
+        break;
+      case 'orchestration-sessions:get':
+        result = session
+          ? { success: true, data: orchestrationSessionView(session) }
+          : { success: false, error: 'Session not found' };
+        break;
+      case 'orchestration-sessions:create': {
+        // SAFETY: the create sheet sends an OrchestrationSessionCreateInput.
+        const input = args[0] as { name: string; agent?: 'claude' | 'codex' | 'cursor' };
+        const created = { ...buildOrchestrationSession(input.name, host.sessions.length + 10), agent: input.agent ?? 'claude' };
+        host.sessions.push(created);
+        result = { success: true, data: orchestrationSessionView(created) };
+        break;
+      }
+      case 'orchestration-sessions:update': {
+        if (!session) {
+          result = { success: false, error: 'Session not found' };
+          break;
+        }
+        // SAFETY: the PWA sends an OrchestrationSessionUpdateInput second.
+        Object.assign(session, args[1] as Partial<OrchestrationSessionRecord>, { updatedAt: new Date().toISOString() });
+        result = { success: true, data: session };
+        break;
+      }
       case 'remote:pwa-affordances':
         result = fixtures.affordances;
         break;

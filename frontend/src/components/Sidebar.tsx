@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BarChart3, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -25,7 +25,9 @@ import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkey
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
-import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
+import { getRemoteFooterStatus, getRemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { RemoteHostSwitcher } from './RemoteHostSwitcher';
+import { useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -69,6 +71,7 @@ interface SidebarProps {
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
+  onManageRemoteConnectionsClick: () => void;
   width: number;
   onResize: (e: React.MouseEvent) => void;
   collapsed?: boolean;
@@ -95,7 +98,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
+export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -190,6 +193,39 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     </div>
   );
   const showRemoteDesktopLink = remoteConnectionState.mode === 'remote' && remoteConnectionState.status === 'connected';
+  const remoteProfiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
+  const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  // Profiles live in the config store; a host imported or connected outside
+  // Settings shows up here once the connection it caused is pushed.
+  useEffect(() => {
+    void fetchConfig().catch(() => undefined);
+  }, [fetchConfig, remoteConnectionState.mode, remoteConnectionState.activeProfileId]);
+  const remoteHostSwitcher = useMemo(
+    () => getRemoteHostSwitcherModel(remoteConnectionState, remoteHostState, remoteProfiles ?? []),
+    [remoteConnectionState, remoteHostState, remoteProfiles],
+  );
+  const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
+    <RemoteHostSwitcher
+      trigger={trigger}
+      position={position}
+      model={remoteHostSwitcher}
+      profiles={remoteProfiles ?? []}
+      connectionState={remoteConnectionState}
+      onManageConnections={onManageRemoteConnectionsClick}
+      onOpenHosting={onRemoteSettingsClick}
+    />
+  );
+  const railRemoteDot = (
+    <button
+      type="button"
+      data-compact-rail-item
+      onClick={remoteHostSwitcher.visible ? undefined : onRemoteSettingsClick}
+      aria-label={remoteFooterStatus.ariaLabel}
+      className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+    >
+      <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />
+    </button>
+  );
   const handleOpenRemoteDesktop = useCallback(() => {
     void window.electronAPI.openExternal(REMOTE_DESKTOP_URL).catch(error => {
       console.error('Failed to open Remote Desktop:', error);
@@ -206,7 +242,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToProject = useNavigationStore((state) => state.navigateToProject);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
-  const navigateToUsage = useNavigationStore((state) => state.navigateToUsage);
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
@@ -304,6 +339,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
   const sidebarMenuItems = [
         {
+          id: 'home',
+          label: 'Home',
+          icon: Home,
+          onClick: () => {
+            setSidebarNavigationScope('repositories');
+            void setActiveSession(null);
+            navigateToSessions();
+          }
+        },
+        {
           id: 'help',
           label: 'Help',
           icon: HelpCircleIcon,
@@ -331,6 +376,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           id: 'remote',
           label: 'Remote',
           description: remoteFooterStatus.title,
+          descriptionInTooltip: true,
           icon: Monitor,
           showDot: true,
           dotColor: remoteFooterStatus.dotClassName,
@@ -356,15 +402,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         },
         {
           id: 'about',
-          label: version ? `About Pane · v${version}` : 'About Pane',
-          description: [worktreeName, gitCommit].filter(Boolean).join(' · ') || undefined,
+          label: 'About Pane',
+          description: [version ? `v${version}` : undefined, worktreeName, gitCommit].filter(Boolean).join(' · ') || undefined,
+          descriptionInTooltip: true,
           icon: Info,
           onClick: onAboutClick
         }
   ] satisfies DropdownItem[];
 
-  // Title-strip controls (portalled into the window title bar when it has a
-  // slot; rendered inline by each layout otherwise).
+  // The sidebar toggle and remote host chip stay beside the window controls; the menu lives in
+  // the sidebar footer so tabs can use the title strip.
   const headerControls = (
     <>
       {onToggleCollapse && (
@@ -378,19 +425,20 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           />
         </Tooltip>
       )}
-      <Dropdown
-        trigger={
-          <IconButton
-            type="button"
-            aria-label="Sidebar menu"
-            size="sm"
-            icon={<MoreHorizontal className="w-4 h-4" />}
-          />
-        }
-        items={sidebarMenuItems}
-        position="bottom-left"
-        width="sm"
-      />
+      {!collapsed && remoteHostSwitcher.visible && renderRemoteHostSwitcher(
+        <button
+          type="button"
+          aria-label={`Agents run on ${remoteHostSwitcher.label}. Switch host`}
+          className="ml-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-2 pr-1.5 text-[12px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+        >
+          {remoteHostSwitcher.dotClassName
+            ? <span className={`h-2 w-2 shrink-0 rounded-full ${remoteHostSwitcher.dotClassName}`} />
+            : <Laptop className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />}
+          <span className="truncate">{remoteHostSwitcher.label}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
+        </button>,
+        'bottom-left',
+      )}
     </>
   );
 
@@ -399,7 +447,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       <>
         <div
           data-testid="sidebar"
-          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-primary text-text-primary h-full flex flex-col flex-shrink-0"
+          className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
           {titleBarControlsSlot && createPortal(headerControls, titleBarControlsSlot)}
@@ -442,22 +490,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
-
-            <Tooltip content="Usage & Limits" side="right">
-              <button
-                type="button"
-                data-testid="compact-usage"
-                data-compact-rail-item
-                onClick={() => {
-                  setSidebarNavigationScope('repositories');
-                  navigateToUsage();
-                }}
-                aria-label="Usage and Limits"
-                className={`${COMPACT_RAIL_BUTTON} ${activeView === 'usage' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
-              >
-                <BarChart3 className="h-4 w-4" />
-              </button>
-            </Tooltip>
 
             {showRemoteDesktopLink && (
               <Tooltip content={REMOTE_DESKTOP_TOOLTIP} side="right">
@@ -529,14 +561,14 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </div>
             )}
 
-            <div role="group" aria-label="Repositories" className="flex w-full shrink-0 flex-col items-center gap-0.5">
-              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} repositories`} side="right">
+            <div role="group" aria-label="Projects" className="flex w-full shrink-0 flex-col items-center gap-0.5">
+              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`} side="right">
                 <button
                   type="button"
                   data-testid="compact-repositories-toggle"
                   data-compact-rail-item
                   onClick={() => handleRepositoriesSectionExpandedChange(!sidebarSectionExpansion.repositories)}
-                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} repositories`}
+                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`}
                   aria-expanded={sidebarSectionExpansion.repositories}
                   className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
                 >
@@ -628,15 +660,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           {/* Bottom actions */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
-              <button
-                type="button"
-                data-compact-rail-item
-                onClick={onRemoteSettingsClick}
-                aria-label={remoteFooterStatus.ariaLabel}
-                className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-              >
-                <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />
-              </button>
+              {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
             </Tooltip>
             <Tooltip content={hotkeyDisplay('open-settings') ? <Kbd>{hotkeyDisplay('open-settings')}</Kbd> : undefined} side="right">
               <button
@@ -649,22 +673,22 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 <SettingsIcon className="h-4 w-4" />
               </button>
             </Tooltip>
+            <Dropdown
+              trigger={
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  aria-label="Sidebar menu"
+                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              }
+              items={sidebarMenuItems}
+              position="top-right"
+              width="sm"
+            />
             {!titleBarControlsSlot && (<>
-              <Dropdown
-                trigger={
-                  <button
-                    type="button"
-                    data-compact-rail-item
-                    aria-label="Sidebar menu"
-                    className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                }
-                items={sidebarMenuItems}
-                position="top-right"
-                width="sm"
-              />
               <Tooltip content={hotkeyDisplay('toggle-sidebar') ? <Kbd>{hotkeyDisplay('toggle-sidebar')}</Kbd> : undefined} side="right">
                 <button
                   type="button"
@@ -703,7 +727,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     <>
       <div
         data-testid="sidebar"
-        className="pane-sidebar-shell bg-surface-primary text-text-primary h-full flex flex-col relative flex-shrink-0"
+        className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: `${width}px` }}
       >
         {/* Resize handle */}
@@ -719,10 +743,19 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         {titleBarControlsSlot
           ? createPortal(headerControls, titleBarControlsSlot)
           : (
-            <div className="flex h-8 items-center justify-end gap-0.5 border-b border-border-primary px-1.5">
+            <div className="flex h-8 items-center justify-end gap-0.5 px-1.5">
               {headerControls}
             </div>
           )}
+
+        <button
+          type="button"
+          onClick={() => addRepositoryRef.current?.()}
+          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary"
+        >
+          <Plus className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>New project</span>
+        </button>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
           <ProjectSessionList
@@ -746,16 +779,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <ArchivedSessions />
         </div>
 
-        {/* Primary creation plus quiet utility actions. */}
-        <div className="flex h-12 flex-shrink-0 items-center gap-1 border-t border-border-primary pl-2 pr-2">
-          <button
-            type="button"
-            onClick={() => addRepositoryRef.current?.()}
-            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            <Plus className="h-4 w-4 flex-shrink-0" />
-            <span className="truncate">Add repository</span>
-          </button>
+        {/* Home opens the footer menu, with navigation and account actions together. */}
+        <div className="flex h-12 flex-shrink-0 items-center gap-1 px-2">
+          <Dropdown
+            trigger={
+              <button
+                type="button"
+                aria-label="Home menu"
+                className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary"
+              >
+                <Home className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-left">Home</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+              </button>
+            }
+            items={sidebarMenuItems}
+            position="top-left"
+            width="sm"
+            className="min-w-0 flex-1"
+          />
           <button
             type="button"
             onClick={onFeedbackClick}

@@ -37,7 +37,7 @@ test('sidebar footer keeps utility controls reachable at minimum width', async (
 
   const sidebarBounds = await page.getByTestId('sidebar').boundingBox();
   if (!sidebarBounds) throw new Error('Sidebar has no visible bounds');
-  for (const name of ['Add repository', 'Feedback', 'Discord', 'Settings']) {
+  for (const name of ['New project', 'Feedback', 'Discord', 'Settings']) {
     const button = page.getByRole('button', { name, exact: true }).first();
     await expect(button).toBeVisible();
     const buttonBounds = await button.boundingBox();

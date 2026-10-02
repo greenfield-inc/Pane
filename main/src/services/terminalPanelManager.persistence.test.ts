@@ -15,6 +15,10 @@ import { databaseService } from './database';
 import { panelManager as panelManagerMock } from '../test/setup';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import { MAX_RESTORE_PAYLOAD_SIZE, TerminalPanelManager } from './terminalPanelManager';
+import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { getAppDirectory } from '../utils/appDirectory';
+import { sessionWorkspacePath } from './sessionWorkspace';
+import { windowsPathToWSLMount } from '../utils/wslUtils';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -144,9 +148,9 @@ describe('terminal panel persistence', () => {
     }
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const manager of managers) {
-      for (const panelId of manager.getActiveTerminals()) manager.destroyTerminal(panelId);
+      for (const panelId of manager.getActiveTerminals()) await manager.destroyTerminal(panelId);
     }
     panelManagerMock.updatePanel.mockReset();
     panelManagerMock.getPanel.mockReset();
@@ -154,7 +158,7 @@ describe('terminal panel persistence', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  async function startTerminal(panel: ToolPanel): Promise<{ manager: TerminalPanelManager; handle: FakePtyHandle }> {
+  async function startTerminal(panel: ToolPanel, visible = true): Promise<{ manager: TerminalPanelManager; handle: FakePtyHandle }> {
     const manager = new TerminalPanelManager(inProcessEmulatorHost);
     managers.push(manager);
     panelManagerMock.getPanel.mockReturnValue(panel);
@@ -162,8 +166,167 @@ describe('terminal panel persistence', () => {
       databaseService.createPanel({ id: panel.id, sessionId: panel.sessionId, type: 'terminal', title: panel.title, state: panel.state });
     }
     await manager.initializeTerminal(panel, tempDir);
+    if (visible) manager.setVisibility(panel.id, true);
     return { manager, handle: ptyHost.latest() };
   }
+
+  it('streams an unviewed terminal without pausing, then applies backpressure while viewed', async () => {
+    vi.useFakeTimers();
+    try {
+      const pause = vi.spyOn(ptyHost, 'pause');
+      const resume = vi.spyOn(ptyHost, 'resume');
+      const panel = makePanel('unviewed-flow-control');
+      const { manager, handle } = await startTerminal(panel, false);
+      for (let i = 0; i < 12; i++) {
+        handle.emit('x'.repeat(10_000));
+        await vi.advanceTimersByTimeAsync(300);
+      }
+      expect(pause).not.toHaveBeenCalled();
+
+      manager.setVisibility(panel.id, true, 'remote:active');
+      manager.setVisibility(panel.id, true, 'remote:silent');
+      handle.emit('x'.repeat(100_000));
+      await vi.advanceTimersByTimeAsync(32);
+      expect(pause).toHaveBeenCalledTimes(1);
+      manager.acknowledgeBytes(panel.id, 100_000);
+      expect(resume).toHaveBeenCalledTimes(1);
+
+      handle.emit('x'.repeat(100_000));
+      await vi.advanceTimersByTimeAsync(32);
+      expect(pause).toHaveBeenCalledTimes(2);
+      manager.clearVisibilityViewersByPrefix('remote');
+      expect(resume).toHaveBeenCalledTimes(2);
+      handle.emit('x'.repeat(100_000));
+      await vi.advanceTimersByTimeAsync(300);
+      expect(pause).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a registered viewer across a PTY host respawn', async () => {
+    const panel = makePanel('viewed-respawn-flow-control');
+    const { manager } = await startTerminal(panel);
+    await manager.respawnAll();
+    ptyHost.latest().emit('viewer still receives output');
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({
+        channel: 'terminal:output',
+        args: [{ sessionId: panel.sessionId, panelId: panel.id, output: 'viewer still receives output' }],
+      });
+    });
+  });
+
+  it.each([false, true])('reconciles visibility during respawn (previously visible: %s)', async (wasVisible) => {
+    const panel = makePanel(`visibility-during-respawn-${wasVisible}`);
+    const { manager } = await startTerminal(panel, wasVisible);
+    const spawn = ptyHost.spawn.bind(ptyHost);
+    let releaseSpawn!: () => void;
+    const gate = new Promise<void>(resolve => { releaseSpawn = resolve; });
+    vi.spyOn(ptyHost, 'spawn').mockImplementationOnce(async opts => {
+      await gate;
+      return spawn(opts);
+    });
+    const restart = manager.respawnAll();
+    manager.setVisibility(panel.id, !wasVisible);
+    releaseSpawn();
+    await restart;
+
+    // Large enough to flush immediately at either cadence.
+    const output = 'x'.repeat(150_000);
+    ptyHost.latest().emit(output);
+    expect(events.filter(event => event.channel === 'terminal:output')).toHaveLength(wasVisible ? 0 : 1);
+    manager.acknowledgeBytes(panel.id, output.length);
+  });
+
+  it('launches and respawns a saved WSL Session inside its distro with Linux cwd and role environment', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const panel = makePanel('wsl-session-panel');
+    panel.state.customState = { orchestrationSessionId: 'wsl-session' };
+    const store = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'));
+    store.write({ version: 1, sessions: [{
+      id: 'wsl-session', name: 'WSL Session', runtime: 'wsl', wslDistribution: 'Ubuntu', agent: 'codex',
+      internalSessionId: panel.sessionId, panelIds: { codex: panel.id, claude: 'claude', cursor: 'cursor' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01',
+    }] });
+    try {
+      const { manager } = await startTerminal(panel);
+      const first = spawn.mock.calls[0][0];
+      expect(first.shell).toBe('wsl.exe');
+      expect(first.args.slice(0, 3)).toEqual(['-d', 'Ubuntu', '--exec']);
+      expect(first.args.at(-1)).toContain(windowsPathToWSLMount(sessionWorkspacePath('wsl-session')));
+      expect(first.env.PANE_ORCHESTRATION_SESSION_ID).toBe('wsl-session');
+      expect(first.env.WSLENV).toContain('GIT_CEILING_DIRECTORIES');
+      expect(first.env.GIT_CEILING_DIRECTORIES).not.toMatch(/^[A-Z]:/i);
+      await manager.respawnAll();
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(spawn.mock.calls[1][0].args).toEqual(first.args);
+    } finally {
+      vi.restoreAllMocks();
+      store.write({ version: 1, sessions: [] });
+    }
+  });
+
+  it.each([
+    { agentType: 'claude', initialCommand: 'claude --dangerously-skip-permissions', agentSessionId: '22222222-2222-4222-8222-222222222222', expected: 'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"' },
+    { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', expected: 'codex --yolo resume "thread-1"' },
+    { agentType: 'cursor', initialCommand: 'cursor-agent --force --trust', agentSessionId: 'chat-1', expected: 'cursor-agent --force --trust --resume "chat-1"' },
+  ] as const)('launches and stages an adopted $agentType conversation through the same resolver', async ({ expected, ...identity }) => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel(`adopt-${identity.agentType}`);
+      panel.state.customState = { ...identity, hasClaudeSessionId: identity.agentType === 'claude' };
+      const { manager, handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handle.written).toContain(`${expected}\r`);
+      handle.written.length = 0;
+      await manager.stageInitialCommand(panel.id, identity.initialCommand);
+      expect(handle.written).toEqual([expected]);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel('explicit-adopt-claude');
+      panel.state.customState = {
+        agentType: 'claude', agentSessionId: 'session$1', hasClaudeSessionId: true,
+        initialCommand: 'claude --dangerously-skip-permissions',
+      };
+      const { handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handle.written).toContain('claude --dangerously-skip-permissions --resume "session\\$1"\r');
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not append a second resume argument to an existing adopted Cursor command', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel('legacy-adopt-cursor');
+      panel.state.customState = {
+        agentType: 'cursor', agentSessionId: 'chat-1', wasInterrupted: true,
+        initialCommand: 'cursor-agent --force --trust --resume "chat-1"',
+      };
+      const { handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handle.written).toContain('cursor-agent --force --trust --resume "chat-1"\r');
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
 
   it('streams 50 MB of newline-free alternate-screen frames without growing the persisted state', async () => {
     const panel = makePanel('panel-frames');
@@ -230,7 +393,7 @@ describe('terminal panel persistence', () => {
     // routes the same write into panel_buffers.
     expect(lastPersisted).not.toBeNull();
     expect(databaseService.updatePanel(panel.id, { state: lastPersisted ?? { isActive: false } })).toBe(true);
-    first.destroyTerminal(panel.id);
+    await first.destroyTerminal(panel.id);
 
     const second = new TerminalPanelManager(inProcessEmulatorHost);
     managers.push(second);

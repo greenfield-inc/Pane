@@ -69,7 +69,7 @@ for (const fullscreen of [false, true]) {
           return invoke(channel, ...args);
         };
       }, fullscreen);
-      await page.getByRole('button', { name: 'Expand repository Terminal input fixture', exact: true }).click();
+      await page.getByRole('button', { name: 'Expand project Terminal input fixture', exact: true }).click();
       await page.getByRole('button', { name: session.name, exact: true }).click();
       const terminal = page.getByRole('tabpanel');
       const input = terminal.locator('.xterm-helper-textarea').first();

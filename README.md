@@ -121,7 +121,7 @@ Each of these is a small thing. Together they compound fast.
 |---|---|---|
 | **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, loads local Pane orchestration skills, and can coordinate Claude, Codex, or Cursor across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
-| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, and open follow-up panes for issues or tasks. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) |
+| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, and open follow-up panes for issues or tasks. Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
@@ -148,22 +148,33 @@ The easiest setup path is in the app:
 4. On another desktop, open Pane, go to `Settings > Remote Pane`, paste the code, and connect.
 5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
 
-For a headless VM or server, use `runpane`:
+For a headless VM or server, run the guided setup in its terminal:
 
 ```bash
-npx --yes runpane@latest install daemon --label "My Server"
+npx --yes runpane@latest
+```
+
+Choose **Set up a remote host**, give it a name, and follow the
+Tailscale login prompts. Paste the printed connection code into Pane or
+[runpane.com/app](https://runpane.com/app/) on another device signed into the same
+Tailscale network.
+
+To skip the menu and run interactive remote setup directly:
+
+```bash
+npx --yes runpane@latest install daemon --interactive-tailscale-setup --auto-listen-port
 ```
 
 pnpm:
 
 ```bash
-pnpm dlx runpane@latest install daemon --label "My Server"
+pnpm dlx runpane@latest
 ```
 
 Python tools:
 
 ```bash
-pipx run runpane install daemon --label "My Server"
+pipx run runpane
 ```
 
 Use SSH instead of Tailscale:
@@ -228,7 +239,11 @@ runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick
 
 `runpane agent-context` is token-efficient by default and prints only command names, arguments, and safe usage notes. Agents can lazy-load full details for a specific command with `runpane agent-context --command "panes create" --json`.
 
-Pane can also manage a short `AGENTS.md` block in saved repositories so agent CLIs know the developer is using Pane and can discover the CLI contract without bloating their context.
+Pane also registers a `pane` MCP server with Claude Code, Codex, and Cursor, so agents in every repository can get these commands as tools. Cursor may ask you to approve the server. The default core toolset covers the common jobs in one call each: start an agent on a task, check on it, and send it a follow-up. It also has git status, docs search, and `pane://` links that open a Pane in the app. You can turn this off, or register every tool, in Settings → AI & Agents. Other MCP clients (VS Code and any stdio client) can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
+
+Pane teaches agents about RunPane without editing your repositories. It installs a small Pane-managed `pane` skill in your home skill folders (`~/.claude/skills/pane`, or under `CLAUDE_CONFIG_DIR`, and `~/.agents/skills/pane`), including saved WSL distros on Windows. The skill is marked `<!-- pane-managed-skill v1 -->`. Pane never overwrites or removes a skill it did not write, and **Settings → AI & Agents → Install Pane skill for agents** removes it again.
+
+Publishing a Pane section into each repository's `AGENTS.md` is still available under **Settings → AI & Agents → Publish Pane instructions to AGENTS.md**, but it is off by default because it edits files in your repositories. Upgrading turns it off once and removes only Pane's marked section; turning it back on afterward sticks.
 
 See [Runpane CLI Contract](docs/RUNPANE_CLI_CONTRACT.md) for the full schema and automation examples.
 
@@ -276,7 +291,11 @@ npx --yes runpane@latest
 ```
 
 The wizard can install Pane on this machine, configure this machine as a remote
-host, update Pane, or run diagnostics.
+host, update Pane, or run diagnostics. For remote access, choose **Set up a remote
+host**, accept or enter a name, and follow the Tailscale login
+prompts. Copy the connection code into Pane on your other device or
+[runpane.com/app](https://runpane.com/app/). Sign that device into the same
+Tailscale network first. No tunnel flags are needed in the wizard.
 
 ### Package Manager Commands
 

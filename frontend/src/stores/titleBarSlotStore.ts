@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 
 /**
- * Mount points inside the window title strip. WindowTitleBar registers them;
- * chrome that belongs on the title plane (the sidebar toggle on the left, the
- * Run / inspector controls on the right) portals into them. Null when the
- * platform keeps its native title bar.
+ * The mount point for global controls (Run, inspector, Session settings) at
+ * the right end of the window title bar. WindowTitleBar registers it; views
+ * portal their controls into it. Null when the platform keeps its native
+ * title bar, in which case views render those controls in their own toolbar.
  */
 interface TitleBarSlotState {
   trailingSlot: HTMLDivElement | null;

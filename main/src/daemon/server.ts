@@ -29,6 +29,8 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'git-status-loading',
   'git-status-updated',
   'logs:output',
+  'pane:focus-requested',
+  'pane:open-link',
   'permission:request',
   'permission:resolved',
   'process:ended',

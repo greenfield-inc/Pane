@@ -80,7 +80,7 @@ export const Toggle: React.FC<ToggleProps> = ({
               : 'bg-interactive/20 text-interactive border border-interactive/30'
             : 'bg-surface-secondary text-text-secondary border border-border-primary hover:bg-surface-hover',
           disabled && 'opacity-50 cursor-not-allowed',
-          !disabled && 'cursor-pointer',
+          !disabled && 'cursor-default',
           className
         )}
       >
@@ -105,7 +105,7 @@ export const Toggle: React.FC<ToggleProps> = ({
         sizes.container,
         isPressed ? 'bg-interactive' : 'bg-surface-secondary border border-border-primary',
         disabled && 'opacity-50 cursor-not-allowed',
-        !disabled && 'cursor-pointer',
+        !disabled && 'cursor-default',
         className
       )}
     >

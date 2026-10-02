@@ -43,6 +43,9 @@ classifier (used by terminalPanelManager, sessionManager, and shutdown marking).
 - Widen `TerminalPanelState['agentType']` in `shared/types/panels.ts`.
 - Add the id to `CLI_AGENT_TYPES` and a token-boundary regex to
   `AGENT_COMMAND_PATTERNS` (order matters when one binary name contains another).
+- The same executable map identifies the agent from the foreground process when
+  it is launched through a wrapper. See
+  [Agents launched through a wrapper](./IMPLEMENTING_NEW_CLI_AGENTS.md#agents-launched-through-a-wrapper).
 
 ## 3. Launch/resume branches
 

@@ -11,6 +11,7 @@ export const PANE_AGENT_CONTEXT_START = '<!-- pane-agent-context:start -->';
 export const PANE_AGENT_CONTEXT_END = '<!-- pane-agent-context:end -->';
 
 const AGENTS_FILENAMES = ['AGENTS.md', 'agents.md'] as const;
+let settingQueue: Promise<void> = Promise.resolve();
 
 export interface AgentContextWriteResult {
   changed: boolean;
@@ -23,13 +24,11 @@ export async function ensureProjectAgentContext(
   project: Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>,
   config: Pick<AppConfig, 'agentContext'>,
 ): Promise<AgentContextWriteResult> {
-  const root = resolveProjectRoot(project);
-  const enabled = config.agentContext?.managedAgentsMd !== false;
-
-  if (!enabled) {
-    return removeProjectAgentContext(root);
+  if (config.agentContext?.managedAgentsMd !== true) {
+    return { changed: false, skipped: 'disabled' };
   }
 
+  const root = resolveProjectRoot(project);
   const filePath = await resolveAgentsFilePath(root);
   if (!filePath) {
     return { changed: false, skipped: 'unsafe-file' };
@@ -44,6 +43,42 @@ export async function ensureProjectAgentContext(
 
   await writeFileNoFollow(filePath, next);
   return { changed: true, filePath };
+}
+
+/**
+ * Apply the repository AGENTS.md setting. Off removes Pane's marked section
+ * from every known project; on publishes it to the active project. Used by the
+ * settings toggle and by the startup migration that turned it off.
+ */
+export function applyManagedAgentsMdSetting<P extends Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>>(
+  config: Pick<AppConfig, 'agentContext'>,
+  projects: { all: () => P[]; active: () => P | null | undefined },
+): Promise<boolean> {
+  const result = settingQueue.then(() => applyManagedAgentsMdSettingNow(config, projects));
+  settingQueue = result.then(() => {}, () => {});
+  return result;
+}
+
+async function applyManagedAgentsMdSettingNow<P extends Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>>(
+  config: Pick<AppConfig, 'agentContext'>,
+  projects: { all: () => P[]; active: () => P | null | undefined },
+): Promise<boolean> {
+  const active = projects.active();
+  const targets = config.agentContext?.managedAgentsMd === true ? (active ? [active] : []) : projects.all();
+  let succeeded = true;
+  for (const project of targets) {
+    try {
+      if (config.agentContext?.managedAgentsMd === true) {
+        await ensureProjectAgentContext(project, config);
+      } else {
+        await removeProjectAgentContext(resolveProjectRoot(project));
+      }
+    } catch (error) {
+      succeeded = false;
+      console.warn('[AgentContext] Failed to update Pane agent context for project:', project.path, error);
+    }
+  }
+  return succeeded;
 }
 
 function renderManagedAgentContextBlock(): string {
@@ -86,6 +121,9 @@ function removeManagedBlock(existing: string): string {
 }
 
 async function removeProjectAgentContext(root: string): Promise<AgentContextWriteResult> {
+  if (!(await fs.stat(root)).isDirectory()) {
+    throw new Error(`Project root is not a directory: ${root}`);
+  }
   const { filePath } = await findExistingAgentsFile(root);
   if (!filePath) {
     return { changed: false, skipped: 'disabled' };

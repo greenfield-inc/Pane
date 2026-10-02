@@ -1,41 +1,42 @@
-import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useEffect, useState, type CSSProperties } from 'react';
-
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import type { Project } from '../types/project';
 import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
 import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
 import { Badge } from './ui/Badge';
 
-// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits the vendor property.
-const TITLE_BAR_STYLE = { height: 38, WebkitAppRegion: 'drag' } as CSSProperties;
-// Breathing room between the window controls and the title, on both sides.
-const GUTTER_PX = 8;
+const GUTTER = 8;
+const SIDEBAR_EDGE = 'var(--border-hairline) solid var(--color-border-primary)';
+// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits it.
+// The bottom hairline is an inset shadow rather than a border so it does not
+// take a pixel from the 38px row: controls stay centered on whole pixels.
+const TITLE_BAR_STYLE = {
+  height: 38,
+  WebkitAppRegion: 'drag',
+  boxShadow: 'inset 0 calc(-1 * var(--border-hairline)) 0 var(--color-border-primary)',
+} as CSSProperties;
 // Traffic lights sit at x=10 with ~70px of width (see `trafficLightPosition` in
-// main/src/index.ts); padding both sides equally keeps the title centered on the
-// window while clearing them.
+// main/src/index.ts); equal padding on both sides clears them and keeps the
+// title centered on the window.
 const MAC_INSET_STYLE: CSSProperties = { paddingLeft: 88, paddingRight: 88 };
-// Windows and Linux put the controls on the right, and on the left under an RTL
-// system layout, so the inset cannot be symmetric or hardcoded. `titlebar-area-x`
-// is where the page's share of the strip starts and `titlebar-area-width` how far
-// it runs, both in CSS pixels, so the leftover on the far side is everything the
-// two do not cover. Chromium recomputes them on DPI, RTL and maximise changes,
-// which is why the numbers never appear here.
-//
-// The `100%` resolves against this element's containing block — the full-width
-// `pane-app-shell` column in App.tsx — which is the same coordinate space the
-// env() values are reported in.
-//
-// With the env() fallbacks — the shape a window that somehow lost the overlay
-// would compute — this collapses to a symmetric gutter rather than to nothing.
-// `max()` keeps a mis-reported rect from producing a negative padding, which CSS
-// would drop on the floor.
+// Windows and Linux report the page's share of the strip through the Window
+// Controls Overlay env() values; the far side is whatever they do not cover.
 const OVERLAY_INSET_STYLE: CSSProperties = {
-  paddingLeft: `calc(env(titlebar-area-x, 0px) + ${GUTTER_PX}px)`,
-  paddingRight: `max(${GUTTER_PX}px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER_PX}px))`,
+  paddingLeft: `calc(env(titlebar-area-x, 0px) + ${GUTTER}px)`,
+  paddingRight: `max(${GUTTER}px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER}px))`,
 };
+const MAC_CONTROLS_LEFT: CSSProperties = { left: 80 + GUTTER };
+const OVERLAY_CONTROLS_LEFT: CSSProperties = { left: `calc(env(titlebar-area-x, 0px) + ${GUTTER}px)` };
+const MAC_CONTROLS_RIGHT: CSSProperties = { right: GUTTER };
+const OVERLAY_CONTROLS_RIGHT: CSSProperties = {
+  right: `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER}px)`,
+};
+// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits it.
+const NO_DRAG = { WebkitAppRegion: 'no-drag' } as CSSProperties;
 // An rtl line box overflows at its left edge, so the ellipsis lands on the head
 // and the end of a long pane name ("… (TM-622)") survives. The inner ltr embed
 // keeps the name itself a single left-to-right run — without it, trailing
@@ -77,30 +78,18 @@ function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
 
 interface WindowTitleBarProps {
   projects: Project[];
-  /**
-   * Receives the element that app-level controls (the sidebar toggle and its
-   * menu) portal into. The slot sits beside the window controls and is the one
-   * `no-drag` island in the strip; everything else keeps dragging.
-   */
+  sidebarWidth: number;
+  sidebarCollapsed: boolean;
   controlsSlotRef?: (element: HTMLDivElement | null) => void;
 }
 
-// SAFETY: Electron supports WebkitAppRegion although React's CSSProperties omits the vendor property.
-const CONTROLS_SLOT_STYLE = { WebkitAppRegion: 'no-drag' } as CSSProperties;
-// Traffic lights end around x=80; keep the shared gutter before app controls.
-const MAC_CONTROLS_LEFT: CSSProperties = { left: 80 + GUTTER_PX };
-const OVERLAY_CONTROLS_LEFT: CSSProperties = { left: `calc(env(titlebar-area-x, 0px) + ${GUTTER_PX}px)` };
-// The trailing slot hugs the end of the page's share of the strip: the window
-// edge on macOS, the overlay's caption buttons on Windows and Linux.
-const MAC_CONTROLS_RIGHT: CSSProperties = { right: GUTTER_PX };
-const OVERLAY_CONTROLS_RIGHT: CSSProperties = {
-  right: `calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%) + ${GUTTER_PX}px)`,
-};
-
 /**
- * The title bar strip above the tool tabs: a window drag region that also names
- * the pane you are looking at. Passive text only — no pointer handlers, so the
- * whole strip keeps dragging and double-click-to-zoom.
+ * The window's title bar: its own row above the sidebar and every tab strip,
+ * the way VS Code lays out its window. It carries the window drag region, the
+ * sidebar controls on the left, global controls (Run, inspector, Session
+ * settings) on the right, and the name of the pane or Session you are looking
+ * at in the middle. Tabs never share this row, so every tab strip — including
+ * each group's strip in a split — starts at the same height below it.
  *
  * It renders wherever the app owns the title bar: macOS via `hiddenInset`, and
  * Windows and Linux via the Window Controls Overlay. A Linux desktop that failed
@@ -108,57 +97,57 @@ const OVERLAY_CONTROLS_RIGHT: CSSProperties = {
  * is `document.title`, which this also owns, that carries the pane name. That is
  * true on every platform for the taskbar and task switcher.
  */
-export function WindowTitleBar({ projects, controlsSlotRef }: WindowTitleBarProps) {
-  const setTrailingSlot = useTitleBarSlotStore((state) => state.setTrailingSlot);
+export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, controlsSlotRef }: WindowTitleBarProps) {
+  const setTrailingSlot = useTitleBarSlotStore(state => state.setTrailingSlot);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
-    if (state.activeMainRepoSession?.id === state.activeSessionId) {
-      return state.activeMainRepoSession;
-    }
+    if (state.activeMainRepoSession?.id === state.activeSessionId) return state.activeMainRepoSession;
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
-
-  // Project dashboard and Pane Chat are not panes; leave the bar empty there.
-  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) : null;
+  const orchestrationName = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId)?.name);
+  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects)
+    : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
 
   // Runs before the platform gate below: naming the window is the part of this
   // that a native-framed Windows or Linux window still uses.
   useEffect(() => {
     document.title = windowTitle;
-    return () => {
-      document.title = APP_WINDOW_TITLE;
-    };
+    return () => { document.title = APP_WINDOW_TITLE; };
   }, [windowTitle]);
 
-  const pills = title ? resolvePaneStatusPills(activeSession) : [];
+  // Status pills describe a pane's branch and PR; a Session has neither.
+  const pills = activeView === 'sessions' && title ? resolvePaneStatusPills(activeSession) : [];
   const arrived = useArrivedKeys(activeSession?.id ?? null, pills.map(pill => pill.key));
 
-  // macOS owns the strip through `hiddenInset`; Windows and Linux own it when
-  // main enabled the overlay. Deliberately not gated on
-  // `navigator.windowControlsOverlay.visible`: that reads false in plenty of
-  // contexts the API is merely present in, and this element carries the window's
-  // only drag region once the native title bar is gone. It stays put in
-  // fullscreen for the same reason the macOS strip always has.
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
 
   return (
     <div
-      className="relative flex-shrink-0 flex items-center justify-center overflow-hidden bg-surface-primary select-none"
+      className="pane-window-title-bar relative flex flex-shrink-0 items-center justify-center overflow-hidden bg-bg-chrome select-none"
       style={{ ...TITLE_BAR_STYLE, ...(isMac() ? MAC_INSET_STYLE : OVERLAY_INSET_STYLE) }}
       data-testid="window-title-bar"
     >
+      {/* Over the sidebar the bar takes the sidebar's own colour and edge and
+          drops its bottom hairline, so the sidebar runs to the top of the
+          window, as in VS Code. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 left-0 bg-surface-secondary transition-[width] duration-reveal ease-out-strong"
+        style={{ width: sidebarCollapsed ? 48 : sidebarWidth, borderRight: SIDEBAR_EDGE }}
+        data-testid="window-title-bar-sidebar-segment"
+      />
       <div
         ref={controlsSlotRef}
-        className="absolute top-0 bottom-0 flex items-center gap-0.5"
-        style={{ ...CONTROLS_SLOT_STYLE, ...(isMac() ? MAC_CONTROLS_LEFT : OVERLAY_CONTROLS_LEFT) }}
+        className="absolute inset-y-0 flex items-center gap-0.5"
+        style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_LEFT : OVERLAY_CONTROLS_LEFT) }}
         data-testid="window-title-bar-controls"
       />
       <div
         ref={setTrailingSlot}
-        className="absolute top-0 bottom-0 flex items-center gap-0.5"
-        style={{ ...CONTROLS_SLOT_STYLE, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
+        className="absolute inset-y-0 flex items-center gap-0.5"
+        style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
       />
       {title && (

@@ -32,7 +32,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
       />
 
       <ModalBody>
-          <div className="space-y-6">
+          <div className="select-text space-y-6">
             <div>
               <h3 className="text-sm font-medium text-text-tertiary mb-2">Error Message</h3>
               <Card variant="bordered" padding="sm" className="bg-status-error/10 border-status-error/30">

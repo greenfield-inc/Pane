@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
-import { PaneCommandRegistry, type PaneCommandValue } from './commandRegistry';
+import { PaneCommandRegistry, isRemotePaneCommand, type PaneCommandValue } from './commandRegistry';
 
 describe('PaneCommandRegistry', () => {
+  it('keeps remote provenance through async handlers without affecting concurrent local calls', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('panels:origin', async () => {
+      await Promise.resolve();
+      return isRemotePaneCommand();
+    });
+    expect(await Promise.all([
+      registry.invokeRemote('panels:origin'), registry.invoke('panels:origin'),
+    ])).toEqual([true, false]);
+  });
   it('registers and invokes daemon-owned commands', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('folders:get-by-project', async (projectId: number) => ({ projectId }));

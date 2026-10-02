@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../../../shared/types/customCommandResume';
 import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { Button } from '../../ui/Button';
@@ -7,16 +8,18 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
-import type { PaneChatAgent } from '../../../../../shared/types/paneChat';
+import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
+import { SessionLaunchFields } from '../../SessionLaunchFields';
+import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
 
-const PANE_CHAT_AGENT_LABELS = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-} satisfies Record<PaneChatAgent, string>;
-
 const paneChatAgentOptions = visibleAgentPresets().map(({ id }) => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
+
+type McpToolsetChoice = 'core' | 'all';
+const mcpToolsetOptions: { id: McpToolsetChoice; label: string }[] = [
+  { id: 'core', label: 'Core' },
+  { id: 'all', label: 'All' },
+];
 
 interface AIAgentsSettingsProps {
   persistence: SettingsPersistence;
@@ -25,7 +28,16 @@ interface AIAgentsSettingsProps {
 export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSettingsProps) {
   const config = persistence.config!;
   const [claudePath, setClaudePath] = useState(config.claudeExecutablePath ?? '');
-  const dirty = claudePath !== (config.claudeExecutablePath ?? '');
+  const [sessionResume, setSessionResume] = useState<CustomCommandResume | null>(config.defaultSessionResume ?? null);
+  const [sessionCommand, setSessionCommand] = useState(config.defaultSessionCommand ?? '');
+  const [sessionProfile, setSessionProfile] = useState(config.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
+  const claudeDirty = claudePath !== (config.claudeExecutablePath ?? '');
+  const sessionDirty = JSON.stringify(sessionResume) !== JSON.stringify(config.defaultSessionResume ?? null) || sessionCommand !== (config.defaultSessionCommand ?? '') || sessionProfile !== (config.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE);
+  const dirty = claudeDirty || sessionDirty;
+
+  useEffect(() => setSessionResume(config.defaultSessionResume ?? null), [config.defaultSessionResume]);
+  useEffect(() => setSessionCommand(config.defaultSessionCommand ?? ''), [config.defaultSessionCommand]);
+  useEffect(() => setSessionProfile(config.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE), [config.defaultSessionProfile]);
 
   useEffect(() => setClaudePath(config.claudeExecutablePath ?? ''), [config.claudeExecutablePath]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
@@ -33,7 +45,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
 
   const applyClaudePath = async () => {
     const saved = await persistence.saveConfig('claude-executable', { claudeExecutablePath: claudePath.trim() });
-    if (saved) onDirtyChange(false);
+    if (saved) onDirtyChange(sessionDirty);
   };
 
   return (
@@ -54,16 +66,70 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
           />
         </SettingRow>
         <SettingRow
+          settingId="mcp-registration"
+          label="Register Pane tools with Claude Code, Codex, and Cursor"
+          description="Adds a pane MCP server to your user-level Claude Code, Codex, and Cursor configs, so agents in every repository can list, create, and drive Panes. The same setting installs an on-demand user skill for all three clients. Turning this off removes Pane-managed entries and skills."
+          saveState={persistence.saveStates['mcp-registration']}
+        >
+          <ImmediateToggle
+            label="Register Pane tools with Claude Code, Codex, and Cursor"
+            value={config.agentContext?.registerMcp !== false}
+            onSave={(value) => persistence.saveConfig('mcp-registration', { agentContext: { registerMcp: value } })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="mcp-toolsets"
+          label="Pane tools to register"
+          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, and links. All adds every Pane command, which can make smaller models pick tools less accurately."
+          saveState={persistence.saveStates['mcp-toolsets']}
+        >
+          <SegmentedControl<McpToolsetChoice>
+            label="Pane tools to register"
+            value={config.agentContext?.mcpToolsets?.includes('all') ? 'all' : 'core'}
+            options={mcpToolsetOptions}
+            onChange={(value) => void persistence.saveConfig('mcp-toolsets', { agentContext: { mcpToolsets: [value] } })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="agent-skill"
+          label="Install Pane skill for agents"
+          description="Adds a Pane-managed skill to your home skill folders (~/.claude/skills and ~/.agents/skills) so agents in Pane terminals know how to use RunPane. Pane never touches skills it did not create; turning this off removes its skill."
+          saveState={persistence.saveStates['agent-skill']}
+        >
+          <ImmediateToggle
+            label="Install Pane skill for agents"
+            value={config.agentContext?.homeSkill !== false}
+            onSave={(value) => persistence.saveConfig('agent-skill', { agentContext: { homeSkill: value } })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="agent-context"
           label="Publish Pane instructions to AGENTS.md"
-          description="Adds a managed block to active repositories so coding agents can discover RunPane commands."
+          description="Edits files in your repositories: adds a marked Pane section to the AGENTS.md at each active repository's root, creating the file if needed. Off by default; turning it off removes only Pane's section."
           saveState={persistence.saveStates['agent-context']}
         >
           <ImmediateToggle
             label="Publish Pane instructions to AGENTS.md"
-            value={config.agentContext?.managedAgentsMd !== false}
+            value={config.agentContext?.managedAgentsMd === true}
             onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
           />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Session defaults">
+        <SettingRow
+          settingId="session-defaults"
+          label="Launch command and behavior"
+          description="Used for new Sessions. Existing Sessions keep their saved settings."
+          saveState={persistence.saveStates['session-defaults']}
+          align="start"
+        >
+          <div className="w-full space-y-3 sm:max-w-xl">
+            <SessionLaunchFields resume={sessionResume} onResumeChange={setSessionResume} command={sessionCommand} profile={sessionProfile} customCommands={config.customCommands} onCommandChange={setSessionCommand} onProfileChange={setSessionProfile} />
+            <div className="flex justify-end">
+              <Button type="button" size="sm" disabled={!sessionDirty} onClick={() => void persistence.saveConfig('session-defaults', { defaultSessionCommand: sessionCommand, defaultSessionResume: sessionResume, defaultSessionProfile: sessionProfile })}>Apply Session defaults</Button>
+            </div>
+          </div>
         </SettingRow>
       </SettingsSection>
 
@@ -103,7 +169,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
               </Button>
             </div>
             <div className="flex justify-end">
-              <Button type="button" size="sm" disabled={!dirty} onClick={applyClaudePath}>Apply</Button>
+              <Button type="button" size="sm" disabled={!claudeDirty} onClick={applyClaudePath}>Apply</Button>
             </div>
           </div>
         </SettingRow>

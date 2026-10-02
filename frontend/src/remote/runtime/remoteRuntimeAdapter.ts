@@ -1,3 +1,10 @@
+import type {
+  OrchestrationSessionCreateInput,
+  OrchestrationSessionListResult,
+  OrchestrationSessionRecord,
+  OrchestrationSessionUpdateInput,
+  OrchestrationSessionView,
+} from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { RemoteDaemonEventEnvelope, RemotePaneConnectionProfile, RemotePwaAffordances } from '../../../../shared/types/remoteDaemon';
 import type {
@@ -125,6 +132,34 @@ export class RemoteRuntimeAdapter {
 
   archiveSession(sessionId: string): Promise<void> {
     return this.invoke<void>('sessions:delete', [sessionId]);
+  }
+
+  getArchivedProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {
+    return this.invoke<RemoteProjectWithSessions[]>('sessions:get-archived-with-projects');
+  }
+
+  restoreSession(sessionId: string): Promise<void> {
+    return this.invoke<void>('sessions:restore', [sessionId]);
+  }
+
+  listOrchestrationSessions(): Promise<OrchestrationSessionListResult> {
+    return this.invoke<OrchestrationSessionListResult>('orchestration-sessions:list');
+  }
+
+  /**
+   * Returns the Session's workspace and agent panel, starting them if needed. It
+   * leaves the host's selected Session alone so a phone never moves the desktop.
+   */
+  openOrchestrationSession(sessionId: string): Promise<OrchestrationSessionView<Session>> {
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }]);
+  }
+
+  createOrchestrationSession(input: OrchestrationSessionCreateInput): Promise<OrchestrationSessionView<Session>> {
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input]);
+  }
+
+  updateOrchestrationSession(sessionId: string, input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> {
+    return this.invoke<OrchestrationSessionRecord>('orchestration-sessions:update', [{ sessionId }, input]);
   }
 
   listProjectBranches(projectId: number): Promise<RemoteBranchInfo[]> {

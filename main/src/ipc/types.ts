@@ -6,6 +6,7 @@ import type { SpotlightManager } from '../services/spotlightManager';
 import type { WorkspaceJournal } from '../services/workspaceJournal';
 import type { WorkspaceStateReader } from '../services/workspaceStateReader';
 import type { WorkspaceCursorStore } from '../services/workspaceCursorStore';
+import type { NamedLockService } from '../services/namedLockService';
 
 export interface DaemonHostServices extends CoreServices {
   taskQueue: TaskQueue | null;
@@ -15,6 +16,7 @@ export interface DaemonHostServices extends CoreServices {
   workspaceJournal?: WorkspaceJournal;
   workspaceStateReader?: WorkspaceStateReader;
   workspaceCursorStore?: WorkspaceCursorStore;
+  namedLockService?: NamedLockService;
 }
 
 export interface AppServices extends DaemonHostServices {

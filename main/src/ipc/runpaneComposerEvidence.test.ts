@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessComposerEvidence, isSlashCommandInput } from './runpaneComposerEvidence';
+import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 
 const stagedText = '/do TM-x';
 
@@ -13,6 +13,22 @@ describe('isSlashCommandInput', () => {
     ['ordinary prose', false],
   ])('classifies %j as %s', (input, expected) => {
     expect(isSlashCommandInput(input)).toBe(expected);
+  });
+});
+
+describe('looksLikePendingComposer', () => {
+  const rule = '─'.repeat(40);
+
+  it.each([
+    ['a Claude paste marker in the composer', `${rule}\n❯ [Pasted text #1 +14 lines]\n${rule}\n  ⏵⏵ bypass permissions on`, true],
+    ['a Codex paste marker in the composer', '• Ran tests\n› [Pasted Content 2048 chars]\n  ctrl+enter to submit', true],
+    ['the Codex Ctrl+Enter hint under the composer', '› deploy it\n  Press Ctrl+Enter to submit', true],
+    ['a composer-less screen ending in a paste marker', 'loading…\n[Pasted Content +5 lines]', true],
+    ['an earlier pasted turn above an empty Claude composer', `❯ [Pasted text #1 +14 lines]\n⏺ PASTED\n${rule}\n❯\n${rule}`, false],
+    ['an earlier pasted turn far above a composer-less screen', '[Pasted text #2 +3 lines]\none\ntwo\nthree\nfour', false],
+    ['ordinary output', 'normal output without markers\n[Some other bracket]', false],
+  ])('%s → %s', (_label, text, expected) => {
+    expect(looksLikePendingComposer(text)).toBe(expected);
   });
 });
 

@@ -11,6 +11,7 @@ describe('RemoteTerminalEmulator', () => {
     await vi.waitFor(() => expect(emulator.state).toEqual({
       screenText: 'working',
       inputScreenText: 'working',
+      ghostScreenText: '',
       isAlternateScreen: true,
       oscTitle: 'agent title',
       oscProgress: '',

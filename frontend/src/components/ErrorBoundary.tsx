@@ -58,13 +58,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
             {/* Error details */}
             {this.state.error && (
-              <div className="bg-surface-secondary border border-border-primary rounded-lg p-4 mb-6 text-left">
+              <div className="select-text bg-surface-secondary border border-border-primary rounded-lg p-4 mb-6 text-left">
                 <p className="font-mono text-sm text-status-error mb-2">
                   {this.state.error.message}
                 </p>
                 {process.env.NODE_ENV === 'development' && this.state.error.stack && (
                   <details className="text-xs text-text-muted mt-2">
-                    <summary className="cursor-pointer hover:text-text-secondary">
+                    <summary className="cursor-default hover:text-text-secondary">
                       Stack trace (dev only)
                     </summary>
                     <pre className="mt-2 overflow-x-auto whitespace-pre-wrap">

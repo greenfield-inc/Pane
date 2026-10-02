@@ -22,6 +22,19 @@ function entry(kind: RunpaneWorkspaceEntryKind, atMs: number, overrides: Partial
 const kinds = (entries: RunpaneWorkspaceEntry[]) => entries.map(item => item.kind);
 
 describe('WatchCadence', () => {
+  it('flushes a worker report at once, with the lines the interval was holding', () => {
+    const cadence = new WatchCadence({
+      settleMs: 0, blockedSettleMs: 0, minIntervalMs: 600_000, emitKinds: ['agent.ready', 'agent.report'], key: '',
+    });
+    cadence.ingest([entry('agent.ready', T0, { panelId: 'panel-2' })], T0);
+    expect(kinds(cadence.flush(T0))).toEqual(['agent.ready']);
+    cadence.ingest([entry('agent.ready', T0 + 10_000, { panelId: 'panel-3' })], T0 + 10_000);
+    expect(cadence.flush(T0 + 10_000)).toEqual([]);
+    cadence.ingest([entry('agent.report', T0 + 20_000, { report: { state: 'ready', reportedAt: 'T' } })], T0 + 20_000);
+    expect(cadence.nextDeadline(T0 + 20_000)).toBe(T0 + 20_000);
+    expect(kinds(cadence.flush(T0 + 20_000))).toEqual(['agent.ready', 'agent.report']);
+  });
+
   it('cancels a READY silently when the panel goes busy inside the settle window', () => {
     const cadence = new WatchCadence({ settleMs: 120_000, blockedSettleMs: 0, minIntervalMs: 0, emitKinds: ['agent.ready'], key: '' });
     cadence.ingest([entry('agent.ready', T0)], T0);
@@ -63,6 +76,20 @@ describe('WatchCadence', () => {
     expect(cadence.nextDeadline(T0 + 20_000)).toBe(T0 + 35_000);
     expect(cadence.flush(T0 + 34_999)).toEqual([]);
     expect(kinds(cadence.flush(T0 + 35_000))).toEqual(['agent.ready', 'agent.blocked']);
+  });
+
+  it('lets a conflicting PR or failed checks bypass the minimum interval, but not passed checks or a merge', () => {
+    const cadence = new WatchCadence({ settleMs: 0, blockedSettleMs: 0, minIntervalMs: 300_000, key: '' });
+    const pr = { panelId: undefined, agentType: undefined, source: 'github' as const, pr: { number: 7, url: 'u', headOid: 'h' } };
+    cadence.ingest([entry('agent.ready', T0)], T0);
+    expect(kinds(cadence.flush(T0))).toEqual(['agent.ready']);
+    cadence.ingest([entry('pr.checks', T0 + 1_000, { ...pr, checks: 'passed' }), entry('pr.merged', T0 + 1_000, pr)], T0 + 1_000);
+    expect(cadence.flush(T0 + 1_000)).toEqual([]);
+    cadence.ingest([entry('pr.checks', T0 + 2_000, { ...pr, checks: 'failed', failingChecks: ['lint'] })], T0 + 2_000);
+    expect(kinds(cadence.flush(T0 + 2_000))).toEqual(['pr.checks', 'pr.merged', 'pr.checks']);
+    cadence.ingest([entry('pr.conflicted', T0 + 3_000, pr)], T0 + 3_000);
+    expect(cadence.nextDeadline(T0 + 3_000)).toBe(T0 + 3_000);
+    expect(kinds(cadence.flush(T0 + 3_000))).toEqual(['pr.conflicted']);
   });
 
   it('batches non-urgent lines into one flush per interval', () => {
