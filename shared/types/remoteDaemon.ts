@@ -1,3 +1,4 @@
+import type { PaneChatAgent } from './paneChat';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundarySchema, JsonObject, JsonValue } from '../validation/boundaryDecoder';
@@ -276,10 +277,18 @@ export interface RemotePwaVoiceTranscriptionAffordance {
   modes: Record<VoiceTranscriptionMode, RemotePwaVoiceModePresentation>;
 }
 
+export interface RemotePwaSessionAgents {
+  /** Agents a new Session can run on this host, in picker order. */
+  agents: PaneChatAgent[];
+  defaultAgent: PaneChatAgent;
+}
+
 export interface RemotePwaAffordances {
   terminalShortcuts: RemotePwaTerminalShortcut[];
   customCommands: RemotePwaCustomCommand[];
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
+  /** Hosts older than the PWA's Sessions support omit this. */
+  sessionAgents?: RemotePwaSessionAgents;
 }
 
 export interface RemotePaneConnectionState {
