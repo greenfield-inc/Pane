@@ -90,7 +90,7 @@
     "anim:evidence:render": "node scripts/render-anim-evidence.mjs",
     "typecheck": "pnpm run -r typecheck",
     "postinstall": "electron-builder install-app-deps",
-    "electron:rebuild": "pnpm exec electron-rebuild -f -w better-sqlite3-multiple-ciphers -m ./main",
+    "electron:rebuild": "pnpm exec electron-rebuild --force --only better-sqlite3-multiple-ciphers --module-dir ./main",
     "setup": "pnpm install && pnpm run electron:rebuild && pnpm run build:main",
     "generate-notices": "node scripts/generate-notices.js",
     "generate-icons": "node tools/generate-icons.js",
