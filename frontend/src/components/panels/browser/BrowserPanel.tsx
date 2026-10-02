@@ -35,6 +35,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const panelIdRef = useRef(panel.id);
   const remoteFileRef = useRef<boolean | null>(null);
   const lastNavigationUrlRef = useRef(currentUrlFromPanelState);
+  const sourceUrlRef = useRef('');
 
   // Ask main before mounting a file webview: remote host paths must never be
   // loaded from this computer, even briefly while connection state is fetched.
@@ -83,6 +84,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
       const savedState = panel.state.customState as BrowserPanelState | undefined;
       if (savedState?.currentUrl) {
+        sourceUrlRef.current = savedState.currentUrl;
         setUrl(savedState.currentUrl);
         setInputUrl(savedState.currentUrl);
       }
@@ -130,6 +132,17 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     }
     setUrlError('');
     setIsLoading(true);
+    const webview = webviewRef.current;
+    if (webview && sourceUrlRef.current === normalized && lastNavigationUrlRef.current !== normalized) {
+      // Following a link changes the guest URL without changing its src attribute.
+      // An explicit return to that src still needs a navigation request.
+      try {
+        void webview.loadURL(normalized).catch(() => setUrlError('Unable to load this page'));
+      } catch {
+        // Before dom-ready, the initial src load is already targeting this URL.
+      }
+    }
+    sourceUrlRef.current = normalized;
     setUrl(normalized);
     setInputUrl(normalized);
     persistState(normalized);
