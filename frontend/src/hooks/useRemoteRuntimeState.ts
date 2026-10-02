@@ -14,6 +14,8 @@ export function useRemoteRuntimeState() {
 
   useEffect(() => {
     let cancelled = false;
+    let connectionUpdated = false;
+    let hostUpdated = false;
 
     const fetchRemoteState = async () => {
       try {
@@ -22,10 +24,10 @@ export function useRemoteRuntimeState() {
           API.remoteDaemon.getHostState(),
         ]);
 
-        if (!cancelled && connectionResponse.success && connectionResponse.data) {
+        if (!cancelled && !connectionUpdated && connectionResponse.success && connectionResponse.data) {
           setConnectionState(connectionResponse.data);
         }
-        if (!cancelled && hostResponse.success && hostResponse.data) {
+        if (!cancelled && !hostUpdated && hostResponse.success && hostResponse.data) {
           setHostState(hostResponse.data);
         }
       } catch (error) {
@@ -33,8 +35,14 @@ export function useRemoteRuntimeState() {
       }
     };
 
-    const unsubscribeConnectionState = API.remoteDaemon.onConnectionStateChanged(setConnectionState);
-    const unsubscribeHostState = API.remoteDaemon.onHostStateChanged(setHostState);
+    const unsubscribeConnectionState = API.remoteDaemon.onConnectionStateChanged(state => {
+      connectionUpdated = true;
+      setConnectionState(state);
+    });
+    const unsubscribeHostState = API.remoteDaemon.onHostStateChanged(state => {
+      hostUpdated = true;
+      setHostState(state);
+    });
     void fetchRemoteState();
 
     return () => {

@@ -46,7 +46,9 @@ export function setupEventListeners(services: AppServices): void {
     orchestrationSessionManager,
   } = services;
 
-  orchestrationSessionManager?.on('changed', (change: { sessionId: string; kind: string; selectionChanged?: boolean }) => {
+  // The daemon's workspace journal also reads this event: associate/detach carry paneIds and become
+  // pane.associated/pane.detached entries.
+  orchestrationSessionManager?.on('changed', (change: { sessionId: string; kind: string; selectionChanged?: boolean; sessionName?: string; paneIds?: string[] }) => {
     sendRendererEvent('orchestration-sessions:changed', change);
   });
   orchestrationSessionManager?.on('overview-updated', (change: { panelId: string; state: string }) => {

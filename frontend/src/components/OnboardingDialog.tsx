@@ -393,7 +393,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
                       )}
                     </div>
                   )}
-                  <label className="flex items-center gap-2 cursor-pointer w-fit">
+                  <label className="flex items-center gap-2 cursor-default w-fit">
                     <input
                       type="checkbox"
                       checked={shouldSupportOnSetup}

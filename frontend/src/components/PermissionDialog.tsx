@@ -92,7 +92,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ request, onR
       const description = getStringValue(input, 'description');
       
       return (
-        <div className="bg-surface-secondary p-3 rounded font-mono text-sm border border-border-primary">
+        <div className="select-text bg-surface-secondary p-3 rounded font-mono text-sm border border-border-primary">
           <div className="text-text-tertiary text-xs mb-1">Command:</div>
           <div className="text-text-primary">{command || 'No command specified'}</div>
           {description && (
@@ -110,7 +110,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ request, onR
       const content = getStringValue(input, 'content');
       
       return (
-        <div className="bg-surface-secondary p-3 rounded font-mono text-sm border border-border-primary">
+        <div className="select-text bg-surface-secondary p-3 rounded font-mono text-sm border border-border-primary">
           <div className="text-text-tertiary text-xs mb-1">File Path:</div>
           <div className="text-text-primary">{filePath || 'No path specified'}</div>
           {content && (
@@ -127,7 +127,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ request, onR
     
     // Default JSON view
     return (
-      <div className="bg-surface-secondary p-3 rounded font-mono text-sm border border-border-primary">
+      <div className="select-text bg-surface-secondary p-3 rounded font-mono text-sm border border-border-primary">
         <pre className="text-text-primary overflow-x-auto">{JSON.stringify(input, null, 2)}</pre>
       </div>
     );

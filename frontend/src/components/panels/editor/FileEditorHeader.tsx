@@ -40,7 +40,7 @@ export function FileEditorHeader({
           </button>
         )}
         <File className="w-4 h-4 text-text-tertiary" />
-        <span className="min-w-0 truncate text-sm text-text-primary">
+        <span className="select-text min-w-0 truncate text-sm text-text-primary">
           {filePath}
           {hasUnsavedChanges && <span className="text-status-warning ml-2">●</span>}
         </span>

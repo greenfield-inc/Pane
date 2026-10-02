@@ -14,29 +14,23 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { PreferredShell, PreferredTerminalPowerMode } from '../../../types/config';
-
-interface AvailableShell {
-  id: PreferredShell;
-  name: string;
-  path: string;
-}
+import { useHostShellSettings } from '../../../hooks/useHostShellSettings';
 
 interface TerminalSettingsProps {
   persistence: SettingsPersistence;
-  platform: string;
-  availableShells: AvailableShell[];
   systemMonoFonts: string[];
 }
 
-export function TerminalSettings({ persistence, platform, availableShells, systemMonoFonts }: TerminalSettingsProps) {
+export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSettingsProps) {
   const config = persistence.config!;
   const saveTerminalLineCount = (value: number) => {
     // SAFETY: SegmentedControl values are generated from the four supported line-count literals below.
     return persistence.savePreference('atTerminalLineCount', value as 100 | 300 | 500 | -1);
   };
+  const hostShell = useHostShellSettings();
   const savePreferredShell = (value: string) => {
     // SAFETY: Select options use only PreferredShell identifiers supplied by the backend.
-    return persistence.saveConfig('terminal-shell', { preferredShell: value as PreferredShell });
+    return persistence.runSave('terminal-shell', () => hostShell.setPreferredShell(value as PreferredShell));
   };
   const [customFont, setCustomFont] = useState(config.terminalFontFamily ?? 'Geist Mono');
   useEffect(() => setCustomFont(config.terminalFontFamily ?? 'Geist Mono'), [config.terminalFontFamily]);
@@ -155,7 +149,7 @@ export function TerminalSettings({ persistence, platform, availableShells, syste
         </SettingRow>
       </SettingsSection>
 
-      {platform === 'win32' && (
+      {hostShell.shells.length > 0 && (
         <SettingsSection title="Windows shell">
           <SettingRow
             settingId="terminal-shell"
@@ -165,13 +159,13 @@ export function TerminalSettings({ persistence, platform, availableShells, syste
           >
             <div className="w-full min-w-[220px] sm:w-72">
               <Select
-                value={config.preferredShell ?? 'auto'}
+                value={hostShell.preferredShell}
                 onValueChange={(value) => void savePreferredShell(value)}
               >
                 <SelectTrigger aria-label="Default Windows terminal shell"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">Auto-detect (Git Bash preferred)</SelectItem>
-                  {availableShells.map((shell) => <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>)}
+                  {hostShell.shells.map((shell) => <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

@@ -29,6 +29,7 @@ function createRecord(overrides: Partial<OrchestrationSessionRecord> = {}): Orch
     id: 'session-1',
     name: 'Release review',
     agent: 'claude',
+    runtime: 'windows',
     internalSessionId: '__orchestration_session_release__',
     panelIds: {
       claude: '__orchestration_panel_release_claude',
@@ -66,6 +67,19 @@ function createData(record = createRecord()): OrchestrationSessionStoreData {
 }
 
 describe('OrchestrationSessionStore', () => {
+  it('defaults old records to Windows and preserves a WSL runtime across reloads', () => {
+    const filePath = createStorePath();
+    const legacy = createData();
+    delete legacy.sessions[0].runtime;
+    fs.writeFileSync(filePath, JSON.stringify(legacy));
+    const store = new OrchestrationSessionStore(filePath);
+    expect(store.read().sessions[0].runtime).toBe('windows');
+    store.write(createData(createRecord({ runtime: 'wsl', wslDistribution: 'Ubuntu' })));
+    expect(new OrchestrationSessionStore(filePath).read().sessions[0]).toMatchObject({
+      runtime: 'wsl', wslDistribution: 'Ubuntu',
+    });
+    expect(() => store.write(createData(createRecord({ runtime: 'wsl' })))).toThrow('distribution');
+  });
   it('persists validated records through a private atomic file', () => {
     const filePath = createStorePath();
     const store = new OrchestrationSessionStore(filePath);

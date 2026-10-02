@@ -2,14 +2,18 @@ import { IpcMain } from 'electron';
 import { execFile } from 'child_process';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
-import type { PaneCommandRegistry } from '../daemon/commandRegistry';
-import type { RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import type { RemotePwaAffordances, RemotePwaSessionAgents } from '../../../shared/types/remoteDaemon';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
-import { ensureProjectAgentContext } from '../services/agentContextManager';
+import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
+import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
+import { isPaneHomeSkillEnabled, syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { AppearanceValidationError } from '../../../shared/types/appearance';
+import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
+import { normalizePaneChatAgent, type PaneChatAgent } from '../../../shared/types/paneChat';
 
 export function registerConfigHandlers(
   ipcMain: IpcMain,
@@ -32,9 +36,22 @@ export function registerConfigHandlers(
           command: command.command,
         })),
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
+        sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
       };
     });
     commandRegistry.bindChannel(ipcMain, 'remote:pwa-affordances');
+
+    // Terminals spawn on the active host, so a remote client reads and sets the host's shell.
+    commandRegistry.register('terminal:get-shell-settings', () => ({
+      shells: ShellDetector.getAvailableShells(),
+      preferredShell: configManager.getConfig().preferredShell ?? 'auto',
+    }));
+    commandRegistry.register('terminal:set-preferred-shell', async (shell: PaneCommandValue) => {
+      await configManager.updateConfig({
+        preferredShell: decodeBoundary(shell, boundary.enumeration('auto', 'gitbash', 'powershell', 'pwsh', 'cmd')),
+      });
+    });
+    commandRegistry.bindChannels(ipcMain, ['terminal:get-shell-settings', 'terminal:set-preferred-shell']);
   }
 
   ipcMain.handle('config:get', async (): Promise<{ success: boolean; data?: AppConfig; error?: string }> => {
@@ -56,8 +73,18 @@ export function registerConfigHandlers(
                                updates.claudeExecutablePath !== oldConfig.claudeExecutablePath;
       const managedAgentsMdChanged = updates.agentContext?.managedAgentsMd !== undefined
         && updates.agentContext.managedAgentsMd !== oldConfig.agentContext?.managedAgentsMd;
+      const registerMcpChanged = (updates.agentContext?.registerMcp !== undefined
+        && updates.agentContext.registerMcp !== (oldConfig.agentContext?.registerMcp !== false))
+        || (updates.agentContext?.mcpToolsets !== undefined
+          && updates.agentContext.mcpToolsets.join(',') !== (oldConfig.agentContext?.mcpToolsets ?? []).join(','));
+      const homeSkillChanged = updates.agentContext?.homeSkill !== undefined
+        && updates.agentContext.homeSkill !== isPaneHomeSkillEnabled(oldConfig);
 
-      const updatedConfig = await configManager.updateConfig(updates);
+      let updatedConfig = await configManager.updateConfig(
+        managedAgentsMdChanged && updates.agentContext?.managedAgentsMd === false
+          ? { ...updates, agentContext: { ...updates.agentContext, cleanupPending: true } }
+          : updates,
+      );
 
       if (updates.autoStartOnBoot !== undefined) {
         syncAutoStartOnBoot(app, updates.autoStartOnBoot !== false);
@@ -70,19 +97,28 @@ export function registerConfigHandlers(
       }
 
       if (managedAgentsMdChanged) {
-        const nextConfig = configManager.getConfig();
-        const activeProject = sessionManager.getActiveProject();
-        const projects = nextConfig.agentContext?.managedAgentsMd === false
-          ? databaseService.getAllProjects()
-          : activeProject ? [activeProject] : [];
-
-        for (const project of projects) {
-          try {
-            await ensureProjectAgentContext(project, nextConfig);
-          } catch (error) {
-            console.warn('[Config] Failed to update Pane agent context after setting change:', error);
-          }
+        const cleanupSucceeded = await applyManagedAgentsMdSetting(configManager.getConfig(), {
+          all: () => databaseService.getAllProjects(),
+          active: () => sessionManager.getActiveProject(),
+        });
+        if (updates.agentContext?.managedAgentsMd === false && cleanupSucceeded) {
+          updatedConfig = await configManager.updateConfig({ agentContext: { cleanupPending: false } });
         }
+      }
+
+      if (homeSkillChanged) {
+        const distros = databaseService.getAllProjects()
+          .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []);
+        await syncPaneHomeSkill(configManager.getConfig(), undefined, distros)
+          .catch(error => console.warn('[Config] Failed to update the Pane home skill after setting change:', error));
+      }
+
+      if (registerMcpChanged) {
+        syncPaneMcpForApp({
+          isPackaged: app.isPackaged,
+          config: configManager.getConfig(),
+          getProjects: () => databaseService.getAllProjects(),
+        });
       }
 
       // Apply UI scale live
@@ -133,17 +169,6 @@ export function registerConfigHandlers(
     } catch (error) {
       console.error('Failed to update session creation preferences:', error);
       return { success: false, error: 'Failed to update session creation preferences' };
-    }
-  });
-
-  ipcMain.handle('config:get-available-shells', async () => {
-    try {
-      const shells = ShellDetector.getAvailableShells();
-      return { success: true, data: shells };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to get available shells';
-      console.error('Failed to get available shells:', error);
-      return { success: false, error: message };
     }
   });
 
@@ -245,6 +270,12 @@ export function registerConfigHandlers(
       return { success: false, data: [] };
     }
   });
+}
+
+function buildRemotePwaSessionAgents(configuredAgent: PaneChatAgent | undefined): RemotePwaSessionAgents {
+  const agents = agentPresetsForPlatform(process.platform).map(preset => preset.id);
+  const preferred = normalizePaneChatAgent(configuredAgent);
+  return { agents, defaultAgent: agents.includes(preferred) ? preferred : agents[0] ?? preferred };
 }
 
 function buildRemotePwaVoiceAffordance(config: AppConfig): RemotePwaAffordances['voiceTranscription'] {

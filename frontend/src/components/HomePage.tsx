@@ -14,13 +14,15 @@ import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
 import { getThemeLabel, themeOptionsForSlot } from '../utils/themeOptions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
+import type { PreferredShell } from '../types/config';
+import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
 
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
 const actionCardClassName =
-  'flex min-h-[9.2rem] min-w-0 w-full flex-col items-center justify-center gap-3 rounded-xl bg-surface-secondary p-6 text-center transition-colors hover:bg-surface-hover cursor-pointer';
+  'flex min-h-[9.2rem] min-w-0 w-full flex-col items-center justify-center gap-3 rounded-xl bg-surface-secondary p-6 text-center transition-colors hover:bg-surface-hover cursor-default';
 
 const paneAscii = String.raw`
 ░█████████                                    
@@ -238,9 +240,7 @@ export function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
-  const [platform, setPlatform] = useState<string>('');
-  const [availableShells, setAvailableShells] = useState<Array<{ id: string; name: string; path: string }>>([]);
-  const [preferredShell, setPreferredShell] = useState<string>('auto');
+  const { shells: availableShells, preferredShell, setPreferredShell } = useHostShellSettings();
 
   const uiScale = config?.uiScale ?? 1.0;
 
@@ -255,27 +255,6 @@ export function HomePage() {
       // Ignore transient IPC failures on home page
     }
   }, []);
-
-  useEffect(() => {
-    void window.electronAPI
-      .getPlatform()
-      .then(async currentPlatform => {
-        setPlatform(currentPlatform);
-        if (currentPlatform === 'win32') {
-          const shellsResponse = await API.config.getAvailableShells();
-          if (shellsResponse.success) {
-            setAvailableShells(shellsResponse.data);
-          }
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (config?.preferredShell) {
-      setPreferredShell(config.preferredShell);
-    }
-  }, [config?.preferredShell]);
 
   useEffect(() => {
     void loadProjects();
@@ -315,16 +294,12 @@ export function HomePage() {
     }
   };
 
-  const handleShellChange = async (shell: string) => {
-    setPreferredShell(shell);
-    await updateConfig({
-      // SAFETY: The value comes from the adjacent finite domain definition.
-      preferredShell: shell as 'auto' | 'gitbash' | 'powershell' | 'pwsh' | 'cmd',
-    }).catch(() => {});
+  const handleShellChange = async (shell: PreferredShell) => {
+    await setPreferredShell(shell).catch(() => {});
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-bg-primary px-8 py-10">
+    <div className="relative flex-1 overflow-y-auto bg-bg-primary px-8 py-10">
       <div className="flex min-h-full items-center">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
           <DiscordBanner />
@@ -377,7 +352,7 @@ export function HomePage() {
                 trigger={
                   <button
                     type="button"
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
+                    className="flex cursor-default items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
                   >
                     <span>{getThemeLabel(theme)}</span>
                     <ChevronDown className="w-3 h-3 text-text-tertiary" />
@@ -432,7 +407,7 @@ export function HomePage() {
               />
             </div>
 
-            {platform === 'win32' && (
+            {availableShells.length > 0 && (
               <div className="flex items-center justify-between rounded-lg bg-surface-secondary p-4">
                 <div className="flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-text-secondary" />
@@ -442,7 +417,7 @@ export function HomePage() {
                   trigger={
                     <button
                       type="button"
-                      className="flex cursor-pointer items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
+                      className="flex cursor-default items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
                     >
                       <span>
                         {preferredShell === 'auto'

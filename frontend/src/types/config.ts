@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
@@ -13,6 +14,7 @@ export interface TerminalShortcut {
 }
 
 interface CustomCommand {
+  resume?: CustomCommandResume | null;
   name: string;
   command: string;
 }
@@ -121,9 +123,20 @@ export interface AppConfig {
   // made through Pane (enabled by default). Applies to newly spawned terminals
   // and commands only — already-running processes keep their launch-time env.
   gitAttributionEnabled?: boolean;
-  // Agent-facing Pane context in repository instructions files
+  // Agent-facing Pane context
   agentContext?: {
-    managedAgentsMd: boolean;
+    /** Write a marked Pane section into repository AGENTS.md files (off by default; edits the repo). */
+    managedAgentsMd?: boolean;
+    /** Register Pane's MCP server with the user-level Claude Code, Codex, and Cursor configs. */
+    registerMcp?: boolean;
+    /** Toolsets the registered server serves (`runpane mcp --toolsets`); core when absent. */
+    mcpToolsets?: string[];
+    /** Install Pane's managed skill in the user's home skill folders (default on). */
+    homeSkill?: boolean;
+    /** Agent-context defaults already applied to this config; see configManager migrations. */
+    defaultsVersion?: number;
+    /** Retry removal of Pane's old AGENTS.md blocks until saved repositories are available. */
+    cleanupPending?: boolean;
   };
   // Use interactive mode for Claude CLI (persistent process with stdin instead of spawn-per-message)
   useInteractiveMode?: boolean;
@@ -135,6 +148,9 @@ export interface AppConfig {
   analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -193,6 +209,9 @@ export interface UpdateConfigRequest {
   usePtyHost?: boolean;
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   terminalShortcuts?: TerminalShortcut[];
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;

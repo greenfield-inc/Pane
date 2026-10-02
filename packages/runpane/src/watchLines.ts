@@ -17,9 +17,24 @@ interface WatchEntry {
   exitCode?: number;
   baseline?: true;
   changedWhileAway?: boolean;
+  sessionId?: string;
+  pr?: { number: number };
+  checks?: string;
+  failingChecks?: string[];
   idleMs?: number;
   idleCount?: number;
+  report?: WatchReport;
 }
+
+/** The fields of a worker report a REPORT line shows. */
+interface WatchReport {
+  state: string;
+  pr?: number;
+  head?: string;
+  question?: string;
+}
+
+const MAX_LINE_QUESTION_LENGTH = 200;
 
 export interface WatchResult {
   epoch: string;
@@ -56,9 +71,36 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     }
     case 'pane.created': return `NEW ${name} ${pane}`;
     case 'pane.gone': return `GONE ${name} ${pane}`;
+    case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
+    case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
+    case 'pr.conflicted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CONFLICTED`;
+    case 'pr.checks': return formatChecksLine(`PR ${name} ${pane} #${entry.pr?.number ?? '?'}`, entry);
+    case 'pr.merged': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} MERGED`;
+    case 'agent.report': return `REPORT ${name} ${pane}${panel} ${entry.report ? describeReport(entry.report) : 'unknown'}`;
     default: return `UNKNOWN ${name} ${pane}${panel}`;
   }
+}
+
+/** `CHECKS FAILED lint,test`: failing names are joined by commas, so their own spaces and commas become `_`. */
+function formatChecksLine(prefix: string, entry: WatchEntry): string {
+  if (entry.checks !== 'failed') return `${prefix} CHECKS PASSED`;
+  const names = (entry.failingChecks ?? []).map(check => sanitizeName(check).replace(/[ ,]/gu, '_'));
+  return `${prefix} CHECKS FAILED${names.length > 0 ? ` ${names.join(',')}` : ''}`;
+}
+
+/**
+ * `ready pr#747 fc5dce9`, or `blocked pr#747: <question>`: the state, PR, and short head of a
+ * report, then a blocked worker's question on one line, cut to 200 characters.
+ */
+export function describeReport(report: WatchReport): string {
+  const parts = [sanitizeName(report.state)];
+  if (report.pr !== undefined) parts.push(`pr#${report.pr}`);
+  if (report.head) parts.push(sanitizeName(report.head).slice(0, 7));
+  const question = report.question ? sanitizeName(report.question) : '';
+  if (!question) return parts.join(' ');
+  const shown = question.length > MAX_LINE_QUESTION_LENGTH ? `${question.slice(0, MAX_LINE_QUESTION_LENGTH - 1)}…` : question;
+  return `${parts.join(' ')}: ${shown}`;
 }
 
 export function formatWaitResult(result: WatchResult, format: WatchFormat): string[] {

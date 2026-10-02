@@ -10,7 +10,7 @@ import {
 
 type Reply = ScreenState | RestoreSnapshot | string | null;
 
-const EMPTY_STATE: ScreenState = { screenText: '', inputScreenText: '', isAlternateScreen: false, oscTitle: '', oscProgress: '' };
+const EMPTY_STATE: ScreenState = { screenText: '', inputScreenText: '', ghostScreenText: '', isAlternateScreen: false, oscTitle: '', oscProgress: '' };
 
 /** Main-side end of an emulator host; one host serves many terminals. */
 export class TerminalEmulatorHostConnection {

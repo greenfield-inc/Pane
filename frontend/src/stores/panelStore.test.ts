@@ -45,6 +45,15 @@ describe('panelStore agent status', () => {
     expect(usePanelStore.getState().getSessionAgentState('s2')).toBe('unknown');
   });
 
+  it('prunes stale background status when panel lists are reloaded', () => {
+    const store = usePanelStore.getState();
+    store.setAgentStatus('deleted', 'background', 'working');
+    store.setAgentStatus('retained', 'background', 'idle');
+    store.setPanels('background', [panel('retained', 'background')]);
+    expect(usePanelStore.getState().getPanelAgentState('deleted')).toBeUndefined();
+    expect(usePanelStore.getState().getSessionAgentState('background')).toBe('idle');
+  });
+
   it('clears agent status when a panel is removed', () => {
     const store = usePanelStore.getState();
     store.setPanels('s1', [panel('a', 's1')]);

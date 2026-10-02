@@ -1,0 +1,188 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pane CLI Improvements</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--fg:#1d2127;--mut:#636b75;--line:#e4e1d9;--acc:#2f6fbf;--hi:#b0572b;--ok:#2f7d4f;--code:#f0eee8}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1b1f24;--fg:#e7ebf0;--mut:#8e98a3;--line:#2c323a;--acc:#6aa4ec;--hi:#e08a5c;--ok:#4cb87a;--code:#23282f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,system-ui,"Segoe UI",sans-serif;padding:24px 16px 48px}
+main{max-width:860px;margin:0 auto}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:34px 0 10px}
+h3{font-size:16px;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+.lede{font-size:16px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);border-radius:8px;padding:10px 12px;overflow-x:auto;font-size:12.5px;margin:8px 0 0}
+.tag{display:inline-block;font-size:11px;font-weight:650;padding:1px 8px;border-radius:10px;border:1px solid currentColor;margin-right:6px}
+.p1{color:var(--hi)}.p2{color:var(--acc)}.p3{color:var(--mut)}.good{color:var(--ok)}
+.row{display:grid;grid-template-columns:110px 1fr;gap:6px 12px;margin-top:8px;font-size:14px}
+.row b{color:var(--mut);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;padding-top:2px}
+ul{margin:6px 0 0;padding-left:20px}li{margin:3px 0}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 8px;border-top:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em;border-top:0}
+.flow{display:block;width:100%;height:auto;margin-top:6px}
+@media (max-width:600px){.row{grid-template-columns:1fr}.row b{padding-top:6px}}
+</style></head><body><main>
+
+<h1>Making the Pane CLI easier for orchestrators</h1>
+<div class="sub">Lessons from running the BloomText frontend refactor through <code>runpane</code>: 48 PRs, up to 3 parallel workers, one orchestrator restart. Written by the Session orchestrator, 2026-09-27.</div>
+
+<div class="card lede">
+<b>Bottom line:</b> Pane made long, parallel work durable and visible, and that was worth it. But every worker cost me about ten manual steps, and roughly a third of my attention went to plumbing: prompt delivery, watcher upkeep, reading results off the screen. Five changes would remove most of that: <b>create a Pane on any base branch with the prompt file in one call</b>, <b>deliver long prompts intact and report delivery accurately</b>, <b>return a structured completion report</b>, <b>a Session-wide watcher that follows Pane membership</b>, and <b>archive that removes adopted worktrees</b>.
+</div>
+
+<h2>What one worker cost me today</h2>
+<div class="card">
+<svg class="flow" viewBox="0 0 820 170" role="img" aria-label="Ten manual steps per worker today versus three proposed">
+<style>.b{fill:none;stroke:currentColor;stroke-width:1.2;rx:6}.t{font:12px -apple-system,system-ui,sans-serif;fill:currentColor}.m{fill:currentColor;opacity:.65;font:11px -apple-system,system-ui,sans-serif}</style>
+<g style="color:var(--hi)"><text class="m" x="0" y="14">Today (per worker)</text></g>
+<g style="color:var(--fg)">
+<rect class="b" x="0" y="22" width="74" height="40"/><text class="t" x="37" y="46" text-anchor="middle">git worktree</text>
+<rect class="b" x="82" y="22" width="74" height="40"/><text class="t" x="119" y="40" text-anchor="middle">write</text><text class="t" x="119" y="54" text-anchor="middle">prompt file</text>
+<rect class="b" x="164" y="22" width="74" height="40"/><text class="t" x="201" y="46" text-anchor="middle">panes adopt</text>
+<rect class="b" x="246" y="22" width="74" height="40"/><text class="t" x="283" y="40" text-anchor="middle">wait, read</text><text class="t" x="283" y="54" text-anchor="middle">screen</text>
+<rect class="b" x="328" y="22" width="74" height="40"/><text class="t" x="365" y="46" text-anchor="middle">submit kick</text>
+<rect class="b" x="410" y="22" width="74" height="40"/><text class="t" x="447" y="40" text-anchor="middle">screen again</text><text class="t" x="447" y="54" text-anchor="middle">(verify)</text>
+<rect class="b" x="492" y="22" width="74" height="40"/><text class="t" x="529" y="40" text-anchor="middle">stop + re-arm</text><text class="t" x="529" y="54" text-anchor="middle">watcher</text>
+<rect class="b" x="574" y="22" width="74" height="40"/><text class="t" x="611" y="40" text-anchor="middle">READY → scrape</text><text class="t" x="611" y="54" text-anchor="middle">screen</text>
+<rect class="b" x="656" y="22" width="74" height="40"/><text class="t" x="693" y="40" text-anchor="middle">gh pr checks</text><text class="t" x="693" y="54" text-anchor="middle">+ merge</text>
+<rect class="b" x="738" y="22" width="80" height="40"/><text class="t" x="778" y="40" text-anchor="middle">archive + git</text><text class="t" x="778" y="54" text-anchor="middle">worktree rm</text>
+</g>
+<g style="color:var(--ok)"><text class="m" x="0" y="100">Proposed</text></g>
+<g style="color:var(--fg)">
+<rect class="b" x="0" y="108" width="260" height="44"/><text class="t" x="130" y="127" text-anchor="middle">panes create --base … --prompt-file …</text><text class="m" x="130" y="143" text-anchor="middle">worktree + launch + verified delivery</text>
+<rect class="b" x="280" y="108" width="260" height="44"/><text class="t" x="410" y="127" text-anchor="middle">watch --session (auto-follows panes)</text><text class="m" x="410" y="143" text-anchor="middle">DONE event carries report + PR</text>
+<rect class="b" x="560" y="108" width="258" height="44"/><text class="t" x="689" y="127" text-anchor="middle">panes archive --remove-worktree</text><text class="m" x="689" y="143" text-anchor="middle">same safety checks</text>
+</g>
+</svg>
+</div>
+
+<h2>Proposals, by priority</h2>
+
+<div class="card">
+<h3><span class="tag p1">P1</span>Create a Pane on any base branch, with the prompt, in one call</h3>
+<div class="row"><b>What happened</b><div><code>panes create</code> makes its own worktree but had no way to choose the base branch, and every worker had to start from <code>release/frontend-modernization</code>. So for 25+ workers I ran <code>git worktree add</code>, then <code>panes adopt --launch</code>, then waited, read the screen and submitted the prompt separately. <code>adopt</code> has no <code>--initial-input-file</code>.</div></div>
+<div class="row"><b>Proposal</b><div>
+<ul><li><code>panes create --base &lt;ref&gt; --branch &lt;name&gt;</code> for Pane-managed worktrees off any branch.</li>
+<li><code>--prompt-file</code> on both <code>create</code> and <code>adopt</code>, delivered after readiness with the same delivery guarantee as below.</li>
+<li><code>--unset-upstream</code> or a sane default, so new branches don't track the base branch.</li></ul>
+<pre>runpane panes create --repo BloomText --base release/frontend-modernization \
+  --branch agents/w5a-web-conversation --agent claude --folder "Frontend Refactor" \
+  --prompt-file prompts/w5a.md --source agent --json</pre></div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p1">P1</span>Deliver long prompts intact, and report delivery accurately</h3>
+<div class="row"><b>What happened</b><div>
+<ul><li><b>Truncation:</b> a ~40-line prompt sent with <code>panels submit --input-file</code> arrived cut off at the start; W3a's agent said its "message arrived cut off at the start". After that I only sent one-line prompts that pointed to a file.</li>
+<li><b>False "not delivered":</b> about 7 times, <code>verifiedSubmitted: false</code> (sometimes with a <code>blocked</code> "still in the composer" hint) came back while the agent had already taken the turn or queued it ("Press up to edit queued messages"). Each time I had to read the screen to avoid a double send.</li></ul></div></div>
+<div class="row"><b>Proposal</b><div>
+<ul><li>Send long input as one paste (bracketed paste, or a file attachment the agent opens), and verify it by comparing a hash or length against what the agent's session log recorded.</li>
+<li>Replace the boolean with a state: <code>delivery: "taken" | "queued" | "in-composer" | "unknown"</code>, taken from the agent's transcript, which Pane already has for resume.</li>
+<li>Built-in <code>--as-file-pointer</code>: Pane writes the prompt to the Pane data dir and submits "Read and follow &lt;path&gt;". It's the workaround I used, and it's reliable.</li></ul></div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p1">P1</span>Give back a structured completion report, not a screen to scrape</h3>
+<div class="row"><b>What happened</b><div>Background subagents handed me a final report automatically. Pane workers didn't: every READY meant <code>panels screen --limit 50</code>, then reading the last ~2,500 characters of terminal text, then parsing out the PR number, head SHA and state. READY also fired for workers that had already finished (C2, C5a, C5b after their PRs merged).</div></div>
+<div class="row"><b>Proposal</b><div>
+<ul><li>A worker-side command: <code>runpane report --state ready|blocked|failed --pr 747 --head fc5dce9 --summary-file report.md</code>. The prompt can tell the worker to call it.</li>
+<li>A <code>agent.done</code> watch event that carries that report (state, PR, head, summary path). BLOCKED events should carry the question.</li>
+<li><code>panels last-message --panel … --json</code>: the agent's final message as clean text, without the terminal chrome.</li></ul></div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p1">P1</span>One Session-wide watcher that follows Pane membership</h3>
+<div class="row"><b>What happened</b><div>
+<ul><li><b>Re-arming:</b> I re-armed the watcher about 20 times, whenever a Pane was added or finished, and every 30 minutes when my harness's monitor expired. Each time meant stopping the old watch and rebuilding the <code>--pane</code> list.</li>
+<li><b>Name limit:</b> the documented cursor name <code>session-&lt;session-id&gt;</code> fails with "must contain 1-64 letters…", because orchestration Session IDs are about 70 characters.</li>
+<li><b>Filtering:</b> the docs say to filter out <code>HEARTBEAT</code>, but <code>--json</code> emits <code>_heartbeat</code>, <code>_ok</code> and <code>_reset</code>. My first filter let heartbeats wake me every minute.</li></ul></div></div>
+<div class="row"><b>Proposal</b><div>
+<ul><li><code>runpane watch --session &lt;id&gt; --follow</code>: tracks associated Panes live, drops archived ones, and needs no re-arm when membership changes.</li>
+<li>Derive cursor names that fit, for example hash long IDs automatically, and fix the documented example.</li>
+<li><code>--no-control-lines</code> (or <code>--quiet</code>) to suppress heartbeats, ok and reset lines, and a note in the JSON docs listing which <code>kind</code>s are control lines.</li></ul></div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p2">P2</span>Archive should be able to remove the worktree it adopted</h3>
+<div class="row"><b>What happened</b><div>For adopted Panes, <code>panes archive --dry-run</code> returned <code>safetyCheck.performed: false</code> and left the directory in place. Cleaning up 45 worktrees meant my own dirty and unpushed checks, then checking each branch against its merged PR, then <code>git worktree remove</code>. That took about 12 minutes of <code>node_modules</code> deletion, and my command timed out.</div></div>
+<div class="row"><b>Proposal</b><div><code>panes archive --remove-worktree</code> for adopted worktrees, using the same safety evidence it already has: uncommitted, untracked and unpushed changes, plus "head merged via PR #n" when the remote branch was deleted after a squash merge. Also a bulk form, <code>panes archive --session &lt;id&gt; --merged</code>, that deletes large folders in the background.</div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p2">P2</span>Locks for shared test resources</h3>
+<div class="row"><b>What happened</b><div>V4 and V5 shared the testing account's single "approve guest" banner and approved each other's guests during two-browser call tests. They worked it out through a cross-session message, which was impressive, but V5 then sat idle for about 40 minutes. The iOS simulator was a similar shared resource.</div></div>
+<div class="row"><b>Proposal</b><div><code>runpane lock acquire &lt;name&gt; --ttl 30m</code> and <code>release</code>, visible in <code>sessions overview</code>. The orchestrator can name locks in prompts ("hold <code>testing-account-video</code> while running call QA"). Per-worktree port allocation already works well and fits the same idea.</div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p2">P2</span>Session-level work items, not a hand-kept ledger</h3>
+<div class="row"><b>What happened</b><div>I kept <code>.agent/ledger.json</code> by hand, 60+ items mapping phase to Pane, panel, worktree, branch, PR, state and notes, and edited it after every event. The Session record in AGENTS.md stayed empty, because I never had a natural reason to call <code>sessions update</code>.</div></div>
+<div class="row"><b>Proposal</b><div><code>runpane sessions items add|update|list</code> on the Session record, with fields for Pane, PR and state, and optionally linked to GitHub so the PR state is filled in automatically. <code>sessions overview</code> would then show the whole board, and a restarted orchestrator could recover in one call.</div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p3">P3</span>Smaller fixes</h3>
+<ul>
+<li><b><code>--pane-dir</code>:</b> the runtime context says to pass it on "every command that accepts it", but most commands reject it with "only valid with install daemon". Accept it everywhere, ignoring it where it doesn't apply, or have <code>agent-context</code> say which commands take it.</li>
+<li><b>Ghost suggestions:</b> <code>panels screen</code> shows Claude's grey composer suggestions ("❯ merge it", "❯ delete the branch") as if they were typed text. <code>hasUndeliveredText</code> is correct, but tag ghost text in the screen output so it's never mistaken for input.</li>
+<li><b>PR events:</b> a <code>pr.conflicted</code> / <code>pr.checks</code> watch event for PRs opened from Session Panes. I hit about 12 counts-file conflicts after merges and found each one by polling <code>gh</code>.</li>
+<li><b>Panel for a Pane:</b> <code>panes adopt</code> returned <code>sessionId</code> (the Pane) and <code>panelId</code>, but <code>paneId</code> was <code>null</code> at the top level. Include both consistently.</li>
+</ul>
+</div>
+
+
+<h2>Addendum (2026-09-27): issues found after this brief was written</h2>
+<div class="card">
+<h3><span class="tag p1">P1</span>Delivery into agent-farm panels silently fails</h3>
+<div class="row"><b>What happened</b><div>The Pane "Pane Session Management Improvements" runs its agent in a terminal panel started by agent-farm (title "agent-farm run free-range"). For that panel:
+<ul><li><code>panels screen</code> reported <code>composer: {isPresent: false, hasUndeliveredText: false}</code> even though a normal Claude prompt box (<code>❯</code>) was on screen.</li>
+<li><code>panels submit --input-file</code> returned <code>ok: true, verifiedSubmitted: false</code> with <b>no</b> <code>blocked</code> hint, and the text sat unsent in the prompt box.</li>
+<li><code>panels submit-composer --strategy auto</code> returned <code>ok: true</code> and still didn't send it. Only <code>--strategy enter</code> worked, and only while the agent was idle. While it was running background Explore subagents, <code>--strategy enter</code> also left the text unsent, so a follow-up couldn't even be queued.</li></ul>
+Because <code>hasUndeliveredText</code> was false, the documented "resubmit only with proof of non-delivery" rule couldn't be followed from structured output. I had to read the raw screen text.</div></div>
+<div class="row"><b>Proposal</b><div>Detect the composer by content (the agent's prompt glyph and box), not only by the panel's launch type. When a panel was launched by a wrapper (agent-farm, custom <code>--tool-command</code>), resolve the underlying agent type and use its submit strategy. When detection fails, return <code>blocked: {kind: "composer-unknown"}</code> instead of a silent <code>ok: true</code>. <code>submit-composer --strategy auto</code> should fall back to <code>enter</code> when the text is still visible after the first attempt.</div></div>
+</div>
+
+<div class="card">
+<h3><span class="tag p2">P2</span>Panel and Pane metadata don't identify the agent</h3>
+<ul>
+<li><b>No agent type:</b> <code>panels list</code> returned <code>agentType: null</code> for the agent-farm panel. An orchestrator can't tell which terminal is the agent without guessing from the title.</li>
+<li><b>Wrong status:</b> <code>panes list</code> showed that Pane as <code>status: "stopped"</code> while its agent terminal was live and waiting for input.</li>
+<li><b>Proposal:</b> record the agent type (and the wrapper) on the panel at launch, and derive Pane status from its panels' activity.</li>
+</ul>
+</div>
+
+<div class="card">
+<h3><span class="tag p3">P3</span>More small fixes</h3>
+<ul>
+<li><b>Unknown commands:</b> <code>runpane agent-context --command "&lt;unknown&gt;" --json</code> printed non-JSON instead of a JSON error listing the valid commands. I found the real command, <code>panes archive</code>, by scraping the full context. Return <code>{ok:false, code:"unknown_command", candidates:[…]}</code>.</li>
+<li><b>Why archive skipped removal:</b> <code>panes archive --dry-run</code> on an adopted Pane returned <code>safetyCheck: {performed: false}</code> with no reason. Add <code>reason: "externally-managed-worktree"</code> and say that the directory will be left in place.</li>
+<li><b>READY timing:</b> with the recommended <code>--settle 180000 --min-interval 600000</code>, a READY can arrive up to about 13 minutes after the turn ended. That's fine for overnight runs, but slow when a person is waiting. Document a "user is present" profile (e.g. <code>--settle 60000 --min-interval 120000</code>) in <code>pane-orchestrator</code>.</li>
+<li><b>Busy-agent wording:</b> when the agent is busy, a submitted prompt is queued ("Press up to edit queued messages"). <code>panels submit</code> should report <code>delivery: "queued"</code> (see P1 delivery state) rather than <code>verifiedSubmitted: false</code>.</li>
+</ul>
+</div>
+
+<h2>What worked well (keep it)</h2>
+<div class="card"><ul>
+<li><span class="tag good">keep</span><b>Durability:</b> when my orchestrator session restarted, two background subagents died mid-task. Pane workers would have kept running, and after the switch they did.</li>
+<li><span class="tag good">keep</span><b>Visibility:</b> every worker was a real workspace you could open, watch or step into.</li>
+<li><span class="tag good">keep</span><b>Cross-session messaging:</b> V4 and V5 coordinated on their own.</li>
+<li><span class="tag good">keep</span><b>Association:</b> <code>association.ok</code> on every create or adopt, plus the automatic Session membership.</li>
+<li><span class="tag good">keep</span><b>Archive safety checks and <code>--dry-run</code></b>, and <code>panels open --file</code> for showing pages beside the chat.</li>
+<li><span class="tag good">keep</span><b>Settle and backoff flags on watch:</b> once filtered properly, wake-ups were infrequent and meaningful.</li>
+</ul></div>
+
+<h2>What I'd do differently next time (no Pane changes needed)</h2>
+<div class="card"><table>
+<tr><th>Change</th><th>Why</th></tr>
+<tr><td>Use Panes from the first worker</td><td>The first ~20 workers were background subagents; the restart killed two of them.</td></tr>
+<tr><td>Always dispatch a one-line pointer to a prompt file</td><td>Avoids truncation, and a quoted heredoc avoids shell mangling (one of my prompts lost a line to backticks).</td></tr>
+<tr><td>Scope work with the project's own tooling (<code>pnpm ratchet --list</code>), never a text grep</td><td>My <code>connect(</code> grep matched comments; C5a found 11 of its 14 "files" were already converted.</td></tr>
+<tr><td>Make shared bookkeeping files merge-friendly before fanning out</td><td>The single counts file conflicted on almost every merge.</td></tr>
+<tr><td>Point every smoke test at staging explicitly</td><td>One production-build smoke test sent three unauthenticated reads to the production API.</td></tr>
+<tr><td>Put one "wait for your lock" line in every prompt that touches shared accounts</td><td>This would have prevented the V4/V5 banner collision.</td></tr>
+</table></div>
+
+<p class="sub" style="margin-top:24px">Evidence: Session ledger (<code>.agent/ledger.json</code>), prompts in <code>prompts/</code>, and worker reports in <code>reports/</code> inside the BloomText Frontend Refactor Session folder. Counts: 48 PRs merged into the release branch (#499–#753), about 25 Pane workers, 19 archived Panes, 45 worktrees removed.</p>
+</main></body></html>

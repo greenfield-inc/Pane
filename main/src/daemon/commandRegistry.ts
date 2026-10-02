@@ -1,5 +1,12 @@
 import { isDaemonOwnedChannel } from './daemonChannels';
 import type { IpcMainInvokeEvent } from 'electron';
+import { AsyncLocalStorage } from 'async_hooks';
+
+const remoteInvocation = new AsyncLocalStorage<boolean>();
+
+export function isRemotePaneCommand(): boolean {
+  return remoteInvocation.getStore() === true;
+}
 
 type PaneCommandObject = object;
 export type PaneCommandValue = PaneCommandObject | string | number | boolean | null | undefined;
@@ -56,6 +63,11 @@ export class PaneCommandRegistry {
     }
 
     return handler(...args);
+  }
+
+  /** Provenance is set by the HTTP transport, never by caller-supplied arguments. */
+  invokeRemote(channel: string, args: readonly PaneCommandValue[] = []): Promise<PaneCommandValue> {
+    return remoteInvocation.run(true, () => this.invoke(channel, args));
   }
 
   bindChannel(ipcMain: IpcMainHandleLike, channel: string): void {

@@ -1,28 +1,61 @@
 import { create } from 'zustand';
+import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { Session } from '../../types/session';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 
-interface RemoteSessionState {
+/** `unavailable` means the host predates Sessions, so the PWA hides them. */
+type RemoteOrchestrationAvailability = 'idle' | 'ready' | 'unavailable' | 'error';
+
+/**
+ * Everything here belongs to the connected host. `reset` clears it on a host
+ * switch or disconnect; the app refetches it after a reconnect.
+ */
+interface RemoteHostState {
   projects: RemoteProjectWithSessions[];
+  /** The Pane whose panels are on screen. An open Session shows its own workspace Pane. */
   selectedSessionId: string | null;
   selectedPanelId: string | null;
   panelsBySessionId: Record<string, ToolPanel[]>;
+  orchestrationSessions: OrchestrationSessionRecord[];
+  orchestrationAvailability: RemoteOrchestrationAvailability;
+  orchestrationError: string | null;
+  /** The open Session, set while its workspace Pane is selected. */
+  openOrchestrationSession: OrchestrationSessionView<Session> | null;
+  /** Null until the Archived section first opens. */
+  archivedProjects: RemoteProjectWithSessions[] | null;
+}
+
+interface RemoteSessionState extends RemoteHostState {
+  reset: () => void;
   setProjects: (projects: RemoteProjectWithSessions[]) => void;
   selectSession: (sessionId: string | null) => void;
+  openSession: (view: OrchestrationSessionView<Session>) => void;
+  setOrchestrationSessions: (sessions: OrchestrationSessionRecord[]) => void;
+  setOrchestrationFailure: (availability: 'unavailable' | 'error', error: string | null) => void;
+  setArchivedProjects: (projects: RemoteProjectWithSessions[]) => void;
   setPanels: (sessionId: string, panels: ToolPanel[]) => void;
   setSelectedPanel: (panelId: string | null) => void;
   upsertPanel: (panel: ToolPanel) => void;
   removePanel: (sessionId: string, panelId: string) => void;
-  getSelectedSession: () => Session | null;
-  getSelectedPanels: () => ToolPanel[];
 }
 
-export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
+const INITIAL_HOST_STATE: RemoteHostState = {
   projects: [],
   selectedSessionId: null,
   selectedPanelId: null,
   panelsBySessionId: {},
+  orchestrationSessions: [],
+  orchestrationAvailability: 'idle',
+  orchestrationError: null,
+  openOrchestrationSession: null,
+  archivedProjects: null,
+};
+
+export const useRemoteSessionStore = create<RemoteSessionState>((set) => ({
+  ...INITIAL_HOST_STATE,
+
+  reset: () => set(INITIAL_HOST_STATE),
 
   setProjects: (projects) => set((state) => ({
     projects,
@@ -32,7 +65,27 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
   selectSession: (sessionId) => set({
     selectedSessionId: sessionId,
     selectedPanelId: null,
+    openOrchestrationSession: null,
   }),
+
+  openSession: (view) => set({
+    selectedSessionId: view.internalSession.id,
+    selectedPanelId: view.panel.id,
+    openOrchestrationSession: view,
+  }),
+
+  setOrchestrationSessions: (orchestrationSessions) => set({
+    orchestrationSessions,
+    orchestrationAvailability: 'ready',
+    orchestrationError: null,
+  }),
+
+  setOrchestrationFailure: (orchestrationAvailability, orchestrationError) => set({
+    orchestrationAvailability,
+    orchestrationError,
+  }),
+
+  setArchivedProjects: (archivedProjects) => set({ archivedProjects }),
 
   setPanels: (sessionId, panels) => set((state) => ({
     panelsBySessionId: {
@@ -66,24 +119,9 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
     },
     selectedPanelId: state.selectedPanelId === panelId ? null : state.selectedPanelId,
   })),
-
-  getSelectedSession: () => {
-    const { projects, selectedSessionId } = get();
-    if (!selectedSessionId) return null;
-    for (const project of projects) {
-      const session = project.sessions?.find(candidate => candidate.id === selectedSessionId);
-      if (session) return session;
-    }
-    return null;
-  },
-
-  getSelectedPanels: () => {
-    const { panelsBySessionId, selectedSessionId } = get();
-    return selectedSessionId ? panelsBySessionId[selectedSessionId] ?? [] : [];
-  },
 }));
 
-function findFirstSessionId(projects: RemoteProjectWithSessions[]): string | null {
+export function findFirstSessionId(projects: Array<{ sessions?: Session[] }>): string | null {
   for (const project of projects) {
     const session = project.sessions?.[0];
     if (session) {

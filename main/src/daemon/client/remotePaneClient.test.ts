@@ -254,6 +254,74 @@ describe('RemotePaneClient', () => {
 
     await client.disconnect();
   });
+
+  it('stays quiet while suspended for system sleep and reconnects on resume', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const connectionStates: string[] = [];
+
+    const client = new RemotePaneClient({
+      id: 'profile-sleep',
+      label: 'Remote host',
+      baseUrl: server.baseUrl,
+      token: 'secret-token',
+      transport: 'http+sse',
+    }, {
+      heartbeatStaleTimeoutMs: 20,
+      reconnectInitialDelayMs: 5,
+      reconnectMaxDelayMs: 20,
+      onConnectionStateChange(status) {
+        connectionStates.push(status);
+      },
+    });
+
+    await client.connect({ retryOnInitialFailure: false });
+    client.suspend();
+    const statesAtSuspend = connectionStates.length;
+
+    // Several heartbeat and backoff windows pass while the machine sleeps.
+    await sleep(150);
+    expect(server.getEventRequestCount()).toBe(1);
+    expect(connectionStates.slice(statesAtSuspend)).toEqual([]);
+
+    client.resume();
+    await waitFor(() => server.getEventRequestCount() === 2);
+    await waitFor(() => connectionStates.at(-1) === 'connected');
+
+    await client.disconnect();
+  });
+
+  it('ignores the suspended stream closing after an immediate resume', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const connectionStates: string[] = [];
+
+    const client = new RemotePaneClient({
+      id: 'profile-fast-wake',
+      label: 'Remote host',
+      baseUrl: server.baseUrl,
+      token: 'secret-token',
+      transport: 'http+sse',
+    }, {
+      reconnectInitialDelayMs: 5,
+      reconnectMaxDelayMs: 20,
+      onConnectionStateChange(status) {
+        connectionStates.push(status);
+      },
+    });
+
+    await client.connect({ retryOnInitialFailure: false });
+    // Wake arrives before the old stream's close callbacks run.
+    client.suspend();
+    client.resume();
+
+    await waitFor(() => connectionStates.at(-1) === 'connected' && server.getEventRequestCount() === 2);
+    await sleep(150);
+    expect(server.getEventRequestCount()).toBe(2);
+    expect(connectionStates.at(-1)).toBe('connected');
+
+    await client.disconnect();
+  });
 });
 
 describe('RemotePaneClientController', () => {

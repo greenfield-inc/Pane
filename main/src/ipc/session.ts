@@ -24,7 +24,6 @@ import {
   logValidationFailure,
   createValidationError,
 } from '../utils/sessionValidation';
-import type { SerializedArchiveTask } from '../services/archiveProgressManager';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -59,6 +58,7 @@ const DAEMON_SESSION_CHANNELS = [
   'sessions:get-resumable',
   'sessions:resume-interrupted',
   'sessions:dismiss-interrupted',
+  'archive:get-progress',
 ] as const;
 
 const ACTIVE_SESSION_HINT_CHANNEL = 'sessions:set-active-session';
@@ -83,6 +83,11 @@ type DatabaseSession = {
   worktree_ownership?: 'pane' | 'external' | null;
   created_at?: string | null;
 };
+
+interface SessionDeleteOptions {
+  /** Also remove an adopted (externally owned) worktree. Pane-managed worktrees are always removed. */
+  removeExternalWorktree?: boolean;
+}
 
 export function registerSessionHandlers(
   ipcMain: IpcMain,
@@ -114,6 +119,16 @@ export function registerSessionHandlers(
       await runCommandManager.stopRunCommands(sessionId);
     } catch (err) {
       console.error(`[Session IPC] stopRunCommands failed during permanent delete for ${sessionId}:`, err);
+    }
+
+    // Normally a no-op: the session was archived, which already killed its
+    // panels. It still has to be awaited, because a panel process that
+    // outlived that teardown would keep the worktree removal below from
+    // succeeding on Windows.
+    try {
+      await terminalPanelManager.terminateSessionTerminals(sessionId);
+    } catch (err) {
+      console.error(`[Session IPC] terminateSessionTerminals failed during permanent delete for ${sessionId}:`, err);
     }
 
     try {
@@ -341,14 +356,18 @@ export function registerSessionHandlers(
     }
   });
 
-  commandRegistry.register('sessions:delete', async (sessionId: string) => {
+  commandRegistry.register('sessions:delete', async (sessionId: string, options?: SessionDeleteOptions) => {
     try {
       // Get database session details before archiving (includes worktree_name and project_id)
       const dbSession = databaseService.getSession(sessionId);
       if (!dbSession) {
         return { success: false, error: 'Session not found' };
       }
-      
+      const isExternalWorktree = dbSession.worktree_ownership === 'external';
+      // Adopted worktrees are only removed when the caller opts in (`runpane panes archive --remove-worktree`).
+      const removesWorktree = Boolean(dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo)
+        && (!isExternalWorktree || options?.removeExternalWorktree === true);
+
       // Check if session is already archived
       if (dbSession.archived) {
         return { success: false, error: 'Session is already archived' };
@@ -383,22 +402,19 @@ export function registerSessionHandlers(
         console.warn(`[ArchiveCleanup] archive_message_output_failed sessionId=${sessionId}:`, error);
       }
 
-      // Kill all panel processes for this session before worktree cleanup
-      // This prevents leaked node-pty processes and ensures worktree removal succeeds.
-      // NOTE: must run BEFORE cleanupSessionPanelsInMemory because
-      // getPanelsForSession has a DB-read side effect that repopulates
-      // panelManager.panels; calling it after the in-memory cleanup would
-      // re-insert the entries we just cleared.
-      const panels = panelManager.getPanelsForSession(sessionId);
-      for (const panel of panels) {
-        try {
-          if (panel.type === 'terminal') {
-            terminalPanelManager.destroyTerminal(panel.id);
-          }
-        } catch (panelError) {
-          console.error(`[Session IPC] Failed to cleanup panel ${panel.id} (${panel.type}):`, panelError);
-        }
-      }
+      // Kill this session's panel processes now, so the agent stops working the
+      // moment the user archives, but hold on to the promise: it only settles
+      // once those processes have really left the OS process table, and the
+      // worktree cannot be removed before then. On Windows the panel shell and
+      // the agent CLI it launched both sit in the worktree, and a directory
+      // cannot be renamed or deleted while it is a live process's cwd.
+      // Reads terminalPanelManager's live PTY map rather than the session's
+      // panels, so it does not repopulate panelManager.panels through
+      // getPanelsForSession's DB-read side effect.
+      const terminalsExited = terminalPanelManager.terminateSessionTerminals(sessionId)
+        .catch(panelError => {
+          console.error(`[Session IPC] terminateSessionTerminals failed for ${sessionId}:`, panelError);
+        });
 
       // Release in-memory panel state (does NOT hard-delete DB rows — archive-safe)
       try {
@@ -427,8 +443,13 @@ export function registerSessionHandlers(
           console.error(`[Session IPC] stopRunCommands failed for ${sessionId}:`, err);
         }
 
+        // The panel processes were killed when the archive was requested; this
+        // is where we wait for them to be gone. Removing the worktree while one
+        // is still sitting in it fails on Windows.
+        await terminalsExited;
+
         // Clean up the worktree if session has one (but not for main repo sessions)
-        if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external') {
+        if (removesWorktree && dbSession.worktree_name && dbSession.project_id) {
           const project = databaseService.getProject(dbSession.project_id);
           if (project) {
             const ctx = sessionManager.getProjectContextByProjectId(dbSession.project_id);
@@ -489,13 +510,20 @@ export function registerSessionHandlers(
                 // Pass session creation date for analytics tracking
                 const sessionCreatedAt = dbSession.created_at ? new Date(dbSession.created_at) : undefined;
                 console.log(`[WorktreeAudit] remove_requested source="session-delete" sessionId=${JSON.stringify(sessionId)} projectId=${dbSession.project_id} projectPath=${JSON.stringify(project.path)} worktreeName=${JSON.stringify(dbSession.worktree_name)} worktreePath=${JSON.stringify(dbSession.worktree_path || '')}`);
-                await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, {
-                  source: 'session-delete',
+                const auditContext = {
+                  source: 'session-delete' as const,
                   sessionId,
                   projectId: dbSession.project_id,
-                });
+                };
+                // An adopted worktree can live anywhere, so remove it by its stored path.
+                const removal = isExternalWorktree && dbSession.worktree_path
+                  ? await worktreeManager.removeWorktreeAtPath(project.path, dbSession.worktree_path, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, auditContext)
+                  : await worktreeManager.removeWorktree(project.path, dbSession.worktree_name, project.worktree_folder || undefined, sessionCreatedAt, ctx.pathResolver, ctx.commandRunner, auditContext);
+                archiveProgressManager?.setTrashDeletion(sessionId, removal);
 
-                cleanupMessage += `\x1b[32m✓ Worktree removed successfully\x1b[0m\r\n`;
+                cleanupMessage += removal === 'pending'
+                  ? `\x1b[32m✓ Worktree removed (files are being deleted in the background)\x1b[0m\r\n`
+                  : `\x1b[32m✓ Worktree removed successfully\x1b[0m\r\n`;
               } catch (worktreeError) {
                 // Log the error but don't fail
                 console.error(`[Main] Failed to remove worktree ${dbSession.worktree_name}:`, worktreeError);
@@ -576,7 +604,7 @@ export function registerSessionHandlers(
       };
 
       // Queue the cleanup task if we have worktree cleanup to do
-      if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external') {
+      if (removesWorktree && dbSession.worktree_name && dbSession.project_id) {
         const project = databaseService.getProject(dbSession.project_id);
         if (project && archiveProgressManager) {
           console.log(`[ArchiveCleanup] archive_queued sessionId=${sessionId} sessionName=${JSON.stringify(dbSession.name)} worktreeName=${JSON.stringify(dbSession.worktree_name)} projectName=${JSON.stringify(project.name)}`);
@@ -867,7 +895,9 @@ export function registerSessionHandlers(
           });
 
           const buildCommands = mainRepoBuildScript.split('\n').filter(cmd => cmd.trim());
-          const buildResult = await sessionManager.runBuildScript(sessionId, buildCommands, session.worktreePath);
+          const buildContext = sessionManager.getProjectContext(sessionId);
+          if (!buildContext) throw new Error('Project context not found for setup script');
+          const buildResult = await sessionManager.runBuildScript(sessionId, buildCommands, session.worktreePath, buildContext.commandRunner);
           console.log(`[IPC] Build script completed. Success: ${buildResult.success}`);
         }
 
@@ -1656,26 +1686,10 @@ export function registerSessionHandlers(
     }
   });
 
-  // Archive progress handler
-  ipcMain.handle('archive:get-progress', async () => {
+  commandRegistry.register('archive:get-progress', async () => {
     try {
-      if (!archiveProgressManager) {
-        return { success: true, data: { tasks: [], activeCount: 0, totalCount: 0 } };
-      }
-      
-      const tasks = archiveProgressManager.getActiveTasks();
-      const activeCount = tasks.filter((t: SerializedArchiveTask) => 
-        t.status !== 'completed' && t.status !== 'failed'
-      ).length;
-      
-      return { 
-        success: true, 
-        data: { 
-          tasks, 
-          activeCount, 
-          totalCount: tasks.length 
-        } 
-      };
+      const data = archiveProgressManager?.getProgress() ?? { tasks: [], activeCount: 0, totalCount: 0 };
+      return { success: true, data };
     } catch (error) {
       console.error('Failed to get archive progress:', error);
       return { success: false, error: 'Failed to get archive progress' };

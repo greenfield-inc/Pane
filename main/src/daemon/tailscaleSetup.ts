@@ -1,3 +1,4 @@
+import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_process';
 import { existsSync, readSync } from 'fs';
 import os from 'os';
@@ -48,27 +49,15 @@ export function installTailscaleCommandOrThrow(
 export function resolveTailscaleCommand(
   dependencies: TailscaleSetupDependencies = defaultTailscaleSetupDependencies,
 ): ResolvedCommand | null {
-  if (commandExistsWithArgs('tailscale', ['version'], dependencies)) {
-    return {
-      command: 'tailscale',
-      displayCommand: 'tailscale',
-    };
-  }
+  return tailscaleCandidates().find(command => commandExistsWithArgs(command, ['version'], dependencies)) ?? null;
+}
 
-  if (process.platform === 'darwin') {
-    const macAppCommand = resolveMacTailscaleAppCommand(dependencies);
-    if (macAppCommand) {
-      return macAppCommand;
-    }
+export async function resolveTailscaleCommandAsync(
+  run: RemoteSetupCommandRunner = runRemoteSetupCommand,
+): Promise<ResolvedCommand | null> {
+  for (const command of tailscaleCandidates()) {
+    if ((await run(command.command, ['version'], { env: command.env })).ok) return command;
   }
-
-  if (process.platform === 'win32') {
-    const windowsCommand = resolveWindowsTailscaleCommand(dependencies);
-    if (windowsCommand) {
-      return windowsCommand;
-    }
-  }
-
   return null;
 }
 
@@ -264,55 +253,28 @@ export function getTailscaleServeSetupInstructions(port?: number): string {
   ].join(' ');
 }
 
-function resolveMacTailscaleAppCommand(dependencies: TailscaleSetupDependencies): ResolvedCommand | null {
-  const candidates = [
-    '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
-    path.join(os.homedir(), 'Applications', 'Tailscale.app', 'Contents', 'MacOS', 'Tailscale'),
-  ];
-
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-
-    const command = {
-      command: candidate,
-      displayCommand: `TAILSCALE_BE_CLI=1 ${quoteForPosix(candidate)}`,
-      env: {
-        ...process.env,
-        TAILSCALE_BE_CLI: '1',
-      },
-    };
-    if (commandExistsWithArgs(command, ['version'], dependencies)) {
-      return command;
+function tailscaleCandidates(): ResolvedCommand[] {
+  const commands: ResolvedCommand[] = [{ command: 'tailscale', displayCommand: 'tailscale' }];
+  if (process.platform === 'darwin') {
+    for (const candidate of [
+      '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
+      path.join(os.homedir(), 'Applications', 'Tailscale.app', 'Contents', 'MacOS', 'Tailscale'),
+    ]) {
+      if (existsSync(candidate)) commands.push({
+        command: candidate,
+        displayCommand: `TAILSCALE_BE_CLI=1 ${quoteForPosix(candidate)}`,
+        env: { ...process.env, TAILSCALE_BE_CLI: '1' },
+      });
     }
   }
-
-  return null;
-}
-
-function resolveWindowsTailscaleCommand(dependencies: TailscaleSetupDependencies): ResolvedCommand | null {
-  const candidates = [
-    process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'Tailscale', 'tailscale.exe') : null,
-    process.env['ProgramFiles(x86)'] ? path.join(process.env['ProgramFiles(x86)'], 'Tailscale', 'tailscale.exe') : null,
-    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Tailscale', 'tailscale.exe') : null,
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-
-    const command = {
-      command: candidate,
-      displayCommand: quoteForWindows(candidate),
-    };
-    if (commandExistsWithArgs(command, ['version'], dependencies)) {
-      return command;
+  if (process.platform === 'win32') {
+    for (const directory of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA]) {
+      if (!directory) continue;
+      const candidate = path.join(directory, 'Tailscale', 'tailscale.exe');
+      if (existsSync(candidate)) commands.push({ command: candidate, displayCommand: quoteForWindows(candidate) });
     }
   }
-
-  return null;
+  return commands;
 }
 
 function installTailscaleForPlatform(

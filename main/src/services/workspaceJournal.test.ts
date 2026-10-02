@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkspaceJournal } from './workspaceJournal';
+import { WorkspaceJournal, workspaceFilterKey } from './workspaceJournal';
+
+/** What the daemon knows about a panel's agent, before and after wrapper detection. */
+interface WrapperIdentity {
+  isCliPanel: boolean;
+  agentType?: string;
+}
 
 describe('WorkspaceJournal', () => {
   it('appends gapless entries and filters reads', () => {
@@ -80,6 +86,30 @@ describe('WorkspaceJournal', () => {
     expect(journal.readySince('panel-1')).toBe(now);
   });
 
+  it('reports a wrapper-launched panel to agents-only readers once its agent is known', () => {
+    // A panel launched as `agent-farm run`: plain until Pane detects Claude behind it.
+    const wrapper: WrapperIdentity = { isCliPanel: false };
+    const journal = new WorkspaceJournal({
+      resolvePane: paneId => ({ paneId, paneName: 'Farm' }),
+      resolvePanel: panelId => ({ panelId, paneId: 'pane-1', ...wrapper }),
+    });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'working' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'idle' });
+    expect(journal.readAfter(0, { agentsOnly: true }).entries).toEqual([]);
+
+    wrapper.isCliPanel = true;
+    wrapper.agentType = 'claude';
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'working' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'blocked' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'idle' });
+
+    expect(journal.readAfter(0, { agentsOnly: true }).entries.map(entry => [entry.kind, entry.agentType])).toEqual([
+      ['agent.busy', 'claude'],
+      ['agent.blocked', 'claude'],
+      ['agent.ready', 'claude'],
+    ]);
+  });
+
   it('does not report the Claude Code prompt suggestion as held input', () => {
     const screens = new Map<string, string>([
       ['panel-suggestion', 'done\n> Try "fix the bug"\n'],
@@ -156,6 +186,16 @@ describe('WorkspaceJournal', () => {
     ]);
   });
 
+  it('records exits for successive lifetimes even when the new terminal exits before its first poll', () => {
+    const journal = new WorkspaceJournal({ resolvePane: paneId => ({ paneId, paneName: 'Pane' }) });
+    const exit = { type: 'terminal:exit', source: { panelId: 'p', sessionId: 's' }, data: { exitCode: 0 } };
+    journal.send('panel:event', exit);
+    journal.send('panel:event', exit);
+    journal.send('panel:agentStatus', { panelId: 'p', sessionId: 's', state: 'unknown', reason: 'terminal_start' });
+    journal.send('panel:event', exit);
+    expect(journal.readAfter(0).entries.map(entry => entry.kind)).toEqual(['panel.exited', 'panel.exited']);
+  });
+
   it('ignores agent-status events from ordinary shell panels', () => {
     let isCliPanel = false;
     const journal = new WorkspaceJournal({
@@ -179,6 +219,129 @@ describe('WorkspaceJournal', () => {
       'pane.created',
       'agent.busy',
     ]);
+  });
+
+  describe('Session scope', () => {
+    const sessionId = '__orchestration_session_s1__';
+    function sessionJournal() {
+      const members = new Map<string, readonly string[]>([['one', []]]);
+      const journal = new WorkspaceJournal({
+        resolvePane: paneId => ({ paneId, paneName: paneId.toUpperCase() }),
+        resolveSessionMembership: id => id === sessionId
+          ? { panes: members, ownPaneIds: new Set(['owner']), ownPanelIds: new Set(['orchestrator']) }
+          : undefined,
+      });
+      const ready = (paneId: string, panelId: string) => journal.append({
+        kind: 'agent.ready', paneId, paneName: paneId, panelId, agentType: 'claude', source: 'agent',
+      });
+      return { journal, members, ready };
+    }
+
+    it('resolves membership on every read, so associate and detach need no re-arm', () => {
+      const { journal, members, ready } = sessionJournal();
+      const filter = { sessionId };
+      ready('one', 'p1');
+      ready('two', 'p2');
+      expect(journal.readAfter(0, filter).entries.map(entry => entry.paneId)).toEqual(['one']);
+
+      members.set('two', []);
+      expect(journal.readAfter(0, filter).entries.map(entry => entry.paneId)).toEqual(['one', 'two']);
+
+      members.delete('one');
+      ready('one', 'p1');
+      expect(journal.readAfter(2, filter).entries).toEqual([]);
+      expect(journal.readAfter(0, { sessionId: 'missing' }).entries).toEqual([]);
+    });
+
+    it('honors association panel limits and never reports the orchestrator itself', () => {
+      const { journal, members, ready } = sessionJournal();
+      members.set('one', ['p1']);
+      ready('one', 'p1');
+      ready('one', 'p-other');
+      ready('one', 'orchestrator');
+      ready('owner', 'p-owner');
+      journal.append({ kind: 'pane.gone', paneId: 'one', paneName: 'one', source: 'session' });
+
+      expect(journal.readAfter(0, { sessionId }).entries.map(entry => [entry.kind, entry.panelId])).toEqual([
+        ['agent.ready', 'p1'],
+        ['pane.gone', undefined],
+      ]);
+    });
+
+    it('records associate and detach as pane.associated and pane.detached for the Session', async () => {
+      const { journal, members } = sessionJournal();
+      const waiting = journal.waitAfter(0, { sessionId, agentsOnly: true }, 1000);
+      members.set('two', []);
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'associated', sessionName: 'Release', paneIds: ['two'] });
+      await expect(waiting).resolves.toMatchObject({
+        entries: [{ kind: 'pane.associated', paneId: 'two', paneName: 'TWO', sessionId, sessionName: 'Release', source: 'session' }],
+      });
+
+      members.delete('two');
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'detached', sessionName: 'Release', paneIds: ['two'] });
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'updated' });
+      // The Pane has left, but its LEFT entry still belongs to the Session.
+      expect(journal.readAfter(1, { sessionId }).entries).toMatchObject([{ kind: 'pane.detached', paneId: 'two' }]);
+      expect(journal.readAfter(0, { sessionId: 'other' }).entries).toEqual([]);
+      expect(journal.generation).toBe(2);
+    });
+
+    it('keeps membership kinds out of consumers that did not ask for them', () => {
+      const { journal } = sessionJournal();
+      journal.send('orchestration-sessions:changed', { sessionId, kind: 'associated', paneIds: ['two'] });
+
+      expect(journal.readAfter(0, {}).entries).toEqual([]);
+      expect(journal.readAfter(0, { kinds: ['pane.associated'], agentsOnly: true }).entries).toHaveLength(1);
+    });
+
+    it('delivers PR entries to Session watchers and to consumers that list them, never to older kinds-less consumers', () => {
+      const { journal } = sessionJournal();
+      const pr = { number: 747, url: 'https://github.com/acme/app/pull/747', headOid: 'abc' };
+      expect(journal.appendPaneEntry('one', { kind: 'pr.conflicted', source: 'github', pr })).toMatchObject({ paneName: 'ONE' });
+      journal.appendPaneEntry('two', { kind: 'pr.merged', source: 'github', pr });
+
+      expect(journal.readAfter(0, {}).entries).toEqual([]);
+      expect(journal.readAfter(0, { sessionId, agentsOnly: true }).entries).toMatchObject([
+        { kind: 'pr.conflicted', paneId: 'one', pr, source: 'github' },
+      ]);
+      expect(journal.readAfter(0, { kinds: ['pr.merged'], agentsOnly: true }).entries.map(entry => entry.paneId)).toEqual(['two']);
+      expect(journal.readAfter(0, { sessionId, kinds: ['agent.ready'] }).entries).toEqual([]);
+    });
+
+    it('delivers a member worker report to Session watchers, and still keeps it from kinds-less consumers', () => {
+      const { journal } = sessionJournal();
+      const report = { state: 'ready' as const, pr: 747, reportedAt: '2026-09-27T18:00:00.000Z' };
+      journal.appendPaneEntry('one', { kind: 'agent.report', panelId: 'p1', agentType: 'claude', source: 'agent', report });
+      journal.appendPaneEntry('two', { kind: 'agent.report', panelId: 'p2', agentType: 'claude', source: 'agent', report });
+
+      expect(journal.readAfter(0, {}).entries).toEqual([]);
+      expect(journal.readAfter(0, { sessionId }).entries).toMatchObject([{ kind: 'agent.report', paneId: 'one', report }]);
+      expect(journal.readAfter(0, { sessionId, kinds: ['agent.ready'] }).entries).toEqual([]);
+    });
+
+    it('keys a Session scope by the Session rather than its Panes', () => {
+      expect(workspaceFilterKey({ sessionId })).toBe(workspaceFilterKey({ sessionId }));
+      expect(workspaceFilterKey({ sessionId })).not.toBe(workspaceFilterKey({ sessionId: 'other' }));
+      expect(workspaceFilterKey({ sessionId })).not.toBe(workspaceFilterKey({}));
+    });
+  });
+
+  it('delivers agent.report only to a consumer that lists it in kinds', async () => {
+    const journal = new WorkspaceJournal({
+      resolvePane: paneId => ({ paneId, paneName: 'Fix login', repoId: 7 }),
+    });
+    const anyKind = journal.waitAfter(0, {}, 50);
+    const optedIn = journal.waitAfter(0, { kinds: ['agent.ready', 'agent.report'] }, 1000);
+    const report = { state: 'ready' as const, pr: 747, head: 'fc5dce9', reportedAt: '2026-09-27T18:00:00.000Z' };
+    journal.appendPaneEntry('pane-1', { kind: 'agent.report', panelId: 'panel-1', agentType: 'claude', source: 'agent', report });
+
+    await expect(optedIn).resolves.toMatchObject({
+      timedOut: false,
+      entries: [{ kind: 'agent.report', paneId: 'pane-1', paneName: 'Fix login', repoId: 7, panelId: 'panel-1', report }],
+    });
+    await expect(anyKind).resolves.toMatchObject({ timedOut: true, entries: [] });
+    expect(journal.readAfter(0).entries).toEqual([]);
+    expect(journal.readAfter(0, { kinds: ['agent.ready'] }).entries).toEqual([]);
   });
 
   it('times out without inventing an entry', async () => {

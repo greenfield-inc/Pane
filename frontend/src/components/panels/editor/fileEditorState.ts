@@ -31,6 +31,7 @@ export const initialFileEditorState: FileEditorState = {
 
 export type FileEditorAction =
   | { type: 'load-start' }
+  | { type: 'load-cancelled' }
   | { type: 'load-text'; file: FileItem; content: string }
   | { type: 'load-binary'; file: FileItem; blobUrl: string | null; error?: string }
   | { type: 'load-failed'; message: string }
@@ -65,6 +66,8 @@ export function fileEditorReducer(state: FileEditorState, action: FileEditorActi
         viewMode: 'edit',
         loading: false,
       };
+    case 'load-cancelled':
+      return { ...state, loading: false };
     case 'load-failed':
       return { ...state, error: action.message, loading: false };
     case 'edit':

@@ -200,6 +200,9 @@ export function UsageView() {
     return () => { requestId.current += 1; };
   }, [load]);
 
+  // Usage comes from the active host, so reload when it changes or reconnects.
+  useEffect(() => window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(() => { void load('refresh'); }), [load]);
+
   // While the index is still building, keep refreshing so numbers fill in.
   const scanning = report?.index.scanning ?? false;
   useEffect(() => {

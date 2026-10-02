@@ -40,7 +40,7 @@ export function ErrorDialog({
       <ModalBody>
         <div className="space-y-4">
           <div>
-            <p className="text-text-secondary">{error}</p>
+            <p className="select-text text-text-secondary">{error}</p>
           </div>
           
           {command && (

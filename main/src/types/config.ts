@@ -1,3 +1,4 @@
+import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -14,6 +15,7 @@ interface TerminalShortcut {
 }
 
 interface CustomCommand {
+  resume?: CustomCommandResume | null;
   name: string;
   command: string;
 }
@@ -58,6 +60,9 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
@@ -108,9 +113,20 @@ export interface AppConfig {
   // made through Pane (enabled by default). Applies to newly spawned terminals
   // and commands only — already-running processes keep their launch-time env.
   gitAttributionEnabled?: boolean;
-  // Agent-facing Pane context in repository instructions files
+  // Agent-facing Pane context
   agentContext?: {
-    managedAgentsMd: boolean;
+    /** Write a marked Pane section into repository AGENTS.md files (off by default; edits the repo). */
+    managedAgentsMd?: boolean;
+    /** Register Pane's MCP server with the user-level Claude Code, Codex, and Cursor configs. */
+    registerMcp?: boolean;
+    /** Toolsets the registered server serves (`runpane mcp --toolsets`); core when absent. */
+    mcpToolsets?: string[];
+    /** Install Pane's managed skill in the user's home skill folders (default on). */
+    homeSkill?: boolean;
+    /** Agent-context defaults already applied to this config; see configManager migrations. */
+    defaultsVersion?: number;
+    /** Retry removal of Pane's old AGENTS.md blocks until saved repositories are available. */
+    cleanupPending?: boolean;
   };
   // Use interactive mode for Claude CLI (persistent process with stdin instead of spawn-per-message)
   useInteractiveMode?: boolean;
@@ -168,6 +184,9 @@ export interface UpdateConfigRequest {
   defaultPermissionMode?: 'approve' | 'ignore';
   defaultModel?: string;
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultSessionCommand?: string;
+  defaultSessionResume?: CustomCommandResume | null;
+  defaultSessionProfile?: string;
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;

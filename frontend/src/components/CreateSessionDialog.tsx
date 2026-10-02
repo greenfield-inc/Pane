@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { API } from '../utils/api';
-import { cancelCreatePane, startCreatePane } from '../utils/journeyTimings';
 import type { CreateSessionRequest } from '../types/session';
 import type { Project } from '../types/project';
 import { useErrorStore } from '../stores/errorStore';
@@ -331,7 +330,6 @@ export function CreateSessionDialog({
     }
 
     setIsSubmitting(true);
-    startCreatePane();
 
     try {
       // Determine if we need to create a folder
@@ -367,7 +365,6 @@ export function CreateSessionDialog({
       });
 
       if (!response.success) {
-        cancelCreatePane();
         showError({
           title: 'Failed to Create Pane',
           error: response.error || 'An error occurred while creating the pane.',
@@ -385,7 +382,6 @@ export function CreateSessionDialog({
       onClose();
     } catch (error: unknown) {
       console.error('Error creating session:', error);
-      cancelCreatePane();
       const errorMessage = error instanceof Error ? error.message : 'An error occurred while creating the pane.';
       const errorDetails = error instanceof Error ? (error.stack || error.toString()) : String(error);
       showError({
@@ -517,7 +513,7 @@ export function CreateSessionDialog({
                                     data-branch-item
                                     role="option"
                                     aria-selected={formData.baseBranch === branch.name}
-                                    className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer ${
+                                    className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-default ${
                                       flatIndex === highlightedBranchIndex
                                         ? 'bg-interactive/10 text-text-primary'
                                         : 'text-text-secondary hover:bg-surface-hover'
@@ -554,7 +550,7 @@ export function CreateSessionDialog({
                                     data-branch-item
                                     role="option"
                                     aria-selected={formData.baseBranch === branch.name}
-                                    className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer ${
+                                    className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-default ${
                                       flatIndex === highlightedBranchIndex
                                         ? 'bg-interactive/10 text-text-primary'
                                         : 'text-text-secondary hover:bg-surface-hover'

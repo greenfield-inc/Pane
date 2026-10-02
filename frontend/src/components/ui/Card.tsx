@@ -23,7 +23,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
       default: 'shadow-card',
       bordered: 'border shadow-card',
       elevated: 'shadow-card hover:shadow-modal',
-      interactive: 'cursor-pointer shadow-card hover:shadow-md'
+      interactive: 'cursor-default shadow-card hover:shadow-md'
     };
     
     const nestingLevels = {

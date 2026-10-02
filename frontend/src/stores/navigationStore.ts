@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import type { PaneNavigationView } from '../../../shared/types/hostNavigation';
 
-export type SidebarNavigationScope = 'repositories' | 'pinned';
+export type SidebarNavigationScope = 'repositories' | 'pinned' | 'orchestration';
 
 // Tracks which project ids have already been seen so registerProjectIds only
 // auto-expands genuinely new projects (preserves user-collapsed state)
@@ -11,11 +12,12 @@ const toProjectIdArray = (projectIds: Set<number>): number[] =>
   Array.from(projectIds).sort((a, b) => a - b);
 
 /**
- * Pane has no router — this enum is the whole navigation model. Adding a value
- * here also requires a branch in `SessionView` and an entry in *both* sidebar
- * components (`Sidebar` compact rail and `ProjectSessionList` expanded tree).
+ * Pane has no router — this enum is the whole navigation model. It lives in
+ * `shared` because per-host navigation memory crosses the IPC boundary; adding a
+ * value there also requires a branch in `SessionView` and an entry in *both*
+ * sidebar components (`Sidebar` compact rail and `ProjectSessionList` tree).
  */
-export type ActiveView = 'sessions' | 'project' | 'pane-chat' | 'usage';
+export type ActiveView = PaneNavigationView;
 
 interface NavigationState {
   activeView: ActiveView;
@@ -34,6 +36,8 @@ interface NavigationState {
   // always-mounted session hotkeys so mod+1-9 numbering matches the visible list
   expandedProjects: Set<number>;
   hydrateExpandedProjects: (projectIds: number[]) => void;
+  // After a host switch: adopt that host's saved expansion and auto-expand none of its existing repositories.
+  resetExpandedProjectsForHost: (projectIds: number[]) => void;
   toggleProjectExpanded: (projectId: number) => number[];
   expandProject: (projectId: number) => number[] | null;
   registerProjectIds: (projectIds: number[]) => number[] | null;
@@ -49,7 +53,6 @@ interface NavigationState {
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
-  navigateToUsage: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -75,6 +78,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   expandedProjects: new Set<number>(),
   hydrateExpandedProjects: (projectIds) => {
+    set({ expandedProjects: new Set(projectIds) });
+  },
+  resetExpandedProjectsForHost: (projectIds) => {
+    knownProjectIds = new Set();
+    hasRegisteredInitialProjectIds = false;
     set({ expandedProjects: new Set(projectIds) });
   },
   toggleProjectExpanded: (projectId) => {
@@ -124,12 +132,6 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   navigateToPaneChat: () => set({
     activeView: 'pane-chat',
-    activeProjectId: null
-  }),
-
-  // Usage is reported per host, not per project.
-  navigateToUsage: () => set({
-    activeView: 'usage',
     activeProjectId: null
   }),
 }));

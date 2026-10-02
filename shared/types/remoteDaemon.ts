@@ -1,3 +1,4 @@
+import type { PaneChatAgent } from './paneChat';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundarySchema, JsonObject, JsonValue } from '../validation/boundaryDecoder';
@@ -276,10 +277,18 @@ export interface RemotePwaVoiceTranscriptionAffordance {
   modes: Record<VoiceTranscriptionMode, RemotePwaVoiceModePresentation>;
 }
 
+export interface RemotePwaSessionAgents {
+  /** Agents a new Session can run on this host, in picker order. */
+  agents: PaneChatAgent[];
+  defaultAgent: PaneChatAgent;
+}
+
 export interface RemotePwaAffordances {
   terminalShortcuts: RemotePwaTerminalShortcut[];
   customCommands: RemotePwaCustomCommand[];
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
+  /** Hosts older than the PWA's Sessions support omit this. */
+  sessionAgents?: RemotePwaSessionAgents;
 }
 
 export interface RemotePaneConnectionState {
@@ -514,6 +523,15 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
     payload.tunnel = tunnel;
   }
   return payload;
+}
+
+/**
+ * Names the host whose runtime is active: a saved remote profile id, or null for
+ * this computer. Per-host state keys off this on both sides of the IPC boundary.
+ */
+export function getActiveRemoteHostId<Value>(value: Value): string | null {
+  const { client } = normalizeRemoteDaemonConfig(value);
+  return client.mode === 'remote' ? client.activeProfileId : null;
 }
 
 export function normalizeRemoteDaemonConfig<Value>(value: Value): RemoteDaemonConfig {

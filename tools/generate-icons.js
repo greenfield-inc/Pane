@@ -1,10 +1,10 @@
 /**
  * Generate Electron app icons from SVG source
  *
- * Converts pane-logo.svg to:
+ * Converts the general icon and the macOS Dock artwork to:
  * - icon.png (1024x1024 for Linux)
  * - icon.ico (Windows - multiple sizes)
- * - icon.icns (macOS - multiple sizes)
+ * - icon-macos.png and icon.icns (macOS - padded to match Dock icon scale)
  *
  * Usage: node tools/generate-icons.js
  *
@@ -20,11 +20,10 @@ async function generateIcons() {
 
   // Accept a source image path as argument, or fall back to defaults
   const argSource = process.argv[2];
-  const defaultPng = path.join(__dirname, '../frontend/src/assets/pane-logo.png');
-  const defaultSvg = path.join(__dirname, '../frontend/src/assets/pane-logo.svg');
   const sourcePath = argSource
     ? path.resolve(argSource)
-    : fs.existsSync(defaultPng) ? defaultPng : defaultSvg;
+    : path.join(__dirname, '../main/assets/icon-source.svg');
+  const macSourcePath = path.join(__dirname, '../main/assets/icon-macos-source.svg');
 
   const outputDir = path.join(__dirname, '../main/assets');
 
@@ -34,8 +33,10 @@ async function generateIcons() {
   }
 
   const svgBuffer = fs.readFileSync(sourcePath);
+  const macSvgBuffer = fs.readFileSync(macSourcePath);
 
   console.log('Generating icons from:', sourcePath);
+  console.log('Generating macOS Dock icon from:', macSourcePath);
   console.log('Output directory:', outputDir);
 
   // Icon sizes needed for different platforms
@@ -52,6 +53,16 @@ async function generateIcons() {
     .png()
     .toFile(path.join(outputDir, 'icon.png'));
   console.log('✅ icon.png (1024x1024)');
+
+  // macOS Dock icons need breathing room around the artwork. The general PNG
+  // fills its canvas, so using it directly makes Pane look larger than peers.
+  const macIcon = await sharp(macSvgBuffer)
+    .resize(824, 824)
+    .extend({ top: 100, bottom: 100, left: 100, right: 100, background: '#00000000' })
+    .png()
+    .toBuffer();
+  fs.writeFileSync(path.join(outputDir, 'icon-macos.png'), macIcon);
+  console.log('✅ icon-macos.png (1024x1024, padded)');
 
   // Generate ICO for Windows
   console.log('\n📦 Generating ICO for Windows...');
@@ -90,14 +101,8 @@ async function generateIcons() {
   try {
     const png2icons = require('png2icons');
 
-    // Generate 1024x1024 PNG buffer for ICNS conversion
-    const png1024 = await sharp(svgBuffer)
-      .resize(1024, 1024)
-      .png()
-      .toBuffer();
-
     // Create ICNS using png2icons
-    const icnsBuffer = png2icons.createICNS(png1024, png2icons.BICUBIC2, 0);
+    const icnsBuffer = png2icons.createICNS(macIcon, png2icons.BICUBIC2, 0);
     if (icnsBuffer) {
       fs.writeFileSync(path.join(outputDir, 'icon.icns'), icnsBuffer);
       console.log('✅ icon.icns (all sizes embedded)');
@@ -154,6 +159,7 @@ async function generateIcons() {
   console.log('\nGenerated files:');
   console.log('  - main/assets/icon.png (Linux)');
   console.log('  - main/assets/icon.ico (Windows)');
+  console.log('  - main/assets/icon-macos.png (macOS Dock)');
   console.log('  - main/assets/icon.icns (macOS) - may need manual step on non-macOS');
   console.log('  - frontend/public/favicon-96x96.png');
   console.log('  - frontend/public/apple-touch-icon.png');

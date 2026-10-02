@@ -11,3 +11,13 @@ Palette slots are validated at load, renderer, IPC, and persistence boundaries. 
 At startup the persisted config selects Electron's `nativeTheme` source. Main passes the four-field appearance snapshot through an argv argument and selects a cached, theme-specific BrowserWindow background colour. The preload decodes the snapshot synchronously; the HTML bootstrap resolves System against `prefers-color-scheme` and stamps the full class chain before React mounts. The provider then owns live OS updates, persistence, rollback, window controls, terminal, and editor updates. A versioned local cache and legacy `localStorage.theme` are fallback-only.
 
 On Linux, System depends on the desktop environment and Chromium exposing `prefers-color-scheme`. Desktops that do not publish an appearance preference may remain on their reported default slot.
+
+## App icon
+
+`pnpm generate-icons` renders the general app assets from
+`main/assets/icon-source.svg` and the macOS Dock assets from
+`main/assets/icon-macos-source.svg`. The macOS Dock PNG and bundle ICNS use the
+black-sky landscape artwork inside a transparent 1024px canvas so its visible size
+matches neighboring Dock icons. The simpler PNG, ICO, and favicons continue to
+serve Linux, Windows, and small web sizes. `pnpm dev` copies an updated Dock PNG
+into the main-process build before launching Electron.

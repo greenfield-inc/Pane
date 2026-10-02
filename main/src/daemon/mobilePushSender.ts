@@ -137,7 +137,8 @@ export class MobilePushSender {
     const config = this.config();
     if (!config.host.mobilePush.registrations.some(item => !item.revokedAt && config.host.clients.some(client => client.id === item.clientId))) return;
     const previous = config.host.mobilePush.panelStates[event.panelId];
-    const kind = event.state === 'blocked' && previous !== 'blocked'
+    const terminalEnded = event.reason === 'exit' || event.reason === 'destroyed';
+    const kind = terminalEnded ? null : event.state === 'blocked' && previous !== 'blocked'
       ? 'needs-input'
       : previous === 'working' && event.state === 'idle'
         ? 'completed'

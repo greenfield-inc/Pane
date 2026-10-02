@@ -115,7 +115,7 @@ async function bootChromeFixture(page: Page, opts: BootOptions = {}) {
     activeProjectId: project.id,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand repository Pane$/ }).click();
+  await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
   await page.getByRole('button', { name: 'Flat chrome', exact: true }).click();
   if (opts.theme) {
     await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${opts.theme}\\b`));
@@ -186,14 +186,18 @@ async function attachScreenshot(page: Page, testInfo: TestInfo, name: string) {
 test('flat chrome preserves the primary navigation hierarchy', async ({ page }, testInfo) => {
   await bootChromeFixture(page);
 
-  await expect(page.getByTestId('usage-nav')).toBeVisible();
+  const sidebar = page.getByTestId('sidebar');
+  await expect(sidebar.getByRole('button', { name: 'New project', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Home menu', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toBeVisible();
   await expect(page.locator('.pane-sidebar-shell')).toHaveCSS('border-radius', '0px');
   await expect(page.locator('.pane-session-shell')).toHaveCSS('border-radius', '0px');
   await attachScreenshot(page, testInfo, 'chrome-expanded');
 
   await page.getByRole('button', { name: 'Collapse sidebar' }).click();
-  await expect(page.getByTestId('compact-usage')).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Home', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toHaveCount(0);
   await attachScreenshot(page, testInfo, 'chrome-collapsed');
 });
@@ -240,13 +244,13 @@ test('macOS UI uses the sans stack; content surfaces stay monospace', async ({ p
   await feedback.getByRole('button', { name: 'Close modal' }).click();
 
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const settings = page.getByRole('dialog', { name: 'Pane Settings' });
-  await expectSans(settings.getByRole('heading', { name: 'Pane Settings' }).last());
+  const settings = page.getByTestId('settings-page');
+  await expectSans(settings.getByRole('heading', { name: 'Settings', exact: true }));
   await settings.getByRole('button', { name: 'Terminal', exact: true }).click();
   await expectSans(settings.getByText('Choose an enumerated monospace font or enter a custom installed font name. Nerd Font symbols remain available.'));
   await expectSans(settings.getByRole('textbox', { name: 'Custom terminal font family' }));
   await expectSans(settings.getByRole('button', { name: 'Decrease terminal font size' }));
-  await settings.getByRole('button', { name: 'Close modal' }).click();
+  await settings.getByRole('button', { name: 'Back', exact: true }).click();
 
   await expect(page.locator('[data-terminal-font]').first()).toHaveAttribute(
     'data-terminal-font',

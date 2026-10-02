@@ -3,7 +3,12 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useErrorStore } from '../stores/errorStore';
 import { usePanelStore } from '../stores/panelStore';
 import { useConfigStore } from '../stores/configStore';
+import { useNavigationStore } from '../stores/navigationStore';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { panelApi } from '../services/panelApi';
+import { openPaneTarget } from '../components/terminal/openPaneLink';
+import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/hostNavigationMemory';
 import { API } from '../utils/api';
 import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
@@ -16,7 +21,20 @@ interface SessionEventData {
 
 type ValidatedEventData = SessionEventData | SessionOutput;
 
-async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void): Promise<void> {
+async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
+  if (hostChanged) {
+    // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
+    const uiState = await window.electronAPI.uiState.getExpanded();
+    useNavigationStore.getState().resetExpandedProjectsForHost(uiState.success ? uiState.data?.expandedProjects ?? [] : []);
+    // Session tiling is per host too, and its Session ids belong to the host we
+    // are leaving. Drop it so the incoming host hydrates its own.
+    useSessionWorkspaceLayoutStore.getState().reset();
+  }
+  // Repository ids are per host, so another host's repository view is meaningless.
+  if (hostChanged && useNavigationStore.getState().activeView === 'project') {
+    useNavigationStore.getState().navigateToSessions();
+    await useSessionStore.getState().setActiveSession(null);
+  }
   await useConfigStore.getState().fetchConfig();
 
   const sessionsResponse = await API.sessions.getAll();
@@ -27,11 +45,19 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     }));
     loadSessions(sessionsWithJsonMessages);
 
-    const activeSessionId = useSessionStore.getState().activeSessionId;
-    if (activeSessionId && !sessionsWithJsonMessages.some((session: Session) => session.id === activeSessionId)) {
+    // The list leaves out repository Panes, so keep the open repository view's own Pane.
+    const { activeSessionId, activeMainRepoSession } = useSessionStore.getState();
+    if (activeSessionId && activeSessionId !== activeMainRepoSession?.id
+      && !sessionsWithJsonMessages.some((session: Session) => session.id === activeSessionId)) {
       await useSessionStore.getState().setActiveSession(null);
       usePanelStore.getState().setPanels(activeSessionId, []);
     }
+  }
+
+  if (hostChanged) {
+    // The new host's config and Panes have landed, so its remembered location
+    // can be validated and reopened; the panel load below brings back its tab.
+    await restoreHostNavigation();
   }
 
   const activeSessionId = useSessionStore.getState().activeSessionId;
@@ -47,6 +73,18 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
 
   window.dispatchEvent(new Event('project-changed'));
   window.dispatchEvent(new Event('project-sessions-refresh'));
+  // Sessions belong to the host too; adopt the new host's selection.
+  window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { selectionChanged: true } }));
+}
+
+async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
+  if (!hostChanged) {
+    await reloadRemoteRuntimeState(loadSessions, false);
+    return;
+  }
+  // A switch clears the outgoing host's selection before restoring the incoming
+  // host's; don't let those intermediate states be remembered as either one's.
+  await withHostNavigationWritesPaused(() => reloadRemoteRuntimeState(loadSessions, true));
 }
 
 // Frontend validation helpers
@@ -221,6 +259,8 @@ export function useIPCEvents() {
 
     const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(({ paneId, panelId }) => {
       devLog.debug('[useIPCEvents] Pane focus requested:', { paneId, panelId });
+      // Same as clicking the Pane in the sidebar, which also leaves a repository or Sessions view.
+      useNavigationStore.getState().navigateToSessions();
       void useSessionStore.getState().setActiveSession(paneId).then(() => {
         if (panelId) {
           usePanelStore.getState().setActivePanel(paneId, panelId);
@@ -228,6 +268,21 @@ export function useIPCEvents() {
       });
     });
     unsubscribeFunctions.push(unsubscribePaneFocusRequested);
+
+    // pane:// links. A host sends Pane links as pane:focus-requested; a remote-mode client sends them here.
+    const unsubscribePaneOpenLink = window.electronAPI.events.onPaneOpenLink((target) => {
+      if (target.kind === 'pane') {
+        void openPaneTarget(target).catch(error => console.error('[useIPCEvents] Failed to open Pane link:', error));
+        return;
+      }
+      if (target.kind === 'repo') {
+        useNavigationStore.getState().navigateToProject(target.repoId);
+        return;
+      }
+      useNavigationStore.getState().navigateToPaneChat();
+      void useOrchestrationSessionStore.getState().select({ sessionId: target.sessionId });
+    });
+    unsubscribeFunctions.push(unsubscribePaneOpenLink);
 
     const unsubscribeSessionDeleted = window.electronAPI.events.onSessionDeleted((sessionData) => {
       devLog.debug('[useIPCEvents] Session deleted:', sessionData);
@@ -434,10 +489,16 @@ export function useIPCEvents() {
       unsubscribeFunctions.push(unsubscribeSpotlightTamper);
     }
 
-    const unsubscribeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(() => {
+    const unsubscribeRemoteResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
+      // Destroy outgoing guests before async resync. Hosts can share panel IDs,
+      // but their file URLs and Electron partitions must never be reused.
+      if (hostChanged) {
+        panelApi.invalidateHostLoads();
+        usePanelStore.getState().removeBrowserPanelsForHostSwitch();
+      }
       void (async () => {
         try {
-          await resyncRemoteRuntimeState(loadSessions);
+          await resyncRemoteRuntimeState(loadSessions, hostChanged);
         } catch (error) {
           console.error('[useIPCEvents] Failed to resync renderer state after remote reconnect:', error);
         }

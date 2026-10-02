@@ -263,6 +263,90 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
     );
     expect(result.baseBranch).toBe('origin/main');
   });
+
+  function branchCheckingRunner(existingBranches: string[]): CommandRunner {
+    return partialMock<CommandRunner>({
+      execAsync: vi.fn(async (command: string) => {
+        throw new Error(`Unexpected command: ${command}`);
+      }),
+      execFile: vi.fn(async (_file: string, args: readonly string[]) => {
+        if (args[0] === 'check-ref-format') {
+          if (args[2].includes('..')) throw new Error('fatal: not a valid branch name');
+          return { stdout: `${args[2]}\n`, stderr: '' };
+        }
+        if (args[0] === 'show-ref') {
+          if (existingBranches.includes(args[3].slice('refs/heads/'.length))) return { stdout: '', stderr: '' };
+          throw new Error('not found');
+        }
+        throw new Error(`Unexpected git ${args.join(' ')}`);
+      }),
+    });
+  }
+
+  it('claims a reserve under an explicitly requested branch name', async () => {
+    const runner = branchCheckingRunner([]);
+    vi.spyOn(worktreePoolManager, 'claimReserve').mockResolvedValue(null);
+    vi.spyOn(worktreePoolManager, 'createReserve').mockResolvedValue();
+    const manager = new WorktreeManager();
+    const createWorktree = vi.spyOn(manager, 'createWorktree').mockResolvedValue({
+      worktreePath: '/repo/worktrees/w5a',
+      baseCommit: 'base-commit',
+      baseBranch: 'release/foo',
+    });
+
+    await manager.resolveWorkingDirectory(
+      '/repo', 'w5a', 'release/foo', true, undefined, partialMock<PathResolver>({}), runner,
+      { branchName: 'agents/w5a' },
+    );
+
+    expect(worktreePoolManager.claimReserve).toHaveBeenCalledWith(
+      '/repo', 'release/foo', 'w5a', 'agents/w5a', undefined, expect.anything(), runner,
+    );
+    expect(createWorktree).toHaveBeenCalledWith(
+      '/repo', 'w5a', 'agents/w5a', 'release/foo', undefined, expect.anything(), runner,
+    );
+  });
+
+  it.each([
+    ['agents/taken', "Branch 'agents/taken' already exists"],
+    ['agents/bad..name', 'git check-ref-format --branch rejected it'],
+    ['agents/$(touch x)', 'Invalid branch name'],
+    ['-agents', 'Invalid branch name'],
+  ])('rejects the requested branch %s before touching worktrees', async (branchName, message) => {
+    const runner = branchCheckingRunner(['agents/taken']);
+    const claimReserve = vi.spyOn(worktreePoolManager, 'claimReserve');
+    const manager = new WorktreeManager();
+    const createWorktree = vi.spyOn(manager, 'createWorktree');
+
+    await expect(manager.resolveWorkingDirectory(
+      '/repo', 'w5a', 'origin/main', true, undefined, partialMock<PathResolver>({}), runner,
+      { branchName },
+    )).rejects.toThrow(message);
+    expect(claimReserve).not.toHaveBeenCalled();
+    expect(createWorktree).not.toHaveBeenCalled();
+  });
+
+  it('renames a claimed reserve branch to the exact requested name', async () => {
+    const runner = commandRunner(async command => {
+      if (command === 'git fetch' || command.startsWith('git worktree add -b ')) return { stdout: '', stderr: '' };
+      if (/^git rev-parse ['"]?origin\/main['"]?$/.test(command)) {
+        return { stdout: 'base-commit\n', stderr: '' };
+      }
+      if (command.startsWith('git worktree move ') || command.startsWith('git branch -m ')) return { stdout: '', stderr: '' };
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    const pathResolver = partialMock<PathResolver>({ join: (...parts: string[]) => parts.join('/') });
+    await worktreePoolManager.createReserve('/repo-claim', 'origin/main', undefined, pathResolver, runner);
+    vi.spyOn(worktreePoolManager, 'createReserve').mockResolvedValue();
+
+    const claimed = await worktreePoolManager.claimReserve(
+      '/repo-claim', 'origin/main', 'w5a', 'agents/w5a', undefined, pathResolver, runner,
+    );
+
+    expect(claimed).toEqual({ worktreePath: '/repo-claim/worktrees/w5a' });
+    const renameCall = vi.mocked(runner.execAsync).mock.calls.find(([command]) => command.startsWith('git branch -m '));
+    expect(renameCall?.[0]).toMatch(/^git branch -m ['"]_reserve\/[0-9a-f]{8}['"] ['"]agents\/w5a['"]$/);
+  });
 });
 
 describe('WorktreeManager.getSessionComparisonBranch', () => {

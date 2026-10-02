@@ -185,34 +185,43 @@ test.describe('window title bar', () => {
       `${project.name}·${worktreeSession.name}`,
     );
 
-    const insets = await titleBarLabel(page).evaluate((label) => {
-      const bar = label.closest('[data-testid="window-title-bar"]');
-      if (!(bar instanceof HTMLElement)) return null;
-      const computed = getComputedStyle(bar);
+    const insets = await page.evaluate(() => {
+      const read = (testId: string) => {
+        const slot = document.querySelector(`[data-testid="${testId}"]`);
+        if (!(slot instanceof HTMLElement)) return null;
+        const computed = getComputedStyle(slot);
+        return {
+          specifiedLeft: slot.style.left,
+          specifiedRight: slot.style.right,
+          computedLeft: computed.left,
+          computedRight: computed.right,
+        };
+      };
       return {
-        specifiedLeft: bar.style.paddingLeft,
-        specifiedRight: bar.style.paddingRight,
-        computedLeft: computed.paddingLeft,
-        computedRight: computed.paddingRight,
-        region: computed.getPropertyValue('-webkit-app-region'),
+        leading: read('window-title-bar-controls'),
+        trailing: read('window-title-bar-trailing-controls'),
       };
     });
 
     // The insets are driven by the overlay's own geometry, so the controls are
     // cleared wherever the OS puts them — on the right, or on the left under an
     // RTL system layout — at whatever width the current DPI makes them.
-    expect(insets?.specifiedLeft).toContain('titlebar-area-x');
-    expect(insets?.specifiedRight).toContain('titlebar-area-width');
+    expect(insets.leading?.specifiedLeft).toContain('titlebar-area-x');
+    expect(insets.trailing?.specifiedRight).toContain('titlebar-area-width');
     // Never the macOS traffic-light inset, which is the wrong side here.
-    expect(insets?.computedLeft).not.toBe('88px');
-    expect(insets?.computedRight).not.toBe('88px');
+    expect(insets.leading?.computedLeft).not.toBe('88px');
     // A browser reports no titlebar-area, which is the shape a window that lost
     // the overlay would compute: the fallbacks have to leave a usable symmetric
-    // strip rather than collapse it.
-    expect(insets?.computedLeft).toBe('8px');
-    expect(insets?.computedRight).toBe('8px');
-    // With the sidebar's drag strips retired, this is the only drag surface left.
-    expect(insets?.region).toBe('drag');
+    // gutter rather than collapse it.
+    expect(insets.leading?.computedLeft).toBe('8px');
+    expect(insets.trailing?.computedRight).toBe('8px');
+
+    // The pane name sits in the title bar, clear of the trailing controls.
+    const labelBox = await titleBarLabel(page).boundingBox();
+    const trailingBox = await page.getByTestId('window-title-bar-trailing-controls').boundingBox();
+    if (!labelBox || !trailingBox) throw new Error('Title bar label or trailing controls have no box');
+    expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(trailingBox.x);
+    expect(labelBox.y).toBeLessThan(38);
   });
 
   test('keeps the whole strip draggable', async ({ page }) => {
