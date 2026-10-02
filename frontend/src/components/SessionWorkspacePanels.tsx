@@ -53,9 +53,9 @@ function layoutPanelIds(layout: SessionPanelLayout | null | undefined): Set<stri
  * menu are tabs (they sit in the layout, or launch a command); the one plain
  * shell outside the layout is the bottom terminal dock.
  */
-function isStagePanel(panel: ToolPanel, agentPanelIds: readonly string[], inLayout: ReadonlySet<string>): boolean {
+function isStagePanel(panel: ToolPanel, agentPanelIds: ReadonlySet<string>, inLayout: ReadonlySet<string>): boolean {
   if (STAGE_PANEL_TYPES.has(panel.type)) return true;
-  if (panel.type !== 'terminal' || agentPanelIds.includes(panel.id)) return false;
+  if (panel.type !== 'terminal' || agentPanelIds.has(panel.id)) return false;
   return inLayout.has(panel.id) || launchesCommand(panel);
 }
 
@@ -85,15 +85,20 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
   const [error, setError] = useState<string | null>(null);
   const creating = useRef(false);
   const inLayout = useMemo(() => layoutPanelIds(layout), [layout]);
-  const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIds.includes(panel.id) && !isStagePanel(panel, agentPanelIds, inLayout));
+  const agentPanelIdSet = useMemo(() => new Set(agentPanelIds), [agentPanelIds]);
+  const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIdSet.has(panel.id) && !isStagePanel(panel, agentPanelIdSet, inLayout));
   const explorer = panels.find(panel => panel.type === 'explorer');
   const tabs = useMemo(
-    () => [agentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIds, inLayout))],
-    [agentPanel, panels, agentPanelIds, inLayout],
+    () => [agentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
+    [agentPanel, panels, agentPanelIdSet, inLayout],
   );
   const agentPanelId = agentPanel.id;
-  const agentPanelIdsRef = useRef(agentPanelIds);
-  agentPanelIdsRef.current = agentPanelIds;
+  // The panel events below outlive the render that subscribed them, so they read
+  // the agent ids through a ref that the commit keeps current.
+  const agentPanelIdsRef = useRef(agentPanelIdSet);
+  useEffect(() => {
+    agentPanelIdsRef.current = agentPanelIdSet;
+  }, [agentPanelIdSet]);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Every layout change funnels through here: store, focus mirror, and a
