@@ -80,6 +80,8 @@ generated files so the name can be retried; user files or edits prevent rollback
 
 WSL Sessions retain their durable files under the Windows Pane data directory.
 Their agent sees Linux paths such as `/mnt/c/Users/.../.pane/sessions/...`.
+This uses Pane's existing Windows-to-WSL path conversion and requires the default
+`/mnt/<drive>` automount layout; custom `[automount] root` settings are not supported.
 Generated `AGENTS.md` points to a Session-specific `runtime-context.md`; this
 context takes precedence over the shared Pane Chat routing instructions.
 
