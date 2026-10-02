@@ -966,8 +966,8 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   setVisibility(panelId: string, isVisible: boolean, viewerId = 'local:legacy'): void {
-    const terminal = this.terminals.get(panelId);
-    if (!terminal) return;
+    // Viewers can attach or detach while an asynchronous PTY spawn/respawn
+    // has no live terminal. Keep that intent for the replacement process.
     const normalizedViewerId = this.normalizeVisibilityViewerId(viewerId);
     let visibleViewers = this.visibleViewersByPanel.get(panelId);
 
@@ -985,7 +985,10 @@ export class TerminalPanelManager extends EventEmitter {
       }
     }
 
-    this.applyVisibilityState(terminal, (visibleViewers?.size ?? 0) > 0);
+    const terminal = this.terminals.get(panelId);
+    if (terminal) {
+      this.applyVisibilityState(terminal, (visibleViewers?.size ?? 0) > 0);
+    }
   }
 
   clearVisibilityViewer(viewerId: string): void {

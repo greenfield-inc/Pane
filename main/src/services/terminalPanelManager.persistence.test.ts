@@ -214,6 +214,28 @@ describe('terminal panel persistence', () => {
     });
   });
 
+  it.each([false, true])('reconciles visibility during respawn (previously visible: %s)', async (wasVisible) => {
+    const panel = makePanel(`visibility-during-respawn-${wasVisible}`);
+    const { manager } = await startTerminal(panel, wasVisible);
+    const spawn = ptyHost.spawn.bind(ptyHost);
+    let releaseSpawn!: () => void;
+    const gate = new Promise<void>(resolve => { releaseSpawn = resolve; });
+    vi.spyOn(ptyHost, 'spawn').mockImplementationOnce(async opts => {
+      await gate;
+      return spawn(opts);
+    });
+    const restart = manager.respawnAll();
+    manager.setVisibility(panel.id, !wasVisible);
+    releaseSpawn();
+    await restart;
+
+    // Large enough to flush immediately at either cadence.
+    const output = 'x'.repeat(150_000);
+    ptyHost.latest().emit(output);
+    expect(events.filter(event => event.channel === 'terminal:output')).toHaveLength(wasVisible ? 0 : 1);
+    manager.acknowledgeBytes(panel.id, output.length);
+  });
+
   it.each([
     { agentType: 'claude', initialCommand: 'claude --dangerously-skip-permissions', agentSessionId: '22222222-2222-4222-8222-222222222222', expected: 'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"' },
     { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', expected: 'codex --yolo resume "thread-1"' },

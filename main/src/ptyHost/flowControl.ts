@@ -188,8 +188,10 @@ function armSafetyTimer(record: FlowControlRecord, onResume: ResumeCallback): vo
       return;
     }
     // A timeout abandons the unacknowledged backlog. Keeping it would pause
-    // again on the very next byte forever. Fresh output still has to respect
-    // the high watermark, so a slow viewer retains bounded backpressure.
+    // again on the very next byte forever. ACKs carry no sequence, so we cannot
+    // distinguish late ACKs from fresh ones after this recovery. Carrying old
+    // debt forward would stall a recovered viewer when those ACKs were lost.
+    // Fresh output still uses the normal high/low watermarks.
     record.pendingBytes = 0;
     record.isPaused = false;
     onResume();
