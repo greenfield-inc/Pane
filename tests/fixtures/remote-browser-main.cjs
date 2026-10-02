@@ -29,7 +29,7 @@ app.whenReady().then(async () => {
   databaseService.createSession({ id: 'test-pane', name: 'Preview', initial_prompt: '', worktree_name: 'preview', worktree_path: root, tool_type: 'none' });
   const panel = await panelManager.createPanel({
     id: 'remote-preview', sessionId: 'test-pane', type: 'browser', title: 'index.html',
-    initialState: { customState: { currentUrl: pathToFileURL(path.join(bundle, 'index.html')).href } },
+    initialState: { customState: { currentUrl: pathToFileURL(path.join(bundle, 'index.html')).href.replace('file:', 'FILE:') } },
   });
   const requests = [];
   const persisted = [];

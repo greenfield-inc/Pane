@@ -36,6 +36,7 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
     expect(await guest('getComputedStyle(document.body).backgroundColor')).toBe('rgb(238, 245, 240)');
     await expect.poll(() => guest('document.querySelector("img").naturalWidth')).toBe(100);
+    await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).requests.length).toBeGreaterThan(0);
     await expect(page.locator('input')).toHaveValue(/\/index\.html$/);
     await page.screenshot({ path: testInfo.outputPath('remote-client-rendered.png') });
     await guest('document.querySelector("a").click()');

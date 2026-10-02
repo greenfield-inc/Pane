@@ -7,6 +7,7 @@ import { usePanelStore } from '../../../stores/panelStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useResizable } from '../../../hooks/useResizable';
 import { normalizeUrl } from './browserUrl';
+import { hasFileProtocol } from '../../../../../shared/utils/browserUrl';
 
 interface BrowserPanelProps {
   panel: ToolPanel;
@@ -23,10 +24,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
-  const isFileUrl = url.startsWith('file:');
+  const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
-  const isHostFileUrl = currentUrlFromPanelState?.startsWith('file:') ?? false;
+  const isHostFileUrl = hasFileProtocol(currentUrlFromPanelState);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
 
@@ -119,7 +120,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     clearTimeout(persistTimeoutRef.current);
     // Browsing a remote bundle is client-local. Keep the host's entry URL as
     // the access boundary instead of replacing it with a link/directory URL.
-    if (remoteFileRef.current === true || (remoteFileRef.current === null && newUrl.startsWith('file:'))) return;
+    if (remoteFileRef.current === true || (remoteFileRef.current === null && hasFileProtocol(newUrl))) return;
     persistTimeoutRef.current = setTimeout(() => {
       window.electron?.invoke('panels:update', panelIdRef.current, {
         state: { customState: { currentUrl: newUrl } }

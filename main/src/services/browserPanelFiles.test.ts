@@ -27,12 +27,12 @@ describe('browser panel file reads', () => {
     await expect(registry.invokeRemote('panels:test-navigation', [original, original])).resolves.toBe(true);
     await expect(registry.invoke('panels:test-navigation', [original])).resolves.toBe(true);
   });
-  it('serves the opened HTML and relative bundle assets, preserving the filename', async () => {
+  it.each(['file:', 'FILE:', ' \tFiLe:'])('serves HTML and relative assets for the %j scheme', async (scheme) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-browser-'));
     directories.push(root);
     await fs.writeFile(path.join(root, 'index.html'), '<link rel="stylesheet" href="theme.css"><h1>Host page</h1>');
     await fs.writeFile(path.join(root, 'theme.css'), 'h1 { color: green }');
-    const url = pathToFileURL(path.join(root, 'index.html')).href;
+    const url = pathToFileURL(path.join(root, 'index.html')).href.replace('file:', scheme);
     const panel: ToolPanel = {
       id: 'preview', sessionId: 'pane', type: 'browser', title: 'index.html',
       state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: url } },
