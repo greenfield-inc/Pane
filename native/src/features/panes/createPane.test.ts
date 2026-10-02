@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCreatePaneRequest, defaultBaseBranch, filterBranches, paneFromCreateResult, suggestPaneName } from './createPane';
+import { buildCreatePaneRequest, defaultBaseBranch, defaultProject, filterBranches, paneFromCreateResult, suggestPaneName } from './createPane';
+import type { ProjectWithPanes } from './paneList';
 
 const branches = [
   { name: 'main', isCurrent: true, hasWorktree: true, isRemote: false },
@@ -63,5 +64,14 @@ describe('paneFromCreateResult', () => {
       repo: { id: 3, name: 'doozy', path: '/r', active: false, sessionCount: 0 },
       items: [{ ok: false, index: 0, error: { message: "Branch 'x' already has a worktree" } }],
     })).toThrow("Branch 'x' already has a worktree");
+  });
+});
+
+describe('defaultProject', () => {
+  it('starts on the repository open on the desktop, else the first one', () => {
+    const projects: ProjectWithPanes[] = [{ id: 1, name: 'pane' }, { id: 2, name: 'doozy', active: true }];
+    expect(defaultProject(projects)?.id).toBe(2);
+    expect(defaultProject([{ id: 1, name: 'pane' }, { id: 2, name: 'doozy' }])?.id).toBe(1);
+    expect(defaultProject([])).toBeUndefined();
   });
 });

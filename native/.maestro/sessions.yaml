@@ -1,0 +1,72 @@
+# Create a Session, open it, pin and unpin it, archive it and restore it
+# from Archived. Needs a dev host with Sessions (README).
+appId: com.dcouple.pane.mobile
+name: Session journeys
+---
+- runFlow: subflows/signed-in.yaml
+- evalScript: ${output.session = 'mae-' + Date.now().toString(36)}
+
+# New Session: name it and keep the host's default agent.
+- tapOn:
+    id: sessions-new
+- extendedWaitUntil:
+    visible:
+      id: new-session-name
+    timeout: 15000
+# The sheet slides up to its detent; tapping mid-slide hits the wrong row.
+- waitForAnimationToEnd
+- tapOn:
+    id: new-session-name
+- inputText: ${output.session}
+# Return submits the sheet (the keyboard covers the Create button).
+- pressKey: Enter
+# The Session opens on its agent chat.
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 60000
+- assertVisible: ".*${output.session}.*"
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible: "Open Session ${output.session}"
+    timeout: 15000
+
+# Pin it: it shows under Pinned as well as Sessions.
+- tapOn: "Pin Session ${output.session}"
+- extendedWaitUntil:
+    visible: "Unpin Session ${output.session}"
+    timeout: 10000
+- assertVisible:
+    id: sidebar-section-pinned
+- tapOn:
+    text: "Unpin Session ${output.session}"
+    index: 0
+- extendedWaitUntil:
+    notVisible: "Unpin Session ${output.session}"
+    timeout: 10000
+
+# Archive it without a confirm, as on desktop, then restore it from Archived.
+- tapOn: "Archive Session ${output.session}"
+- extendedWaitUntil:
+    notVisible: "Open Session ${output.session}"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: sidebar-section-archived
+- runFlow:
+    when:
+      notVisible: "Restore Session ${output.session}"
+    commands:
+      - tapOn:
+          id: sidebar-section-archived
+- scrollUntilVisible:
+    element: "Restore Session ${output.session}"
+    timeout: 15000
+- tapOn: "Restore Session ${output.session}"
+- scrollUntilVisible:
+    element: "Open Session ${output.session}"
+    direction: UP
+    timeout: 15000
