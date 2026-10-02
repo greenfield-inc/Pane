@@ -26,6 +26,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const isFileUrl = url.startsWith('file:');
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
+  const isHostFileUrl = currentUrlFromPanelState?.startsWith('file:') ?? false;
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
 
@@ -40,7 +41,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // Ask main before mounting a file webview: remote host paths must never be
   // loaded from this computer, even briefly while connection state is fetched.
   useEffect(() => {
-    if (!isFileUrl) return;
+    if (!isFileUrl) {
+      // A host-authored HTTP panel uses ordinary project cookies and writes.
+      // Client-only links away from a file keep the host's file entry grant.
+      if (!isHostFileUrl) {
+        remoteFileRef.current = false;
+        setFileSession(null);
+      }
+      return;
+    }
     let cancelled = false;
     void window.electronAPI.invoke('browser-panel:prepare-file', panel.id).then(
       (result: { partition: string | null }) => {
@@ -51,7 +60,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       () => { if (!cancelled) setUrlError('Unable to prepare this file. Check the host connection and try again.'); },
     );
     return () => { cancelled = true; };
-  }, [panel.id, isFileUrl]);
+  }, [panel.id, isFileUrl, isHostFileUrl]);
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);
@@ -151,9 +160,12 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   useEffect(() => {
     // A navigation's debounced persistence is an echo, not a new load request.
     // Reassigning src here resets the guest's navigation history.
-    if (!currentUrlFromPanelState || currentUrlFromPanelState === lastNavigationUrlRef.current) return;
+    // A host changing its file entry to HTTP also changes the guest's session,
+    // even if the client already followed a link to that exact HTTP page.
+    const endsRemoteFileSession = remoteFileRef.current === true && !isHostFileUrl;
+    if (!currentUrlFromPanelState || (currentUrlFromPanelState === lastNavigationUrlRef.current && !endsRemoteFileSession)) return;
     navigateTo(currentUrlFromPanelState);
-  }, [currentUrlFromPanelState, navigateTo]);
+  }, [currentUrlFromPanelState, isHostFileUrl, navigateTo]);
 
   // An agent reopened this page after rewriting it; show the new content.
   const lastReopenedAt = useRef(reopenedAt);

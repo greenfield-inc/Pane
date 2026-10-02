@@ -1,5 +1,5 @@
 // Isolated Electron client and loopback host using the production remote transport.
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 process.on('uncaughtException', error => { console.error(error); app.exit(1); });
 process.on('unhandledRejection', error => { console.error(error); app.exit(1); });
 const fs = require('node:fs/promises');
@@ -62,14 +62,23 @@ app.whenReady().then(async () => {
     remoteMode = remote;
     window.webContents.send('remote-daemon:resync-requested', { hostChanged: true });
   });
+  ipcMain.handle('preview-test:host-http', async () => {
+    const url = `http://127.0.0.1:${address.port}/health`;
+    await session.fromPartition('persist:project-test-pane').cookies.set({ url, name: 'project-session', value: 'available' });
+    await panelManager.updatePanel(panel.id, { state: { customState: { currentUrl: url } } });
+    const updated = panelManager.getPanel(panel.id);
+    await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(updated)} }))`);
+  });
   ipcMain.handle('preview-test:remote-command', (_event, channel, args) => remotePaneClientController.invoke(channel, args, async () => null));
   ipcMain.handle('browser-panel:prepare-file', (_event, panelId) => prepareRemoteBrowserFiles(panelId));
   ipcMain.handle('browser-panel:register-webview', () => ({ success: true }));
   ipcMain.handle('browser-panel:close-devtools', () => ({ success: true }));
   ipcMain.handle('panels:update', async (_event, ...args) => {
     persisted.push(args);
-    localPanel = { ...localPanel, state: { ...localPanel.state, ...args[1].state } };
-    await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(localPanel)} }))`);
+    if (remoteMode) await panelManager.updatePanel(...args);
+    else localPanel = { ...localPanel, state: { ...localPanel.state, ...args[1].state } };
+    const updated = remoteMode ? panelManager.getPanel(panel.id) : localPanel;
+    await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(updated)} }))`);
     return { success: true };
   });
   const window = new BrowserWindow({

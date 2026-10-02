@@ -102,6 +102,17 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await expect(page.locator('webview')).toHaveCount(0);
     await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).requests.length).toBeGreaterThan(requestsBeforeSwitch);
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
+    // The host can adopt the same HTTP page the client already followed. This
+    // is an authoritative session transition, not an echo of client browsing.
+    await guest(`location.href = ${JSON.stringify(externalUrl)}`);
+    await expect.poll(() => guest('location.href')).toBe(externalUrl);
+    await page.evaluate(() => window.electronAPI.invoke('preview-test:host-http'));
+    await expect.poll(() => guest('location.href')).toBe(externalUrl);
+    await expect.poll(() => guest('document.cookie')).toContain('project-session=available');
+    const nextHttpUrl = `${externalUrl}?next=1`;
+    await page.locator('input').fill(nextHttpUrl);
+    await page.locator('input').press('Enter');
+    await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted.at(-1)?.[1].state.customState.currentUrl).toBe(nextHttpUrl);
   } finally {
     await app.close();
     await fs.rm(paneDir, { recursive: true, force: true });
