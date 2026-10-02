@@ -458,6 +458,24 @@ test('Session runtime is hidden when the host offers no WSL distributions', asyn
   await expect(page.getByLabel('Run agent in')).toHaveCount(0);
 });
 
+test('selecting WSL restores a Cursor default while preserving an explicit agent choice', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
+  });
+  await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04'], defaultOrchestratorAgent: 'cursor' });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
+  const runtime = page.getByLabel('Run agent in');
+  await runtime.selectOption('Ubuntu-24.04');
+  await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toBeChecked();
+  await page.getByTestId('create-session-agent-codex').click();
+  await runtime.selectOption('');
+  await runtime.selectOption('Ubuntu-24.04');
+  await expect(page.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
+});
+
 test('Sessions create, rename, switch, and keep chat surfaces focused', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [

@@ -498,6 +498,13 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
   const userSelectedAgent = useRef(false);
 
   useEffect(() => {
+    if (!isOpen || userSelectedAgent.current) return;
+    setAgent(wslDistribution
+      ? config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT
+      : supportedSessionAgent(config?.defaultOrchestratorAgent));
+  }, [isOpen, wslDistribution, config?.defaultOrchestratorAgent]);
+
+  useEffect(() => {
     if (!isOpen) return;
     userSelectedAgent.current = false;
     userEditedLaunch.current = false;
