@@ -71,16 +71,20 @@ name: Pane list journeys
     id: panes-search-clear
 - waitForAnimationToEnd
 
-# Delete it for good from Archived.
+# Delete it for good from the Archived section, which loads when opened.
 - scrollUntilVisible:
     element:
-      id: panes-archived
+      id: sidebar-section-archived
 - tapOn:
-    id: panes-archived
-- extendedWaitUntil:
-    visible: "${output.pane}.*"
+    id: sidebar-section-archived
+- scrollUntilVisible:
+    element: "${output.pane}.*"
     timeout: 15000
-- tapOn: "${output.pane}.*"
+- tapOn:
+    id: "archived-delete-.*"
+    childOf:
+      id: "archived-row-.*"
+      containsChild: "${output.pane}.*"
 - tapOn:
     text: "Delete"
     below:

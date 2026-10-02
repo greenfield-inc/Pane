@@ -1,4 +1,5 @@
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
+import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
 import type { ToolPanel } from '@shared/types/panels';
 import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
 
@@ -22,6 +23,19 @@ export function pickPanel(
     ?? panels.find(panel => panel.id === hostActiveId)
     ?? panels[0]
     ?? null;
+}
+
+/**
+ * A Session's tabs, as on desktop: its current agent's chat first, then the
+ * workspace's own terminals. Chats of agents the Session no longer uses stay hidden.
+ */
+export function sessionWorkspacePanels(
+  view: { session: Pick<OrchestrationSessionRecord, 'panelIds'>; panel: ToolPanel },
+  panels: readonly ToolPanel[],
+): ToolPanel[] {
+  const chatIds = new Set(Object.values(view.session.panelIds));
+  const chat = panels.find(panel => panel.id === view.panel.id) ?? view.panel;
+  return [chat, ...panels.filter(panel => !chatIds.has(panel.id))];
 }
 
 export interface NewPanelOption {
