@@ -14,7 +14,7 @@ test('remote browser loads host HTML, assets and linked pages through the remote
   });
   try {
     const page = await app.firstWindow();
-    page.on('pageerror', error => console.error(error.message));
+    page.on('pageerror', error => console.error(error.stack));
     const fixture = path.resolve('tests/fixtures/remote-browser-renderer.tsx').replaceAll('\\', '/');
     await page.route('**/remote-preview-test', route => route.fulfill({
       contentType: 'text/html',
@@ -77,9 +77,13 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await expect.poll(() => guest('document.body.innerText')).toContain('The connected host has changed');
     // Local file navigation must retain the same guest and Back history after
     // its debounced URL write is reflected back into panel props.
-    await page.reload();
+    // Keep identical panel/session IDs mounted while changing runtimes.
+    await page.evaluate(() => window.electronAPI.invoke('preview-test:resync', false));
+    await expect(page.locator('webview')).toHaveCount(0);
     await expect(page.locator('webview')).toBeVisible();
-    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
+    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from local disk');
+    const localEntryUrl = await page.locator('input').inputValue();
+    expect(localEntryUrl).not.toBe(entryUrl);
     const guestId = await page.locator('webview').evaluate(element => {
       // SAFETY: The locator selects the real Electron webview.
       return (element as Electron.WebviewTag).getWebContentsId();
@@ -91,6 +95,12 @@ test('remote browser loads host HTML, assets and linked pages through the remote
       return (element as Electron.WebviewTag).getWebContentsId();
     })).toBe(guestId);
     await page.getByTitle('Back', { exact: true }).click();
+    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from local disk');
+    await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted.at(-1)?.[1].state.customState.currentUrl).toBe(localEntryUrl);
+    const requestsBeforeSwitch = (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).requests.length;
+    await page.evaluate(() => window.electronAPI.invoke('preview-test:resync', true));
+    await expect(page.locator('webview')).toHaveCount(0);
+    await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).requests.length).toBeGreaterThan(requestsBeforeSwitch);
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
   } finally {
     await app.close();

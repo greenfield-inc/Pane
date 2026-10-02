@@ -19,6 +19,12 @@ export const usePanelStore = create<PanelStore>()(
     focusedGroupIds: {},
 
     // Pure synchronous state updates
+    removeBrowserPanelsForHostSwitch: () => {
+      for (const [sessionId, panels] of Object.entries(get().panels)) {
+        get().setPanels(sessionId, panels.filter(panel => panel.type !== 'browser'));
+      }
+    },
+
     setPanels: (sessionId, panels) => {
       set((state) => {
         const panelIds = new Set(panels.map(panel => panel.id));

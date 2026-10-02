@@ -33,6 +33,12 @@ app.whenReady().then(async () => {
   });
   const requests = [];
   const persisted = [];
+  const localBundle = path.join(root, 'Local bundle');
+  await fs.cp(bundle, localBundle, { recursive: true });
+  const localEntry = path.join(localBundle, 'index.html');
+  await fs.writeFile(localEntry, (await fs.readFile(localEntry, 'utf8')).replace('Rendered from the host', 'Rendered from local disk'));
+  let localPanel = { ...panel, state: { ...panel.state, customState: { currentUrl: pathToFileURL(localEntry).href } } };
+  let remoteMode = true;
   const registry = new PaneCommandRegistry();
   registry.register('panels:read-browser-file', (panelId, url) => {
     requests.push(url);
@@ -48,17 +54,22 @@ app.whenReady().then(async () => {
   const address = host.getAddress();
   ipcMain.handle('preview-test:host-url', () => `http://127.0.0.1:${address.port}/health`);
   await remotePaneClientController.activateProfile({ id: 'test-host', label: 'Test host', baseUrl: `http://127.0.0.1:${address.port}`, token: 'test-only-token', transport: 'http+sse' });
-  ipcMain.handle('preview-test:panel', () => panel);
+  ipcMain.handle('preview-test:panel', () => remoteMode ? panel : localPanel);
   ipcMain.handle('preview-test:requests', () => ({ requests, persisted }));
-  ipcMain.handle('preview-test:disconnect', () => remotePaneClientController.switchToLocalMode());
+  ipcMain.handle('preview-test:disconnect', async () => { await remotePaneClientController.switchToLocalMode(); remoteMode = false; });
+  ipcMain.handle('preview-test:resync', async (_event, remote) => {
+    if (remote) await remotePaneClientController.activateProfile({ id: 'test-host', label: 'Test host', baseUrl: `http://127.0.0.1:${address.port}`, token: 'test-only-token', transport: 'http+sse' });
+    remoteMode = remote;
+    window.webContents.send('remote-daemon:resync-requested', { hostChanged: true });
+  });
   ipcMain.handle('preview-test:remote-command', (_event, channel, args) => remotePaneClientController.invoke(channel, args, async () => null));
   ipcMain.handle('browser-panel:prepare-file', (_event, panelId) => prepareRemoteBrowserFiles(panelId));
   ipcMain.handle('browser-panel:register-webview', () => ({ success: true }));
   ipcMain.handle('browser-panel:close-devtools', () => ({ success: true }));
   ipcMain.handle('panels:update', async (_event, ...args) => {
     persisted.push(args);
-    await panelManager.updatePanel(...args);
-    await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(panel)} }))`);
+    localPanel = { ...localPanel, state: { ...localPanel.state, ...args[1].state } };
+    await window.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('test-panel-update', { detail: ${JSON.stringify(localPanel)} }))`);
     return { success: true };
   });
   const window = new BrowserWindow({

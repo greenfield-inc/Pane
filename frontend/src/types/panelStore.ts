@@ -17,6 +17,7 @@ export interface PanelStore {
   focusedGroupIds: Record<string, string>;        // sessionId -> focused group id
 
   // Synchronous state update actions
+  removeBrowserPanelsForHostSwitch: () => void;
   setPanels: (sessionId: string, panels: ToolPanel[]) => void;
   setActivePanel: (sessionId: string, panelId: string) => void;
   addPanel: (panel: ToolPanel) => void;
