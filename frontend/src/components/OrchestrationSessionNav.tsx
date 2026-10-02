@@ -22,6 +22,7 @@ import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
 import { useOrchestrationSessionActivity } from '../hooks/useAgentStatus';
 import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
+import { startSessionDrag } from '../utils/sessionDrag';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import type { AppConfig } from '../types/config';
@@ -261,6 +262,11 @@ export function OrchestrationSessionNav({
             type="button"
             data-testid={rowId}
             aria-label={isLegacy ? label : `Open Session ${session.name}`}
+            // Dragging a row tiles the Session beside another, the same gesture
+            // as dragging a tab. Repository rows carry only text/plain, so the
+            // two drags never answer each other's drop targets.
+            draggable
+            onDragStart={event => startSessionDrag(event.dataTransfer, session.id)}
             onClick={() => void openSession(session.id)}
             onContextMenu={event => handleSessionContextMenu(event, session)}
             onKeyDown={event => handleSessionKeyDown(event, session)}
@@ -306,6 +312,8 @@ export function OrchestrationSessionNav({
               data-compact-rail-item
               aria-label={session.id === LEGACY_ORCHESTRATION_SESSION_ID ? 'Pane Chat' : `Open Session ${session.name}`}
               title={session.name}
+              draggable
+              onDragStart={event => startSessionDrag(event.dataTransfer, session.id)}
               onClick={() => void openSession(session.id)}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session)}

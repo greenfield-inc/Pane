@@ -59,11 +59,31 @@ function isStagePanel(panel: ToolPanel, agentPanelIds: ReadonlySet<string>, inLa
   return inLayout.has(panel.id) || launchesCommand(panel);
 }
 
-export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewContent, changesContent, toolbarActions }: {
+export function SessionWorkspacePanels({
+  agentPanel,
+  agentPanelIds,
+  overviewContent,
+  changesContent,
+  toolbarActions,
+  chromeInline = false,
+  focusWithin = true,
+}: {
   agentPanel: ToolPanel; agentPanelIds: string[];
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
+  /**
+   * Keep this Session's toolbar in its own tile instead of the window title
+   * bar. The title bar has one trailing slot, so tiled Sessions would otherwise
+   * all portal their controls into the same strip.
+   */
+  chromeInline?: boolean;
+  /**
+   * Whether this Session owns window focus. A tile that does not must not
+   * autofocus its panels, or the last tile to mount would steal the caret.
+   */
+  focusWithin?: boolean;
 }) {
-  const trailingSlot = useTitleBarSlotStore(state => state.trailingSlot);
+  const titleBarSlot = useTitleBarSlotStore(state => state.trailingSlot);
+  const trailingSlot = chromeInline ? null : titleBarSlot;
   const sessionId = agentPanel.sessionId;
   const panels = usePanelStore(state => state.panels[sessionId] ?? EMPTY_PANELS);
   const layout = usePanelStore(state => state.layouts[sessionId]);
@@ -300,7 +320,7 @@ export function SessionWorkspacePanels({ agentPanel, agentPanelIds, overviewCont
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="relative min-h-0 flex-1">
-            {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={layout.focusedGroupId ?? primaryGroup(layout.root).id}
+            {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
               onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
               renderAddTool={renderGroupAddTool} />}

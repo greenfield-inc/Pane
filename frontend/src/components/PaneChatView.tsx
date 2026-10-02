@@ -1,6 +1,5 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
-import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
@@ -11,9 +10,13 @@ import type {
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
+import type { SessionTileNode, SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { SessionProvider } from '../contexts/SessionContext';
 import { PanelContainer } from './panels/PanelContainer';
+import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
+import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
@@ -27,176 +30,78 @@ import {
   isArchivedOrchestrationSession,
   useOrchestrationSessionStore,
 } from '../stores/orchestrationSessionStore';
+import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useHotkey } from '../hooks/useHotkey';
+import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
+import type { DropZone, LayoutDirection } from '../utils/layoutTree';
+import {
+  closeSessionTile,
+  dropSessionOnTile,
+  findSessionTileInDirection,
+  focusSessionTile,
+  focusedSessionId,
+  focusedSessionTile,
+  resizeSessionSplit,
+  showSessionInLayout,
+} from '../utils/sessionWorkspaceLayout';
 
 function responseError(response: { success: boolean; error?: string }, fallback: string): Error | null {
   return response.success ? null : new Error(response.error || fallback);
 }
 
+/** Every zone, for a tile being offered the Session it already shows. */
+const NO_DROP_ZONES: readonly DropZone[] = ['center', 'left', 'right', 'top', 'bottom'];
+
 export function PaneChatView() {
   const [legacyState, setLegacyState] = useState<PaneChatState<Session> | null>(null);
-  const [namedView, setNamedView] = useState<OrchestrationSessionView<Session> | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [statusAnnouncement, setStatusAnnouncement] = useState('');
-  const requestGeneration = useRef(0);
-  const agentReloadKey = useRef<string | null>(null);
-  const lastSelectedSessionId = useRef<string | undefined>(undefined);
-  const pendingSessionId = useRef<string | undefined>(undefined);
+  const [legacyLoading, setLegacyLoading] = useState(true);
+  const [legacyError, setLegacyError] = useState<string | null>(null);
 
   const availability = useOrchestrationSessionStore(state => state.availability);
-  const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
-  const selectedSessionRecord = useOrchestrationSessionStore(state => state.sessions.find(
-    session => session.id === state.selectedSessionId && !isArchivedOrchestrationSession(session),
-  ));
+  const storeError = useOrchestrationSessionStore(state => state.error);
   const hasActiveSessions = useOrchestrationSessionStore(state => state.sessions.some(
     session => !isArchivedOrchestrationSession(session),
   ));
   const loadSessions = useOrchestrationSessionStore(state => state.load);
-  const updateSession = useOrchestrationSessionStore(state => state.update);
-  const selectSession = useOrchestrationSessionStore(state => state.select);
 
   const loadLegacyPaneChat = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+    setLegacyLoading(true);
+    setLegacyError(null);
     try {
       const response = await API.paneChat.getOrCreate();
       const responseFailure = responseError(response, 'Failed to open Pane Chat');
       if (responseFailure || !response.data) throw responseFailure ?? new Error('Failed to open Pane Chat');
       setLegacyState(response.data);
-      setNamedView(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to open Pane Chat');
+      setLegacyError(cause instanceof Error ? cause.message : 'Failed to open Pane Chat');
     } finally {
-      setIsLoading(false);
+      setLegacyLoading(false);
     }
   }, []);
 
-  const loadNamedSession = useCallback(async (sessionId?: string) => {
-    const generation = ++requestGeneration.current;
-    setIsLoading(true);
-    setError(null);
-    try {
-      await loadSessions();
-      if (generation !== requestGeneration.current) return;
-      const current = useOrchestrationSessionStore.getState();
-      if (current.availability === 'error') throw new Error(current.error || 'Sessions could not be loaded');
-      if (sessionId && current.selectedSessionId && sessionId !== current.selectedSessionId) return;
-      const requestedSession = sessionId
-        ? current.sessions.find(session => session.id === sessionId)
-        : undefined;
-      if (sessionId && (!requestedSession || isArchivedOrchestrationSession(requestedSession))) {
-        throw new Error('This Session is archived. Restore it from Archived in the sidebar to reopen it.');
-      }
-      const targetId = sessionId
-        ?? current.selectedSessionId
-        ?? current.sessions.find(session => !isArchivedOrchestrationSession(session))?.id;
-      if (!targetId) {
-        setNamedView(null);
-        setLegacyState(null);
-        setError(null);
-        return;
-      }
-      pendingSessionId.current = targetId;
-      if (targetId !== current.selectedSessionId) {
-        await selectSession({ sessionId: targetId });
-        if (generation !== requestGeneration.current) return;
-      }
-      const response = await API.orchestrationSessions.get({ sessionId: targetId });
-      const stateAfterLoad = useOrchestrationSessionStore.getState();
-      const selectedAfterLoad = stateAfterLoad.selectedSessionId;
-      const activeRecordAfterLoad = stateAfterLoad.sessions.find(session => session.id === targetId);
-      if (
-        generation !== requestGeneration.current
-        || selectedAfterLoad !== targetId
-        || !activeRecordAfterLoad
-        || isArchivedOrchestrationSession(activeRecordAfterLoad)
-      ) return;
-      const responseFailure = responseError(response, 'Failed to open Session');
-      if (responseFailure || !response.data) throw responseFailure ?? new Error('Failed to open Session');
-      pendingSessionId.current = undefined;
-      setNamedView(response.data);
-      setLegacyState(null);
-    } catch (cause) {
-      if (generation !== requestGeneration.current) return;
-      pendingSessionId.current = undefined;
-      setError(cause instanceof Error ? cause.message : 'Failed to open Session');
-      setNamedView(null);
-      setLegacyState(null);
-    } finally {
-      if (generation === requestGeneration.current) setIsLoading(false);
-    }
-  }, [loadSessions, selectSession]);
-
   useEffect(() => {
-    const hasNamedSessionApi = Boolean(window.electronAPI?.orchestrationSessions);
-    if (!hasNamedSessionApi) {
+    if (!window.electronAPI?.orchestrationSessions) {
       void loadLegacyPaneChat();
       return;
     }
-    void loadNamedSession();
-  }, [loadLegacyPaneChat, loadNamedSession]);
+    setLegacyLoading(false);
+    void loadSessions();
+  }, [loadLegacyPaneChat, loadSessions]);
 
-  useEffect(() => {
-    if (!window.electronAPI?.orchestrationSessions || !selectedSessionId) return;
-    if (namedView?.session.id === selectedSessionId) return;
-    void loadNamedSession(selectedSessionId);
-  }, [loadNamedSession, namedView?.session.id, selectedSessionId]);
+  if (legacyState) {
+    return (
+      <LegacyPaneChatWorkspace
+        state={legacyState}
+        error={legacyError}
+        onRetry={loadLegacyPaneChat}
+      />
+    );
+  }
 
-  useEffect(() => {
-    if (!window.electronAPI?.orchestrationSessions) return;
-    if (selectedSessionId) {
-      lastSelectedSessionId.current = selectedSessionId;
-      return;
-    }
-    if (!lastSelectedSessionId.current && !pendingSessionId.current && !namedView) return;
-    requestGeneration.current += 1;
-    lastSelectedSessionId.current = undefined;
-    pendingSessionId.current = undefined;
-    if (!namedView) {
-      setIsLoading(false);
-      return;
-    }
-    setNamedView(null);
-    setLegacyState(null);
-    setError(null);
-    setIsLoading(false);
-  }, [namedView, selectedSessionId]);
-
-  useEffect(() => {
-    if (!namedView || !selectedSessionRecord || namedView.session.id !== selectedSessionRecord.id) return;
-    if (namedView.agent !== selectedSessionRecord.agent) {
-      const reloadKey = `${selectedSessionRecord.id}:${selectedSessionRecord.agent}`;
-      if (agentReloadKey.current === reloadKey) return;
-      agentReloadKey.current = reloadKey;
-      void loadNamedSession(namedView.session.id).finally(() => {
-        if (agentReloadKey.current === reloadKey) agentReloadKey.current = null;
-      });
-      return;
-    }
-    agentReloadKey.current = null;
-    if (namedView.session.revision === selectedSessionRecord.revision) return;
-    setNamedView(current => current ? { ...current, session: selectedSessionRecord } : current);
-  }, [loadNamedSession, namedView, selectedSessionRecord]);
-
-  const handleNamedOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
-    if (!namedView) throw new Error('No Session selected');
-    const sessionId = namedView.session.id;
-    const generation = requestGeneration.current;
-    const record = await updateSession({ sessionId }, {
-      ...input,
-      expectedRevision: namedView.session.revision,
-    });
-    if (generation !== requestGeneration.current || useOrchestrationSessionStore.getState().selectedSessionId !== sessionId) {
-      throw new Error('Session selection changed while saving the overview');
-    }
-    setNamedView(current => current ? { ...current, session: record } : current);
-    setStatusAnnouncement(`${record.name} overview saved`);
-    return record;
-  }, [namedView, updateSession]);
-
-  if (isLoading && !legacyState && !namedView) {
+  const isOpening = legacyLoading || availability === 'idle' || (availability === 'loading' && !hasActiveSessions);
+  if (isOpening) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
         <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
@@ -207,61 +112,487 @@ export function PaneChatView() {
     );
   }
 
-  if (legacyState) {
-    return (
-      <LegacyPaneChatWorkspace
-        state={legacyState}
-        error={error}
-        statusAnnouncement={statusAnnouncement}
-        onRetry={loadLegacyPaneChat}
-      />
-    );
-  }
+  if (hasActiveSessions) return <SessionWorkspace />;
 
-  if (!namedView) {
+  const error = availability === 'error' ? storeError ?? 'Sessions could not be loaded' : legacyError;
+  return (
+    <div className="flex-1 flex items-center justify-center bg-bg-primary p-6">
+      <div className="max-w-md text-center">
+        <Terminal className="mx-auto mb-3 h-8 w-8 text-text-tertiary" />
+        {error ? (
+          <>
+            <h2 className="text-base font-semibold text-text-primary">Sessions did not open</h2>
+            <p role="alert" className="mt-2 text-sm text-text-secondary">{error}</p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="mt-4"
+              icon={<RefreshCw className="h-4 w-4" />}
+              onClick={() => void loadSessions()}
+            >
+              Retry
+            </Button>
+          </>
+        ) : (
+          <>
+            <h2 className="text-base font-semibold text-text-primary">Choose a Session</h2>
+            <p className="mt-2 text-sm text-text-secondary">
+              Create a new Session or restore one from Archived to start a chat.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tiled Sessions
+// ---------------------------------------------------------------------------
+
+/**
+ * The window divided between Sessions.
+ *
+ * Owns the outer layout tree and keeps it agreeing with the rest of the app in
+ * both directions: the focused tile's Session is the selected one, and
+ * selecting a Session elsewhere (a sidebar click, a restored host) focuses its
+ * tile or, when it is not on screen, takes over the focused one. With a single
+ * tile that is exactly the pre-tiling behaviour.
+ */
+function SessionWorkspace() {
+  const sessions = useOrchestrationSessionStore(state => state.sessions);
+  const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
+  const select = useOrchestrationSessionStore(state => state.select);
+  const layout = useSessionWorkspaceLayoutStore(state => state.layout);
+  const applyLayout = useSessionWorkspaceLayoutStore(state => state.apply);
+  const hydrateLayout = useSessionWorkspaceLayoutStore(state => state.hydrate);
+  const reconcileLayout = useSessionWorkspaceLayoutStore(state => state.reconcile);
+  const remoteHostId = useConfigStore(state => (
+    state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined
+  ));
+  const draggedSessionId = useDraggedSessionId();
+
+  const activeSessionIds = useMemo(
+    () => sessions.filter(session => !isArchivedOrchestrationSession(session)).map(session => session.id),
+    [sessions],
+  );
+
+  const currentLayout = useCallback(() => useSessionWorkspaceLayoutStore.getState().layout, []);
+
+  const selectSession = useCallback((sessionId: string) => {
+    if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
+    void select({ sessionId }).catch(() => undefined);
+  }, [select]);
+
+  // Something always has to be selected for the layout to have a starting tile;
+  // what the layout already shows beats an arbitrary first Session.
+  useEffect(() => {
+    if (selectedSessionId || activeSessionIds.length === 0) return;
+    const current = currentLayout();
+    const focused = current ? focusedSessionId(current) : undefined;
+    selectSession(focused && activeSessionIds.includes(focused) ? focused : activeSessionIds[0]);
+  }, [activeSessionIds, currentLayout, selectSession, selectedSessionId]);
+
+  // Read the host's remembered layout once its Sessions are known, then let the
+  // selection adopt what it restored. The store hydrates once per host and only
+  // that call resolves with a layout, so this runs exactly once per host —
+  // never as a standing rule that could argue with the effect below.
+  useEffect(() => {
+    if (remoteHostId === undefined || activeSessionIds.length === 0) return;
+    void hydrateLayout(activeSessionIds, selectedSessionId).then(hydrated => {
+      if (!hydrated) return;
+      const focused = focusedSessionId(hydrated);
+      if (activeSessionIds.includes(focused)) selectSession(focused);
+    });
+  }, [activeSessionIds, hydrateLayout, remoteHostId, selectSession, selectedSessionId]);
+
+  // Archiving or deleting a Session retires its tile.
+  useEffect(() => {
+    reconcileLayout(activeSessionIds, selectedSessionId);
+  }, [activeSessionIds, reconcileLayout, selectedSessionId]);
+
+  // Selection moving is what drives the layout; the layout pushes back only
+  // from a real gesture, through `commitLayout`. Edge-triggering on the
+  // selection matters: a gesture's own `select` has not landed yet on the
+  // render right after it, and reading the outgoing selection as an
+  // instruction here would bounce focus straight back.
+  const lastSelection = useRef(selectedSessionId);
+  useEffect(() => {
+    const previous = lastSelection.current;
+    lastSelection.current = selectedSessionId;
+    if (!layout || !selectedSessionId || previous === selectedSessionId) return;
+    const next = showSessionInLayout(layout, selectedSessionId);
+    if (next !== layout) applyLayout(next);
+  }, [applyLayout, layout, selectedSessionId]);
+
+  /** Apply a gesture's layout and let the Session selection follow its focus. */
+  const commitLayout = useCallback((next: SessionWorkspaceLayout) => {
+    applyLayout(next);
+    selectSession(focusedSessionId(next));
+  }, [applyLayout, selectSession]);
+
+  const focusTile = useCallback((tileId: string) => {
+    const current = currentLayout();
+    if (!current) return;
+    const next = focusSessionTile(current, tileId);
+    if (next !== current) commitLayout(next);
+  }, [commitLayout, currentLayout]);
+
+  const dropSession = useCallback((tileId: string, sessionId: string, zone: DropZone) => {
+    const current = currentLayout();
+    if (!current) return;
+    // Only a Session this host still has can be tiled.
+    if (!activeSessionIds.includes(sessionId)) return;
+    const next = dropSessionOnTile(current, tileId, sessionId, zone);
+    if (next !== current) commitLayout(next);
+  }, [activeSessionIds, commitLayout, currentLayout]);
+
+  const closeTile = useCallback((tileId: string) => {
+    const current = currentLayout();
+    if (!current) return;
+    const next = closeSessionTile(current, tileId);
+    if (next !== current) commitLayout(next);
+  }, [commitLayout, currentLayout]);
+
+  const resizeTiles = useCallback((splitNodeId: string, sizes: number[]) => {
+    const current = currentLayout();
+    if (!current) return;
+    applyLayout(resizeSessionSplit(current, splitNodeId, sizes));
+  }, [applyLayout, currentLayout]);
+
+  const focusDirection = useCallback((dir: LayoutDirection) => {
+    const current = currentLayout();
+    if (!current) return;
+    const target = findSessionTileInDirection(current, dir);
+    if (target) focusTile(target);
+  }, [currentLayout, focusTile]);
+
+  // Palette-only commands: tiling is a pointer gesture, and binding keys here
+  // would collide with the in-Pane split shortcuts of the same shape.
+  const isTiled = layout?.root.type === 'split';
+  useHotkey({
+    id: 'focus-session-tile-left',
+    label: 'Focus Session Left',
+    keys: '',
+    category: 'view',
+    enabled: () => isTiled,
+    action: () => focusDirection('left'),
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'focus-session-tile-right',
+    label: 'Focus Session Right',
+    keys: '',
+    category: 'view',
+    enabled: () => isTiled,
+    action: () => focusDirection('right'),
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'focus-session-tile-up',
+    label: 'Focus Session Up',
+    keys: '',
+    category: 'view',
+    enabled: () => isTiled,
+    action: () => focusDirection('up'),
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'focus-session-tile-down',
+    label: 'Focus Session Down',
+    keys: '',
+    category: 'view',
+    enabled: () => isTiled,
+    action: () => focusDirection('down'),
+    showInPalette: true,
+  });
+  useHotkey({
+    id: 'close-session-tile',
+    label: 'Stop tiling this Session',
+    keys: '',
+    category: 'view',
+    enabled: () => isTiled,
+    action: () => {
+      const current = currentLayout();
+      if (current) closeTile(focusedSessionTile(current).id);
+    },
+    showInPalette: true,
+  });
+
+  const renderTile = useCallback((tile: SessionTileNode, context: SessionTileContext) => (
+    <SessionTile
+      tile={tile}
+      isFocused={context.isFocused}
+      tiled={context.tiled}
+      draggedSessionId={draggedSessionId}
+      onFocus={focusTile}
+      onDropSession={dropSession}
+      onClose={context.tiled ? closeTile : undefined}
+    />
+  ), [closeTile, dropSession, draggedSessionId, focusTile]);
+
+  if (!layout) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-bg-primary p-6">
-        <div className="max-w-md text-center">
-          <Terminal className="mx-auto mb-3 h-8 w-8 text-text-tertiary" />
-          {error ? (
-            <>
-              <h2 className="text-base font-semibold text-text-primary">Sessions did not open</h2>
-              <p role="alert" className="mt-2 text-sm text-text-secondary">{error}</p>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="mt-4"
-                icon={<RefreshCw className="h-4 w-4" />}
-                onClick={() => void loadNamedSession()}
-              >
-                Retry
-              </Button>
-            </>
-          ) : (
-            <>
-              <h2 className="text-base font-semibold text-text-primary">Choose a Session</h2>
-              <p className="mt-2 text-sm text-text-secondary">
-                {hasActiveSessions
-                  ? 'Choose a Session from the sidebar to open its chat.'
-                  : 'Create a new Session or restore one from Archived to start a chat.'}
-              </p>
-            </>
-          )}
+      <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
+        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
+          <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
+          <span>Opening Sessions…</span>
         </div>
       </div>
     );
   }
 
   return (
-    <NamedSessionWorkspace
-      key={namedView.session.id}
-      view={namedView}
-      error={error}
-      statusAnnouncement={statusAnnouncement}
-      onOverviewUpdate={handleNamedOverviewUpdate}
-      onRetry={() => void loadNamedSession(namedView.session.id)}
-    />
+    <div data-testid="session-tile-layout" className="relative flex min-h-0 flex-1 overflow-hidden bg-bg-primary">
+      <SessionTileLayout
+        layout={layout}
+        focusedTileId={focusedSessionTile(layout).id}
+        renderTile={renderTile}
+        onSizesChange={resizeTiles}
+      />
+    </div>
+  );
+}
+
+interface SessionTileProps {
+  tile: SessionTileNode;
+  isFocused: boolean;
+  tiled: boolean;
+  draggedSessionId: string | null;
+  onFocus: (tileId: string) => void;
+  onDropSession: (tileId: string, sessionId: string, zone: DropZone) => void;
+  /** Absent while the window shows a single Session: the last tile never closes. */
+  onClose?: (tileId: string) => void;
+}
+
+/**
+ * One Session filling its region of the window: its own live terminal, its own
+ * tab splits, its own navigation. Tiles stay mounted whether focused or not.
+ */
+function SessionTile({
+  tile,
+  isFocused,
+  tiled,
+  draggedSessionId,
+  onFocus,
+  onDropSession,
+  onClose,
+}: SessionTileProps) {
+  const sessionId = tile.sessionId;
+  const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [dropZone, setDropZone] = useState<DropZone | null>(null);
+  const requestGeneration = useRef(0);
+  const agentReloadKey = useRef<string | null>(null);
+  const record = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === sessionId));
+
+  const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await API.orchestrationSessions.get({ sessionId });
+      if (generation !== requestGeneration.current) return;
+      const responseFailure = responseError(response, 'Failed to open Session');
+      if (responseFailure || !response.data) throw responseFailure ?? new Error('Failed to open Session');
+      setView(response.data);
+    } catch (cause) {
+      if (generation !== requestGeneration.current) return;
+      setError(cause instanceof Error ? cause.message : 'Failed to open Session');
+      setView(null);
+    } finally {
+      if (generation === requestGeneration.current) setIsLoading(false);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void load();
+    return () => { requestGeneration.current += 1; };
+  }, [load]);
+
+  // The view carries a snapshot of the record; a changed agent needs a fresh
+  // panel, while any other edit only needs the newer record folded in.
+  useEffect(() => {
+    if (!view || !record || view.session.id !== record.id) return;
+    if (view.agent !== record.agent) {
+      const reloadKey = `${record.id}:${record.agent}`;
+      if (agentReloadKey.current === reloadKey) return;
+      agentReloadKey.current = reloadKey;
+      void load().finally(() => {
+        if (agentReloadKey.current === reloadKey) agentReloadKey.current = null;
+      });
+      return;
+    }
+    agentReloadKey.current = null;
+    if (view.session.revision === record.revision) return;
+    setView(current => current ? { ...current, session: record } : current);
+  }, [load, record, view]);
+
+  const handleOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
+    if (!view) throw new Error('This Session is not open');
+    const next = await useOrchestrationSessionStore.getState().update(
+      { sessionId },
+      { ...input, expectedRevision: view.session.revision },
+    );
+    setView(current => current ? { ...current, session: next } : current);
+    return next;
+  }, [sessionId, view]);
+
+  const handleDragStart = useCallback((event: React.DragEvent) => {
+    startSessionDrag(event.dataTransfer, sessionId);
+  }, [sessionId]);
+
+  const handleDrop = useCallback((zone: DropZone, event: React.DragEvent) => {
+    setDropZone(null);
+    // The payload is authoritative; the tracked id covers a drag whose
+    // dragstart this window never saw.
+    const dragged = readDraggedSessionId(event.dataTransfer) ?? draggedSessionId;
+    if (dragged) onDropSession(tile.id, dragged, zone);
+  }, [draggedSessionId, onDropSession, tile.id]);
+
+  const handleDropZoneChange = useCallback((zone: DropZone | null) => setDropZone(zone), []);
+
+  const focusThisTile = useCallback(() => onFocus(tile.id), [onFocus, tile.id]);
+
+  const chrome: SessionTileChrome = useMemo(() => ({
+    tiled,
+    isFocused,
+    onDragStart: handleDragStart,
+    onClose: onClose ? () => onClose(tile.id) : undefined,
+  }), [handleDragStart, isFocused, onClose, tile.id, tiled]);
+
+  // A tile already showing the dragged Session has nothing to offer it.
+  const isDragSource = draggedSessionId === sessionId;
+
+  return (
+    <div
+      className={cn(
+        // h-full/w-full fills an Allotment pane; flex-1 fills the plain flex
+        // row a single tile sits in. A tile is never content-sized.
+        'relative flex h-full w-full flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-bg-primary',
+        tiled && isFocused && 'ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]',
+      )}
+      onMouseDownCapture={focusThisTile}
+      onFocusCapture={focusThisTile}
+    >
+      {view ? (
+        <NamedSessionWorkspace
+          // Changing which Session a tile shows starts that Session's workspace
+          // fresh, exactly as switching Sessions always has: its inspector, its
+          // terminal dock and its tab state belong to the Session, not the tile.
+          key={view.session.id}
+          view={view}
+          error={error}
+          chrome={chrome}
+          onOverviewUpdate={handleOverviewUpdate}
+          onRetry={() => void load()}
+        />
+      ) : (
+        <SessionTileFallback
+          name={record?.name}
+          error={error}
+          isLoading={isLoading}
+          chrome={chrome}
+          onRetry={() => void load()}
+        />
+      )}
+
+      {/* A drag shield: xterm and webviews swallow drag events otherwise. */}
+      {draggedSessionId && <div className="absolute inset-0 z-30" style={{ background: 'transparent' }} />}
+      {draggedSessionId && (
+        <div className="absolute inset-0 z-40" data-pane-session-drop-target="true">
+          <DropOverlay
+            activeZone={dropZone}
+            onZoneChange={handleDropZoneChange}
+            onDrop={handleDrop}
+            disabledZones={isDragSource ? NO_DROP_ZONES : undefined}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SessionTileFallback({ name, error, isLoading, chrome, onRetry }: {
+  name?: string;
+  error: string | null;
+  isLoading: boolean;
+  chrome: SessionTileChrome;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <SessionTileHeader name={name ?? 'Session'} chrome={chrome} />
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
+        {isLoading ? (
+          <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-text-secondary">
+            <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
+            <span>Opening {name ?? 'Session'}…</span>
+          </div>
+        ) : (
+          <div>
+            <p role="alert" className="text-sm text-text-secondary">{error ?? 'This Session did not open.'}</p>
+            <Button type="button" variant="secondary" size="sm" className="mt-3"
+              icon={<RefreshCw className="h-4 w-4" />} onClick={onRetry}>Retry</Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface SessionTileChrome {
+  /** False while the window shows a single Session. */
+  tiled: boolean;
+  isFocused: boolean;
+  onDragStart: (event: React.DragEvent) => void;
+  /** Absent for the last tile. */
+  onClose?: () => void;
+}
+
+/**
+ * A tile's title row, and the handle it is dragged by: the same gesture as a
+ * tab, one level up.
+ */
+function SessionTileHeader({ name, chrome, error, actions }: {
+  name: string;
+  chrome: SessionTileChrome;
+  error?: string | null;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div
+      draggable
+      onDragStart={chrome.onDragStart}
+      data-testid="session-tile-header"
+      title={`Drag ${name} beside another Session`}
+      className="flex min-h-11 flex-shrink-0 cursor-grab items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5 active:cursor-grabbing"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-semibold text-text-primary">{name}</h1>
+        </div>
+        {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
+      </div>
+      <div className="flex flex-shrink-0 items-center gap-1">
+        {actions}
+        {chrome.onClose && (
+          <Tooltip content="Stop tiling this Session" side="bottom">
+            <button
+              type="button"
+              aria-label={`Stop tiling ${name}`}
+              onClick={chrome.onClose}
+              className="inline-flex h-7 w-7 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </Tooltip>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -280,14 +611,12 @@ function PaneChatAgentBadge({ agent }: { agent: PaneChatAgent }) {
 interface LegacyPaneChatWorkspaceProps {
   state: PaneChatState<Session>;
   error: string | null;
-  statusAnnouncement: string;
   onRetry: () => void;
 }
 
-function LegacyPaneChatWorkspace({ state, error, statusAnnouncement, onRetry }: LegacyPaneChatWorkspaceProps) {
+function LegacyPaneChatWorkspace({ state, error, onRetry }: LegacyPaneChatWorkspaceProps) {
   return (
     <div className="pane-chat-shell flex-1 flex flex-col overflow-hidden bg-bg-primary">
-      <LiveRegion>{statusAnnouncement}</LiveRegion>
       <div className="flex h-11 flex-shrink-0 items-center justify-between border-b border-border-primary px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
@@ -309,18 +638,16 @@ function LegacyPaneChatWorkspace({ state, error, statusAnnouncement, onRetry }: 
 interface NamedSessionWorkspaceProps {
   view: OrchestrationSessionView<Session>;
   error: string | null;
-  statusAnnouncement: string;
+  chrome: SessionTileChrome;
   onOverviewUpdate: (input: OrchestrationSessionUpdateInput) => Promise<OrchestrationSessionRecord>;
   onRetry: () => void;
 }
 
-function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpdate, onRetry }: NamedSessionWorkspaceProps) {
+function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry }: NamedSessionWorkspaceProps) {
   const [overview, setOverview] = useState<OrchestrationSessionOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
-  // With a window title bar the Session name is shown there, so this header
-  // only remains for screen readers.
-  const hasTitleBar = useTitleBarSlotStore(state => state.trailingSlot !== null);
   const [showSettings, setShowSettings] = useState(false);
+  const [statusAnnouncement, setStatusAnnouncement] = useState('');
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
   const isMounted = useRef(false);
@@ -328,9 +655,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
   const refreshOverview = useCallback(async () => {
     const sessionId = view.session.id;
     const requestId = ++overviewRequestId.current;
-    const isCurrentRequest = () => isMounted.current
-      && requestId === overviewRequestId.current
-      && useOrchestrationSessionStore.getState().selectedSessionId === sessionId;
+    const isCurrentRequest = () => isMounted.current && requestId === overviewRequestId.current;
 
     try {
       const response = await API.orchestrationSessions.overview({ sessionId });
@@ -375,8 +700,7 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
 
     const currentAssociations = () => {
       const state = useOrchestrationSessionStore.getState();
-      if (state.selectedSessionId !== view.session.id) return [];
-      return state.sessions.find(session => session.id === state.selectedSessionId)?.associations ?? [];
+      return state.sessions.find(session => session.id === view.session.id)?.associations ?? [];
     };
     const isAssociatedPane = (paneId: string) => currentAssociations().some(association => association.paneId === paneId);
     const isAssociatedPanel = (panelId: string, paneId: string) => currentAssociations().some(association => (
@@ -431,6 +755,12 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
     };
   }, [scheduleOverviewRefresh, view.session.id]);
 
+  const saveOverview = useCallback(async (input: OrchestrationSessionUpdateInput) => {
+    const record = await onOverviewUpdate(input);
+    setStatusAnnouncement(`${record.name} overview saved`);
+    return record;
+  }, [onOverviewUpdate]);
+
   const sessionControls = (
     <Tooltip content="Session settings" side="bottom">
       <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
@@ -443,28 +773,21 @@ function NamedSessionWorkspace({ view, error, statusAnnouncement, onOverviewUpda
   return (
     <div className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
       <LiveRegion>{statusAnnouncement}</LiveRegion>
-      <div className={hasTitleBar ? "sr-only" : "flex min-h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-border-primary px-4 py-1.5"}>
-        <div className="flex min-w-0 items-center gap-2">
-          <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold text-text-primary">{view.session.name}</h1>
-          </div>
-          {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
-        </div>
-      </div>
-      {hasTitleBar && error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
-      {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={onOverviewUpdate} />}
+      <SessionTileHeader name={view.session.name} chrome={chrome} error={error} />
+      {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={saveOverview} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
             toolbarActions={sessionControls}
+            chromeInline={chrome.tiled}
+            focusWithin={chrome.isFocused}
             overviewContent={<SessionOverviewPanel
             record={view.session}
             overview={overview}
             error={overviewError}
             onRefresh={refreshOverview}
             onUpdate={async input => {
-              const record = await onOverviewUpdate(input);
+              const record = await saveOverview(input);
               await refreshOverview();
               return record;
             }}
