@@ -31,7 +31,7 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await expect(page.locator('webview')).toBeVisible();
     const guest = async <T>(script: string): Promise<T> => page.locator('webview').evaluate(
       // SAFETY: This locator selects Electron's webview tag in the Electron client fixture.
-      (element, code) => (element as Electron.WebviewTag).executeJavaScript(code), script,
+      (element, code) => (element as Electron.WebviewTag).executeJavaScript(code, true), script,
     );
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
     expect(await guest('getComputedStyle(document.body).backgroundColor')).toBe('rgb(238, 245, 240)');
@@ -42,17 +42,49 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await expect.poll(() => guest('document.body.innerText')).toContain('Sibling navigation works');
     await guest('document.querySelector("a").click()');
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
+    const externalUrl: string = await page.evaluate(() => window.electronAPI.invoke('preview-test:host-url'));
+    await guest(`location.href = ${JSON.stringify(externalUrl)}`);
+    await expect.poll(() => guest('location.href')).toBe(externalUrl);
+    // Wait past the URL-persistence debounce to catch an external link replacing
+    // the host's entry grant before returning to the file.
+    await page.waitForTimeout(2200);
+    await page.getByTitle('Back', { exact: true }).click();
+    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
     const evidence = await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'));
     expect(evidence.requests).toEqual(expect.arrayContaining([
       expect.stringMatching(/\/index\.html$/), expect.stringMatching(/\/theme\.css$/),
       expect.stringMatching(/\/mark\.svg$/), expect.stringMatching(/\/nested\/next\.html$/),
     ]));
     expect(evidence.persisted).toEqual([]);
+    const attackerUrl = 'file:///private/nonexistent.html';
+    await expect(page.evaluate(url => window.electronAPI.invoke('preview-test:remote-command', 'panels:update', [
+      'remote-preview', { state: { customState: { currentUrl: url } } },
+    ]), attackerUrl)).rejects.toThrow('on the host');
+    await expect(page.evaluate(url => window.electronAPI.invoke('preview-test:remote-command', 'panels:create', [{
+      sessionId: 'test-pane', type: 'browser', initialState: { currentUrl: url },
+    }]), attackerUrl)).rejects.toThrow('on the host');
     await guest('location.href = new URL("../private.txt", location.href).href');
     await expect.poll(() => guest('document.body.innerText')).toContain('Unable to read this file from the host');
     await page.evaluate(() => window.electronAPI.invoke('preview-test:disconnect'));
     await page.getByTitle('Refresh', { exact: true }).click();
     await expect.poll(() => guest('document.body.innerText')).toContain('The connected host has changed');
+    // Local file navigation must retain the same guest and Back history after
+    // its debounced URL write is reflected back into panel props.
+    await page.reload();
+    await expect(page.locator('webview')).toBeVisible();
+    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
+    const guestId = await page.locator('webview').evaluate(element => {
+      // SAFETY: The locator selects the real Electron webview.
+      return (element as Electron.WebviewTag).getWebContentsId();
+    });
+    await guest('document.querySelector("a").click()');
+    await expect.poll(async () => (await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted.length).toBeGreaterThan(0);
+    expect(await page.locator('webview').evaluate(element => {
+      // SAFETY: The locator selects the real Electron webview.
+      return (element as Electron.WebviewTag).getWebContentsId();
+    })).toBe(guestId);
+    await page.getByTitle('Back', { exact: true }).click();
+    await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
   } finally {
     await app.close();
     await fs.rm(paneDir, { recursive: true, force: true });

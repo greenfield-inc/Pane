@@ -22,7 +22,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const [fileSession, setFileSession] = useState<{ url: string; partition: string | null } | null>(null);
+  const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
+  const isFileUrl = url.startsWith('file:');
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
@@ -32,23 +33,24 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const panelIdRef = useRef(panel.id);
-  const remoteFileRef = useRef(false);
+  const remoteFileRef = useRef<boolean | null>(null);
+  const lastNavigationUrlRef = useRef(currentUrlFromPanelState);
 
   // Ask main before mounting a file webview: remote host paths must never be
   // loaded from this computer, even briefly while connection state is fetched.
   useEffect(() => {
-    if (!url.startsWith('file:')) return;
+    if (!isFileUrl) return;
     let cancelled = false;
     void window.electronAPI.invoke('browser-panel:prepare-file', panel.id).then(
       (result: { partition: string | null }) => {
         if (cancelled) return;
         remoteFileRef.current = result.partition !== null;
-        setFileSession({ url, partition: result.partition });
+        setFileSession({ panelId: panel.id, partition: result.partition });
       },
       () => { if (!cancelled) setUrlError('Unable to prepare this file. Check the host connection and try again.'); },
     );
     return () => { cancelled = true; };
-  }, [panel.id, url]);
+  }, [panel.id, isFileUrl]);
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);
@@ -106,7 +108,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     clearTimeout(persistTimeoutRef.current);
     // Browsing a remote bundle is client-local. Keep the host's entry URL as
     // the access boundary instead of replacing it with a link/directory URL.
-    if (remoteFileRef.current && newUrl.startsWith('file:')) return;
+    if (remoteFileRef.current === true || (remoteFileRef.current === null && newUrl.startsWith('file:'))) return;
     persistTimeoutRef.current = setTimeout(() => {
       window.electron?.invoke('panels:update', panelIdRef.current, {
         state: { customState: { currentUrl: newUrl } }
@@ -134,9 +136,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [persistState]);
 
   useEffect(() => {
-    if (!currentUrlFromPanelState || currentUrlFromPanelState === url) return;
+    // A navigation's debounced persistence is an echo, not a new load request.
+    // Reassigning src here resets the guest's navigation history.
+    if (!currentUrlFromPanelState || currentUrlFromPanelState === lastNavigationUrlRef.current) return;
     navigateTo(currentUrlFromPanelState);
-  }, [currentUrlFromPanelState, navigateTo, url]);
+  }, [currentUrlFromPanelState, navigateTo]);
 
   // An agent reopened this page after rewriting it; show the new content.
   const lastReopenedAt = useRef(reopenedAt);
@@ -252,6 +256,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const onDidNavigate = () => {
       const currentUrl = webview.getURL();
       if (currentUrl && currentUrl !== 'about:blank') {
+        lastNavigationUrlRef.current = currentUrl;
         setInputUrl(currentUrl);
         persistState(currentUrl);
       }
@@ -460,7 +465,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       ) : (
         <div className="flex-1 flex flex-row min-h-0">
           {/* Page webview */}
-          {(!url.startsWith('file:') || fileSession?.url === url) && <webview
+          {(!isFileUrl || fileSession?.panelId === panel.id) && <webview
             key={fileSession?.partition ?? 'local'}
             ref={webviewRef}
             src={url}

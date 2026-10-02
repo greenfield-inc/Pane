@@ -1,7 +1,22 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { BrowserPanelState, ToolPanel, ToolPanelState } from '../../../shared/types/panels';
+import { isRemotePaneCommand } from '../daemon/commandRegistry';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+
+const browserUrlSchema = boundary.object({ currentUrl: boundary.optional(boundary.string) });
+
+/** File entry URLs are host-owned grants; remote panel edits cannot create them. */
+export function assertHostBrowserFileNavigation(type: string, nextState: ToolPanelState, previousState?: ToolPanelState): void {
+  if (type !== 'browser' || !isRemotePaneCommand()) return;
+  const next = decodeBoundary(nextState.customState ?? {}, browserUrlSchema).currentUrl;
+  const previous = decodeBoundary(previousState?.customState ?? {}, browserUrlSchema).currentUrl;
+  if (!next || next === previous) return;
+  let protocol: string;
+  try { protocol = new URL(next).protocol; } catch { return; }
+  if (protocol === 'file:') throw new Error('Open or change this file preview on the host');
+}
 
 interface ContentTypeByExtension { [extension: string]: string }
 const CONTENT_TYPES: ContentTypeByExtension = {
@@ -21,6 +36,7 @@ export async function readBrowserPanelFile(panel: ToolPanel | undefined, request
     ? (panel.state.customState as BrowserPanelState | undefined)?.currentUrl : undefined;
   if (!entryUrl?.startsWith('file:')) throw new Error('No host file is open in this browser panel');
   const entryPath = fileURLToPath(entryUrl);
+  if (!(await fs.stat(entryPath)).isFile()) throw new Error('The host entry page is not a regular file');
   const root = await fs.realpath(path.dirname(entryPath));
   const requestedPath = await fs.realpath(fileURLToPath(requestedUrl));
   const relative = path.relative(root, requestedPath);

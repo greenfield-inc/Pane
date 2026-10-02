@@ -4,5 +4,17 @@ import BrowserPanel from '../../frontend/src/components/panels/browser/BrowserPa
 import '../../frontend/src/index.css';
 import type { ToolPanel } from '../../shared/types/panels';
 
-const panel: ToolPanel = await window.electronAPI.invoke('preview-test:panel');
-createRoot(document.getElementById('root')!).render(<BrowserPanel panel={panel} isActive />);
+const initialPanel: ToolPanel = await window.electronAPI.invoke('preview-test:panel');
+function Preview() {
+  const [panel, setPanel] = React.useState(initialPanel);
+  React.useEffect(() => {
+    const update = (event: Event) => {
+      // SAFETY: The isolated Electron fixture sends a ToolPanel in this event.
+      setPanel((event as CustomEvent<ToolPanel>).detail);
+    };
+    window.addEventListener('test-panel-update', update);
+    return () => window.removeEventListener('test-panel-update', update);
+  }, []);
+  return <BrowserPanel panel={panel} isActive />;
+}
+createRoot(document.getElementById('root')!).render(<Preview />);

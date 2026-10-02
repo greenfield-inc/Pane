@@ -4,7 +4,8 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import type { ToolPanel } from '../../../shared/types/panels';
-import { readBrowserPanelFile } from './browserPanelFiles';
+import { assertHostBrowserFileNavigation, readBrowserPanelFile } from './browserPanelFiles';
+import { PaneCommandRegistry } from '../daemon/commandRegistry';
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -12,6 +13,20 @@ afterEach(async () => {
 });
 
 describe('browser panel file reads', () => {
+  it('does not let remote commands create or retarget a file preview grant', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('panels:test-navigation', (next: string, previous?: string) => {
+      assertHostBrowserFileNavigation('browser',
+        { isActive: true, hasBeenViewed: true, customState: { currentUrl: next } },
+        { isActive: true, hasBeenViewed: true, customState: { currentUrl: previous } });
+      return true;
+    });
+    const original = 'file:///host/bundle/index.html';
+    await expect(registry.invokeRemote('panels:test-navigation', [original])).rejects.toThrow('on the host');
+    await expect(registry.invokeRemote('panels:test-navigation', ['file:///private/key', original])).rejects.toThrow('on the host');
+    await expect(registry.invokeRemote('panels:test-navigation', [original, original])).resolves.toBe(true);
+    await expect(registry.invoke('panels:test-navigation', [original])).resolves.toBe(true);
+  });
   it('serves the opened HTML and relative bundle assets, preserving the filename', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-browser-'));
     directories.push(root);
