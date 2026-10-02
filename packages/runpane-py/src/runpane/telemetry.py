@@ -60,6 +60,8 @@ def create_initial_telemetry_context(argv: Optional[List[str]] = None) -> Wrappe
             return {"command": "panels submit"}
         if len(args) > 1 and args[1] == "wait":
             return {"command": "panels wait"}
+        if len(args) > 1 and args[1] == "resume":
+            return {"command": "panels resume"}
         return {"command": "panels list"}
     return {"command": "unknown"}
 

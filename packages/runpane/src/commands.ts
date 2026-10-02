@@ -86,6 +86,7 @@ export interface ParsedArgs {
   minIntervalMs?: number;
   idleBackoff?: boolean;
   allManaged?: boolean;
+  allStopped?: boolean;
   includeShells?: boolean;
   noHeldInput?: boolean;
   selfTest?: boolean;
@@ -457,6 +458,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--all-managed') {
     parsed.allManaged = true;
+    return;
+  }
+  if (flag === '--all-stopped') {
+    parsed.allStopped = true;
     return;
   }
   if (flag === '--include-shells') {
@@ -847,6 +852,7 @@ function isRunpaneLocalCommand(command: RunpaneCommand): boolean {
     || command === 'panels submit'
     || command === 'panels submit-composer'
     || command === 'panels wait'
+    || command === 'panels resume'
     || command === 'panels last-message'
     || command === 'report'
     || command === 'workspace state'

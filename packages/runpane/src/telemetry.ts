@@ -128,6 +128,7 @@ export function createInitialTelemetryContext(argv: string[]): WrapperTelemetryC
     if (argv[1] === 'screen') return { command: 'panels screen' };
     if (argv[1] === 'submit') return { command: 'panels submit' };
     if (argv[1] === 'wait') return { command: 'panels wait' };
+    if (argv[1] === 'resume') return { command: 'panels resume' };
     return { command: 'panels list' };
   }
   return { command: 'unknown' };

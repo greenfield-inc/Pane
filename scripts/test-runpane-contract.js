@@ -185,6 +185,8 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ['pane.created', 'NEW Issue 538 pane pane-1'],
     ['pane.gone', 'GONE Issue 538 pane pane-1'],
     ['panel.exited', 'EXIT Issue 538 pane pane-1 panel panel-1 code 3', { exitCode: 3 }],
+    ['panel.stopped', 'STOPPED Issue 538 pane pane-1 panel panel-1', { running: false }],
+    ['panel.stopped', 'STOPPED Issue 538 pane pane-1 panel panel-1', { running: false, baseline: true, changedWhileAway: true }],
     ['pane.associated', 'JOINED Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
     ['pane.detached', 'LEFT Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
     ['pr.conflicted', 'PR Issue 538 pane pane-1 #747 CONFLICTED', { panelId: undefined, pr }],

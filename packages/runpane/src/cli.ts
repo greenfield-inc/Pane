@@ -31,6 +31,7 @@ import {
   runPanelsSubmit,
   runPanelsSubmitComposer,
   runPanelsWait,
+  runPanelsResume,
   runPanesArchive,
   runPanesAdopt,
   runPanesCreate,
@@ -292,6 +293,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panels wait') {
     return runPanelsWait(parsed);
+  }
+
+  if (parsed.command === 'panels resume') {
+    return runPanelsResume(parsed);
   }
 
   if (parsed.command === 'panels last-message') {

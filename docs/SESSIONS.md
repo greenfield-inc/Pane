@@ -362,7 +362,7 @@ or exact name, and the daemon follows every Pane associated with it:
 
 ```text
 runpane watch --session <session-id> --follow --quiet --json \
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report \
+  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,panel.stopped,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report \
   --settle 180000 --blocked-settle 30000 --min-interval 600000 \
   --idle-backoff
 ```
@@ -377,6 +377,24 @@ to specific panels reports only those panels. There is no re-arm after
 `--pane` or `--all-managed`, an unknown Session fails the watch, and a daemon
 that predates `--session` fails it with `WATCH ERROR` instead of watching every
 Pane.
+
+After a Pane restart, an agent panel whose process did not come back is
+reported once as `panel.stopped` (`STOPPED <pane-name> pane <pane-id> panel
+<panel-id>`, `running: false`), never as `agent.ready`. Restart it in place,
+with the same panel ID and its conversation, using `runpane panels resume
+--panel <panel-id> --wait-ready --yes --json`, or every stopped agent panel of
+the Session at once with `runpane panels resume --session <session-id>
+--wait-ready --yes --json`. The bulk form restarts `--concurrency` panels at a
+time (default 3), leaves running panels alone, waits on the resumed panels
+together, and returns one result per panel with its readiness, blocker, or
+error; `--all-stopped` does the same for every Pane. It relaunches finished
+workers too, so resume single panels when only some should continue.
+
+If a stopped panel's previous shell or agent process is still exiting, resume
+returns a `still stopping` error instead of starting a second process. Retry
+after the old processes exit. This also applies when bounded teardown could
+not kill a process; bulk resume reports the error for that panel and continues
+with the others. Archived Panes cannot be resumed, even if archive cleanup failed.
 
 Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
 pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The

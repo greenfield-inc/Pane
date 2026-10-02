@@ -97,6 +97,7 @@ const sessionMembershipEventSchema = boundary.object({
 });
 /** Kinds only a consumer that asks for them (by `kinds`, or a Session scope) receives, so older clients never see them. */
 const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = [
+  'panel.stopped',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
@@ -446,6 +447,19 @@ function matchesSession(
   const panelIds = membership.panes.get(entry.paneId);
   if (!panelIds) return false;
   return !entry.panelId || panelIds.length === 0 || panelIds.includes(entry.panelId);
+}
+
+/**
+ * Older runpane clients reject kinds they do not know, and a stopped panel reaches every
+ * consumer in the baseline after each restart. So it reads as `agent.unknown` (still
+ * `running: false`, never `agent.ready`) unless the consumer lists `panel.stopped` in its kinds.
+ */
+export function presentStoppedPanel(
+  entry: RunpaneWorkspaceEntry,
+  filter: Pick<WorkspaceJournalFilter, 'kinds'>,
+): RunpaneWorkspaceEntry {
+  if (entry.kind !== 'panel.stopped') return entry;
+  return filter.kinds?.includes('panel.stopped') ? entry : { ...entry, kind: 'agent.unknown' };
 }
 
 export function projectWorkspaceEntry(

@@ -669,6 +669,27 @@
     ],
     [
       "panels",
+      "resume",
+      "--all-stopped",
+      "--wait-ready",
+      "--concurrency",
+      "2",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
+      "resume",
+      "--panel",
+      "panel-1",
+      "--wait-ready",
+      "--ready-timeout-ms",
+      "45000",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
       "last-message",
       "--panel",
       "panel-1",

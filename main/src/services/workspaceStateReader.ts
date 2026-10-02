@@ -21,6 +21,8 @@ export interface ManagedCliPanel {
   repoName?: string;
   worktreePath?: string;
   agentState: AgentState;
+  /** Whether the panel's terminal process is live; a stopped panel has no agent to be idle. */
+  running: boolean;
   lastActivityTime?: string;
   heldInputPresent?: boolean;
 }
@@ -69,23 +71,24 @@ export class WorkspaceStateReader {
           isCliPanel: boundary.optional(boundary.boolean),
           agentType: boundary.optional(boundary.string),
         }));
-        const agentState = resolveAgentState(panel.id);
         panelSummaries.push({
           panelId: panel.id,
           title: panel.title,
           agentType: customState.agentType,
-          agentState,
+          agentState: resolveAgentState(panel.id),
+          running: terminalPanelManager.isTerminalInitialized(panel.id),
         });
 
       }
 
       const agentEntries = (managedByPane.get(session.id) ?? []).map((panel): RunpaneWorkspaceEntry => ({
           ...common,
-          kind: entryKindForState(panel.agentState),
+          kind: panel.running ? entryKindForState(panel.agentState) : 'panel.stopped',
           panelId: panel.panelId,
           panelTitle: panel.panelTitle,
           agentType: panel.agentType,
           to: panel.agentState,
+          running: panel.running,
           source: 'agent',
         }));
 
@@ -123,6 +126,7 @@ export class WorkspaceStateReader {
           repoName: project?.name,
           worktreePath: session.worktreePath,
           agentState: resolveAgentState(panel.id),
+          running: terminalPanelManager.isTerminalInitialized(panel.id),
           lastActivityTime: snapshot?.lastActivityTime,
           heldInputPresent: snapshot?.screenText ? extractWorkspaceHeldInput(snapshot.screenText) !== undefined : undefined,
         });
@@ -133,10 +137,9 @@ export class WorkspaceStateReader {
 }
 
 function resolveAgentState(panelId: string): AgentState {
-  const tracked = terminalPanelManager.getAgentStatus(panelId);
-  if (tracked) return tracked;
-  const initialized = terminalPanelManager.isTerminalInitialized(panelId);
-  return initialized ? 'unknown' : 'idle';
+  // A panel whose terminal is not running has no agent to be idle or ready.
+  if (!terminalPanelManager.isTerminalInitialized(panelId)) return 'unknown';
+  return terminalPanelManager.getAgentStatus(panelId) ?? 'unknown';
 }
 
 function entryKindForState(state: AgentState): RunpaneWorkspaceEntryKind {

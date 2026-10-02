@@ -470,6 +470,7 @@
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels resume",
         "panels last-message",
         "agent-context",
         "mcp",
@@ -609,6 +610,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels wait": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels resume": {
           "$ref": "#/$defs/helpLines"
         },
         "panels last-message": {

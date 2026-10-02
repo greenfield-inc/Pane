@@ -36,6 +36,7 @@ from .local_control import (
     run_panels_submit,
     run_panels_submit_composer,
     run_panels_wait,
+    run_panels_resume,
     run_panes_archive,
     run_panes_create,
     run_panes_focus,
@@ -183,6 +184,7 @@ class ParsedArgs:
     min_interval_ms: Optional[int] = None
     idle_backoff: bool = False
     all_managed: bool = False
+    all_stopped: bool = False
     include_shells: bool = False
     no_held_input: bool = False
     self_test: bool = False
@@ -333,6 +335,8 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
         return run_panels_submit_composer(parsed)
     if parsed.command == "panels wait":
         return run_panels_wait(parsed)
+    if parsed.command == "panels resume":
+        return run_panels_resume(parsed)
     if parsed.command == "panels last-message":
         return run_panels_last_message(parsed)
     if parsed.command == "report":
@@ -729,6 +733,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--all-managed":
         parsed.all_managed = True
         return
+    if flag == "--all-stopped":
+        parsed.all_stopped = True
+        return
     if flag == "--include-shells":
         parsed.include_shells = True
         return
@@ -1034,6 +1041,7 @@ def is_runpane_local_command(command: str) -> bool:
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels resume",
         "panels last-message",
         "report",
         "agents doctor",

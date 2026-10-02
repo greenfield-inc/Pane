@@ -962,6 +962,74 @@ def run_panels_wait(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_panels_resume(parsed: Any) -> int:
+    scopes = [value for value in (parsed.panel_id, parsed.session_id, parsed.all_stopped) if value]
+    if len(scopes) != 1:
+        raise ValueError("runpane panels resume requires exactly one of --panel, --session, or --all-stopped.")
+    if parsed.panel_id and parsed.concurrency is not None:
+        raise ValueError("runpane panels resume --concurrency applies only to --session or --all-stopped.")
+    confirm_panel_resume(parsed)
+    if not parsed.panel_id:
+        return run_panels_resume_many(parsed)
+
+    result = invoke_daemon("runpane:panels:resume", [{
+        "panelId": parsed.panel_id,
+        **optional_value("waitReady", True if parsed.wait_ready else None),
+        **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
+    }], pane_dir=parsed.pane_dir, timeout_ms=(parsed.ready_timeout_ms or 30_000) + 10_000)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        verb = "Resumed" if result.get("action") == "resumed" else "Already running:"
+        print(f"{verb} panel {result.get('panelId')} in pane {result.get('paneId')}. {result.get('message')}")
+        readiness = result.get("readiness")
+        if readiness:
+            status = "yes" if readiness.get("ok") else "timed out" if readiness.get("timedOut") else "blocked"
+            print(f"Ready: {status} after {readiness.get('elapsedMs')}ms")
+            if readiness.get("blocked"):
+                print(f"Blocked: {readiness['blocked'].get('message')}")
+        print(f"Next: {result.get('nextCommand')}")
+    return 0 if result.get("ok") else 1
+
+
+def run_panels_resume_many(parsed: Any) -> int:
+    # The resumed panels wait together, so the wait adds one --ready-timeout-ms however many there are.
+    timeout_ms = 5 * 60_000 + ((parsed.ready_timeout_ms or 30_000) if parsed.wait_ready else 0)
+    result = invoke_daemon("runpane:panels:resume-many", [{
+        **optional_value("sessionId", parsed.session_id),
+        **optional_value("allStopped", True if parsed.all_stopped else None),
+        **optional_value("waitReady", True if parsed.wait_ready else None),
+        **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
+        **optional_value("concurrency", parsed.concurrency),
+    }], pane_dir=parsed.pane_dir, timeout_ms=timeout_ms)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        scope = result.get("scope") or {}
+        label = f"Session {scope.get('sessionName')}" if scope.get("kind") == "session" else "every Pane"
+        resumed = result.get("resumed", 0)
+        not_ready = f", {result.get('notReady')} not ready" if result.get("notReady") else ""
+        print(
+            f"Resumed {resumed} stopped agent panel{'' if resumed == 1 else 's'} in {label}, "
+            f"{result.get('concurrency')} at a time; "
+            f"{result.get('alreadyRunning', 0)} already running, {result.get('failed', 0)} failed{not_ready}."
+        )
+        for item in result.get("items", []):
+            readiness = item.get("readiness") or {}
+            if item.get("error"):
+                status = f"failed: {item.get('error')}"
+            elif readiness.get("blocked"):
+                status = f"blocked: {readiness['blocked'].get('message')}"
+            elif readiness and not readiness.get("ok"):
+                status = "not ready"
+            else:
+                status = item.get("action") or "resumed"
+            print(f"{'OK' if item.get('ok') else 'FAIL'} {item.get('paneName')} panel {item.get('panelId')}: {status}")
+    return 0 if result.get("ok") else 1
+
+
 def run_agents_doctor(parsed: Any) -> int:
     if not parsed.agent:
         agents = "|".join(RUNPANE_CONTRACT["enums"]["agents"])
@@ -1277,6 +1345,23 @@ def confirm_panel_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("Cancelled.")
 
 
+def confirm_panel_resume(parsed: Any) -> None:
+    if parsed.yes:
+        return
+    if not is_interactive_shell():
+        raise ValueError("runpane panels resume restarts a Pane terminal. Rerun with --yes in non-interactive shells.")
+
+    if parsed.panel_id:
+        target = f"panel {parsed.panel_id}"
+    elif parsed.session_id:
+        target = f"every stopped agent panel in Session {parsed.session_id}"
+    else:
+        target = "every stopped agent panel"
+    answer = input(f"Resume {target}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
 def confirm_panel_input(parsed: Any, request: Dict[str, Any], command: str = "input") -> None:
     if parsed.yes:
         return
@@ -1378,9 +1463,11 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
     name = sanitize_watch_value(entry.get("paneName"))
     pane = f"pane {sanitize_watch_value(entry.get('paneId'))}"
     panel = f" panel {sanitize_watch_value(entry.get('panelId'))}" if entry.get("panelId") else ""
-    if entry.get("changedWhileAway"):
-        return f"CHANGED {name} {pane}{panel}"
     kind = entry.get("kind")
+    if entry.get("changedWhileAway") and kind != "panel.stopped":
+        return f"CHANGED {name} {pane}{panel}"
+    if kind == "panel.stopped":
+        return f"STOPPED {name} {pane}{panel}"
     if kind == "agent.idle":
         minutes = max(0, int(entry.get("idleMs") or 0) // 60_000)
         return f"IDLE {name} {minutes}m {pane}{panel}"
@@ -1463,6 +1550,7 @@ def workspace_label(kind: Any) -> str:
         "pane.created": "NEW",
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
+        "panel.stopped": "STOPPED",
         "pane.associated": "JOINED",
         "pane.detached": "LEFT",
         "pr.conflicted": "PR CONFLICTED",
@@ -1653,6 +1741,8 @@ def print_panel_wait_result(result: Dict[str, Any]) -> None:
     elapsed = result.get("elapsedMs")
     if result.get("ok"):
         print(f"Matched {condition} for panel {panel_id} after {elapsed}ms.")
+    elif result.get("stopped") and not result.get("timedOut"):
+        print(f"Panel {panel_id} is not running, so it cannot become {condition}.")
     elif result.get("blocked"):
         print(f"Blocked waiting for {condition} on panel {panel_id}: {result['blocked'].get('message')}")
     elif result.get("timedOut"):
@@ -1662,6 +1752,7 @@ def print_panel_wait_result(result: Dict[str, Any]) -> None:
 
     state = result.get("state") or {}
     status_parts = [
+        "stopped" if state.get("running") is False else None,
         "initialized" if state.get("initialized") else "not-initialized",
         state.get("activityStatus"),
         None if state.get("isCliReady") is None else "cli-ready" if state.get("isCliReady") else "cli-not-ready",
@@ -1700,6 +1791,8 @@ def print_panel_list_result(result: Dict[str, Any]) -> None:
         initialized = ""
         if panel.get("initialized") is not None:
             initialized = " initialized" if panel.get("initialized") else " not-initialized"
+        if panel.get("running") is False:
+            initialized += " stopped"
         agent = f" {panel.get('agentType')}" if panel.get("agentType") else ""
         detection = panel.get("agentDetection")
         detection_label = f" ({detection})" if detection and detection != "command" else ""
