@@ -4,6 +4,8 @@ import type { AppServices } from './types';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
+import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 
 export function registerUIStateHandlers(services: AppServices) {
   const uiStateManager = new UIStateManager(
@@ -115,6 +117,42 @@ export function registerUIStateHandlers(services: AppServices) {
       };
     } catch (error) {
       console.error('Error getting host navigation memory:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:get-session-workspace-layout', async (_, hostId: string | null) => {
+    try {
+      return {
+        success: true,
+        data: uiStateManager.getSessionWorkspaceLayout(hostId)
+      };
+    } catch (error) {
+      console.error('Error getting Session workspace layout:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:save-session-workspace-layout', async (_, hostId: string | null, layout: SessionWorkspaceLayout | null) => {
+    try {
+      // Decoded on the way in, so a stored layout is always readable back and a
+      // tree past the tile or depth bounds never reaches the database.
+      const decoded = layout === null ? null : decodeSessionWorkspaceLayout(layout);
+      if (layout !== null && !decoded) {
+        throw new Error('Invalid Session workspace layout');
+      }
+      uiStateManager.saveSessionWorkspaceLayout(hostId, decoded);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving Session workspace layout:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

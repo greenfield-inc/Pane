@@ -23,6 +23,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
+import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { ToolPanel } from '../../shared/types/panels';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
@@ -724,6 +725,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // can still be showing the outgoing host while main has switched runtimes.
     getNavigationMemory: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-navigation-memory', hostId),
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory): Promise<IPCResponse> => invokeIpc('ui-state:save-navigation-memory', hostId, memory),
+    // Per-host Session tiling, the layout counterpart of navigation memory.
+    getSessionWorkspaceLayout: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-session-workspace-layout', hostId),
+    saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null): Promise<IPCResponse> => invokeIpc('ui-state:save-session-workspace-layout', hostId, layout),
   },
 
   // Event listeners for real-time updates

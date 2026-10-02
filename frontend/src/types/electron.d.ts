@@ -6,6 +6,7 @@ import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type {
   RemoteDaemonClientRecord,
   RemoteDaemonConnectionPair,
@@ -402,6 +403,8 @@ interface ElectronAPI {
     saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean) => Promise<IPCResponse>;
     getNavigationMemory: (hostId: string | null) => Promise<IPCResponse<HostNavigationMemory | null>>;
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
+    getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;
+    saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null) => Promise<IPCResponse>;
   };
 
   // Event listeners for real-time updates

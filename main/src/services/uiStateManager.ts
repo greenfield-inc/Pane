@@ -2,6 +2,8 @@ import { DatabaseService } from '../database/database';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
+import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 
 type SidebarSection = 'pinned' | 'repositories';
 
@@ -115,6 +117,34 @@ class UIStateManager {
 
   saveNavigationMemory(hostId: string | null, memory: HostNavigationMemory): void {
     this.db.setUIState(this.navigationMemoryKey(hostId), JSON.stringify(memory));
+  }
+
+  // How the window was divided between that host's Sessions. The sibling of
+  // navigation memory: once Sessions can be tiled, "where you were" is a layout
+  // as well as a location, and it takes the host id from the caller for the
+  // same reason.
+  private sessionWorkspaceLayoutKey(hostId: string | null): string {
+    return hostId ? `sessions.workspaceLayout@${hostId}` : 'sessions.workspaceLayout';
+  }
+
+  getSessionWorkspaceLayout(hostId: string | null): SessionWorkspaceLayout | null {
+    const value = this.db.getUIState(this.sessionWorkspaceLayoutKey(hostId));
+    if (!value) return null;
+    try {
+      return decodeSessionWorkspaceLayout(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+
+  /** A null layout clears the memory: this host has nothing tiled worth keeping. */
+  saveSessionWorkspaceLayout(hostId: string | null, layout: SessionWorkspaceLayout | null): void {
+    const key = this.sessionWorkspaceLayoutKey(hostId);
+    if (!layout) {
+      this.db.deleteUIState(key);
+      return;
+    }
+    this.db.setUIState(key, JSON.stringify(layout));
   }
 
   getExpandedState(): ExpandedUiState {

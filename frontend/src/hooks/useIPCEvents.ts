@@ -5,6 +5,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { panelApi } from '../services/panelApi';
 import { openPaneTarget } from '../components/terminal/openPaneLink';
 import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/hostNavigationMemory';
@@ -25,6 +26,9 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
     const uiState = await window.electronAPI.uiState.getExpanded();
     useNavigationStore.getState().resetExpandedProjectsForHost(uiState.success ? uiState.data?.expandedProjects ?? [] : []);
+    // Session tiling is per host too, and its Session ids belong to the host we
+    // are leaving. Drop it so the incoming host hydrates its own.
+    useSessionWorkspaceLayoutStore.getState().reset();
   }
   // Repository ids are per host, so another host's repository view is meaningless.
   if (hostChanged && useNavigationStore.getState().activeView === 'project') {
