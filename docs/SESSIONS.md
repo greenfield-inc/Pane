@@ -396,6 +396,12 @@ together, and returns one result per panel with its readiness, blocker, or
 error; `--all-stopped` does the same for every Pane. It relaunches finished
 workers too, so resume single panels when only some should continue.
 
+If a stopped panel's previous shell or agent process is still exiting, resume
+returns a `still stopping` error instead of starting a second process. Retry
+after the old processes exit. This also applies when bounded teardown could
+not kill a process; bulk resume reports the error for that panel and continues
+with the others. Archived Panes cannot be resumed, even if archive cleanup failed.
+
 Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
 pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The
 Session manager emits them from `sessions associate` (only when the Pane was

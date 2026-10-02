@@ -2403,7 +2403,8 @@ async function resumeTerminalPanel(
   options: Pick<RunpanePanelResumeRequest, 'waitReady' | 'readyTimeoutMs'>,
 ): Promise<RunpanePanelResumeResult> {
   const pane = services.sessionManager.getSession(panel.sessionId);
-  // Archiving already cleaned up the Pane; nothing would ever stop a process started in it.
+  // Archive marks the Pane before bounded process teardown and worktree removal.
+  // Cleanup may still be running or have failed; neither makes it resumable.
   if (pane?.archived) {
     throw new Error(`Pane ${pane.id} is archived; its panels cannot be resumed`);
   }
@@ -2424,6 +2425,8 @@ async function resumeTerminalPanel(
   const cwd = pane?.worktreePath
     ?? optionalString(customState.cwd)
     ?? process.cwd();
+  // initializeTerminal also checks the old process tree: absence from the live
+  // PTY map alone does not prove that bounded teardown finished killing it.
   await terminalPanelManager.initializeTerminal(panel, cwd, sessionWslContext(services, panel.sessionId));
   const resumed = panelManager.getPanel(panel.id) ?? panel;
   return panelResumeResult(resumed, 'resumed', resumeMessage(resumed), await waitIfAsked(resumed));

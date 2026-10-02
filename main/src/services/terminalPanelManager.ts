@@ -25,7 +25,7 @@ import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
-import { listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
+import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -323,6 +323,10 @@ interface CliLaunchResolution {
 
 export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
+  // Retiring a PTY is not proof its shell or agent exited. Keep their identities
+  // until the OS confirms exit, including survivors of bounded session teardown.
+  private stoppingProcesses = new Map<string, number[]>();
+  private sessionTerminations = new Map<string, Promise<void>>();
   private serializedBuffers = new Map<string, string>();
   private readonly visibleViewersByPanel = new Map<string, Map<string, number>>();
   private readonly MAX_SCROLLBACK_LINES = 10000;
@@ -1161,6 +1165,16 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     try {
+
+    if (this.sessionTerminations.has(panel.sessionId)) {
+      throw new Error(`Panel ${panel.id} is still stopping; its session teardown is in progress. Retry resume after it finishes.`);
+    }
+    const stopping = (this.stoppingProcesses.get(panel.id) ?? []).filter(isProcessAlive);
+    if (stopping.length > 0) {
+      this.stoppingProcesses.set(panel.id, stopping);
+      throw new Error(`Panel ${panel.id} is still stopping; its previous processes have not exited. Retry resume after they exit.`);
+    }
+    this.stoppingProcesses.delete(panel.id);
 
     let shellPath: string;
     let shellArgs: string[];
@@ -2236,29 +2250,40 @@ export class TerminalPanelManager extends EventEmitter {
    * tree killed, and one that survives even that is logged and left behind
    * rather than holding the archive open.
    */
-  async terminateSessionTerminals(sessionId: string, options: { timeoutMs?: number } = {}): Promise<void> {
+  terminateSessionTerminals(sessionId: string, options: { timeoutMs?: number } = {}): Promise<void> {
+    const pending = this.sessionTerminations.get(sessionId);
+    if (pending) return pending;
+    const termination = this.finishTerminateSessionTerminals(sessionId, options).finally(() => {
+      this.sessionTerminations.delete(sessionId);
+    });
+    this.sessionTerminations.set(sessionId, termination);
+    return termination;
+  }
+
+  private async finishTerminateSessionTerminals(sessionId: string, options: { timeoutMs?: number }): Promise<void> {
     const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
     if (terminals.length === 0) return;
     const deadline = Date.now() + (options.timeoutMs ?? PROCESS_EXIT_TIMEOUT_MS);
-    const roots = terminals.map(terminal => terminal.pty.pid);
-    // Snapshot the tree alongside the destroy rather than before it: it has to
-    // be read while the shells are alive, because a dead parent's children keep
-    // its pid and nothing can walk to them afterwards, and destroy saves each
-    // panel's state before it kills, which leaves room for the read. Starting
-    // it first would delay the kill by the whole process-table query.
-    const tree = listDescendantPids(roots).then(descendants => [...new Set([...roots, ...descendants])]);
-
     await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId).catch(error => {
       console.error(`[TerminalPanelManager] Destroy failed for ${terminal.panelId}:`, error);
     })));
 
+    const tree = [...new Set(terminals.flatMap(terminal =>
+      this.stoppingProcesses.get(terminal.panelId) ?? [terminal.pty.pid]))];
     const graceMs = Math.min(PROCESS_EXIT_GRACE_MS, Math.max(0, deadline - Date.now()));
-    const outlived = await waitForProcessesToExit(await tree, graceMs);
+    const outlived = await waitForProcessesToExit(tree, graceMs);
     if (outlived.length === 0) return;
 
     console.warn(`[TerminalPanelManager] process_exit_timeout sessionId=${sessionId} pids=${outlived.join(',')} killing their process trees`);
     const survivors = await terminateProcessTrees(outlived, { timeoutMs: Math.max(0, deadline - Date.now()) });
     if (survivors.length > 0) {
+      // Escalation takes a fresh snapshot and may discover new children. They
+      // share this session's worktree, so guard every retired panel against them.
+      for (const terminal of terminals) {
+        this.stoppingProcesses.set(terminal.panelId, [...new Set([
+          ...(this.stoppingProcesses.get(terminal.panelId) ?? []), ...survivors,
+        ])]);
+      }
       console.error(`[TerminalPanelManager] process_kill_failed sessionId=${sessionId} pids=${survivors.join(',')} these may still hold the worktree open`);
     }
   }
@@ -2279,6 +2304,9 @@ export class TerminalPanelManager extends EventEmitter {
 
   private async finishDestroyTerminal(terminal: TerminalProcess, saveState: boolean): Promise<void> {
     const panelId = terminal.panelId;
+    // Start the snapshot alongside persistence, but finish it before kill: once
+    // the shell exits its surviving children may no longer be discoverable.
+    const tree = listDescendantPids([terminal.pty.pid]);
     // Stop detection as soon as teardown begins, so output during the save
     // cannot announce completion. Keep the emulator alive through any snapshot save.
     this.agentStatusMonitor.unregister(panelId);
@@ -2288,7 +2316,9 @@ export class TerminalPanelManager extends EventEmitter {
     } catch (error) {
       console.error(`[TerminalPanelManager] Failed to save state for ${panelId}:`, error);
     }
+    const descendants = await tree;
     if (this.terminals.get(panelId) !== terminal) return;
+    this.stoppingProcesses.set(panelId, [...new Set([terminal.pty.pid, ...descendants])]);
 
     try {
       this.retireTerminal(terminal, terminal.exitDuringDestroy);
