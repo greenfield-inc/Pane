@@ -2,6 +2,8 @@ import type { AgentLaunchPresetId } from '@shared/constants/agentLaunchPresets';
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult } from '@shared/types/runpaneOrchestration';
 import { generatePaneName, sanitizePaneName, type PaneNameBranchInfo } from '@shared/utils/paneName';
 
+import type { ProjectWithPanes } from './paneList';
+
 /** One entry of `projects:list-branches`. */
 export type BranchInfo = PaneNameBranchInfo;
 
@@ -9,6 +11,11 @@ export type BranchInfo = PaneNameBranchInfo;
 export function defaultBaseBranch(branches: BranchInfo[]): string | undefined {
   const remoteMain = branches.find(branch => branch.isRemote && (branch.name === 'origin/main' || branch.name === 'origin/master'));
   return (remoteMain ?? branches.find(branch => branch.isCurrent) ?? branches[0])?.name;
+}
+
+/** Desktop's rule for a new pane without a repository: the one open on the desktop, else the first. */
+export function defaultProject(projects: readonly ProjectWithPanes[]): ProjectWithPanes | undefined {
+  return projects.find(project => project.active) ?? projects[0];
 }
 
 export function filterBranches(branches: BranchInfo[], query: string): BranchInfo[] {

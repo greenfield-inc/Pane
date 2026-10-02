@@ -20,7 +20,8 @@ const TERMINAL_ICON = { ios: 'apple.terminal', android: 'terminal' } as const;
 
 /** The web app's Add tool menu: opens a new terminal tab in the pane, a shell or an agent. */
 export default function NewPanelSheet() {
-  const { paneId } = useLocalSearchParams<{ paneId: string }>();
+  // `sessionId` when the pane is a Session's workspace: the new tab opens back in the Session.
+  const { paneId, sessionId } = useLocalSearchParams<{ paneId: string; sessionId?: string }>();
   const theme = useTheme();
   const { colors } = theme;
   const affordances = useInvokeQuery<RemotePwaAffordances>('remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
@@ -33,7 +34,8 @@ export default function NewPanelSheet() {
     create.mutate([createPanelRequest(paneId, option)], {
       onSuccess: panel => {
         setActive.mutate([paneId, panel.id]);
-        router.dismissTo({ pathname: '/pane/[paneId]', params: { paneId, panelId: panel.id } });
+        if (sessionId) router.dismissTo({ pathname: '/session/[sessionId]', params: { sessionId, panelId: panel.id } });
+        else router.dismissTo({ pathname: '/pane/[paneId]', params: { paneId, panelId: panel.id } });
       },
     });
   };

@@ -27,10 +27,18 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
   const [connection, setConnection] = useState<RemoteDaemonConnectionState>(() => client.getState());
 
   useEffect(() => {
-    const unsubscribeStatus = client.onStatus(setConnection);
-    // The stream does not replay missed events, so refetch everything on (re)connect.
-    const unsubscribeEvents = client.onEvent(event => {
-      if (event.type === 'ready') void queryClient.invalidateQueries({ queryKey: [profile.id] });
+    // The stream does not replay missed events, so refetch everything once it
+    // is back: after a drop, an error or a disconnect (app resume included).
+    // Both transports report status; only some emit the host's `ready` event.
+    // `onStatus` reports the new client's initial `local` state first; that is not a drop.
+    let missedEvents: boolean | null = null;
+    const unsubscribeStatus = client.onStatus(state => {
+      if (missedEvents === null) missedEvents = false;
+      else if (state.status === 'connected') {
+        if (missedEvents) void queryClient.invalidateQueries({ queryKey: [profile.id] });
+        missedEvents = false;
+      } else if (state.status !== 'connecting') missedEvents = true;
+      setConnection(state);
     });
     const connect = () => client.connect().catch(() => undefined);
     void connect();
@@ -40,7 +48,6 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     });
     return () => {
       appState.remove();
-      unsubscribeEvents();
       unsubscribeStatus();
       client.disconnect();
     };

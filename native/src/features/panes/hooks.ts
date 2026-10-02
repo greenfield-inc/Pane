@@ -38,8 +38,9 @@ export function useProjects() {
   return projects;
 }
 
-export function useArchivedProjects() {
-  return useInvokeQuery<ProjectWithPanes[]>(ARCHIVED);
+/** Loads once `enabled` turns on (the Archived section first opens), then stays cached. */
+export function useArchivedProjects(enabled: boolean) {
+  return useInvokeQuery<ProjectWithPanes[]>(ARCHIVED, [], { enabled });
 }
 
 /** Every pane's agent status: a snapshot on (re)connect, then live `panel:agentStatus` events. */
@@ -115,6 +116,10 @@ export function useToggleFavorite() {
  */
 export function useArchivePane() {
   return useOptimisticRemoval('sessions:delete', PANES, [PANES, ARCHIVED, WORKSPACE]);
+}
+
+export function useRestorePane() {
+  return useOptimisticRemoval('sessions:restore', ARCHIVED, [PANES, ARCHIVED, WORKSPACE]);
 }
 
 /** Only archived panes can be deleted for good. */
