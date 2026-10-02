@@ -2043,6 +2043,11 @@ Version: 57.0.5
 Author: 650 Industries, Inc.
 Homepage: https://docs.expo.dev/versions/latest/sdk/audio/
 
+Package: expo-build-properties
+Version: 57.0.20
+Author: 650 Industries, Inc.
+Homepage: https://docs.expo.dev/versions/latest/sdk/build-properties
+
 Package: expo-camera
 Version: 57.0.5
 Author: 650 Industries, Inc.

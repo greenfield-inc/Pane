@@ -13,14 +13,14 @@
     "backgroundColor": "#010409",
     "ios": {
       "bundleIdentifier": "com.dcouple.pane.mobile",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "3",
+      "buildNumber": "5",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -33,6 +33,14 @@
       "versionCode": 3
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       [

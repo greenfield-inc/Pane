@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ToolPanel } from '@shared/types/panels';
 
-import { pickPanel, terminalPanels } from './panels';
+import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
 
 function panel(id: string, type: ToolPanel['type'], position: number): ToolPanel {
   return {
@@ -37,5 +37,20 @@ describe('pickPanel', () => {
   it('falls back to the first tab when the host has a non-terminal panel active', () => {
     expect(pickPanel(panels, null, 'diff')?.id).toBe('claude');
     expect(pickPanel([], null, null)).toBeNull();
+  });
+});
+
+describe('sessionWorkspacePanels', () => {
+  const session = { panelIds: { claude: 'claude-chat', codex: 'codex-chat', cursor: 'cursor-chat' } };
+  const workspace = [panel('shell', 'terminal', 0), panel('codex-chat', 'terminal', 1), panel('claude-chat', 'terminal', 2), panel('server', 'terminal', 3)];
+
+  it('puts the current agent’s chat first, then the workspace’s own terminals, hiding other agents’ chats', () => {
+    const tabs = sessionWorkspacePanels({ session, panel: panel('claude-chat', 'terminal', 2) }, workspace);
+    expect(tabs.map(p => p.id)).toEqual(['claude-chat', 'shell', 'server']);
+  });
+
+  it('shows the chat the host returned before the panel list includes it', () => {
+    const tabs = sessionWorkspacePanels({ session, panel: panel('cursor-chat', 'terminal', 9) }, [panel('shell', 'terminal', 0)]);
+    expect(tabs.map(p => p.id)).toEqual(['cursor-chat', 'shell']);
   });
 });

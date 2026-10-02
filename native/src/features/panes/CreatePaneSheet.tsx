@@ -9,7 +9,7 @@ import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
-import { buildCreatePaneRequest, defaultBaseBranch, filterBranches, paneFromCreateResult, suggestPaneName } from './createPane';
+import { buildCreatePaneRequest, defaultBaseBranch, defaultProject, filterBranches, paneFromCreateResult, suggestPaneName } from './createPane';
 import { useBranches, useCreatePane, useProjects } from './hooks';
 import { DialogSection, DialogSheet, Notice, SheetButton } from './PaneKit';
 
@@ -22,7 +22,8 @@ export function CreatePaneSheet() {
   const projects = useProjects();
   const createPane = useCreatePane();
   const branchInput = useRef<TextInput>(null);
-  const [chosenProjectId, setChosenProjectId] = useState(params.projectId ? Number(params.projectId) : undefined);
+  // A snapshot: the desktop opening another repository does not move the sheet while someone edits it.
+  const [chosenProjectId, setChosenProjectId] = useState(() => params.projectId ? Number(params.projectId) : defaultProject(projects.data ?? [])?.id);
   const [choosingProject, setChoosingProject] = useState(false);
   const [agent, setAgent] = useState<AgentLaunchPresetId>('claude');
   const [chosenBranch, setChosenBranch] = useState<string>();
@@ -33,7 +34,7 @@ export function CreatePaneSheet() {
   const [error, setError] = useState<string>();
 
   const projectList = projects.data ?? [];
-  const project = projectList.find(candidate => candidate.id === chosenProjectId) ?? projectList[0];
+  const project = projectList.find(candidate => candidate.id === chosenProjectId) ?? defaultProject(projectList);
   const branches = useBranches(project?.id);
   const branchList = branches.data ?? [];
   const baseBranch = chosenBranch ?? defaultBaseBranch(branchList);
@@ -100,8 +101,8 @@ export function CreatePaneSheet() {
         </>
       }
     >
-      {/* Opened from the header "+" rather than a repository's own. */}
-      {!params.projectId && projectList.length > 1 ? (
+      {/* Opened from New Pane rather than a repository's own "+": the person can switch before creating. */}
+      {!params.projectId && projectList.length > 0 ? (
         <DialogSection>
           <Label ios="folder" android="folder">Repository</Label>
           <Pressable

@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useState, type Dispatch, type SetStateAction
 import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
@@ -14,7 +15,7 @@ import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { useMarkPaneSeen } from '../panes/hooks';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
-import { pickPanel, terminalPanels } from './panels';
+import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
 import { PanelTabs } from './PanelTabs';
 import { QuickKeys } from './QuickKeys';
 import { ScrollJoystick } from './ScrollJoystick';
@@ -29,19 +30,21 @@ const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:
 
 /**
  * A pane's terminals, laid out like the web app on a phone: the host bar and
- * tabs on top, xterm in the middle, the input and its keys below.
+ * tabs on top, xterm in the middle, the input and its keys below. With a
+ * `session`, it shows that Session's workspace pane, its agent chat first.
  */
-export function TerminalScreen() {
-  const { paneId, panelId } = useLocalSearchParams<{ paneId: string; panelId?: string }>();
+export function TerminalScreen({ paneId, session }: { paneId: string; session?: OrchestrationSessionView }) {
+  const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const { client, profile } = useDaemon();
   const queryClient = useQueryClient();
 
-  const pane = useInvokeQuery<{ name: string }>('sessions:get', [paneId]);
+  const pane = useInvokeQuery<{ name: string }>('sessions:get', [paneId], { enabled: !session });
   const panelList = useInvokeQuery<ToolPanel[]>('panels:list', [paneId]);
-  const hostActive = useInvokeQuery<ToolPanel | null>('panels:getActive', [paneId]);
+  // A Session opens on its agent chat, wherever the desktop left the workspace.
+  const hostActive = useInvokeQuery<ToolPanel | null>('panels:getActive', [paneId], { enabled: !session });
   const affordances = useInvokeQuery<RemotePwaAffordances>('remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
 
@@ -63,8 +66,10 @@ export function TerminalScreen() {
     return () => markThisPaneSeen();
   }, [paneId]);
 
-  const panels = terminalPanels(panelList.data ?? []);
+  const panes = terminalPanels(panelList.data ?? []);
+  const panels = session ? sessionWorkspacePanels(session, panes) : panes;
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
+  const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
   const [draft, setDraft] = useState('');
   const voice = useVoiceDictation(text => setDraft(current => (current ? `${current} ${text}` : text)));
@@ -80,12 +85,12 @@ export function TerminalScreen() {
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
-      <TerminalTopBar paneName={pane.data?.name ?? ''} />
+      <TerminalTopBar paneName={title} />
       <PanelTabs
         panels={panels}
         selectedId={panel?.id ?? null}
         onSelect={selectPanel}
-        onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: { paneId } })}
+        onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
       />
       {panel ? (
         <TerminalPanel

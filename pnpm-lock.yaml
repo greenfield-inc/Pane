@@ -412,11 +412,14 @@ importers:
         specifier: ^5.90.0
         version: 5.103.1(react@19.2.3)
       expo:
-        specifier: ~57.0.0
+        specifier: ~57.0.23
         version: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
       expo-audio:
         specifier: ~57.0.5
         version: 57.0.5(expo-asset@57.0.17(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3))(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
+      expo-build-properties:
+        specifier: 57.0.20
+        version: 57.0.20(expo@57.0.23)
       expo-camera:
         specifier: ~57.0.5
         version: 57.0.5(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
@@ -5672,6 +5675,11 @@ packages:
       expo-asset: '*'
       react: '*'
       react-native: '*'
+
+  expo-build-properties@57.0.20:
+    resolution: {integrity: sha512-rQ3Xt5slDXJQL+vevO1AsYAiCQsIq8c8bz1JfSK/UstPr3Md8fypaS/wcp6f67yZu4CzQSuPFC0hR46raHLTzg==}
+    peerDependencies:
+      expo: '*'
 
   expo-camera@57.0.5:
     resolution: {integrity: sha512-0JaUXfDWMytmqm4pVKesZfLTSjAumfS2UGhnc1M4tqJ0qATCS0jxc7KjaoyKEzWJY+FEc8GlPCAGprS/7tNWZQ==}
@@ -15347,6 +15355,13 @@ snapshots:
       expo-asset: 57.0.17(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
       react: 19.2.3
       react-native: 0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)
+
+  expo-build-properties@57.0.20(expo@57.0.23):
+    dependencies:
+      '@expo/schema-utils': 57.0.2
+      expo: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
+      resolve-from: 5.0.0
+      semver: 7.7.4
 
   expo-camera@57.0.5(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
     dependencies:

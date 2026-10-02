@@ -34,10 +34,10 @@ name: Pane list journeys
     start: 5%, 50%
     end: 90%, 50%
     duration: 400
-- extendedWaitUntil:
-    visible: "${output.pane}.*"
-    timeout: 15000
-- assertVisible: ".*Claude Code.*"
+# Pinned and Sessions sit above Repositories, so the new row can be below the fold.
+- scrollUntilVisible:
+    element: "${output.pane}, .*Claude Code.*"
+    timeout: 30000
 
 # Search narrows the list to matching panes.
 - tapOn:
@@ -59,10 +59,10 @@ name: Pane list journeys
 - tapOn:
     id: "pane-archive-.*"
     index: 0
+# The alert's buttons sit side by side on iOS 27.
 - tapOn:
     text: "Archive"
-    below:
-      text: "Archive “.*”\\?"
+    rightOf: "Cancel"
 - extendedWaitUntil:
     visible:
       id: panes-no-results
@@ -71,20 +71,19 @@ name: Pane list journeys
     id: panes-search-clear
 - waitForAnimationToEnd
 
-# Delete it for good from Archived.
+# Delete it for good from the Archived section, which loads when opened.
 - scrollUntilVisible:
     element:
-      id: panes-archived
+      id: sidebar-section-archived
 - tapOn:
-    id: panes-archived
-- extendedWaitUntil:
-    visible: "${output.pane}.*"
+    id: sidebar-section-archived
+- scrollUntilVisible:
+    element: "Delete ${output.pane}"
     timeout: 15000
-- tapOn: "${output.pane}.*"
+- tapOn: "Delete ${output.pane}"
 - tapOn:
     text: "Delete"
-    below:
-      text: "Delete “.*”\\?"
+    rightOf: "Cancel"
 - extendedWaitUntil:
     notVisible: "${output.pane}.*"
     timeout: 20000
