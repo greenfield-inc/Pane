@@ -122,3 +122,6 @@ docs/research/
 # Draft posts (local only)
 docs/posts/
 .agent-farm/generated/
+
+# ChatGPT plugin server, built by `pnpm build:chatgpt-plugin`
+plugins/pane/server/

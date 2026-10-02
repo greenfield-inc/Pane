@@ -92,9 +92,10 @@
         "src/installers.ts",
         "src/releases.ts",
         "src/telemetry.ts",
-        "scripts/mark-executable.js"
+        "scripts/mark-executable.js",
+        "panel/main.tsx"
       ],
-      "project": ["src/**/*.ts", "scripts/**/*.js"],
+      "project": ["src/**/*.ts", "scripts/**/*.js", "panel/**/*.{ts,tsx}"],
       "ignoreBinaries": ["ditto"]
     },
     "mobile": {

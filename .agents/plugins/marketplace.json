@@ -1,0 +1,20 @@
+{
+  "name": "pane",
+  "interface": {
+    "displayName": "Pane"
+  },
+  "plugins": [
+    {
+      "name": "pane",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pane"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
