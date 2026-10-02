@@ -133,6 +133,20 @@ export const useSessionWorkspaceLayoutStore = create<SessionWorkspaceLayoutState
     // A stored layout wins; failing that, keep whatever is already on screen.
     const base = stored ?? get().layout;
     const reconciled = base ? reconcileSessionWorkspaceLayout(base, liveSessionIds).layout : null;
+
+    if (stored && !reconciled) {
+      // Every stored tile pruned. A host switch renames the active host in
+      // config before that host's Session list arrives, so a list that overlaps
+      // this layout nowhere is far more likely to be the outgoing host's than a
+      // reason to throw the incoming host's layout away. Show something usable
+      // and remember which host it belongs to, but neither persist it nor mark
+      // the host hydrated: the next call, with the host's own Sessions, restores
+      // what was stored. A deliberate gesture in the meantime wins, because
+      // `apply` marks the layout loaded.
+      set({ layout: fallbackLayout(liveSessionIds, fallbackSessionId), hostId });
+      return null;
+    }
+
     const layout = reconciled ?? fallbackLayout(liveSessionIds, fallbackSessionId);
     set({ layout, hostId, loaded: true });
     // Only write back a layout the host did not already have in this shape.

@@ -1705,7 +1705,6 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
 });
 
-
 /**
  * Drag a Session from the sidebar onto a tile.
  *

@@ -316,7 +316,11 @@ describe('decodeSessionWorkspaceLayout', () => {
       tile('t1', 's1'),
       split('y', 'column', [tile('t2', 's2'), tile('t3', 's3')]),
     ]), 't3');
-    expect(decodeSessionWorkspaceLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+    // Through JSON deliberately: that is the boundary the stored layout crosses,
+    // and the one the decoder has to survive. A structured clone would keep
+    // shapes JSON cannot and so would not exercise it at all.
+    const stored = JSON.stringify(layout);
+    expect(decodeSessionWorkspaceLayout(JSON.parse(stored))).toEqual(layout);
   });
 
   it('rejects anything that is not a usable layout', () => {

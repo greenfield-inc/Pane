@@ -174,7 +174,7 @@ function SessionWorkspace() {
   const draggedSessionId = useDraggedSessionId();
 
   const activeSessionIds = useMemo(
-    () => sessions.filter(session => !isArchivedOrchestrationSession(session)).map(session => session.id),
+    () => sessions.flatMap(session => isArchivedOrchestrationSession(session) ? [] : [session.id]),
     [sessions],
   );
 
@@ -198,8 +198,13 @@ function SessionWorkspace() {
   // selection adopt what it restored. The store hydrates once per host and only
   // that call resolves with a layout, so this runs exactly once per host —
   // never as a standing rule that could argue with the effect below.
+  //
+  // Deliberately not gated on the host being known: the store answers an unknown
+  // host with a usable single-Session layout and stays unhydrated, so a slow or
+  // failed config read cannot leave this view waiting forever. `remoteHostId` is
+  // still a dependency, so learning the host re-runs the real hydrate.
   useEffect(() => {
-    if (remoteHostId === undefined || activeSessionIds.length === 0) return;
+    if (activeSessionIds.length === 0) return;
     void hydrateLayout(activeSessionIds, selectedSessionId).then(hydrated => {
       if (!hydrated) return;
       const focused = focusedSessionId(hydrated);
