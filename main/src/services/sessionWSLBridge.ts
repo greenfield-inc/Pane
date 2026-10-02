@@ -9,6 +9,8 @@ function quotePowerShell(value: string): string {
 
 /** Run the bundled Windows CLI, which can open this instance's named pipe. */
 export function sessionWSLBridge(appDirectory: string, record: OrchestrationSessionRecord, launcherPath: string, execPath = process.execPath): string {
+  appDirectory = path.resolve(appDirectory);
+  launcherPath = path.resolve(launcherPath);
   const powershell = sessionRuntimePath(path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), record);
   const command = [
     "$ErrorActionPreference = 'Stop'",
@@ -66,7 +68,7 @@ export function sessionWSLLauncher(appDirectory: string): string {
   return [
     "const args = JSON.parse(require('node:fs').readFileSync(process.env.PANE_WSL_RUNPANE_ARGS_FILE, 'utf8'));",
     'delete process.env.PANE_WSL_RUNPANE_ARGS_FILE;',
-    `const cli = require(${JSON.stringify(path.join(appDirectory, 'bin', 'runpane.cjs'))});`,
+    `const cli = require(${JSON.stringify(path.resolve(appDirectory, 'bin', 'runpane.cjs'))});`,
     'cli.main(args).then(code => { process.exitCode = code; }).catch(error => { console.error(error.message); process.exitCode = 1; });',
     '',
   ].join('\n');

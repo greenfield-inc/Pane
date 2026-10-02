@@ -22,7 +22,7 @@ function fixture() {
     return 7;
   };`);
   const launcher = path.join(directory, 'launcher.cjs');
-  fs.writeFileSync(launcher, sessionWSLLauncher(directory));
+  fs.writeFileSync(launcher, sessionWSLLauncher(path.relative(process.cwd(), directory)));
   return { directory, launcher };
 }
 
@@ -53,7 +53,7 @@ describe('WSL Session RunPane bridge', () => {
       revision: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01',
     };
     const script = path.join(directory, 'runpane');
-    fs.writeFileSync(script, sessionWSLBridge(directory, record, launcher));
+    fs.writeFileSync(script, sessionWSLBridge(path.relative(process.cwd(), directory), record, path.relative(process.cwd(), launcher)));
     const literal = 'quotes " and \' $dollar `tick`; Unicode é' + 'x'.repeat(16_001);
     try {
       execFileSync('wsl.exe', ['-d', process.env.PANE_TEST_WSL_DISTRO!, '--exec', 'env', 'PANE_PANEL_ID=calling-panel', 'PATH=/usr/bin:/bin',
