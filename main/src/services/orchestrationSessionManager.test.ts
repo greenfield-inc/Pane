@@ -25,6 +25,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { terminalPanelManager } from './terminalPanelManager';
 import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspace';
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
+import * as wslUtils from '../utils/wslUtils';
 
 const liveStates = new Map<string, AgentState>();
 
@@ -273,6 +274,25 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('reopens WSL Sessions with Linux paths, native commands, and durable distro choice', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.spyOn(wslUtils, 'validateWSLAvailable').mockResolvedValue(null);
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'WSL planning', agent: 'cursor', runtime: 'wsl', wslDistribution: 'Ubuntu' });
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    const reopened = await restarted.getView({ sessionId: created.session.id });
+    expect(reopened.agent).toBe('cursor');
+    expect(reopened.session).toMatchObject({ runtime: 'wsl', wslDistribution: 'Ubuntu' });
+    expect(reopened.panel.state.customState).toMatchObject({
+      orchestrationWorkspace: wslUtils.windowsPathToWSLMount(sessionWorkspacePath(created.session.id)),
+      initialCommand: RUNPANE_CONTRACT.agentTemplates.cursor.command,
+    });
+    const workspace = sessionWorkspacePath(created.session.id);
+    expect(fs.readFileSync(path.join(workspace, 'runtime-context.md'), 'utf8')).toContain('powershell.exe');
+    expect(fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8')).toContain('WSL RunPane Routing');
+    await expect(fixture.manager.create({ name: 'Missing distro', runtime: 'wsl' })).rejects.toThrow('distribution');
+  });
   it('points migrated Pane Chat file tools at its private Session directory', async () => {
     const fixture = createFixture();
     const view = await fixture.manager.getView({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID });

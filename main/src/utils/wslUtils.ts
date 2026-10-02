@@ -226,6 +226,12 @@ type RunWSL = (args: string[]) => Promise<Buffer>;
 const runWSL: RunWSL = async args =>
   (await execFileAsync('wsl.exe', args, { encoding: 'buffer', timeout: 5000 })).stdout;
 
+export async function listWSLDistributions(run: RunWSL = runWSL): Promise<string[]> {
+  const output = await run(['-l', '-q']);
+  return (output.includes(0) ? output.toString('utf16le') : output.toString('utf8'))
+    .replace(/^\uFEFF/, '').replaceAll('\0', '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+}
+
 /**
  * Validate that WSL is available and the specified distro is installed.
  * Returns error message if invalid, null if OK.
@@ -239,15 +245,7 @@ export async function validateWSLAvailable(distro: string, run: RunWSL = runWSL)
 
   let distros: string[];
   try {
-    const output = await run(['-l', '-q']);
-    // wsl.exe writes UTF-16LE unless WSL_UTF8=1 is set, in which case it writes UTF-8.
-    const text = output.includes(0) ? output.toString('utf16le') : output.toString('utf8');
-    distros = text
-      .replace(/^\uFEFF/, '')
-      .replaceAll('\0', '')
-      .split(/\r?\n/)
-      .map(d => d.trim())
-      .filter(Boolean);
+    distros = await listWSLDistributions(run);
   } catch {
     return 'Failed to list WSL distributions.';
   }

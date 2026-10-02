@@ -15,6 +15,10 @@ import { databaseService } from './database';
 import { panelManager as panelManagerMock } from '../test/setup';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import { MAX_RESTORE_PAYLOAD_SIZE, TerminalPanelManager } from './terminalPanelManager';
+import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { getAppDirectory } from '../utils/appDirectory';
+import { sessionWorkspacePath } from './sessionWorkspace';
+import { windowsPathToWSLMount } from '../utils/wslUtils';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -234,6 +238,36 @@ describe('terminal panel persistence', () => {
     ptyHost.latest().emit(output);
     expect(events.filter(event => event.channel === 'terminal:output')).toHaveLength(wasVisible ? 0 : 1);
     manager.acknowledgeBytes(panel.id, output.length);
+  });
+
+  it('launches and respawns a saved WSL Session inside its distro with Linux cwd and role environment', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const panel = makePanel('wsl-session-panel');
+    panel.state.customState = { orchestrationSessionId: 'wsl-session' };
+    const store = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'));
+    store.write({ version: 1, sessions: [{
+      id: 'wsl-session', name: 'WSL Session', runtime: 'wsl', wslDistribution: 'Ubuntu', agent: 'codex',
+      internalSessionId: panel.sessionId, panelIds: { codex: panel.id, claude: 'claude', cursor: 'cursor' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01',
+    }] });
+    try {
+      const { manager } = await startTerminal(panel);
+      const first = spawn.mock.calls[0][0];
+      expect(first.shell).toBe('wsl.exe');
+      expect(first.args.slice(0, 3)).toEqual(['-d', 'Ubuntu', '--exec']);
+      expect(first.args.at(-1)).toContain(windowsPathToWSLMount(sessionWorkspacePath('wsl-session')));
+      expect(first.env.PANE_ORCHESTRATION_SESSION_ID).toBe('wsl-session');
+      expect(first.env.WSLENV).toContain('GIT_CEILING_DIRECTORIES');
+      expect(first.env.GIT_CEILING_DIRECTORIES).not.toMatch(/^[A-Z]:/i);
+      await manager.respawnAll();
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(spawn.mock.calls[1][0].args).toEqual(first.args);
+    } finally {
+      vi.restoreAllMocks();
+      store.write({ version: 1, sessions: [] });
+    }
   });
 
   it.each([

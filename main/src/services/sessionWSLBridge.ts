@@ -1,0 +1,72 @@
+import path from 'path';
+import { escapeForBash } from '../utils/wslUtils';
+import { sessionRuntimePath } from './sessionRuntime';
+import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+
+function quotePowerShell(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/** Run the bundled Windows CLI, which can open this instance's named pipe. */
+export function sessionWSLBridge(appDirectory: string, record: OrchestrationSessionRecord, launcherPath: string, execPath = process.execPath): string {
+  const command = [
+    "$ErrorActionPreference = 'Stop'",
+    "$ProgressPreference = 'SilentlyContinue'",
+    'Set-Location $env:TEMP',
+    "$env:ELECTRON_RUN_AS_NODE = '1'",
+    `$env:PANE_DIR = ${quotePowerShell(appDirectory)}`,
+    `$env:PANE_ORCHESTRATION_SESSION_ID = ${quotePowerShell(record.id)}`,
+    `$env:PANE_SESSION_ID = ${quotePowerShell(record.internalSessionId)}`,
+  ].join('; ');
+  return [
+    '#!/bin/bash',
+    '# Pane-managed WSL Session bridge. Arguments cross as PowerShell literals.',
+    'set -euo pipefail',
+    'pane_windows_path() {',
+    String.raw`  case "$1" in -|[A-Za-z]:*|\\*) printf %s "$1" ;; *) wslpath -aw "$1" ;; esac`,
+    '}',
+    `panel_id=\${PANE_PANEL_ID:-${escapeForBash(record.panelIds[record.agent])}}`,
+    "panel_id=${panel_id//\\'/\\'\\'}",
+    `command=${escapeForBash(`${command}; $env:PANE_PANEL_ID = `)}`,
+    'command+="\'$panel_id\'; \\$paneArgs = @("',
+    'path_arg=false',
+    'for arg in "$@"; do',
+    '  if "$path_arg"; then arg=$(pane_windows_path "$arg"); fi',
+    '  path_arg=false',
+    '  key=${arg%%=*}',
+    '  case "$key" in',
+    '    --pane-dir|--file|--path|--input-file|--initial-input-file|--prompt-file|--body-file|--summary-file|--from-json)',
+    '      if [[ "$arg" == *=* ]]; then arg="$key=$(pane_windows_path "${arg#*=}")"; else path_arg=true; fi ;;',
+    '  esac',
+    // PowerShell single-quoted strings escape an apostrophe by doubling it.
+    "  arg=${arg//\\'/\\'\\'}",
+    '  command+="\'$arg\',"',
+    'done',
+    `command+=${escapeForBash(`${quotePowerShell('--pane-dir')},${quotePowerShell(appDirectory)}); $env:PANE_WSL_RUNPANE_ARGS = ConvertTo-Json -InputObject $paneArgs -Compress; & ${quotePowerShell(execPath)} ${quotePowerShell(launcherPath)}; exit $LASTEXITCODE`)}`,
+    'encoded=$(printf %s "$command" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)',
+    'exec powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand "$encoded"',
+    '',
+  ].join('\n');
+}
+
+/** JSON avoids Windows PowerShell's lossy native argument quoting. */
+export function sessionWSLLauncher(appDirectory: string): string {
+  return [
+    "const args = JSON.parse(process.env.PANE_WSL_RUNPANE_ARGS);",
+    'delete process.env.PANE_WSL_RUNPANE_ARGS;',
+    `const cli = require(${JSON.stringify(path.join(appDirectory, 'bin', 'runpane.cjs'))});`,
+    'cli.main(args).then(code => { process.exitCode = code; }).catch(error => { console.error(error.message); process.exitCode = 1; });',
+    '',
+  ].join('\n');
+}
+
+export function sessionWSLRcFile(workspace: string, record: OrchestrationSessionRecord): string {
+  const bin = sessionRuntimePath(path.join(workspace, '.pane-runtime'), record);
+  return [
+    '# Pane-managed Session shell startup.',
+    '[ ! -f "$HOME/.bashrc" ] || . "$HOME/.bashrc"',
+    `export PATH=${escapeForBash(bin)}:"$PATH"`,
+    `export PANE_RUNPANE_BIN=${escapeForBash(`${bin}/runpane`)}`,
+    '',
+  ].join('\n');
+}

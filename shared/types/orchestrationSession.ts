@@ -73,6 +73,9 @@ export interface OrchestrationActivity {
 }
 
 export interface OrchestrationSessionRecord {
+  /** Omitted in older stores; migrated to the host runtime on read. */
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   /** Durable recovery anchor for an in-place conversation transfer. */
   promotedFrom?: { paneId: string; panelId: string };
   id: string;
@@ -176,6 +179,8 @@ export interface OrchestrationSessionOverview {
 }
 
 export interface OrchestrationSessionCreateInput {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   name: string;
   agent?: PaneChatAgent;
   launchCommand?: string;

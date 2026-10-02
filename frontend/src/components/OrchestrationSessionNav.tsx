@@ -59,7 +59,8 @@ function availabilityIsVisible(availability: OrchestrationSessionAvailability): 
 const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
   .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
-function availableSessionAgents(): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
+function availableSessionAgents(wsl = false): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
+  if (wsl) return SESSION_AGENT_OPTIONS;
   const visible = new Set(visibleAgentPresets().map(preset => preset.id));
   return SESSION_AGENT_OPTIONS.filter(option => visible.has(option.id));
 }
@@ -107,10 +108,10 @@ export function OrchestrationSessionNav({
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
 
-  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => {
+  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => {
     await load();
     const name = requestedName?.trim() || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ name, agent, launchCommand, profile, customResume });
+    await create({ name, agent, launchCommand, profile, customResume, runtime: wslDistribution ? 'wsl' : 'windows', wslDistribution });
     setShowCreate(false);
     setActiveSession(null);
     navigateToPaneChat();
@@ -467,10 +468,22 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
 interface CreateOrchestrationSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null) => Promise<void>;
+  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => Promise<void>;
 }
 
 function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateOrchestrationSessionDialogProps) {
+  const [distributions, setDistributions] = useState<string[]>([]);
+  const [wslDistribution, setWslDistribution] = useState('');
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setWslDistribution('');
+    setDistributions([]);
+    void window.electronAPI?.orchestrationSessions.runtimes?.().then(result => {
+      if (!cancelled && result.success) setDistributions(result.data?.distributions ?? []);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [isOpen]);
   const [agent, setAgent] = useState<PaneChatAgent>(DEFAULT_PANE_CHAT_AGENT);
   const [name, setName] = useState('');
   const [launchCommand, setLaunchCommand] = useState('');
@@ -517,7 +530,7 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
       if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
       if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
       if (Object.keys(defaults).length > 0) await updateConfig(defaults);
-      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume);
+      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume, wslDistribution || undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to create Session');
     } finally {
@@ -534,7 +547,7 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
             <div className="grid gap-2" role="radiogroup" aria-label="Session agent">
-              {availableSessionAgents().map(option => {
+              {availableSessionAgents(Boolean(wslDistribution)).map(option => {
                 const selected = agent === option.id;
                 const isDefault = config?.defaultOrchestratorAgent === option.id;
                 return (
@@ -567,6 +580,20 @@ function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateO
               })}
             </div>
           </fieldset>
+          {distributions.length > 0 && (
+            <div className="space-y-2">
+              <label htmlFor="session-runtime" className="text-label font-medium text-text-primary">Run agent in</label>
+              <select id="session-runtime" value={wslDistribution} onChange={event => {
+                setWslDistribution(event.target.value);
+                if (!event.target.value) setAgent(supportedSessionAgent(agent));
+              }} disabled={isSubmitting}
+                className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus:ring-2 focus:ring-interactive">
+                <option value="">Windows</option>
+                {distributions.map(distribution => <option key={distribution} value={distribution}>WSL · {distribution}</option>)}
+              </select>
+              {wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
+            </div>
+          )}
           <details className="space-y-3">
             <summary className="cursor-default text-sm font-medium text-text-secondary">Launch command and behavior</summary>
             <SessionLaunchFields

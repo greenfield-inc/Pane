@@ -1,4 +1,5 @@
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
+import { listWSLDistributions } from '../utils/wslUtils';
 import type { IpcMain } from 'electron';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -27,6 +28,8 @@ const reportSchema = boundary.object({
   provenance: boundary.nonEmptyString,
 });
 const createSchema = boundary.object({
+  runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
+  wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
   launchCommand: boundary.optional(boundary.string),
@@ -79,6 +82,10 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry: PaneCommandRegistry,
 ): void {
   const manager = services.orchestrationSessionManager;
+  commandRegistry.register('orchestration-sessions:runtimes', async () => invokeSafely(async () => ({
+    distributions: process.platform === 'win32' ? await listWSLDistributions().catch(() => []) : [],
+  })));
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:runtimes');
   const requireManager = () => {
     if (!manager) throw new Error('Sessions manager is not initialized');
     return manager;

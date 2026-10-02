@@ -43,6 +43,8 @@ interface OrchestrationActivity {
 }
 
 interface OrchestrationSessionRecord {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   id: string;
   name: string;
   archived?: boolean;
@@ -85,6 +87,8 @@ interface SessionSelectorValue {
 }
 
 interface SessionCreatePayload {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   name: string;
   agent?: RunpaneAgent;
   goal?: string;
@@ -1124,6 +1128,8 @@ const orchestrationActivitySchema: BoundarySchema<OrchestrationActivity> = bound
   panelId: boundary.optional(boundary.nonEmptyString),
 });
 const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.object({
+  runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
+  wslDistribution: boundary.optional(boundary.nonEmptyString),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
@@ -1997,6 +2003,8 @@ function sessionSelectorFromParsed(parsed: ParsedArgs): SessionSelectorValue {
 
 function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
   return decodeBoundary(value, boundary.object({
+    runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
+    wslDistribution: boundary.optional(boundary.nonEmptyString),
     name: boundary.nonEmptyString,
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
   launchCommand: boundary.optional(boundary.string),

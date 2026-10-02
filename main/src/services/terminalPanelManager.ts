@@ -1,4 +1,6 @@
 import { withRunpaneOnPath } from './runpaneShim';
+import { sessionRuntimePath, sessionWSLContext } from './sessionRuntime';
+import { escapeForBash } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
@@ -1102,10 +1104,17 @@ export class TerminalPanelManager extends EventEmitter {
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
+    let sessionRuntimeRc: string | undefined;
     if (sessionState.orchestrationSessionId) {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
         .read().sessions.find(item => item.id === sessionState.orchestrationSessionId);
       cwd = prepareSessionWorkspace(sessionState.orchestrationSessionId, record?.profile ?? sessionState.orchestrationProfile, record);
+      if (record?.runtime === 'wsl') {
+        if (process.platform !== 'win32') throw new Error('WSL Sessions require Windows');
+        wslContext = sessionWSLContext(record, cwd);
+        sessionRuntimeRc = sessionRuntimePath(path.join(cwd, '.pane-runtime', 'bashrc'), record);
+        cwd = sessionRuntimePath(cwd, record);
+      }
     }
 
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
@@ -1128,6 +1137,10 @@ export class TerminalPanelManager extends EventEmitter {
       const wslShell = getWSLShellSpawn(wslContext.distribution, cwd);
       shellPath = wslShell.path;
       shellArgs = wslShell.args;
+      if (sessionRuntimeRc) {
+        shellArgs = ['-d', wslContext.distribution, '--exec', 'bash', '-lc',
+          `cd ${escapeForBash(cwd)} && exec bash --rcfile ${escapeForBash(sessionRuntimeRc)} -i`];
+      }
       shellType = 'bash';
       spawnCwd = undefined; // WSL handles cwd
     } else {
@@ -1173,6 +1186,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_SESSION_ID',
             'PANE_PANEL_ID',
             'PANE_ORCHESTRATION_SESSION_ID',
+            'GIT_CEILING_DIRECTORIES',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
           ]),
@@ -1203,7 +1217,7 @@ export class TerminalPanelManager extends EventEmitter {
       ...wslEnvVars,
     } satisfies Record<string, string>;
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
-      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionGitCeiling() }
+      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
       : baseSpawnEnv;
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
     // cannot run the Windows Electron binary, so they keep their own PATH.

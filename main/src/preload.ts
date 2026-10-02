@@ -394,6 +394,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   orchestrationSessions: {
+    runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
     list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
     select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input),

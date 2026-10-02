@@ -3909,6 +3909,34 @@ print(json.dumps([build_pane_create_request(parse_args(base + extra))["panes"][0
   }
 }
 
+async function checkSessionRuntime() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runSessionsCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runtime-contract-'));
+  const file = path.join(directory, 'session.json');
+  const input = { name: 'WSL planning', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' };
+  fs.writeFileSync(file, JSON.stringify(input));
+  const originalInvoke = daemonClient.invokeDaemon;
+  const originalLog = console.log;
+  let received;
+  daemonClient.invokeDaemon = async (channel, args) => {
+    assert.strictEqual(channel, 'runpane:sessions:create');
+    received = args[0];
+    return { ok: true, session: { ...input, id: 'session', associations: [] } };
+  };
+  console.log = () => {};
+  try {
+    assert.strictEqual(await runSessionsCreate(parseRunpaneArgs(['sessions', 'create', '--from-json', file, '--json'])), 0);
+    assert.strictEqual(received.runtime, 'wsl');
+    assert.strictEqual(received.wslDistribution, 'Ubuntu-24.04');
+  } finally {
+    daemonClient.invokeDaemon = originalInvoke;
+    console.log = originalLog;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
@@ -3952,6 +3980,7 @@ async function runChecks() {
   await checkPaneRenameParity();
   await checkLockParity();
   await checkOverviewReportsAndLocks();
+  await checkSessionRuntime();
   await checkAgentTemplateParity();
   checkHelpOutput();
   compareAgentContextParity();

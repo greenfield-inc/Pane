@@ -148,6 +148,7 @@ interface ElectronAPI {
   };
 
   orchestrationSessions: {
+    runtimes: () => Promise<IPCResponse<{ distributions: string[] }>>;
     list: () => Promise<IPCResponse<OrchestrationSessionListResult>>;
     select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult>>;
     create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;

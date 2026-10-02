@@ -1,4 +1,6 @@
 import { validateCustomCommandResume, customResumeAgentType, type CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { validateWSLAvailable } from '../utils/wslUtils';
+import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
@@ -141,8 +143,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         internalSession,
         panel,
         agent: record.agent,
-        cwd: sessionWorkspacePath(record.id),
-        guidePath: await this.ensureGuidePath(),
+        cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
+        guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
         started: terminalPanelManager.isTerminalInitialized(panel.id),
       };
     });
@@ -152,6 +154,13 @@ export class OrchestrationSessionManager extends EventEmitter {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       validateCreateInput(input);
+      if (input.runtime === 'wsl') {
+        if (process.platform !== 'win32') throw new Error('WSL Sessions require Windows');
+        if (!input.wslDistribution?.trim()) throw new Error('WSL Session requires a distribution');
+        const runtimeError = await validateWSLAvailable(input.wslDistribution);
+        if (runtimeError) throw new Error(runtimeError);
+        if (sourcePanelId) throw new Error('Moving a chat cannot change its runtime');
+      } else if (input.wslDistribution) throw new Error('Windows Session cannot specify a WSL distribution');
       const data = this.store.read();
       const name = input.name.trim();
       if (data.sessions.some(session => normalizeSessionName(session.name) === normalizeSessionName(name))) {
@@ -197,8 +206,10 @@ export class OrchestrationSessionManager extends EventEmitter {
           : fits('', config.defaultSessionResume) ? config.defaultSessionResume : null;
       const agent = resolveSessionAgent(explicitAgent, launchCommand, customResume)
         ?? normalizePaneChatAgent(config.defaultOrchestratorAgent);
-      this.assertAgentSupported(agent);
+      this.assertAgentSupported(agent, input.runtime);
       const record: OrchestrationSessionRecord = {
+        runtime: input.runtime ?? 'windows',
+        wslDistribution: input.wslDistribution,
         id,
         name,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
@@ -313,7 +324,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (input.name !== undefined && data.sessions.some(session => session.id !== current.id && normalizeSessionName(session.name) === normalizeSessionName(nextRecord.name))) {
         throw new Error(`A Session named ${nextRecord.name} already exists`);
       }
-      this.assertAgentSupported(nextRecord.agent);
+      this.assertAgentSupported(nextRecord.agent, nextRecord.runtime);
       if (nextRecord.archived === true && nextRecord.agent !== current.agent) {
         throw new Error(`Session ${current.name} is archived; restore it before changing its agent`);
       }
@@ -617,7 +628,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private normalizePersistedSessionAgents(data: OrchestrationSessionStoreData): OrchestrationSessionStoreData {
     let changed = false;
     const sessions = data.sessions.map(session => {
-      const agent = resolveSupportedPaneChatAgent(session.agent);
+      const agent = session.runtime === 'wsl' ? session.agent : resolveSupportedPaneChatAgent(session.agent);
       if (agent === session.agent) return session;
       changed = true;
       return { ...session, agent };
@@ -875,7 +886,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     const command = record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
     const nativeCommand = /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
     return {
-      initialCommand: record.launchCommand?.trim() || this.skillCacheManager?.launchCommand(record.agent) || command,
+      initialCommand: record.launchCommand?.trim() || (record.runtime === 'wsl' ? command : this.skillCacheManager?.launchCommand(record.agent)) || command,
       customResume: record.customResume,
       initialInput: undefined,
       initialInputMode: 'argument',
@@ -883,7 +894,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       initialInputDeliveryVersion: ORCHESTRATION_BOOTSTRAP_VERSION,
       agentType: record.customResume ? customResumeAgentType(record.customResume) : resolveAgentTypeFromCommand(command) ?? record.agent,
       orchestrationSessionId: record.id,
-      orchestrationWorkspace: sessionWorkspacePath(record.id),
+      orchestrationWorkspace: sessionRuntimePath(sessionWorkspacePath(record.id), record),
       orchestrationProfile: record.profile,
       preserveLaunchCommand: !nativeCommand,
       isCliPanel: true,
@@ -904,8 +915,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       internalSession,
       panel,
       agent: record.agent,
-      cwd: sessionWorkspacePath(record.id),
-      guidePath: await this.ensureGuidePath(),
+      cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
+      guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
       started: terminalPanelManager.isTerminalInitialized(panel.id),
     };
   }
@@ -1001,8 +1012,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     return matches[0];
   }
 
-  private assertAgentSupported(agent: PaneChatAgent): void {
-    if (!isAgentSupportedOnPlatform(agent, process.platform)) {
+  private assertAgentSupported(agent: PaneChatAgent, runtime?: 'windows' | 'wsl'): void {
+    if (!isAgentSupportedOnPlatform(agent, runtime === 'wsl' ? 'wsl' : process.platform)) {
       throw new Error(`${RUNPANE_CONTRACT.agentTemplates[agent].title} is not supported on ${process.platform}.`);
     }
   }

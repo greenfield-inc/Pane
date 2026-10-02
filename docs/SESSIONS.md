@@ -66,6 +66,35 @@ reopening, and archiving retain this folder. These folders are not Git
 worktrees or security sandboxes and do not expire with OS temporary files.
 Project implementation belongs in an appropriate Pane/worktree.
 
+## Windows and WSL runtimes
+
+On Windows, **Create Session → Run agent in** appears directly below the agent
+picker when WSL reports installed distributions. Windows is the default on every
+creation. Choose a named distribution to run the agent there; install the agent
+inside that distribution first. Cursor is available when WSL is selected.
+The runtime and distribution belong to the Session and survive reopening,
+application restart, and terminal supervisor restart. Existing records retain
+their host runtime through an additive store migration.
+
+WSL Sessions retain their durable files under the Windows Pane data directory.
+Their agent sees Linux paths such as `/mnt/c/Users/.../.pane/sessions/...`.
+Generated `AGENTS.md` points to a Session-specific `runtime-context.md`; this
+context takes precedence over the shared Pane Chat routing instructions.
+
+Each WSL Session gets a managed `.pane-runtime/runpane` wrapper on PATH, also
+available as `$PANE_RUNPANE_BIN`. It invokes this build's bundled Windows CLI via
+PowerShell interop from Windows TEMP, so the CLI can reach this Pane instance's
+named pipe. Arguments cross as JSON to preserve quotes and Unicode. File flags
+accept relative or absolute Linux paths (including `--flag=value`); `-` retains
+stdin semantics. Paths inside JSON request bodies must use Windows paths, and
+Windows paths returned by the CLI can be read in WSL after `wslpath -u` conversion.
+The bridge pins `--pane-dir` to this instance and preserves the calling Session
+and panel identities. WSL interop must be enabled; a Linux-installed RunPane CLI
+cannot replace this bridge for a Windows daemon.
+
+For CLI JSON creation, `runtime: "wsl"` and `wslDistribution: "Ubuntu-24.04"`
+select an installed distribution; omitted runtime selects the host.
+
 ## Resuming custom launchers
 
 Use **Enable custom command resume** in Session launch settings or a saved custom

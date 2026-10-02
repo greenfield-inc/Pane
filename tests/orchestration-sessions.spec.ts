@@ -30,6 +30,8 @@ type UiPaneOverviewFixture = {
 };
 
 type UiSessionFixture = {
+  runtime?: 'windows' | 'wsl';
+  wslDistribution?: string;
   id: string;
   name: string;
   agent: 'claude' | 'codex' | 'cursor';
@@ -61,6 +63,7 @@ type UiSessionFixture = {
 };
 
 type SessionFixtureOptions = {
+  distributions?: string[];
   listDelayMs?: number;
   getDelayMs?: number;
   overviewPanes?: Record<string, UiPaneOverviewFixture[]>;
@@ -154,7 +157,7 @@ async function installSessionsFixture(
     initialProjects: [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
     initialSessions: paneSessions,
   });
-  await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]> }) => {
+  await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;
     type Selector = { sessionId?: string; name?: string };
     type Update = Partial<Pick<SessionRecord, 'name' | 'goal' | 'context' | 'decisions' | 'blockers' | 'nextAction' | 'archived' | 'isPinned' | 'launchCommand' | 'profile' | 'customResume'>> & { expectedRevision?: number };
@@ -249,6 +252,7 @@ async function installSessionsFixture(
     };
 
     const api = {
+      runtimes: async () => success({ distributions }),
       list: async () => {
         const selected = selectedSessionId && sessions.find(session => session.id === selectedSessionId && !session.archived)
           ? selectedSessionId
@@ -266,11 +270,13 @@ async function installSessionsFixture(
         changed('selected');
         return success({ sessions: clone(sessions), selectedSessionId });
       },
-      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null }) => {
+      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null; runtime?: 'windows' | 'wsl'; wslDistribution?: string }) => {
         const id = `created-session-${nextId++}`;
         const record: SessionRecord = {
           id,
           name: input.name,
+          runtime: input.runtime,
+          wslDistribution: input.wslDistribution,
           agent: input.agent ?? 'claude',
           launchCommand: input.launchCommand,
           customResume: input.customResume,
@@ -412,7 +418,7 @@ async function installSessionsFixture(
         selectedSessionId = sessions.find(session => !session.archived)?.id;
       },
     });
-  }, { seed: initialSessions, listDelayMs: fixtureOptions.listDelayMs ?? 0, getDelayMs: fixtureOptions.getDelayMs ?? 0, overviewPanes: fixtureOptions.overviewPanes ?? {} });
+  }, { seed: initialSessions, listDelayMs: fixtureOptions.listDelayMs ?? 0, getDelayMs: fixtureOptions.getDelayMs ?? 0, overviewPanes: fixtureOptions.overviewPanes ?? {}, distributions: fixtureOptions.distributions ?? [] });
 }
 
 async function dismissStartupDialogs(page: Page): Promise<void> {
@@ -427,6 +433,30 @@ async function layoutBox(locator: Locator): Promise<{ x: number; y: number; widt
   if (!box) throw new Error('Expected layout target to be visible');
   return { x: box.x, y: box.y, width: box.width, height: box.height };
 }
+
+test('Session runtime defaults to Windows and submits the selected installed distribution', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04', 'Debian'] });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  const runtime = page.getByLabel('Run agent in');
+  await expect(runtime).toHaveValue('');
+  await runtime.selectOption('Ubuntu-24.04');
+  await page.getByLabel('Name your chat (optional)', { exact: true }).fill('WSL planning');
+  await page.screenshot({ path: 'tmp/verify/session-runtime/01-wsl-create.png' });
+  await page.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'WSL planning', exact: true })).toBeAttached();
+  const result = await page.evaluate(() => window.electronAPI.orchestrationSessions.list());
+  expect(result.data?.sessions.find(session => session.name === 'WSL planning')).toMatchObject({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
+});
+
+test('Session runtime is hidden when the host offers no WSL distributions', async ({ page }) => {
+  await installSessionsFixture(page, []);
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(page.getByLabel('Run agent in')).toHaveCount(0);
+});
 
 test('Sessions create, rename, switch, and keep chat surfaces focused', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -513,6 +543,9 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
 });
 
 test('Session creation agent picker supports native radio keyboard semantics', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Linux' });
+  });
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
     sessionFixture('keyboard', 'Keyboard chat', 'Keyboard goal.', 'Keyboard context.', '2026-09-16T12:00:00.000Z'),
@@ -1308,6 +1341,10 @@ test('Session app defaults save for new Sessions without changing existing launc
 });
 
 test('Sessions open persistent shell and Files panels in their own workspace', async ({ page }, testInfo) => {
+  // This journey asserts controls in the macOS title bar.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+  });
   await installSessionsFixture(page, [
     sessionFixture('tools', 'Tools', '', '', new Date(0).toISOString()),
     sessionFixture('other', 'Other', '', '', new Date(0).toISOString()),
@@ -1513,4 +1550,3 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await expect(groupStrips).toHaveCount(0);
   await expect(titleBarTabs.getByRole('tab')).toHaveCount(1);
 });
-

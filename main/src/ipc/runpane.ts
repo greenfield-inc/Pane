@@ -285,6 +285,8 @@ const orchestrationLinkSchema = boundary.object({
   addedAt: boundary.nonEmptyString,
 });
 const orchestrationSessionCreateSchema = boundary.object({
+  runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
+  wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
   launchCommand: boundary.optional(boundary.string),
