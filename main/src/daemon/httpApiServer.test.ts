@@ -318,7 +318,7 @@ describe('PaneRemoteHttpApiServer', () => {
 
   it('serves the host folder browser to remote clients from the host filesystem', async () => {
     const hostHome = await mkdtemp(path.join(os.tmpdir(), 'pane-remote-host-'));
-    await mkdir(path.join(hostHome, 'montlakev2', '.git'), { recursive: true });
+    await mkdir(path.join(hostHome, 'my-repo', '.git'), { recursive: true });
     vi.spyOn(os, 'homedir').mockReturnValue(hostHome);
     const registry = new PaneCommandRegistry();
     // SAFETY: Registry binding only needs IpcMain.handle.
@@ -330,7 +330,7 @@ describe('PaneRemoteHttpApiServer', () => {
     try {
       await expect(requestJson(server, 'POST', '/invoke', {
         channel: 'fs:browse-directories',
-        args: [{ hostLabel: 'testina' }],
+        args: [{ hostLabel: 'sandbox-1' }],
       }, 'secret-token')).resolves.toEqual({
         statusCode: 200,
         body: {
@@ -342,7 +342,7 @@ describe('PaneRemoteHttpApiServer', () => {
               parent: path.dirname(hostHome),
               home: hostHome,
               platform: process.platform,
-              entries: [{ name: 'montlakev2', path: path.join(hostHome, 'montlakev2'), isGitRepo: true, isHidden: false }],
+              entries: [{ name: 'my-repo', path: path.join(hostHome, 'my-repo'), isGitRepo: true, isHidden: false }],
             },
           },
         },
@@ -350,7 +350,7 @@ describe('PaneRemoteHttpApiServer', () => {
       if (process.platform !== 'win32') {
         await expect(requestJson(server, 'POST', '/invoke', {
           channel: 'fs:browse-directories',
-          args: [{ path: 'C:\\runpane-temp-home', hostLabel: 'testina' }],
+          args: [{ path: 'C:\\Users\\me', hostLabel: 'sandbox-1' }],
         }, 'secret-token')).resolves.toMatchObject({
           statusCode: 200,
           body: { ok: true, result: { success: false, code: 'WINDOWS_PATH_ON_POSIX_HOST' } },

@@ -15,8 +15,8 @@ import {
 
 let home: string;
 // Filesystem checks run against this machine; Windows-path checks fake a Linux host and throw before touching disk.
-const thisHost = () => ({ platform: process.platform, homeDir: home, hostLabel: 'testina' });
-const linuxHost = () => ({ platform: 'linux' as const, homeDir: home, hostLabel: 'testina' });
+const thisHost = () => ({ platform: process.platform, homeDir: home, hostLabel: 'sandbox-1' });
+const linuxHost = () => ({ platform: 'linux' as const, homeDir: home, hostLabel: 'sandbox-1' });
 
 beforeEach(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), 'pane-host-paths-'));
@@ -92,23 +92,23 @@ describe('browseHostDirectories', () => {
     await expectHostPathError(
       browseHostDirectories({ path: 'C:\\Users\\me' }, linuxHost()),
       'WINDOWS_PATH_ON_POSIX_HOST',
-      "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+      "That's a path on this computer; sandbox-1 is a Linux host. Pick a folder on sandbox-1.",
     );
   });
 });
 
 describe('assertPathOnHost', () => {
   it.each([
-    'C:\\runpane-temp-home\\montlakev2',
+    'C:\\Users\\me\\my-repo',
     'C:/Users/me/repo',
     'D:',
     '\\\\wsl$\\Ubuntu\\home\\user',
-    'repos\\montlakev2',
+    'repos\\my-repo',
   ])('rejects %s on a Linux host', input => {
     expect(() => assertPathOnHost(input, linuxHost())).toThrow(
       new HostPathError(
         'WINDOWS_PATH_ON_POSIX_HOST',
-        "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+        "That's a path on this computer; sandbox-1 is a Linux host. Pick a folder on sandbox-1.",
       ),
     );
   });
@@ -132,10 +132,10 @@ describe('assertPathOnHost', () => {
 
 describe('createHostDirectory', () => {
   it('creates one new folder under the parent', async () => {
-    const result = await createHostDirectory({ parent: '~', name: 'montlakev2' }, thisHost());
+    const result = await createHostDirectory({ parent: '~', name: 'my-repo' }, thisHost());
 
-    expect(result).toEqual({ path: path.join(home, 'montlakev2') });
-    expect(existsSync(path.join(home, 'montlakev2'))).toBe(true);
+    expect(result).toEqual({ path: path.join(home, 'my-repo') });
+    expect(existsSync(path.join(home, 'my-repo'))).toBe(true);
   });
 
   it.each(['', ' ', '.', '..', 'a/b', 'a\\b'])('rejects the folder name %j', async name => {
@@ -191,7 +191,7 @@ describe('validateHostProjectPath', () => {
   it('rejects Windows paths in both modes on a POSIX host', async () => {
     for (const mode of ['open', 'new'] as const) {
       await expectHostPathError(
-        validateHostProjectPath({ path: 'C:\\runpane-temp-home\\montlakev2', mode }, linuxHost(), async registration => registration.path),
+        validateHostProjectPath({ path: 'C:\\Users\\me\\my-repo', mode }, linuxHost(), async registration => registration.path),
         'WINDOWS_PATH_ON_POSIX_HOST',
       );
     }
@@ -211,8 +211,8 @@ describe('resolveCloneDestination', () => {
   });
 
   it('rejects a Windows destination on a POSIX host', () => {
-    expect(() => resolveCloneDestination('C:\\runpane-temp-home', linuxHost())).toThrow(
-      "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+    expect(() => resolveCloneDestination('C:\\Users\\me', linuxHost())).toThrow(
+      "That's a path on this computer; sandbox-1 is a Linux host. Pick a folder on sandbox-1.",
     );
   });
 });
