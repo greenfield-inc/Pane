@@ -105,7 +105,7 @@ describe('openHostTerminal', () => {
 
     await openHostTerminal({}, api);
 
-    expect(open).toHaveBeenCalledWith(undefined);
+    expect(open).toHaveBeenCalledWith({});
   });
 
   it('throws the host error and stays put when opening fails', async () => {

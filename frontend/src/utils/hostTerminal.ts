@@ -58,7 +58,7 @@ export async function getActiveHostId(api: HostTerminalApi = API): Promise<strin
  */
 export async function openHostTerminal(options: { input?: string } = {}, api: HostTerminalApi = API): Promise<void> {
   const hostId = await getActiveHostId(api);
-  const response = await api.hostTerminal.open(options.input === undefined ? undefined : { input: options.input });
+  const response = await api.hostTerminal.open(options.input === undefined ? {} : { input: options.input });
   if (!response.success || !response.data) {
     throw new Error(response.error ?? 'Could not open the host terminal');
   }
