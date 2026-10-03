@@ -133,6 +133,8 @@ test('Open Project on a remote picks an existing repo there and rejects a path f
   await expect(dialog.getByRole('alert')).toHaveText(
     "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
   );
+  // A rejected path has no branch to show.
+  await expect(dialog.getByText('Detected Branch')).toHaveCount(0);
   await shot(page, testInfo, '05-open-windows-path-inline-error');
 
   await dialog.getByRole('button', { name: 'Browse' }).click();

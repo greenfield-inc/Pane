@@ -176,7 +176,7 @@ export function AddProjectDialog({ isOpen, onClose, mode }: AddProjectDialogProp
             </div>
           </FieldWithTooltip>
 
-          {newProject.path && (
+          {newProject.path && !pathError && (
             <FieldWithTooltip
               label="Detected Branch"
               tooltip="The main branch Pane will use as the base for worktrees"
