@@ -370,6 +370,8 @@ The remote host. In remote mode, Open project, New project and Clone run on the 
 - Open project needs the root folder of an existing git repository on the host. It never creates a folder or runs `git init`; New project does both.
 - Clone defaults to the host's home folder, and `~` in the destination means the host's home.
 
+The dialogs show which host they act on with a chip at the top, for example "On: devbox (remote host)". On a remote host, Browse opens Pane's own folder browser instead of this computer's file dialog: it starts at the host's home, has Up and Show hidden folders, marks git repositories, and offers New folder when creating a project or picking a clone destination.
+
 ### Where does copied terminal text go?
 
 To the clipboard of the machine you are sitting at. In remote mode, dragging to select text in a terminal copies it right away, with no Copy popover. Programs that copy with OSC 52, such as Claude Code, tmux, and vim, also copy to your machine. Programs in the terminal cannot read your clipboard through OSC 52.
