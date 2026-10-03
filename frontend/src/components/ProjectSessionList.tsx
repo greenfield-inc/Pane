@@ -811,9 +811,14 @@ function SessionRow({
         />
       </div>
 
-      {/* Quick actions stay out of the resting row and appear on hover or
-          keyboard focus; the right-click menu carries the full set. */}
-      <div className="relative z-10 flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100">
+      {/* Overlay actions so hidden controls never shorten the title. Layer the
+          translucent row token over the sidebar surface to fully cover text. */}
+      <div className={cn(
+        'absolute inset-y-0 right-2 z-10 flex items-center gap-0.5 rounded bg-surface-secondary opacity-0 transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100',
+        isActive
+          ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
+          : 'group-hover/session:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]'
+      )}>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onArchive(); }}

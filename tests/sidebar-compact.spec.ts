@@ -55,6 +55,63 @@ async function collapseSidebar(page: Page) {
 }
 
 test.describe('compact sidebar', () => {
+  for (const [theme, layout] of [['night-owl', 'single'], ['light', 'single'], ['night-owl', 'two-row'], ['light', 'two-row']]) {
+    test(`pane titles use the row width beneath quick actions (${theme}, ${layout})`, async ({ page }) => {
+      const title = 'pictur-pr-web-component-sidebar-action-overlay';
+      const evidence = `tmp/verify/sidebar-row-action-overlay/${theme}-${layout}`;
+      await installElectronApiMock(page, {
+        initialConfig: { theme },
+        initialPreferences: { sidebar_pane_row_layout: layout },
+        initialProjects: projects,
+        initialSessions: [
+          session('overlay', title, 1, { gitStatus: { prNumber: 123, prState: 'OPEN', additions: 12, deletions: 3 } }),
+          session('pinned-overlay', `${title}-pinned`, 1, { isFavorite: true }),
+        ],
+        initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true, pinnedSectionExpanded: true },
+      });
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('html')).toHaveClass(new RegExp(theme));
+      const pane = page.getByRole('button', { name: title, exact: true });
+      const label = page.getByTestId('sidebar').getByText(title, { exact: true });
+      await expect(pane).toBeVisible();
+      await page.mouse.move(800, 500);
+      await page.screenshot({ path: `${evidence}-idle.png` });
+      const rowBox = await pane.boundingBox();
+      const labelBox = await label.boundingBox();
+      if (!rowBox || !labelBox) throw new Error('Pane title has no bounds');
+      expect(rowBox.x + rowBox.width - labelBox.x - labelBox.width).toBeLessThanOrEqual(9);
+      await pane.hover();
+      const archive = page.getByRole('button', { name: `Archive ${title}`, exact: true });
+      await expect(archive.locator('..')).toHaveCSS('opacity', '1');
+      const actionBox = await archive.boundingBox();
+      if (!actionBox) throw new Error('Archive has no bounds');
+      expect(actionBox.x).toBeLessThan(labelBox.x + labelBox.width);
+      const overlayBox = await archive.locator('..').boundingBox();
+      if (!overlayBox) throw new Error('Action overlay has no bounds');
+      expect(overlayBox.y).toBeLessThanOrEqual(labelBox.y);
+      expect(overlayBox.y + overlayBox.height).toBeGreaterThanOrEqual(labelBox.y + labelBox.height);
+      await page.screenshot({ path: `${evidence}-hover.png` });
+      await page.evaluate(() => {
+        // SAFETY: installElectronApiMock installs this event bridge before navigation.
+        const mock = (window as typeof window & { __paneTestElectronMock: {
+          emitPanelAgentStatus(panelId: string, sessionId: string, state: string): void;
+        } }).__paneTestElectronMock;
+        mock.emitPanelAgentStatus('overlay-agent', 'overlay', 'working');
+        mock.emitPanelAgentStatus('overlay-agent', 'overlay', 'idle');
+      });
+      await expect(label).toHaveCSS('text-decoration-style', 'dashed');
+      await page.screenshot({ path: `${evidence}-activity.png` });
+      await pane.click();
+      await expect(pane).toHaveAttribute('aria-current', 'page');
+      await page.screenshot({ path: `${evidence}-active.png` });
+      const unpin = page.getByRole('button', { name: `Unpin ${title}-pinned`, exact: true });
+      await expect(unpin).toBeAttached();
+      await page.mouse.move(800, 500);
+      await expect(unpin.locator('..')).toHaveCSS('opacity', '0');
+      await page.screenshot({ path: `${evidence}-pinned-idle.png` });
+    });
+  }
+
   test('keeps Projects + direct while the top New button opens the chooser', async ({ page }) => {
     await installElectronApiMock(page, {
       initialProjects: projects,
