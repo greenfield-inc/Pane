@@ -102,6 +102,10 @@ export class ArchiveProgressManager extends EventEmitter {
     const task = this.activeTasks.get(sessionId);
     if (!task) return;
 
+    // Cleanup continues after a worktree removal error. Its later artifact
+    // stages must not turn that failure into a successful archive result.
+    if (task.status === 'failed' && status !== 'failed') return;
+
     task.status = status;
     console.log(`[ArchiveProgressManager] status sessionId=${sessionId} status=${status}${error ? ` error=${JSON.stringify(error)}` : ''}`);
     

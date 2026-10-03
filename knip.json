@@ -31,6 +31,7 @@
         "playwright*.ts"
       ],
       "ignoreDependencies": [
+        "original-fs",
         "@anthropic-ai/sdk",
         "@lydell/node-pty",
         "@modelcontextprotocol/sdk",

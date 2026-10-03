@@ -7,6 +7,7 @@ import { CommandRunner } from '../../utils/commandRunner';
 import { PathResolver } from '../../utils/pathResolver';
 import { terminateProcessTrees } from '../../utils/processTree';
 import { classifyWorktree, removeWorktreeViaTrash, sweepWorktreeTrash, waitForPendingWorktreeTrash } from '../worktreeTrash';
+import { ArchiveProgressManager } from '../archiveProgressManager';
 
 const directories: string[] = [];
 const holders: ChildProcess[] = [];
@@ -62,7 +63,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
   });
@@ -92,7 +93,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('pending');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     const [entry] = readdirSync(join(repo, '.git', 'pane-trash'));
     expect(entry).toMatch(/^pane-2-[0-9a-f]{8}$/);
 
@@ -116,7 +117,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(outcome).toBe('done');
     expect(attempts).toBe(4);
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(execFile.mock.calls.some(([file, args]) => file === 'git' && args[0] === 'worktree' && args[1] === 'remove')).toBe(false);
   });
 
@@ -131,7 +132,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
   });
 
@@ -159,7 +160,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     await waitForPendingWorktreeTrash();
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
   });
@@ -180,13 +181,13 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
   });
 
   it('reports the git failure when the worktree directory really cannot be removed', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
     vi.spyOn(fsPromises, 'rename').mockRejectedValue(busyError());
-    vi.spyOn(fsPromises, 'rm').mockRejectedValue(busyError());
+    vi.spyOn(fsPromises, 'rmdir').mockRejectedValue(busyError());
     const realExecFile = runner.execFile.bind(runner);
     vi.spyOn(runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
       if (file !== 'git' || args[0] !== 'worktree' || args[1] !== 'remove') {
@@ -201,6 +202,57 @@ describe('removeWorktreeViaTrash', () => {
     expect(existsSync(worktree)).toBe(true);
   });
 
+  it('fails a nonempty leftover and advances the archive queue without starting an unbounded recursive delete', async () => {
+    const { repo, worktree, runner, resolver } = repositoryWithWorktree();
+    vi.spyOn(fsPromises, 'rename').mockRejectedValue(busyError());
+    const realExecFile = runner.execFile.bind(runner);
+    vi.spyOn(runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
+      if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error(`error: failed to delete '${worktree}': Filename too long`);
+      }
+      return realExecFile(file, args, cwd, options);
+    });
+    // Model the observed fs.rm that never settles. Releasing it in finally
+    // keeps even a failing regression run from leaving a live deletion behind.
+    let releaseDeletion = () => {};
+    const deletion = new Promise<void>(resolve => { releaseDeletion = resolve; });
+    const realRm = fsPromises.rm.bind(fsPromises);
+    const remove = vi.spyOn(fsPromises, 'rm').mockImplementation((target, options) =>
+      target === worktree ? deletion : realRm(target, options));
+    const manager = new ArchiveProgressManager();
+    let nextStarted = () => {};
+    const next = new Promise<boolean>(resolve => { nextStarted = () => resolve(true); });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      manager.addTask('blocked', 'blocked', 'blocked', 'test', async () => {
+        try {
+          await removeWorktreeViaTrash(worktree, repo, resolver, runner, { busyRetryMs: 0 });
+        } catch (error) {
+          // The session IPC handler reports the failure, then continues its
+          // artifact cleanup rather than throwing out of the queued callback.
+          manager.updateTaskStatus('blocked', 'failed', error instanceof Error ? error.message : String(error));
+        }
+        manager.updateTaskStatus('blocked', 'cleaning-artifacts');
+      });
+      manager.addTask('next', 'next', 'next', 'test', async () => { nextStarted(); });
+      const advanced = await Promise.race([
+        next,
+        new Promise<boolean>(resolve => { deadline = setTimeout(() => resolve(false), 1500); }),
+      ]);
+      expect(advanced).toBe(true);
+      expect(manager.getActiveTasks().find(task => task.sessionId === 'blocked')).toMatchObject({
+        status: 'failed', error: expect.stringContaining('Filename too long'),
+      });
+      expect(remove.mock.calls.some(([target]) => target === worktree)).toBe(false);
+      expect(existsSync(join(worktree, 'node_modules', 'dep', 'index.js'))).toBe(true);
+      expect(git(repo, 'worktree', 'list', '--porcelain')).toContain(worktree.replaceAll('\\', '/'));
+    } finally {
+      clearTimeout(deadline);
+      releaseDeletion();
+      await next;
+    }
+  });
+
   it('falls back to git worktree remove when the rename fails, for example across filesystems', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
     vi.spyOn(fsPromises, 'rename').mockRejectedValue(Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' }));
@@ -209,7 +261,7 @@ describe('removeWorktreeViaTrash', () => {
 
     expect(outcome).toBe('done');
     expect(existsSync(worktree)).toBe(false);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
   });
 
   it('leaves a locked worktree to git, which refuses to remove it', async () => {
