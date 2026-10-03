@@ -4,9 +4,11 @@ import type { AppServices } from './types';
 import { HostTerminalManager } from '../services/hostTerminalManager';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { HostTerminalOpenRequest } from '../../../shared/types/hostTerminal';
+import { hostTerminalEnvVarSchema } from '../../../shared/types/remoteDaemon';
 
 const openRequestSchema = boundary.optional(boundary.nullable(boundary.object({
   input: boundary.optional(boundary.string),
+  env: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
 })));
 
 /** A remote client's /invoke sends an omitted request as null; both mean "just open". */

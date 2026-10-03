@@ -84,6 +84,12 @@ export interface RemoteHostKind {
   icon: RemoteHostKindIcon;
 }
 
+/** One variable a host's terminal starts with, e.g. BROWSER=false where no browser should open. */
+export interface HostTerminalEnvVar {
+  name: string;
+  value: string;
+}
+
 export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
@@ -92,6 +98,8 @@ export interface RemotePaneConnectionProfile {
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
   hostKind?: RemoteHostKind;
+  /** Environment the host terminal's shell starts with on this host. Saved unencrypted with the profile: not for secrets. */
+  hostTerminalEnv?: HostTerminalEnvVar[];
 }
 
 export interface RemoteDaemonHostAccess {
@@ -453,6 +461,10 @@ const remoteHostKindSchema: BoundarySchema<RemoteHostKind> = boundary.object({
   label: boundary.nonEmptyString,
   icon: boundary.enumeration('server', 'cloud'),
 });
+export const hostTerminalEnvVarSchema: BoundarySchema<HostTerminalEnvVar> = boundary.object({
+  name: boundary.nonEmptyString,
+  value: boundary.string,
+});
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -461,6 +473,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
   hostKind: boundary.optional(remoteHostKindSchema),
+  hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),

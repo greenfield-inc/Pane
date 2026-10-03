@@ -35,6 +35,14 @@ describe('host-terminal:open', () => {
     expect(open.mock.calls).toEqual([[{}], [{}]]);
   });
 
+  it('passes the saved host\'s environment through', async () => {
+    const { registry, open } = register();
+
+    await registry.invoke('host-terminal:open', overInvoke([{ env: [{ name: 'BROWSER', value: 'false' }] }]));
+
+    expect(open).toHaveBeenCalledWith({ env: [{ name: 'BROWSER', value: 'false' }] });
+  });
+
   it('passes the text to type through', async () => {
     const { registry, open } = register();
 

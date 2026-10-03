@@ -69,7 +69,7 @@ export interface TerminalPanelState {
   alternateScreenBuffer?: string;         // Recent TUI/alternate-screen output, kept separate from shell scrollback
   isAlternateScreen?: boolean;            // Whether the live terminal is currently in alternate-screen/TUI mode
   serializedBuffer?: string;             // xterm.js serialized terminal state (includes full visual buffer)
-  environmentVars?: Record<string, string>; // Modified env vars
+  environmentVars?: Record<string, string>; // Variables the shell starts with (applied last at spawn)
   dimensions?: { cols: number; rows: number }; // Terminal size
   cursorPosition?: { x: number; y: number }; // Cursor location
   selectionText?: string;        // Any selected text

@@ -11,6 +11,7 @@ import {
   HOST_TERMINAL_PANEL_ID,
   HOST_TERMINAL_SESSION_ID,
   HOST_TERMINAL_WORKSPACE,
+  hostTerminalEnvironment,
   hostTerminalTypedInput,
   type HostTerminalOpenRequest,
   type HostTerminalRef,
@@ -37,17 +38,21 @@ export class HostTerminalManager {
   ) {}
 
   async open(request: HostTerminalOpenRequest = {}): Promise<HostTerminalState<Session>> {
+    // Checked before anything changes, so a bad request leaves the terminal as it was.
+    const environment = request.env === undefined ? undefined : Object.fromEntries(hostTerminalEnvironment(request.env));
     return withLock('host-terminal', async () => {
       const session = this.ensureSession();
       const panel = await this.ensurePanel(session.id);
       await this.panels.setActivePanel(session.id, panel.id);
       const input = request.input === undefined ? '' : hostTerminalTypedInput(request.input);
       const cwd = os.homedir();
+      const running = this.shells.isTerminalInitialized(panel.id);
 
-      if (this.shells.isTerminalInitialized(panel.id)) {
+      // A running shell keeps its environment; the stored one applies the next time it starts.
+      await this.updateLaunchState(panel, environment, running ? '' : input);
+      if (running) {
         if (input) this.shells.writeToTerminal(panel.id, `${CLEAR_PROMPT_LINE}${input}`);
       } else {
-        if (input) await this.stageInput(panel, input);
         await this.shells.initializeTerminal(this.panels.getPanel(panel.id) ?? panel, cwd);
       }
 
@@ -113,17 +118,26 @@ export class HostTerminalManager {
     });
   }
 
-  /** The shell types this once it starts, and never presses Enter. */
-  private async stageInput(panel: ToolPanel, input: string): Promise<void> {
+  /**
+   * Store the environment the shell starts with, and text a starting shell
+   * types once it is up (never pressing Enter).
+   */
+  private async updateLaunchState(
+    panel: ToolPanel,
+    environment: TerminalPanelState['environmentVars'],
+    input: string,
+  ): Promise<void> {
+    if (environment === undefined && !input) return;
     // SAFETY: The host terminal panel is created with a TerminalPanelState.
     const current = panel.state.customState as TerminalPanelState | undefined;
-    const customState: TerminalPanelState = {
-      ...current,
-      initialInput: input,
-      initialInputSubmitStrategy: 'none',
-      initialInputSentAt: undefined,
-      initialInputError: undefined,
-    };
+    const customState: TerminalPanelState = { ...current };
+    if (environment !== undefined) customState.environmentVars = environment;
+    if (input) {
+      customState.initialInput = input;
+      customState.initialInputSubmitStrategy = 'none';
+      customState.initialInputSentAt = undefined;
+      customState.initialInputError = undefined;
+    }
     await this.panels.updatePanel(panel.id, { state: { ...panel.state, customState } });
   }
 }

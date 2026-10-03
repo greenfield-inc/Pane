@@ -53,8 +53,10 @@ class FakePtyHandle implements PtyHandleLike {
 
 class FakePtyHost implements PtyHostRuntime {
   readonly handles = new Map<string, FakePtyHandle>();
+  readonly spawned: PtyHostSpawnOpts[] = [];
 
-  async spawn(_opts: PtyHostSpawnOpts): Promise<{ ptyId: string; pid: number }> {
+  async spawn(opts: PtyHostSpawnOpts): Promise<{ ptyId: string; pid: number }> {
+    this.spawned.push(opts);
     const ptyId = `pty-${this.handles.size + 1}`;
     const handle = new FakePtyHandle(ptyId);
     this.handles.set(ptyId, handle);
@@ -289,6 +291,18 @@ describe('terminal panel persistence', () => {
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();
+    }
+  });
+
+  it('starts the shell with the panel\'s own environment variables last, so they win', async () => {
+    vi.stubEnv('BROWSER', 'xdg-open');
+    try {
+      const panel = makePanel('host-shell-env');
+      panel.state.customState = { environmentVars: { BROWSER: 'false', GH_BROWSER: 'false' } };
+      await startTerminal(panel);
+      expect(ptyHost.spawned.at(-1)?.env).toMatchObject({ BROWSER: 'false', GH_BROWSER: 'false', PANE_PANEL_ID: 'host-shell-env' });
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 
