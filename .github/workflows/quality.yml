@@ -131,6 +131,9 @@ jobs:
     # The browser download and apt packages overlap the build steps below.
     # apt upgrades libraries Electron loads, so the wait step comes before
     # Electron first starts.
+    - name: Build packaged frontend and editor workers
+      run: pnpm build:frontend
+
     - name: Start Playwright browser dependencies install
       run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
 
@@ -152,6 +155,9 @@ jobs:
 
     - name: Verify sandboxed Electron preload
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
+
+    - name: Verify packaged editor offline in Electron
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.packaged.config.ts
 
     - name: Run maintained functional smoke tests
       run: xvfb-run -a pnpm test:ci:minimal
