@@ -1,26 +1,59 @@
-import { useState } from 'react';
-import { FolderPlus, GitBranch } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FolderOpen, FolderPlus, GitBranch } from 'lucide-react';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
+import { HostChip } from './HostChip';
+import { HostFolderField } from './HostFolderField';
 import { API } from '../utils/api';
 import { useNavigationStore } from '../stores/navigationStore';
+import { useActiveHost } from '../hooks/useActiveHost';
+import { buildCreateProjectRequest, withHostLabel } from '../utils/hostRepoActions';
 import type { CreateProjectRequest } from '../types/project';
+import type { ProjectPathMode } from '../../../shared/types/hostPaths';
+
+const PATH_CHECK_DELAY_MS = 300;
 
 interface AddProjectDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** 'open' adds an existing repo on the active host; 'new' creates one there. */
+  mode: ProjectPathMode;
 }
 
-export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
+export function AddProjectDialog({ isOpen, onClose, mode }: AddProjectDialogProps) {
   const [newProject, setNewProject] = useState<CreateProjectRequest>({ name: '', path: '', buildScript: '', runScript: '' });
   const [detectedBranch, setDetectedBranch] = useState<string | null>(null);
   const [branchDetectionFailed, setBranchDetectionFailed] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [pathError, setPathError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  const host = useActiveHost();
+  const path = newProject.path;
+
+  // Typed paths are checked on the host itself, so a path from this computer
+  // is caught before Create. Failures without a code (an older host without
+  // this check) stay quiet; Create still reports them.
+  useEffect(() => {
+    setPathError(null);
+    if (!isOpen || !path.trim()) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void API.projects.validatePath(withHostLabel(host, { path, mode }))
+        .then((response) => {
+          if (!cancelled && !response.success && response.code) setPathError(response.error ?? null);
+        })
+        .catch(() => undefined);
+    }, PATH_CHECK_DELAY_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isOpen, path, mode, host]);
 
   const detectCurrentBranch = async (path: string) => {
     if (!path) {
@@ -50,15 +83,11 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       setShowValidationErrors(true);
       return;
     }
+    setSubmitError(null);
     try {
-      const projectToCreate = {
-        ...newProject,
-        active: false,
-      };
-
-      const response = await API.projects.create(projectToCreate);
+      const response = await API.projects.create(buildCreateProjectRequest(host, { ...newProject, mode }));
       if (!response.success || !response.data) {
-        console.error('Failed to create project:', response.error);
+        setSubmitError(response.error ?? 'Failed to add the project.');
         return;
       }
 
@@ -73,7 +102,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       // Navigate to the new project
       navigateToProject(newProjectId);
     } catch (e) {
-      console.error('Failed to create project:', e);
+      setSubmitError(e instanceof Error ? e.message : 'Failed to add the project.');
     }
   };
 
@@ -82,6 +111,8 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
     setDetectedBranch(null);
     setBranchDetectionFailed(false);
     setShowValidationErrors(false);
+    setPathError(null);
+    setSubmitError(null);
     onClose();
   };
 
@@ -91,9 +122,13 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       onClose={resetAndClose}
       size="lg"
     >
-      <ModalHeader title="Add New Repository" icon={<FolderPlus className="w-5 h-5" />} />
+      <ModalHeader
+        title={mode === 'new' ? 'New Project' : 'Open Repository'}
+        icon={mode === 'new' ? <FolderPlus className="w-5 h-5" /> : <FolderOpen className="w-5 h-5" />}
+      />
       <ModalBody>
         <div className="space-y-6">
+          <HostChip host={host} />
           <FieldWithTooltip
             label="Project Name"
             tooltip="A display name for this project in the sidebar"
@@ -115,39 +150,29 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
 
           <FieldWithTooltip
             label="Repository Path"
-            tooltip="Path to a git repository. ~ and relative paths are expanded to an absolute path."
+            tooltip={mode === 'new'
+              ? `Folder for the new repository on ${host.name}. It is created if it doesn't exist. ~ and relative paths are expanded on ${host.name}.`
+              : `Path to an existing git repository on ${host.name}. ~ and relative paths are expanded on ${host.name}.`}
           >
             <div className="space-y-2">
-              <EnhancedInput
-                type="text"
+              <HostFolderField
+                host={host}
+                label="Repository Path"
                 value={newProject.path}
-                onChange={(e) => {
-                  setNewProject({ ...newProject, path: e.target.value });
-                  detectCurrentBranch(e.target.value);
+                onChange={(value) => {
+                  setNewProject({ ...newProject, path: value });
+                  detectCurrentBranch(value);
+                  setSubmitError(null);
                   if (showValidationErrors) setShowValidationErrors(false);
                 }}
-                placeholder="/path/to/your/repository"
-                size="lg"
-                fullWidth
+                placeholder={host.remote ? '~/path/to/repository' : '/path/to/your/repository'}
+                allowCreate={mode === 'new'}
                 required
                 showRequiredIndicator={showValidationErrors}
               />
-              <div className="flex justify-end">
-                <Button
-                  onClick={async () => {
-                    // SAFETY: The named IPC/API channel contract establishes this response payload type.
-                    const result = await window.electron?.invoke('dialog:open-directory') as { success: boolean; data?: string } | undefined;
-                    if (result?.success && result.data) {
-                      setNewProject({ ...newProject, path: result.data });
-                      detectCurrentBranch(result.data);
-                    }
-                  }}
-                  variant="secondary"
-                  size="sm"
-                >
-                  Browse
-                </Button>
-              </div>
+              {pathError && (
+                <div role="alert" className="text-sm text-status-error">{pathError}</div>
+              )}
             </div>
           </FieldWithTooltip>
 
@@ -167,6 +192,9 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
             </FieldWithTooltip>
           )}
 
+          {submitError && submitError !== pathError && (
+            <div role="alert" className="text-sm text-status-error">{submitError}</div>
+          )}
         </div>
       </ModalBody>
       <ModalFooter>
@@ -183,7 +211,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
           variant="primary"
           size="md"
         >
-          Create
+          {mode === 'new' ? 'Create' : 'Open'}
         </Button>
       </ModalFooter>
     </Modal>

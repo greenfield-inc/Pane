@@ -1,6 +1,13 @@
 // Utility for making API calls using Electron IPC
 import type { CreateSessionRequest, Session } from '../types/session';
-import type { Project } from '../types/project';
+import type { CreateProjectRequest, Project } from '../types/project';
+import type {
+  BrowseDirectoriesRequest,
+  BrowseDirectoriesResult,
+  CreateDirectoryRequest,
+  ValidateProjectPathRequest,
+  ValidateProjectPathResult,
+} from '../../../shared/types/hostPaths';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -492,9 +499,15 @@ export class API {
       return window.electronAPI.projects.getActive();
     },
 
-    async create(projectData: Omit<Project, 'id' | 'created_at' | 'updated_at'>) {
+    async create(projectData: CreateProjectRequest) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.projects.create(projectData);
+    },
+
+    /** Checks a typed path on the active host without creating anything. */
+    async validatePath(request: ValidateProjectPathRequest): Promise<IPCResponse<ValidateProjectPathResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('projects:validate-path', request);
     },
 
     async activate(projectId: string) {
@@ -533,6 +546,19 @@ export class API {
     async cloneRepo(url: string, destDir: string, options?: { hostLabel?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.git.cloneRepo(url, destDir, options);
+    },
+  };
+
+  // Folders on the active host (the daemon's filesystem, not this computer's)
+  static hostFs = {
+    async browseDirectories(request: BrowseDirectoriesRequest): Promise<IPCResponse<BrowseDirectoriesResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('fs:browse-directories', request);
+    },
+
+    async createDirectory(request: CreateDirectoryRequest): Promise<IPCResponse<{ path: string }>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('fs:create-directory', request);
     },
   };
 

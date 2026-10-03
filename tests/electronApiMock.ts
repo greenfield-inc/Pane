@@ -71,6 +71,12 @@ type ElectronApiMockOptions = {
   paneChatAgentChangeDelayMs?: number;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
+  /**
+   * A fake POSIX host filesystem behind fs:browse-directories, fs:create-directory,
+   * projects:validate-path, projects.create and git.cloneRepo: absolute folder
+   * paths, with the ones that are git repos marked.
+   */
+  hostFs?: { home: string; folders: Record<string, { isGitRepo?: boolean }> };
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -395,11 +401,79 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
     });
 
-    const invoke = (channel: string, ...args: unknown[]) => {
+    const recordCall = (channel: string, args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
-      calls.push({ channel, args });
+      calls.push({ channel, args: clone(args) });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+    };
+
+    // The fake host answers like the daemon: paths resolve on the host, and a
+    // missing hostLabel falls back to the machine's hostname.
+    const hostFolders = new Map(Object.entries(clone(mockOptions.hostFs?.folders ?? {})));
+    const hostHome = mockOptions.hostFs?.home ?? '/home/user';
+    const hostFailure = (code: string, error: string) => Promise.resolve({ success: false, code, error });
+    const hostLabelOf = (request: unknown) => {
+      const label = request && typeof request === 'object' && 'hostLabel' in request ? request.hostLabel : undefined;
+      return typeof label === 'string' && label ? label : 'rp-fakehost';
+    };
+    const resolveHostPath = (path: string) => {
+      if (!path || path === '~') return hostHome;
+      if (path.startsWith('~/')) return `${hostHome}/${path.slice(2)}`.replace(/\/+$/, '');
+      return path.startsWith('/') ? path.replace(/(.)\/+$/, '$1') : `${hostHome}/${path}`;
+    };
+    const isWindowsStyle = (path: string) => /^[a-zA-Z]:/.test(path) || path.includes('\\');
+    const windowsPathFailure = (request: unknown) => {
+      const host = hostLabelOf(request);
+      return hostFailure(
+        'WINDOWS_PATH_ON_POSIX_HOST',
+        `That's a path on this computer; ${host} is a Linux host. Pick a folder on ${host}.`,
+      );
+    };
+    const parentOf = (path: string) => (path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/');
+    const checkProjectPath = (request: { path: string; mode?: string }) => {
+      if (isWindowsStyle(request.path)) return windowsPathFailure(request);
+      const path = resolveHostPath(request.path);
+      if (request.mode === 'open' && !hostFolders.has(path)) {
+        return hostFailure('NOT_FOUND', `${path} does not exist on ${hostLabelOf(request)}.`);
+      }
+      if (request.mode === 'open' && !hostFolders.get(path)?.isGitRepo) {
+        return hostFailure('NOT_A_GIT_REPO', `${path} is not a git repository.`);
+      }
+      return null;
+    };
+    const hostInvoke = (channel: string, request: { path?: string; parent?: string; name?: string; mode?: string }) => {
+      if (channel === 'fs:browse-directories') {
+        if (isWindowsStyle(request.path ?? '')) return windowsPathFailure(request);
+        const path = resolveHostPath(request.path ?? '');
+        if (!hostFolders.has(path)) return hostFailure('NOT_FOUND', `${path} does not exist on ${hostLabelOf(request)}.`);
+        const entries = [...hostFolders.entries()]
+          .filter(([candidate]) => candidate !== path && parentOf(candidate) === path)
+          .map(([candidate, folder]) => {
+            const name = candidate.slice(candidate.lastIndexOf('/') + 1);
+            return { name, path: candidate, isGitRepo: Boolean(folder.isGitRepo), isHidden: name.startsWith('.') };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        return success({ path, parent: parentOf(path), home: hostHome, platform: 'linux', entries });
+      }
+      if (channel === 'fs:create-directory') {
+        const name = request.name ?? '';
+        if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) {
+          return hostFailure('INVALID_NAME', `${name} is not a valid folder name.`);
+        }
+        const path = `${request.parent === '/' ? '' : request.parent}/${name}`;
+        if (hostFolders.has(path)) return hostFailure('ALREADY_EXISTS', `${name} already exists.`);
+        hostFolders.set(path, {});
+        return success({ path });
+      }
+      const failure = checkProjectPath({ ...request, path: request.path ?? '' });
+      if (failure) return failure;
+      const path = resolveHostPath(request.path ?? '');
+      return success({ path, isGitRepo: Boolean(hostFolders.get(path)?.isGitRepo) });
+    };
+
+    const invoke = (channel: string, ...args: unknown[]) => {
+      recordCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
@@ -453,6 +527,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'archive:get-progress') {
         return success(null);
+      }
+      if (mockOptions.hostFs && ['fs:browse-directories', 'fs:create-directory', 'projects:validate-path'].includes(channel)) {
+        // SAFETY: These host channels take one request object, per shared/types/hostPaths.ts.
+        return hostInvoke(channel, args[0] as { path?: string; parent?: string; name?: string; mode?: string });
       }
       return success();
     };
@@ -677,9 +755,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       git: namespace({
         detectBranch: () => success('main'),
+        cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }) => {
+          recordCall('git:clone-repo', [url, destDir, options ?? null]);
+          if (isWindowsStyle(destDir)) return windowsPathFailure(options);
+          const repoName = url.replace(/\.git$/, '').split('/').pop() ?? 'repo';
+          const clonedPath = `${resolveHostPath(destDir)}/${repoName}`;
+          hostFolders.set(clonedPath, { isGitRepo: true });
+          return success({ clonedPath, repoName });
+        },
       }),
       dialog: namespace({
-        openDirectory: () => success('/tmp/pane-worktrees'),
+        openDirectory: () => {
+          recordCall('dialog:open-directory', []);
+          return success('/tmp/pane-worktrees');
+        },
       }),
       onboarding: namespace({
         detectEnvironment: () => success({}),
@@ -756,6 +845,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       projects: namespace({
+        create: (request: { name: string; path: string; mode?: string }) => {
+          recordCall('projects:create', [request]);
+          const failure = mockOptions.hostFs ? checkProjectPath(request) : null;
+          if (failure) return failure;
+          const now = new Date().toISOString();
+          const project = {
+            id: mockProjects.reduce((max, existing) => Math.max(max, Number(existing.id) || 0), 0) + 1,
+            name: request.name,
+            path: mockOptions.hostFs ? resolveHostPath(request.path) : request.path,
+            active: false,
+            created_at: now,
+            updated_at: now,
+            displayOrder: mockProjects.length,
+          };
+          mockProjects = [...mockProjects, project];
+          return success(clone(project));
+        },
         getAll: () => success(clone(mockProjects.map((project) => ({
           ...project,
           active: mockActiveProjectId === null

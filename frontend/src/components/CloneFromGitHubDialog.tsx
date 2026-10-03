@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
+import { HostChip } from './HostChip';
+import { HostFolderField } from './HostFolderField';
 import { API } from '../utils/api';
 import { useNavigationStore } from '../stores/navigationStore';
+import { useActiveHost } from '../hooks/useActiveHost';
+import { buildCloneOptions, buildCreateProjectRequest, defaultCloneDestination } from '../utils/hostRepoActions';
 
 interface CloneFromGitHubDialogProps {
   isOpen: boolean;
@@ -26,6 +30,13 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
   const [error, setError] = useState('');
 
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  const host = useActiveHost();
+  const defaultDestination = defaultCloneDestination(host);
+
+  // A remote clone lands in the host's home unless the user picks a folder.
+  useEffect(() => {
+    if (isOpen) setDestPath((current) => current || defaultDestination);
+  }, [isOpen, defaultDestination]);
 
   const resetAndClose = () => {
     setUrl('');
@@ -35,19 +46,12 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
     onClose();
   };
 
-  const handleBrowse = async () => {
-    const result = await window.electronAPI.dialog.openDirectory();
-    if (result.success && result.data) {
-      setDestPath(result.data);
-    }
-  };
-
   const handleClone = async () => {
     if (!url || !destPath) return;
     setCloning(true);
     setError('');
     try {
-      const cloneResult = await API.git.cloneRepo(url, destPath);
+      const cloneResult = await API.git.cloneRepo(url, destPath, buildCloneOptions(host));
       if (!cloneResult.success || !cloneResult.data) {
         setError(cloneResult.error ?? 'Clone failed');
         setCloning(false);
@@ -56,11 +60,9 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
 
       const { clonedPath, repoName } = cloneResult.data;
 
-      const projectResult = await API.projects.create({
-        name: repoName,
-        path: clonedPath,
-        active: false,
-      });
+      const projectResult = await API.projects.create(
+        buildCreateProjectRequest(host, { name: repoName, path: clonedPath, mode: 'open' }),
+      );
 
       if (!projectResult.success || !projectResult.data) {
         setError(projectResult.error ?? 'Failed to create project');
@@ -85,12 +87,14 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
       />
       <ModalBody>
         <div className="space-y-6">
+          <HostChip host={host} />
           <FieldWithTooltip
             label="Repository URL"
             tooltip="The HTTPS or SSH URL of the GitHub repository to clone"
           >
             <EnhancedInput
               type="text"
+              aria-label="Repository URL"
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);
@@ -104,27 +108,23 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
 
           <FieldWithTooltip
             label="Destination"
-            tooltip="The local directory where the repository will be cloned into"
+            tooltip={`The folder on ${host.name} that the repository is cloned into`}
           >
-            <div className="space-y-2">
-              <EnhancedInput
-                type="text"
-                value={destPath}
-                readOnly
-                placeholder="Select a destination folder..."
-                size="lg"
-                fullWidth
-              />
-              <div className="flex justify-end">
-                <Button onClick={handleBrowse} variant="secondary" size="sm">
-                  Browse
-                </Button>
-              </div>
-            </div>
+            <HostFolderField
+              host={host}
+              label="Destination"
+              value={destPath}
+              onChange={(value) => {
+                setDestPath(value);
+                if (error) setError('');
+              }}
+              placeholder="Select a destination folder..."
+              allowCreate
+            />
           </FieldWithTooltip>
 
           {error && (
-            <div className="text-sm text-status-error">{error}</div>
+            <div role="alert" className="text-sm text-status-error">{error}</div>
           )}
         </div>
       </ModalBody>
