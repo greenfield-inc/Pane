@@ -133,6 +133,9 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'file:write-project',
   'fs:browse-directories',
   'fs:create-directory',
+  'github:device-login-cancel',
+  'github:device-login-start',
+  'github:device-login-status',
 ] as const;
 
 export const ELECTRON_ADAPTER_ONLY_CHANNELS = [
