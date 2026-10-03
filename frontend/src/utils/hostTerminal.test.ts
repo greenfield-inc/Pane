@@ -1,15 +1,25 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDefaultRemotePaneConnectionState, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 
-const open = vi.fn();
-const getConnectionState = vi.fn();
-const navigateToHostTerminal = vi.fn();
-vi.mock('./api', () => ({ API: { hostTerminal: { open }, remoteDaemon: { getConnectionState } } }));
-// The real store reads localStorage at import; only the navigation call matters here.
-vi.mock('../stores/navigationStore', () => ({ useNavigationStore: { getState: () => ({ navigateToHostTerminal }) } }));
+class MemoryStorage implements Storage {
+  private values = new Map<string, string>();
+  get length(): number { return this.values.size; }
+  clear(): void { this.values.clear(); }
+  getItem(key: string): string | null { return this.values.get(key) ?? null; }
+  key(index: number): string | null { return Array.from(this.values.keys())[index] ?? null; }
+  removeItem(key: string): void { this.values.delete(key); }
+  setItem(key: string, value: string): void { this.values.set(key, value); }
+}
 
-const { getActiveRemoteProfile, getHostTerminalPresentation, openHostTerminal } = await import('./hostTerminal');
-const { useHostTerminalStore } = await import('../stores/hostTerminalStore');
+// The navigation store reads localStorage when it loads.
+async function load() {
+  vi.resetModules();
+  vi.stubGlobal('localStorage', new MemoryStorage());
+  const hostTerminal = await import('./hostTerminal');
+  const { useHostTerminalStore } = await import('../stores/hostTerminalStore');
+  const { useNavigationStore } = await import('../stores/navigationStore');
+  return { ...hostTerminal, useHostTerminalStore, useNavigationStore };
+}
 
 const devbox: RemotePaneConnectionProfile = {
   id: 'devbox-id',
@@ -19,8 +29,13 @@ const devbox: RemotePaneConnectionProfile = {
   transport: 'http+sse',
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('getHostTerminalPresentation', () => {
-  it('names a self-hosted remote with a server icon', () => {
+  it('names a self-hosted remote with a server icon', async () => {
+    const { getHostTerminalPresentation } = await load();
     expect(getHostTerminalPresentation(devbox)).toEqual({
       hostName: 'devbox',
       icon: 'server',
@@ -30,7 +45,8 @@ describe('getHostTerminalPresentation', () => {
     });
   });
 
-  it('uses the icon from the host kind', () => {
+  it('uses the icon from the host kind', async () => {
+    const { getHostTerminalPresentation } = await load();
     const presentation = getHostTerminalPresentation({ label: 'testina', hostKind: { label: 'cloud sandbox', icon: 'cloud' } });
     expect(presentation).toMatchObject({ icon: 'cloud', name: 'Terminal on testina', tabTitle: 'testina · Terminal' });
   });
@@ -39,50 +55,64 @@ describe('getHostTerminalPresentation', () => {
 describe('getActiveRemoteProfile', () => {
   const remote = { mode: 'remote' as const, activeProfileId: 'devbox-id', activeProfileLabel: 'devbox' };
 
-  it('is null on this computer', () => {
+  it('is null on this computer', async () => {
+    const { getActiveRemoteProfile } = await load();
     expect(getActiveRemoteProfile({ ...remote, mode: 'local' }, [devbox])).toBeNull();
   });
 
-  it('finds the active saved host', () => {
+  it('finds the active saved host', async () => {
+    const { getActiveRemoteProfile } = await load();
     expect(getActiveRemoteProfile(remote, [devbox])).toBe(devbox);
   });
 
-  it('falls back to the connection label before profiles load', () => {
+  it('falls back to the connection label before profiles load', async () => {
+    const { getActiveRemoteProfile } = await load();
     expect(getActiveRemoteProfile(remote, [])).toEqual({ label: 'devbox' });
   });
 });
 
 describe('openHostTerminal', () => {
+  const open = vi.fn();
+  const api = {
+    hostTerminal: { open },
+    remoteDaemon: {
+      getConnectionState: vi.fn(async () => ({
+        success: true,
+        data: { ...createDefaultRemotePaneConnectionState(), mode: 'remote' as const, activeProfileId: 'devbox-id' },
+      })),
+    },
+  };
+
   beforeEach(() => {
     open.mockReset();
-    getConnectionState.mockResolvedValue({ success: true, data: { mode: 'remote', activeProfileId: 'devbox-id' } });
-    useHostTerminalStore.setState({ terminal: null, hostId: null });
-    navigateToHostTerminal.mockReset();
   });
 
   it('passes the text to type unchanged and shows the terminal', async () => {
+    const { openHostTerminal, useHostTerminalStore, useNavigationStore } = await load();
     const terminal = { session: { id: '__host_terminal__' }, panel: { id: '__host_terminal_panel__' }, cwd: '/home/user', started: true };
     open.mockResolvedValue({ success: true, data: terminal });
 
-    await openHostTerminal({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' });
+    await openHostTerminal({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' }, api);
 
     expect(open).toHaveBeenCalledWith({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' });
     expect(useHostTerminalStore.getState()).toMatchObject({ terminal, hostId: 'devbox-id' });
-    expect(navigateToHostTerminal).toHaveBeenCalledTimes(1);
+    expect(useNavigationStore.getState().activeView).toBe('host-terminal');
   });
 
   it('opens without typing anything when there is no input', async () => {
+    const { openHostTerminal } = await load();
     open.mockResolvedValue({ success: true, data: { session: {}, panel: {}, cwd: '/home/user', started: true } });
 
-    await openHostTerminal();
+    await openHostTerminal({}, api);
 
     expect(open).toHaveBeenCalledWith(undefined);
   });
 
   it('throws the host error and stays put when opening fails', async () => {
+    const { openHostTerminal, useNavigationStore } = await load();
     open.mockResolvedValue({ success: false, error: 'Remote host is not connected' });
 
-    await expect(openHostTerminal()).rejects.toThrow('Remote host is not connected');
-    expect(navigateToHostTerminal).not.toHaveBeenCalled();
+    await expect(openHostTerminal({}, api)).rejects.toThrow('Remote host is not connected');
+    expect(useNavigationStore.getState().activeView).toBe('sessions');
   });
 });

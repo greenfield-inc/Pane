@@ -39,9 +39,15 @@ export function getActiveRemoteProfile(
     ?? { label: connectionState.activeProfileLabel ?? 'Remote host' };
 }
 
+/** The calls the host terminal makes; tests pass their own. */
+interface HostTerminalApi {
+  hostTerminal: Pick<typeof API.hostTerminal, 'open'>;
+  remoteDaemon: Pick<typeof API.remoteDaemon, 'getConnectionState'>;
+}
+
 /** The host this window talks to now: its saved profile id, or null for this computer. */
-export async function getActiveHostId(): Promise<string | null> {
-  const response = await API.remoteDaemon.getConnectionState();
+export async function getActiveHostId(api: HostTerminalApi = API): Promise<string | null> {
+  const response = await api.remoteDaemon.getConnectionState();
   const state = response.success ? response.data : undefined;
   return state?.mode === 'remote' ? state.activeProfileId : null;
 }
@@ -50,9 +56,9 @@ export async function getActiveHostId(): Promise<string | null> {
  * Open the active host's terminal in the main area. `input` is typed at its
  * prompt without pressing Enter, so the user reviews it before running it.
  */
-export async function openHostTerminal(options: { input?: string } = {}): Promise<void> {
-  const hostId = await getActiveHostId();
-  const response = await API.hostTerminal.open(options.input === undefined ? undefined : { input: options.input });
+export async function openHostTerminal(options: { input?: string } = {}, api: HostTerminalApi = API): Promise<void> {
+  const hostId = await getActiveHostId(api);
+  const response = await api.hostTerminal.open(options.input === undefined ? undefined : { input: options.input });
   if (!response.success || !response.data) {
     throw new Error(response.error ?? 'Could not open the host terminal');
   }

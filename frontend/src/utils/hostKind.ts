@@ -11,11 +11,11 @@ interface HostDescription {
   icon: HostIcon;
 }
 
-export const HOST_ICONS: Record<HostIcon, LucideIcon> = {
+export const HOST_ICONS = {
   local: Laptop,
   server: Server,
   cloud: Cloud,
-};
+} satisfies Record<HostIcon, LucideIcon>;
 
 /** How the app names a host: null is this computer, a profile is a saved remote. */
 export function describeHost(

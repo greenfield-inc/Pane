@@ -51,6 +51,14 @@ export function RemoteHostSwitcher({
     else showActionError(`Could not switch to ${machine.name}`, outcome.error);
   };
 
+  const openTerminal = async () => {
+    try {
+      await openHostTerminal();
+    } catch (error) {
+      showActionError('Could not open the host terminal', error);
+    }
+  };
+
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
     label: <span className="font-medium">{machine.name}</span>,
@@ -63,9 +71,7 @@ export function RemoteHostSwitcher({
     action: machine.active && machine.kind !== 'local' ? {
       label: getHostTerminalPresentation(machine.profile ?? { label: machine.name }).openLabel,
       icon: SquareTerminal,
-      onClick: () => {
-        openHostTerminal().catch((error: unknown) => showActionError('Could not open the host terminal', error));
-      },
+      onClick: () => void openTerminal(),
     } : undefined,
   }));
   if (allMachines) {

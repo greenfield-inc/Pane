@@ -19,47 +19,54 @@ import {
 
 const HOST_TERMINAL_TITLE = 'Terminal';
 
+type HostTerminalPanels = Pick<typeof panelManager, 'getPanel' | 'createPanel' | 'updatePanel' | 'setActivePanel'>;
+type HostTerminalShells = Pick<typeof terminalPanelManager, 'isTerminalInitialized' | 'initializeTerminal' | 'writeToTerminal'>;
+
 /**
  * The one plain shell on this host. It needs no repository: a hidden detached
  * session owns it (like Pane Chat), so it never shows up as a project or Pane,
  * and reopening it returns the same running shell.
  */
 export class HostTerminalManager {
-  constructor(private readonly sessionManager: SessionManager) {}
+  constructor(
+    private readonly sessionManager: SessionManager,
+    private readonly panels: HostTerminalPanels = panelManager,
+    private readonly shells: HostTerminalShells = terminalPanelManager,
+  ) {}
 
   async open(request: HostTerminalOpenRequest = {}): Promise<HostTerminalState<Session>> {
     return withLock('host-terminal', async () => {
       const session = this.ensureSession();
       const panel = await this.ensurePanel(session.id);
-      await panelManager.setActivePanel(session.id, panel.id);
+      await this.panels.setActivePanel(session.id, panel.id);
       const input = request.input === undefined ? '' : hostTerminalTypedInput(request.input);
       const cwd = os.homedir();
 
-      if (terminalPanelManager.isTerminalInitialized(panel.id)) {
-        if (input) terminalPanelManager.writeToTerminal(panel.id, input);
+      if (this.shells.isTerminalInitialized(panel.id)) {
+        if (input) this.shells.writeToTerminal(panel.id, input);
       } else {
         if (input) await this.stageInput(panel, input);
-        await terminalPanelManager.initializeTerminal(panelManager.getPanel(panel.id) ?? panel, cwd);
+        await this.shells.initializeTerminal(this.panels.getPanel(panel.id) ?? panel, cwd);
       }
 
       return {
         session,
-        panel: panelManager.getPanel(panel.id) ?? panel,
+        panel: this.panels.getPanel(panel.id) ?? panel,
         cwd,
-        started: terminalPanelManager.isTerminalInitialized(panel.id),
+        started: this.shells.isTerminalInitialized(panel.id),
       };
     });
   }
 
   /** Read-only: null until the terminal was first opened on this host. */
   get(): HostTerminalRef | null {
-    if (!this.sessionManager.getSession(HOST_TERMINAL_SESSION_ID) || !panelManager.getPanel(HOST_TERMINAL_PANEL_ID)) {
+    if (!this.sessionManager.getSession(HOST_TERMINAL_SESSION_ID) || !this.panels.getPanel(HOST_TERMINAL_PANEL_ID)) {
       return null;
     }
     return {
       sessionId: HOST_TERMINAL_SESSION_ID,
       panelId: HOST_TERMINAL_PANEL_ID,
-      started: terminalPanelManager.isTerminalInitialized(HOST_TERMINAL_PANEL_ID),
+      started: this.shells.isTerminalInitialized(HOST_TERMINAL_PANEL_ID),
     };
   }
 
@@ -90,11 +97,11 @@ export class HostTerminalManager {
   }
 
   private async ensurePanel(sessionId: string): Promise<ToolPanel> {
-    const existing = panelManager.getPanel(HOST_TERMINAL_PANEL_ID);
+    const existing = this.panels.getPanel(HOST_TERMINAL_PANEL_ID);
     if (existing) return existing;
 
     const initialState: TerminalPanelState = { isCliPanel: false };
-    return panelManager.createPanel({
+    return this.panels.createPanel({
       id: HOST_TERMINAL_PANEL_ID,
       sessionId,
       type: 'terminal',
@@ -115,6 +122,6 @@ export class HostTerminalManager {
       initialInputSentAt: undefined,
       initialInputError: undefined,
     };
-    await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState } });
+    await this.panels.updatePanel(panel.id, { state: { ...panel.state, customState } });
   }
 }

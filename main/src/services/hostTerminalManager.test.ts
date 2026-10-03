@@ -1,51 +1,23 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SessionManager } from './sessionManager';
 import type { Session } from '../types/session';
-import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { HOST_TERMINAL_PANEL_ID, HOST_TERMINAL_SESSION_ID } from '../../../shared/types/hostTerminal';
 import { getAppDirectory } from '../utils/appDirectory';
+import { HostTerminalManager } from './hostTerminalManager';
 
-const panels = new Map<string, ToolPanel>();
-const running = new Set<string>();
-
-vi.mock('./panelManager', () => ({
-  panelManager: {
-    getPanel: vi.fn((id: string) => panels.get(id)),
-    createPanel: vi.fn(async (request: { id: string; sessionId: string; title: string; initialState: TerminalPanelState }) => {
-      const panel: ToolPanel = {
-        id: request.id,
-        sessionId: request.sessionId,
-        type: 'terminal',
-        title: request.title,
-        state: { isActive: true, customState: request.initialState },
-        metadata: { createdAt: '2026-10-03T00:00:00.000Z', lastActiveAt: '2026-10-03T00:00:00.000Z', position: 0 },
-      };
-      panels.set(panel.id, panel);
-      return panel;
-    }),
-    updatePanel: vi.fn(async (id: string, update: Partial<ToolPanel>) => {
-      const panel = panels.get(id);
-      if (panel && update.state) panel.state = update.state;
-    }),
-    setActivePanel: vi.fn(async () => undefined),
-  },
-}));
-
-vi.mock('./terminalPanelManager', () => ({
-  terminalPanelManager: {
-    isTerminalInitialized: vi.fn((id: string) => running.has(id)),
-    initializeTerminal: vi.fn(async (panel: ToolPanel) => { running.add(panel.id); }),
-    writeToTerminal: vi.fn(),
-  },
-}));
-
-const { terminalPanelManager } = await import('./terminalPanelManager');
-const { HostTerminalManager } = await import('./hostTerminalManager');
+function serviceStub<Service>(value: Partial<Service>): Service {
+  // SAFETY: The fixture implements exactly the methods the host terminal
+  // reaches; any other call fails at its own site.
+  return value as Service;
+}
 
 function createFixture() {
+  const panels = new Map<string, ToolPanel>();
+  const running = new Set<string>();
   const sessions = new Map<string, Session>();
   const createSessionWithId = vi.fn((id: string, name: string, worktreePath: string): Session => {
     const session: Session = {
@@ -62,32 +34,51 @@ function createFixture() {
     sessions.set(id, session);
     return session;
   });
-  // SAFETY: The stub implements exactly the SessionManager methods the
-  // host terminal reaches; any other call fails at its own site.
-  const sessionManager = {
+  const sessionManager = serviceStub<SessionManager>({
     getSession: vi.fn((id: string) => sessions.get(id)),
     createSessionWithId,
     updateSession: vi.fn(),
-  } as Partial<SessionManager> as SessionManager;
-  return { manager: new HostTerminalManager(sessionManager), createSessionWithId };
-}
-
-function customState(): TerminalPanelState | undefined {
-  // SAFETY: The fixture panel was created with a TerminalPanelState.
-  return panels.get(HOST_TERMINAL_PANEL_ID)?.state.customState as TerminalPanelState | undefined;
-}
-
-function writes(): string[] {
-  return vi.mocked(terminalPanelManager.writeToTerminal).mock.calls.map(([, data]) => data);
+  });
+  const panelStore = {
+    getPanel: vi.fn((id: string) => panels.get(id)),
+    createPanel: vi.fn(async (request: CreatePanelRequest) => {
+      const panel: ToolPanel = {
+        id: request.id ?? 'unexpected',
+        sessionId: request.sessionId,
+        type: request.type,
+        title: request.title ?? '',
+        state: { isActive: true, customState: request.initialState },
+        metadata: { createdAt: '2026-10-03T00:00:00.000Z', lastActiveAt: '2026-10-03T00:00:00.000Z', position: 0 },
+      };
+      panels.set(panel.id, panel);
+      return panel;
+    }),
+    updatePanel: vi.fn(async (id: string, update: Partial<ToolPanel>) => {
+      const panel = panels.get(id);
+      if (panel && update.state) panel.state = update.state;
+    }),
+    setActivePanel: vi.fn(async () => undefined),
+  };
+  const shells = {
+    isTerminalInitialized: vi.fn((id: string) => running.has(id)),
+    initializeTerminal: vi.fn(async (panel: ToolPanel, _cwd: string) => { running.add(panel.id); }),
+    writeToTerminal: vi.fn(),
+  };
+  return {
+    manager: new HostTerminalManager(sessionManager, panelStore, shells),
+    createSessionWithId,
+    shells,
+    customState(): TerminalPanelState | undefined {
+      // SAFETY: The host terminal panel is created with a TerminalPanelState.
+      return panels.get(HOST_TERMINAL_PANEL_ID)?.state.customState as TerminalPanelState | undefined;
+    },
+    writes(): string[] {
+      return shells.writeToTerminal.mock.calls.map(([, data]: [string, string]) => data);
+    },
+  };
 }
 
 describe('HostTerminalManager', () => {
-  beforeEach(() => {
-    panels.clear();
-    running.clear();
-    vi.clearAllMocks();
-  });
-
   it('keeps one hidden, detached session under sessions/host-terminal', async () => {
     const { manager, createSessionWithId } = createFixture();
 
@@ -107,21 +98,21 @@ describe('HostTerminalManager', () => {
   });
 
   it('starts one shell in the home folder and reuses it on reopen', async () => {
-    const { manager } = createFixture();
+    const { manager, shells, customState } = createFixture();
 
     const opened = await manager.open();
     await manager.open();
 
     expect(opened.cwd).toBe(os.homedir());
     expect(opened.started).toBe(true);
-    expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls[0][1]).toBe(os.homedir());
+    expect(shells.initializeTerminal).toHaveBeenCalledTimes(1);
+    expect(shells.initializeTerminal.mock.calls[0][1]).toBe(os.homedir());
     expect(customState()).toMatchObject({ isCliPanel: false });
     expect(customState()?.initialCommand).toBeUndefined();
   });
 
   it('types input into a running shell without pressing Enter', async () => {
-    const { manager } = createFixture();
+    const { manager, writes } = createFixture();
     await manager.open();
 
     await manager.open({ input: 'gh auth login --web --git-protocol https && gh auth setup-git\n' });
@@ -131,7 +122,7 @@ describe('HostTerminalManager', () => {
   });
 
   it('types input once a new shell starts, without pressing Enter', async () => {
-    const { manager } = createFixture();
+    const { manager, writes, customState } = createFixture();
 
     await manager.open({ input: 'gh auth login\r\n' });
 
