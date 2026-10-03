@@ -2841,6 +2841,42 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('reads a stopped panel from its persisted screen text, not the raw byte log', async () => {
+    // No live terminal: the panel's own state is all there is to read.
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(null);
+    vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+    vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (
+      panelId === terminalPanel.id
+        ? {
+            ...terminalPanel,
+            state: {
+              ...terminalPanel.state,
+              customState: {
+                ...terminalPanel.state.customState,
+                isAlternateScreen: true,
+                // What a full-screen TUI leaves behind: positioning, no spaces.
+                alternateScreenBuffer: '\x1b[Hitems\x1b[12Gand\x1b[20Gfind',
+                screenText: 'items      and     find\nsecond row',
+              },
+            },
+          }
+        : undefined
+    ));
+    const registry = createRegistry();
+
+    const result = await registry.invoke('runpane:panels:screen', [{
+      panelId: terminalPanel.id,
+      limit: 10,
+    }]);
+
+    // Stripping the byte log would collapse this to "itemsandfind".
+    expect(result).toMatchObject({
+      ok: true,
+      source: 'persistedOutput',
+      text: 'items      and     find\nsecond row',
+    });
+  });
+
   it('waits for ready terminal state with bounded screen output', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,

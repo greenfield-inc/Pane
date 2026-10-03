@@ -362,6 +362,32 @@ describe('PaneRemoteHttpApiServer', () => {
     );
   });
 
+  it('scopes terminal acknowledgements to the authenticated remote runtime', async () => {
+    const registry = new PaneCommandRegistry();
+    const handler = vi.fn(async () => ({ ok: true }));
+    registry.register('terminal:ack', handler);
+
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    await expect(requestJson(server, 'POST', '/invoke', {
+      channel: 'terminal:ack',
+      args: ['panel-1', 42, 'renderer-viewer-1'],
+    }, 'secret-token', {
+      'X-Pane-Remote-Runtime-Id': 'runtime-1',
+    })).resolves.toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+
+    expect(handler).toHaveBeenCalledWith(
+      'panel-1',
+      42,
+      'remote:client-1:runtime-1:viewer:renderer-viewer-1',
+    );
+  });
+
   it('scopes browser terminal visibility invokes to the body runtime id', async () => {
     const registry = new PaneCommandRegistry();
     const handler = vi.fn(async () => ({ ok: true }));

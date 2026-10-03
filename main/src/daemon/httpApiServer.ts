@@ -830,7 +830,7 @@ export class PaneRemoteHttpApiServer {
       // The second argument is server-owned, even if the client supplied extra args.
       return [args[0] ?? null, { clientId: auth.client.id }];
     }
-    if (invokeRequest.channel !== 'terminal:setVisibility') {
+    if (invokeRequest.channel !== 'terminal:setVisibility' && invokeRequest.channel !== 'terminal:ack') {
       return args;
     }
 

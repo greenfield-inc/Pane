@@ -51,6 +51,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
+import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
@@ -181,6 +182,12 @@ interface ElectronAPI {
   export: {
     saveImage: (data: string, defaultFilename: string) => Promise<IPCResponse<{ filePath: string } | null>>;
     shareImage: (data: string, filename: string) => Promise<IPCResponse<{ method: 'share' | 'clipboard' }>>;
+  };
+
+  // Mission Control — every agent pane across all sessions
+  missionControl: {
+    listAgents: (options?: { includeArchived?: boolean }) => Promise<IPCResponse<MissionControlAgentPanel[]>>;
+    snapshots: (request: MissionControlSnapshotRequest) => Promise<IPCResponse<MissionControlSnapshotResult>>;
   };
 
   // Session management

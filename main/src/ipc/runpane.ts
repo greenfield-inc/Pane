@@ -8,10 +8,13 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import { PathResolver, ProjectEnvironment, expandUserRepoPath } from '../utils/pathResolver';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { escapeShellArg } from '../utils/shellEscape';
+import {
+  boundSanitizedLines,
+  selectPanelScreenText,
+} from '../services/panels/terminalScreenText';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
-import type { PanelBuffers } from '../database/panelBuffers';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
@@ -114,7 +117,6 @@ import type {
   RunpanePanelOutputResult,
   RunpanePanelScreenRequest,
   RunpanePanelScreenResult,
-  RunpanePanelScreenSource,
   RunpanePanelStateSummary,
   RunpanePanelSubmitComposerRequest,
   RunpanePanelSubmitComposerResult,
@@ -2348,45 +2350,6 @@ async function buildPanelScreenResult(panel: ToolPanel, limit: number): Promise<
   };
 }
 
-interface PanelScreenText {
-  source: RunpanePanelScreenSource;
-  rawText: string;
-}
-
-function selectPanelScreenText(
-  snapshot: TerminalPanelSnapshot | null,
-  customState: TerminalPanelState,
-  persisted: PanelBuffers | null,
-): PanelScreenText {
-  if (snapshot) {
-    if (snapshot.screenText !== undefined) {
-      return {
-        source: snapshot.isAlternateScreen ? 'alternateScreen' : 'scrollback',
-        rawText: snapshot.screenText,
-      };
-    }
-    if (snapshot.isAlternateScreen && snapshot.alternateScreenBuffer) {
-      return { source: 'alternateScreen', rawText: snapshot.alternateScreenBuffer };
-    }
-    if (snapshot.scrollbackBuffer) {
-      return { source: 'scrollback', rawText: snapshot.scrollbackBuffer };
-    }
-    return { source: 'empty', rawText: '' };
-  }
-
-  const persistedAlternate = persisted?.alternate;
-  if (customState.isAlternateScreen && persistedAlternate) {
-    return { source: 'persistedOutput', rawText: persistedAlternate };
-  }
-
-  const persistedScrollback = persisted?.scrollback;
-  if (persistedScrollback) {
-    return { source: 'persistedOutput', rawText: persistedScrollback };
-  }
-
-  return { source: 'empty', rawText: '' };
-}
-
 function panelStateSummary(
   panel: ToolPanel,
   snapshot: TerminalPanelSnapshot | null,
@@ -2410,6 +2373,10 @@ function getTerminalCustomState(panel: ToolPanel): TerminalPanelState {
   try {
     return decodeBoundary(panel.state.customState, boundary.object({
       isAlternateScreen: boundary.optional(boundary.boolean),
+      // The emulator's laid-out text, preferred by selectPanelScreenText over
+      // the raw buffers. Leaving it out of this schema silently drops it and
+      // sends every stopped panel back to the ANSI-stripped byte log.
+      screenText: boundary.optional(boundary.string),
       agentType: boundary.optional(boundary.enumeration(...RUNPANE_CONTRACT.enums.agents)),
       isCliReady: boundary.optional(boundary.boolean),
       isCliPanel: boundary.optional(boundary.boolean),
@@ -2418,28 +2385,6 @@ function getTerminalCustomState(panel: ToolPanel): TerminalPanelState {
   } catch {
     return {};
   }
-}
-
-interface BoundedSanitizedLines {
-  text: string;
-  hasMore: boolean;
-  returnedLineCount: number;
-}
-
-function boundSanitizedLines(rawText: string, limit: number): BoundedSanitizedLines {
-  const stripped = sanitizeTerminalOutput(rawText);
-  if (!stripped) {
-    return { text: '', hasMore: false, returnedLineCount: 0 };
-  }
-
-  const allLines = stripped.split('\n');
-  const hasMore = allLines.length > limit;
-  const lines = hasMore ? allLines.slice(-limit) : allLines;
-  return {
-    text: lines.join('\n'),
-    hasMore,
-    returnedLineCount: lines.length,
-  };
 }
 
 async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest): Promise<RunpanePanelWaitResult> {

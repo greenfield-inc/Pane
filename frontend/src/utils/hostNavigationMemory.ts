@@ -185,6 +185,12 @@ export async function restoreHostNavigation(): Promise<void> {
     return;
   }
 
+  if (memory.view === 'mission-control') {
+    await setActiveSession(null);
+    navigation.navigateToMissionControl();
+    return;
+  }
+
   if (memory.view === 'pane-chat') {
     // Which Session is selected is the host's own state; the resync adopts it.
     await setActiveSession(null);

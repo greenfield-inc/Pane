@@ -4,14 +4,12 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { WebglAddon } from '@xterm/addon-webgl';
 import type { WebLinksAddon } from '@xterm/addon-web-links';
 import type { SerializeAddon } from '@xterm/addon-serialize';
-import type { Unicode11Addon } from '@xterm/addon-unicode11';
-import type { ImageAddon, IImageAddonOptions } from '@xterm/addon-image';
 import { useSession } from '../../contexts/SessionContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TerminalPanelProps } from '../../types/panelComponents';
 import { isHotkeyEnabledForEvent, useHotkeyStore } from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
-import { getTerminalTheme } from '../../utils/terminalTheme';
+import { getTerminalTheme, buildTerminalFontFamily, getMinimumContrastRatio, DEFAULT_TERMINAL_FONT_FAMILY } from '../../utils/terminalTheme';
 import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
@@ -34,8 +32,10 @@ import { useTerminalSearch } from '../../hooks/useTerminalSearch';
 import { useScrollSurface } from '../../hooks/useScrollSurface';
 import { TerminalSearchOverlay } from '../terminal/TerminalSearchOverlay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { TERMINAL_IMAGE_OPTIONS } from '../../../../shared/constants/terminalGraphics';
-import { selectTerminalRestoreContent } from '../../utils/terminalRestore';
+import {
+  loadTerminalCapabilities, terminalCapabilityOptions, type LoadedTerminalCapabilities,
+} from '../../utils/terminalCapabilities';
+import { createTerminalOutputAcknowledger, selectTerminalRestoreContent } from '../../utils/terminalRestore';
 import { TerminalInterceptor } from '../../services/terminalInterceptor/TerminalInterceptor';
 import { createAtTerminalHandler } from '../../services/terminalInterceptor/handlers/atTerminalHandler';
 import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
@@ -98,7 +98,6 @@ interface TerminalRestoreState {
   cursorY?: number;
 }
 
-const DEFAULT_TERMINAL_FONT_FAMILY = 'Geist Mono';
 const DEFAULT_TERMINAL_FONT_SIZE = 14;
 const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
@@ -109,31 +108,12 @@ const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-lay
 const MIN_PTY_COLS = 20;        // mirrors main-process floor
 const MIN_PTY_ROWS = 5;
 const NEAR_BOTTOM_THRESHOLD_ROWS = 3;
-
-// Sequence-size limits stay at the addon defaults (32 MB), which a 4K kitty frame
-// fits inside once zlib-compressed and base64-encoded.
-const TERMINAL_IMAGE_ADDON_OPTIONS: IImageAddonOptions = TERMINAL_IMAGE_OPTIONS;
 const terminalPasteImageResultSchema = boundary.object({
   filePath: boundary.string,
   imageNumber: boundary.number,
 });
 const terminalPasteFileResultSchema = boundary.object({ filePath: boundary.string });
 
-// xterm halves the configured ratio for dim (SGR 2) cells, so 9 is what gets dim
-// CLI output (Claude Code / Codex) to 4.5:1 AA. Off-state stays a modest safety
-// floor so the deliberate muted grays in the dark themes survive.
-const HIGH_CONTRAST_MIN_RATIO = 9;   // dim cells get ratio/2 = 4.5 (AA)
-const LIGHT_MIN_RATIO = 4.5;
-const DARK_MIN_RATIO = 3;
-
-// Takes highContrast as an argument rather than reading the `high-contrast`
-// class: that class is stamped by ThemeProvider's effect, and React flushes
-// passive effects child-first, so this component's effect would observe the
-// previous value and leave the terminal one toggle behind.
-const getMinimumContrastRatio = (highContrast: boolean): number => {
-  if (highContrast) return HIGH_CONTRAST_MIN_RATIO;
-  return document.documentElement.classList.contains('light') ? LIGHT_MIN_RATIO : DARK_MIN_RATIO;
-};
 const TERMINAL_VISIBILITY_VIEWER_ID = getTerminalVisibilityViewerId();
 
 function getTerminalVisibilityViewerId(): string {
@@ -149,10 +129,6 @@ function getTerminalVisibilityViewerId(): string {
   } catch {
     return `viewer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   }
-}
-
-function buildTerminalFontFamily(userFont: string): string {
-  return `"${userFont}", "Symbols Nerd Font Mono", monospace`;
 }
 
 function isClipboardImagePlaceholderText(text: string): boolean {
@@ -254,8 +230,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
   // Restored output still being parsed. OSC 52 copies in it are history, not new copies.
   const pendingReplayWritesRef = useRef(0);
-  const unicode11AddonRef = useRef<Unicode11Addon | null>(null);
-  const imageAddonRef = useRef<ImageAddon | null>(null);
+  // Unicode 11 widths and the inline-image protocols, shared with every other
+  // renderer of the same PTY. See `terminalCapabilities`.
+  const capabilitiesRef = useRef<LoadedTerminalCapabilities | null>(null);
   const isActiveRef = useRef(isActive);
   const pasteFilesRef = useRef<((files: File[]) => void) | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -974,16 +951,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           cursorWidth: 1,
           cursorInactiveStyle: 'outline',
           allowTransparency: false,
-          // Unlocks terminal.unicode, which the Unicode11Addon below needs.
-          // Without it that addon throws on load and the terminal silently
-          // falls back to Unicode 6 cell widths.
-          allowProposedApi: true,
-          // Honor ConPTY's CSI ? 9001 h request. In particular, Windows programs
-          // launched through WSL need key records, not literal VT characters.
-          vtExtensions: {
-            kittyKeyboard: kittyKeyboardEnabledRef.current,
-            win32InputMode: true,
-          },
+          ...terminalCapabilityOptions(kittyKeyboardEnabledRef.current),
           scrollOnUserInput: true,
           scrollSensitivity: 1,
           altClickMovesCursor: true,
@@ -1248,41 +1216,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             serializeAddonRef.current = null;
           }
 
-          // Load Unicode11Addon for better emoji/unicode width calculation
-          try {
-            const { Unicode11Addon: Unicode11AddonImpl } = await import('@xterm/addon-unicode11');
-            if (!disposed) {
-              const unicode11Addon = new Unicode11AddonImpl();
-              terminal.loadAddon(unicode11Addon);
-              terminal.unicode.activeVersion = '11';
-              unicode11AddonRef.current = unicode11Addon;
-              devLog.debug('[TerminalPanel] Unicode11Addon loaded for panel', panel.id);
-            }
-          } catch (e) {
-            console.warn('[TerminalPanel] Unicode11Addon failed to load for panel', panel.id, ':', e);
-            unicode11AddonRef.current = null;
-          }
-
-          // Load ImageAddon so image-emitting tools render inline instead of
-          // printing nothing. Protocols and limits live in TERMINAL_IMAGE_OPTIONS.
-          try {
-            const { ImageAddon: ImageAddonImpl } = await import('@xterm/addon-image');
-            if (!disposed) {
-              const imageAddon = new ImageAddonImpl(TERMINAL_IMAGE_ADDON_OPTIONS);
-              terminal.loadAddon(imageAddon);
-              imageAddonRef.current = imageAddon;
-              devLog.debug('[TerminalPanel] ImageAddon loaded for panel', panel.id);
-            }
-          } catch (e) {
-            console.warn('[TerminalPanel] ImageAddon failed to load for panel', panel.id, ':', e);
-            imageAddonRef.current = null;
-          }
+          // Unicode 11 cell widths and the inline-image protocols, from the
+          // same helper Mission Control tiles use: the agent cannot tell its
+          // renderers apart, so they must not differ on either.
+          const capabilities = await loadTerminalCapabilities(terminal, {
+            label: `panel ${panel.id}`,
+            images: true,
+            isStale: () => disposed,
+          });
 
           if (disposed) {
+            capabilities.dispose();
             terminal.dispose();
             fitAddon.dispose();
             return;
           }
+          capabilitiesRef.current = capabilities;
           xtermRef.current = terminal;
           setTerminalInstance(terminal);
           fitAddonRef.current = fitAddon;
@@ -1323,27 +1272,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             }
           });
 
-          // Ack batching for flow control
-          const ACK_BATCH_SIZE = 5_000; // 5KB - aligned with main LOW_WATERMARK per VS Code FlowControlConstants
-          const ACK_BATCH_INTERVAL = 100; // ms
-          let pendingAckBytes = 0;
-          let ackFlushTimer: ReturnType<typeof setTimeout> | null = null;
-
-          const flushAck = () => {
-            if (ackFlushTimer) {
-              clearTimeout(ackFlushTimer);
-              ackFlushTimer = null;
-            }
-            if (pendingAckBytes > 0) {
-              const bytes = pendingAckBytes;
-              pendingAckBytes = 0;
-              // Read the current mode at flush time, including when a local
-              // ptyId survived a switch to a remote host.
-              acknowledgeTerminalOutput(
-                panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode,
-              );
-            }
-          };
+          const acknowledger = createTerminalOutputAcknowledger(bytes => {
+            acknowledgeTerminalOutput(
+              panel.id, bytes, currentPtyIdRef.current, terminalRuntimeRef.current.isRemoteMode, TERMINAL_VISIBILITY_VIEWER_ID,
+            );
+          });
 
           // Snapshot persistence: see the active-to-inactive effect below and
           // the dispose-time snapshot in this effect's cleanup. The previous
@@ -1596,17 +1529,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Core write-and-ack: consume a raw output chunk for this panel.
           const writeAndAck = (output: string) => {
             if (!terminal || disposed) return;
-            const outputLength = output.length;
             terminal.write(output, () => {
               if (disposed) return;
               markPanelOutput(panel.id);
               // Ack AFTER xterm has rendered the data — proper backpressure
-              pendingAckBytes += outputLength;
-              if (pendingAckBytes >= ACK_BATCH_SIZE) {
-                flushAck();
-              } else if (!ackFlushTimer) {
-                ackFlushTimer = setTimeout(flushAck, ACK_BATCH_INTERVAL);
-              }
+              acknowledger.acknowledge(output);
               // Read scroll position LIVE after render, not before write —
               // avoids stale shouldSnap=true yanking user back to bottom
               if (isNearBottomRef.current && terminal) {
@@ -1815,8 +1742,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             disposed = true;
             interceptor.dispose();
             interceptorRef.current = null;
-            flushAck();
-            if (ackFlushTimer) clearTimeout(ackFlushTimer);
+            acknowledger.dispose();
             resizeObserver?.disconnect();
             resizeObserver = null;
             if (resizeTimer) clearTimeout(resizeTimer);
@@ -1893,17 +1819,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         serializeAddonRef.current = null;
       }
 
-      // Dispose ImageAddon
-      if (imageAddonRef.current) {
-        try { imageAddonRef.current.dispose(); } catch { /* ignore */ }
-        imageAddonRef.current = null;
-      }
-
-      // Dispose Unicode11Addon
-      if (unicode11AddonRef.current) {
-        try { unicode11AddonRef.current.dispose(); } catch { /* ignore */ }
-        unicode11AddonRef.current = null;
-      }
+      // Dispose the shared capability addons (Unicode 11, images)
+      capabilitiesRef.current?.dispose();
+      capabilitiesRef.current = null;
 
       // Dispose XTerm instance only on final unmount
       if (xtermRef.current) {

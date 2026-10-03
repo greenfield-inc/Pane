@@ -658,6 +658,18 @@ body.understory {
   background-color: transparent !important;
 }
 
+/* Mission Control tiles are read-only previews: no scrollbar, no text cursor, no
+   selection affordance — all of which read as chrome bugs at tile size. */
+.pane-mission-control-surface .xterm .xterm-scrollable-element > .scrollbar {
+  display: none !important;
+}
+.pane-mission-control-surface .xterm-viewport {
+  overflow: hidden !important;
+}
+.pane-mission-control-surface .xterm {
+  cursor: default !important;
+}
+
 /* xterm v6 custom scrollbar — thin, matches app scrollbars */
 .xterm .xterm-scrollable-element > .scrollbar {
   width: 3px !important;

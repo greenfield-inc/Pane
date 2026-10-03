@@ -6,6 +6,7 @@ import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlReco
 import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import type { TerminalPanelState } from '../../../shared/types/panels';
+import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ShellDetector } from '../utils/shellDetector';
@@ -64,6 +65,8 @@ type VisibilityAccess = {
   setVisibility(panelId: string, isVisible: boolean, viewerId?: string): void;
   clearVisibilityViewersByPrefix(prefix: string): void;
   pruneVisibilityViewersByPrefix(prefix: string, staleAfterMs: number): void;
+  acknowledgeBytes(panelId: string, bytesConsumed: number, viewerId?: string): void;
+  writeTerminalReply(panelId: string, data: string, viewerId?: string): { delivered: boolean };
 };
 
 type SnapshotAccess = {
@@ -473,6 +476,199 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
     expect(terminal.isVisible).toBe(false);
     disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('prunes stale Mission Control viewers registered under the shared prefix', () => {
+    const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({
+      isVisible: false,
+      outputBuffer: '',
+    });
+    manager.terminals.set(terminal.panelId, terminal);
+
+    // The id a Mission Control tile actually registers, built from the same
+    // constant the main-process sweep passes to the matcher.
+    manager.setVisibility(terminal.panelId, true, `${MISSION_CONTROL_VIEWER_PREFIX}:8f1c`);
+    expect(terminal.isVisible).toBe(true);
+
+    // A sweep with no elapsed staleness leaves a fresh viewer alone.
+    manager.pruneVisibilityViewersByPrefix(MISSION_CONTROL_VIEWER_PREFIX, 60_000);
+    expect(terminal.isVisible).toBe(true);
+
+    // Once the viewer is older than the window, the sweep clears it. This is the
+    // assertion that fails if the prefix and the minted id ever diverge again.
+    manager.pruneVisibilityViewersByPrefix(MISSION_CONTROL_VIEWER_PREFIX, -1);
+    expect(terminal.isVisible).toBe(false);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  describe('flow-control acknowledgement', () => {
+    const panelViewer = 'local:panel-viewer';
+    const tileViewer = `${MISSION_CONTROL_VIEWER_PREFIX}:tile-1`;
+
+    function armed() {
+      const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+      const terminal = createTerminal({ isVisible: false, outputBuffer: '' });
+      manager.terminals.set(terminal.panelId, terminal);
+      terminal.flowControl.pendingBytes = 1000;
+      return { manager, terminal };
+    }
+
+    it('credits the panel viewer and ignores a tile watching the same panel', () => {
+      const { manager, terminal } = armed();
+      manager.setVisibility(terminal.panelId, true, panelViewer);
+      manager.setVisibility(terminal.panelId, true, tileViewer);
+
+      manager.acknowledgeBytes(terminal.panelId, 100, panelViewer);
+      expect(terminal.flowControl.pendingBytes).toBe(900);
+
+      // The same chunk, acked again by the preview. Crediting it would drain
+      // the counter at twice the rate the PTY debited it.
+      manager.acknowledgeBytes(terminal.panelId, 100, tileViewer);
+      expect(terminal.flowControl.pendingBytes).toBe(900);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('credits a tile when it is the only viewer, so the PTY still resumes', () => {
+      const { manager, terminal } = armed();
+      manager.setVisibility(terminal.panelId, true, tileViewer);
+
+      manager.acknowledgeBytes(terminal.panelId, 100, tileViewer);
+      expect(terminal.flowControl.pendingBytes).toBe(900);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('resolves a bare ack id to the scoped id it registered under', () => {
+      const { manager, terminal } = armed();
+      // TerminalPanel mints a bare uuid. Registration used to be scoped by the
+      // IPC layer while the ack was passed through raw, so the panel registered
+      // as `local:<uuid>`, acked as `<uuid>`, and every ack was dropped: the
+      // PTY jammed at the high watermark on the default (non-ptyHost) path.
+      manager.setVisibility(terminal.panelId, true, 'local:8f1c');
+
+      manager.acknowledgeBytes(terminal.panelId, 100, '8f1c');
+      expect(terminal.flowControl.pendingBytes).toBe(900);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('credits callers that send no viewer id, since every ack path predates them', () => {
+      const { manager, terminal } = armed();
+      manager.setVisibility(terminal.panelId, true, panelViewer);
+
+      manager.acknowledgeBytes(terminal.panelId, 100);
+      expect(terminal.flowControl.pendingBytes).toBe(900);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('debits and credits multibyte output in UTF-8 bytes', () => {
+      const manager = testAccess<VisibilityAccess & FlushOutputBufferAccess>(new TerminalPanelManager());
+      const terminal = createTerminal({ isVisible: false, outputBuffer: '' });
+      manager.terminals.set(terminal.panelId, terminal);
+      manager.setVisibility(terminal.panelId, true, panelViewer);
+      terminal.outputBuffer = 'A界🙂';
+
+      manager.flushOutputBuffer(terminal);
+      expect(terminal.flowControl.pendingBytes).toBe(8);
+
+      manager.acknowledgeBytes(terminal.panelId, 8, panelViewer);
+      expect(terminal.flowControl.pendingBytes).toBe(0);
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+  });
+
+  describe('terminal query replies', () => {
+    const panelViewer = 'local:panel-viewer';
+    const tileViewer = `${MISSION_CONTROL_VIEWER_PREFIX}:tile-1`;
+    /** DSR cursor-position report — what Codex reads its viewport origin from. */
+    const CURSOR_POSITION_REPORT = '\x1b[24;80R';
+
+    function armed() {
+      const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+      const terminal = createTerminal({ outputBuffer: '' });
+      manager.terminals.set(terminal.panelId, terminal);
+      return { manager, terminal };
+    }
+
+    it('lets a tile answer when it is the only renderer left', () => {
+      const { manager, terminal } = armed();
+      // Mission Control unmounts the session's terminal panel, so the tile is
+      // the only thing that can answer. Swallowing the query here is what made
+      // a Codex pane wait on a reply that never came.
+      manager.setVisibility(terminal.panelId, true, tileViewer);
+
+      expect(manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT, tileViewer))
+        .toEqual({ delivered: true });
+      expect(terminal.pty.write).toHaveBeenCalledWith(CURSOR_POSITION_REPORT);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('drops a tile reply while a real terminal panel is watching', () => {
+      const { manager, terminal } = armed();
+      manager.setVisibility(terminal.panelId, true, panelViewer);
+      manager.setVisibility(terminal.panelId, true, tileViewer);
+
+      // Two answers to one question move the agent's idea of where its screen
+      // starts, and every redraw after that lands on the wrong lines.
+      expect(manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT, tileViewer))
+        .toEqual({ delivered: false });
+      expect(terminal.pty.write).not.toHaveBeenCalled();
+
+      expect(manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT, panelViewer))
+        .toEqual({ delivered: true });
+      expect(terminal.pty.write).toHaveBeenCalledTimes(1);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('picks one voice when two Mission Control windows watch the same panel', () => {
+      const { manager, terminal } = armed();
+      const otherWindow = `${MISSION_CONTROL_VIEWER_PREFIX}:tile-2`;
+      manager.setVisibility(terminal.panelId, true, tileViewer);
+      manager.setVisibility(terminal.panelId, true, otherWindow);
+
+      const first = manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT, tileViewer);
+      const second = manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT, otherWindow);
+
+      expect([first.delivered, second.delivered].filter(Boolean)).toHaveLength(1);
+      expect(terminal.pty.write).toHaveBeenCalledTimes(1);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('resolves a bare viewer id to the scoped id it registered under', () => {
+      const { manager, terminal } = armed();
+      manager.setVisibility(terminal.panelId, true, 'local:8f1c');
+
+      expect(manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT, '8f1c'))
+        .toEqual({ delivered: true });
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('refuses an unidentified reply, unlike an ack', () => {
+      const { manager, terminal } = armed();
+      manager.setVisibility(terminal.panelId, true, tileViewer);
+
+      // Acks accept a missing id because every ack path predates viewer ids.
+      // Replies have no such history, so an anonymous one is a second voice
+      // with nothing to arbitrate it.
+      expect(manager.writeTerminalReply(terminal.panelId, CURSOR_POSITION_REPORT))
+        .toEqual({ delivered: false });
+      expect(terminal.pty.write).not.toHaveBeenCalled();
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
+    it('drops a reply for a panel whose PTY is already gone', () => {
+      const manager = testAccess<VisibilityAccess>(new TerminalPanelManager());
+      expect(manager.writeTerminalReply('missing-panel', CURSOR_POSITION_REPORT, tileViewer))
+        .toEqual({ delivered: false });
+    });
   });
 
   it('returns emulated live screen and restore state for daemon and renderer reads', async () => {
