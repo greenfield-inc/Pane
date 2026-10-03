@@ -46,6 +46,7 @@ import type {
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { NotifyCommand, NotifySharedState, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
+import type { GitCloneAuthProtocol } from '../../../shared/types/gitClone';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -409,7 +410,7 @@ interface ElectronAPI {
     detectBranch: (path: string) => Promise<IPCResponse<string>>;
     cancelStatusForProject: (projectId: number) => Promise<{ success: boolean; error?: string }>;
     executeProject: (projectId: number, args: string[]) => Promise<IPCResponse>;
-    cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }) => Promise<IPCResponse<{ clonedPath: string; repoName: string }>>;
+    cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }) => Promise<IPCResponse<{ clonedPath: string; repoName: string }> & { authProtocol?: GitCloneAuthProtocol }>;
   };
 
   // Folders

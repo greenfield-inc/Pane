@@ -9,6 +9,8 @@ export interface CloneDraft {
   error: string;
   /** Remote host whose git could not sign in to the server; null when the error is not about signing in. */
   signInHost: string | null;
+  /** The failed sign-in was over SSH, which signing in to GitHub over HTTPS does not fix. */
+  signInOverSsh: boolean;
 }
 
 interface CloneDraftState extends CloneDraft {
@@ -19,7 +21,7 @@ interface CloneDraftState extends CloneDraft {
   reset: () => void;
 }
 
-export const EMPTY_CLONE_DRAFT: CloneDraft = { url: '', destPath: '', error: '', signInHost: null };
+export const EMPTY_CLONE_DRAFT: CloneDraft = { url: '', destPath: '', error: '', signInHost: null, signInOverSsh: false };
 
 /**
  * What the Clone from GitHub dialog was filled in with. It outlives the dialog
