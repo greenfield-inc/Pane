@@ -1,6 +1,5 @@
 import React from 'react';
 import { GitErrorDetails } from '../../types/session';
-import { sanitizeGitOutput } from '../../utils/sanitizer';
 import { Button } from '../ui/Button';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '../ui/Modal';
 import { Card } from '../ui/Card';
@@ -87,7 +86,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
                 Git Output
               </h3>
               <Card variant="bordered" padding="md" className="bg-surface-tertiary text-text-primary max-h-96 overflow-y-auto">
-                <pre className="text-sm whitespace-pre-wrap font-mono">{sanitizeGitOutput(errorDetails.output || 'No output available')}</pre>
+                <pre className="text-sm whitespace-pre-wrap font-mono">{errorDetails.output || 'No output available'}</pre>
               </Card>
             </Card>
 

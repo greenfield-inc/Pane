@@ -151,16 +151,24 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
 
   const handleRevert = useCallback(async (commitHash: string) => {
     if (!window.confirm(`Revert commit ${commitHash.slice(0, 7)}?`)) return;
-    const response = await window.electronAPI.invoke('git:revert', { sessionId, commitHash });
-    if (!response.success) throw new Error(response.error || 'Failed to revert commit');
-    refresh();
+    try {
+      const response = await window.electronAPI.invoke('git:revert', { sessionId, commitHash });
+      if (!response.success) throw new Error(response.error || 'Failed to revert commit');
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to revert commit');
+    }
   }, [refresh, sessionId]);
 
   const handleRestore = useCallback(async () => {
     if (!window.confirm('Restore all uncommitted changes?')) return;
-    const response = await window.electronAPI.invoke('git:restore', { sessionId });
-    if (!response.success) throw new Error(response.error || 'Failed to restore changes');
-    refresh();
+    try {
+      const response = await window.electronAPI.invoke('git:restore', { sessionId });
+      if (!response.success) throw new Error(response.error || 'Failed to restore changes');
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to restore changes');
+    }
   }, [refresh, sessionId]);
 
   const label = scopeLabel(scope, { ref: visibleManifest?.resolvedBase.ref });
