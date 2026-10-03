@@ -15,6 +15,7 @@ import { getActiveHostPlatform, getGitHubSignInTerminalCommand } from '../utils/
 import { buildDeviceLoginStartRequest } from '../utils/githubDeviceLogin';
 import { useGitHubDeviceLogin } from '../hooks/useGitHubDeviceLogin';
 import { useConfigStore } from '../stores/configStore';
+import { openHostGitHubSettings } from '../utils/hostSettings';
 import { CloneSignInNotice } from './CloneSignInNotice';
 import { GIT_CLONE_AUTH_REQUIRED } from '../../../shared/types/gitClone';
 
@@ -45,7 +46,8 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
   const updateDraft = (draft: Partial<CloneDraft>) => storedDraft.update(hostId, draft);
   const profiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
   const activeProfile = profiles?.find((profile) => profile.id === host.id) ?? null;
-  const deviceLogin = useGitHubDeviceLogin(isOpen && signInHost !== null);
+  const managedInSettings = host.remote && activeProfile?.githubSignIn === 'settings';
+  const deviceLogin = useGitHubDeviceLogin(isOpen && signInHost !== null && !managedInSettings);
 
   // A remote clone lands in the host's home unless the user picks a folder.
   useEffect(() => {
@@ -74,6 +76,12 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
     } catch (err) {
       setTerminalError(err instanceof Error ? err.message : `Could not open the terminal on ${signInHost}`);
     }
+  };
+
+  // Closes without clearing the draft, so the user can add the token and come back to try again.
+  const handleOpenSettings = () => {
+    onClose();
+    openHostGitHubSettings();
   };
 
   const handleSignIn = () => {
@@ -166,6 +174,8 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
             <CloneSignInNotice
               host={signInHost}
               overSsh={signInOverSsh}
+              managedInSettings={managedInSettings}
+              onOpenSettings={handleOpenSettings}
               retrying={cloning}
               deviceLogin={deviceLogin.state}
               deviceLoginError={deviceLogin.requestError}

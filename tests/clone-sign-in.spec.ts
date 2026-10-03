@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import type { GitHubDeviceLoginState } from '../shared/types/githubDeviceLogin';
 
 // BROWSER=false: gh must print its device code, never open a browser on the host.
 const SIGN_IN_COMMAND = 'BROWSER=false gh auth login --web --git-protocol https && gh auth setup-git';
@@ -50,7 +51,7 @@ async function hostReportsPlatform(page: Page, platform: 'linux' | 'win32') {
 }
 
 interface FakeDeviceLogin {
-  state: { status: string; loginId?: string; [key: string]: unknown };
+  state: GitHubDeviceLoginState;
   starts: unknown[];
   statusCalls: number;
   cancels: number;
@@ -373,4 +374,40 @@ test('a host saved to keep gh\'s token in a file asks the daemon for that', asyn
   const notice = (await fillAndClone(page, '~')).getByRole('alert');
   await notice.getByRole('button', { name: 'Sign in to GitHub' }).click();
   await expect.poll(() => page.evaluate(() => window.__deviceLogin?.starts)).toEqual([{ hostLabel: 'sandbox-1', ghInsecureStorage: true }]);
+});
+
+test('a host whose GitHub sign-in lives in Settings sends the user there', async ({ page }, testInfo) => {
+  await installElectronApiMock(page);
+  await page.goto('/');
+  await page.evaluate(async () => {
+    await window.electronAPI.remoteDaemon.upsertConnectionProfile({
+      id: 'sandbox-1', label: 'sandbox-1', baseUrl: 'https://sandbox-1.example.ts.net',
+      token: 'synthetic', transport: 'http+sse', githubSignIn: 'settings',
+    });
+    await window.electronAPI.remoteDaemon.updateClientState({ mode: 'remote', activeProfileId: 'sandbox-1' });
+  });
+  await expect(page.getByRole('button', { name: /Agents run on sandbox-1/ })).toBeVisible();
+  await fakeDeviceLogin(page);
+  await failClonesWithAuth(page, LOCAL_HTTPS_MESSAGE);
+  const dialog = await fillAndClone(page, '~');
+  const notice = dialog.getByRole('alert');
+  await expect(notice.getByText('Add a GitHub token in Settings', { exact: true })).toBeVisible();
+  await expect(notice.getByRole('button')).toHaveText(['Open Settings', 'Try again']);
+  await expect(notice.getByText(/isn't signed in to GitHub/)).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('settings-route-notice.png') });
+
+  await notice.getByRole('button', { name: 'Open Settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Remote Access' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Clone from GitHub' })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('settings-route-opened-settings.png') });
+  expect(await page.evaluate(() => window.__deviceLogin?.starts)).toEqual([]);
+  expect(await hostTerminalOpenRequests(page)).toEqual([]);
+
+  // The URL and destination wait for the user to come back.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading', { name: 'Remote Access' })).toHaveCount(0);
+  await goHome(page);
+  await page.getByRole('button', { name: 'GitHub', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('textbox', { name: 'Repository URL' })).toHaveValue(REPO_URL);
+  await expect(page.getByRole('dialog').getByRole('textbox', { name: 'Destination' })).toHaveValue('~');
 });
