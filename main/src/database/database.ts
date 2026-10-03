@@ -3466,13 +3466,13 @@ export class DatabaseService {
   }
 
   setSessionFavorite(id: string, pinned: boolean): Session | undefined {
+    // Pinning is metadata, not session activity: preserve updated_at and existing pin order.
     this.db.prepare(`
       UPDATE sessions SET
         is_favorite = @pinned,
         favorite_pinned_at = CASE WHEN @pinned
           THEN COALESCE(favorite_pinned_at, CURRENT_TIMESTAMP)
-          ELSE NULL END,
-        updated_at = CURRENT_TIMESTAMP
+          ELSE NULL END
       WHERE id = @id
     `).run({ id, pinned: pinned ? 1 : 0 });
 
