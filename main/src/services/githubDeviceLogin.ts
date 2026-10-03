@@ -76,7 +76,7 @@ export class GitHubDeviceLogin {
     const hostLabel = request.hostLabel?.trim() || os.hostname();
     this.state = { status: 'starting', loginId };
     this.timer = setTimeout(() => this.fail(loginId, 'timeout', null, 'Sign-in timed out. Start again.'), this.timeoutMs);
-    void this.run(loginId, hostLabel);
+    void this.run(loginId, hostLabel, request.ghInsecureStorage === true);
     return this.state;
   }
 
@@ -86,8 +86,10 @@ export class GitHubDeviceLogin {
     return this.state;
   }
 
-  private async run(loginId: string, hostLabel: string): Promise<void> {
-    const login = await this.runGh(loginId, ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', GITHUB_HOSTNAME], output => {
+  private async run(loginId: string, hostLabel: string, insecureStorage: boolean): Promise<void> {
+    const loginArgs = ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', GITHUB_HOSTNAME];
+    if (insecureStorage) loginArgs.push('--insecure-storage');
+    const login = await this.runGh(loginId, loginArgs, output => {
       const device = this.isCurrent(loginId, 'starting') ? parseGhDeviceCode(output) : null;
       if (device) this.state = { status: 'waiting', loginId, ...device };
     });

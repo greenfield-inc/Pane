@@ -123,6 +123,21 @@ describe('GitHubDeviceLogin', () => {
     ]);
   });
 
+  it('keeps gh\'s keyring by default and stores the token in gh\'s config only when asked', async () => {
+    const keyring = createLogin('ok');
+    keyring.start({ ghInsecureStorage: false });
+    await waitForState(keyring, 'signed-in');
+    const insecure = createLogin('ok');
+    insecure.start({ ghInsecureStorage: true });
+    await waitForState(insecure, 'signed-in');
+
+    const logins = (await calls()).filter(call => call.args[1] === 'login').map(call => call.args);
+    expect(logins).toEqual([
+      ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', 'github.com'],
+      ['auth', 'login', '--web', '--git-protocol', 'https', '--hostname', 'github.com', '--insecure-storage'],
+    ]);
+  });
+
   it('answers gh\'s Press Enter prompt so it never waits on the user', async () => {
     const login = createLogin('tty');
     login.start();
