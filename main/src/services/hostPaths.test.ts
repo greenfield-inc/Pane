@@ -151,13 +151,24 @@ describe('createHostDirectory', () => {
 
 describe('validateHostProjectPath', () => {
   it('accepts an existing repo for open', async () => {
-    await expect(validateHostProjectPath({ path: '~/repo', mode: 'open' }, thisHost(), async () => true))
+    await expect(validateHostProjectPath({ path: '~/repo', mode: 'open' }, thisHost(), async registration => registration.path))
       .resolves.toEqual({ path: path.join(home, 'repo'), isGitRepo: true });
+  });
+
+  it('rejects open on a folder inside a repo and names the repo root', async () => {
+    await mkdir(path.join(home, 'repo', 'src'));
+    const repoRoot = path.join(home, 'repo');
+
+    await expectHostPathError(
+      validateHostProjectPath({ path: '~/repo/src', mode: 'open' }, thisHost(), async () => repoRoot),
+      'NOT_A_GIT_REPO',
+      `${path.join(repoRoot, 'src')} is inside the git repository at ${repoRoot}. Open ${repoRoot} instead.`,
+    );
   });
 
   it('rejects open on a missing path, a file or a non-repo, without creating anything', async () => {
     const before = await readdir(home);
-    const isRepo = async () => false;
+    const isRepo = async () => null;
 
     await expectHostPathError(validateHostProjectPath({ path: '~/missing', mode: 'open' }, thisHost(), isRepo), 'NOT_FOUND');
     await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'open' }, thisHost(), isRepo), 'NOT_A_DIRECTORY');
@@ -168,7 +179,7 @@ describe('validateHostProjectPath', () => {
   });
 
   it('accepts a missing or existing folder for new, but not a file', async () => {
-    const isRepo = async () => false;
+    const isRepo = async () => null;
     await expect(validateHostProjectPath({ path: '~/fresh', mode: 'new' }, thisHost(), isRepo))
       .resolves.toEqual({ path: path.join(home, 'fresh'), isGitRepo: false });
     await expect(validateHostProjectPath({ path: '~/Notes', mode: 'new' }, thisHost(), isRepo))
@@ -180,7 +191,7 @@ describe('validateHostProjectPath', () => {
   it('rejects Windows paths in both modes on a POSIX host', async () => {
     for (const mode of ['open', 'new'] as const) {
       await expectHostPathError(
-        validateHostProjectPath({ path: 'C:\\runpane-temp-home\\montlakev2', mode }, linuxHost(), async () => true),
+        validateHostProjectPath({ path: 'C:\\runpane-temp-home\\montlakev2', mode }, linuxHost(), async registration => registration.path),
         'WINDOWS_PATH_ON_POSIX_HOST',
       );
     }
