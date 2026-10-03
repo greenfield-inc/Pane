@@ -134,6 +134,9 @@ jobs:
     - name: Start Playwright browser dependencies install
       run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
 
+    - name: Verify browser-computed theme contrast
+      run: pnpm theme:contrast
+
     - name: Rebuild native modules for Electron smoke tests
       run: pnpm run electron:rebuild
 
