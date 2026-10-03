@@ -2016,12 +2016,10 @@ async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
     return;
   }
 
-  // Panel state writes merge into the stored row; an explicit undefined removes the key, a delete does not.
-  const nextCustomState = { ...customState, initialInputSentAt: undefined };
   await panelManager.updatePanel(panel.id, {
     state: {
       ...state,
-      customState: nextCustomState,
+      customState: { ...customState, initialInputSentAt: undefined },
     },
   });
 }
