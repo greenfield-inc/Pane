@@ -29,6 +29,8 @@ interface RemoteHostState {
 interface RemoteSessionState extends RemoteHostState {
   reset: () => void;
   setProjects: (projects: RemoteProjectWithSessions[]) => void;
+  upsertSession: (session: Session) => void;
+  removeSession: (sessionId: string) => void;
   selectSession: (sessionId: string | null) => void;
   openSession: (view: OrchestrationSessionView<Session>) => void;
   setOrchestrationSessions: (sessions: OrchestrationSessionRecord[]) => void;
@@ -57,10 +59,39 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set) => ({
 
   reset: () => set(INITIAL_HOST_STATE),
 
-  setProjects: (projects) => set((state) => ({
-    projects,
-    selectedSessionId: state.selectedSessionId ?? findFirstSessionId(projects),
+  setProjects: (projects) => set((state) => {
+    const hasSelection = state.openOrchestrationSession?.internalSession.id === state.selectedSessionId || projects.some(project => project.sessions?.some(session => session.id === state.selectedSessionId));
+    return {
+      projects,
+      selectedSessionId: hasSelection ? state.selectedSessionId : null,
+      selectedPanelId: hasSelection ? state.selectedPanelId : null,
+    };
+  }),
+
+  upsertSession: (session) => set((state) => ({
+    projects: state.projects.map(project => {
+      const sessions = project.sessions ?? [];
+      if (project.id !== session.projectId && !sessions.some(existing => existing.id === session.id)) return project;
+      return {
+        ...project,
+        sessions: sessions.some(existing => existing.id === session.id)
+          ? sessions.map(existing => existing.id === session.id ? session : existing)
+          : [...sessions, session],
+      };
+    }),
   })),
+
+  removeSession: (sessionId) => set((state) => {
+    const panelsBySessionId = { ...state.panelsBySessionId };
+    delete panelsBySessionId[sessionId];
+    return {
+      projects: state.projects.map(project => project.sessions?.some(session => session.id === sessionId)
+        ? { ...project, sessions: project.sessions.filter(session => session.id !== sessionId) } : project),
+      panelsBySessionId,
+      selectedSessionId: state.selectedSessionId === sessionId ? null : state.selectedSessionId,
+      selectedPanelId: state.selectedSessionId === sessionId ? null : state.selectedPanelId,
+    };
+  }),
 
   selectSession: (sessionId) => set({
     selectedSessionId: sessionId,

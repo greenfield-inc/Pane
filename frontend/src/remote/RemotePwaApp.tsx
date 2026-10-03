@@ -26,6 +26,7 @@ import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { remoteDeletedSessionSchema, remoteSessionSchema } from './runtime/remote-session-schemas';
 import { ErrorDialog } from '../components/ErrorDialog';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
@@ -154,6 +155,8 @@ export function RemotePwaApp() {
   const selectedPanelId = useRemoteSessionStore(state => state.selectedPanelId);
   const panelsBySessionId = useRemoteSessionStore(state => state.panelsBySessionId);
   const setProjects = useRemoteSessionStore(state => state.setProjects);
+  const upsertSession = useRemoteSessionStore(state => state.upsertSession);
+  const removeSession = useRemoteSessionStore(state => state.removeSession);
   const selectSession = useRemoteSessionStore(state => state.selectSession);
   const setPanels = useRemoteSessionStore(state => state.setPanels);
   const setSelectedPanel = useRemoteSessionStore(state => state.setSelectedPanel);
@@ -251,14 +254,6 @@ export function RemotePwaApp() {
       const nextProjects = await runtime.getProjectsWithSessions();
       if (runtime !== activeRuntimeRef.current) return null;
       setProjects(nextProjects);
-      const { selectedSessionId: currentSessionId, openOrchestrationSession: openView } = useRemoteSessionStore.getState();
-      const hasSelectedSession = Boolean(currentSessionId && (
-        openView?.internalSession.id === currentSessionId
-        || nextProjects.some(project => project.sessions?.some(session => session.id === currentSessionId))
-      ));
-      if (!hasSelectedSession) {
-        selectSession(findFirstSessionId(nextProjects));
-      }
       setLastError(null);
       return nextProjects;
     } catch (error) {
@@ -267,7 +262,7 @@ export function RemotePwaApp() {
     } finally {
       if (runtime === activeRuntimeRef.current) setLoading(false);
     }
-  }, [adapter, selectSession, setProjects, setLastError]);
+  }, [adapter, setProjects, setLastError]);
 
   const loadPanels = useCallback(async (sessionId: string, runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
@@ -405,7 +400,10 @@ export function RemotePwaApp() {
       if (activeRuntimeRef.current !== runtime) return null;
       updateConnection({ adapter: runtime, activeProfile: profile });
       saveProfile(profile, setSavedProfiles);
-      await Promise.all([refreshProjects(runtime), refreshOrchestrationSessions(runtime), loadAffordances(runtime)]);
+      const initialProjects = await refreshProjects(runtime);
+      if (activeRuntimeRef.current !== runtime) return null;
+      if (initialProjects) selectSession(findFirstSessionId(initialProjects));
+      await Promise.all([refreshOrchestrationSessions(runtime), loadAffordances(runtime)]);
       return activeRuntimeRef.current === runtime ? runtime : null;
     } catch (error) {
       runtime.disconnect();
@@ -643,7 +641,8 @@ export function RemotePwaApp() {
 
   useEffect(() => {
     if (!adapter) return;
-    return adapter.onEvent(event => {
+    const stopReady = adapter.onReady(() => { void refreshProjects(adapter); });
+    const stopEvents = adapter.onEvent(event => {
       if (event.channel === 'session:creation-failed') {
         const failure = decodeBoundary(event.args[0], boundary.object({ name: boundary.string, error: boundary.string }));
         setCreationFailure(failure);
@@ -676,17 +675,31 @@ export function RemotePwaApp() {
         return;
       }
 
-      if (event.channel.startsWith('session:') || event.channel.startsWith('project:')) {
-        if (event.channel === 'session:created' || event.channel === 'session:deleted') void loadArchivedIfShown(adapter);
-        void refreshProjects(adapter);
-        return;
-      }
-
-      if (event.channel === 'orchestration-sessions:changed') {
-        void refreshOrchestrationSessions(adapter);
+      switch (event.channel) {
+        case 'session:created':
+        case 'session:updated': {
+          void loadArchivedIfShown(adapter);
+          const session = decodeBoundary(event.args[0], remoteSessionSchema);
+          if (session.archived || session.isHidden || session.isMainRepo) removeSession(session.id);
+          else upsertSession(session);
+          break;
+        }
+        case 'session:deleted':
+          void loadArchivedIfShown(adapter);
+          removeSession(decodeBoundary(event.args[0], remoteDeletedSessionSchema).id);
+          break;
+        case 'orchestration-sessions:changed':
+          void refreshOrchestrationSessions(adapter);
+          break;
+        case 'project:created':
+        case 'project:updated':
+        case 'project:deleted':
+          void refreshProjects(adapter);
+          break;
       }
     });
-  }, [adapter, loadArchivedIfShown, refreshOrchestrationSessions, refreshProjects, removePanel, selectedSessionId, setSelectedPanel, upsertPanel]);
+    return () => { stopReady(); stopEvents(); };
+  }, [adapter, loadArchivedIfShown, refreshOrchestrationSessions, refreshProjects, removePanel, removeSession, selectedSessionId, setSelectedPanel, upsertPanel, upsertSession]);
 
   useEffect(() => {
     if (!selectedSessionId || !adapter) return;

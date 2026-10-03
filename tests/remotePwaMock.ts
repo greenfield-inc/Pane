@@ -215,6 +215,7 @@ export async function openConnectedRemotePwa(
   options: RemotePwaMockOptions = {},
 ): Promise<RemotePwaMockHost> {
   const fixtures = buildFixtures(options);
+  const invocations: string[] = [];
 
   await page.addInitScript((profile) => {
     window.localStorage.setItem('pane.remotePwa.savedProfiles', JSON.stringify([profile]));
@@ -234,14 +235,23 @@ export async function openConnectedRemotePwa(
         // which is what keeps `reconnecting` on screen for as long as a caller
         // needs rather than for one backoff interval.
         if (!held) {
-          window.setTimeout(() => this.onopen?.(new Event('open')), 0);
+          window.setTimeout(() => { this.onopen?.(new Event('open')); this.emit('ready', '{}'); }, 0);
         }
       }
-      addEventListener(): void {}
-      removeEventListener(): void {}
+      private listeners = new Map<string, Set<EventListener>>();
+      addEventListener(type: string, listener: EventListener): void {
+        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+      removeEventListener(type: string, listener: EventListener): void { this.listeners.get(type)?.delete(listener); }
+      emit(type: string, data: string): void {
+        for (const listener of this.listeners.get(type) ?? []) listener(new MessageEvent(type, { data }));
+      }
       close(): void {}
     }
 
+    window.__paneRemoteEmit = (channel, args) => live?.emit('daemon-event', JSON.stringify({ channel, args, timestamp: new Date().toISOString() }));
     let live: MockEventSource | undefined;
     let held = false;
     const register = (source: MockEventSource) => { live = source; };
@@ -266,15 +276,16 @@ export async function openConnectedRemotePwa(
       value: () => {
         held = false;
         live?.onopen?.(new Event('open'));
+        live?.emit('ready', '{}');
       },
     });
   }, PROFILE);
 
-  await installRemoteHostRoute(page, fixtures);
+  await installRemoteHostRoute(page, fixtures, invocations);
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: 'Connect', exact: true }).click();
-  return fixtures.host;
+  return { ...fixtures.host, invocations };
 }
 
 /**
@@ -307,6 +318,7 @@ declare global {
   interface Window {
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
     __paneRemoteDropConnection?: () => void;
+    __paneRemoteEmit?: (channel: string, args: JsonValue[]) => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
     __paneRemoteRestoreConnection?: () => void;
   }
@@ -316,6 +328,7 @@ declare global {
 async function installRemoteHostRoute(
   page: Page,
   fixtures: ReturnType<typeof buildFixtures>,
+  invocations: string[],
 ): Promise<void> {
   await page.route('http://anim-pane.test/**', async (route) => {
     const request = route.request();
@@ -332,6 +345,7 @@ async function installRemoteHostRoute(
     const sessionId = (args[0] as { sessionId?: string } | null)?.sessionId;
     const session = host.sessions.find(candidate => candidate.id === sessionId);
     const ownerSession = host.sessions.find(candidate => candidate.internalSessionId === args[0]);
+    invocations.push(body.channel ?? '');
     let result: JsonValue = null;
 
     switch (body.channel) {
