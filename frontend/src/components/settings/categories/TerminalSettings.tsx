@@ -1,3 +1,4 @@
+import { AT_TERMINAL_LINE_COUNT_PRESETS } from '../../../types/settings';
 import { useEffect, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton } from '../../ui/Button';
@@ -23,10 +24,6 @@ interface TerminalSettingsProps {
 
 export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSettingsProps) {
   const config = persistence.config!;
-  const saveTerminalLineCount = (value: number) => {
-    // SAFETY: SegmentedControl values are generated from the four supported line-count literals below.
-    return persistence.savePreference('atTerminalLineCount', value as 100 | 300 | 500 | -1);
-  };
   const hostShell = useHostShellSettings();
   const savePreferredShell = (value: string) => {
     // SAFETY: Select options use only PreferredShell identifiers supplied by the backend.
@@ -143,8 +140,8 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
             label="Default terminal reference line count"
             value={persistence.preferences.atTerminalLineCount}
             columns={4}
-            options={[100, 300, 500, -1].map((value) => ({ id: value, label: value === -1 ? 'All' : String(value) }))}
-            onChange={(value) => void saveTerminalLineCount(value)}
+            options={AT_TERMINAL_LINE_COUNT_PRESETS.map((value) => ({ id: value, label: value === -1 ? 'All' : String(value) }))}
+            onChange={(value) => void persistence.savePreference('atTerminalLineCount', value)}
           />
         </SettingRow>
       </SettingsSection>

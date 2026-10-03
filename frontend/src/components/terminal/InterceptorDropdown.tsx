@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { Kbd } from '../ui/Kbd';
 import type { TerminalSuggestion, PasteMode } from '../../services/terminalInterceptor/types';
-import { LINE_COUNT_PRESETS } from '../../services/terminalInterceptor/types';
+import { AT_TERMINAL_LINE_COUNT_PRESETS as LINE_COUNT_PRESETS } from '../../types/settings';
 import { LiveRegion } from '../ui/LiveRegion';
 
 interface InterceptorDropdownProps {
