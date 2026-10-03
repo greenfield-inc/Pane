@@ -65,12 +65,13 @@ interface ConnectionState {
   adapter: RemoteRuntimeAdapter | null;
   activeProfile: RemotePaneConnectionProfile | null;
   connectionStatus: RemotePaneConnectionStatus;
-  lastError: string | null;
+  connectionError: string | null;
+  actionError: string | null;
   connectionErrorKind: RemoteConnectionErrorKind | null;
   lastSeenAt: string | null;
 }
 const INITIAL_CONNECTION: ConnectionState = {
-  adapter: null, activeProfile: null, connectionStatus: 'local', lastError: null,
+  adapter: null, activeProfile: null, connectionStatus: 'local', connectionError: null, actionError: null,
   connectionErrorKind: null, lastSeenAt: null,
 };
 function connectionReducer(state: ConnectionState, update: Partial<ConnectionState>): ConnectionState {
@@ -83,8 +84,11 @@ export function RemotePwaApp() {
   const [pendingPushRoute, setPendingPushRoute] = useState<NativePushRoute | null>(null);
   const [pushStatus, setPushStatus] = useState<{ registration: 'registered' | 'not-registered' | 'revoked'; provider: string; message: string; needsInputEnabled?: boolean; completedEnabled?: boolean } | null>(null);
   const [pushControls, setPushControls] = useState(DEFAULT_PUSH_CONTROLS);
-  const [{ adapter, activeProfile, connectionStatus, lastError, connectionErrorKind, lastSeenAt }, updateConnection] = useReducer(connectionReducer, INITIAL_CONNECTION);
-  const setLastError = useCallback((error: string | null) => updateConnection({ lastError: error }), []);
+  const [{ adapter, activeProfile, connectionStatus, connectionError, actionError, connectionErrorKind, lastSeenAt }, updateConnection] = useReducer(connectionReducer, INITIAL_CONNECTION);
+  const setActionError = useCallback((error: string | null) => updateConnection({ actionError: error }), []);
+  const lastError = connectionStatus === 'connected'
+    ? actionError ?? connectionError
+    : connectionError ?? actionError;
   const [loading, setLoading] = useState(false);
   const [creatingTerminal, setCreatingTerminal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -109,24 +113,24 @@ export function RemotePwaApp() {
   useEffect(() => {
     void loadRemoteProfiles()
       .then(profiles => { profilesLoadedRef.current = true; setSavedProfiles(profiles); })
-      .catch(error => setLastError(error instanceof Error ? error.message : 'Could not load saved remote connections.'))
+      .catch(error => setActionError(error instanceof Error ? error.message : 'Could not load saved remote connections.'))
       .finally(() => setProfilesLoading(false));
-  }, [setLastError]);
+  }, [setActionError]);
   useEffect(() => {
     let mounted = true;
     void installNativePushRouting()
       .then(consumeNativePushRoute)
       .then(route => { if (mounted && route) setPendingPushRoute(route); })
-      .catch(error => { if (mounted) setLastError(error instanceof Error ? error.message : 'Native notification setup failed.'); });
+      .catch(error => { if (mounted) setActionError(error instanceof Error ? error.message : 'Native notification setup failed.'); });
     return () => { mounted = false; };
-  }, [setLastError]);
+  }, [setActionError]);
   useEffect(() => {
     if (!profilesLoading && profilesLoadedRef.current) {
       void saveRemoteProfiles(savedProfiles).catch(error => {
-        setLastError(error instanceof Error ? error.message : 'Could not save remote connections.');
+        setActionError(error instanceof Error ? error.message : 'Could not save remote connections.');
       });
     }
-  }, [profilesLoading, savedProfiles, setLastError]);
+  }, [profilesLoading, savedProfiles, setActionError]);
 
   const openSidebar = useCallback(() => {
     sidebarOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -191,11 +195,11 @@ export function RemotePwaApp() {
     const route = () => {
       void consumeNativePushRoute().then(detail => {
         if (detail) setPendingPushRoute(detail);
-      }).catch(() => setLastError('Could not open the notification.'));
+      }).catch(() => setActionError('Could not open the notification.'));
     };
     window.addEventListener('pane-native-push-route', route);
     return () => window.removeEventListener('pane-native-push-route', route);
-  }, [setLastError]);
+  }, [setActionError]);
 
   useEffect(() => {
     if (!adapter || !isNativeMobile()) return;
@@ -208,9 +212,9 @@ export function RemotePwaApp() {
     }).then(result => {
       if (!active) void result?.remove();
       else listener = result;
-    }).catch(() => setLastError('Could not monitor app activity.'));
+    }).catch(() => setActionError('Could not monitor app activity.'));
     return () => { active = false; void listener?.remove(); };
-  }, [adapter, setLastError]);
+  }, [adapter, setActionError]);
 
   const selectedSession = useMemo(() => {
     if (!selectedSessionId) return null;
@@ -259,15 +263,14 @@ export function RemotePwaApp() {
       if (!hasSelectedSession) {
         selectSession(findFirstSessionId(nextProjects));
       }
-      setLastError(null);
       return nextProjects;
     } catch (error) {
-      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to load remote panes');
+      if (runtime === activeRuntimeRef.current) setActionError(error instanceof Error ? error.message : 'Failed to load remote panes');
       return null;
     } finally {
       if (runtime === activeRuntimeRef.current) setLoading(false);
     }
-  }, [adapter, selectSession, setProjects, setLastError]);
+  }, [adapter, selectSession, setProjects, setActionError]);
 
   const loadPanels = useCallback(async (sessionId: string, runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
@@ -287,14 +290,12 @@ export function RemotePwaApp() {
       const keptPanelId = panels.some(panel => panel.id === currentPanelId) ? currentPanelId : null;
       setSelectedPanel(routeMatches ? routedPanel.panelId : keptPanelId ?? activePanel?.id ?? panels[0]?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
-        setLastError('The notified panel is no longer available on this Pane host.');
-      } else {
-        setLastError(null);
+        setActionError('The notified panel is no longer available on this Pane host.');
       }
     } catch (error) {
-      if (runtime === activeRuntimeRef.current && request === panelLoadRequestRef.current) setLastError(error instanceof Error ? error.message : 'Failed to load remote panels');
+      if (runtime === activeRuntimeRef.current && request === panelLoadRequestRef.current) setActionError(error instanceof Error ? error.message : 'Failed to load remote panels');
     }
-  }, [adapter, setPanels, setSelectedPanel, setLastError]);
+  }, [adapter, setPanels, setSelectedPanel, setActionError]);
 
   const loadAffordances = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
@@ -319,9 +320,9 @@ export function RemotePwaApp() {
     } catch (error) {
       if (runtime !== activeRuntimeRef.current || request !== archivedLoadRequestRef.current) return;
       setArchivedProjects([]);
-      setLastError(error instanceof Error ? error.message : 'Failed to load archived panes');
+      setActionError(error instanceof Error ? error.message : 'Failed to load archived panes');
     }
-  }, [adapter, setArchivedProjects, setLastError]);
+  }, [adapter, setArchivedProjects, setActionError]);
 
   const openRemoteOrchestrationSession = useCallback(async (sessionId: string, runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
@@ -330,11 +331,11 @@ export function RemotePwaApp() {
       const view = await runtime.openOrchestrationSession(sessionId);
       if (runtime !== activeRuntimeRef.current || request !== navigationRequestRef.current) return;
       openSession(view);
-      setLastError(null);
+      setActionError(null);
     } catch (error) {
-      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to open Session');
+      if (runtime === activeRuntimeRef.current) setActionError(error instanceof Error ? error.message : 'Failed to open Session');
     }
-  }, [adapter, openSession, setLastError]);
+  }, [adapter, openSession, setActionError]);
 
   const refreshOrchestrationSessions = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
@@ -413,7 +414,7 @@ export function RemotePwaApp() {
       activeRuntimeRef.current = null;
       updateConnection({
         ...INITIAL_CONNECTION,
-        lastError: error instanceof Error ? error.message : 'Failed to connect to remote Pane',
+        connectionError: error instanceof Error ? error.message : 'Failed to connect to remote Pane',
         connectionErrorKind: 'connection',
       });
       throw error;
@@ -427,7 +428,7 @@ export function RemotePwaApp() {
     setPendingPushRoute(null);
     const profile = savedProfiles.find(candidate => candidate.id === route.hostProfileId);
     if (!profile) {
-      setLastError('The notification belongs to a connection that is no longer saved.');
+      setActionError('The notification belongs to a connection that is no longer saved.');
       return;
     }
     const applyRoute = (runtime: RemoteRuntimeAdapter | null) => {
@@ -435,7 +436,7 @@ export function RemotePwaApp() {
       if (route.paneId) {
         const state = useRemoteSessionStore.getState();
         if (!state.projects.some(project => project.sessions?.some(session => session.id === route.paneId))) {
-          setLastError('The notified pane is no longer available on this Pane host.');
+          setActionError('The notified pane is no longer available on this Pane host.');
           return;
         }
         pushRoutePanelRef.current = route.panelId ? { sessionId: route.paneId, panelId: route.panelId } : null;
@@ -449,23 +450,23 @@ export function RemotePwaApp() {
       return;
     }
     void connectProfile(profile).then(applyRoute).catch(() => {});
-  }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, savedProfiles, selectSession, setLastError]);
+  }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, savedProfiles, selectSession, setActionError]);
 
   const connectCode = useCallback(async (code: string) => {
-    setLastError(null);
+    setActionError(null);
     updateConnection({ connectionErrorKind: null });
     let profile: RemotePaneConnectionProfile;
     try {
       profile = decodeRemoteConnectionCode(code);
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : 'Invalid remote Pane connection code');
+      setActionError(error instanceof Error ? error.message : 'Invalid remote Pane connection code');
       updateConnection({ connectionErrorKind: 'connection-code' });
       throw error;
     }
 
     forgetProfilesForBaseUrl(profile.baseUrl, setSavedProfiles);
     await connectProfile(profile);
-  }, [connectProfile, setLastError]);
+  }, [connectProfile, setActionError]);
 
   const disconnect = useCallback(() => {
     activeRuntimeRef.current?.disconnect();
@@ -495,17 +496,18 @@ export function RemotePwaApp() {
   const createTerminal = useCallback(async (options?: RemoteTerminalCreateOptions) => {
     if (!adapter || !selectedSessionId) return;
     setCreatingTerminal(true);
+    setActionError(null);
     try {
       const panel = await adapter.createTerminalPanel(selectedSessionId, options);
       upsertPanel(panel);
       setSelectedPanel(panel.id);
       await adapter.setActivePanel(selectedSessionId, panel.id);
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : 'Failed to create terminal');
+      setActionError(error instanceof Error ? error.message : 'Failed to create terminal');
     } finally {
       setCreatingTerminal(false);
     }
-  }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
+  }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setActionError]);
 
   const selectRemoteSession = useCallback((sessionId: string) => {
     navigationRequestRef.current += 1;
@@ -519,13 +521,13 @@ export function RemotePwaApp() {
     setSidebarActionId(id);
     try {
       await action(adapter);
-      if (adapter === activeRuntimeRef.current) setLastError(null);
+      if (adapter === activeRuntimeRef.current) setActionError(null);
     } catch (error) {
-      if (adapter === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : failure);
+      if (adapter === activeRuntimeRef.current) setActionError(error instanceof Error ? error.message : failure);
     } finally {
       setSidebarActionId(null);
     }
-  }, [adapter, sidebarActionId, setLastError]);
+  }, [adapter, sidebarActionId, setActionError]);
 
   const handleOrchestrationSessionCreated = useCallback((view: OrchestrationSessionView<Session>) => {
     // The create request can finish after a switch to another host.
@@ -569,7 +571,7 @@ export function RemotePwaApp() {
     }),
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
-    refresh: () => void resyncHost(adapter),
+    refresh: () => { setActionError(null); void resyncHost(adapter); },
   }), [adapter, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, resyncHost, runSidebarAction, selectRemoteSession]);
 
   const handleRemoteSessionCreated = useCallback(async (projectId: number, sessionName: string) => {
@@ -593,16 +595,16 @@ export function RemotePwaApp() {
     if (!adapter || !selectedSessionId) return;
     setSelectedPanel(panelId);
     void adapter.setActivePanel(selectedSessionId, panelId).catch(error => {
-      setLastError(error instanceof Error ? error.message : 'Failed to set active panel');
+      setActionError(error instanceof Error ? error.message : 'Failed to set active panel');
     });
-  }, [adapter, selectedSessionId, setSelectedPanel, setLastError]);
+  }, [adapter, selectedSessionId, setSelectedPanel, setActionError]);
 
   useEffect(() => {
     if (!adapter) return;
     // Events sent while the stream was down are lost: refetch once it is back.
     let streamDropped = false;
     return adapter.onStatus(state => {
-      updateConnection({ connectionStatus: state.status, lastError: state.lastError, lastSeenAt: state.lastSeenAt });
+      updateConnection({ connectionStatus: state.status, connectionError: state.lastError, lastSeenAt: state.lastSeenAt });
       if (state.status === 'connected' && streamDropped) void resyncHost(adapter);
       if (state.status !== 'connecting') streamDropped = state.status !== 'connected';
     });
@@ -617,12 +619,12 @@ export function RemotePwaApp() {
       if (cancelled) return;
       setPushStatus(status);
       setPushControls({ needsInputEnabled: status?.needsInputEnabled ?? true, completedEnabled: status?.completedEnabled ?? true });
-      if (pushError) setLastError(pushError);
+      if (pushError) setActionError(pushError);
     })().catch(error => {
-      if (!cancelled) setLastError(error instanceof Error ? error.message : 'Could not set up notifications.');
+      if (!cancelled) setActionError(error instanceof Error ? error.message : 'Could not set up notifications.');
     });
     return () => { cancelled = true; };
-  }, [adapter, activeProfile, setLastError]);
+  }, [adapter, activeProfile, setActionError]);
 
   const changePushControl = useCallback((key: 'needsInputEnabled' | 'completedEnabled', value: boolean) => {
     if (!adapter) return;
@@ -637,9 +639,9 @@ export function RemotePwaApp() {
     }).catch(error => {
       if (adapter !== activeRuntimeRef.current) return;
       setPushControls(pushControls);
-      setLastError(error instanceof Error ? error.message : 'Could not update notification settings.');
+      setActionError(error instanceof Error ? error.message : 'Could not update notification settings.');
     });
-  }, [adapter, pushControls, setLastError]);
+  }, [adapter, pushControls, setActionError]);
 
   useEffect(() => {
     if (!adapter) return;

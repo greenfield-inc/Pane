@@ -173,12 +173,12 @@ export function useRemoteVoiceDictation({
     try {
       const selectedMimeType = selectRecordingMimeType();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
       const recorder = selectedMimeType
         ? new MediaRecorder(stream, { mimeType: selectedMimeType })
         : new MediaRecorder(stream);
 
       chunksRef.current = [];
-      mediaStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
       recordingMimeTypeRef.current = normalizeMimeType(recorder.mimeType || selectedMimeType || 'audio/webm');
       recordingStartedAtRef.current = Date.now();
@@ -261,6 +261,7 @@ export function useRemoteVoiceDictation({
     try {
       const selectedMimeType = selectRecordingMimeType();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
       let socket: WebSocket;
       if (onCreateStreamingSocket) {
         socket = await openStreamingSocket(onCreateStreamingSocket(), handleDeepgramMessage);
@@ -275,7 +276,6 @@ export function useRemoteVoiceDictation({
         ? new MediaRecorder(stream, { mimeType: selectedMimeType })
         : new MediaRecorder(stream);
 
-      mediaStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
       socketRef.current = socket;
       recordingMimeTypeRef.current = normalizeMimeType(recorder.mimeType || selectedMimeType || 'audio/webm');
