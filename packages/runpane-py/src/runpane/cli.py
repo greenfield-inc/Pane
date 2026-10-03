@@ -1144,6 +1144,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "watch": lambda parsed, context: run_watch(parsed),
     "panes create": lambda parsed, context: run_panes_create(parsed),
     "panes archive": lambda parsed, context: run_panes_archive(parsed),
+    "panes handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "panes receive": lambda parsed, context: run_unsupported_contract(parsed, context),
     "panes pin": lambda parsed, context: run_panes_pin(parsed, True),
     "panes unpin": lambda parsed, context: run_panes_pin(parsed, False),
     "panes rename": lambda parsed, context: run_panes_rename(parsed),

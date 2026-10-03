@@ -67,6 +67,11 @@ export interface ParsedArgs {
   removeWorktree?: boolean;
   merged?: boolean;
   launch?: boolean;
+  handoffTo?: string;
+  remote?: string;
+  park?: boolean;
+  archive?: boolean;
+  includeDirty?: boolean;
   watchAs?: string;
   watchSince?: number;
   watchFrom?: 'now' | 'earliest';
@@ -435,6 +440,18 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.asFilePointer = true;
     return;
   }
+  if (flag === '--park') {
+    parsed.park = true;
+    return;
+  }
+  if (flag === '--archive') {
+    parsed.archive = true;
+    return;
+  }
+  if (flag === '--include-dirty') {
+    parsed.includeDirty = true;
+    return;
+  }
   if (flag === '--follow') {
     parsed.follow = true;
     return;
@@ -612,6 +629,18 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
       throw new Error('--concurrency must be a positive integer.');
     }
     parsed.concurrency = concurrency;
+    return;
+  }
+  if (flag === '--to') {
+    parsed.handoffTo = value;
+    return;
+  }
+  if (flag === '--branch') {
+    parsed.branch = value;
+    return;
+  }
+  if (flag === '--remote') {
+    parsed.remote = value;
     return;
   }
   if (flag === '--limit') {

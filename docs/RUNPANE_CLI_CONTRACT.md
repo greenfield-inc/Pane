@@ -139,6 +139,8 @@ runpane links create --pane <pane-id> --json
 runpane panes git-status --pane <pane-id> --json
 runpane help
 runpane <command> --help
+runpane panes handoff --pane <pane-id> --to local --yes --json
+runpane panes receive --repo Pane --branch feat/x --agent codex --yes --json
 ```
 
 `runpane` with no arguments and `runpane setup` open an interactive wizard when stdin and stdout are TTYs. The remote-host wizard asks only for a name, then runs interactive Tailscale setup with automatic port selection; explicit install daemon flags remain available for SSH and manual URLs. In non-interactive shells or CI, both forms must print help, common commands, and agent discovery hints, then exit successfully instead of waiting for input.
@@ -233,6 +235,10 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
+`runpane panes handoff` moves a Pane's work to another runtime: it refuses a dirty worktree unless `--include-dirty` commits it, refuses a non-fast-forward push and names the remote head, pushes the branch, commits and pushes `HANDOFF.md` at the worktree root (pane, branch, head sha, agent, open PR url, timestamp, last `--limit` lines of the CLI panel output), then parks the pane (default; `handedOffAt` appears in `panes list --json`) or archives it with `--archive`. It prints the `runpane panes receive` command for the target. It runs on the runtime that owns the pane and is available in the npm wrapper only.
+
+`runpane panes receive` completes a handoff on the target runtime: it fetches the branch, refuses when the remote ref has no `HANDOFF.md`, then resumes this runtime's parked pane for that branch, reuses a registered worktree without a pane, or creates a tracking branch plus a Pane-managed worktree named after the source pane, and starts the chosen agent with one instruction that begins from the note. It reports `readiness` and `initialInput` like `panes create` and prints the pane id and `HANDOFF.md` path. Available in the npm wrapper only.
+
 ## Command reference
 
 Every command and its options, from `commands` in `contracts/runpane/contract.json`.
@@ -305,6 +311,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `panes handoff`: Hand a Pane's work to another runtime: push the branch, commit a HANDOFF.md note, then park or archive the pane.
+- `panes receive`: Receive a handed-off branch: fetch it, open a Pane on that exact branch, and start the agent from HANDOFF.md.
 
 ```bash
 runpane help [command]
@@ -385,6 +393,8 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane panes handoff --pane <pane-id> --to <local|remote:<label>> [--park|--archive] [--include-dirty] [--force] [--limit <count>] [--dry-run] --yes [--json]
+runpane panes receive --repo <selector> --branch <branch> --agent <codex|claude|cursor> [--name <name>] [--remote <name>] [--no-focus|--focus] [--source user|agent] [--ready-timeout-ms <ms>] [--dry-run] --yes [--json]
 ```
 
 ## Agent Context
@@ -435,6 +445,8 @@ Brief tools:
 - `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `watch`: Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.
+- `panes handoff`: Hand a Pane's work to another runtime: push the branch, commit a HANDOFF.md note, then park or archive the pane.
+- `panes receive`: Receive a handed-off branch: fetch it, open a Pane on that exact branch, and start the agent from HANDOFF.md.
 
 Managed AGENTS.md block body:
 
@@ -527,6 +539,8 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--to <local|remote:<label>>
+--remote <name>
 --json
 --wait-ready
 --no-focus
@@ -553,6 +567,9 @@ These flags are consumed by local daemon-control commands:
 --idle-backoff
 --report
 --read-only
+--park
+--archive
+--include-dirty
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

@@ -2568,6 +2568,13 @@ export class DatabaseService {
     this.db.prepare(
       "CREATE INDEX IF NOT EXISTS idx_sessions_worktree_ownership ON sessions(worktree_ownership, project_id)",
     ).run();
+
+    // Handed-off panes (runpane panes handoff --park) keep their row and worktree but
+    // record when the work moved to another runtime. Nullable; null means not handed off.
+    if (!finalSessionColumns.some(column => column.name === "handed_off_at")) {
+      this.db.prepare("ALTER TABLE sessions ADD COLUMN handed_off_at DATETIME").run();
+      console.log("[Database] Added handed_off_at column to sessions table");
+    }
   }
 
   // Project operations
@@ -3427,6 +3434,10 @@ export class DatabaseService {
     if (data.pr_renamed !== undefined) {
       updates.push("pr_renamed = ?");
       values.push(data.pr_renamed ? 1 : 0);
+    }
+    if (data.handed_off_at !== undefined) {
+      updates.push("handed_off_at = ?");
+      values.push(data.handed_off_at);
     }
 
     if (updates.length === 0) {

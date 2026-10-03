@@ -35,7 +35,9 @@ export function SessionDetailTooltip({ session, gitStatus, showName = true, show
 
   let statusText = '';
   let statusColor = 'text-text-tertiary';
-  if (session.status === 'running' || session.status === 'initializing') {
+  if (session.handedOffAt) {
+    statusText = `Handed off ${formatTimeAgo(session.handedOffAt)}`;
+  } else if (session.status === 'running' || session.status === 'initializing') {
     statusText = session.status === 'initializing' ? 'Initializing' : 'Running';
     statusColor = 'text-status-success';
   } else if (session.status === 'waiting') {
