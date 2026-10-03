@@ -1,4 +1,8 @@
+import type { IpcMain } from 'electron';
 import http from 'http';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import zlib from 'zlib';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +14,7 @@ import { boundary, decodeBoundary, type JsonValue } from '../../../shared/valida
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { RecentWrites } from './recentWrites';
 import { PaneError } from '../../../shared/paneError';
+import { registerHostFsHandlers } from '../ipc/hostFs';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
@@ -370,6 +375,52 @@ describe('PaneRemoteHttpApiServer', () => {
         result: [{ id: 'session-1' }],
       },
     });
+  });
+
+  it('serves the host folder browser to remote clients from the host filesystem', async () => {
+    const hostHome = await mkdtemp(path.join(os.tmpdir(), 'pane-remote-host-'));
+    await mkdir(path.join(hostHome, 'montlakev2', '.git'), { recursive: true });
+    vi.spyOn(os, 'homedir').mockReturnValue(hostHome);
+    const registry = new PaneCommandRegistry();
+    // SAFETY: Registry binding only needs IpcMain.handle.
+    registerHostFsHandlers({ handle: vi.fn() } as IpcMain, registry);
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    try {
+      await expect(requestJson(server, 'POST', '/invoke', {
+        channel: 'fs:browse-directories',
+        args: [{ hostLabel: 'testina' }],
+      }, 'secret-token')).resolves.toEqual({
+        statusCode: 200,
+        body: {
+          ok: true,
+          result: {
+            success: true,
+            data: {
+              path: hostHome,
+              parent: path.dirname(hostHome),
+              home: hostHome,
+              platform: process.platform,
+              entries: [{ name: 'montlakev2', path: path.join(hostHome, 'montlakev2'), isGitRepo: true, isHidden: false }],
+            },
+          },
+        },
+      });
+      if (process.platform !== 'win32') {
+        await expect(requestJson(server, 'POST', '/invoke', {
+          channel: 'fs:browse-directories',
+          args: [{ path: 'C:\\runpane-temp-home', hostLabel: 'testina' }],
+        }, 'secret-token')).resolves.toMatchObject({
+          statusCode: 200,
+          body: { ok: true, result: { success: false, code: 'WINDOWS_PATH_ON_POSIX_HOST' } },
+        });
+      }
+    } finally {
+      vi.mocked(os.homedir).mockRestore();
+      await rm(hostHome, { recursive: true, force: true });
+    }
   });
 
   it('accepts browser invoke auth metadata from a simple request body', async () => {
