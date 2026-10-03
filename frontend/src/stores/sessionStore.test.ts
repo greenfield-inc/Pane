@@ -38,6 +38,31 @@ describe('sessionStore', () => {
     const timer = useSessionStore.getState().gitStatusBatchTimer;
     if (timer) clearTimeout(timer);
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps main-repository updates when switching away and back', async () => {
+    vi.stubGlobal('window', { dispatchEvent: vi.fn(), electronAPI: {
+      invoke: async () => undefined,
+      sessions: { markViewed: async () => ({success: true}) },
+    } });
+    const main = session({id: 'main', isMainRepo: true, name: 'Old name'});
+    useSessionStore.setState({sessions: [main, session({id: 'other'})], activeMainRepoSession: main, activeSessionId: 'main'});
+    useSessionStore.getState().updateSession({...main, name: 'Updated name', gitStatus: undefined});
+    await useSessionStore.getState().setActiveSession('other');
+    await useSessionStore.getState().setActiveSession('main');
+    expect(useSessionStore.getState().activeMainRepoSession?.name).toBe('Updated name');
+    expect(useSessionStore.getState().sessions.find(pane => pane.id === 'main')?.name).toBe('Updated name');
+  });
+
+  it('marks a fetched pane viewed when selecting it for the first time', async () => {
+    const viewed = vi.fn(async () => ({success: true}));
+    vi.stubGlobal('window', { dispatchEvent: vi.fn(), electronAPI: {
+      invoke: async () => undefined,
+      sessions: { get: async () => ({success: true, data: session({id: 'fetched'})}), markViewed: viewed },
+    } });
+    await useSessionStore.getState().setActiveSession('fetched');
+    expect(viewed).toHaveBeenCalledWith('fetched');
   });
 
   it('keeps the current active pane when a background-created session arrives', () => {

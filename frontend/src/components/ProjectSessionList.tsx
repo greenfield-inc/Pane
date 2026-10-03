@@ -701,7 +701,6 @@ function SessionRow({
   onArchive, onTogglePinned, displayName, rowLayout, nested = false,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
-  const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
   const initialGitStatusRequestRef = useRef<string | null>(null);
 
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
@@ -723,7 +722,7 @@ function SessionRow({
           true
         ) as GitStatusIPCResponse;
         if (res?.success && res.gitStatus) {
-          setLocalGitStatus(res.gitStatus);
+          useSessionStore.getState().updateSessionGitStatus(session.id, res.gitStatus);
         }
       } catch {
         // Silently fail
@@ -732,25 +731,7 @@ function SessionRow({
     fetchStatus();
   }, [session.id, session.archived, session.status]);
 
-  // Sync from session prop when store updates
-  useEffect(() => {
-    if (session.gitStatus) setLocalGitStatus(session.gitStatus);
-  }, [session.gitStatus]);
-
-  // Listen for background git status updates (e.g., PR enrichment)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
-      const detail = (e as CustomEvent<{ sessionId: string; gitStatus: GitStatus }>).detail;
-      if (detail?.sessionId === session.id && detail?.gitStatus) {
-        setLocalGitStatus(detail.gitStatus);
-      }
-    };
-    window.addEventListener('git-status-updated', handler);
-    return () => window.removeEventListener('git-status-updated', handler);
-  }, [session.id]);
-
-  const gs = localGitStatus;
+  const gs = session.gitStatus;
 
   const iconColor = gs?.prState
     ? gs.prState === 'MERGED' ? 'text-purple-400'
@@ -779,7 +760,7 @@ function SessionRow({
       )}
     >
       <Tooltip
-        content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
+        content={<SessionDetailTooltip session={session} gitStatus={session.gitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
         side="right"
         interactive
       >
