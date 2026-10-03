@@ -21,6 +21,12 @@ export interface DropdownItem {
   showDot?: boolean;
   dotColor?: string;
   shortcut?: string;
+  /** An icon button at the row's end that does something other than picking the row. */
+  action?: {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    onClick: () => void;
+  };
 }
 
 export interface DropdownProps {
@@ -371,6 +377,8 @@ export function Dropdown({
                 const isSelectable = selectedId !== undefined;
                 const isSelected = item.id === selectedId;
                 const variant = item.variant || 'default';
+                const action = item.action;
+                const ActionIcon = action?.icon;
                 const menuButton = (
                     <button
                       type="button"
@@ -382,7 +390,7 @@ export function Dropdown({
                       onMouseEnter={() => !item.disabled && setActiveIndex(index)}
                       disabled={item.disabled}
                       className={cn(
-                        'w-full text-left px-2.5 py-1',
+                        'w-full min-w-0 text-left px-2.5 py-1',
                         'flex items-center gap-2',
                         'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
                         'min-h-[1.75rem] group relative',
@@ -418,9 +426,27 @@ export function Dropdown({
                       <div className="h-2" />
                     )}
 
-                    {item.description && item.descriptionInTooltip
-                      ? <Tooltip content={item.description} side="right" delay={250}>{menuButton}</Tooltip>
-                      : menuButton}
+                    <div className="flex items-center">
+                      {item.description && item.descriptionInTooltip
+                        ? <Tooltip content={item.description} side="right" delay={250}>{menuButton}</Tooltip>
+                        : menuButton}
+                      {action && ActionIcon && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          aria-label={action.label}
+                          title={action.label}
+                          tabIndex={-1}
+                          onClick={() => {
+                            action.onClick();
+                            if (closeOnSelect) handleClose();
+                          }}
+                          className="mr-1 inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle"
+                        >
+                          <ActionIcon className="h-3.5 w-3.5 stroke-[1.5]" />
+                        </button>
+                      )}
+                    </div>
                   </React.Fragment>
                 );
               })}

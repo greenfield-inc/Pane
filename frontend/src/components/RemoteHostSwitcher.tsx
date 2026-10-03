@@ -1,9 +1,11 @@
 import { useState, type ReactElement } from 'react';
-import { Laptop, Plug, Radio, Server } from 'lucide-react';
+import { Laptop, Plug, Radio, SquareTerminal } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { HOST_ICONS, describeHost } from '../utils/hostKind';
+import { getHostTerminalPresentation, openHostTerminal } from '../utils/hostTerminal';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 
 interface RemoteHostSwitcherProps {
@@ -53,16 +55,25 @@ export function RemoteHostSwitcher({
   };
 
   const items: DropdownItem[] = [
-    ...profiles.map((profile) => ({
-      id: profile.id,
-      label: profile.label,
-      description: remote && profile.id === model.selectedId
-        ? `${activeStatusText} · ${profile.baseUrl}`
-        : profile.baseUrl,
-      icon: Server,
-      disabled: switching,
-      onClick: () => void switchTo(profile.id),
-    })),
+    ...profiles.map((profile) => {
+      const active = remote && profile.id === model.selectedId;
+      return {
+        id: profile.id,
+        label: profile.label,
+        description: active ? `${activeStatusText} · ${profile.baseUrl}` : profile.baseUrl,
+        icon: HOST_ICONS[describeHost(profile).icon],
+        disabled: switching,
+        onClick: () => void switchTo(profile.id),
+        // Only the active host's terminal can open: the window talks to one host at a time.
+        action: active ? {
+          label: getHostTerminalPresentation(profile).openLabel,
+          icon: SquareTerminal,
+          onClick: () => {
+            openHostTerminal().catch((error: unknown) => console.error('Failed to open the host terminal:', error));
+          },
+        } : undefined,
+      };
+    }),
     {
       id: LOCAL_RUNTIME_ID,
       label: 'This computer',

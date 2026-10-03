@@ -4,6 +4,7 @@ import { useErrorStore } from '../stores/errorStore';
 import { usePanelStore } from '../stores/panelStore';
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
+import { useHostTerminalStore } from '../stores/hostTerminalStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { panelApi } from '../services/panelApi';
@@ -34,6 +35,11 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   if (hostChanged && useNavigationStore.getState().activeView === 'project') {
     useNavigationStore.getState().navigateToSessions();
     await useSessionStore.getState().setActiveSession(null);
+  }
+  // The open host terminal belongs to the previous host.
+  if (hostChanged) {
+    useHostTerminalStore.getState().setTerminal(null);
+    if (useNavigationStore.getState().activeView === 'host-terminal') useNavigationStore.getState().navigateToSessions();
   }
   await useConfigStore.getState().fetchConfig();
 

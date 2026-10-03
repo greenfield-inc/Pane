@@ -8,12 +8,14 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { HOST_TERMINAL_SESSION_ID } from '../../../shared/types/hostTerminal';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
 import { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
+import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
@@ -681,6 +683,10 @@ export class TerminalPanelManager extends EventEmitter {
   ): void {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return;
+    if (submitStrategy === 'none') {
+      this.writeToTerminal(panelId, input);
+      return;
+    }
     // An agent reads text and Enter arriving together as a paste and keeps
     // the Enter as a newline, so agents get the Enter as its own write.
     if (submitStrategy === 'codex-ctrl-enter' || terminal.agentType) {
@@ -1104,6 +1110,8 @@ export class TerminalPanelManager extends EventEmitter {
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
+    // The host terminal's session folder only anchors it; its shell starts at home.
+    if (panel.sessionId === HOST_TERMINAL_SESSION_ID) cwd = os.homedir();
     let sessionRuntimeRc: string | undefined;
     if (sessionState.orchestrationSessionId) {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))

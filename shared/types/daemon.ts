@@ -85,6 +85,7 @@ const daemonFrameSchema: BoundarySchema<PaneDaemonFrame> = boundary.union(
 export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'agent-usage:',
   'folders:',
+  'host-terminal:',
   'logs:',
   'mobile:',
   'panels:',

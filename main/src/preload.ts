@@ -38,6 +38,7 @@ import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
+import type { HostTerminalOpenRequest } from '../../shared/types/hostTerminal';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type {
   PanePermissionRequest as PermissionRequest,
@@ -387,6 +388,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       line?: number;
       column?: number;
     }): Promise<IPCResponse> => invokeIpc('diagnostics:renderer-fatal', payload),
+  },
+
+  hostTerminal: {
+    open: (request?: HostTerminalOpenRequest): Promise<IPCResponse> => invokeIpc('host-terminal:open', request),
   },
 
   paneChat: {
