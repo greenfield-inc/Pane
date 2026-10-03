@@ -14,7 +14,9 @@ export interface SelectionPopoverProps {
   workingDirectory?: string;
   sessionId?: string;
   isRemoteMode?: boolean;
-  onOpenInBrowser?: (url: string) => void | Promise<void>;
+  /** Whether this session can host a Pane Browser panel; the button is hidden otherwise. */
+  browserAvailable: boolean;
+  onOpenInBrowser: (url: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -62,6 +64,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   workingDirectory,
   sessionId,
   isRemoteMode = false,
+  browserAvailable,
   onOpenInBrowser,
   onClose,
 }) => {
@@ -93,15 +96,9 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   };
 
   const handleOpenInBrowser = async () => {
-    if (urlMatch && sessionId) {
+    if (urlMatch && sessionId && browserAvailable) {
       try {
-        if (onOpenInBrowser) {
-          await onOpenInBrowser(urlMatch[0]);
-        } else {
-          window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
-            detail: { url: urlMatch[0], sessionId }
-          }));
-        }
+        await onOpenInBrowser(urlMatch[0]);
       } catch (error) {
         console.error('Failed to open URL in browser panel:', error);
       } finally {
@@ -145,7 +142,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
           Copy
         </span>
       </PopoverButton>
-      {isUrl && sessionId && (
+      {isUrl && sessionId && browserAvailable && (
         <PopoverButton onClick={handleOpenInBrowser}>
           <span className="flex items-center gap-2">
             <Globe className="w-4 h-4" />

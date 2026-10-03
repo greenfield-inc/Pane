@@ -12,7 +12,6 @@ import { randomUUID } from 'crypto';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
@@ -21,6 +20,17 @@ import {
   normalizeAppearance,
   type AppearanceConfig,
 } from '../../../shared/types/appearance';
+import {
+  boundary,
+  decodeBoundary,
+  decodeOptionalBoundary,
+  type JsonValue,
+} from '../../../shared/validation/boundaryDecoder';
+import {
+  collectActiveBindings,
+  findChordConflicts,
+  normalizeKeyboardShortcutOverrides,
+} from '../../../shared/utils/keyboardBindings';
 
 const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
 const LEGACY_POSTHOG_HOST = 'https://us.i.posthog.com';
@@ -42,6 +52,7 @@ export class ConfigManager extends EventEmitter {
   private configDir: string;
   private fileWatcher: FSWatcher | null = null;
   private lastConfigJson: string = '';
+  private lastLoggedShortcutDiagnostics: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
 
   constructor(defaultGitPath?: string) {
@@ -228,6 +239,10 @@ export class ConfigManager extends EventEmitter {
         };
         shouldPersistMigration = true;
       }
+      if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
+        delete this.config.keyboardShortcutOverrides;
+      }
+
       if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
         this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
         shouldPersistMigration = true;
@@ -400,6 +415,9 @@ export class ConfigManager extends EventEmitter {
           defaultsVersion: boundary.optional(boundary.number),
         }));
       }
+      if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {
+        delete next.keyboardShortcutOverrides;
+      }
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;
@@ -438,6 +456,40 @@ export class ConfigManager extends EventEmitter {
     if (isLightTheme(appearance.systemDarkTheme)) {
       throw new AppearanceValidationError('systemDarkTheme must be a dark palette');
     }
+  }
+
+  /**
+   * Normalizes the raw override map, logs anything malformed or conflicting
+   * (once per distinct message set), and reports whether the map should stay
+   * in config: any non-empty object is preserved verbatim (unknown ids and
+   * malformed values from hand edits or newer versions are kept for
+   * forward/downgrade tolerance and only ignored at runtime); `{}` and
+   * non-objects are dropped.
+   */
+  private applyKeyboardShortcutOverrides(rawOverrides: JsonValue | undefined, config: AppConfig = this.config): boolean {
+    const normalized = normalizeKeyboardShortcutOverrides(rawOverrides);
+    const messages = normalized.diagnostics.map(message =>
+      `[ConfigManager] keyboardShortcutOverrides: ${message}`
+    );
+    const conflicts = findChordConflicts(collectActiveBindings({
+      overrides: rawOverrides,
+      terminalShortcuts: config.terminalShortcuts,
+      customCommands: config.customCommands,
+      // No platform gate: overrides are global and a Windows host can open a
+      // WSL project where platform-limited commands (Cursor) are active.
+    }));
+    for (const conflict of conflicts) {
+      messages.push(
+        `[ConfigManager] keyboardShortcutOverrides conflict: ${conflict.chord} is bound to ${conflict.ids.join(' and ')}`
+      );
+    }
+    const diagnosticKey = messages.join('\n');
+    if (diagnosticKey !== this.lastLoggedShortcutDiagnostics) {
+      this.lastLoggedShortcutDiagnostics = diagnosticKey;
+      for (const message of messages) console.warn(message);
+    }
+    const parsed = decodeOptionalBoundary(rawOverrides, boundary.jsonObject);
+    return parsed !== undefined && Object.keys(parsed).length > 0;
   }
 
   getGitRepoPath(): string {

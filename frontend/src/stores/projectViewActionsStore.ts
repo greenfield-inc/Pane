@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { InspectorTab } from '../components/InspectorTabs';
+import type { PanelCreateOptions } from '../types/panelComponents';
 
 /**
  * What a main-repo pane (ProjectView) can do in response to the global tab /
@@ -11,6 +12,7 @@ interface ProjectViewActions {
   toggleDetail: () => void;
   showInspector: (tab: InspectorTab) => void;
   addTerminal: () => void;
+  addTerminalWithOptions: (options: PanelCreateOptions) => void;
   tabCount: () => number;
   selectTab: (index: number) => void;
   cycleTab: (direction: 'next' | 'prev') => void;

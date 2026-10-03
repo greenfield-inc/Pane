@@ -263,7 +263,7 @@ function createServicesStub(overrides: Partial<AppServices> = {}): AppServices {
   return {
     sessionManager: {},
     gitStatusManager: {},
-    configManager: {},
+    configManager: { on: () => undefined },
     databaseService: {},
     worktreeManager: {},
     gitDiffManager: {},
@@ -297,6 +297,7 @@ describe('daemon registry IPC bindings', () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     registerConfigHandlers(ipcMain, createServicesStub({
       configManager: {
+        on: () => undefined,
         getConfig: () => ({
           anthropicApiKey: 'secret-api-key',
           terminalShortcuts: [{
@@ -364,6 +365,7 @@ describe('daemon registry IPC bindings', () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     registerVoiceHandlers(ipcMain, createServicesStub({
       configManager: {
+        on: () => undefined,
         getConfig: () => ({}),
       },
     } as Partial<AppServices>), registry);

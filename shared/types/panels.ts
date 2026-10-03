@@ -237,6 +237,13 @@ export interface SetupTasksPanelState {
 
 export interface BrowserPanelState {
   currentUrl?: string;
+  /**
+   * Monotonically increasing token written by the renderer's navigation
+   * helper so a repeated request for the current URL reloads it. It rides
+   * along in the panel state update but carries no meaning across restarts:
+   * BrowserPanel seeds its last-seen nonce from the mounted state.
+   */
+  navigationNonce?: number;
   isPopup?: boolean;
   /** Set when an agent reopens this page (runpane panels open); the tab reloads to show the latest file. */
   reopenedAt?: string;

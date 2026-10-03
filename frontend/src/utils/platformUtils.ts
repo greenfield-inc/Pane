@@ -24,3 +24,11 @@ export function isWindows(): boolean {
 export function getModifierKeyName(): string {
   return isMac() ? 'Cmd' : 'Ctrl';
 }
+
+/**
+ * Platform id in the form the shared shortcut catalog and agent presets use.
+ * Project environments (e.g. WSL) can override this per project.
+ */
+export function rendererPlatform(): 'darwin' | 'win32' | 'linux' {
+  return isWindows() ? 'win32' : isMac() ? 'darwin' : 'linux';
+}

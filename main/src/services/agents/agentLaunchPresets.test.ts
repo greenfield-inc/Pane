@@ -5,6 +5,7 @@ import {
   isAgentSupportedOnPlatform,
 } from '../../../../shared/constants/agentLaunchPresets';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
+import { getCatalogEntry } from '../../../../shared/constants/keyboardShortcuts';
 
 describe('AGENT_LAUNCH_PRESETS', () => {
   it('mirrors the RunPane contract agent templates exactly', () => {
@@ -16,9 +17,9 @@ describe('AGENT_LAUNCH_PRESETS', () => {
     }
   });
 
-  it('assigns unique, contiguous hotkey slots starting at mod+alt+3', () => {
-    const slots = AGENT_LAUNCH_PRESETS.map(p => Number(p.hotkey.replace('mod+alt+', '')));
-    expect(slots).toEqual(slots.map((_, i) => 3 + i));
+  it('maps every preset to its catalog default', () => {
+    expect(AGENT_LAUNCH_PRESETS.map(p => getCatalogEntry(p.hotkeyId)?.defaultChord))
+      .toEqual(['mod+alt+3', 'mod+alt+4', 'mod+alt+5']);
     expect(new Set(AGENT_LAUNCH_PRESETS.map(p => p.hotkeyId)).size).toBe(AGENT_LAUNCH_PRESETS.length);
   });
 

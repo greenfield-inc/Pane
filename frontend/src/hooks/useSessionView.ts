@@ -731,7 +731,6 @@ export const useSessionView = (
   useHotkey({
     id: 'git-commit',
     label: 'Git: Commit',
-    keys: 'mod+shift+k',
     category: 'session',
     action: () => {
       setDialogType('commit');
@@ -745,7 +744,6 @@ export const useSessionView = (
   useHotkey({
     id: 'git-push',
     label: 'Git: Push',
-    keys: 'mod+shift+u',
     category: 'session',
     action: () => handleGitPush(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
@@ -755,7 +753,6 @@ export const useSessionView = (
   useHotkey({
     id: 'git-soft-reset',
     label: 'Git: Undo Last Commit',
-    keys: 'mod+alt+z',
     category: 'session',
     action: () => handleGitSoftReset(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
@@ -765,7 +762,6 @@ export const useSessionView = (
   useHotkey({
     id: 'git-pull',
     label: 'Git: Pull',
-    keys: 'mod+shift+l',
     category: 'session',
     action: () => handleGitPull(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo,
@@ -775,7 +771,6 @@ export const useSessionView = (
   useHotkey({
     id: 'git-rebase-from-main',
     label: 'Git: Rebase from Main',
-    keys: 'mod+shift+r',
     category: 'session',
     action: () => handleRebaseMainIntoWorktree(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && hasChangesToRebase,
@@ -785,7 +780,6 @@ export const useSessionView = (
   useHotkey({
     id: 'git-merge-to-main',
     label: 'Git: Merge to Main',
-    keys: 'mod+shift+m',
     category: 'session',
     action: () => handleSquashAndRebaseToMain(),
     enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo &&

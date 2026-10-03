@@ -4,6 +4,7 @@ import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/p
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
 import { usePanelStore } from '../../../stores/panelStore';
+import { resolveBrowserNavigation } from '../../../services/browserPanelNavigation';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useResizable } from '../../../hooks/useResizable';
 import { normalizeUrl } from './browserUrl';
@@ -26,10 +27,12 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
   const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
-  const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
+  const browserStateFromPanel = panel.state.customState as BrowserPanelState | undefined;
+  const currentUrlFromPanelState = browserStateFromPanel?.currentUrl;
+  const navigationNonceFromPanelState = browserStateFromPanel?.navigationNonce;
+  const lastNavigationNonceRef = useRef<number | undefined>(navigationNonceFromPanelState);
   const isHostFileUrl = hasFileProtocol(currentUrlFromPanelState);
-  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
-  const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
+  const reopenedAt = browserStateFromPanel?.reopenedAt;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
@@ -158,15 +161,19 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     persistState(normalized);
   }, [persistState]);
 
+  // Single navigation trigger for requests from other surfaces (terminal links,
+  // selection popover, HTML preview): they write panel state through
+  // openUrlInSessionBrowser, and a fresh nonce for the same URL means reload.
   useEffect(() => {
-    // A navigation's debounced persistence is an echo, not a new load request.
-    // Reassigning src here resets the guest's navigation history.
-    // A host changing its file entry to HTTP also changes the guest's session,
-    // even if the client already followed a link to that exact HTTP page.
     const endsRemoteFileSession = Boolean(fileSession?.partition) && !isHostFileUrl;
-    if (!currentUrlFromPanelState || (currentUrlFromPanelState === lastNavigationUrlRef.current && !endsRemoteFileSession)) return;
-    navigateTo(currentUrlFromPanelState);
-  }, [currentUrlFromPanelState, isHostFileUrl, fileSession?.partition, navigateTo]);
+    const decision = resolveBrowserNavigation(
+      { url: lastNavigationUrlRef.current ?? '', nonce: lastNavigationNonceRef.current },
+      { currentUrl: currentUrlFromPanelState, nonce: navigationNonceFromPanelState },
+    );
+    lastNavigationNonceRef.current = navigationNonceFromPanelState;
+    if ((decision === 'navigate' || endsRemoteFileSession) && currentUrlFromPanelState) navigateTo(currentUrlFromPanelState);
+    else if (decision === 'reload') webviewRef.current?.reload();
+  }, [currentUrlFromPanelState, navigationNonceFromPanelState, isHostFileUrl, fileSession?.partition, navigateTo]);
 
   // An agent reopened this page after rewriting it; show the new content.
   const lastReopenedAt = useRef(reopenedAt);
@@ -348,30 +355,6 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     window.addEventListener('browser-panel:popup-requested', handler);
     return () => window.removeEventListener('browser-panel:popup-requested', handler);
   }, [panel.id, panel.sessionId, addPanel, setActivePanelInStore]);
-
-  // Listen for browser-panel:navigate CustomEvents (e.g., from SelectionPopover "Open in Browser")
-  // Uses stopImmediatePropagation so only the first browser panel for a session handles the event,
-  // preventing duplicate navigation when multiple browser panels exist.
-  // Also auto-focuses this browser panel so the user sees the navigated page immediately.
-  useEffect(() => {
-    const handler = (e: Event) => {
-      // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
-      const customEvent = e as CustomEvent<{ url: string; sessionId: string }>;
-      if (customEvent.detail.sessionId === panel.sessionId) {
-        e.stopImmediatePropagation();
-        if (customEvent.detail.url === url) {
-          webviewRef.current?.reload();
-        } else {
-          navigateTo(customEvent.detail.url);
-        }
-        // Auto-focus this browser panel
-        setActivePanelInStore(panel.sessionId, panel.id);
-        panelApi.setActivePanel(panel.sessionId, panel.id).catch(() => {});
-      }
-    };
-    window.addEventListener('browser-panel:navigate', handler);
-    return () => window.removeEventListener('browser-panel:navigate', handler);
-  }, [panel.sessionId, panel.id, setActivePanelInStore, navigateTo, url]);
 
   // Hide/show DevTools overlay when switching between panel tabs.
   // Close the WebContentsView when inactive so it doesn't cover other panels,

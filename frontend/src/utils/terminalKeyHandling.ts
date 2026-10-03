@@ -12,6 +12,7 @@ export interface TerminalKeyHandlingState {
   isCliPanel: boolean;
   isMac: boolean;
   keyboardShortcutsEnabled: boolean;
+  isTuiReleasableChord?: (event: TerminalKeyLike) => boolean;
 }
 
 export interface TerminalKeyLike {
@@ -65,9 +66,8 @@ function isPaneNavigationShortcut(
   event: TerminalKeyLike,
   state: TerminalKeyHandlingState,
 ): boolean {
-  const primaryModifier = state.isMac ? event.metaKey : event.ctrlKey;
-  if (!primaryModifier) return false;
-
+  // Literal Control on macOS must retain terminal signals such as SIGQUIT.
+  if ((event.ctrlKey || event.metaKey) && !(state.isMac ? event.metaKey : event.ctrlKey)) return false;
   const isAltGr = event.getModifierState('AltGraph');
   const digitMatch = event.code.match(/^Digit([1-9])$/);
   const isUnreportedAltGrDigit = !state.isMac
@@ -75,25 +75,38 @@ function isPaneNavigationShortcut(
     && event.altKey
     && digitMatch
     && event.key !== digitMatch[1];
-  if (
-    event.altKey
-    && !isAltGr
-    && !isUnreportedAltGrDigit
-    && !event.shiftKey
-    && (
-      ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
-      || digitMatch
-    )
-  ) {
-    return true;
-  }
+  if (isAltGr || isUnreportedAltGrDigit) return false;
+  return state.isTuiReleasableChord?.(event) ?? false;
+}
 
-  if (!event.altKey && event.key === 'Tab') return true;
-  if (!event.altKey && event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
-  if (!event.altKey && event.shiftKey && event.key.toLowerCase() === 'z') return true;
+const TERMINAL_RESERVED_EVENT_KEYS = ['f', 'v', 'q', 'p'];
+// mod+k (any Shift/Alt) is the terminal's clear-scrollback branch in TerminalPanel;
+// mod+c / mod+shift+c is terminal copy (terminalClipboard.isTerminalCopyShortcut).
+const TERMINAL_RESERVED_CHORD_KEYS = new Set([...TERMINAL_RESERVED_EVENT_KEYS, 'k', 'c']);
 
+export function isTerminalReservedChord(event: TerminalKeyLike): boolean {
+  if (event.code === 'AltRight') return true;
+  return (event.ctrlKey || event.metaKey)
+    && TERMINAL_RESERVED_EVENT_KEYS.includes(event.key.toLowerCase());
+}
+
+/**
+ * String twin of `isTerminalReservedChord` for chords a user records: the
+ * terminal owns Ctrl/Cmd + f/v/q/p/k/c with any Shift/Alt combination.
+ */
+export function isTerminalReservedChordString(chord: string): boolean {
+  const parts = chord.split('+');
+  return parts.includes('mod') && TERMINAL_RESERVED_CHORD_KEYS.has(parts[parts.length - 1]);
+}
+
+export function shouldReleaseToApplication(
+  event: TerminalKeyLike,
+  state: { isMac: boolean; isBound: boolean },
+): boolean {
+  if (event.getModifierState('AltGraph')) return false;
   const isBackslash = event.code === 'Backslash' || event.code === 'IntlBackslash';
-  return !event.altKey && isBackslash;
+  if (isBackslash && (state.isMac ? !event.metaKey : !event.ctrlKey)) return false;
+  return state.isBound;
 }
 
 export function resolveTerminalKeyHandling(

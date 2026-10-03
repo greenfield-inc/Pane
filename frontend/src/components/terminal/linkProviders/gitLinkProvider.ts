@@ -1,6 +1,5 @@
 import type { ILink, ILinkProvider } from '@xterm/xterm';
 import type { LinkProviderConfig } from './types';
-import { isMac, getModifierKeyName } from '../../../utils/platformUtils';
 
 /**
  * Creates a git link provider that detects git SHAs and issue references.
@@ -22,8 +21,10 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
   const CROSS_REPO_ISSUE = /([a-z0-9_-]+\/[a-z0-9_-]+)#(\d+)/gi;
 
   return {
+    // xterm passes a 1-based buffer line; buffer.getLine is 0-based and link
+    // ranges are 1-based, so the range y is the line number as given.
     provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void) {
-      const line = config.terminal.buffer.active.getLine(lineNumber);
+      const line = config.terminal.buffer.active.getLine(lineNumber - 1);
       if (!line) {
         callback(undefined);
         return;
@@ -31,9 +32,6 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
 
       const text = line.translateToString();
       const links: ILink[] = [];
-
-      const isMacPlatform = isMac();
-      const modifierKey = getModifierKeyName();
 
       // Match Git SHAs
       GIT_SHA.lastIndex = 0;
@@ -44,18 +42,15 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
 
         links.push({
           range: {
-            start: { x: shaMatch.index + 1, y: lineNumber + 1 },
-            end: { x: shaMatch.index + shaMatch[0].length + 1, y: lineNumber + 1 },
+            start: { x: shaMatch.index + 1, y: lineNumber },
+            end: { x: shaMatch.index + shaMatch[0].length + 1, y: lineNumber },
           },
           text: sha,
           activate: (event: MouseEvent) => {
-            // Only activate on Ctrl/Cmd+Click
-            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-              config.onOpenUrl(commitUrl);
-            }
+            config.onActivateUrl(commitUrl, event);
           },
           hover: (event: MouseEvent) => {
-            config.onShowTooltip(event, commitUrl, `${modifierKey}+Click to open`);
+            config.onShowTooltip(event, commitUrl, config.urlHoverHint);
           },
           leave: () => {
             config.onHideTooltip();
@@ -72,18 +67,15 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
 
         links.push({
           range: {
-            start: { x: issueMatch.index + 1, y: lineNumber + 1 },
-            end: { x: issueMatch.index + issueMatch[0].length + 1, y: lineNumber + 1 },
+            start: { x: issueMatch.index + 1, y: lineNumber },
+            end: { x: issueMatch.index + issueMatch[0].length + 1, y: lineNumber },
           },
           text: `#${issueNumber}`,
           activate: (event: MouseEvent) => {
-            // Only activate on Ctrl/Cmd+Click
-            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-              config.onOpenUrl(issueUrl);
-            }
+            config.onActivateUrl(issueUrl, event);
           },
           hover: (event: MouseEvent) => {
-            config.onShowTooltip(event, issueUrl, `${modifierKey}+Click to open`);
+            config.onShowTooltip(event, issueUrl, config.urlHoverHint);
           },
           leave: () => {
             config.onHideTooltip();
@@ -101,18 +93,15 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
 
         links.push({
           range: {
-            start: { x: crossRepoMatch.index + 1, y: lineNumber + 1 },
-            end: { x: crossRepoMatch.index + crossRepoMatch[0].length + 1, y: lineNumber + 1 },
+            start: { x: crossRepoMatch.index + 1, y: lineNumber },
+            end: { x: crossRepoMatch.index + crossRepoMatch[0].length + 1, y: lineNumber },
           },
           text: `${repo}#${issueNumber}`,
           activate: (event: MouseEvent) => {
-            // Only activate on Ctrl/Cmd+Click
-            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-              config.onOpenUrl(crossRepoUrl);
-            }
+            config.onActivateUrl(crossRepoUrl, event);
           },
           hover: (event: MouseEvent) => {
-            config.onShowTooltip(event, crossRepoUrl, `${modifierKey}+Click to open`);
+            config.onShowTooltip(event, crossRepoUrl, config.urlHoverHint);
           },
           leave: () => {
             config.onHideTooltip();

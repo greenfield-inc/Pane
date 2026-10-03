@@ -58,6 +58,8 @@ type ElectronApiMockOptions = {
   /** Seeded split layout for the session under test (panels:get-layout). */
   initialLayout?: JsonObject | null;
   initialTerminalStates?: Record<string, JsonObject>;
+  /** Value returned by `git:get-github-remote` (enables git SHA/issue links). */
+  githubRemoteUrl?: string | null;
   initialAgentUsage?: JsonObject;
   initialUsageReport?: JsonObject;
   initialLeaderboardStatus?: JsonObject;
@@ -93,6 +95,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const openedExternalUrls: string[] = [];
     const diffManifestCalls: Array<{ sessionId: string; scope: DiffScope }> = [];
     const fileDiffCalls: Array<{ sessionId: string; scope: DiffScope; path: string }> = [];
+    const panelCreates: JsonObject[] = [];
+    const panelUpdates: Array<{ panelId: string; updates: JsonObject }> = [];
+    const panelActivations: Array<{ sessionId: string; panelId: string }> = [];
     const clone = <T>(value: T): T => structuredClone(value);
     const scopeMockKey = (scope: DiffScope): string => {
       if (scope.kind === 'commit') return `commit:${scope.hash}`;
@@ -391,6 +396,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPanelAgentStatus') {
           return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
         }
+        if (prop === 'onConfigUpdated') {
+          return (callback: MockEventCallback) => subscribe('config:updated', callback);
+        }
+        if (prop === 'onPanelCreated') {
+          return (callback: MockEventCallback) => subscribe('panel:created', callback);
+        }
         return () => unsubscribe;
       },
     });
@@ -404,6 +415,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
 
       const key = args[0] === undefined ? undefined : String(args[0]);
       const value = args[1] === undefined ? undefined : String(args[1]);
+      if (channel === 'panels:agent-statuses') return success([]);
       if (channel === 'terminal:get-shell-settings') {
         // Raw result, like the host: Windows shells only on a Windows host.
         return Promise.resolve({
@@ -421,6 +433,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       if (channel === 'panels:set-layout') {
         if (key) mockLayouts.set(key, clone(args[1] ?? null));
         return success();
+      }
+      if (channel === 'panels:update') {
+        // This body runs inside the page (addInitScript), so no imported helpers are available.
+        // SAFETY: The test bridge receives JSON panel updates from panelApi; exclude scalar/array arguments.
+        const updates = args[1] instanceof Object && !Array.isArray(args[1]) ? args[1] as JsonObject : undefined;
+        if (key && updates) {
+          panelUpdates.push({ panelId: key, updates: clone(updates) });
+          const panel = mockPanels.find((candidate) => candidate.id === key);
+          if (panel) Object.assign(panel, clone(updates));
+        }
+        return success();
+      }
+      if (channel === 'git:get-github-remote') {
+        return success(mockOptions.githubRemoteUrl ?? null);
       }
       if (channel === 'panels:shouldAutoCreate') {
         // Fixtures seed their own panels; the app must not grow a terminal.
@@ -443,8 +469,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return Promise.resolve({ success: false, error });
         }
         if (key) {
-          preferences[key] = value ?? '';
-          preferenceWrites.push({ key, value: value ?? '' });
+          const stored = value ?? '';
+          preferences[key] = stored;
+          preferenceWrites.push({ key, value: stored });
         }
         return success();
       }
@@ -725,6 +752,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setActivePanel: (sessionId: string, panelId: string) => {
           setActiveMockPanel(sessionId, panelId);
+          panelActivations.push({ sessionId, panelId });
           return success();
         },
         createPanel: (sessionId: string, type: string, title: string, initialState?: JsonObject) => {
@@ -739,7 +767,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           };
           mockPanels.push(panel);
           setActiveMockPanel(sessionId, panel.id);
-          emit('panel:created', clone(panel));
+          panelCreates.push(clone(panel));
+          // The main process broadcasts every created panel; SessionView relies on it
+          // to place panels created outside its own create path into the layout.
+          setTimeout(() => emit('panel:created', clone(panel)), 0);
           return success(clone(panel));
         },
         shouldAutoCreate: () => success(false),
@@ -1143,6 +1174,18 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getOpenedExternalUrls() {
           return clone(openedExternalUrls);
+        },
+        getPanelCreates() {
+          return clone(panelCreates);
+        },
+        getPanelUpdates() {
+          return clone(panelUpdates);
+        },
+        getPanelActivations() {
+          return clone(panelActivations);
+        },
+        getPanels() {
+          return clone(mockPanels);
         },
         getPreferenceWrites() {
           return clone(preferenceWrites);

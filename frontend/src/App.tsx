@@ -122,7 +122,7 @@ function App() {
   const sessions = useSessionStore(state => state.sessions);
   const isLoaded = useSessionStore(state => state.isLoaded);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
-  const { fetchConfig, config: appConfig } = useConfigStore();
+  const { fetchConfig, subscribeToUpdates, config: appConfig } = useConfigStore();
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
@@ -175,7 +175,6 @@ function App() {
   useHotkey({
     id: 'open-command-palette',
     label: 'Open Command Palette',
-    keys: 'mod+shift+p',
     category: 'navigation',
     action: () => setIsCommandPaletteOpen(true),
   });
@@ -183,7 +182,6 @@ function App() {
   useHotkey({
     id: 'toggle-sidebar',
     label: 'Toggle Sidebar',
-    keys: 'mod+b',
     category: 'view',
     action: handleToggleSidebar,
   });
@@ -191,7 +189,6 @@ function App() {
   useHotkey({
     id: 'open-settings',
     label: 'Open Settings',
-    keys: 'mod+,',
     category: 'navigation',
     action: () => openSettings(),
   });
@@ -199,7 +196,6 @@ function App() {
   useHotkey({
     id: 'focus-sidebar',
     label: 'Focus Sidebar',
-    keys: 'mod+shift+e',
     category: 'navigation',
     action: () => {
       if (sidebarCollapsed) handleToggleSidebar();
@@ -216,7 +212,6 @@ function App() {
   useHotkey({
     id: 'open-shortcut-settings',
     label: 'Open Shortcut Settings',
-    keys: 'mod+alt+/',
     category: 'shortcuts',
     action: () => {
       openSettings({ category: 'shortcuts', setting: 'terminal-shortcuts' });
@@ -226,7 +221,6 @@ function App() {
   useHotkey({
     id: 'new-session',
     label: 'New Pane',
-    keys: 'mod+n',
     category: 'session',
     action: () => {
       if (activeProject) setShowCreateSessionDialog(true);
@@ -236,7 +230,6 @@ function App() {
   useHotkey({
     id: 'new-project',
     label: 'New Project',
-    keys: 'mod+shift+n',
     category: 'navigation',
     action: () => setShowAddProjectDialog(true),
   });
@@ -246,8 +239,9 @@ function App() {
 
   // Load config on app startup
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    void fetchConfig();
+    return subscribeToUpdates();
+  }, [fetchConfig, subscribeToUpdates]);
 
   // Remember where the user is on the active host, so a host switch can return here.
   useEffect(() => startHostNavigationMemoryWrites(), []);

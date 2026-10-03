@@ -7,23 +7,36 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { TerminalShortcut } from '../../../types/config';
+import type { KeyboardShortcutOverrides } from '../../../../../shared/utils/keyboardBindings';
 import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
+import { buildShortcutMap, resolveShortcutEnvironment } from '../../../utils/shortcutMap';
+import { useActiveProjectEnvironment } from '../../../hooks/useActiveProjectEnvironment';
+import { KeyboardShortcutMap } from '../KeyboardShortcutMap';
 
 interface ShortcutsSettingsProps {
   persistence: SettingsPersistence;
+  /** Host platform from the main process; the active project's environment takes precedence for availability. */
+  platform: string;
   onDirtyChange: (dirty: boolean) => void;
   onShowKeyboardShortcuts: () => void;
 }
 
-export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardShortcuts }: ShortcutsSettingsProps) {
+export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShowKeyboardShortcuts }: ShortcutsSettingsProps) {
   const config = persistence.config!;
   const persistedShortcuts = config.terminalShortcuts ?? [];
   const persistedKey = JSON.stringify(persistedShortcuts);
   const [shortcuts, setShortcuts] = useState<TerminalShortcut[]>(persistedShortcuts);
-  const dirty = JSON.stringify(shortcuts) !== persistedKey;
+  const snippetsDirty = JSON.stringify(shortcuts) !== persistedKey;
+  const persistedOverrides = config.keyboardShortcutOverrides ?? {};
+  const persistedOverridesKey = JSON.stringify(persistedOverrides);
+  const [overridesDraft, setOverridesDraft] = useState<KeyboardShortcutOverrides>(persistedOverrides);
+  const overridesDirty = JSON.stringify(overridesDraft) !== persistedOverridesKey;
+  const dirty = snippetsDirty || overridesDirty;
 
   // SAFETY: App-owned storage writes this value through the matching typed serializer.
   useEffect(() => setShortcuts(JSON.parse(persistedKey) as TerminalShortcut[]), [persistedKey]);
+  // SAFETY: Same app-owned storage; the main process normalizes the override map before saving.
+  useEffect(() => setOverridesDraft(JSON.parse(persistedOverridesKey) as KeyboardShortcutOverrides), [persistedOverridesKey]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
@@ -34,7 +47,25 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
     }
     return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key));
   }, [shortcuts]);
-  const invalid = shortcuts.some((shortcut) => !shortcut.label.trim() || !shortcut.key || !shortcut.text.trim()) || duplicateKeys.size > 0;
+  const projectEnvironment = useActiveProjectEnvironment();
+  const customCommands = useMemo(() => config.customCommands ?? [], [config.customCommands]);
+  const shortcutMap = useMemo(() => buildShortcutMap({
+    overridesRaw: overridesDraft,
+    terminalShortcuts: shortcuts,
+    customCommands,
+    environment: resolveShortcutEnvironment(projectEnvironment, platform),
+  }), [overridesDraft, shortcuts, customCommands, projectEnvironment, platform]);
+  const conflicted = shortcutMap.conflicts.length > 0;
+  const snippetConflicts = new Set(
+    shortcutMap.rows.flatMap((row) => row.origin === 'snippet' && row.conflicts.length > 0 ? [row.id] : []),
+  );
+  const invalid = shortcuts.some((shortcut) => !shortcut.label.trim() || !shortcut.key || !shortcut.text.trim())
+    || duplicateKeys.size > 0
+    || snippetConflicts.size > 0;
+  // Conflicts are validated across both drafts, but each Apply persists only its
+  // own section, so neither may save while the other draft is unsaved.
+  const applyOverridesBlockedBySnippets = snippetsDirty;
+  const applySnippetsBlockedByOverrides = overridesDirty;
 
   const update = (index: number, patch: Partial<TerminalShortcut>) => {
     setShortcuts((current) => current.map((shortcut, shortcutIndex) => (
@@ -43,9 +74,13 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
   };
 
   const apply = async () => {
-    if (invalid) return;
-    const saved = await persistence.saveConfig('terminal-shortcuts', { terminalShortcuts: shortcuts });
-    if (saved) onDirtyChange(false);
+    if (invalid || applySnippetsBlockedByOverrides) return;
+    await persistence.saveConfig('terminal-shortcuts', { terminalShortcuts: shortcuts });
+  };
+
+  const applyOverrides = async () => {
+    if (conflicted || applyOverridesBlockedBySnippets) return;
+    await persistence.saveConfig('keyboard-shortcut-map', { keyboardShortcutOverrides: overridesDraft });
   };
 
   return (
@@ -66,13 +101,32 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
         <SettingRow
           settingId="command-palette-shortcut"
           label="Keep Command Palette shortcut enabled"
-          description="Keep Ctrl/Cmd+Shift+P available when other Pane keyboard shortcuts are disabled."
+          description="Keep the configured Command Palette shortcut available when other Pane keyboard shortcuts are disabled."
           saveState={persistence.saveStates['command-palette-shortcut']}
         >
           <ImmediateToggle
             label="Keep Command Palette shortcut enabled"
             value={config.commandPaletteShortcutEnabled !== false}
             onSave={(value) => persistence.saveConfig('command-palette-shortcut', { commandPaletteShortcutEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="keyboard-shortcut-map"
+          label="Key bindings"
+          description="Record a new key for any Pane command, clear it, or reset it to the default. Bindings are global across repositories. Two commands that can be active together cannot share a key."
+          saveState={persistence.saveStates['keyboard-shortcut-map']}
+          align="start"
+          className="sm:grid-cols-1"
+        >
+          <KeyboardShortcutMap
+            map={shortcutMap}
+            draft={overridesDraft}
+            dirty={overridesDirty}
+            terminalShortcuts={shortcuts}
+            customCommands={customCommands}
+            onDraftChange={setOverridesDraft}
+            onApply={applyOverrides}
+            applyBlockedReason={applyOverridesBlockedBySnippets ? 'Apply or discard the Terminal snippet changes below first.' : null}
           />
         </SettingRow>
         <button
@@ -123,7 +177,7 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
                     label="Key"
                     value={shortcut.key}
                     onChange={(event) => update(index, { key: event.target.value.toLowerCase().replace(/[^a-z]/g, '').slice(0, 1) })}
-                    error={!shortcut.key ? 'Required' : duplicateKeys.has(shortcut.key) ? 'In use' : undefined}
+                    error={!shortcut.key ? 'Required' : duplicateKeys.has(shortcut.key) || snippetConflicts.has(`terminal-shortcut-${shortcut.id}`) ? 'In use' : undefined}
                     fullWidth
                   />
                   <div className="flex gap-1 pt-6">
@@ -168,7 +222,12 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
               >
                 Add Shortcut
               </Button>
-              <Button type="button" size="sm" disabled={!dirty || invalid} onClick={apply}>Apply</Button>
+              <div className="flex items-center gap-2">
+                {applySnippetsBlockedByOverrides && snippetsDirty && (
+                  <span className="text-xs text-text-tertiary">Apply or discard the Key bindings changes above first.</span>
+                )}
+                <Button type="button" size="sm" disabled={!snippetsDirty || invalid || applySnippetsBlockedByOverrides} onClick={apply}>Apply</Button>
+              </div>
             </div>
           </div>
         </SettingRow>

@@ -344,7 +344,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useHotkey({
     id: 'open-add-tool',
     label: 'Open Add Tool menu',
-    keys: 'mod+t',
     category: 'tabs',
     action: () => setShowDropdown(true),
   });
@@ -389,7 +388,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useHotkey({
     id: 'run-dev-server',
     label: 'Run Dev Server',
-    keys: 'mod+shift+d',
     category: 'tools',
     action: handleRunDevServer,
     enabled: () => !!session,
