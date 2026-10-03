@@ -413,17 +413,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const hostFolders = new Map(Object.entries(clone(mockOptions.hostFs?.folders ?? {})));
     const hostHome = mockOptions.hostFs?.home ?? '/home/user';
     const hostFailure = (code: string, error: string) => Promise.resolve({ success: false, code, error });
-    const hostLabelOf = (request: unknown) => {
-      const label = request && typeof request === 'object' && 'hostLabel' in request ? request.hostLabel : undefined;
-      return typeof label === 'string' && label ? label : 'rp-fakehost';
-    };
+    type HostLabelled = { hostLabel?: string } | null | undefined;
+    const hostLabelOf = (request: HostLabelled) => request?.hostLabel || 'rp-fakehost';
     const resolveHostPath = (path: string) => {
       if (!path || path === '~') return hostHome;
       if (path.startsWith('~/')) return `${hostHome}/${path.slice(2)}`.replace(/\/+$/, '');
       return path.startsWith('/') ? path.replace(/(.)\/+$/, '$1') : `${hostHome}/${path}`;
     };
     const isWindowsStyle = (path: string) => /^[a-zA-Z]:/.test(path) || path.includes('\\');
-    const windowsPathFailure = (request: unknown) => {
+    const windowsPathFailure = (request: HostLabelled) => {
       const host = hostLabelOf(request);
       return hostFailure(
         'WINDOWS_PATH_ON_POSIX_HOST',
@@ -431,7 +429,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       );
     };
     const parentOf = (path: string) => (path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/');
-    const checkProjectPath = (request: { path: string; mode?: string }) => {
+    const checkProjectPath = (request: { path: string; mode?: string; hostLabel?: string }) => {
       if (isWindowsStyle(request.path)) return windowsPathFailure(request);
       const path = resolveHostPath(request.path);
       if (request.mode === 'open' && !hostFolders.has(path)) {
@@ -442,7 +440,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       return null;
     };
-    const hostInvoke = (channel: string, request: { path?: string; parent?: string; name?: string; mode?: string }) => {
+    const hostInvoke = (channel: string, request: { path?: string; parent?: string; name?: string; mode?: string; hostLabel?: string }) => {
       if (channel === 'fs:browse-directories') {
         if (isWindowsStyle(request.path ?? '')) return windowsPathFailure(request);
         const path = resolveHostPath(request.path ?? '');
@@ -530,7 +528,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (mockOptions.hostFs && ['fs:browse-directories', 'fs:create-directory', 'projects:validate-path'].includes(channel)) {
         // SAFETY: These host channels take one request object, per shared/types/hostPaths.ts.
-        return hostInvoke(channel, args[0] as { path?: string; parent?: string; name?: string; mode?: string });
+        return hostInvoke(channel, args[0] as { path?: string; parent?: string; name?: string; mode?: string; hostLabel?: string });
       }
       return success();
     };
@@ -845,7 +843,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       projects: namespace({
-        create: (request: { name: string; path: string; mode?: string }) => {
+        create: (request: { name: string; path: string; mode?: string; hostLabel?: string }) => {
           recordCall('projects:create', [request]);
           const failure = mockOptions.hostFs ? checkProjectPath(request) : null;
           if (failure) return failure;

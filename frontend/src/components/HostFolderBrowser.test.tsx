@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { HostFolderBrowserView } from './HostFolderBrowser';
 import {
-  HostFolderBrowserView,
   hostFolderBrowserReducer,
   initialHostFolderBrowserState,
   visibleEntries,
   type HostFolderBrowserState,
-} from './HostFolderBrowser';
+} from '../utils/hostFolderBrowserState';
 import type { BrowseDirectoriesResult } from '../../../shared/types/hostPaths';
 
 const home: BrowseDirectoriesResult = {
