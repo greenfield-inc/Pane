@@ -272,19 +272,21 @@ export function OrchestrationSessionNav({
 
   if (compact) {
     return (
-      <div role="group" aria-label="Sessions" className="flex w-full shrink-0 flex-col items-center gap-0.5">
-        <Tooltip content="New Session" side="right">
-          <button
-            type="button"
-            data-testid="compact-new-orchestration-session"
-            data-compact-rail-item
-            aria-label="New Session"
-            onClick={() => setShowCreate(true)}
-            className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-        </Tooltip>
+      <div role="group" aria-label="Sessions" className="contents">
+        <div className="pane-sidebar-sessions-header sticky top-0 bottom-10 z-30 flex h-10 w-full shrink-0 items-center justify-center bg-surface-secondary">
+          <Tooltip content="New Session" side="right">
+            <button
+              type="button"
+              data-testid="compact-new-orchestration-session"
+              data-compact-rail-item
+              aria-label="New Session"
+              onClick={() => setShowCreate(true)}
+              className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </Tooltip>
+        </div>
         {activeSessions.map(session => (
           <Tooltip key={session.id} content={`${session.name} · ${statusLabel(session)}`} side="right">
             <button
@@ -367,8 +369,8 @@ export function OrchestrationSessionNav({
           )}
         </div>
       )}
-      {sessionsVisible && <div className="mt-3" role="group" aria-label="Sessions">
-        <div data-testid="sessions-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
+      {sessionsVisible && <div className="contents" role="group" aria-label="Sessions">
+        <div data-testid="sessions-section-header" className="pane-sidebar-sessions-header group/section sticky top-0 bottom-8 z-30 mt-3 flex h-8 shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1">
           <button
             type="button"
             aria-expanded={sectionExpanded}

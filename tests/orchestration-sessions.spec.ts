@@ -437,6 +437,106 @@ async function layoutBox(locator: Locator): Promise<{ x: number; y: number; widt
   return { x: box.x, y: box.y, width: box.width, height: box.height };
 }
 
+for (const theme of ['light', 'night-owl']) {
+  for (const compact of [false, true]) {
+    test(`sidebar actions remain reachable while scrolling (${theme}, compact: ${compact})`, async ({ page }) => {
+      await page.setViewportSize({ width: 1200, height: 800 });
+      await installSessionsFixture(page, Array.from({ length: 30 }, (_, i) =>
+        sessionFixture(`scroll-${i}`, `Session ${i + 1}`, '', '', '2026-01-01T00:00:00.000Z'),
+      ), [], {
+        projects: Array.from({ length: 30 }, (_, i) => ({
+          id: i + 1, name: `Project ${i + 1}`, path: `/tmp/project-${i}`,
+          active: i === 0, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z',
+        })),
+        activeProjectId: 1,
+        initialConfig: { theme },
+      });
+      await page.goto('/');
+      await dismissStartupDialogs(page);
+      await expect(page.getByTestId('sessions-section-header')).toBeVisible();
+      if (compact) await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+      const sidebar = page.getByTestId('sidebar');
+      const creation = compact
+        ? page.getByTestId('compact-new-orchestration-session')
+        : page.getByTestId('new-orchestration-session');
+      const projectsAction = compact
+        ? page.getByRole('button', { name: 'New pane in Project 1', exact: true })
+        : page.getByTestId('new-project');
+      const reachable = async (control: Locator) => {
+        await expect.poll(() => control.evaluate(element => {
+          const box = element.getBoundingClientRect();
+          return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        })).toBe(true);
+      };
+      for (const fraction of [0, 0.5, 1]) {
+        await sidebar.evaluate((element, progress) => {
+          const scrollers = [...element.querySelectorAll<HTMLElement>('*')].filter(node =>
+            getComputedStyle(node).overflowY === 'auto' && node.scrollHeight > node.clientHeight,
+          );
+          if (scrollers.length !== 1) throw new Error(`Expected one scrolling list, got ${scrollers.length}`);
+          scrollers[0].scrollTop = (scrollers[0].scrollHeight - scrollers[0].clientHeight) * progress;
+        }, fraction);
+        await page.screenshot({ path: `tmp/verify/sidebar-sticky/${theme}-${compact ? 'rail' : 'expanded'}-${fraction}.png` });
+        await reachable(page.getByRole('button', { name: 'New', exact: true }));
+        await reachable(creation);
+        await reachable(projectsAction);
+        if (compact) {
+          await reachable(page.getByRole('button', { name: 'Expand sidebar', exact: true }));
+          await reachable(page.getByRole('button', { name: 'Settings', exact: true }));
+        }
+      }
+      await creation.focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      await expect(creation).toBeFocused();
+      await expect(creation).toHaveCSS('outline-width', '2px');
+      await reachable(creation);
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('dialog', { name: 'Create Session', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await creation.focus();
+      // Traverse the long list in both directions: a visible focus ring must
+      // never land underneath either pinned header.
+      for (const key of ['Tab', 'Shift+Tab']) {
+        for (let i = 0; i < 65; i++) {
+          await page.keyboard.press(key);
+          const focused = sidebar.locator(':focus');
+          if (await focused.count()) await reachable(focused);
+        }
+      }
+      const projectsToggle = compact
+        ? page.getByTestId('compact-repositories-toggle')
+        : page.getByRole('button', { name: 'Projects', exact: true });
+      await projectsToggle.click();
+      await reachable(projectsAction);
+      if (!compact) {
+        await expect(sidebar.getByText('Project 30', { exact: true })).toHaveCount(0);
+      }
+      await projectsToggle.click();
+      await reachable(projectsAction);
+    });
+  }
+}
+
+test('empty and folded sidebar sections keep their actions beside the headings', async ({ page }) => {
+  await installSessionsFixture(page, []);
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  const sessions = page.getByTestId('sessions-section-header');
+  const projects = page.getByRole('button', { name: 'Projects', exact: true });
+  await expect(sessions).toBeVisible();
+  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
+  for (let i = 0; i < 2; i++) {
+    await projects.click();
+    const sessionBox = await layoutBox(sessions);
+    const projectBox = await layoutBox(projects);
+    expect(projectBox.y).toBeGreaterThanOrEqual(sessionBox.y + sessionBox.height);
+    expect(projectBox.y).toBeLessThan(sessionBox.y + sessionBox.height + 24);
+    await expect(page.getByTestId('new-orchestration-session')).toBeInViewport();
+    await expect(page.getByTestId('new-project')).toBeInViewport();
+  }
+});
+
 test('Session runtime defaults to Windows and submits the selected installed distribution', async ({ page }) => {
   await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04', 'Debian'] });
   await page.goto('/');

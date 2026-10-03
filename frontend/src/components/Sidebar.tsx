@@ -465,6 +465,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             <Tooltip content="New" side="right">
               <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
             </Tooltip>
+            {showRemoteDesktopLink && (
+              <Tooltip content={REMOTE_DESKTOP_TOOLTIP} side="right">
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  onClick={handleOpenRemoteDesktop}
+                  aria-label="Open Remote Desktop"
+                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+                >
+                  <Monitor className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
+
+          <nav
+            aria-label="Compact sidebar"
+            className="pane-sidebar-list flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden"
+          >
             <Tooltip content="Home" side="right">
               <button
                 type="button"
@@ -481,9 +500,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </button>
             </Tooltip>
 
-            {orchestrationAvailability === 'ready' || orchestrationAvailability === 'loading' || orchestrationAvailability === 'error' ? (
-              <OrchestrationSessionNav compact />
-            ) : (
+            {(orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle') && (
               <Tooltip content="Pane Chat" side="right">
                 <button
                   type="button"
@@ -503,25 +520,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </Tooltip>
             )}
 
-            {showRemoteDesktopLink && (
-              <Tooltip content={REMOTE_DESKTOP_TOOLTIP} side="right">
-                <button
-                  type="button"
-                  data-compact-rail-item
-                  onClick={handleOpenRemoteDesktop}
-                  aria-label="Open Remote Desktop"
-                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-                >
-                  <Monitor className="h-4 w-4" />
-                </button>
-              </Tooltip>
-            )}
-          </div>
-
-          <nav
-            aria-label="Compact sidebar"
-            className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden py-2"
-          >
+            <OrchestrationSessionNav compact />
             {pinnedSessions.length > 0 && (
               <div role="group" aria-label="Pinned panes" className="flex w-full shrink-0 flex-col items-center gap-0.5">
                 <Tooltip content={`${sidebarSectionExpansion.pinned ? 'Collapse' : 'Expand'} pinned panes`} side="right">
@@ -573,23 +572,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </div>
             )}
 
-            <div role="group" aria-label="Projects" className="flex w-full shrink-0 flex-col items-center gap-0.5">
-              <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`} side="right">
-                <button
-                  type="button"
-                  data-testid="compact-repositories-toggle"
-                  data-compact-rail-item
-                  onClick={() => handleRepositoriesSectionExpandedChange(!sidebarSectionExpansion.repositories)}
-                  aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`}
-                  aria-expanded={sidebarSectionExpansion.repositories}
-                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-                >
-                  <FolderGit2 className="h-4 w-4" />
-                  {sidebarSectionExpansion.repositories
-                    ? <ChevronDown className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5" />
-                    : <ChevronRight className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5" />}
-                </button>
-              </Tooltip>
+            <div role="group" aria-label="Projects" className="contents">
+              <div className="pane-sidebar-projects-header sticky bottom-0 z-30 flex h-10 w-full shrink-0 items-center justify-center bg-surface-secondary">
+                <Tooltip content={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`} side="right">
+                  <button
+                    type="button"
+                    data-testid="compact-repositories-toggle"
+                    data-compact-rail-item
+                    onClick={() => handleRepositoriesSectionExpandedChange(!sidebarSectionExpansion.repositories)}
+                    aria-label={`${sidebarSectionExpansion.repositories ? 'Collapse' : 'Expand'} projects`}
+                    aria-expanded={sidebarSectionExpansion.repositories}
+                    className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+                  >
+                    <FolderGit2 className="h-4 w-4" />
+                    {sidebarSectionExpansion.repositories
+                      ? <ChevronDown className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5" />
+                      : <ChevronRight className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5" />}
+                  </button>
+                </Tooltip>
+              </div>
 
               {sidebarSectionExpansion.repositories && projects.map((project) => {
                 const isActiveProject = project.id === activeProject?.id && activeView === 'project';
@@ -653,24 +654,24 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 );
               })}
 
-              {sidebarSectionExpansion.repositories && activeProject && (
-                <Tooltip content={`New pane in ${activeProject.name}`} side="right">
-                  <button
-                    type="button"
-                    data-compact-rail-item
-                    onClick={() => setShowCreateDialog(true)}
-                    aria-label={`New pane in ${activeProject.name}`}
-                    className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE} hover:text-interactive`}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </Tooltip>
-              )}
             </div>
           </nav>
 
-          {/* Bottom actions */}
+          {/* Bottom actions stay reachable even with a long Session list. */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
+            {activeProject && (
+              <Tooltip content={`New pane in ${activeProject.name}`} side="right">
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  onClick={() => setShowCreateDialog(true)}
+                  aria-label={`New pane in ${activeProject.name}`}
+                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE} hover:text-interactive`}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
               {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
             </Tooltip>
@@ -757,7 +758,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <span>New</span>
         </button>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+        <div className="pane-sidebar-list flex-1 overflow-y-auto overflow-x-hidden min-h-0">
           <ProjectSessionList
             projects={projects}
             onProjectsChange={setProjects}

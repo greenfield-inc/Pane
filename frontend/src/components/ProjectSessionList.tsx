@@ -36,7 +36,7 @@ import {
 const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transition-colors';
 const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
 const SIDEBAR_ROW_GAP = 'gap-2';
-const SIDEBAR_SECTION_ROW = 'mt-3 flex w-full items-center justify-between gap-2 pl-4 pr-3 py-1';
+const SIDEBAR_SECTION_ROW = 'pane-sidebar-projects-header sticky bottom-0 z-30 mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1';
 const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
 const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
 

@@ -320,6 +320,27 @@ body.understory {
   user-select: text;
 }
 
+/* Both section actions remain reachable: Sessions pins above Projects, which
+   rests at the bottom until its rows reach the viewport. The groups use
+   display: contents so sticky headers share the list's containing block.
+   Reserve the covered space when keyboard focus scrolls a row into view. */
+.pane-sidebar-list {
+  --sidebar-section-height: 2rem;
+  scroll-padding-block: calc(2 * var(--sidebar-section-height) + 0.25rem) calc(var(--sidebar-section-height) + 0.25rem);
+}
+
+.pane-sidebar-shell-collapsed .pane-sidebar-list {
+  --sidebar-section-height: 2.5rem;
+}
+
+.pane-sidebar-projects-header {
+  top: 0;
+}
+
+.pane-sidebar-list:has(.pane-sidebar-sessions-header) .pane-sidebar-projects-header {
+  top: var(--sidebar-section-height);
+}
+
 /* Sidebar selection is indicated by row shading, so a pointer press leaves no
    ring. Keyboard focus keeps one: the rows and their Archive and Pin buttons are
    only reachable without a mouse. The ring is inset so dense rows never clip it. */
