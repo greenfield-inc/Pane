@@ -84,10 +84,6 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
   const [{ agent, name, launchCommand, customResume, profile, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
   const userEditedLaunch = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  useEffect(() => {
-    onSubmittingChange?.(isSubmitting);
-    return () => onSubmittingChange?.(false);
-  }, [isSubmitting, onSubmittingChange]);
   const config = useConfigStore(state => state.config);
   const fetchConfig = useConfigStore(state => state.fetchConfig);
   const updateConfig = useConfigStore(state => state.updateConfig);
@@ -124,6 +120,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     event.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
+    onSubmittingChange?.(true);
     dispatch({ type: 'update', values: { error: null } });
     try {
       const defaults: Partial<AppConfig> = {};
@@ -136,6 +133,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       dispatch({ type: 'update', values: { error: cause instanceof Error ? cause.message : 'Failed to create Session' } });
     } finally {
       setIsSubmitting(false);
+      onSubmittingChange?.(false);
     }
   };
 

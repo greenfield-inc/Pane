@@ -1899,3 +1899,28 @@ test('New can show Session settings when an older host has no Session API', asyn
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('This host does not support Sessions.');
 });
+
+test('New keeps a pending Session creation in its dialog and enables retry after failure', async ({ page }) => {
+  await installSessionsFixture(page, []);
+  await page.addInitScript(() => {
+    window.electronAPI.orchestrationSessions.create = async () => {
+      await new Promise<void>(resolve => document.addEventListener('test-release-create', () => resolve(), { once: true }));
+      return { success: false, error: 'Creation unavailable; retry.' };
+    };
+  });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'Create Session An agent' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Close modal', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await page.evaluate(() => document.dispatchEvent(new Event('test-release-create')));
+  await expect(dialog.getByRole('alert')).toHaveText('Creation unavailable; retry.');
+  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
+});

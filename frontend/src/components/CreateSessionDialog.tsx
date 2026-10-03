@@ -70,10 +70,6 @@ export function CreatePaneForm({
     baseBranch: initialBaseBranch
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  useEffect(() => {
-    onSubmittingChange?.(isSubmitting);
-    return () => onSubmittingChange?.(false);
-  }, [isSubmitting, onSubmittingChange]);
 
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [branchesProjectId, setBranchesProjectId] = useState<number | null>(null);
@@ -85,10 +81,10 @@ export function CreatePaneForm({
   const [branchSearch, setBranchSearch] = useState('');
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [highlightedBranchIndex, setHighlightedBranchIndex] = useState(0);
-  useEffect(() => {
-    onBranchDropdownOpenChange?.(isBranchDropdownOpen);
-    return () => onBranchDropdownOpenChange?.(false);
-  }, [isBranchDropdownOpen, onBranchDropdownOpenChange]);
+  const setBranchDropdownOpen = useCallback((open: boolean) => {
+    setIsBranchDropdownOpen(open);
+    onBranchDropdownOpenChange?.(open);
+  }, [onBranchDropdownOpenChange]);
   const [userEditedName, setUserEditedName] = useState(false);
   const userEditedNameRef = useRef(false);
   const branchDropdownRef = useRef<HTMLDivElement>(null);
@@ -209,22 +205,22 @@ export function CreatePaneForm({
     const handleClickOutside = (e: MouseEvent) => {
       // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
       if (branchDropdownRef.current && !branchDropdownRef.current.contains(e.target as Node)) {
-        setIsBranchDropdownOpen(false);
+        setBranchDropdownOpen(false);
         setBranchSearch('');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isBranchDropdownOpen]);
+  }, [isBranchDropdownOpen, setBranchDropdownOpen]);
 
   // Reset branch search state when dialog closes
   useEffect(() => {
     if (!isOpen) {
-      setIsBranchDropdownOpen(false);
+      setBranchDropdownOpen(false);
       setBranchSearch('');
       setHighlightedBranchIndex(0);
     }
-  }, [isOpen]);
+  }, [isOpen, setBranchDropdownOpen]);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -243,7 +239,7 @@ export function CreatePaneForm({
   const selectBranch = useCallback((branchName: string) => {
     setFormData(prev => ({ ...prev, baseBranch: branchName }));
     savePreferences({ baseBranch: branchName });
-    setIsBranchDropdownOpen(false);
+    setBranchDropdownOpen(false);
     setBranchSearch('');
     setHighlightedBranchIndex(0);
 
@@ -253,13 +249,13 @@ export function CreatePaneForm({
       setSessionName(autoName);
       setFormData(prev => ({ ...prev, baseBranch: branchName, worktreeTemplate: autoName }));
     }
-  }, [savePreferences, userEditedName, generateSessionName]);
+  }, [savePreferences, userEditedName, generateSessionName, setBranchDropdownOpen]);
 
   const handleBranchKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isBranchDropdownOpen) {
       if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        setIsBranchDropdownOpen(true);
+        setBranchDropdownOpen(true);
         return;
       }
       return;
@@ -285,12 +281,12 @@ export function CreatePaneForm({
       case 'Escape':
         e.preventDefault();
         e.stopPropagation();
-        setIsBranchDropdownOpen(false);
+        setBranchDropdownOpen(false);
         setBranchSearch('');
         setHighlightedBranchIndex(0);
         break;
     }
-  }, [isBranchDropdownOpen, flatFilteredBranches, highlightedBranchIndex, selectBranch]);
+  }, [isBranchDropdownOpen, flatFilteredBranches, highlightedBranchIndex, selectBranch, setBranchDropdownOpen]);
 
   // Add keyboard shortcut handler
   useEffect(() => {
@@ -353,6 +349,7 @@ export function CreatePaneForm({
     }
 
     setIsSubmitting(true);
+    onSubmittingChange?.(true);
 
     try {
       // Determine if we need to create a folder
@@ -414,6 +411,7 @@ export function CreatePaneForm({
       });
     } finally {
       setIsSubmitting(false);
+      onSubmittingChange?.(false);
     }
   };
 
@@ -468,11 +466,11 @@ export function CreatePaneForm({
                         setBranchSearch(e.target.value);
                         setHighlightedBranchIndex(0);
                         if (!isBranchDropdownOpen) {
-                          setIsBranchDropdownOpen(true);
+                          setBranchDropdownOpen(true);
                         }
                       }}
                       onFocus={() => {
-                        setIsBranchDropdownOpen(true);
+                        setBranchDropdownOpen(true);
                         setBranchSearch('');
                         setHighlightedBranchIndex(0);
                       }}
@@ -487,7 +485,7 @@ export function CreatePaneForm({
                       tabIndex={-1}
                       aria-label={isBranchDropdownOpen ? 'Close branch options' : 'Open branch options'}
                       onClick={() => {
-                        setIsBranchDropdownOpen(!isBranchDropdownOpen);
+                        setBranchDropdownOpen(!isBranchDropdownOpen);
                         if (!isBranchDropdownOpen) {
                           setBranchSearch('');
                           setHighlightedBranchIndex(0);

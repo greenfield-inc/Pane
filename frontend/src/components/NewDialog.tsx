@@ -37,7 +37,7 @@ export function NewDialog({ projects, defaultProjectId, onClose }: NewDialogProp
   const header = <>
     <ModalHeader title={step === 'session' ? 'Create Session' : 'Create Pane'} />
     <div className="px-6 pt-3">
-      <Button type="button" variant="ghost" size="sm" className="focus-visible:ring-interactive" icon={<ArrowLeft className="h-3.5 w-3.5" />} disabled={isSubmitting} onClick={() => setStep('choose')}>Back</Button>
+      <Button type="button" variant="ghost" size="sm" className="focus-visible:ring-interactive" icon={<ArrowLeft className="h-3.5 w-3.5" />} disabled={isSubmitting} onClick={() => { setBranchDropdownOpen(false); setStep('choose'); }}>Back</Button>
     </div>
   </>;
 
@@ -67,7 +67,7 @@ export function NewDialog({ projects, defaultProjectId, onClose }: NewDialogProp
     }} /> : project ? <CreatePaneForm key={project.id} isOpen projectId={project.id} projectName={project.name} onClose={onClose} header={header} onBranchDropdownOpenChange={setBranchDropdownOpen} onSubmittingChange={setIsSubmitting} repositoryPicker={
       <div className="px-6 pt-4">
         <label htmlFor="new-pane-repository" className="mb-2 block text-sm font-medium text-text-primary">Repository</label>
-        <select id="new-pane-repository" value={project.id} disabled={isSubmitting} onChange={event => setProjectId(Number(event.target.value))} className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive">
+        <select id="new-pane-repository" value={project.id} disabled={isSubmitting} onChange={event => { setBranchDropdownOpen(false); setProjectId(Number(event.target.value)); }} className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive">
           {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
       </div>
