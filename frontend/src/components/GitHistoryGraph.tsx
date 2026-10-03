@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, memo } from 'react';
 import { API } from '../utils/api';
-import { Loader2, GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork } from 'lucide-react';
+import { Loader2, GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork, ChevronRight, ChevronDown } from 'lucide-react';
 import { Tooltip } from './ui/Tooltip';
 import { CopyableField } from './ui/CopyableField';
+import { CommitFileList } from './git/CommitFileList';
 
 interface GitGraphCommitData {
   hash: string;
@@ -27,6 +28,12 @@ interface GitHistoryGraphProps {
   baseBranch: string;
   layout?: 'compact' | 'wide';
   onCommitClick?: (hash: string) => void;
+  /**
+   * Show a per-commit toggle that lists the files the commit touched.
+   */
+  expandable?: boolean;
+  /** Called when a file inside an expanded commit is activated. */
+  onFileClick?: (hash: string, path: string) => void;
 }
 
 function CommitTooltipContent({ entry }: { entry: GitGraphCommitData }) {
@@ -92,11 +99,21 @@ const CommitRow = memo(function CommitRow({
   isLast,
   layout = 'compact',
   onClick,
+  sessionId,
+  expandable = false,
+  isExpanded = false,
+  onToggleExpand,
+  onFileClick,
 }: {
   entry: GitGraphCommitData;
   isLast: boolean;
   layout?: 'compact' | 'wide';
   onClick?: (hash: string) => void;
+  sessionId: string;
+  expandable?: boolean;
+  isExpanded?: boolean;
+  onToggleExpand?: (hash: string) => void;
+  onFileClick?: (hash: string, path: string) => void;
 }) {
   const isIndex = entry.hash === 'index';
   const date = new Date(entry.committerDate);
@@ -183,7 +200,42 @@ const CommitRow = memo(function CommitRow({
       </Row>
   );
 
-  if (layout === 'wide') return row;
+  if (layout === 'wide' || expandable) {
+    if (!expandable) return row;
+    const historyRow = layout === 'wide' ? row : (
+      <Tooltip content={<CommitTooltipContent entry={entry} />} side="left" interactive>{row}</Tooltip>
+    );
+
+    const filesPanelId = `git-history-files-${entry.hash}`;
+    return (
+      <div>
+        <div className="flex items-stretch">
+          <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-controls={filesPanelId}
+            aria-label={`${isExpanded ? 'Hide' : 'Show'} files changed in ${entry.hash === 'index' ? 'uncommitted changes' : entry.hash.slice(0, 7)}`}
+            onClick={() => onToggleExpand?.(entry.hash)}
+            className="flex flex-shrink-0 items-center rounded-sm px-0.5 text-text-muted transition-colors hover:text-text-secondary focus:outline-none focus:ring-1 focus:ring-inset focus:ring-interactive"
+          >
+            {isExpanded
+              ? <ChevronDown className="h-3 w-3" aria-hidden="true" />
+              : <ChevronRight className="h-3 w-3" aria-hidden="true" />}
+          </button>
+          <div className="min-w-0 flex-1">{historyRow}</div>
+        </div>
+        {isExpanded && (
+          <div id={filesPanelId} className="ml-4 border-l border-border-secondary">
+            <CommitFileList
+              sessionId={sessionId}
+              commitRef={entry.hash}
+              onFileClick={onFileClick}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Tooltip content={<CommitTooltipContent entry={entry} />} side="left" interactive>
@@ -192,11 +244,28 @@ const CommitRow = memo(function CommitRow({
   );
 });
 
-export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onCommitClick }: GitHistoryGraphProps) {
+export function GitHistoryGraph({
+  sessionId,
+  baseBranch,
+  layout = 'compact',
+  onCommitClick,
+  expandable = false,
+  onFileClick,
+}: GitHistoryGraphProps) {
   const [rawEntries, setRawEntries] = useState<GitGraphCommitData[]>([]);
   const [currentBranch, setCurrentBranch] = useState(baseBranch);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedHashes, setExpandedHashes] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = useCallback((hash: string) => {
+    setExpandedHashes(prev => {
+      const next = new Set(prev);
+      if (next.has(hash)) next.delete(hash);
+      else next.add(hash);
+      return next;
+    });
+  }, []);
 
   const fetchGraph = useCallback(async () => {
     try {
@@ -288,6 +357,11 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
             isLast={i === rawEntries.length - 1}
             layout={layout}
             onClick={onCommitClick}
+            sessionId={sessionId}
+            expandable={expandable}
+            isExpanded={expandedHashes.has(entry.hash)}
+            onToggleExpand={toggleExpanded}
+            onFileClick={onFileClick}
           />
         ))}
       </div>

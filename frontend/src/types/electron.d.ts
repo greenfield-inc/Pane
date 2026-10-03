@@ -51,6 +51,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
+import type { GitCommitFilesResult } from '../../../shared/types/git';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
@@ -213,6 +214,8 @@ interface ElectronAPI {
     gitDiff: (sessionId: string) => Promise<IPCResponse>;
     getDiffManifest: (sessionId: string, scope: DiffScope) => Promise<IPCResponse<DiffManifest>>;
     getFileDiff: (sessionId: string, scope: DiffScope, request: FileDiffRequest) => Promise<IPCResponse<FileDiffResult>>;
+    getCommitDiffByHash: (sessionId: string, commitHash: string) => Promise<IPCResponse>;
+    getCommitFiles: (sessionId: string, ref: string) => Promise<IPCResponse<GitCommitFilesResult>>;
 
     // Script operations
     hasRunScript: (sessionId: string) => Promise<IPCResponse>;

@@ -1,9 +1,12 @@
+import { createReadStream } from 'fs';
+import { linuxToUNCPath, posixJoin, type WSLContext } from '../utils/wslUtils';
+import { MAX_FILES_PER_COMMIT, WORKING_TREE_REF, type GitCommitFileChange, type GitCommitFilesResult, type GitFileChangeStatus } from '../../../shared/types/git';
 import type { Logger } from '../utils/logger';
 import type { AnalyticsManager } from './analyticsManager';
 import { CommandRunner } from '../utils/commandRunner';
 import type { ExecFileAsyncOptions, ExecFileResult } from '../utils/commandExecutor';
 import * as fs from 'fs/promises';
-import { isAbsolute } from 'path';
+import { isAbsolute, join } from 'path';
 import type {
   DiffManifest,
   DiffRequestErrorCode,
@@ -13,8 +16,8 @@ import type {
 } from '../../../shared/types/gitDiff';
 import {
   mergeSummaries,
-  parseNameStatusZ,
-  parseNumstatZ,
+  parseNameStatusZ as parseScopeNameStatusZ,
+  parseNumstatZ as parseScopeNumstatZ,
   parseUnmergedFilesZ,
   resolveScope,
   type ScopeResolutionDependencies,
@@ -66,6 +69,108 @@ export interface GitDiffDependencies {
 }
 
 const DEFAULT_DIFF_MAX_BUFFER = 50 * 1024 * 1024;
+
+function legacyFileStatus(code: string): GitFileChangeStatus {
+  switch (code[0]) {
+    case 'A': return 'added'; case 'M': return 'modified'; case 'D': return 'deleted';
+    case 'R': return 'renamed'; case 'C': return 'copied'; case 'T': return 'typechange';
+    case 'U': return 'unmerged'; default: return 'unknown';
+  }
+}
+export function parseNumstatZ(raw: string) {
+  return parseScopeNumstatZ(raw).map(file => ({ oldPath: file.previousPath ?? file.path, path: file.path, additions: file.additions, deletions: file.deletions, isBinary: file.additions === null || file.deletions === null }));
+}
+export function parseNameStatusZ(raw: string) {
+  return parseScopeNameStatusZ(raw).map(file => ({ oldPath: file.previousPath ?? file.path, path: file.path, status: legacyFileStatus(file.status) }));
+}
+export function mergeFileChanges(numstat: ReturnType<typeof parseNumstatZ>, names: ReturnType<typeof parseNameStatusZ>): GitCommitFileChange[] {
+  const byPath = new Map(names.map(file => [file.path, file]));
+  return numstat.map(file => { const name = byPath.get(file.path); return { ...file, oldPath: name?.oldPath ?? file.oldPath, status: name?.status ?? 'modified' }; });
+}
+export function parseUntrackedPathsZ(raw: string): string[] {
+  const parts = raw.split('\0'), files: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const record = parts[i]; if (!record || record.length < 4) continue;
+    if (record[0] === 'R' || record[0] === 'C') i++;
+    if (record.startsWith('?? ')) files.push(record.slice(3));
+  }
+  return files;
+}
+
+
+/**
+ * Caps on inlining untracked file content into a synthesized diff.
+ *
+ * The resulting patch is parsed with a regex in the renderer, so an unignored
+ * build directory would otherwise hand it megabytes to chew through.
+ */
+export const MAX_UNTRACKED_INLINE_FILES = 200;
+const MAX_UNTRACKED_INLINE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Per-file ceiling for inlining. Matches the buffer the previous `cat` had, so
+ * the same oversized files are left out of the patch as before.
+ */
+const MAX_UNTRACKED_INLINE_FILE_BYTES = 1024 * 1024;
+
+/** A working-tree diff can be large; don't truncate it at Node's 1MB default. */
+const MAX_DIFF_BUFFER_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Split NUL-separated git output.
+ *
+ * Git only quotes and escapes a path when it has to delimit it with a newline;
+ * under `-z` the bytes come through exactly as they are on disk. Nothing is
+ * trimmed here for the same reason — a leading or trailing space is part of the
+ * name, not padding.
+ */
+export function splitNulSeparated(raw: string): string[] {
+  return raw.split('\0').filter(entry => entry.length > 0);
+}
+
+/**
+ * The path Node's `fs` needs for a file git named relative to the worktree.
+ *
+ * Git reports `dir/file.txt` with forward slashes whatever the platform. For a
+ * WSL project the worktree is a Linux path the Windows host can only reach
+ * through its UNC mount, which is what `gitPlumbingCommands` does for the same
+ * reason.
+ *
+ * Going through `fs` at all is the point: the name comes from the repository
+ * and may contain a space, a quote, `$`, a backtick or a newline, all of which
+ * git allows. Interpolated into a shell command those stop being a filename.
+ */
+export function untrackedFilePath(
+  worktreePath: string,
+  file: string,
+  wslContext?: WSLContext | null
+): string {
+  if (wslContext) return linuxToUNCPath(posixJoin(worktreePath, file), wslContext.distribution);
+  return join(worktreePath, file);
+}
+
+/**
+ * Newlines in a file, streamed so a large one costs bounded memory.
+ *
+ * Counts terminators rather than lines, which is what the `wc -l` this replaces
+ * reported, so the additions figure stays the number it always was.
+ */
+async function countNewlines(fsPath: string): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    let count = 0;
+    const stream = createReadStream(fsPath, { highWaterMark: 64 * 1024 });
+
+    stream.on('data', (chunk: string | Buffer) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      for (let i = 0; i < buffer.length; i++) {
+        if (buffer[i] === 0x0a) count++;
+      }
+    });
+    stream.on('error', reject);
+    stream.on('close', () => resolve(count));
+  });
+}
+
 
 export class GitDiffManager {
   constructor(
@@ -130,10 +235,10 @@ export class GitDiffManager {
     ]);
     const files = mergeSummaries(
       [
-        ...parseNameStatusZ(names.stdout),
+        ...parseScopeNameStatusZ(names.stdout),
         ...parseUnmergedFilesZ(unmerged.stdout).map(path => ({ status: 'U', path })),
       ],
-      parseNumstatZ(stats.stdout),
+      parseScopeNumstatZ(stats.stdout),
       untracked.stdout.split('\0').filter(Boolean),
     );
     return {
@@ -182,7 +287,7 @@ export class GitDiffManager {
         worktreePath,
         options,
       );
-      const isActualSource = parseNameStatusZ(candidateNames.stdout).some(record =>
+      const isActualSource = parseScopeNameStatusZ(candidateNames.stdout).some(record =>
         (record.status.startsWith('R') || record.status.startsWith('C'))
         && record.path === request.path
         && record.previousPath === request.previousPath,
@@ -206,7 +311,7 @@ export class GitDiffManager {
         : Promise.resolve({ stdout: validatedNamesOutput, stderr: '', exitCode: 0 }),
       runner.execFile('git', ['diff', '-z', '-M', '--numstat', ...range, '--', ...paths], worktreePath, options),
     ]);
-    let files = mergeSummaries(parseNameStatusZ(names.stdout), parseNumstatZ(stats.stdout), []);
+    let files = mergeSummaries(parseScopeNameStatusZ(names.stdout), parseScopeNumstatZ(stats.stdout), []);
 
     if (!patch && files.length === 0 && resolved.target.kind === 'working-tree') {
       const listed = await runner.execFile('git', ['ls-files', '-z', '--others', '--exclude-standard', '--', request.path], worktreePath, options);
@@ -266,43 +371,6 @@ export class GitDiffManager {
         throw new DiffRequestError('diff-too-large', 'File diff exceeds the configured size limit');
       }
       throw cause;
-    }
-  }
-
-  /**
-   * Capture git diff for a worktree directory
-   */
-  async captureWorkingDirectoryDiff(worktreePath: string, commandRunner: CommandRunner): Promise<GitDiffResult> {
-    try {
-      console.log(`captureWorkingDirectoryDiff called for: ${worktreePath}`);
-      this.logger?.verbose(`Capturing git diff in ${worktreePath}`);
-
-      // Get current commit hash
-      const beforeHash = await this.getCurrentCommitHash(worktreePath, commandRunner);
-
-      // Get diff of working directory vs HEAD
-      const diff = await this.getGitDiffString(worktreePath, commandRunner);
-      console.log(`Captured diff length: ${diff.length}`);
-
-      // Get changed files
-      const changedFiles = await this.getChangedFiles(worktreePath, commandRunner);
-
-      // Get diff stats
-      const stats = await this.getDiffStats(worktreePath, commandRunner);
-
-      this.logger?.verbose(`Captured diff: ${stats.filesChanged} files, +${stats.additions} -${stats.deletions}`);
-      console.log(`Diff stats:`, stats);
-
-      return {
-        diff,
-        stats,
-        changedFiles,
-        beforeHash,
-        afterHash: undefined // No after hash for working directory changes
-      };
-    } catch (error) {
-      this.logger?.error(`Failed to capture git diff in ${worktreePath}:`, error instanceof Error ? error : undefined);
-      throw error;
     }
   }
 
@@ -599,66 +667,12 @@ export class GitDiffManager {
     return result;
   }
 
-  private async getGitDiffString(worktreePath: string, commandRunner: CommandRunner): Promise<string> {
-    try {
-      // First check if we're in a valid git repository
-      try {
-        await commandRunner.execAsync('git rev-parse --git-dir', worktreePath);
-      } catch {
-        console.error(`Not a git repository: ${worktreePath}`);
-        return '';
-      }
-
-      // Check git status to see what files have changes
-      const status = (await commandRunner.execAsync('git status --porcelain', worktreePath)).stdout;
-      console.log(`Git status in ${worktreePath}:`, status || '(no changes)');
-
-      // Get diff of both staged and unstaged changes against HEAD
-      // Using 'git diff HEAD' to include both staged and unstaged changes
-      let diff = (await commandRunner.execAsync('git diff HEAD', worktreePath)).stdout;
-      console.log(`Git diff in ${worktreePath}: ${diff.length} characters`);
-
-      // Get untracked files and create diff-like output for them
-      const untrackedFiles = await this.getUntrackedFiles(worktreePath, commandRunner);
-      if (untrackedFiles.length > 0) {
-        console.log(`Found ${untrackedFiles.length} untracked files`);
-        const untrackedDiff = await this.createDiffForUntrackedFiles(worktreePath, untrackedFiles, commandRunner);
-        if (untrackedDiff) {
-          diff = diff ? diff + '\n' + untrackedDiff : untrackedDiff;
-        }
-      }
-      
-      return diff;
-    } catch (error) {
-      this.logger?.warn(`Could not get git diff in ${worktreePath}`, error instanceof Error ? error : undefined);
-      console.error(`Error getting git diff:`, error);
-      return '';
-    }
-  }
-
   private async getGitCommitDiff(worktreePath: string, fromCommit: string, toCommit: string, commandRunner: CommandRunner): Promise<string> {
     try {
       return (await commandRunner.execAsync(`git diff ${fromCommit}..${toCommit}`, worktreePath)).stdout;
     } catch {
       this.logger?.warn(`Could not get git commit diff in ${worktreePath}`);
       return '';
-    }
-  }
-
-  private async getChangedFiles(worktreePath: string, commandRunner: CommandRunner): Promise<string[]> {
-    try {
-      // Get tracked changed files
-      const trackedOutput = (await commandRunner.execAsync('git diff --name-only HEAD', worktreePath)).stdout;
-      const trackedFiles = trackedOutput.trim().split('\n').filter((f: string) => f.length > 0);
-
-      // Get untracked files
-      const untrackedFiles = await this.getUntrackedFiles(worktreePath, commandRunner);
-      
-      // Combine both lists
-      return [...trackedFiles, ...untrackedFiles];
-    } catch {
-      this.logger?.warn(`Could not get changed files in ${worktreePath}`);
-      return [];
     }
   }
 
@@ -669,46 +683,6 @@ export class GitDiffManager {
     } catch {
       this.logger?.warn(`Could not get changed files between commits in ${worktreePath}`);
       return [];
-    }
-  }
-
-  private async getDiffStats(worktreePath: string, commandRunner: CommandRunner): Promise<GitDiffStats> {
-    try {
-      const output = (await commandRunner.execAsync('git diff --stat HEAD', worktreePath)).stdout;
-
-      const trackedStats = this.parseDiffStats(output);
-
-      // Add stats for untracked files
-      const untrackedFiles = await this.getUntrackedFiles(worktreePath, commandRunner);
-      if (untrackedFiles.length > 0) {
-        let untrackedAdditions = 0;
-        for (const file of untrackedFiles) {
-          // Skip invalid filenames
-          if (!file || file.trim().length === 0) {
-            continue;
-          }
-
-          try {
-            const cleanFile = file.trim();
-            const filePath = `${worktreePath}/${cleanFile}`;
-            const lines = (await commandRunner.execAsync(`wc -l < "${filePath}"`, worktreePath)).stdout;
-            untrackedAdditions += parseInt(lines.trim()) || 0;
-          } catch {
-            // Skip files that can't be counted
-          }
-        }
-        
-        return {
-          additions: trackedStats.additions + untrackedAdditions,
-          deletions: trackedStats.deletions,
-          filesChanged: trackedStats.filesChanged + untrackedFiles.length
-        };
-      }
-      
-      return trackedStats;
-    } catch {
-      this.logger?.warn(`Could not get diff stats in ${worktreePath}`);
-      return { additions: 0, deletions: 0, filesChanged: 0 };
     }
   }
 
@@ -751,65 +725,205 @@ export class GitDiffManager {
       return false;
     }
   }
-
-  /**
-   * Get list of untracked files
-   */
-  private async getUntrackedFiles(worktreePath: string, commandRunner: CommandRunner): Promise<string[]> {
+  /** Patch-free, bounded file details; current manifest/path APIs remain separate. */
+  async getCommitFileChanges(worktreePath: string, ref: string, runner: CommandRunner): Promise<GitCommitFilesResult> {
+    const empty: GitCommitFilesResult = { ref, files: [], totalFiles: 0, truncated: false, isMergeAgainstFirstParent: false };
+    const working = ref === WORKING_TREE_REF || ref === 'UNCOMMITTED';
+    if (!working && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(ref)) return empty;
     try {
-      const output = (await commandRunner.execAsync('git ls-files --others --exclude-standard', worktreePath)).stdout;
-      
-      // Handle empty output case
-      if (!output || output.trim().length === 0) {
-        return [];
+      let isMerge = false;
+      if (!working) {
+        const parents = (await runner.execFile('git', ['rev-list', '--parents', '-n', '1', ref, '--'], worktreePath)).stdout.trim().split(/\s+/).slice(1);
+        isMerge = parents.length > 1;
       }
-      
-      return output.trim().split('\n').filter((f: string) => f && f.trim().length > 0);
+      const prefix = working ? ['diff'] : ['show', '--format='];
+      const suffix = working ? ['HEAD', '--'] : [...(isMerge ? ['-m', '--first-parent'] : []), ref, '--'];
+      const [numstat, names] = await Promise.all([
+        runner.execFile('git', [...prefix, '--numstat', '-M', '-z', ...suffix], worktreePath),
+        runner.execFile('git', [...prefix, '--name-status', '-M', '-z', ...suffix], worktreePath),
+      ]);
+      const files = mergeFileChanges(parseNumstatZ(numstat.stdout), parseNameStatusZ(names.stdout));
+      if (working) {
+        try {
+          const status = await runner.execFile('git', ['status', '--porcelain', '-z'], worktreePath);
+          const known = new Set(files.map(file => file.path));
+          for (const path of parseUntrackedPathsZ(status.stdout)) if (!known.has(path)) { known.add(path); files.push({ path, oldPath: path, status: 'added', additions: null, deletions: null, isBinary: false }); }
+        } catch { /* A disappearing working tree must not erase its tracked list. */ }
+      }
+      return { ref: working ? WORKING_TREE_REF : ref, files: files.slice(0, MAX_FILES_PER_COMMIT), totalFiles: files.length, truncated: files.length > MAX_FILES_PER_COMMIT, isMergeAgainstFirstParent: isMerge };
+    } catch (cause) {
+      this.logger?.error('Failed to list commit files', cause instanceof Error ? cause : undefined);
+      return empty;
+    }
+  }
+
+
+  async captureWorkingDirectoryDiff(worktreePath: string, commandRunner: CommandRunner): Promise<GitDiffResult> {
+    try {
+      console.log(`captureWorkingDirectoryDiff called for: ${worktreePath}`);
+      this.logger?.verbose(`Capturing git diff in ${worktreePath}`);
+
+      // Get current commit hash
+      const beforeHash = await this.getCurrentCommitHash(worktreePath, commandRunner);
+
+      // Listed once and threaded through: each `git ls-files` is a process
+      // spawn, and the three consumers below used to ask for it separately.
+      const untrackedFiles = await this.getUntrackedFilesAsync(worktreePath, commandRunner);
+
+      // Get diff of working directory vs HEAD
+      const diff = await this.getGitDiffStringAsync(worktreePath, untrackedFiles, commandRunner);
+      console.log(`Captured diff length: ${diff.length}`);
+
+      // Get changed files
+      const changedFiles = await this.getChangedFilesAsync(worktreePath, untrackedFiles, commandRunner);
+
+      // Get diff stats
+      const stats = await this.getDiffStatsAsync(worktreePath, untrackedFiles, commandRunner);
+
+      this.logger?.verbose(`Captured diff: ${stats.filesChanged} files, +${stats.additions} -${stats.deletions}`);
+      console.log(`Diff stats:`, stats);
+
+      return {
+        diff,
+        stats,
+        changedFiles,
+        beforeHash,
+        afterHash: undefined // No after hash for working directory changes
+      };
+    } catch (error) {
+      this.logger?.error(`Failed to capture git diff in ${worktreePath}:`, error instanceof Error ? error : undefined);
+      throw error;
+    }
+  }
+
+  private async getUntrackedFilesAsync(worktreePath: string, commandRunner: CommandRunner): Promise<string[]> {
+    try {
+      const { stdout } = await commandRunner.execAsync('git ls-files --others --exclude-standard -z', worktreePath);
+      return splitNulSeparated(stdout ?? '');
     } catch {
       this.logger?.warn(`Could not get untracked files in ${worktreePath}`);
       return [];
     }
   }
 
-  /**
-   * Create diff-like output for untracked files
-   */
-  private async createDiffForUntrackedFiles(worktreePath: string, untrackedFiles: string[], commandRunner: CommandRunner): Promise<string> {
-    let diffOutput = '';
-    
-    for (const file of untrackedFiles) {
-      // Skip invalid filenames
-      if (!file || file.trim().length === 0) {
-        continue;
-      }
-      
+  private async getGitDiffStringAsync(
+    worktreePath: string,
+    untrackedFiles: string[],
+    commandRunner: CommandRunner
+  ): Promise<string> {
+    let diff = '';
+    try {
+      const { stdout } = await commandRunner.execAsync('git diff HEAD', worktreePath, { maxBuffer: MAX_DIFF_BUFFER_BYTES });
+      diff = stdout ?? '';
+    } catch (error) {
+      this.logger?.warn(`Could not get tracked diff in ${worktreePath}: ${error instanceof Error ? error.message : error}`);
+    }
+
+    if (untrackedFiles.length === 0) return diff;
+    return diff + await this.createDiffForUntrackedFilesAsync(worktreePath, untrackedFiles, commandRunner);
+  }
+
+  private async getChangedFilesAsync(
+    worktreePath: string,
+    untrackedFiles: string[],
+    commandRunner: CommandRunner
+  ): Promise<string[]> {
+    try {
+      const { stdout } = await commandRunner.execAsync('git diff --name-only -z HEAD', worktreePath);
+      const tracked = splitNulSeparated(stdout ?? '');
+      return [...tracked, ...untrackedFiles];
+    } catch {
+      this.logger?.warn(`Could not get changed files in ${worktreePath}`);
+      return [...untrackedFiles];
+    }
+  }
+
+  private async getDiffStatsAsync(
+    worktreePath: string,
+    untrackedFiles: string[],
+    commandRunner: CommandRunner
+  ): Promise<GitDiffStats> {
+    let trackedStats: GitDiffStats = { additions: 0, deletions: 0, filesChanged: 0 };
+    try {
+      const { stdout } = await commandRunner.execAsync('git diff --shortstat HEAD', worktreePath);
+      trackedStats = this.parseDiffStats((stdout ?? '').trim());
+    } catch {
+      this.logger?.warn(`Could not get diff stats in ${worktreePath}`);
+    }
+
+    if (untrackedFiles.length === 0) return trackedStats;
+
+    const untrackedAdditions = await this.countUntrackedLines(worktreePath, untrackedFiles, commandRunner);
+    return {
+      additions: trackedStats.additions + untrackedAdditions,
+      deletions: trackedStats.deletions,
+      filesChanged: trackedStats.filesChanged + untrackedFiles.length,
+    };
+  }
+
+  private async countUntrackedLines(
+    worktreePath: string,
+    files: string[],
+    commandRunner: CommandRunner
+  ): Promise<number> {
+    let total = 0;
+    for (const file of files) {
       try {
-        const cleanFile = file.trim();
-        const filePath = `${worktreePath}/${cleanFile}`;
-        const fileContent = (await commandRunner.execAsync(`cat "${filePath}"`, worktreePath, { maxBuffer: 1024 * 1024 })).stdout;
-        
-        // Create a diff-like format for the new file
-        diffOutput += `diff --git a/${cleanFile} b/${cleanFile}\n`;
-        diffOutput += `new file mode 100644\n`;
-        diffOutput += `index 0000000..0000000\n`;
-        diffOutput += `--- /dev/null\n`;
-        diffOutput += `+++ b/${cleanFile}\n`;
-        
-        // Add the file content with '+' prefix for each line
-        const lines = fileContent.split('\n');
-        if (lines.length > 0) {
-          diffOutput += `@@ -0,0 +1,${lines.length} @@\n`;
-          for (const line of lines) {
-            diffOutput += `+${line}\n`;
-          }
-        }
-      } catch (error) {
-        // Skip files that can't be read (binary files, etc.)
-        const cleanFile = file.trim();
-        this.logger?.verbose(`Could not read untracked file ${cleanFile}: ${error}`);
+        total += await countNewlines(untrackedFilePath(worktreePath, file, commandRunner.wslContext));
+      } catch {
+        // Unreadable (permissions, a symlink to nowhere, deleted since the
+        // listing): its lines simply go uncounted, as before.
       }
     }
-    
-    return diffOutput;
+    return total;
   }
+
+  private async createDiffForUntrackedFilesAsync(
+    worktreePath: string,
+    untrackedFiles: string[],
+    commandRunner: CommandRunner
+  ): Promise<string> {
+    const parts: string[] = [];
+    let bytes = 0;
+    let inlined = 0;
+
+    for (const file of untrackedFiles) {
+      if (inlined >= MAX_UNTRACKED_INLINE_FILES || bytes >= MAX_UNTRACKED_INLINE_BYTES) {
+        this.logger?.warn(
+          `Untracked diff truncated in ${worktreePath}: ${untrackedFiles.length} untracked files exceed the inline budget`
+        );
+        break;
+      }
+
+      try {
+        const fsPath = untrackedFilePath(worktreePath, file, commandRunner.wslContext);
+
+        // Checked before reading rather than by letting a buffer overflow, so a
+        // huge file costs a stat instead of a gigabyte of string.
+        const { size } = await fs.stat(fsPath);
+        if (size > MAX_UNTRACKED_INLINE_FILE_BYTES) continue;
+
+        const content = await fs.readFile(fsPath, 'utf8');
+        inlined++;
+
+        const lines = content.split('\n');
+        const header =
+          `diff --git a/${file} b/${file}\n`
+          + 'new file mode 100644\n'
+          + 'index 0000000..0000000\n'
+          + '--- /dev/null\n'
+          + `+++ b/${file}\n`
+          + `@@ -0,0 +1,${lines.length} @@\n`;
+        const body = lines.map(line => `+${line}`).join('\n') + '\n';
+
+        parts.push(header, body);
+        bytes += header.length + body.length;
+      } catch {
+        // Binary or unreadable files are omitted from the synthesized patch.
+      }
+    }
+
+    return parts.join('');
+  }
+
 }

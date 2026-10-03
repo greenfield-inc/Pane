@@ -297,6 +297,12 @@ export class API {
       return window.electronAPI.sessions.getFileDiff(sessionId, scope, request);
     },
 
+    /** Per-file change details for one commit, or `index` for the working tree. */
+    async getCommitFiles(sessionId: string, ref: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessions.getCommitFiles(sessionId, ref);
+    },
+
     // Main repo session
     async getOrCreateMainRepoSession(projectId: number) {
       if (!isElectron()) throw new Error('Electron API not available');

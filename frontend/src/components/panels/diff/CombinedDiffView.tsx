@@ -39,6 +39,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   const [mainBranch, setMainBranch] = useState('main');
   const [historySource, setHistorySource] = useState<'remote' | 'local' | 'branch'>(isMainRepo ? 'remote' : 'branch');
   const scopeCache = useRef(new Map<string, LoadedScope>());
+  const pendingFile = useRef<{ key: string; path: string } | null>(null);
   const requestId = useRef(0);
   const executionRequestId = useRef(0);
 
@@ -102,12 +103,18 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
 
   useEffect(() => {
     const pending = takePendingViewCommit(sessionId);
-    if (pending !== null) setScope(pending === 'index' ? { kind: 'working-tree' } : { kind: 'commit', hash: pending });
+    if (pending !== null) {
+      const target: DiffScope = pending.commitHash === 'index' ? { kind: 'working-tree' } : { kind: 'commit', hash: pending.commitHash };
+      pendingFile.current = pending.filePath ? { key: scopeKey(target), path: pending.filePath } : null;
+      setScope(target);
+    }
     const handler = (event: Event) => {
       // SAFETY: This listener is registered only for the app-owned diff:view-commit event.
-      const detail = (event as CustomEvent<{ sessionId: string; commitHash: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId: string; commitHash: string; filePath?: string }>).detail;
       if (detail.sessionId !== sessionId) return;
-      setScope(detail.commitHash === 'index' ? { kind: 'working-tree' } : { kind: 'commit', hash: detail.commitHash });
+      const target: DiffScope = detail.commitHash === 'index' ? { kind: 'working-tree' } : { kind: 'commit', hash: detail.commitHash };
+      pendingFile.current = detail.filePath ? { key: scopeKey(target), path: detail.filePath } : null;
+      setScope(target);
       clearPendingViewCommit();
     };
     window.addEventListener('diff:view-commit', handler);
@@ -138,6 +145,17 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
       if (owned === requestId.current) setLoadingKey(null);
     });
   }, [isVisible, key, refreshNonce, scope, sessionId]);
+
+  // A commit file request is opened only after its own scoped manifest arrives.
+  useEffect(() => {
+    const requested = pendingFile.current;
+    if (!requested) return;
+    if (requested.key !== scopeKey(scope)) return;
+    if (!visible) return;
+    pendingFile.current = null;
+    const file = visible.manifest.files.find(candidate => candidate.path === requested.path);
+    if (file) void openFileInEditor({ sessionId, filePath: file.path, pin: false, diff: editorDiffRefForFile(scope, file) });
+  }, [visible, scope, sessionId]);
 
   const handleFileOpen = useCallback((file: ChangedFileSummary, pin: boolean) => {
     void openFileInEditor({ sessionId, filePath: file.path, pin, diff: editorDiffRefForFile(scope, file) });
@@ -189,7 +207,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
           {scope.kind !== 'session' && (
-            <button type="button" onClick={() => setScope({ kind: 'session' })} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-text-tertiary hover:bg-surface-hover hover:text-text-primary">
+            <button type="button" onClick={() => { pendingFile.current = null; setScope({ kind: 'session' }); }} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-text-tertiary hover:bg-surface-hover hover:text-text-primary">
               All changes
             </button>
           )}
