@@ -1,3 +1,4 @@
+import { isPrintable } from './input';
 import type {
   InterceptHandler,
   InterceptResult,
@@ -112,21 +113,18 @@ export class TerminalInterceptor {
         // Only buffer printable characters — navigation keys (arrow escape sequences,
         // backspace, etc.) are consumed but NOT added to the buffer, so they won't be
         // flushed to the PTY on cancel.
-        if (this.isPrintable(data)) {
+        if (isPrintable(data)) {
           this.buffer += data;
         }
         return { consumed: true };
 
       case 'cancel': {
-        // Flush only the printable text the user typed (trigger + filter chars).
-        // Include the cancel character only if it's printable (Space yes, Escape no).
-        const cancelCharPrintable = this.isPrintable(data);
-        const toFlush = cancelCharPrintable
-          ? this.buffer + data
-          : this.buffer;
+        // Replay the held prefix. Unless this is a picker-owned cancellation
+        // key, let the caller forward the original paste, IME or control input.
+        const toFlush = this.buffer;
         this.deactivate();
         this._onFlush(toFlush);
-        return { consumed: true };
+        return { consumed: action.consumeInput ?? false };
       }
 
       case 'dismiss':
@@ -139,7 +137,7 @@ export class TerminalInterceptor {
         return { consumed: true };
 
       case 'update':
-        if (this.isPrintable(data)) {
+        if (isPrintable(data)) {
           this.buffer += data;
         }
         this.filterBuffer = action.buffer;
@@ -184,11 +182,6 @@ export class TerminalInterceptor {
       buffer: this.filterBuffer,
       handlerState: this.activeHandler?.getState() ?? null,
     };
-  }
-
-  /** A single printable character (no control chars or escape sequences) */
-  private isPrintable(data: string): boolean {
-    return data.length === 1 && data >= ' ' && data <= '~';
   }
 
   dispose(): void {
