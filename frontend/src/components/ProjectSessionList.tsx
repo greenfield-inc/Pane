@@ -771,6 +771,13 @@ function SessionRow({
   const hasDiff = adds > 0 || dels > 0;
   const showActivity = agentDisplayStatus === 'working';
   const accessibleName = displayName || gs?.prTitle || session.name || 'Untitled';
+  // Composite translucent row tokens over an opaque base to mask the title.
+  const actionSurfaceClassName = cn(
+    'flex h-full items-center bg-surface-secondary transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100',
+    isActive
+      ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
+      : 'group-hover/session:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]'
+  );
 
   return (<>
     <div
@@ -811,32 +818,31 @@ function SessionRow({
         />
       </div>
 
-      {/* Overlay actions so hidden controls never shorten the title. Layer the
-          translucent row token over the sidebar surface to fully cover text. */}
-      <div className={cn(
-        'absolute inset-y-0 right-2 z-10 flex items-center gap-0.5 rounded bg-surface-secondary opacity-0 transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100',
-        isActive
-          ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
-          : 'group-hover/session:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]'
-      )}>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onArchive(); }}
-          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
-          title="Archive"
-          aria-label={`Archive ${accessibleName}`}
-        >
-          <Archive className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
-          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary"
-          title={session.isFavorite ? 'Unpin' : 'Pin'}
-          aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
-        >
-          <Pin className="h-3.5 w-3.5 rotate-45" />
-        </button>
+      {/* Each action masks only its own area. A pinned row shows just the pin
+          at rest; hover or keyboard focus reveals Archive as well. */}
+      <div className="absolute inset-y-0 right-2 z-10 flex items-center">
+        <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
+            title="Archive"
+            aria-label={`Archive ${accessibleName}`}
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary"
+            title={session.isFavorite ? 'Unpin' : 'Pin'}
+            aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
+          >
+            <Pin className="h-3.5 w-3.5 rotate-45" />
+          </button>
+        </div>
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}

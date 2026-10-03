@@ -107,8 +107,22 @@ test.describe('compact sidebar', () => {
       const unpin = page.getByRole('button', { name: `Unpin ${title}-pinned`, exact: true });
       await expect(unpin).toBeAttached();
       await page.mouse.move(800, 500);
-      await expect(unpin.locator('..')).toHaveCSS('opacity', '0');
+      const pinnedArchive = page.getByRole('button', { name: `Archive ${title}-pinned`, exact: true });
+      await expect(unpin.locator('..')).toHaveCSS('opacity', '1');
+      await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '0');
+      const pinBox = await unpin.boundingBox();
+      const pinSurfaceBox = await unpin.locator('..').boundingBox();
+      if (!pinBox || !pinSurfaceBox) throw new Error('Pinned action has no bounds');
+      expect(pinSurfaceBox.width).toBe(pinBox.width);
       await page.screenshot({ path: `${evidence}-pinned-idle.png` });
+      await unpin.hover();
+      await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '1');
+      await page.mouse.move(800, 500);
+      await page.getByRole('button', { name: `${title}-pinned`, exact: true }).focus();
+      await page.keyboard.press('Tab');
+      await expect(pinnedArchive).toBeFocused();
+      await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '1');
+      await expect(pinnedArchive).toHaveCSS('outline-width', '2px');
     });
   }
 
