@@ -55,6 +55,72 @@ async function collapseSidebar(page: Page) {
 }
 
 test.describe('compact sidebar', () => {
+  test('opens new projects from the inline plus and the prominent button', async ({ page }) => {
+    await installElectronApiMock(page, {
+      initialProjects: projects,
+      initialConfig: { theme: 'night-owl' },
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const projectsToggle = page.getByRole('button', { name: 'Projects', exact: true });
+    await expect(projectsToggle).toBeVisible();
+    await page.screenshot({ path: 'tmp/verify/sidebar-affordances/projects.png' });
+    // The adjacent + stays available even when the project list is folded away.
+    await projectsToggle.click();
+    await projectsToggle.focus();
+    await page.keyboard.press('Tab');
+    const addProject = page.getByTestId('new-project');
+    await expect(addProject).toBeFocused();
+    await expect(addProject).toHaveAccessibleName('New project');
+    await expect(addProject).toHaveCSS('outline-style', 'solid');
+    await expect(addProject).toHaveCSS('outline-width', '2px');
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Add New Repository' });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText('Alpha', { exact: true })).toHaveCount(0);
+    await projectsToggle.click();
+    await addProject.click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'New project', exact: true }).filter({ hasText: 'New project' }).click();
+    await expect(dialog).toBeVisible();
+  });
+
+  for (const titleBar of [true, false]) {
+    test(`keeps the keyboard expand control inside the rail (title bar: ${titleBar})`, async ({ page }) => {
+      await installElectronApiMock(page, {
+        platform: 'win32',
+        windowControlsOverlayEnabled: titleBar,
+        initialProjects: projects,
+        initialConfig: { theme: 'night-owl' },
+      });
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await collapseSidebar(page);
+      const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+      await expect(expand).toHaveCount(1);
+      const rail = page.getByTestId('sidebar');
+      await page.screenshot({ path: `tmp/verify/sidebar-affordances/rail-${titleBar}.png` });
+      await expect(rail.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+      const railBox = await rail.boundingBox();
+      const buttonBox = await expand.boundingBox();
+      if (!railBox || !buttonBox) throw new Error('Sidebar controls have no bounds');
+      expect(buttonBox.x).toBeGreaterThanOrEqual(railBox.x);
+      expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(railBox.x + railBox.width);
+      expect(buttonBox.y).toBeGreaterThanOrEqual(railBox.y);
+      expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(railBox.y + railBox.height);
+      // Shift-Tab back from the next control proves the toggle is in the tab order.
+      await expand.focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      await expect(expand).toBeFocused();
+      await expect(expand).toHaveCSS('outline-style', 'solid');
+      await expect(expand).toHaveCSS('outline-width', '2px');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible();
+    });
+  }
+
   test('collapses repositories from the full sidebar using the shared section state', async ({ page }) => {
     await installElectronApiMock(page, {
       initialConfig: { theme: 'night-owl' },

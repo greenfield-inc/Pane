@@ -410,8 +410,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         }
   ] satisfies DropdownItem[];
 
-  // The sidebar toggle and remote host chip stay beside the window controls; the menu lives in
-  // the sidebar footer so tabs can use the title strip.
+  // Expanded controls sit beside the window controls. The collapsed toggle stays
+  // in the rail so reopening the sidebar is reachable where the sidebar lives.
   const headerControls = (
     <>
       {onToggleCollapse && (
@@ -450,9 +450,20 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
-          {titleBarControlsSlot && createPortal(headerControls, titleBarControlsSlot)}
-
           <div className="flex shrink-0 flex-col items-center gap-1 border-b border-border-primary py-2">
+            {onToggleCollapse && (
+              <Tooltip content={hotkeyDisplay('toggle-sidebar') ? <Kbd>{hotkeyDisplay('toggle-sidebar')}</Kbd> : undefined} side="right">
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  onClick={onToggleCollapse}
+                  aria-label="Expand sidebar"
+                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
+                >
+                  <PanelLeftOpen className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content="Home" side="right">
               <button
                 type="button"
@@ -688,19 +699,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               position="top-right"
               width="sm"
             />
-            {!titleBarControlsSlot && (<>
-              <Tooltip content={hotkeyDisplay('toggle-sidebar') ? <Kbd>{hotkeyDisplay('toggle-sidebar')}</Kbd> : undefined} side="right">
-                <button
-                  type="button"
-                  data-compact-rail-item
-                  onClick={onToggleCollapse}
-                  aria-label="Expand sidebar"
-                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
-                >
-                  <PanelLeftOpen className="h-4 w-4" />
-                </button>
-              </Tooltip>
-            </>)}
           </div>
         </div>
 

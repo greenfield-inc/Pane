@@ -431,6 +431,16 @@ export function ProjectSessionList({
               )}
             </span>
           </button>
+          <button
+            type="button"
+            data-testid="new-project"
+            aria-label="New project"
+            title="New project"
+            onClick={() => setShowAddProjectDialog(true)}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
         </div>
 
         {/* Projects */}
