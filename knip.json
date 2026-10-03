@@ -66,6 +66,7 @@
         "src/daemon/headless.ts",
         "src/ptyHost/ptyHostMain.ts",
         "src/services/mcpPermissionBridge.ts",
+        "src/services/agentBridges/piBridge.ts",
         "src/**/*.test.ts",
         "src/**/__tests__/**/*.ts",
         "build-mcp-bridge.js"

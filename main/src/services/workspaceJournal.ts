@@ -33,6 +33,7 @@ export interface WorkspaceJournalFilter {
   /** Named Session id; membership is resolved on every read, so associate and detach apply at once. */
   sessionId?: string;
   excludePaneIds?: readonly string[];
+  quietPanelIds?: readonly string[];
   repoId?: number;
   nameContains?: string;
   agentsOnly?: boolean;
@@ -408,6 +409,7 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
     // A Session scope keys on the Session, never its current Panes, so membership changes keep held state.
     sessionId: filter.sessionId ?? null,
     excludePaneIds: [...filter.excludePaneIds ?? []].sort(),
+    quietPanelIds: [...filter.quietPanelIds ?? []].sort(),
     repoId: filter.repoId ?? null,
     nameContains: filter.nameContains ?? null,
     agentsOnly: filter.agentsOnly ?? null,
@@ -416,7 +418,13 @@ export function workspaceFilterKey(filter: WorkspaceJournalFilter): string {
   });
 }
 
-function matchesFilter(
+export function isQuietPanelEntry(entry: RunpaneWorkspaceEntry, quietPanelIds: readonly string[] | undefined): boolean {
+  return Boolean(entry.panelId && quietPanelIds?.includes(entry.panelId)
+    && (entry.kind === 'agent.ready' || entry.kind === 'agent.idle')
+    && !entry.heldInputPresent && entry.heldInput === undefined);
+}
+
+export function matchesFilter(
   entry: RunpaneWorkspaceEntry,
   filter: WorkspaceJournalFilter,
   membership?: WorkspaceSessionMembership,
@@ -425,6 +433,7 @@ function matchesFilter(
   if (!filter.kinds && filter.sessionId === undefined && entry.kind === 'agent.report') return false;
   if (!filter.kinds && filter.sessionId === undefined && OPT_IN_KINDS.includes(entry.kind)) return false;
   if (filter.sessionId !== undefined && !matchesSession(entry, filter.sessionId, membership)) return false;
+  if (isQuietPanelEntry(entry, filter.quietPanelIds)) return false;
   if (filter.paneIds && !filter.paneIds.includes(entry.paneId)) return false;
   if (filter.excludePaneIds && filter.excludePaneIds.includes(entry.paneId)) return false;
   if (filter.repoId !== undefined && entry.repoId !== filter.repoId) return false;

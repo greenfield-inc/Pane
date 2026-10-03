@@ -8,6 +8,20 @@ interface WrapperIdentity {
 }
 
 describe('WorkspaceJournal', () => {
+  it('quiets inferred readiness for correlated panels while preserving blockers, exits and fallback peers', () => {
+    const journal = new WorkspaceJournal();
+    for (const panelId of ['tracked', 'fallback']) {
+      for (const kind of ['agent.ready', 'agent.idle', 'agent.blocked', 'panel.exited'] as const) {
+        journal.append({ kind, panelId, paneId: 'one', paneName: 'One', source: 'agent' });
+      }
+    }
+    journal.append({ kind: 'agent.ready', panelId: 'tracked', paneId: 'one', paneName: 'One', source: 'agent', heldInputPresent: true });
+    const entries = journal.readAfter(0, { quietPanelIds: ['tracked'] }).entries;
+    expect(entries.filter(entry => entry.panelId === 'tracked').map(entry => entry.kind)).toEqual(['agent.blocked', 'panel.exited', 'agent.ready']);
+    expect(entries.filter(entry => entry.panelId === 'fallback')).toHaveLength(4);
+    journal.dispose();
+  });
+
   it('appends gapless entries and filters reads', () => {
     let now = 1000;
     const journal = new WorkspaceJournal({ now: () => now });

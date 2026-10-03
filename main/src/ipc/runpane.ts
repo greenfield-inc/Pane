@@ -1,4 +1,5 @@
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
+import { registerPeerHandlers } from './runpanePeers';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -181,6 +182,7 @@ import {
 } from '../services/workspaceIdleTracker';
 
 const RUNPANE_CHANNELS = [
+  'runpane:peers',
   'runpane:doctor',
   'runpane:repos:list',
   'runpane:repos:add',
@@ -366,6 +368,7 @@ export function registerRunpaneHandlers(
   services.workspaceJournal = workspaceJournal;
   services.workspaceStateReader = workspaceStateReader;
   services.workspaceCursorStore = workspaceCursorStore;
+  registerPeerHandlers(commandRegistry, services, workspaceStateReader, terminalPanelManager);
 
   commandRegistry.register('runpane:doctor', async (): Promise<RunpaneDoctorResult> => {
     return withRunpaneAction(services, 'doctor', {}, async () => {
@@ -1416,6 +1419,7 @@ export function registerRunpaneHandlers(
         paneIds: normalized.paneIds,
         sessionId: session?.id,
         excludePaneIds: normalized.excludePaneIds,
+        quietPanelIds: normalized.quietPanelIds,
         repoId: project?.id,
         nameContains: normalized.nameContains,
         agentsOnly: normalized.agentsOnly,
@@ -3342,6 +3346,7 @@ function parseWorkspaceWaitRequest(value: PaneCommandValue): RunpaneWorkspaceWai
     paneIds,
     session,
     excludePaneIds: parseStringArray(value.excludePaneIds, 'excludePaneIds'),
+    quietPanelIds: parseStringArray(value.quietPanelIds, 'quietPanelIds'),
     repo: value.repo === undefined || value.repo === null || value.repo === '' ? undefined : parseRepoSelector(value.repo),
     nameContains: optionalString(value.nameContains),
     agentsOnly: optionalBoolean(value.agentsOnly),
@@ -4830,7 +4835,7 @@ function workspaceCadenceOptions(
     idleBackoff: idleSchedule.backoff === true,
     filter: workspaceFilterKey(filter),
   });
-  return { settleMs, blockedSettleMs, minIntervalMs, emitKinds: request.kinds, key };
+  return { settleMs, blockedSettleMs, minIntervalMs, emitKinds: request.kinds, quietPanelIds: request.quietPanelIds, key };
 }
 
 function workspaceNextCommand(

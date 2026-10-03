@@ -221,6 +221,7 @@ export interface RunpaneWorkspaceWaitRequest {
    */
   session?: string;
   excludePaneIds?: string[];
+  quietPanelIds?: string[];
   repo?: RunpaneRepoSelector;
   nameContains?: string;
   agentsOnly?: boolean;

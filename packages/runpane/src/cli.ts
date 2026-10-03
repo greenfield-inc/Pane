@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import * as prompts from './setupPrompts';
+import { runPeers } from './peers';
 import { runAgentContext } from './agentContext';
 import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
 import { daemonActionFor, runDaemonAction } from './daemonActions';
@@ -195,6 +196,14 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'workspace state': async (parsed, telemetryContext) => {
     return runWorkspaceState(parsed);
   },
+  "peers self": (parsed) => runPeers(parsed),
+  "peers list": (parsed) => runPeers(parsed),
+  "peers register": (parsed) => runPeers(parsed),
+  "peers send": (parsed) => runPeers(parsed),
+  "peers inbox": (parsed) => runPeers(parsed),
+  "peers reply": (parsed) => runPeers(parsed),
+  "peers wait": (parsed) => runPeers(parsed),
+  "peers wake": (parsed) => runPeers(parsed),
   'watch': async (parsed, telemetryContext) => {
     return runWatch(parsed);
   },

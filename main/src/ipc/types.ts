@@ -7,6 +7,7 @@ import type { WorkspaceJournal } from '../services/workspaceJournal';
 import type { WorkspaceStateReader } from '../services/workspaceStateReader';
 import type { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import type { NamedLockService } from '../services/namedLockService';
+import type { AgentMailbox } from '../services/agentMailbox';
 
 export interface DaemonHostServices extends CoreServices {
   taskQueue: TaskQueue | null;
@@ -17,6 +18,7 @@ export interface DaemonHostServices extends CoreServices {
   workspaceStateReader?: WorkspaceStateReader;
   workspaceCursorStore?: WorkspaceCursorStore;
   namedLockService?: NamedLockService;
+  agentMailbox?: AgentMailbox;
 }
 
 export interface AppServices extends DaemonHostServices {

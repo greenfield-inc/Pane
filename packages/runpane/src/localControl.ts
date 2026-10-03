@@ -2134,6 +2134,7 @@ export async function runWatch(parsed: ParsedArgs): Promise<number> {
     // The daemon resolves the Session (id or exact name) and re-reads its Panes on every read.
     session: parsed.sessionId,
     excludePaneIds: parsed.watchExcludePaneIds,
+    quietPanelIds: parsed.watchQuietPanelIds,
     repo: parsed.repo,
     nameContains: parsed.nameContains,
     agentsOnly: effectiveAgentsOnly,

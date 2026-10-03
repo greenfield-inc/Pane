@@ -10,6 +10,11 @@ the worked example.
 > architecture was removed. Only Claude's deprecated session-level path still uses
 > it. Do not build new tools on it.
 
+For communication alone, no new built-in agent registration is required. Any CLI
+agent can use [peer discovery and task messages](./AGENT_COMMUNICATION.md), including
+an external process. Follow the steps below only to add a native Pane launch preset
+and terminal-specific readiness/resume behavior.
+
 ## 0. Learn the CLI first
 
 Before writing code, verify against the real binary (see the Cursor example):

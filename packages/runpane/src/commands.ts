@@ -12,6 +12,15 @@ export type { ArtifactFormat, InstallTarget, RunpaneAgent, RunpaneCommand };
 
 export interface ParsedArgs {
   command: RunpaneCommand;
+  peer?: string;
+  peerTo?: string;
+  messageId?: string;
+  agentLabel?: string;
+  receiver?: string;
+  replyStatus?: string;
+  afterRevision?: number;
+  claim?: boolean;
+  includeReceived?: boolean;
   helpTopic?: string;
   target: InstallTarget;
   paneVersion: string;
@@ -73,6 +82,7 @@ export interface ParsedArgs {
   watchKinds?: string[];
   watchPaneIds?: string[];
   watchExcludePaneIds?: string[];
+  watchQuietPanelIds?: string[];
   nameContains?: string;
   follow?: boolean;
   agentsOnly?: boolean;
@@ -129,7 +139,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'peers']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -380,6 +390,8 @@ function createFlagSet(flags: readonly { name: string; aliases?: readonly string
 }
 
 function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
+  if (flag === '--claim') { parsed.claim = true; return; }
+  if (flag === '--include-received') { parsed.includeReceived = true; return; }
   if (flag === '--json') {
     parsed.json = true;
     return;
@@ -491,6 +503,13 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
 }
 
 function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): void {
+  if (flag === '--peer') { parsed.peer = value; return; }
+  if (flag === '--to') { parsed.peerTo = value; return; }
+  if (flag === '--id') { parsed.messageId = value; return; }
+  if (flag === '--agent-label') { parsed.agentLabel = value; return; }
+  if (flag === '--receiver') { parsed.receiver = value; return; }
+  if (flag === '--status') { parsed.replyStatus = value; return; }
+  if (flag === '--after') { parsed.afterRevision = parseNonNegativeIntegerFlag(flag, value); return; }
   if (flag === '--pane-dir') {
     parsed.paneDir = value;
     return;
@@ -511,6 +530,7 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.sessionId = value;
     return;
   }
+  if (flag === '--quiet-panel') { (parsed.watchQuietPanelIds ??= []).push(value); return; }
   if (flag === '--exclude-pane') {
     (parsed.watchExcludePaneIds ??= []).push(value);
     return;
@@ -592,7 +612,7 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--timeout-ms') {
     const timeoutMs = Number(value);
-    if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || (timeoutMs === 0 && parsed.command !== 'watch')) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || (timeoutMs === 0 && parsed.command !== 'watch' && !parsed.command.startsWith('peers '))) {
       throw new Error('--timeout-ms must be a positive number (watch also accepts 0).');
     }
     parsed.timeoutMs = timeoutMs;

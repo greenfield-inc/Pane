@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from .agent_context import run_agent_context
 from .daemon_actions import contract_command, run_daemon_action, run_links_create
+from .peers import run_peers
 from .doctor import run_doctor
 from .download import download_artifact
 from .generated_contract import RUNPANE_CONTRACT
@@ -85,6 +86,7 @@ COMMAND_GROUP_HELP_TOPICS.add("lock")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
+COMMAND_GROUP_HELP_TOPICS.add("peers")
 
 REMOTE_VALUE_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteValue"]}
 REMOTE_BOOLEAN_FLAGS = {flag["name"] for flag in RUNPANE_CONTRACT["flags"]["remoteBoolean"]}
@@ -111,6 +113,15 @@ HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 @dataclass
 class ParsedArgs:
     command: str
+    peer: Optional[str] = None
+    peer_to: Optional[str] = None
+    message_id: Optional[str] = None
+    agent_label: Optional[str] = None
+    receiver: Optional[str] = None
+    reply_status: Optional[str] = None
+    after_revision: Optional[int] = None
+    claim: bool = False
+    include_received: bool = False
     target: str = DEFAULTS["target"]
     pane_version: str = DEFAULTS["paneVersion"]
     channel: str = DEFAULTS["channel"]
@@ -171,6 +182,7 @@ class ParsedArgs:
     watch_kinds: List[str] = field(default_factory=list)
     watch_pane_ids: List[str] = field(default_factory=list)
     watch_exclude_pane_ids: List[str] = field(default_factory=list)
+    watch_quiet_panel_ids: List[str] = field(default_factory=list)
     name_contains: Optional[str] = None
     follow: bool = False
     agents_only: bool = False
@@ -575,6 +587,12 @@ def match_command_group_help(args: List[str]) -> Optional[str]:
 
 
 def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
+    if flag == "--claim":
+        parsed.claim = True
+        return
+    if flag == "--include-received":
+        parsed.include_received = True
+        return
     if flag == "--json":
         parsed.json = True
         return
@@ -659,6 +677,27 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
 
 
 def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
+    if flag == "--peer":
+        parsed.peer = value
+        return
+    if flag == "--to":
+        parsed.peer_to = value
+        return
+    if flag == "--id":
+        parsed.message_id = value
+        return
+    if flag == "--agent-label":
+        parsed.agent_label = value
+        return
+    if flag == "--receiver":
+        parsed.receiver = value
+        return
+    if flag == "--status":
+        parsed.reply_status = value
+        return
+    if flag == "--after":
+        parsed.after_revision = parse_non_negative_int_flag(flag, value)
+        return
     if flag == "--pane-dir":
         parsed.pane_dir = value
         return
@@ -673,6 +712,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--session":
         parsed.session_id = value
+        return
+    if flag == "--quiet-panel":
+        parsed.watch_quiet_panel_ids.append(value)
         return
     if flag == "--exclude-pane":
         parsed.watch_exclude_pane_ids.append(value)
@@ -738,7 +780,7 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             timeout_ms = float(value)
         except ValueError as error:
             raise ValueError("--timeout-ms must be a positive number.") from error
-        if not math.isfinite(timeout_ms) or timeout_ms < 0 or (timeout_ms == 0 and parsed.command != "watch"):
+        if not math.isfinite(timeout_ms) or timeout_ms < 0 or (timeout_ms == 0 and parsed.command != "watch" and not parsed.command.startswith("peers ")):
             raise ValueError("--timeout-ms must be a positive number (watch also accepts 0).")
         parsed.timeout_ms = timeout_ms
         return
@@ -1141,6 +1183,14 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panes list": lambda parsed, context: run_panes_list(parsed),
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),
+    "peers self": lambda parsed, context: run_peers(parsed),
+    "peers list": lambda parsed, context: run_peers(parsed),
+    "peers register": lambda parsed, context: run_peers(parsed),
+    "peers send": lambda parsed, context: run_peers(parsed),
+    "peers inbox": lambda parsed, context: run_peers(parsed),
+    "peers reply": lambda parsed, context: run_peers(parsed),
+    "peers wait": lambda parsed, context: run_peers(parsed),
+    "peers wake": lambda parsed, context: run_peers(parsed),
     "watch": lambda parsed, context: run_watch(parsed),
     "panes create": lambda parsed, context: run_panes_create(parsed),
     "panes archive": lambda parsed, context: run_panes_archive(parsed),

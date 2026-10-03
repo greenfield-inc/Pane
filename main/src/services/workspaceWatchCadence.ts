@@ -2,13 +2,14 @@ import type {
   RunpaneWorkspaceEntry,
   RunpaneWorkspaceEntryKind,
 } from '../../../shared/types/runpaneOrchestration';
-import type { WorkspaceJournalFilter } from './workspaceJournal';
+import { isQuietPanelEntry, type WorkspaceJournalFilter } from './workspaceJournal';
 
 export interface WatchCadenceOptions {
   settleMs: number;
   blockedSettleMs: number;
   minIntervalMs: number;
   emitKinds?: readonly RunpaneWorkspaceEntryKind[];
+  quietPanelIds?: readonly string[];
   /** Identity of the whole request shape; a different key means a fresh instance. */
   key: string;
 }
@@ -47,8 +48,8 @@ export class WatchCadence {
 
   /** Widen the consumer's filter so state changes it did not ask for still reach `ingest`. */
   static observeFilter(filter: WorkspaceJournalFilter): WorkspaceJournalFilter {
-    if (!filter.kinds) return filter;
-    return { ...filter, kinds: [...new Set([...filter.kinds, ...OBSERVED_KINDS])] };
+    return { ...filter, quietPanelIds: undefined,
+      kinds: filter.kinds ? [...new Set([...filter.kinds, ...OBSERVED_KINDS])] : undefined };
   }
 
   /**
@@ -81,7 +82,7 @@ export class WatchCadence {
         ? this.options.settleMs
         : entry.kind === 'agent.blocked' ? this.options.blockedSettleMs : 0;
       if (settleMs > 0 && entry.panelId) {
-        if (this.emits(entry.kind)) {
+        if (this.emits(entry)) {
           this.pending.set(entry.panelId, { entry, matureAt: entryTimeMs(entry, nowMs) + settleMs });
         }
         continue;
@@ -118,11 +119,12 @@ export class WatchCadence {
   }
 
   private hold(entry: RunpaneWorkspaceEntry): void {
-    if (this.emits(entry.kind)) this.held.push(entry);
+    if (this.emits(entry)) this.held.push(entry);
   }
 
-  private emits(kind: RunpaneWorkspaceEntryKind): boolean {
-    return !this.options.emitKinds || this.options.emitKinds.includes(kind);
+  private emits(entry: RunpaneWorkspaceEntry): boolean {
+    return (!this.options.emitKinds || this.options.emitKinds.includes(entry.kind))
+      && !isQuietPanelEntry(entry, this.options.quietPanelIds);
   }
 }
 

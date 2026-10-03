@@ -305,6 +305,14 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `peers self`: Discover caller identity, available messaging capabilities and the optional Pi extension.
+- `peers list`: List managed panels and registered peers with honest live receiver capabilities.
+- `peers register`: Register any agent, including one outside a Pane terminal.
+- `peers send`: Durably queue one idempotent task; a queued response is not consumption.
+- `peers inbox`: Read or atomically claim queued tasks. Inspect received tasks after uncertain delivery; never reclaim automatically.
+- `peers reply`: Reply to a claimed task as its recipient; terminal replies are immutable.
+- `peers wait`: Quietly wait for a correlated blocked, failed or completed reply; --follow suppresses timeouts.
+- `peers wake`: Attempt one guarded terminal inbox cue. A crash or uncertain write is never automatically replayed.
 
 ```bash
 runpane help [command]
@@ -385,6 +393,14 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane peers self [--peer <id>] [--pane-dir <path>] [--json]
+runpane peers list [--peer <id>] [--pane-dir <path>] [--json]
+runpane peers register --peer <stable-id> --agent-label <name> [--receiver cooperative|pi] --yes [--pane-dir <path>] [--json]
+runpane peers send --to <peer> --id <request-id> (--text <text>|--input-file <path|->) --yes [--peer <id>] [--pane-dir <path>] [--json]
+runpane peers inbox [--id <request-id>] [--claim --yes] [--include-received] [--limit <1-100>] [--timeout-ms <0-120000>] [--peer <id>] [--pane-dir <path>] [--json]
+runpane peers reply --id <request-id> --status <blocked|completed|failed> (--text <text>|--input-file <path|->) --yes [--peer <id>] [--pane-dir <path>] [--json]
+runpane peers wait --id <request-id> [--after <revision>] [--timeout-ms <0-120000>] [--follow] [--peer <id>] [--pane-dir <path>] [--json]
+runpane peers wake --id <request-id> --yes [--peer <id>] [--pane-dir <path>] [--json]
 ```
 
 ## Agent Context
@@ -435,6 +451,8 @@ Brief tools:
 - `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `watch`: Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.
+- `peers self`: Discover caller identity, available messaging capabilities and the optional Pi extension.
+- `peers list`: List managed panels and registered peers with honest live receiver capabilities.
 
 Managed AGENTS.md block body:
 
@@ -446,6 +464,7 @@ This repository is used with [Pane](https://runpane.com). Drive it with the CLI 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
 MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = "npx"` and `args = ["--yes", "runpane@latest", "mcp"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.
+Discover communication with `runpane peers self --json` and `runpane peers list --json`. Any agent can register with `peers register --peer <stable-id> --agent-label <name> --yes`; use that --peer on subsequent calls outside Pane. Send durable tasks with `peers send --to <peer> --id <stable-id> --input-file <file> --yes`, claim with `peers inbox --claim --yes`, reply with `peers reply --id <id> --status completed|blocked|failed --text <summary> --yes`, and wait with `peers wait --id <id> --follow --json`. Queued is not consumed; received is not completed; completed is not reviewed/QA/CI ready. Never replay uncertain terminal writes. Use the cadenced watcher only for uncorrelated work and liveness.
 ```
 
 ## Wrapper Flags
@@ -527,6 +546,14 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--peer <id>
+--to <id>
+--id <id>
+--agent-label <name>
+--receiver <cooperative|pi>
+--status <blocked|completed|failed>
+--after <revision>
+--quiet-panel <panel-id>
 --json
 --wait-ready
 --no-focus
@@ -553,6 +580,8 @@ These flags are consumed by local daemon-control commands:
 --idle-backoff
 --report
 --read-only
+--claim
+--include-received
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

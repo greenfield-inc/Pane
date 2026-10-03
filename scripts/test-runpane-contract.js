@@ -311,6 +311,15 @@ async function withFakeDaemon(paneDir, onRequest, action, onFrame = () => {}) {
     pendingResponseTimers.delete(socket);
   };
   const server = net.createServer((socket) => {
+    // Monitors stop their CLI as soon as the expected line arrives. A delayed
+    // fixture response may race that disconnect, especially on macOS.
+    socket.on('error', error => {
+      if (error.code === 'EPIPE' || error.code === 'ECONNRESET') {
+        socket.destroy();
+        return;
+      }
+      throw error;
+    });
     let buffer = '';
     socket.on('error', (error) => rememberSocketError(error, socket));
     socket.once('close', () => clearResponseTimers(socket));
@@ -768,6 +777,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
   asFilePointer: false, noAssociate: false, removeWorktree: false, merged: false,
   quiet: false, readOnly: false, launch: false,
+  claim: false, includeReceived: false, watchQuietPanelIds: [],
 };
 
 function normalizeParsedArgs(value) {
@@ -3977,6 +3987,7 @@ async function runChecks() {
   checkLeadingDashTextArguments();
   await checkPythonDaemonTimeouts();
   compareParserParity();
+  await checkPeerProtocolParity();
   checkWatchFormatterGoldens();
   await checkWatchStreamParity();
   compareLegacyRemoteDaemonHealthParity();
@@ -4031,6 +4042,42 @@ async function runChecks() {
     stdio: 'inherit',
   });
   console.log('runpane CLI contract checks passed');
+}
+
+async function checkPeerProtocolParity() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-peer-cli-'));
+  const taskFile = path.join(directory, 'task.txt');
+  fs.writeFileSync(taskFile, 'Review Unicode: 世界\nDo not interpret `shell` syntax.\n');
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      const cases = [
+        { args: ['peers', 'register', '--peer', 'external', '--agent-label', 'future-agent', '--yes', '--json'], expected: { action: 'register', peer: 'external', agent: 'future-agent', confirmed: true } },
+        { args: ['peers', 'send', '--peer', 'external', '--to', 'worker', '--id', 'task-1', '--input-file', taskFile, '--yes', '--json'], expected: { action: 'send', to: 'worker', id: 'task-1', text: fs.readFileSync(taskFile, 'utf8') } },
+        { args: ['peers', 'inbox', '--peer', 'worker', '--id', 'task-1', '--claim', '--limit', '1', '--yes', '--json'], expected: { action: 'inbox', id: 'task-1', claim: true, limit: 1 } },
+        { args: ['peers', 'reply', '--peer', 'worker', '--id', 'task-1', '--status', 'completed', '--text', 'Tests passed', '--yes', '--json'], expected: { action: 'reply', status: 'completed', text: 'Tests passed' } },
+      ];
+      for (const testCase of cases) {
+        let calls = 0;
+        await withFakeDaemon(directory, frame => {
+          calls++;
+          assert.strictEqual(frame.channel, 'runpane:peers');
+          for (const [key, value] of Object.entries(testCase.expected)) assert.deepStrictEqual(frame.args[0][key], value);
+          return { result: { ok: true, protocolVersion: 1, verified: true } };
+        }, () => runWatchCli(runtime, testCase.args, directory, stdout => stdout.includes('verified')));
+        assert.strictEqual(calls, 1);
+      }
+      let calls = 0;
+      const result = await withFakeDaemon(directory, frame => {
+        calls++;
+        assert.strictEqual(frame.args[0].after, 3);
+        return { result: { ok: true, protocolVersion: 1, timedOut: calls < 3, message: { status: calls < 3 ? 'received' : 'completed' } } };
+      }, () => runWatchCli(runtime, ['peers', 'wait', '--peer', 'external', '--id', 'task-1', '--after', '3', '--timeout-ms', '100', '--follow', '--json'], directory, stdout => stdout.includes('completed')));
+      assert.strictEqual(calls, 3);
+      assert.strictEqual(result.stdout.trim().split('\n').length, 1, 'Timeouts must not wake the model.');
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 runChecks().catch((error) => {

@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsc -w",
-    "build": "rimraf dist && tsc && npm run bundle:preload && npm run copy:assets && npm run bundle:mcp && npm run bundle:runpane",
+    "build": "rimraf dist && tsc && npm run bundle:preload && npm run copy:assets && npm run bundle:mcp && npm run bundle:runpane && pnpm run bundle:pi-bridge",
     "headless": "npm run build && electron dist/main/src/daemon/headless.js",
     "bundle:mcp": "node build-mcp-bridge.js",
     "bundle:runpane": "node build-runpane.js && node build-runpane-cli.js",
@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:watch": "vitest --watch",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "bundle:pi-bridge": "esbuild src/services/agentBridges/piBridge.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main/assets/pi-extension.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",

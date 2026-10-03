@@ -1187,6 +1187,8 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_PANEL_ID',
             'PANE_ORCHESTRATION_SESSION_ID',
             'GIT_CEILING_DIRECTORIES',
+            'PANE_PEER_ID',
+            'PANE_AGENT_DISCOVERY',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
           ]),
@@ -1202,6 +1204,7 @@ export class TerminalPanelManager extends EventEmitter {
     const inheritedEnv = interactiveTerminalEnv();
     // A Pane launched from an orchestrator must not inherit the parent's role.
     delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
+    if (!isWSL) inheritedEnv.PANE_DIR = getAppDirectory();
     const baseSpawnEnv = {
       ...inheritedEnv,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
@@ -1212,6 +1215,9 @@ export class TerminalPanelManager extends EventEmitter {
       WORKTREE_PATH: cwd,
       PANE_SESSION_ID: panel.sessionId,
       PANE_PANEL_ID: panel.id,
+      PANE_PEER_ID: panel.id,
+      PANE_AGENT_DISCOVERY: 'runpane peers self --json',
+
       PANE_PORT: String(panePort),
       PANE_WORKSPACE_PATH: cwd,
       ...wslEnvVars,

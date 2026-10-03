@@ -235,3 +235,10 @@ shared installer behavior:
 This package should be published through npm Trusted Publishing from GitHub
 Actions. Token-based `NPM_TOKEN` publishing is a fallback for first package
 reservation or manual publication only.
+
+## Agent communication
+
+Run `runpane peers self --json` to discover identity and messaging capabilities,
+then `runpane peers list --json`. Any agent can use durable task inboxes and
+correlated replies through this CLI. See the [protocol, Pi bridge and recovery
+guide](../../docs/AGENT_COMMUNICATION.md).

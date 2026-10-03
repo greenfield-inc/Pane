@@ -388,6 +388,7 @@ def run_watch(parsed: Any) -> int:
         # The daemon resolves the Session (id or exact name) and re-reads its Panes on every read.
         **optional_value("session", parsed.session_id),
         **optional_value("excludePaneIds", parsed.watch_exclude_pane_ids or None),
+        **optional_value("quietPanelIds", parsed.watch_quiet_panel_ids or None),
         **optional_value("repo", parsed.repo),
         **optional_value("nameContains", parsed.name_contains),
         **optional_value("agentsOnly", effective_agents_only),

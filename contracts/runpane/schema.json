@@ -735,6 +735,33 @@
         },
         "lock list": {
           "$ref": "#/$defs/helpLines"
+        },
+        "peers": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers self": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers register": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers send": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers inbox": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers reply": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers wait": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "peers wake": {
+          "$ref": "#/$defs/helpLines"
         }
       },
       "additionalProperties": false
