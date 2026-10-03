@@ -63,6 +63,8 @@ function createFixture() {
     isTerminalInitialized: vi.fn((id: string) => running.has(id)),
     initializeTerminal: vi.fn(async (panel: ToolPanel, _cwd: string) => { running.add(panel.id); }),
     writeToTerminal: vi.fn(),
+    // A started shell reports what it runs; one not started yet, what it would run.
+    getShellPath: vi.fn((id: string) => (running.has(id) ? '/bin/bash' : '/usr/bin/zsh')),
   };
   return {
     manager: new HostTerminalManager(sessionManager, panelStore, shells),
@@ -165,9 +167,12 @@ describe('HostTerminalManager', () => {
     const { manager, createSessionWithId } = createFixture();
 
     expect(manager.get()).toBeNull();
+    expect(manager.shell()).toBe('/usr/bin/zsh');
     expect(createSessionWithId).not.toHaveBeenCalled();
 
-    await manager.open();
-    expect(manager.get()).toEqual({ sessionId: HOST_TERMINAL_SESSION_ID, panelId: HOST_TERMINAL_PANEL_ID, started: true });
+    const opened = await manager.open();
+    expect(opened.shell).toBe('/bin/bash');
+    expect(manager.get()).toEqual({ sessionId: HOST_TERMINAL_SESSION_ID, panelId: HOST_TERMINAL_PANEL_ID, started: true, shell: '/bin/bash' });
+    expect(manager.shell()).toBe('/bin/bash');
   });
 });

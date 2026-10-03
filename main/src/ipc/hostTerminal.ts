@@ -20,7 +20,7 @@ export function registerHostTerminalHandlers(
   ipcMain: IpcMain,
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
-  hostTerminal: Pick<HostTerminalManager, 'open' | 'get'> = new HostTerminalManager(services.sessionManager),
+  hostTerminal: Pick<HostTerminalManager, 'open' | 'get' | 'shell'> = new HostTerminalManager(services.sessionManager),
 ): void {
   commandRegistry.register('host-terminal:open', async (request: PaneCommandValue) => {
     try {
@@ -35,4 +35,8 @@ export function registerHostTerminalHandlers(
 
   commandRegistry.register('host-terminal:get', () => ({ success: true, data: hostTerminal.get() }));
   commandRegistry.bindChannel(ipcMain, 'host-terminal:get');
+
+  // Read-only and works before the terminal exists: what the host terminal's shell is (or will be).
+  commandRegistry.register('host-terminal:shell', () => ({ success: true, data: { shell: hostTerminal.shell() } }));
+  commandRegistry.bindChannel(ipcMain, 'host-terminal:shell');
 }

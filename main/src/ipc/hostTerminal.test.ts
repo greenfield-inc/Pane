@@ -15,7 +15,8 @@ function register() {
   const registry = new PaneCommandRegistry();
   const open = vi.fn<HostTerminalManager['open']>(async () => stub<Awaited<ReturnType<HostTerminalManager['open']>>>({ cwd: '/home/user', started: true }));
   const get = vi.fn<HostTerminalManager['get']>(() => null);
-  registerHostTerminalHandlers(stub<IpcMain>({ handle: vi.fn() }), stub<AppServices>({}), registry, { open, get });
+  const shell = vi.fn<HostTerminalManager['shell']>(() => 'pwsh.exe');
+  registerHostTerminalHandlers(stub<IpcMain>({ handle: vi.fn() }), stub<AppServices>({}), registry, { open, get, shell });
   return { registry, open };
 }
 
@@ -56,6 +57,14 @@ describe('host-terminal:open', () => {
 
     await expect(registry.invoke('host-terminal:open', [{ input: 42 }])).resolves.toMatchObject({ success: false });
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('host-terminal:shell', () => {
+  it('answers with the shell even before the terminal exists', async () => {
+    const { registry } = register();
+
+    await expect(registry.invoke('host-terminal:shell', [])).resolves.toEqual({ success: true, data: { shell: 'pwsh.exe' } });
   });
 });
 

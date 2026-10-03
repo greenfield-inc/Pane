@@ -1457,6 +1457,19 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it('reports the shell a terminal runs, and the one a terminal not started yet would run', async () => {
+    const { manager } = await startTerminal(makePanel('shell-report'));
+    const spawnedShell = ptyHost.spawnOptions.at(-1)?.shell;
+    // The default changes later (e.g. the user picks another shell); a running shell stays what it is.
+    const changed = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: '/usr/bin/fish', name: 'fish', args: [] });
+    try {
+      expect(manager.getShellPath('shell-report')).toBe(spawnedShell);
+      expect(manager.getShellPath('never-started')).toBe('/usr/bin/fish');
+    } finally {
+      changed.mockRestore();
+    }
+  });
+
   it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {
     vi.useFakeTimers();
     try {

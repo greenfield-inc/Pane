@@ -330,6 +330,8 @@ interface TerminalProcess {
   /** Basename of the shell Pane spawned, to tell its prompt from a program running in it. */
   shellProcessName?: string;
   interactiveOutputUntil?: number;
+  /** The shell executable this terminal was spawned with. */
+  shellPath?: string;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
   /** The agent showed its own working signal since it last went idle. */
@@ -2050,6 +2052,7 @@ export class TerminalPanelManager extends EventEmitter {
       agentSessionScrapeBuffer: '',
       heldInput: process.platform === 'win32' && !wslContext ? [] : undefined,
       claudeTrustFolder,
+      shellPath,
     };
 
     // Store in map (ptyHost path: pid is already populated on the shim).
@@ -2288,6 +2291,15 @@ export class TerminalPanelManager extends EventEmitter {
   
   isTerminalInitialized(panelId: string): boolean {
     return this.terminals.has(panelId);
+  }
+
+  /**
+   * The shell a terminal runs, or the one a terminal that hasn't started would run (the
+   * spawn's own choice: the preferred shell, else the detected default; WSL panels aside).
+   */
+  getShellPath(panelId: string): string {
+    return this.terminals.get(panelId)?.shellPath
+      ?? ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).path;
   }
 
   getLastOutputAt(panelId: string): string | undefined {

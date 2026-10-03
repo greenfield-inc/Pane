@@ -34,12 +34,16 @@ export interface HostTerminalState<TSession = unknown> {
   /** Where the shell starts: the host's home folder. */
   cwd: string;
   started: boolean;
+  /** The shell executable it runs, e.g. /bin/bash or pwsh.exe; null if unknown. */
+  shell: string | null;
 }
 
 export interface HostTerminalRef {
   sessionId: string;
   panelId: string;
   started: boolean;
+  /** The shell executable it runs, or would run if not started; null if unknown. */
+  shell: string | null;
 }
 
 /** The text `input` puts at the prompt: no line breaks, so nothing is submitted. */
