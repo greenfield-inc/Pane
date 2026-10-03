@@ -1,7 +1,7 @@
 import { HOST_ICONS } from '../utils/hostKind';
 import { formatHostChipText, type ActiveHost } from '../utils/hostRepoActions';
 
-/** Names the host a repo dialog acts on, e.g. "On: testina (cloud sandbox)". */
+/** Names the host a repo dialog acts on, e.g. "On: sandbox-1 (cloud sandbox)". */
 export function HostChip({ host }: { host: ActiveHost }) {
   const Icon = HOST_ICONS[host.icon];
   return (
