@@ -43,14 +43,12 @@ import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
+import { createWorkspaceJournal } from '../services/create-workspace-journal';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
-import { extractWorkspaceHeldInput } from '../services/workspaceHeldInput';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 interface PaneDaemonHostOptions {
   app: App;
@@ -250,49 +248,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     worktreeNameGenerator,
   });
 
-  const workspaceJournal = new WorkspaceJournal({
-    resolvePane: (paneId) => {
-      const session = sessionManager.getSession(paneId);
-      if (!session) return undefined;
-      const project = sessionManager.getProjectForSession(paneId);
-      return {
-        paneId,
-        paneName: session.name,
-        repoId: project?.id,
-        repoName: project?.name,
-        worktreePath: session.worktreePath,
-      };
-    },
-    resolvePanel: (panelId) => {
-      const panel = panelManager.getPanel(panelId);
-      if (!panel) return undefined;
-      const snapshot = terminalPanelManager.getTerminalSnapshot(panelId);
-      const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
-        agentType: boundary.optional(boundary.string),
-        isCliPanel: boundary.optional(boundary.boolean),
-      }));
-      return {
-        panelId,
-        paneId: panel.sessionId,
-        isCliPanel: snapshot?.isCliPanel ?? customState.isCliPanel ?? false,
-        agentType: snapshot?.agentType ?? customState.agentType,
-        panelTitle: panel.title,
-        lastActivityAt: snapshot?.lastActivityTime,
-        heldInput: snapshot?.screenText ? extractWorkspaceHeldInput(snapshot.screenText) : undefined,
-      };
-    },
-    resolveSessionMembership: sessionId => orchestrationSessionManager.workspaceMembership(sessionId),
-  });
-  for (const session of sessionManager.getAllSessions()) {
-    const project = sessionManager.getProjectForSession(session.id);
-    workspaceJournal.rememberPane({
-      paneId: session.id,
-      paneName: session.name,
-      repoId: project?.id,
-      repoName: project?.name,
-      worktreePath: session.worktreePath,
-    });
-  }
+  const workspaceJournal = createWorkspaceJournal(sessionManager, panelManager, terminalPanelManager, { resolveSessionMembership: sessionId => orchestrationSessionManager.workspaceMembership(sessionId) });
   // Polls GitHub only for Panes in a live Session with an open PR; idle rounds run no gh.
   const sessionPrMonitor = new SessionPrMonitor({
     sessions: orchestrationSessionManager,

@@ -1151,7 +1151,7 @@ async function initializeServices() {
   });
 
   const services = paneDaemonHost.services;
-  if (!services.logger || !services.archiveProgressManager || !services.analyticsManager) {
+  if (!services.analyticsManager) {
     throw new Error('Pane daemon host did not initialize required core services');
   }
   configManager = services.configManager;
