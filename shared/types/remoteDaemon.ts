@@ -86,6 +86,18 @@ export interface RemoteDaemonClientRecord {
   phoneId?: string;
 }
 
+export type RemoteHostKindIcon = 'server' | 'cloud';
+
+/**
+ * How the app names and draws a saved host, set by whatever created the
+ * profile. Profiles without one are self-hosted remotes.
+ */
+export interface RemoteHostKind {
+  /** Lowercase noun shown after the host name, e.g. "remote host". */
+  label: string;
+  icon: RemoteHostKindIcon;
+}
+
 export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
@@ -101,6 +113,7 @@ export interface RemotePaneConnectionProfile {
    */
   tailnetMachine?: string;
   tailnetDomain?: string;
+  hostKind?: RemoteHostKind;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -561,6 +574,10 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
+const remoteHostKindSchema: BoundarySchema<RemoteHostKind> = boundary.object({
+  label: boundary.nonEmptyString,
+  icon: boundary.enumeration('server', 'cloud'),
+});
 const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -570,6 +587,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tunnel: boundary.optional(remoteTunnelSchema),
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
+  hostKind: boundary.optional(remoteHostKindSchema),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
