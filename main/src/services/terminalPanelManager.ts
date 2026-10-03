@@ -276,6 +276,8 @@ interface TerminalProcess {
   agentType?: CliAgentType;
   /** Basename of the shell Pane spawned, to tell its prompt from a program running in it. */
   shellProcessName?: string;
+  /** The shell executable this terminal was spawned with. */
+  shellPath?: string;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
   /** Last status scan, reused while the emulator pushes no new screen. */
@@ -1320,6 +1322,7 @@ export class TerminalPanelManager extends EventEmitter {
       filterInAltScreen: false,
       agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
       shellProcessName: normalizeProcessName(shellPath),
+      shellPath,
       agentSessionScrapeBuffer: ''
     };
 
@@ -1628,6 +1631,15 @@ export class TerminalPanelManager extends EventEmitter {
   
   isTerminalInitialized(panelId: string): boolean {
     return this.terminals.has(panelId);
+  }
+
+  /**
+   * The shell a terminal runs, or the one a terminal that hasn't started would run (the
+   * spawn's own choice: the preferred shell, else the detected default; WSL panels aside).
+   */
+  getShellPath(panelId: string): string {
+    return this.terminals.get(panelId)?.shellPath
+      ?? ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).path;
   }
 
   getLastOutputAt(panelId: string): string | undefined {

@@ -248,6 +248,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
       cwd: '/home/user',
       started: true,
+      shell: '/bin/bash',
     });
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);

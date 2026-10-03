@@ -19,6 +19,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { sessionWorkspacePath } from './sessionWorkspace';
 import { windowsPathToWSLMount } from '../utils/wslUtils';
+import { ShellDetector } from '../utils/shellDetector';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -303,6 +304,19 @@ describe('terminal panel persistence', () => {
       expect(ptyHost.spawned.at(-1)?.env).toMatchObject({ BROWSER: 'false', GH_BROWSER: 'false', PANE_PANEL_ID: 'host-shell-env' });
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+
+  it('reports the shell a terminal runs, and the one a terminal not started yet would run', async () => {
+    const { manager } = await startTerminal(makePanel('shell-report'));
+    const spawnedShell = ptyHost.spawned.at(-1)?.shell;
+    // The default changes later (e.g. the user picks another shell); a running shell stays what it is.
+    const changed = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: '/usr/bin/fish', name: 'fish', args: [] });
+    try {
+      expect(manager.getShellPath('shell-report')).toBe(spawnedShell);
+      expect(manager.getShellPath('never-started')).toBe('/usr/bin/fish');
+    } finally {
+      changed.mockRestore();
     }
   });
 

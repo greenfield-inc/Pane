@@ -23,7 +23,10 @@ const HOST_TERMINAL_TITLE = 'Terminal';
 const CLEAR_PROMPT_LINE = '\x05\x15';
 
 type HostTerminalPanels = Pick<typeof panelManager, 'getPanel' | 'createPanel' | 'updatePanel' | 'setActivePanel'>;
-type HostTerminalShells = Pick<typeof terminalPanelManager, 'isTerminalInitialized' | 'initializeTerminal' | 'writeToTerminal'>;
+type HostTerminalShells = Pick<
+  typeof terminalPanelManager,
+  'isTerminalInitialized' | 'initializeTerminal' | 'writeToTerminal' | 'getShellPath'
+>;
 
 /**
  * The one plain shell on this host. It needs no repository: a hidden detached
@@ -61,6 +64,7 @@ export class HostTerminalManager {
         panel: this.panels.getPanel(panel.id) ?? panel,
         cwd,
         started: this.shells.isTerminalInitialized(panel.id),
+        shell: this.shell(),
       };
     });
   }
@@ -74,7 +78,16 @@ export class HostTerminalManager {
       sessionId: HOST_TERMINAL_SESSION_ID,
       panelId: HOST_TERMINAL_PANEL_ID,
       started: this.shells.isTerminalInitialized(HOST_TERMINAL_PANEL_ID),
+      shell: this.shell(),
     };
+  }
+
+  /**
+   * The shell the host terminal runs, or would run if it hasn't started (even before it was ever
+   * opened), so text typed for the user can match it. Read-only.
+   */
+  shell(): string | null {
+    return this.shells.getShellPath(HOST_TERMINAL_PANEL_ID) || null;
   }
 
   private ensureSession(): Session {
