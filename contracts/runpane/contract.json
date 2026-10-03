@@ -81,7 +81,7 @@
     "enter": "\r",
     "escape": "\u001b",
     "tab": "\t",
-    "backspace": "\u007f",
+    "backspace": "",
     "space": " ",
     "up": "\u001b[A",
     "down": "\u001b[B",
@@ -5284,15 +5284,37 @@
         },
         "watchDefaults": {
           "type": "object",
-          "required": ["heartbeatSeconds", "idleAfterMs", "settleMs", "blockedSettleMs", "minIntervalMs", "idleBackoff", "kinds"],
+          "required": [
+            "heartbeatSeconds",
+            "idleAfterMs",
+            "settleMs",
+            "blockedSettleMs",
+            "minIntervalMs",
+            "idleBackoff",
+            "kinds"
+          ],
           "properties": {
-            "heartbeatSeconds": { "type": "number" },
-            "idleAfterMs": { "type": "number" },
-            "settleMs": { "type": "number" },
-            "blockedSettleMs": { "type": "number" },
-            "minIntervalMs": { "type": "number" },
-            "idleBackoff": { "type": "boolean" },
-            "kinds": { "const": "all" }
+            "heartbeatSeconds": {
+              "type": "number"
+            },
+            "idleAfterMs": {
+              "type": "number"
+            },
+            "settleMs": {
+              "type": "number"
+            },
+            "blockedSettleMs": {
+              "type": "number"
+            },
+            "minIntervalMs": {
+              "type": "number"
+            },
+            "idleBackoff": {
+              "type": "boolean"
+            },
+            "kinds": {
+              "const": "all"
+            }
           },
           "additionalProperties": false
         },
@@ -7729,7 +7751,10 @@
           "type": "number"
         },
         "enter": {
-          "enum": ["cr", "tab"]
+          "enum": [
+            "cr",
+            "tab"
+          ]
         },
         "sequenceName": {
           "enum": [
@@ -9303,7 +9328,7 @@
         "Use `panes create` for separate visible Panes (Pane sessions) for feature/PR work. Pane creates and owns the worktree/branch for each new Pane.",
         "Use `panels create` for reviewer/helper/clean-context tabs that should stay inside an existing Pane and share that Pane's worktree.",
         "For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
-        "Skill routing: Pane's skills live in `<PANE_DIR>/skills/pane-chat/skills/`, and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`; read the skill that matches the request, such as `discussion`, `create-ticket`, `tdd`, `prepare-pr`, or `review`.",
+        "Skill routing: Pane's skills live in `<PANE_DIR>/skills/pane-chat/skills/`, and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`; read the skill that matches the request, such as `discussion`, `create-ticket`, `tdd`, `prepare-pr`, or `review`. Read installed local skills first; when a requested skill is absent, inspect upstream skill files with `gh` against https://github.com/greenfield-inc/skills, and do not clone or install it unless the user asks.",
         "When an agent creates Panes or panels, pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved; `panes create` pins the new Pane into the UI's favorite/pin set by default, so no follow-up `panes pin` call is needed and `--no-pinned` is the opt-out for throwaway Panes.",
         "Use `runpane agent-context --json` for the full agent-facing CLI context, or `runpane agent-context --command <command> --json` for one detailed command definition.",
         "For `agent-context --command`, use canonical spaced names like `panes create`; copied forms like `panes.create` or `runpane panes create` are accepted too.",

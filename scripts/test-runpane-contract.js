@@ -3381,7 +3381,8 @@ function compareAgentContextParity() {
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('normal subagent/worktree mechanism')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('<PANE_DIR>/skills/pane-chat/skills/')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md')));
-  assert.ok(!nodeBrief.rules.some((rule) => rule.includes('runpane-orchestrator.md')));
+  assert.ok(nodeBrief.rules.some((rule) => rule.includes('inspect upstream skill files with `gh` against https://github.com/greenfield-inc/skills')));
+  assert.ok(nodeBrief.rules.some((rule) => rule.includes('do not clone or install it unless the user asks')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('creates Panes or panels')));
   assert.ok(nodeBrief.tools.some((tool) => tool.name === 'doctor'));
   assert.ok(nodeBrief.tools.some((tool) => tool.name === 'panes create'));
