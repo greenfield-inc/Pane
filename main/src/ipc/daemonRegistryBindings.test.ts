@@ -5,7 +5,7 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerFileHandlers } from './file';
 import { registerConfigHandlers } from './config';
-import { registerGitHandlers } from './git';
+import { decodeRepoGitGraphRequest, registerGitHandlers } from './git';
 import { registerPanelHandlers } from './panels';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
@@ -197,6 +197,8 @@ const GIT_STATUS_CHANNELS = [
   'sessions:get-executions',
   'sessions:get-execution-diff',
   'sessions:get-git-graph',
+  'projects:get-git-graph',
+  'projects:get-commit-detail',
   'git:file-status',
   'sessions:git-diff',
   'sessions:get-diff-manifest',
@@ -280,6 +282,26 @@ function createServicesStub(overrides: Partial<AppServices> = {}): AppServices {
 }
 
 describe('daemon registry IPC bindings', () => {
+  it('decodes repository graph requests at the daemon boundary', () => {
+    expect(decodeRepoGitGraphRequest({
+      projectId: 7,
+      limit: 300,
+      remoteScope: 'origin',
+      focusRef: 'feature/graph',
+    })).toEqual({
+      projectId: 7,
+      limit: 300,
+      remoteScope: 'origin',
+      focusRef: 'feature/graph',
+    });
+  });
+
+  it('rejects malformed repository graph request numbers', () => {
+    expect(() => decodeRepoGitGraphRequest({ projectId: 1.5 })).toThrow('positive integer');
+    expect(() => decodeRepoGitGraphRequest({ projectId: 1, limit: Number.NaN })).toThrow('integer');
+    expect(() => decodeRepoGitGraphRequest({ projectId: 1, limit: 2.5 })).toThrow('integer');
+  });
+
   it('binds daemon-owned project channels through the shared registry', () => {
     const registry = new PaneCommandRegistry();
     const ipcMain = createIpcMainStub();

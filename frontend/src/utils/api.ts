@@ -4,6 +4,7 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { RepoGitGraphRequest } from '../../../shared/types/gitGraph';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -525,6 +526,18 @@ export class API {
     async listBranches(projectId: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.projects.listBranches(projectId);
+    },
+
+    /** Repository-wide commit graph across every branch and tag. */
+    async getGitGraph(request: RepoGitGraphRequest) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.projects.getGitGraph(request);
+    },
+
+    /** Full patch for one commit, resolved against the project checkout. */
+    async getCommitDetail(projectId: number, commitHash: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.projects.getCommitDetail(projectId, commitHash);
     },
   };
 

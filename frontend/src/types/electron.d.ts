@@ -51,6 +51,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
+import type { RepoGitGraph, RepoGitGraphRequest } from '../../../shared/types/gitGraph';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
@@ -302,6 +303,10 @@ interface ElectronAPI {
     detectConfig: (projectId: string) => Promise<IPCResponse<DetectedProjectConfig | null>>;
     /** Resolve which run script to execute for a session (DB > config files > scripts/pane-run-script.js). Used by PanelTabBar Play button. */
     resolveRunScript: (sessionId: string) => Promise<IPCResponse<{ command: string; source: string } | null>>;
+    /** Repository-wide commit graph across every branch and tag. */
+    getGitGraph: (request: RepoGitGraphRequest) => Promise<IPCResponse<RepoGitGraph>>;
+    /** Full patch for one commit, resolved against the project checkout. */
+    getCommitDetail: (projectId: number, commitHash: string) => Promise<IPCResponse<GitDiffResult>>;
   };
 
   // Git operations

@@ -177,11 +177,12 @@ export async function restoreHostNavigation(): Promise<void> {
   const navigation = useNavigationStore.getState();
   const { setActiveSession } = useSessionStore.getState();
 
-  if (memory.view === 'project') {
+  if (memory.view === 'project' || memory.view === 'git-graph') {
     // The repository view mounts the project's own main-repo Pane itself.
     if (memory.projectId === null || !(await projectExists(memory.projectId))) return;
     await setActiveSession(null);
-    navigation.navigateToProject(memory.projectId);
+    if (memory.view === 'git-graph') navigation.navigateToGitGraph(memory.projectId);
+    else navigation.navigateToProject(memory.projectId);
     return;
   }
 
