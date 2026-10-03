@@ -72,6 +72,18 @@ export interface RemoteDaemonClientRecord {
   lastUsedAt?: string;
 }
 
+export type RemoteHostKindIcon = 'server' | 'cloud';
+
+/**
+ * How the app names and draws a saved host, set by whatever created the
+ * profile. Profiles without one are self-hosted remotes.
+ */
+export interface RemoteHostKind {
+  /** Lowercase noun shown after the host name, e.g. "remote host". */
+  label: string;
+  icon: RemoteHostKindIcon;
+}
+
 export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
@@ -79,6 +91,7 @@ export interface RemotePaneConnectionProfile {
   token: string;
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
+  hostKind?: RemoteHostKind;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -436,6 +449,10 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
+const remoteHostKindSchema: BoundarySchema<RemoteHostKind> = boundary.object({
+  label: boundary.nonEmptyString,
+  icon: boundary.enumeration('server', 'cloud'),
+});
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -443,6 +460,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  hostKind: boundary.optional(remoteHostKindSchema),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),
