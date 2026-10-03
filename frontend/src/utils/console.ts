@@ -1,29 +1,18 @@
-/**
- * Performance-optimized console utilities
- * Reduces console.log calls in production builds
- */
+import { useConfigStore } from '../stores/configStore';
 
-const isDevelopment = process.env.NODE_ENV === 'development';
-const isVerboseEnabled = () => {
-  // Check if verbose logging is enabled in settings
-  try {
-    const verboseLogging = localStorage.getItem('pane.verboseLogging');
-    return verboseLogging === 'true';
-  } catch {
-    return false;
-  }
-};
+// Read the current persisted setting at each call so Settings takes effect immediately.
+const isLoggingEnabled = () => process.env.NODE_ENV === 'development' || useConfigStore.getState().config?.verbose === true;
 
 export const devLog = {
   log: (...args: unknown[]) => {
-    if (isDevelopment || isVerboseEnabled()) {
+    if (isLoggingEnabled()) {
       // eslint-disable-next-line no-console -- this module is the centralized console adapter.
       console.log(...args);
     }
   },
   
   warn: (...args: unknown[]) => {
-    if (isDevelopment || isVerboseEnabled()) {
+    if (isLoggingEnabled()) {
       console.warn(...args);
     }
   },
@@ -34,14 +23,14 @@ export const devLog = {
   },
   
   debug: (...args: unknown[]) => {
-    if (isDevelopment && isVerboseEnabled()) {
+    if (isLoggingEnabled()) {
       // eslint-disable-next-line no-console -- this module is the centralized console adapter.
       console.debug(...args);
     }
   },
   
   info: (...args: unknown[]) => {
-    if (isDevelopment || isVerboseEnabled()) {
+    if (isLoggingEnabled()) {
       // eslint-disable-next-line no-console -- this module is the centralized console adapter.
       console.info(...args);
     }
@@ -50,10 +39,10 @@ export const devLog = {
 
 /**
  * Performance-focused logging for component renders
- * Only logs in development with verbose enabled
+ * Uses the same development/verbose gate as other optional diagnostics
  */
 export const renderLog = (...args: unknown[]) => {
-  if (isDevelopment && isVerboseEnabled()) {
+  if (isLoggingEnabled()) {
     // eslint-disable-next-line no-console -- this module is the centralized console adapter.
     console.log(...args);
   }
