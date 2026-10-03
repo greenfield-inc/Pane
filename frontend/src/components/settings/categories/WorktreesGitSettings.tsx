@@ -70,18 +70,6 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
             onSave={(value) => persistence.saveConfig('git-attribution', { gitAttributionEnabled: value })}
           />
         </SettingRow>
-        <SettingRow
-          settingId="auto-rename-pr"
-          label="Auto-rename panes to pull request titles"
-          description="When Pane detects a pull request for a pane, use its title as the pane name."
-          saveState={persistence.saveStates['auto-rename-pr']}
-        >
-          <ImmediateToggle
-            label="Auto-rename panes to pull request titles"
-            value={persistence.preferences.autoRenameSessionsToPr}
-            onSave={(value) => persistence.savePreference('autoRenameSessionsToPr', value)}
-          />
-        </SettingRow>
       </SettingsSection>
 
       <SettingsSection title="New worktrees" description="Copy gitignored configuration into newly created worktrees when it exists in the main repository.">

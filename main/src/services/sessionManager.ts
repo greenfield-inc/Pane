@@ -36,6 +36,10 @@ interface CommandExecutionError {
   message?: string;
 }
 
+export class SessionDisplayNameError extends Error {
+  override name = 'SessionDisplayNameError';
+}
+
 // Interface for generic JSON message data that can contain various properties
 interface MessageTextBlock { type: string; text?: string }
 interface GenericMessageData {
@@ -332,7 +336,8 @@ export class SessionManager extends EventEmitter {
       isHidden: !!dbSession.is_hidden,
       baseCommit: dbSession.base_commit,
       baseBranch: dbSession.base_branch,
-      pr_renamed: !!dbSession.pr_renamed
+      pr_renamed: !!dbSession.pr_renamed,
+      nameManuallySet: !!dbSession.name_manually_set,
     };
   }
 
@@ -586,6 +591,19 @@ export class SessionManager extends EventEmitter {
     });
   }
 
+  async getOrCreateMainRepoSessionAnnounced(
+    projectId: number,
+    options: { createDefaultTerminalOnCreate?: boolean } = {},
+  ): Promise<Session> {
+    const session = await this.getOrCreateMainRepoSession(projectId);
+    const dbSession = this.db.getSession(session.id);
+    if (dbSession?.status === 'pending') {
+      this.emitSessionCreated(session, options);
+      this.updateSession(session.id, { status: 'stopped' });
+    }
+    return session;
+  }
+
   emitSessionCreated(
     session: Session,
     options: { activateOnCreate?: boolean; createDefaultTerminalOnCreate?: boolean } = {},
@@ -595,6 +613,32 @@ export class SessionManager extends EventEmitter {
       activateOnCreate: options.activateOnCreate !== false,
       createDefaultTerminalOnCreate: options.createDefaultTerminalOnCreate !== false,
     });
+  }
+
+  renameSessionDisplayName(sessionId: string, rawName: string): Session {
+    const name = rawName.trim();
+    if (!name) {
+      throw new SessionDisplayNameError('Pane name cannot be blank');
+    }
+
+    const currentSession = this.getSession(sessionId);
+    if (!currentSession) {
+      throw new SessionDisplayNameError('Session not found');
+    }
+
+    const updatedDbSession = this.db.updateSession(sessionId, {
+      name,
+      name_manually_set: true,
+    });
+    if (!updatedDbSession) {
+      throw new SessionDisplayNameError('Session not found');
+    }
+
+    currentSession.name = name;
+    currentSession.nameManuallySet = true;
+    this.activeSessions.set(sessionId, currentSession);
+    this.emit('session-updated', currentSession);
+    return currentSession;
   }
 
   updateSession(id: string, update: SessionUpdate): void {

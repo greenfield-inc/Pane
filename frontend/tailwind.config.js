@@ -252,7 +252,6 @@ export default {
       },
       animation: {
         shimmer: 'shimmer 2s linear infinite',
-        'status-working': 'status-working-sweep 1.4s ease-in-out infinite alternate',
         'in': 'in 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',
         'zoom-in-95': 'zoom-in-95 0.2s ease-out',
@@ -266,11 +265,6 @@ export default {
         shimmer: {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(100%)' },
-        },
-        // Vertical "loading" light that sweeps up and down the working status bar.
-        'status-working-sweep': {
-          '0%': { transform: 'translateY(-120%)' },
-          '100%': { transform: 'translateY(120%)' },
         },
         'in': {
           '0%': { opacity: 0, transform: 'scale(0.95)' },

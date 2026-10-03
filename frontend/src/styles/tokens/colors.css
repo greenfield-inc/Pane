@@ -597,7 +597,7 @@
   --color-surface-navigation-selected: rgba(var(--color-interactive-rgb), 0.15);
   --color-surface-navigation-selected-hover: rgba(var(--color-interactive-rgb), 0.2);
 
-  --color-text-navigation-primary: rgb(200 208 217);
+  --color-text-navigation-primary: rgb(188 196 205);   /* softer than body text — sidebar is navigation, not reading */
   --color-text-navigation-secondary: rgb(125 133 144);
   --color-text-navigation-muted: rgb(114 122 133);  /* #727a85 — 4.7:1 on bg-primary (AA) */
   --color-text-navigation-selected: rgb(230 237 243);
@@ -746,7 +746,7 @@
   --color-surface-navigation-selected: var(--blue-100);
   --color-surface-navigation-selected-hover: var(--blue-200);
 
-  --color-text-navigation-primary: rgb(31 35 40);
+  --color-text-navigation-primary: rgb(58 64 71);     /* #3a4047 — softer than body text, 8.6:1 on the rail */
   --color-text-navigation-secondary: rgb(93 101 110); /* 5.3:1 */
   --color-text-navigation-muted: rgb(107 114 128);   /* gray-500 — 4.6:1 (AA) */
   --color-text-navigation-selected: var(--gray-800);

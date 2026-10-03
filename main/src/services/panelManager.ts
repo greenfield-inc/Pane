@@ -386,6 +386,15 @@ class PanelManager {
 
     return undefined;
   }
+
+  removePanelFromMemory(panelId: string): void {
+    const panel = this.panels.get(panelId);
+    panelEventBus.unsubscribePanel(panelId);
+    this.panels.delete(panelId);
+    if (panel) {
+      this.sendRendererEvent('panel:deleted', { panelId, sessionId: panel.sessionId });
+    }
+  }
   
   getPanelsForSession(sessionId: string): ToolPanel[] {
     // Always get fresh from database to ensure consistency

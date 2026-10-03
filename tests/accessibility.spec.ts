@@ -352,6 +352,10 @@ test('seeded pane exposes separate compound actions and arrow-keyed panel tabs',
   await expect(archiveButton).toBeAttached();
   await expect(pinButton).toBeAttached();
   await expect(paneButton.locator('button, a, [role="button"]')).toHaveCount(0);
+  // The row actions collapse to zero width at rest so an idle sidebar keeps its
+  // width for names, so reveal them the way a user does before acting on them.
+  await paneButton.hover();
+  await expect(archiveButton).toBeVisible();
   await archiveButton.click();
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
   await expect.poll(() => page.evaluate(() => (

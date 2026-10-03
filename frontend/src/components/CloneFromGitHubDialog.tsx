@@ -59,7 +59,6 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
       const projectResult = await API.projects.create({
         name: repoName,
         path: clonedPath,
-        active: false,
       });
 
       if (!projectResult.success || !projectResult.data) {

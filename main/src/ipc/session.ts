@@ -26,6 +26,7 @@ import {
 } from '../utils/sessionValidation';
 import { detectProjectConfig } from '../services/projectConfigDetector';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { SessionDisplayNameError } from '../services/sessionManager';
 
 const DAEMON_SESSION_CHANNELS = [
   'sessions:get-all',
@@ -772,20 +773,7 @@ export function registerSessionHandlers(
     try {
       console.log('[IPC] sessions:get-or-create-main-repo handler called with projectId:', projectId);
 
-      // Get or create the main repo session
-      const session = await sessionManager.getOrCreateMainRepoSession(projectId);
-
-      // If it's a newly created session, just emit the created event
-      const dbSession = databaseService.getSession(session.id);
-      if (dbSession && dbSession.status === 'pending') {
-        console.log('[IPC] New main repo session created:', session.id);
-
-        // Emit session created event
-        sessionManager.emitSessionCreated(session);
-
-        // Set the status to stopped since Claude Code isn't running yet
-        sessionManager.updateSession(session.id, { status: 'stopped' });
-      }
+      const session = await sessionManager.getOrCreateMainRepoSessionAnnounced(projectId);
 
       return { success: true, data: session };
     } catch (error) {
@@ -1452,23 +1440,15 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:rename', async (sessionId: string, newName: string) => {
     try {
-      // Update the session name in the database
-      const updatedSession = databaseService.updateSession(sessionId, { name: newName });
-      if (!updatedSession) {
-        return { success: false, error: 'Session not found' };
-      }
-
-      // Emit update event so frontend gets notified
-      const session = sessionManager.getSession(sessionId);
-      if (session) {
-        session.name = newName;
-        sessionManager.emit('session-updated', session);
-      }
-
+      sessionManager.renameSessionDisplayName(sessionId, newName);
+      const updatedSession = databaseService.getSession(sessionId);
       return { success: true, data: updatedSession };
     } catch (error) {
       console.error('Failed to rename session:', error);
-      return { success: false, error: 'Failed to rename session' };
+      return {
+        success: false,
+        error: error instanceof SessionDisplayNameError ? error.message : 'Failed to rename session',
+      };
     }
   });
 

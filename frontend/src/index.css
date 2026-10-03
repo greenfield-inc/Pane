@@ -551,8 +551,7 @@ body.understory {
 
   /* Decorative loops that translate. The bar and the accent stay visible; only
      the sweep stops. */
-  .animate-slide-progress,
-  .animate-status-working {
+  .animate-slide-progress {
     animation: none;
   }
 
@@ -604,23 +603,6 @@ body.understory {
 
 .animate-typing-dot {
   animation: typing-dots 1.5s ease-in-out infinite;
-}
-
-@keyframes sidebar-active-label-breathe {
-  0%, 100% {
-    color: var(--color-text-primary);
-  }
-  50% {
-    color: var(--color-status-info);
-  }
-}
-
-.animate-sidebar-active-label {
-  /* 2.8s = one full cycle of the accent bar's status-working sweep (1.4s
-     alternate), so the label's color peak lands on the sweep's bottom bounce
-     and the two stay in phase — both animations start on the same render when
-     a session flips to working. */
-  animation: sidebar-active-label-breathe 2.8s ease-in-out infinite;
 }
 
 /* Terminal specific styling */
@@ -1160,7 +1142,6 @@ body.understory {
 .animate-modal-overlay-enter,
 .animate-title-pill-enter,
 .animate-fade-in,
-.animate-sidebar-active-label,
 [class*="animate-zoom-in"],
 .pane-sheet[data-state='open'],
 .pane-sheet[data-state='closed'],

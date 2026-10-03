@@ -396,7 +396,7 @@ export class TaskQueue {
                 // Guard: only apply if the name is still the fallback (user may have renamed manually)
                 const sm = this.options.sessionManager;
                 const liveSession = sm.getSession(capturedSessionId);
-                if (liveSession && liveSession.name === capturedFallbackName) {
+                if (liveSession && !liveSession.nameManuallySet && liveSession.name === capturedFallbackName) {
                   // Ensure uniqueness — another session may already have this AI-generated name
                   let finalName = aiName;
                   if (sm.db.checkSessionNameExists(finalName)) {

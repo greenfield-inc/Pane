@@ -71,7 +71,7 @@ export interface AppConfig {
   defaultPermissionMode?: 'approve' | 'ignore';
   // Default model for new sessions
   defaultModel?: string;
-  // Default agent used by the global Pane Chat orchestrator terminal
+  // Default agent used by Pane Chat and a newly added repository's first terminal.
   defaultOrchestratorAgent?: PaneChatAgent;
   // Auto-check for updates
   autoCheckUpdates?: boolean;

@@ -5,7 +5,7 @@ import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
 import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
-import type { TerminalPanelState } from '../../../shared/types/panels';
+import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ShellDetector } from '../utils/shellDetector';
@@ -123,6 +123,14 @@ type ShellPromptSchedulerAccess = {
   }, callback: () => void): void;
 };
 
+type SpawnQueueAccess = {
+  activeSpawns: number;
+  spawnQueue: Array<{ resolve: () => void; priority: number }>;
+  terminals: Map<string, TerminalUnderTest>;
+  initializeTerminal: TerminalPanelManager['initializeTerminal'];
+  releaseSpawnSlot(): void;
+};
+
 function testAccess<Access>(manager: TerminalPanelManager): Access {
   // SAFETY: Each access type above mirrors the exact private members exercised
   // by its tests; this helper keeps that deliberate test-only seam in one place.
@@ -189,6 +197,39 @@ describe('TerminalPanelManager keyboard input', () => {
     manager.writeToTerminal(terminal.panelId, data);
     expect(terminal.pty.write.mock.calls).toEqual([[data]]);
     disposeFlowControlRecord(terminal.flowControl);
+  });
+});
+
+describe('TerminalPanelManager spawn queue', () => {
+  it('releases an acquired slot without spawning when the queued panel was deleted', async () => {
+    const manager = testAccess<SpawnQueueAccess>(new TerminalPanelManager());
+    const panel: ToolPanel = {
+      id: 'deleted-panel',
+      sessionId: 'session-1',
+      type: 'terminal',
+      title: 'Terminal',
+      state: { isActive: true },
+      metadata: {
+        createdAt: '2026-01-01T00:00:00.000Z',
+        lastActiveAt: '2026-01-01T00:00:00.000Z',
+        position: 0,
+      },
+    };
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    vi.mocked(panelManager.getPanel).mockReturnValue(undefined);
+    manager.activeSpawns = 3;
+
+    const initialization = manager.initializeTerminal(panel, '/repo');
+    await vi.waitFor(() => expect(manager.spawnQueue).toHaveLength(1));
+    manager.releaseSpawnSlot();
+    await initialization;
+
+    expect(manager.terminals.has(panel.id)).toBe(false);
+    expect(manager.spawnQueue).toHaveLength(0);
+    expect(manager.activeSpawns).toBe(2);
+    expect(panelManager.updatePanel).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('deleted while waiting for a spawn slot'));
+    info.mockRestore();
   });
 });
 

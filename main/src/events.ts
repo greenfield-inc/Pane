@@ -16,6 +16,14 @@ import { resourceMonitorService } from './services/resourceMonitorService';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { PaneEventArgument } from './core/eventSink';
 import type { AgentState } from '../../shared/types/agentStatus';
+import type { CreatePanelRequest, ToolPanel } from '../../shared/types/panels';
+import type { Session } from './types/session';
+
+interface SessionCreatedEventDependencies {
+  send: (channel: string, ...args: PaneEventArgument[]) => void;
+  createPanel: (request: CreatePanelRequest) => Promise<ToolPanel>;
+  refreshGitStatus: (sessionId: string) => Promise<GitStatus | null>;
+}
 
 function isArchivedSessionOutputValidation(validation: { error?: string; sessionId?: string }): boolean {
   return Boolean(
@@ -29,6 +37,33 @@ function sendRendererEvent(channel: string, ...args: PaneEventArgument[]): void 
     getPaneEventSink().send(channel, ...args);
   } catch (error) {
     console.error(`[Main] Failed to send ${channel} event:`, error);
+  }
+}
+
+export async function handleSessionCreatedEvent(
+  session: Session,
+  dependencies: SessionCreatedEventDependencies,
+): Promise<void> {
+  dependencies.send('session:created', session);
+
+  if (session.createDefaultTerminalOnCreate !== false) {
+    try {
+      await dependencies.createPanel({
+        sessionId: session.id,
+        type: 'terminal',
+        title: 'Terminal',
+      });
+    } catch (error) {
+      console.error(`[Events] Failed to auto-create terminal panel for session ${session.id}:`, error);
+    }
+  }
+
+  if (session.id && !session.archived) {
+    setTimeout(() => {
+      dependencies.refreshGitStatus(session.id).catch(error => {
+        console.error(`[Main] Failed to refresh git status for new session ${session.id}:`, error);
+      });
+    }, 1000);
   }
 }
 
@@ -155,31 +190,12 @@ export function setupEventListeners(services: AppServices): void {
 
 
   // Listen to sessionManager events and broadcast to renderer
-  sessionManager.on('session-created', async (session) => {
-    sendRendererEvent('session:created', session);
-
-    if (session.createDefaultTerminalOnCreate !== false) {
-      try {
-        await panelManager.createPanel({
-          sessionId: session.id,
-          type: 'terminal',
-          title: 'Terminal',
-        });
-      } catch (error) {
-        console.error(`[Events] Failed to auto-create terminal panel for session ${session.id}:`, error);
-      }
-    }
-
-    // Refresh git status for newly created session (non-blocking for UI responsiveness)
-    if (session.id && !session.archived) {
-      // Add a small delay for newly created sessions to prevent overwhelming git operations
-      // when multiple sessions are created rapidly
-      setTimeout(() => {
-        gitStatusManager.refreshSessionGitStatus(session.id, false).catch(error => {
-          console.error(`[Main] Failed to refresh git status for new session ${session.id}:`, error);
-        });
-      }, 1000); // 1 second delay to allow session creation UI to complete
-    }
+  sessionManager.on('session-created', async (session: Session) => {
+    await handleSessionCreatedEvent(session, {
+      send: sendRendererEvent,
+      createPanel: request => panelManager.createPanel(request),
+      refreshGitStatus: sessionId => gitStatusManager.refreshSessionGitStatus(sessionId, false),
+    });
   });
 
   sessionManager.on('session-updated', (session) => {

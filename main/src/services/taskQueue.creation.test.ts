@@ -88,6 +88,23 @@ async function createPane(name = 'Feature', isMainRepo = false, taskQueue = queu
   return database.getSession(result.sessionId)!;
 }
 
+it('does not apply a late AI name after an explicit rename to the fallback label', async () => {
+  let finishNaming!: (name: string) => void;
+  queueOptions.worktreeNameGenerator.generateFallbackSessionName = vi.fn(() => 'Fallback');
+  queueOptions.worktreeNameGenerator.generateSessionName = vi.fn(() => new Promise<string>(resolve => { finishNaming = resolve; }));
+  queueOptions.sessionManager.getSession = id => {
+    const row = database.getSession(id);
+    return row ? partialMock<Session>({ id, name: row.name, nameManuallySet: Boolean(row.name_manually_set) }) : undefined;
+  };
+  queueOptions.sessionManager.emit = vi.fn();
+  const created = await createPane('');
+  database.updateSession(created.id, { name: created.name, name_manually_set: true });
+  finishNaming('Automatic replacement');
+  await Promise.resolve();
+  expect(database.getSession(created.id)?.name).toBe(created.name);
+  expect(queueOptions.sessionManager.emit).not.toHaveBeenCalled();
+});
+
 describe('pane creation name reuse', () => {
   it('reuses an archived display name without taking its worktree identity or commits', async () => {
     const original = await createPane();

@@ -3620,18 +3620,18 @@ describe('runpane IPC handlers', () => {
 
   it('renames a pane, trims the name, emits an update, and returns the updated pane', async () => {
     const renamedSession = { ...session };
-    const updateSession = vi.fn(() => ({ id: session.id, name: 'renamed pane' }));
     const emit = vi.fn();
+    const renameSessionDisplayName = vi.fn((_id: string, name: string) => {
+      renamedSession.name = name;
+      emit('session-updated', renamedSession);
+      return renamedSession;
+    });
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       sessionManager: {
         ...createServices().sessionManager,
         getSession: vi.fn(() => renamedSession),
+        renameSessionDisplayName,
         emit,
       } as never,
     });
@@ -3642,7 +3642,7 @@ describe('runpane IPC handlers', () => {
       name: '  renamed pane  ',
     }]);
 
-    expect(updateSession).toHaveBeenCalledWith(session.id, { name: 'renamed pane' });
+    expect(renameSessionDisplayName).toHaveBeenCalledWith(session.id, 'renamed pane');
     expect(renamedSession.name).toBe('renamed pane');
     expect(emit).toHaveBeenCalledWith('session-updated', renamedSession);
     expect(result).toMatchObject({
@@ -3689,17 +3689,16 @@ describe('runpane IPC handlers', () => {
   it('rejects empty rename names and accepts names without a new length limit', async () => {
     const longName = 'x'.repeat(10_000);
     const renamedSession = { ...session };
-    const updateSession = vi.fn(() => ({ id: session.id, name: longName }));
+    const renameSessionDisplayName = vi.fn((_id: string, name: string) => {
+      renamedSession.name = name;
+      return renamedSession;
+    });
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       sessionManager: {
         ...createServices().sessionManager,
         getSession: vi.fn(() => renamedSession),
+        renameSessionDisplayName,
         emit: vi.fn(),
       } as never,
     });

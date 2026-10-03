@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FolderPlus, GitBranch } from 'lucide-react';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -7,7 +7,11 @@ import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
 import { API } from '../utils/api';
 import { useNavigationStore } from '../stores/navigationStore';
-import type { CreateProjectRequest } from '../types/project';
+import type { CreateProjectRequest, Project } from '../types/project';
+import { useConfigStore } from '../stores/configStore';
+import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
+import { getCliBrandIcon } from './ui/brandIconRegistry';
+import { useWorkspaceEntryStore } from '../stores/workspaceEntryStore';
 
 interface AddProjectDialogProps {
   isOpen: boolean;
@@ -19,8 +23,20 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
   const [detectedBranch, setDetectedBranch] = useState<string | null>(null);
   const [branchDetectionFailed, setBranchDetectionFailed] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string>();
+  const config = useConfigStore(state => state.config);
+  const fetchConfig = useConfigStore(state => state.fetchConfig);
+  const launchPreset = useMemo(
+    () => AGENT_LAUNCH_PRESETS.find(preset => preset.id === config?.defaultOrchestratorAgent) ?? null,
+    [config?.defaultOrchestratorAgent],
+  );
 
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+
+  useEffect(() => {
+    if (isOpen && !config) void fetchConfig().catch(() => undefined);
+  }, [config, fetchConfig, isOpen]);
 
   const detectCurrentBranch = async (path: string) => {
     if (!path) {
@@ -50,19 +66,31 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       setShowValidationErrors(true);
       return;
     }
+    setIsCreating(true);
+    setCreateError(undefined);
     try {
-      const projectToCreate = {
-        ...newProject,
-        active: false,
-      };
+      const projectToCreate: CreateProjectRequest = launchPreset
+        ? { ...newProject, launchDefaultAgent: true, disclosedAgent: launchPreset.id }
+        : { ...newProject };
 
       const response = await API.projects.create(projectToCreate);
       if (!response.success || !response.data) {
-        console.error('Failed to create project:', response.error);
+        setCreateError(response.error || 'Failed to create repository');
         return;
       }
 
-      const newProjectId = response.data.id;
+      const createdProject: Project = response.data;
+      const newProjectId = createdProject.id;
+      if (createdProject.defaultAgentLaunch?.status === 'failed') {
+        const failure = createdProject.defaultAgentLaunch;
+        useWorkspaceEntryStore.getState().setLaunchFailure({
+          projectId: newProjectId,
+          agentType: failure.agentType,
+          agentTitle: failure.agentTitle,
+          initialCommand: failure.initialCommand,
+          message: failure.message,
+        });
+      }
 
       // Reset form state and close
       resetAndClose();
@@ -73,7 +101,9 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       // Navigate to the new project
       navigateToProject(newProjectId);
     } catch (e) {
-      console.error('Failed to create project:', e);
+      setCreateError(e instanceof Error ? e.message : 'Failed to create repository');
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -82,13 +112,19 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
     setDetectedBranch(null);
     setBranchDetectionFailed(false);
     setShowValidationErrors(false);
+    setCreateError(undefined);
+    setIsCreating(false);
     onClose();
+  };
+
+  const handleClose = () => {
+    if (!isCreating) resetAndClose();
   };
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={resetAndClose}
+      onClose={handleClose}
       size="lg"
     >
       <ModalHeader title="Add New Repository" icon={<FolderPlus className="w-5 h-5" />} />
@@ -167,6 +203,20 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
             </FieldWithTooltip>
           )}
 
+          {launchPreset && (
+            <Card variant="bordered" padding="md">
+              <div className="flex items-start gap-3 text-sm text-text-secondary">
+                <span className="mt-0.5 text-text-primary">{getCliBrandIcon(launchPreset.iconKey)}</span>
+                <p>
+                  Creating this repository will start <strong className="text-text-primary">{launchPreset.title}</strong> in it
+                  {' '}(<code className="font-mono text-text-primary">{launchPreset.command}</code>). Close the tab at any time.
+                </p>
+              </div>
+            </Card>
+          )}
+
+          {createError && <p role="alert" className="text-sm text-status-error">{createError}</p>}
+
         </div>
       </ModalBody>
       <ModalFooter>
@@ -174,16 +224,17 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
           onClick={resetAndClose}
           variant="ghost"
           size="md"
+          disabled={isCreating}
         >
           Cancel
         </Button>
         <Button
           onClick={handleCreateProject}
-          disabled={!newProject.name || !newProject.path}
+          disabled={!newProject.name || !newProject.path || isCreating}
           variant="primary"
           size="md"
         >
-          Create
+          {isCreating ? (launchPreset ? `Starting ${launchPreset.title}…` : 'Creating…') : 'Create'}
         </Button>
       </ModalFooter>
     </Modal>

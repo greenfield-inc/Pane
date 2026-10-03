@@ -1,5 +1,6 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { ProjectEnvironment, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
+import type { PaneChatAgent } from '../../../shared/types/paneChat';
 
 type PanelContext = 'project' | 'worktree';
 
@@ -8,6 +9,7 @@ export interface PanelCreateOptions {
   initialCommand?: string;  // Command to run on terminal init
   title?: string;           // Custom panel title
   initialState?: { customState?: unknown };
+  agentType?: PaneChatAgent;
 }
 
 interface PanelTabPresentation {

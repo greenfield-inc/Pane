@@ -40,6 +40,18 @@ describe('sessionStore', () => {
     vi.useRealTimers();
   });
 
+  it('updates both copies of an active main-repo pane and preserves their output', () => {
+    const pane = session({ isMainRepo: true });
+    const output = ['kept'];
+    useSessionStore.setState({ sessions: [pane], activeMainRepoSession: { ...pane, output } });
+    useSessionStore.getState().updateSession({ ...pane, name: 'Human label', nameManuallySet: true });
+    const state = useSessionStore.getState();
+    expect(state.sessions[0]).toMatchObject({ name: 'Human label', nameManuallySet: true });
+    expect(state.activeMainRepoSession).toMatchObject({ name: 'Human label', nameManuallySet: true });
+    expect(state.activeMainRepoSession?.output).toBe(output);
+    expect(state.sessions[0].output).toBe(pane.output);
+  });
+
   it('keeps the current active pane when a background-created session arrives', () => {
     useSessionStore.setState({ activeSessionId: 'session-existing' });
 

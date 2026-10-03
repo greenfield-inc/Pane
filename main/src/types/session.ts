@@ -32,6 +32,7 @@ export interface Session {
   baseCommit?: string;
   baseBranch?: string;
   pr_renamed?: boolean;
+  nameManuallySet?: boolean;
   activateOnCreate?: boolean;
   createDefaultTerminalOnCreate?: boolean;
 }

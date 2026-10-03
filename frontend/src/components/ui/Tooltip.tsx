@@ -9,6 +9,8 @@ export interface TooltipProps extends Omit<React.HTMLAttributes<HTMLElement>, 'c
   children: React.ReactElement;
   side?: 'top' | 'bottom' | 'left' | 'right';
   className?: string;
+  /** Extra classes for the floating panel (e.g. wider padding for a rich card). */
+  contentClassName?: string;
   /** When true, the tooltip stays open when hovered so rich text can be selected. */
   interactive?: boolean;
   /** Delay in ms before showing the tooltip (default: 400) */
@@ -47,6 +49,7 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
   children,
   side = 'top',
   className,
+  contentClassName,
   interactive = false,
   delay = 400,
   onMouseEnter,
@@ -213,6 +216,7 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
           ref={tooltipRef}
           className={cn(
             'fixed z-tooltip px-3 py-1.5 text-sm text-text-primary bg-bg-tertiary border border-border-primary rounded-lg shadow-lg transition-opacity duration-150',
+            contentClassName,
             interactive ? 'whitespace-normal pointer-events-auto' : 'whitespace-nowrap pointer-events-none'
           )}
           style={style}

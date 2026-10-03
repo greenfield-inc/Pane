@@ -22,6 +22,8 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
 import { shouldActivateReopenedPanel } from '../utils/panelLayout';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
+import { useWorkspaceEntryStore } from '../stores/workspaceEntryStore';
+import { WorkspaceEntryLaunchNotice } from './WorkspaceEntryLaunchNotice';
 
 interface ProjectViewProps {
   projectId: number;
@@ -55,6 +57,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     ? branchState.branch
     : null;
   const displayBranch = activeMainRepoSession?.baseBranch ?? detectedBranch;
+  const launchFailure = useWorkspaceEntryStore(state => state.launchFailure);
+  const clearLaunchFailure = useWorkspaceEntryStore(state => state.clearLaunchFailure);
   // Panel store state and actions
   const {
     panels,
@@ -221,14 +225,15 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
   const handlePanelCreate = useCallback(
     async (type: ToolPanelType, options?: PanelCreateOptions) => {
-      if (!mainRepoSessionId) return;
+      if (!mainRepoSessionId) return false;
 
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
       let initialState = options?.initialState;
       if (type === 'terminal' && options?.initialCommand) {
-        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = {
+        const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume' | 'agentType' | 'isCliPanel'> = {
           initialCommand: options.initialCommand,
         };
+        if (options.agentType) { customState.agentType = options.agentType; customState.isCliPanel = true; }
         if (options.customResume !== undefined) customState.customResume = options.customResume;
         initialState = { customState };
       }
@@ -487,6 +492,23 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                     Open a terminal
                   </button>
                 </div>
+              )}
+              {launchFailure?.projectId === projectId && (
+                <WorkspaceEntryLaunchNotice
+                  failure={launchFailure}
+                  onOpenAgent={() => {
+                    void handlePanelCreate('terminal', {
+                      initialCommand: launchFailure.initialCommand,
+                      title: launchFailure.agentTitle,
+                      agentType: launchFailure.agentType,
+                    }).then(created => {
+                      if (created) clearLaunchFailure();
+                    }).catch(error => {
+                      console.error('Failed to open agent after automatic launch failure:', error);
+                    });
+                  }}
+                  onDismiss={clearLaunchFailure}
+                />
               )}
             </div>
 

@@ -129,6 +129,7 @@ export interface TerminalPanelSnapshot {
   currentCommand: string;
   isCliPanel?: boolean;
   isCliReady?: boolean;
+  initialCommandSent?: boolean;
   agentType?: CliAgentType;
   agentSessionId?: string;
 }
@@ -235,6 +236,7 @@ interface TerminalProcess {
   /** True when `pty` is a `PtyHandleShim` wrapping a ptyHost handle. */
   isPtyHost: boolean;
   panelId: string;
+  initialCommandSent?: boolean;
   sessionId: string;
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
@@ -1120,13 +1122,16 @@ export class TerminalPanelManager extends EventEmitter {
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
     await this.acquireSpawnSlot(priority);
 
-    // Re-check after waiting — another call may have initialized this panel
+    try {
+    // Re-check after waiting — another call may have initialized this panel,
+    // or its owning panel may have been deleted while queued.
     if (this.terminals.has(panel.id)) {
-      this.releaseSpawnSlot();
       return;
     }
-
-    try {
+    if (!panelManager.getPanel(panel.id)) {
+      console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted while waiting for a spawn slot; skipping spawn`);
+      return;
+    }
 
     let shellPath: string;
     let shellArgs: string[];
@@ -1242,6 +1247,11 @@ export class TerminalPanelManager extends EventEmitter {
 
     let ptyProcess: pty.IPty;
     let ptyHostId: string | undefined;
+
+    if (!panelManager.getPanel(panel.id)) {
+      console.info(`[TerminalPanelManager] Panel ${panel.id} was deleted before terminal spawn; skipping spawn`);
+      return;
+    }
 
     if (usePtyHost && supervisor) {
       // Flag-on path: spawn via ptyHost UtilityProcess. Critical invariant:
@@ -1374,6 +1384,7 @@ export class TerminalPanelManager extends EventEmitter {
       const injectCommand = () => {
         if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
         this.writeToTerminal(panelId, commandToRun! + '\r');
+        terminalProcess.initialCommandSent = true;
 
         // For CLI tool terminals, signal the frontend when the CLI responds
         if (isCliCommand) {
@@ -1902,6 +1913,7 @@ export class TerminalPanelManager extends EventEmitter {
       currentCommand: terminal.currentCommand,
       isCliPanel: customState.isCliPanel,
       isCliReady: customState.isCliReady,
+      initialCommandSent: terminal.initialCommandSent,
       agentType,
       agentSessionId: customState.agentSessionId ?? terminal.capturedAgentSessionId,
     };

@@ -26,7 +26,11 @@ export const SessionStatusBadge: React.FC<SessionStatusBadgeProps> = ({
 
   if (displayStatus === 'unknown') {
     if (unknownFallback) return unknownFallback;
-    return <AgentActivityDot active={false} size={size} inactiveClassName={unknownClassName} />;
+    return (
+      <span role="status" aria-label="Agent status unknown">
+        <AgentActivityDot active={false} size={size} inactiveClassName={unknownClassName} />
+      </span>
+    );
   }
 
   return <AgentStatusDot status={displayStatus} size={size} />;

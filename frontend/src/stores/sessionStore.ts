@@ -111,21 +111,18 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   updateSession: (updatedSession) => set((state) => {
     const normalizedUpdatedSession = normalizeSession(updatedSession);
     
-    // If this is the active main repo session, update it
+    // Main-repo panes also appear in sessions; keep both copies current.
+    let activeMainRepoSession = state.activeMainRepoSession;
     if (state.activeMainRepoSession && state.activeMainRepoSession.id === normalizedUpdatedSession.id) {
-      const newActiveSession = {
+      activeMainRepoSession = {
         ...state.activeMainRepoSession,
         ...normalizedUpdatedSession,
         output: state.activeMainRepoSession.output,
         jsonMessages: state.activeMainRepoSession.jsonMessages
       };
-      return {
-        ...state,
-        activeMainRepoSession: newActiveSession
-      };
     }
     
-    // Otherwise update in regular sessions
+    // Update the sidebar copy too
     // Performance: Only clone array if session exists
     let newSessions = state.sessions;
     for (let i = 0; i < state.sessions.length; i++) {
@@ -144,7 +141,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     
     return {
       ...state,
-      sessions: newSessions
+      sessions: newSessions,
+      activeMainRepoSession
     };
   }),
   

@@ -1,172 +1,115 @@
-import { GitBranch, Clock, FileText, Plus, Minus, GitPullRequest } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { Github } from 'lucide-react';
 import type { Session, GitStatus } from '../types/session';
+import { prStateLabel, prStateVariant } from '../utils/paneTitle';
+import { Badge } from './ui/Badge';
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return `${mins} ${mins === 1 ? 'minute' : 'minutes'} ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
+  if (hrs < 24) return `${hrs} ${hrs === 1 ? 'hour' : 'hours'} ago`;
   const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  if (days < 30) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} ${months === 1 ? 'month' : 'months'} ago`;
 }
 
 interface SessionDetailTooltipProps {
   session: Session;
   gitStatus?: GitStatus;
-  /** Hide session name when it's already visible inline (default: true) */
-  showName?: boolean;
-  /** Hide diff stats when they're already visible inline (default: true) */
-  showDiffStats?: boolean;
+  /** Label to show as the heading; defaults to the session name. */
+  name?: string;
   /** Session hotkey index (0-8) — shows ⌘N shortcut hint when provided */
   globalIndex?: number;
 }
 
-export function SessionDetailTooltip({ session, gitStatus, showName = true, showDiffStats = true, globalIndex }: SessionDetailTooltipProps) {
+/**
+ * Hover card for a Pane in the sidebar: the label, its branch, when it was last
+ * active, and — when a pull request exists — the PR number, state, diff size,
+ * title, and a link out. Deliberately no PR body or status prose: the row
+ * already carries live status, and a hover card is for orientation, not reading.
+ */
+export function SessionDetailTooltip({ session, gitStatus, name, globalIndex }: SessionDetailTooltipProps) {
   const gs = gitStatus ?? session.gitStatus;
   const branch = session.worktreePath?.replace(/\\/g, '/').split('/').pop() || '';
-  const createdDate = new Date(session.createdAt).toLocaleDateString(undefined, {
-    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-  });
-  const lastActiveAgo = session.lastActivity ? formatTimeAgo(session.lastActivity) : null;
-
-  let statusText = '';
-  let statusColor = 'text-text-tertiary';
-  if (session.status === 'running' || session.status === 'initializing') {
-    statusText = session.status === 'initializing' ? 'Initializing' : 'Running';
-    statusColor = 'text-status-success';
-  } else if (session.status === 'waiting') {
-    statusText = 'Waiting for input';
-    statusColor = 'text-status-warning';
-  } else if (session.status === 'error') {
-    statusText = 'Error';
-    statusColor = 'text-status-error';
-  } else if (gs) {
-    if (gs.state === 'conflict') { statusText = 'Merge conflicts'; statusColor = 'text-status-error'; }
-    else if (gs.isReadyToMerge) { statusText = 'Ready to merge'; statusColor = 'text-status-success'; }
-    else if (gs.hasUncommittedChanges) { statusText = 'Uncommitted'; statusColor = 'text-status-warning'; }
-    else if (gs.state === 'diverged') { statusText = 'Diverged'; statusColor = 'text-status-warning'; }
-    else if (gs.state === 'ahead' && gs.ahead) { statusText = `${gs.ahead} ahead`; statusColor = 'text-status-warning'; }
-    else if (gs.state === 'behind' && gs.behind) { statusText = `${gs.behind} behind`; }
-    else if (gs.state === 'clean') { statusText = 'Up to date'; }
-  }
+  const lastActive = session.lastActivity || session.createdAt;
+  const lastActiveAgo = lastActive ? formatTimeAgo(lastActive) : null;
 
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
   const hasDiff = adds > 0 || dels > 0;
-  const filesChanged = (gs?.commitFilesChanged ?? 0) + (gs?.filesChanged ?? 0);
-  const shouldShowDiffStats = hasDiff && (showDiffStats || Boolean(gs?.prNumber));
+  const prState = gs?.prState?.toUpperCase();
+  const stateLabel = prStateLabel(prState);
+  const prStateTitle = stateLabel.charAt(0).toUpperCase() + stateLabel.slice(1);
+  const hotkey = globalIndex != null && globalIndex >= 0 && globalIndex < 9 ? `⌘${globalIndex + 1}` : null;
+
+  const diffStats = hasDiff ? (
+    <span className="flex flex-shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums">
+      {adds > 0 && <span className="text-status-success">+{adds}</span>}
+      {dels > 0 && <span className="text-status-error">-{dels}</span>}
+    </span>
+  ) : null;
+
+  const openPr = () => {
+    if (gs?.prUrl) void window.electronAPI.openExternal(gs.prUrl);
+  };
 
   return (
-    <div className="max-w-xs space-y-1.5">
-      {showName && (
-        <>
-          <p className="text-[11px] text-text-primary font-medium whitespace-pre-wrap break-words leading-snug">
-            {session.name || 'Untitled'}
-          </p>
-          <div className="border-t border-border-primary" />
-        </>
-      )}
-
-      <div className="space-y-0.5 text-[10px]">
-        {branch && (
-          <div className="flex items-center gap-1.5">
-            <GitBranch className="w-3 h-3 text-text-tertiary flex-shrink-0" />
-            <span className="text-text-secondary font-mono break-all">{branch}</span>
-          </div>
+    <div className="w-64 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 text-sm font-semibold leading-snug text-text-primary whitespace-pre-wrap break-words">
+          {name ?? (session.name || 'Untitled')}
+        </p>
+        {hotkey && (
+          <kbd className="mt-0.5 flex-shrink-0 rounded border border-border-primary px-1 font-sans text-[10px] leading-4 text-text-muted">
+            {hotkey}
+          </kbd>
         )}
-        {statusText && (
-          <div className="flex items-center gap-1.5">
-            <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ml-[3px] ${
-              statusColor.replace('text-', 'bg-')
-            }`} />
-            <span className={`${statusColor} ml-[3px]`}>{statusText}</span>
-          </div>
-        )}
-        <div className="flex items-center gap-1.5">
-          <Clock className="w-3 h-3 text-text-tertiary flex-shrink-0" />
-          <span className="text-text-secondary">
-            {createdDate}
-            {lastActiveAgo && <span className="text-text-tertiary"> · active {lastActiveAgo}</span>}
-          </span>
-        </div>
       </div>
 
-      {shouldShowDiffStats && (
-        <>
-          <div className="border-t border-border-primary" />
-          <div className="flex items-center gap-3 text-[10px]">
-            <span className="flex items-center gap-1 text-text-secondary">
-              <FileText className="w-3 h-3 text-text-tertiary" />
-              {filesChanged} {filesChanged === 1 ? 'file' : 'files'}
+      {branch && (
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">Branch</p>
+          <p className="font-mono text-[13px] leading-snug text-text-primary break-all">{branch}</p>
+        </div>
+      )}
+
+      {lastActiveAgo && <p className="text-xs text-text-tertiary">{lastActiveAgo}</p>}
+
+      {gs?.prNumber ? (
+        <div className="space-y-2 border-t border-border-primary pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
+              #{gs.prNumber}
+              {prState && (
+                <Badge variant={prStateVariant(prState)} size="sm" className="px-1.5 py-0 text-[11px] leading-4">
+                  {prStateTitle}
+                </Badge>
+              )}
             </span>
-            {adds > 0 && (
-              <span className="flex items-center gap-0.5 text-status-success">
-                <Plus className="w-3 h-3" />{adds}
-              </span>
-            )}
-            {dels > 0 && (
-              <span className="flex items-center gap-0.5 text-status-error">
-                <Minus className="w-3 h-3" />{dels}
-              </span>
-            )}
+            {diffStats}
           </div>
-        </>
-      )}
-
-      {globalIndex != null && globalIndex >= 0 && globalIndex < 9 && (
-        <>
-          <div className="border-t border-border-primary" />
-          <div className="text-[10px] text-text-muted">⌘{globalIndex + 1}</div>
-        </>
-      )}
-
-      {gs?.prNumber && (
-        <>
-          <div className="border-t border-border-primary" />
-          <div className="space-y-1 text-[10px]">
-            {showName ? (
-              <div className="flex items-center gap-1.5">
-                <GitPullRequest className="w-3 h-3 text-text-tertiary flex-shrink-0" />
-                <span className="text-text-secondary font-medium">
-                  #{gs.prNumber}
-                  {gs.prState && (
-                    <span className={`ml-1 ${
-                      gs.prState === 'MERGED' ? 'text-purple-400' :
-                      gs.prState === 'CLOSED' ? 'text-red-400' :
-                      'text-green-400'
-                    }`}>
-                      {gs.prState.charAt(0) + gs.prState.slice(1).toLowerCase()}
-                    </span>
-                  )}
-                </span>
-              </div>
-            ) : gs.prState && (
-              <div className="flex items-center gap-1.5">
-                <span className={
-                  gs.prState === 'MERGED' ? 'text-purple-400' :
-                  gs.prState === 'CLOSED' ? 'text-red-400' :
-                  'text-green-400'
-                }>
-                  {gs.prState.charAt(0) + gs.prState.slice(1).toLowerCase()}
-                </span>
-              </div>
-            )}
-            {showName && gs.prTitle && (
-              <p className="text-[11px] text-text-primary font-medium whitespace-pre-wrap break-words leading-snug pl-[18px]">
-                {gs.prTitle}
-              </p>
-            )}
-            {gs.prBody && (
-              <div className={`text-[10px] text-text-tertiary break-words leading-snug ${showName ? 'pl-[18px]' : ''} line-clamp-[32] prose prose-xs prose-invert max-w-none overflow-hidden [&_h1]:text-[11px] [&_h2]:text-[11px] [&_h3]:text-[10px] [&_p]:text-[10px] [&_li]:text-[10px] [&_code]:text-[9px] [&_code]:break-all [&_ul]:my-0.5 [&_ol]:my-0.5 [&_p]:my-0.5 [&_pre]:whitespace-pre-wrap [&_pre]:overflow-hidden`}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{gs.prBody}</ReactMarkdown>
-              </div>
-            )}
-          </div>
-        </>
+          {gs.prTitle && (
+            <p className="line-clamp-2 text-[13px] leading-snug text-text-primary break-words">{gs.prTitle}</p>
+          )}
+          {gs.prUrl && (
+            <button
+              type="button"
+              onClick={openPr}
+              className="flex w-full items-center gap-2 rounded-md border border-border-primary bg-surface-secondary px-2.5 py-1.5 text-left text-xs text-text-primary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+            >
+              <Github className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" aria-hidden="true" />
+              View on GitHub
+            </button>
+          )}
+        </div>
+      ) : diffStats && (
+        <div className="flex items-center justify-between gap-3 border-t border-border-primary pt-3 text-xs text-text-tertiary">
+          <span>Changes</span>
+          {diffStats}
+        </div>
       )}
     </div>
   );

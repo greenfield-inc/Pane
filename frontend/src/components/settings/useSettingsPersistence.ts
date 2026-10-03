@@ -14,14 +14,12 @@ import { useConfigStore } from '../../stores/configStore';
 type PreferenceName = keyof SettingsPreferenceValues;
 
 const PREFERENCE_KEY_BY_NAME = {
-  autoRenameSessionsToPr: SETTINGS_PREFERENCE_KEYS.autoRenameSessionsToPr,
   sidebarPaneRowLayout: SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout,
   atTerminalPasteMode: SETTINGS_PREFERENCE_KEYS.atTerminalPasteMode,
   atTerminalLineCount: SETTINGS_PREFERENCE_KEYS.atTerminalLineCount,
 } satisfies Record<PreferenceName, string>;
 
 const PREFERENCE_SETTING_ID = {
-  autoRenameSessionsToPr: 'auto-rename-pr',
   sidebarPaneRowLayout: 'sidebar-pane-rows',
   atTerminalPasteMode: 'terminal-reference-paste-mode',
   atTerminalLineCount: 'terminal-reference-line-count',

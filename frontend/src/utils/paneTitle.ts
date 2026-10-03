@@ -8,6 +8,10 @@ export interface PaneTitle {
   pane: string;
 }
 
+export function resolveSessionLabel(session: Session, displayName?: string): string {
+  return displayName ?? (session.name?.trim() || 'Untitled');
+}
+
 /**
  * Builds the `<project> · <pane name>` title shown in the window title bar.
  * Returns null when there is nothing worth naming (no pane, or no project for it).
@@ -52,7 +56,7 @@ export interface PaneStatusPill {
   tooltip: string;
 }
 
-function prStateLabel(prState: string | undefined): string {
+export function prStateLabel(prState: string | undefined): string {
   if (prState === 'MERGED') return 'merged';
   if (prState === 'CLOSED') return 'closed';
   return 'open';
@@ -65,6 +69,10 @@ function prStateLabel(prState: string | undefined): string {
  * Deliberately excludes anything that churns while you work (diff counts, agent
  * activity) — the title is centered, so a pill that flickers drags the name with it.
  */
+export function prStateVariant(prState: string | undefined): 'primary' | 'error' | 'success' {
+  return prState === 'MERGED' ? 'primary' : prState === 'CLOSED' ? 'error' : 'success';
+}
+
 export function resolvePaneStatusPills(session: Session | undefined): PaneStatusPill[] {
   const gitStatus = session?.gitStatus;
   if (!gitStatus) return [];
@@ -77,7 +85,7 @@ export function resolvePaneStatusPills(session: Session | undefined): PaneStatus
     pills.push({
       key: 'pr',
       label: `#${gitStatus.prNumber}`,
-      variant: prState === 'MERGED' ? 'primary' : prState === 'CLOSED' ? 'error' : 'success',
+      variant: prStateVariant(prState),
       tooltip: gitStatus.prTitle
         ? `Pull request #${gitStatus.prNumber} (${stateLabel}) — ${gitStatus.prTitle}`
         : `Pull request #${gitStatus.prNumber} (${stateLabel})`,

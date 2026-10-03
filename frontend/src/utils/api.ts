@@ -1,6 +1,6 @@
 // Utility for making API calls using Electron IPC
 import type { CreateSessionRequest, Session } from '../types/session';
-import type { Project } from '../types/project';
+import type { CreateProjectRequest, Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -492,7 +492,7 @@ export class API {
       return window.electronAPI.projects.getActive();
     },
 
-    async create(projectData: Omit<Project, 'id' | 'created_at' | 'updated_at'>) {
+    async create(projectData: CreateProjectRequest) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.projects.create(projectData);
     },

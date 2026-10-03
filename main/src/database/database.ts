@@ -410,6 +410,16 @@ export class DatabaseService {
         .run();
     }
 
+    const hasDefaultAgentLaunchedAtColumn = projectsTableInfoForWsl.some(
+      (col: SqliteTableInfo) => col.name === "default_agent_launched_at",
+    );
+    if (!hasDefaultAgentLaunchedAtColumn) {
+      this.db
+        .prepare("ALTER TABLE projects ADD COLUMN default_agent_launched_at TEXT")
+        .run();
+      console.log("[Database] Added default_agent_launched_at column to projects table");
+    }
+
     // Check if we need to rename prompt to initial_prompt
     if (!hasInitialPromptColumn) {
       const hasPromptColumn = tableInfo.some(
@@ -1143,6 +1153,21 @@ export class DatabaseService {
         .run();
       console.log(
         "[Database] Added pr_renamed column to sessions table",
+      );
+    }
+
+    const hasNameManuallySetColumn = sessionTableInfoFavorite.some(
+      (col: SqliteTableInfo) => col.name === "name_manually_set",
+    );
+
+    if (!hasNameManuallySetColumn) {
+      this.db
+        .prepare(
+          "ALTER TABLE sessions ADD COLUMN name_manually_set BOOLEAN DEFAULT 0",
+        )
+        .run();
+      console.log(
+        "[Database] Added name_manually_set column to sessions table",
       );
     }
 
@@ -2723,6 +2748,10 @@ export class DatabaseService {
       fields.push("wsl_distribution = ?");
       values.push(updates.wsl_distribution);
     }
+    if (updates.default_agent_launched_at !== undefined) {
+      fields.push("default_agent_launched_at = ?");
+      values.push(updates.default_agent_launched_at);
+    }
 
     if (fields.length === 0) {
       return this.getProject(id);
@@ -3428,12 +3457,16 @@ export class DatabaseService {
       updates.push("pr_renamed = ?");
       values.push(data.pr_renamed ? 1 : 0);
     }
+    if (data.name_manually_set !== undefined) {
+      updates.push("name_manually_set = ?");
+      values.push(data.name_manually_set ? 1 : 0);
+    }
 
     if (updates.length === 0) {
       return this.getSession(id);
     }
 
-    // Only update the updated_at timestamp if we're changing something other than is_favorite, skip_continue_next, or pr_renamed
+    // Only update the updated_at timestamp if we're changing something other than toggle/bookkeeping fields.
     // This prevents the session from showing as "unviewed" when just toggling these settings
     const toggleOnlyFields = new Set([
       "is_favorite = ?",
@@ -3441,6 +3474,7 @@ export class DatabaseService {
       "favorite_pinned_at = CURRENT_TIMESTAMP",
       "skip_continue_next = ?",
       "pr_renamed = ?",
+      "name_manually_set = ?",
     ]);
     const isOnlyToggleUpdate = updates.every((update) =>
       toggleOnlyFields.has(update),
