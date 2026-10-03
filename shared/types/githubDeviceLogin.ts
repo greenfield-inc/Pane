@@ -9,6 +9,8 @@
 export interface GitHubDeviceLoginStartRequest {
   /** Display name of the active host, used only in user-facing messages. */
   hostLabel?: string;
+  /** Store the token in gh's config file instead of the system keyring (for hosts whose keyring can't be unlocked). */
+  ghInsecureStorage?: boolean;
 }
 
 export type GitHubDeviceLoginFailureReason = 'timeout' | 'expired' | 'gh-missing' | 'exit';
