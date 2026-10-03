@@ -4,6 +4,13 @@ import { installElectronApiMock } from './electronApiMock';
 const SIGN_IN_COMMAND = 'gh auth login --web --git-protocol https && gh auth setup-git';
 const REPO_URL = 'https://github.com/jamari-morrison/montlakev2';
 const LOCAL_HTTPS_MESSAGE = 'Authentication failed — check your credentials or use an SSH URL.';
+const SSH_URL = 'git@github.com:jamari-morrison/montlakev2.git';
+const SSH_HINT = 'This is an SSH URL; after signing in, use the HTTPS URL instead.';
+// What the daemon says on this computer for each SSH sign-in failure.
+const SSH_FAILURES = [
+  ['an unknown host key', "SSH host key verification failed — this computer doesn't trust the Git server yet. Connect to it once with ssh to accept its host key, or use an HTTPS URL."],
+  ['no accepted key', 'SSH authentication failed — the Git server rejected this computer\'s SSH key. Add your SSH key to your Git host, or use an HTTPS URL.'],
+] as const;
 
 interface CloneProbe {
   cloneCalls: Array<[string, string]>;
@@ -16,17 +23,17 @@ declare global {
 }
 
 /** Makes every clone fail the way the host's daemon reports a sign-in failure, and records the clones. */
-async function failClonesWithAuth(page: Page, error: string) {
-  await page.evaluate((error) => {
+async function failClonesWithAuth(page: Page, error: string, authProtocol: 'https' | 'ssh' = 'https') {
+  await page.evaluate(({ error, authProtocol }) => {
     const probe: CloneProbe = { cloneCalls: [] };
     window.__cloneProbe = probe;
     Object.assign(window.electronAPI.git, {
       cloneRepo: async (url: string, destDir: string) => {
         probe.cloneCalls.push([url, destDir]);
-        return { success: false, error, code: 'GIT_CLONE_AUTH_REQUIRED' };
+        return { success: false, error, code: 'GIT_CLONE_AUTH_REQUIRED', authProtocol };
       },
     });
-  }, error);
+  }, { error, authProtocol });
 }
 
 async function hostTerminalOpenRequests(page: Page) {
@@ -62,10 +69,10 @@ async function connectRemote(page: Page) {
 }
 
 /** A remote clone keeps its default destination, the host's home; this computer browses with the native dialog. */
-async function fillAndClone(page: Page, destination: '~' | '/tmp/pane-worktrees') {
+async function fillAndClone(page: Page, destination: '~' | '/tmp/pane-worktrees', url = REPO_URL) {
   await page.getByRole('button', { name: 'GitHub', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('textbox', { name: 'Repository URL' }).fill(REPO_URL);
+  await dialog.getByRole('textbox', { name: 'Repository URL' }).fill(url);
   if (destination !== '~') await dialog.getByRole('button', { name: 'Browse' }).click();
   await expect(dialog.getByRole('textbox', { name: 'Destination' })).toHaveValue(destination);
   await dialog.getByRole('button', { name: 'Clone', exact: true }).click();
@@ -84,6 +91,7 @@ test('a remote host that is not signed in offers its terminal, prefilled, and a 
   await expect(notice).toContainText('Sign in on devbox, then try again.');
   await expect(notice.getByRole('button')).toHaveText(['Open terminal on devbox to sign in', 'Try again']);
   await expect(dialog.getByText(LOCAL_HTTPS_MESSAGE)).toHaveCount(0);
+  await expect(dialog.getByText(SSH_HINT)).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('remote-sign-in-notice.png') });
 
   await notice.getByRole('button', { name: 'Try again' }).click();
@@ -150,3 +158,37 @@ test('a sign-in draft stays with its host when the user switches hosts', async (
   await local.getByRole('button', { name: 'Cancel' }).click();
   expect(await page.evaluate(() => window.__cloneProbe?.cloneCalls.length)).toBe(1);
 });
+
+for (const [failure, message] of SSH_FAILURES) {
+  test(`an SSH clone on a remote host with ${failure} also points to the HTTPS URL`, async ({ page }, testInfo) => {
+    await installElectronApiMock(page);
+    await page.goto('/');
+    await connectRemote(page);
+    await failClonesWithAuth(page, message, 'ssh');
+
+    const dialog = await fillAndClone(page, '~', SSH_URL);
+    const notice = dialog.getByRole('alert');
+    await expect(notice).toContainText("devbox isn't signed in to GitHub.");
+    await expect(notice).toContainText('Sign in on devbox, then try again.');
+    await expect(notice.getByText(SSH_HINT, { exact: true })).toBeVisible();
+    await expect(notice.getByRole('button')).toHaveText(['Open terminal on devbox to sign in', 'Try again']);
+    await page.screenshot({ path: testInfo.outputPath(`remote-ssh-${failure.replaceAll(' ', '-')}.png`) });
+
+    // The URL stays as typed: Try again clones the same SSH URL to the same place.
+    await notice.getByRole('button', { name: 'Try again' }).click();
+    await expect.poll(() => page.evaluate(() => window.__cloneProbe?.cloneCalls)).toEqual([[SSH_URL, '~'], [SSH_URL, '~']]);
+    await expect(dialog.getByRole('textbox', { name: 'Repository URL' })).toHaveValue(SSH_URL);
+  });
+
+  test(`an SSH clone on this computer with ${failure} keeps its own message`, async ({ page }) => {
+    await installElectronApiMock(page);
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'GitHub', exact: true })).toBeVisible();
+    await failClonesWithAuth(page, message, 'ssh');
+
+    const dialog = await fillAndClone(page, '/tmp/pane-worktrees', SSH_URL);
+    await expect(dialog.getByText(message, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(SSH_HINT)).toHaveCount(0);
+    await expect(dialog.getByText(/isn't signed in to GitHub/)).toHaveCount(0);
+  });
+}

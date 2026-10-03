@@ -39,7 +39,7 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
   const defaultDestination = defaultCloneDestination(host);
   const hostId = host.id ?? LOCAL_CLONE_HOST;
   const storedDraft = useCloneDraftStore();
-  const { url, destPath, error, signInHost } = storedDraft.hostId === hostId ? storedDraft : EMPTY_CLONE_DRAFT;
+  const { url, destPath, error, signInHost, signInOverSsh } = storedDraft.hostId === hostId ? storedDraft : EMPTY_CLONE_DRAFT;
   const updateDraft = (draft: Partial<CloneDraft>) => storedDraft.update(hostId, draft);
 
   // A remote clone lands in the host's home unless the user picks a folder.
@@ -82,6 +82,7 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
         updateDraft({
           error: cloneResult.error ?? 'Clone failed',
           signInHost: host.remote && cloneResult.code === GIT_CLONE_AUTH_REQUIRED ? host.name : null,
+          signInOverSsh: cloneResult.authProtocol === 'ssh',
         });
         setCloning(false);
         return;
@@ -153,6 +154,7 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
           {signInHost ? (
             <CloneSignInNotice
               host={signInHost}
+              overSsh={signInOverSsh}
               retrying={cloning}
               onOpenTerminal={() => void handleOpenTerminal()}
               onTryAgain={() => void handleClone()}

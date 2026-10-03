@@ -36,23 +36,25 @@ describe('classifyGitCloneFailure', () => {
 
 describe('describeGitCloneFailure', () => {
   it('keeps the existing message for HTTPS sign-in failures and marks them', () => {
-    const expected = { error: 'Authentication failed — check your credentials or use an SSH URL.', code: GIT_CLONE_AUTH_REQUIRED };
+    const expected = { error: 'Authentication failed — check your credentials or use an SSH URL.', code: GIT_CLONE_AUTH_REQUIRED, authProtocol: 'https' };
     expect(describeGitCloneFailure(httpsNoCredentials)).toEqual(expected);
     expect(describeGitCloneFailure(httpsBadToken)).toEqual(expected);
   });
 
   it('keeps git\'s own text for a 403 and marks it', () => {
-    expect(describeGitCloneFailure(httpsForbidden)).toEqual({ error: httpsForbidden, code: GIT_CLONE_AUTH_REQUIRED });
+    expect(describeGitCloneFailure(httpsForbidden)).toEqual({ error: httpsForbidden, code: GIT_CLONE_AUTH_REQUIRED, authProtocol: 'https' });
   });
 
   it('explains SSH failures instead of showing the raw command output', () => {
     expect(describeGitCloneFailure(sshUnknownHostKey)).toEqual({
       error: "SSH host key verification failed — this computer doesn't trust the Git server yet. Connect to it once with ssh to accept its host key, or use an HTTPS URL.",
       code: GIT_CLONE_AUTH_REQUIRED,
+      authProtocol: 'ssh',
     });
     expect(describeGitCloneFailure(sshNoKey)).toEqual({
       error: 'SSH authentication failed — the Git server rejected this computer\'s SSH key. Add your SSH key to your Git host, or use an HTTPS URL.',
       code: GIT_CLONE_AUTH_REQUIRED,
+      authProtocol: 'ssh',
     });
   });
 
