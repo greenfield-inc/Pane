@@ -1,3 +1,4 @@
+import { registerTerminalPathHandlers } from './terminalPaths';
 import { ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
@@ -81,6 +82,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerDashboardHandlers(ipcMain, services);
   setupLogHandlers(ipcMain, services.sessionManager, commandRegistry);
   registerPanelHandlers(ipcMain, services, commandRegistry);
+  registerTerminalPathHandlers(ipcMain, services, commandRegistry);
   registerEditorPanelHandlers(ipcMain, services);
   registerNimbalystHandlers(ipcMain, services);
   registerSpotlightHandlers(ipcMain, services);

@@ -1,3 +1,6 @@
+import { decodeBoundary } from '../../../../../shared/validation/boundaryDecoder';
+import { terminalPathContextSchema, type TerminalPathContext } from '../../../../../shared/types/terminalPaths';
+import type { TerminalFilePath } from '../resolveTerminalPath';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { LinkProviderConfig } from '../linkProviders/types';
@@ -23,11 +26,10 @@ interface TooltipState {
   hint: string;
 }
 
-interface FilePopoverState {
+interface FilePopoverState extends TerminalFilePath {
   visible: boolean;
   x: number;
   y: number;
-  path: string;
   line: number;
 }
 
@@ -59,7 +61,8 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     visible: false,
     x: 0,
     y: 0,
-    path: '',
+    absolutePath: null,
+    relativePath: null,
     line: 0,
   });
 
@@ -74,6 +77,19 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
   const { onCopyError } = config;
   const mousePositionRef = useRef({ x: 0, y: 0 });
+
+  const [pathContext, setPathContext] = useState<TerminalPathContext | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setPathContext(null);
+    window.electronAPI.invoke('terminal:getPathContext', config.sessionId)
+      .then((value) => {
+        const context = decodeBoundary(value, terminalPathContextSchema);
+        if (!cancelled) setPathContext(context);
+      })
+      .catch(error => console.error('Failed to load terminal path context:', error));
+    return () => { cancelled = true; };
+  }, [config.sessionId]);
 
   // Track mouse position for selection popover
   const onMouseMove = useCallback((e: React.MouseEvent) => {
@@ -100,7 +116,8 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
     const providerConfig: LinkProviderConfig = {
       terminal,
-      workingDirectory: config.workingDirectory,
+      workingDirectory: pathContext?.workingDirectory ?? config.workingDirectory,
+      homeDirectory: pathContext?.homeDirectory ?? undefined,
       githubRemoteUrl: githubRemoteUrl ?? undefined,
       onShowTooltip: (event, text, hint) => {
         setTooltip({ visible: true, x: event.clientX, y: event.clientY, text, hint });
@@ -109,7 +126,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
         setTooltip((prev) => ({ ...prev, visible: false }));
       },
       onShowFilePopover: (event, path, line) => {
-        setFilePopover({ visible: true, x: event.clientX, y: event.clientY, path, line: line ?? 0 });
+        setFilePopover({ visible: true, x: event.clientX, y: event.clientY, ...path, line: line ?? 0 });
       },
       onOpenUrl: (url) => {
         window.electronAPI.openExternal(url);
@@ -121,7 +138,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposables.forEach((d) => d.dispose());
     };
-  }, [terminal, config.workingDirectory, githubRemoteUrl]);
+  }, [terminal, config.workingDirectory, githubRemoteUrl, pathContext]);
 
   // Listen for selection changes
   useEffect(() => {
@@ -171,18 +188,19 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   // File popover action handlers
   const handleOpenInEditor = useCallback(async () => {
-    const { path, line } = filePopover;
+    const { relativePath, line } = filePopover;
+    if (relativePath === null) return;
 
     // Check if file exists - file:exists returns a bare boolean
     const exists = await window.electronAPI.invoke('file:exists', {
       sessionId: config.sessionId,
-      filePath: path,
+      filePath: relativePath,
     });
 
     if (exists) {
       await openFileInEditor({
         sessionId: config.sessionId,
-        filePath: path,
+        filePath: relativePath,
         pin: true,
         cursorPosition: line ? { line, column: 1 } : undefined,
       });
@@ -192,7 +210,8 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   }, [filePopover, config.sessionId]);
 
   const handleShowInExplorer = useCallback(async () => {
-    const { path } = filePopover;
+    const { absolutePath } = filePopover;
+    if (!absolutePath) return;
 
     if (isRemoteMode) {
       console.warn('Show in Explorer is only available in local mode.');
@@ -203,7 +222,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     try {
       const result: { success: boolean; error?: string } = await window.electronAPI.invoke(
         'app:showItemInFolder',
-        path,
+        absolutePath,
         config.sessionId
       );
       if (!result?.success) {
@@ -272,6 +291,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   return {
     onMouseMove,
+    pathContext,
     tooltip,
     filePopover,
     isRemoteMode,
