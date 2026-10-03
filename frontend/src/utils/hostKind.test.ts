@@ -56,6 +56,21 @@ describe('saved host kind', () => {
     expect(config.client.profiles).toEqual([]);
   });
 
+  it('keeps a host whose GitHub sign-in lives in Settings', () => {
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [profile({ githubSignIn: 'settings' }), profile({ id: 'plain' })], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles[0].githubSignIn).toBe('settings');
+    expect(config.client.profiles[1].githubSignIn).toBeUndefined();
+  });
+
+  it('drops a profile with an unknown GitHub sign-in route', () => {
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [{ ...profile(), githubSignIn: 'terminal' }], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles).toEqual([]);
+  });
+
   it('drops a profile whose host kind has an unknown icon', () => {
     const config = normalizeRemoteDaemonConfig({
       client: { profiles: [{ ...profile(), hostKind: { label: 'x', icon: 'rocket' } }], activeProfileId: null, mode: 'local' },
