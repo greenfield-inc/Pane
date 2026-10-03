@@ -106,6 +106,11 @@ export interface RemotePaneConnectionProfile {
    * used without someone at its screen. Absent means gh's default, the keyring.
    */
   ghInsecureStorage?: boolean;
+  /**
+   * Where the user signs this host in to GitHub. 'settings': its credentials are managed in this app's
+   * Settings, so a clone that needs a sign-in points there. Absent: sign in on the host itself.
+   */
+  githubSignIn?: 'settings';
 }
 
 export interface RemoteDaemonHostAccess {
@@ -481,6 +486,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   hostKind: boundary.optional(remoteHostKindSchema),
   hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
   ghInsecureStorage: boundary.optional(boundary.boolean),
+  githubSignIn: boundary.optional(boundary.literal('settings')),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),

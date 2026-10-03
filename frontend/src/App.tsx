@@ -58,6 +58,7 @@ import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
+import { onOpenHostGitHubSettings } from './utils/hostSettings';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -684,6 +685,9 @@ function App() {
     const frame = requestAnimationFrame(() => window.electronAPI?.notifyRendererReady?.());
     return () => cancelAnimationFrame(frame);
   }, [isLoaded]);
+
+  // A host whose GitHub sign-in lives in Settings (e.g. from a clone error) opens it here.
+  useEffect(() => onOpenHostGitHubSettings(openSettings), [openSettings]);
 
   useEffect(() => window.electronAPI?.events?.onAppMenuAction?.((action) => {
     if (action === 'open-settings') openSettings();
