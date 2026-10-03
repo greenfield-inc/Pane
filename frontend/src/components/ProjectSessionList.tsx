@@ -828,7 +828,7 @@ function SessionRow({
       }
     };
     document.addEventListener('pointerdown', handlePointerDown, true);
-    return (<>) => document.removeEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
   }, [isRenaming, submitRename]);
 
   const handleRenameBlur = useCallback(() => {
@@ -840,7 +840,7 @@ function SessionRow({
     void submitRename();
   }, [submitRename]);
 
-  return (
+  return (<>
     <div
       onContextMenu={event => { event.preventDefault(); setContextMenu({ session, x: event.clientX, y: event.clientY }); }}
       className={cn(
