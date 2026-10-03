@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, stat } from 'fs/promises';
+import { access, mkdir, readdir, realpath, stat } from 'fs/promises';
 import type { Dirent } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -34,7 +34,8 @@ interface HostPathContext {
 }
 
 type ProjectRegistration = ReturnType<typeof resolveProjectRegistration>;
-type GitRepoCheck = (registration: ProjectRegistration) => Promise<boolean>;
+/** The repo root containing the registration's path, or null outside a repo. */
+type GitTopLevelLookup = (registration: ProjectRegistration) => Promise<string | null>;
 
 function hostPlatform(context: HostPathContext): NodeJS.Platform {
   return context.platform ?? process.platform;
@@ -152,29 +153,37 @@ export async function createHostDirectory(
   return { path: target };
 }
 
-const isGitWorkTree: GitRepoCheck = async registration => {
+const findGitTopLevel: GitTopLevelLookup = async registration => {
   try {
     const result = await registration.commandRunner.execFile(
       'git',
-      ['rev-parse', '--is-inside-work-tree'],
+      ['rev-parse', '--show-toplevel'],
       registration.path,
       { silent: true },
     );
-    return result.stdout.trim() === 'true';
+    return result.stdout.trim() || null;
   } catch {
-    return false;
+    return null;
   }
 };
 
+async function isSameFolder(registration: ProjectRegistration, topLevel: string): Promise<boolean> {
+  // WSL paths are Linux paths that this process cannot resolve directly.
+  if (registration.wsl_enabled) return path.posix.normalize(topLevel) === path.posix.normalize(registration.path);
+  const [left, right] = await Promise.all([realpath(topLevel), realpath(registration.path)])
+    .catch(() => [topLevel, registration.path]);
+  return path.resolve(left) === path.resolve(right);
+}
+
 /**
  * Resolve a project path on this host and check it suits the action, without
- * changing anything. `open` needs an existing git repo; `new` needs a folder
- * that is missing or already a folder.
+ * changing anything. `open` needs the root folder of an existing git repo;
+ * `new` needs a folder that is missing or already a folder.
  */
 export async function validateHostProjectPath(
   request: ValidateProjectPathRequest,
   context: HostPathContext = {},
-  isGitRepo: GitRepoCheck = isGitWorkTree,
+  findTopLevel: GitTopLevelLookup = findGitTopLevel,
 ): Promise<ValidateProjectPathResult> {
   assertPathOnHost(request.path, context);
   const registration = resolveProjectRegistration(expandUserRepoPath(request.path, { homeDir: hostHome(context) }));
@@ -185,11 +194,14 @@ export async function validateHostProjectPath(
   }
   await assertDirectory(fileSystemPath);
 
-  const repo = await isGitRepo(registration);
-  if (request.mode === 'open' && !repo) {
-    throw new HostPathError('NOT_A_GIT_REPO', `Not a git repository: ${registration.path}. Use New project to create one.`);
+  const topLevel = await findTopLevel(registration);
+  const isRepoRoot = topLevel !== null && await isSameFolder(registration, topLevel);
+  if (request.mode === 'open' && !isRepoRoot) {
+    throw new HostPathError('NOT_A_GIT_REPO', topLevel
+      ? `${registration.path} is inside the git repository at ${topLevel}. Open ${topLevel} instead.`
+      : `Not a git repository: ${registration.path}. Use New project to create one.`);
   }
-  return { path: registration.path, isGitRepo: repo };
+  return { path: registration.path, isGitRepo: isRepoRoot };
 }
 
 /** Resolve the clone destination on this host; it defaults to the home folder. */

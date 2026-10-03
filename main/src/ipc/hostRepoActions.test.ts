@@ -49,7 +49,10 @@ beforeEach(async () => {
   });
   vi.spyOn(CommandRunner.prototype, 'execFile').mockImplementation(async (_file: string, args: string[], cwd: string) => {
     gitCommands.push(`git ${args.join(' ')}`);
-    return { stdout: existsSync(path.join(cwd, '.git')) ? 'true\n' : 'false\n', stderr: '' };
+    for (let folder = cwd; ; folder = path.dirname(folder)) {
+      if (existsSync(path.join(folder, '.git'))) return { stdout: `${folder}\n`, stderr: '' };
+      if (path.dirname(folder) === folder) throw new Error('not a git repository');
+    }
   });
 });
 
@@ -101,6 +104,17 @@ describe('projects:create on the active host', () => {
     expect(result).toMatchObject({ success: false, code: 'NOT_A_GIT_REPO' });
     expect(await readdir(path.join(home, 'plain'))).toEqual([]);
     expect(gitCommands.some(command => command.startsWith('git init'))).toBe(false);
+    expect(createProject).not.toHaveBeenCalled();
+  });
+
+  it('fails Open on a folder inside a repo instead of registering the subfolder', async () => {
+    await mkdir(path.join(home, 'repo', '.git'), { recursive: true });
+    await mkdir(path.join(home, 'repo', 'src'));
+    const { registry, createProject } = createProjectRegistry();
+
+    const result = await registry.invoke('projects:create', [{ name: 'src', path: '~/repo/src', mode: 'open' }]);
+
+    expect(result).toMatchObject({ success: false, code: 'NOT_A_GIT_REPO' });
     expect(createProject).not.toHaveBeenCalled();
   });
 
