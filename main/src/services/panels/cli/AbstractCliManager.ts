@@ -14,6 +14,7 @@ import { getShellPath } from '../../../utils/shellPath';
 import { findNodeExecutable } from '../../../utils/nodeFinder';
 import { getGitAttributionEnv } from '../../../utils/attribution';
 import { interactiveTerminalEnv } from '../../../utils/inheritedProcessEnv';
+import { stripInheritedAgentSession } from '../../../utils/agentSessionEnv';
 
 const LAST_OUTPUT_TAIL_BYTES = 16 * 1024;
 
@@ -646,7 +647,7 @@ export abstract class AbstractCliManager extends EventEmitter {
     const pathWithNode = nodeDir + pathSeparator + shellPath;
 
     return {
-      ...interactiveTerminalEnv(),
+      ...stripInheritedAgentSession(interactiveTerminalEnv()),
       ...getGitAttributionEnv(this.configManager?.getConfig()),
       PATH: pathWithNode
     };

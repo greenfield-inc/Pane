@@ -97,6 +97,16 @@ export class GitStatusManager extends EventEmitter {
   private readonly MAX_CONCURRENT_PR_ENRICHMENT = 1;
   private activePrEnrichmentOperations = 0;
   private prEnrichmentTimers: Map<string, NodeJS.Timeout> = new Map();
+  /**
+   * Whether the GitHub CLI exists, per execution context.
+   *
+   * PR enrichment is optional garnish, but every status refresh used to run
+   * `gh pr list` regardless — on a machine without `gh` that is two red console
+   * lines per session per refresh, for something that was never going to work.
+   * Probed once and remembered; keyed by WSL distribution because the host and
+   * a distro have separate PATHs.
+   */
+  private ghAvailability = new Map<string, Promise<boolean>>();
 
   constructor(
     private sessionManager: SessionManager,
@@ -620,11 +630,18 @@ export class GitStatusManager extends EventEmitter {
       };
     }
 
+    if (!await this.isGhAvailable(projectPath, commandRunner)) {
+      return { ok: false, error: new Error('GitHub CLI is unavailable') };
+    }
+
     try {
+      // Silent: a repository without a GitHub remote, or an unauthenticated
+      // `gh`, fails here on every refresh. That is a normal state for a local
+      // project, not something to shout about in the console.
       const result = await commandRunner.execAsync(
         `gh pr list --head ${escapeShellArg(branchName)} --state all --json number,url,title,state,isDraft,body --limit 1`,
         projectPath,
-        { timeout: 5000 }
+        { timeout: 5000, silent: true }
       );
       const prs = decodeBoundary(JSON.parse(result.stdout.trim() || '[]'), githubPrListSchema);
       const pr = prs[0];
@@ -645,8 +662,37 @@ export class GitStatusManager extends EventEmitter {
           : undefined,
       };
     } catch (error) {
+      this.logger?.verbose(
+        `[GitStatus] No PR info for ${branchName}: ${error instanceof Error ? error.message : String(error)}`
+      );
       return { ok: false, error };
     }
+  }
+
+  /**
+   * Is the GitHub CLI installed in this context?
+   *
+   * The probe runs at most once per context and the in-flight promise is
+   * cached, so a burst of sessions refreshing together shares one `gh
+   * --version` rather than each discovering the same missing binary.
+   */
+  private isGhAvailable(projectPath: string, commandRunner: CommandRunner): Promise<boolean> {
+    const key = commandRunner.wslContext?.distribution ?? 'host';
+    const known = this.ghAvailability.get(key);
+    if (known) return known;
+
+    const probe = commandRunner
+      .execAsync('gh --version', projectPath, { timeout: 5000, silent: true })
+      .then(() => true)
+      .catch(() => {
+        this.logger?.info(
+          '[GitStatus] GitHub CLI (gh) not found — pull request details stay empty. Install it from https://cli.github.com to enable them.'
+        );
+        return false;
+      });
+
+    this.ghAvailability.set(key, probe);
+    return probe;
   }
 
   invalidatePrCache(projectPath?: string): void {
