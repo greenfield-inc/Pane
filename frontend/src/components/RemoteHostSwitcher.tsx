@@ -3,6 +3,7 @@ import { Laptop, Plug, Radio, SquareTerminal } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
+import { useErrorStore } from '../stores/errorStore';
 import { LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
 import { HOST_ICONS, describeHost } from '../utils/hostKind';
 import { getHostTerminalPresentation, openHostTerminal } from '../utils/hostTerminal';
@@ -29,6 +30,7 @@ export function RemoteHostSwitcher({
   onOpenHosting,
 }: RemoteHostSwitcherProps) {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const showError = useErrorStore((state) => state.showError);
   // Main does not serialize client transitions, so one switch at a time.
   const [switching, setSwitching] = useState(false);
   const remote = connectionState.mode === 'remote';
@@ -54,11 +56,14 @@ export function RemoteHostSwitcher({
     }
   };
 
-  const openTerminal = async () => {
+  const openTerminal = async (hostName: string) => {
     try {
       await openHostTerminal();
     } catch (error) {
-      console.error('Failed to open the host terminal:', error);
+      showError({
+        title: `Could not open the terminal on ${hostName}`,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -76,7 +81,7 @@ export function RemoteHostSwitcher({
         action: active ? {
           label: getHostTerminalPresentation(profile).openLabel,
           icon: SquareTerminal,
-          onClick: () => void openTerminal(),
+          onClick: () => void openTerminal(profile.label),
         } : undefined,
       };
     }),

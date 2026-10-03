@@ -69,3 +69,16 @@ test('a host saved with a cloud kind shows a cloud on its terminal tab', async (
   await expect(tab).toBeVisible();
   await expect(tab.locator('..').locator('svg.lucide-cloud')).toHaveCount(1);
 });
+
+test('a host terminal that cannot open says why', async ({ page }) => {
+  await installElectronApiMock(page, { hostTerminalOpenError: 'Remote host is not connected' });
+  await page.goto('/');
+  await saveHosts(page, 'devbox');
+
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch host' }).click();
+  await page.getByRole('menuitem', { name: 'Open terminal on devbox' }).click();
+
+  await expect(page.getByText('Could not open the terminal on devbox')).toBeVisible();
+  await expect(page.getByText('Remote host is not connected')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'devbox · Terminal' })).toHaveCount(0);
+});
