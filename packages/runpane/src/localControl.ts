@@ -2322,6 +2322,20 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
     associateSession: resolveAssociateSession(parsed),
     };
   }
+  if (parsed.dryRun) request.dryRun = true;
+  const pinnedOverride = resolvePinnedOverride(parsed);
+  for (const pane of request.panes) {
+    if (pinnedOverride !== undefined) pane.pinned = pinnedOverride;
+    if (parsed.launch) pane.launch = true;
+  }
+  if (parsed.focus && parsed.noFocus) {
+    throw new Error('Use either --focus or --no-focus, not both.');
+  }
+  if (parsed.focus || parsed.noFocus) {
+    request.focus = Boolean(parsed.focus);
+    request.noFocus = Boolean(parsed.noFocus);
+  }
+  if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
   await confirmPaneAdopt(parsed, request);
   const result = await invokeDaemon('runpane:panes:adopt', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
