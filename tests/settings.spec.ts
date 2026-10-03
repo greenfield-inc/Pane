@@ -393,7 +393,9 @@ test.describe('Settings', () => {
 
     const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
     await expect(confirm).toBeVisible();
-    await confirm.getByRole('button', { name: 'Stay' }).click();
+    await expect(confirm.getByRole('button', { name: 'Discard Changes' })).toBeFocused();
+    await confirm.getByRole('button', { name: 'Stay' }).focus();
+    await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Worktrees & Git' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -402,7 +404,8 @@ test.describe('Settings', () => {
     await expect(page.getByTestId('settings-page')).toBeVisible();
 
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-    await confirm.getByRole('button', { name: 'Discard Changes' }).click();
+    await confirm.getByRole('button', { name: 'Discard Changes' }).focus();
+    await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
   });
 
