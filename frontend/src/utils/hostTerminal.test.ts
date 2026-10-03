@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 
 const open = vi.fn();
+const getConnectionState = vi.fn();
 const navigateToHostTerminal = vi.fn();
-vi.mock('./api', () => ({ API: { hostTerminal: { open } } }));
+vi.mock('./api', () => ({ API: { hostTerminal: { open }, remoteDaemon: { getConnectionState } } }));
 // The real store reads localStorage at import; only the navigation call matters here.
 vi.mock('../stores/navigationStore', () => ({ useNavigationStore: { getState: () => ({ navigateToHostTerminal }) } }));
 
@@ -54,7 +55,8 @@ describe('getActiveRemoteProfile', () => {
 describe('openHostTerminal', () => {
   beforeEach(() => {
     open.mockReset();
-    useHostTerminalStore.setState({ terminal: null });
+    getConnectionState.mockResolvedValue({ success: true, data: { mode: 'remote', activeProfileId: 'devbox-id' } });
+    useHostTerminalStore.setState({ terminal: null, hostId: null });
     navigateToHostTerminal.mockReset();
   });
 
@@ -65,7 +67,7 @@ describe('openHostTerminal', () => {
     await openHostTerminal({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' });
 
     expect(open).toHaveBeenCalledWith({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' });
-    expect(useHostTerminalStore.getState().terminal).toBe(terminal);
+    expect(useHostTerminalStore.getState()).toMatchObject({ terminal, hostId: 'devbox-id' });
     expect(navigateToHostTerminal).toHaveBeenCalledTimes(1);
   });
 
