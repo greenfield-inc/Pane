@@ -41,6 +41,21 @@ describe('saved host kind', () => {
     expect(config.client.profiles[0].hostKind).toEqual(hostKind);
   });
 
+  it('keeps whether gh on the host stores its token in a file', () => {
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [profile({ ghInsecureStorage: true }), profile({ id: 'plain' })], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles[0].ghInsecureStorage).toBe(true);
+    expect(config.client.profiles[1].ghInsecureStorage).toBeUndefined();
+  });
+
+  it('drops a profile whose token storage setting is not a boolean', () => {
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [{ ...profile(), ghInsecureStorage: 'yes' }], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles).toEqual([]);
+  });
+
   it('drops a profile whose host kind has an unknown icon', () => {
     const config = normalizeRemoteDaemonConfig({
       client: { profiles: [{ ...profile(), hostKind: { label: 'x', icon: 'rocket' } }], activeProfileId: null, mode: 'local' },
