@@ -46,6 +46,7 @@ export function HostTerminalView() {
               aria-selected={true}
               aria-controls={TAB_PANEL_ID}
               aria-label={presentation.tabTitle}
+              title={presentation.name}
               className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle"
             />
             <span className="relative z-10 pointer-events-none inline-flex min-w-0 items-center gap-2">
