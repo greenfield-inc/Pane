@@ -18,9 +18,8 @@ export function registerHostTerminalHandlers(
   ipcMain: IpcMain,
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
+  hostTerminal: Pick<HostTerminalManager, 'open' | 'get'> = new HostTerminalManager(services.sessionManager),
 ): void {
-  const hostTerminal = new HostTerminalManager(services.sessionManager);
-
   commandRegistry.register('host-terminal:open', async (request: PaneCommandValue) => {
     try {
       const state = await hostTerminal.open(decodeHostTerminalOpenRequest(request));
