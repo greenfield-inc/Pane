@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  DEFAULT_REMOTE_DAEMON_HOST_CONFIG,
   createDefaultRemoteDaemonConfig,
   createDefaultRemoteDaemonHostRuntimeState,
   createDefaultRemotePaneConnectionState,
@@ -13,13 +14,14 @@ import {
   type RemoteSetupDataDirectoryMode,
   type RemoteSetupTunnelPreference,
 } from '../../../../shared/types/remoteDaemon';
+import { DEFAULT_REMOTE_BASE_URL, formatRemoteBaseUrl } from '../../utils/remote-base-url';
 import { API } from '../../utils/api';
 import { panelApi } from '../../services/panelApi';
 import { useConfigStore } from '../../stores/configStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 
-interface RemoteHostSetupDraft {
+interface RemoteHostSetupValues {
   dataMode: RemoteSetupDataDirectoryMode;
   label: string;
   listenPort: number;
@@ -29,25 +31,24 @@ interface RemoteHostSetupDraft {
   installService: boolean;
 }
 
+interface RemoteHostSetupDraft {
+  values: RemoteHostSetupValues;
+  touched: Partial<Record<keyof RemoteHostSetupValues, true>>;
+}
+
 type RemoteActionOutcome<T> =
   | { success: true; value: T }
   | { success: false };
 
-const DEFAULT_HOST_SETUP_DRAFT: RemoteHostSetupDraft = {
+const DEFAULT_HOST_SETUP_DRAFT: RemoteHostSetupValues = {
   dataMode: 'current',
   label: '',
-  listenPort: 42137,
+  listenPort: DEFAULT_REMOTE_DAEMON_HOST_CONFIG.listenPort,
   paneDir: '',
   tunnelPreference: 'tailscale',
   manualBaseUrl: '',
   installService: true,
 };
-
-function formatRemoteBaseUrl(host: string, port: number): string {
-  const trimmedHost = host.trim();
-  const normalizedHost = trimmedHost.includes(':') && !trimmedHost.startsWith('[') ? `[${trimmedHost}]` : trimmedHost;
-  return `http://${normalizedHost}:${port}`;
-}
 
 export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => void) {
   const [config, setConfig] = useState<RemoteDaemonConfig>(createDefaultRemoteDaemonConfig);
@@ -61,21 +62,22 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
   const [result, setResult] = useState<string | null>(null);
   const [setupResult, setSetupResult] = useState<RemoteHostSetupResult | null>(null);
 
-  const [setupDataMode, setSetupDataMode] = useState<RemoteSetupDataDirectoryMode>('current');
-  const [setupLabel, setSetupLabel] = useState('');
-  const [setupListenPort, setSetupListenPort] = useState(42137);
-  const [setupPaneDir, setSetupPaneDir] = useState('');
-  const [setupTunnelPreference, setSetupTunnelPreference] = useState<RemoteSetupTunnelPreference>('tailscale');
-  const [setupManualBaseUrl, setSetupManualBaseUrl] = useState('');
-  const [setupInstallService, setSetupInstallService] = useState(true);
+  const [setupDraft, setSetupDraft] = useState<RemoteHostSetupDraft>({ values: DEFAULT_HOST_SETUP_DRAFT, touched: {} });
   const [setupBaseline, setSetupBaseline] = useState(DEFAULT_HOST_SETUP_DRAFT);
+  const { dataMode: setupDataMode, label: setupLabel, listenPort: setupListenPort, paneDir: setupPaneDir,
+    tunnelPreference: setupTunnelPreference, manualBaseUrl: setupManualBaseUrl, installService: setupInstallService } = setupDraft.values;
+  const updateSetupField = <Key extends keyof RemoteHostSetupValues>(key: Key, value: RemoteHostSetupValues[Key]) => {
+    setSetupDraft(current => ({ values: { ...current.values, [key]: value }, touched: { ...current.touched, [key]: true } }));
+  };
 
   const [connectionCode, setConnectionCode] = useState('');
   const [pairLabel, setPairLabel] = useState('');
-  const [pairBaseUrl, setPairBaseUrl] = useState('http://127.0.0.1:42137');
+  const [pairUrlDraft, setPairUrlDraft] = useState({ value: DEFAULT_REMOTE_BASE_URL, touched: false });
+  const pairBaseUrl = pairUrlDraft.value;
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [profileLabel, setProfileLabel] = useState('');
-  const [profileBaseUrl, setProfileBaseUrl] = useState('http://127.0.0.1:42137');
+  const [profileUrlDraft, setProfileUrlDraft] = useState({ value: DEFAULT_REMOTE_BASE_URL, touched: false });
+  const profileBaseUrl = profileUrlDraft.value;
   const [profileToken, setProfileToken] = useState('');
 
   const refreshConfigStore = useConfigStore((state) => state.fetchConfig);
@@ -103,13 +105,12 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     ));
     configRef.current = nextConfig;
     setConfig(nextConfig);
-    setSetupListenPort((current) => current === 42137 ? configResponse.data!.host.config.listenPort : current);
-    setSetupBaseline((current) => current.listenPort === 42137
-      ? { ...current, listenPort: configResponse.data!.host.config.listenPort }
-      : current);
-    const baseUrl = formatRemoteBaseUrl(configResponse.data.host.config.listenHost, configResponse.data.host.config.listenPort);
-    setPairBaseUrl((current) => current === 'http://127.0.0.1:42137' ? baseUrl : current);
-    setProfileBaseUrl((current) => current === 'http://127.0.0.1:42137' ? baseUrl : current);
+    const { listenHost, listenPort } = nextConfig.host.config;
+    setSetupDraft(current => current.touched.listenPort ? current : { ...current, values: { ...current.values, listenPort } });
+    setSetupBaseline(current => ({ ...current, listenPort }));
+    const baseUrl = formatRemoteBaseUrl(listenHost, listenPort);
+    setPairUrlDraft(current => current.touched ? current : { value: baseUrl, touched: false });
+    setProfileUrlDraft(current => current.touched ? current : { value: baseUrl, touched: false });
     if (connectionResponse.success && connectionResponse.data) setConnectionState(connectionResponse.data);
     if (hostResponse.success && hostResponse.data) setHostState(hostResponse.data);
   }, []);
@@ -171,16 +172,6 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     installService: setupDataMode === 'isolated' ? setupInstallService : false,
   });
 
-  const getSetupDraft = (): RemoteHostSetupDraft => ({
-    dataMode: setupDataMode,
-    label: setupLabel,
-    listenPort: setupListenPort,
-    paneDir: setupPaneDir,
-    tunnelPreference: setupTunnelPreference,
-    manualBaseUrl: setupManualBaseUrl,
-    installService: setupInstallService,
-  });
-
   const setupHost = async () => {
     const outcome = await runRemoteRequest(async () => {
       const response = await API.remoteDaemon.setupHost(buildSetupRequest());
@@ -189,9 +180,9 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     });
     if (!outcome.success) return false;
     setSetupResult(outcome.value);
-    setSetupLabel('');
-    setSetupListenPort(outcome.value.listenPort);
-    setSetupBaseline({ ...getSetupDraft(), label: '', listenPort: outcome.value.listenPort });
+    const nextDraft = { ...setupDraft.values, label: '', listenPort: outcome.value.listenPort };
+    setSetupDraft({ values: nextDraft, touched: {} });
+    setSetupBaseline(nextDraft);
     setResult('Remote host configured and connection code created.');
     return true;
   };
@@ -344,17 +335,17 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     profile: profileLabel.trim().length > 0 && isValidHttpUrl(profileBaseUrl) && profileToken.trim().length > 0,
   }), [hostDraft.listenPort, pairBaseUrl, pairLabel, profileBaseUrl, profileLabel, profileToken, setupListenPort, setupManualBaseUrl, setupTunnelPreference]);
 
-  const setupDirty = JSON.stringify(getSetupDraft()) !== JSON.stringify(setupBaseline);
+  const setupDirty = JSON.stringify(setupDraft.values) !== JSON.stringify(setupBaseline);
+
+  const configuredBaseUrl = formatRemoteBaseUrl(config.host.config.listenHost, config.host.config.listenPort);
+  const advancedDirty = JSON.stringify(hostDraft) !== JSON.stringify(config.host.config)
+    || Boolean(pairLabel || profileLabel || profileToken)
+    || (pairUrlDraft.touched && pairBaseUrl !== configuredBaseUrl)
+    || (profileUrlDraft.touched && profileBaseUrl !== configuredBaseUrl);
 
   const resetSubviewDraft = (subview: 'host-setup' | 'connections' | 'advanced-host') => {
     if (subview === 'host-setup') {
-      setSetupDataMode(setupBaseline.dataMode);
-      setSetupLabel(setupBaseline.label);
-      setSetupListenPort(setupBaseline.listenPort);
-      setSetupPaneDir(setupBaseline.paneDir);
-      setSetupTunnelPreference(setupBaseline.tunnelPreference);
-      setSetupManualBaseUrl(setupBaseline.manualBaseUrl);
-      setSetupInstallService(setupBaseline.installService);
+      setSetupDraft({ values: setupBaseline, touched: {} });
       setSetupResult(null);
       return;
     }
@@ -365,10 +356,10 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     const baseUrl = formatRemoteBaseUrl(config.host.config.listenHost, config.host.config.listenPort);
     setHostDraft(config.host.config);
     setPairLabel('');
-    setPairBaseUrl(baseUrl);
+    setPairUrlDraft({ value: baseUrl, touched: false });
     setCreatedToken(null);
     setProfileLabel('');
-    setProfileBaseUrl(baseUrl);
+    setProfileUrlDraft({ value: baseUrl, touched: false });
     setProfileToken('');
   };
 
@@ -384,31 +375,32 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     result,
     setupResult,
     setupDataMode,
-    setSetupDataMode,
+    setSetupDataMode: (value: RemoteSetupDataDirectoryMode) => updateSetupField('dataMode', value),
     setupLabel,
-    setSetupLabel,
+    setSetupLabel: (value: string) => updateSetupField('label', value),
     setupListenPort,
-    setSetupListenPort,
+    setSetupListenPort: (value: number) => updateSetupField('listenPort', value),
     setupPaneDir,
-    setSetupPaneDir,
+    setSetupPaneDir: (value: string) => updateSetupField('paneDir', value),
     setupTunnelPreference,
-    setSetupTunnelPreference,
+    setSetupTunnelPreference: (value: RemoteSetupTunnelPreference) => updateSetupField('tunnelPreference', value),
     setupManualBaseUrl,
-    setSetupManualBaseUrl,
+    setSetupManualBaseUrl: (value: string) => updateSetupField('manualBaseUrl', value),
     setupInstallService,
-    setSetupInstallService,
+    setSetupInstallService: (value: boolean) => updateSetupField('installService', value),
     setupDirty,
+    advancedDirty,
     connectionCode,
     setConnectionCode,
     pairLabel,
     setPairLabel,
     pairBaseUrl,
-    setPairBaseUrl,
+    setPairBaseUrl: (value: string) => setPairUrlDraft({ value, touched: true }),
     createdToken,
     profileLabel,
     setProfileLabel,
     profileBaseUrl,
-    setProfileBaseUrl,
+    setProfileBaseUrl: (value: string) => setProfileUrlDraft({ value, touched: true }),
     profileToken,
     setProfileToken,
     validation,
