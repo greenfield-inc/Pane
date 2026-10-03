@@ -1358,6 +1358,11 @@ export const RUNPANE_CONTRACT = {
         "description": "Connect to a Pane daemon using this Pane data directory."
       },
       {
+        "name": "--retry",
+        "value": "<count>",
+        "description": "Retry transient local daemon connection failures up to this many times. Defaults to 0."
+      },
+      {
         "name": "--repo",
         "value": "<selector>",
         "description": "Repository selector: active, id, exact path, or saved repository name."
@@ -4099,7 +4104,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
-    "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.",
+    "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. For automation, `--json` always writes one JSON result to stdout; failures exit nonzero and use {\"ok\":false,\"error\":{\"message\":\"...\",\"code\":\"...\"}}. `--retry N` retries transient connection failures up to `N` times with bounded backoff, but only before a daemon connection succeeds so delivered mutations are never replayed. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.",
     "daemonFlagNote": "Unknown daemon flags should be forwarded rather than dropped so newer Pane versions can extend `--remote-setup` without requiring an immediate wrapper release. Unknown flags for non-daemon commands should fail clearly.",
     "downloadAttribution": [
       "The npm package uses `source=npm` for all npm-registry consumers, including `npx`, `pnpm dlx`, `yarn dlx`, `bunx`, and global npm/pnpm installs.",
@@ -4264,6 +4269,8 @@ export const RUNPANE_CONTRACT = {
         "list",
         "--repo",
         "active",
+        "--retry",
+        "2",
         "--json"
       ],
       [

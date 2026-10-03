@@ -7,7 +7,7 @@ import os
 import re
 import socket
 import sys
-from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
+from typing import Callable, Dict, List, Optional, Set, TextIO, Tuple, TypeVar
 
 from .agent_context import run_agent_context
 from .daemon_actions import contract_command, run_daemon_action, run_links_create
@@ -123,6 +123,7 @@ class ParsedArgs:
     json: bool = False
     context_command: Optional[str] = None
     pane_dir: Optional[str] = None
+    retry: int = 0
     repo: Optional[str] = None
     pane_id: Optional[str] = None
     session_id: Optional[str] = None
@@ -211,40 +212,92 @@ class ParsedArgs:
     remote_setup_args: List[str] = field(default_factory=list)
 
 
+class CountingTextWriter:
+    def __init__(self, stream: TextIO) -> None:
+        self.stream = stream
+        self.character_count = 0
+
+    def write(self, value: str) -> int:
+        self.character_count += len(value)
+        return self.stream.write(value)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def isatty(self) -> bool:
+        return self.stream.isatty()
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     effective_argv = sys.argv[1:] if argv is None else argv
-    telemetry_context = create_initial_telemetry_context(effective_argv)
+    json_requested = "--json" in effective_argv
+    original_stdout = sys.stdout
+    counting_stdout = CountingTextWriter(original_stdout) if json_requested else None
+    if counting_stdout:
+        sys.stdout = counting_stdout
     try:
-        if not effective_argv:
-            return run_tracked_command(
-                telemetry_context,
-                lambda: run_no_args_entrypoint(telemetry_context),
-            )
-
         try:
-            parsed = parse_args(effective_argv)
+            code = run_main(effective_argv)
         except Exception as error:
-            telemetry_context["failure_stage"] = "parse"
-            telemetry_context["failure_category"] = categorize_failure(error)
-            track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
-            raise
-        apply_parsed_args_to_telemetry_context(telemetry_context, parsed)
+            if json_requested:
+                print(json.dumps({
+                    "ok": False,
+                    "error": {
+                        "message": str(error),
+                        "code": getattr(error, "code", None) or "ERR_RUNPANE_CLI",
+                    },
+                }, indent=2))
+            else:
+                print(str(error), file=sys.stderr)
+            return 1
 
-        if parsed.command == "version":
-            return dispatch_parsed_command(parsed, telemetry_context)
+        if counting_stdout and counting_stdout.character_count == 0:
+            print(json.dumps({
+                "ok": False,
+                "error": {
+                    "message": (
+                        "runpane completed without producing the requested JSON output."
+                        if code == 0
+                        else f"runpane failed with exit code {code} without producing JSON output."
+                    ),
+                    "code": "ERR_RUNPANE_EMPTY_JSON_OUTPUT",
+                },
+            }, indent=2))
+            return 1 if code == 0 else code
+        return code
+    finally:
+        sys.stdout = original_stdout
 
+
+def run_main(effective_argv: List[str]) -> int:
+    telemetry_context = create_initial_telemetry_context(effective_argv)
+    if not effective_argv:
         return run_tracked_command(
             telemetry_context,
-            lambda: dispatch_parsed_command(parsed, telemetry_context),
+            lambda: run_no_args_entrypoint(telemetry_context),
         )
+
+    try:
+        parsed = parse_args(effective_argv)
     except Exception as error:
         if effective_argv and effective_argv[0] == "watch":
             line = f"WATCH ERROR {type(error).__name__}: {error}"
             print(line, flush=True)
             print(line, file=sys.stderr, flush=True)
             return 2
-        print(str(error), file=sys.stderr)
-        return 1
+        telemetry_context["failure_stage"] = "parse"
+        telemetry_context["failure_category"] = categorize_failure(error)
+        track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
+        raise
+    apply_parsed_args_to_telemetry_context(telemetry_context, parsed)
+
+    if parsed.command == "version":
+        return dispatch_parsed_command(parsed, telemetry_context)
+
+    return run_tracked_command(
+        telemetry_context,
+        lambda: dispatch_parsed_command(parsed, telemetry_context),
+    )
 
 
 def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTelemetryContext) -> int:
@@ -661,6 +714,15 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
 def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--pane-dir":
         parsed.pane_dir = value
+        return
+    if flag == "--retry":
+        try:
+            retry = int(value)
+        except ValueError as error:
+            raise ValueError("--retry must be a non-negative integer.") from error
+        if retry < 0:
+            raise ValueError("--retry must be a non-negative integer.")
+        parsed.retry = retry
         return
     if flag == "--repo":
         parsed.repo = value

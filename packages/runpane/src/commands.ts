@@ -25,6 +25,7 @@ export interface ParsedArgs {
   json: boolean;
   contextCommand?: string;
   paneDir?: string;
+  retry: number;
   repo?: string;
   paneId?: string;
   sessionId?: string;
@@ -153,6 +154,7 @@ const DEFAULTS: Omit<ParsedArgs, 'command'> = {
   yes: RUNPANE_CONTRACT.defaults.yes,
   verbose: RUNPANE_CONTRACT.defaults.verbose,
   json: false,
+  retry: 0,
   remoteSetupArgs: []
 };
 
@@ -493,6 +495,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
 function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): void {
   if (flag === '--pane-dir') {
     parsed.paneDir = value;
+    return;
+  }
+  if (flag === '--retry') {
+    const retry = Number(value);
+    if (!Number.isInteger(retry) || retry < 0) {
+      throw new Error('--retry must be a non-negative integer.');
+    }
+    parsed.retry = retry;
     return;
   }
   if (flag === '--repo') {

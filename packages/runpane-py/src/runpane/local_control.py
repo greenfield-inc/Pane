@@ -7,14 +7,29 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
 
 
+def invoke_local_daemon(
+    parsed: Any,
+    channel: str,
+    args: Optional[List[Any]] = None,
+    timeout_ms: Optional[float] = None,
+) -> Any:
+    return invoke_daemon(
+        channel,
+        args,
+        pane_dir=parsed.pane_dir,
+        timeout_ms=timeout_ms,
+        retry=parsed.retry,
+    )
+
+
 def run_repos_list(parsed: Any) -> int:
-    result = invoke_daemon("runpane:repos:list", pane_dir=parsed.pane_dir)
+    result = invoke_local_daemon(parsed, "runpane:repos:list")
 
     if parsed.json:
         print_json(result)
@@ -35,7 +50,7 @@ def run_repos_list(parsed: Any) -> int:
 def run_repos_add(parsed: Any) -> int:
     request = build_repo_add_request(parsed)
     confirm_repo_add(parsed, request)
-    result = invoke_daemon("runpane:repos:add", [request], pane_dir=parsed.pane_dir)
+    result = invoke_local_daemon(parsed, "runpane:repos:add", [request])
 
     if parsed.json:
         print_json(result)
@@ -298,9 +313,9 @@ def print_session_result(result: Dict[str, Any], as_json: bool, action: str) -> 
 
 
 def run_panes_list(parsed: Any) -> int:
-    result = invoke_daemon("runpane:panes:list", [{
+    result = invoke_local_daemon(parsed, "runpane:panes:list", [{
         "repo": parsed.repo,
-    }], pane_dir=parsed.pane_dir)
+    }])
 
     if parsed.json:
         print_json(result)
@@ -431,13 +446,13 @@ def run_watch(parsed: Any) -> int:
                     event_include=[],
                 )
             except PaneDaemonClientError as error:
-                if not parsed.follow or error.code not in {
+                if not parsed.follow or (not error.retryable and error.code not in {
                     "ERR_RUNPANE_DAEMON_CLOSED",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
                     "ERR_RUNPANE_DAEMON_TIMEOUT",
                     "ECONNREFUSED",
                     "ENOENT",
-                }:
+                }):
                     return emit_watch_failure(error, output_format)
                 code = error.code or type(error).__name__
                 now_ms = time.monotonic() * 1_000
@@ -525,10 +540,10 @@ def effective_watch_heartbeat_ms(seconds: float) -> float:
 def run_panes_create(parsed: Any) -> int:
     request = build_pane_create_request(parsed)
     confirm_pane_create(parsed, request)
-    result = invoke_daemon(
+    result = invoke_local_daemon(
+        parsed,
         "runpane:panes:create",
         [request],
-        pane_dir=parsed.pane_dir,
         timeout_ms=(parsed.timeout_ms or 120_000) + (parsed.ready_timeout_ms or 30_000) + 10_000,
     )
 
@@ -607,10 +622,10 @@ def run_panes_archive(parsed: Any) -> int:
     suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
     confirm_pane_archive(parsed, f"Archive pane {request.get('paneId')}{suffix}")
 
-    result = invoke_daemon(
+    result = invoke_local_daemon(
+        parsed,
         "runpane:panes:archive",
         [request],
-        pane_dir=parsed.pane_dir,
         timeout_ms=40_000,
     )
 
@@ -662,10 +677,10 @@ def run_panes_pin(parsed: Any, pinned: bool) -> int:
         **optional_value("dryRun", True if parsed.dry_run else None),
     }
     confirm_pane_pin(parsed, request)
-    result = invoke_daemon(
+    result = invoke_local_daemon(
+        parsed,
         "runpane:panes:pin",
         [request],
-        pane_dir=parsed.pane_dir,
     )
 
     if parsed.json:
@@ -690,10 +705,10 @@ def run_panes_rename(parsed: Any) -> int:
         **optional_value("dryRun", True if parsed.dry_run else None),
     }
     confirm_pane_rename(parsed, request)
-    result = invoke_daemon(
+    result = invoke_local_daemon(
+        parsed,
         "runpane:panes:rename",
         [request],
-        pane_dir=parsed.pane_dir,
     )
 
     if parsed.json:
@@ -735,9 +750,9 @@ def run_panels_list(parsed: Any) -> int:
     if not parsed.pane_id:
         raise ValueError("runpane panels list requires --pane.")
 
-    result = invoke_daemon("runpane:panels:list", [{
+    result = invoke_local_daemon(parsed, "runpane:panels:list", [{
         "paneId": parsed.pane_id,
-    }], pane_dir=parsed.pane_dir)
+    }])
 
     if parsed.json:
         print_json(result)
@@ -750,10 +765,10 @@ def run_panels_list(parsed: Any) -> int:
 def run_panels_create(parsed: Any) -> int:
     request = build_panel_create_request(parsed)
     confirm_panel_create(parsed, request)
-    result = invoke_daemon(
+    result = invoke_local_daemon(
+        parsed,
         "runpane:panels:create",
         [request],
-        pane_dir=parsed.pane_dir,
         timeout_ms=(parsed.ready_timeout_ms or 30_000) + 10_000,
     )
 
@@ -799,10 +814,10 @@ def run_panels_output(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels output requires --panel.")
 
-    result = invoke_daemon("runpane:panels:output", [{
+    result = invoke_local_daemon(parsed, "runpane:panels:output", [{
         "panelId": parsed.panel_id,
         "limit": parsed.limit,
-    }], pane_dir=parsed.pane_dir)
+    }])
 
     if parsed.json:
         print_json(result)
@@ -818,7 +833,7 @@ def run_panels_output(parsed: Any) -> int:
 def run_panels_input(parsed: Any) -> int:
     request = build_panel_input_request(parsed)
     confirm_panel_input(parsed, request)
-    result = invoke_daemon("runpane:panels:input", [request], pane_dir=parsed.pane_dir)
+    result = invoke_local_daemon(parsed, "runpane:panels:input", [request])
 
     if parsed.json:
         print_json(result)
@@ -834,10 +849,10 @@ def run_panels_screen(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels screen requires --panel.")
 
-    result = invoke_daemon("runpane:panels:screen", [{
+    result = invoke_local_daemon(parsed, "runpane:panels:screen", [{
         "panelId": parsed.panel_id,
         "limit": parsed.limit,
-    }], pane_dir=parsed.pane_dir)
+    }])
 
     if parsed.json:
         print_json(result)
@@ -920,7 +935,7 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
 def run_panels_submit(parsed: Any) -> int:
     request = build_panel_input_request(parsed, "submit")
     confirm_panel_input(parsed, request, "submit")
-    result = invoke_daemon("runpane:panels:submit", [request], pane_dir=parsed.pane_dir)
+    result = invoke_local_daemon(parsed, "runpane:panels:submit", [request])
 
     if parsed.json:
         print_json(result)
@@ -975,10 +990,10 @@ def run_panels_submit_composer(parsed: Any) -> int:
         raise ValueError("runpane panels submit-composer requires --panel.")
     confirm_panel_submit_composer(parsed)
 
-    result = invoke_daemon("runpane:panels:submit-composer", [{
+    result = invoke_local_daemon(parsed, "runpane:panels:submit-composer", [{
         "panelId": parsed.panel_id,
         "strategy": parsed.composer_strategy,
-    }], pane_dir=parsed.pane_dir)
+    }])
 
     if parsed.json:
         print_json(result)
@@ -998,13 +1013,13 @@ def run_panels_wait(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels wait requires --panel.")
 
-    result = invoke_daemon("runpane:panels:wait", [{
+    result = invoke_local_daemon(parsed, "runpane:panels:wait", [{
         "panelId": parsed.panel_id,
         "condition": parsed.wait_condition,
         "contains": parsed.contains,
         "timeoutMs": parsed.timeout_ms,
         "intervalMs": parsed.interval_ms,
-    }], pane_dir=parsed.pane_dir, timeout_ms=(parsed.timeout_ms or 30_000) + 5_000)
+    }], timeout_ms=(parsed.timeout_ms or 30_000) + 5_000)
 
     if parsed.json:
         print_json(result)
@@ -1018,10 +1033,10 @@ def run_agents_doctor(parsed: Any) -> int:
         agents = "|".join(RUNPANE_CONTRACT["enums"]["agents"])
         raise ValueError(f"runpane agents doctor requires --agent {agents}.")
 
-    result = invoke_daemon("runpane:agents:doctor", [{
+    result = invoke_local_daemon(parsed, "runpane:agents:doctor", [{
         "agent": parsed.agent,
         "repo": parsed.repo,
-    }], pane_dir=parsed.pane_dir)
+    }])
 
     if parsed.json:
         print_json(result)

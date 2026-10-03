@@ -3545,6 +3545,150 @@ print(json.dumps(prepared))
   }
 }
 
+function checkJsonFailureOutput() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-json-failure-'));
+  const python = findPython();
+  const pythonEnv = {
+    ...process.env,
+    PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONPATH: pythonSource
+  };
+  const commands = [
+    [process.execPath, [npmCli, 'panes', 'list', '--json', '--retry', '2', '--pane-dir', paneDir], process.env],
+    [python, ['-m', 'runpane', 'panes', 'list', '--json', '--retry', '2', '--pane-dir', paneDir], pythonEnv],
+    [process.execPath, [npmCli, 'panes', 'list', '--json', '--retry', '-1'], process.env],
+    [python, ['-m', 'runpane', 'panes', 'list', '--json', '--retry', '-1'], pythonEnv]
+  ];
+
+  try {
+    for (const [command, args, env] of commands) {
+      const result = childProcess.spawnSync(command, args, {
+        cwd: rootDir,
+        encoding: 'utf8',
+        env
+      });
+      assert.notStrictEqual(result.status, 0, `${command} unexpectedly succeeded`);
+      assert.ok(result.stdout.trim().length > 0, `${command} returned empty stdout for --json failure`);
+      const failure = JSON.parse(result.stdout);
+      assert.strictEqual(failure.ok, false);
+      assert.ok(failure.error.message);
+      assert.ok(failure.error.code);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
+async function checkNodeTransientDaemonRetry() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-retry-'));
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { boundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const endpoint = daemonClient.getPaneDaemonEndpoint(paneDir);
+  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
+  let requestCount = 0;
+  const server = net.createServer((socket) => {
+    socket.once('data', () => {
+      requestCount += 1;
+      socket.write(`${JSON.stringify({
+        type: 'response',
+        id: 1,
+        ok: true,
+        result: { ok: true }
+      })}\n`);
+    });
+  });
+  const started = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      server.once('error', reject);
+      server.listen(endpoint.path, resolve);
+    }, 20);
+    server.once('close', () => clearTimeout(timer));
+  });
+
+  try {
+    const result = await daemonClient.invokeDaemon(
+      'runpane:test:retry',
+      [],
+      boundary.object({ ok: boundary.literal(true) }),
+      { paneDir, retry: 2 }
+    );
+    await started;
+    assert.deepStrictEqual(result, { ok: true });
+    assert.strictEqual(requestCount, 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
+async function checkNodeDoesNotRetryDeliveredRequest() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-no-replay-'));
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { boundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const endpoint = daemonClient.getPaneDaemonEndpoint(paneDir);
+  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
+  let connectionCount = 0;
+  const server = net.createServer((socket) => {
+    connectionCount += 1;
+    socket.once('data', () => socket.destroy());
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(endpoint.path, resolve);
+  });
+
+  try {
+    await assert.rejects(() => daemonClient.invokeDaemon(
+      'runpane:test:no-replay',
+      [],
+      boundary.object({ ok: boundary.literal(true) }),
+      { paneDir, retry: 2 }
+    ), /closed the connection before responding/);
+    assert.strictEqual(connectionCount, 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
+async function checkNodeRejectsEmptyJsonSuccess() {
+  const cli = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const originalRunPanesList = localControl.runPanesList;
+  const originalWrite = process.stdout.write;
+  let stdout = '';
+  try {
+    localControl.runPanesList = async () => 0;
+    process.stdout.write = (chunk) => {
+      stdout += String(chunk);
+      return true;
+    };
+    const code = await cli.runCli(['panes', 'list', '--json']);
+    assert.strictEqual(code, 1);
+    assert.strictEqual(JSON.parse(stdout).error.code, 'ERR_RUNPANE_EMPTY_JSON_OUTPUT');
+  } finally {
+    localControl.runPanesList = originalRunPanesList;
+    process.stdout.write = originalWrite;
+  }
+}
+
+function checkPythonRejectsEmptyJsonSuccess() {
+  const result = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.cli as cli
+
+cli.dispatch_parsed_command = lambda parsed, telemetry_context: 0
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    code = cli.main(["panes", "list", "--json"])
+print(json.dumps({"code": code, "stdout": stdout.getvalue()}))
+`));
+  assert.strictEqual(result.code, 1);
+  assert.strictEqual(JSON.parse(result.stdout).error.code, 'ERR_RUNPANE_EMPTY_JSON_OUTPUT');
+}
+
 async function checkAgentTemplateParity() {
   const { RUNPANE_CONTRACT } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'generated', 'contract.js'));
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
@@ -4030,6 +4174,11 @@ async function runChecks() {
     env: { ...process.env, PYTHON: findPython() },
     stdio: 'inherit',
   });
+  checkJsonFailureOutput();
+  await checkNodeTransientDaemonRetry();
+  await checkNodeDoesNotRetryDeliveredRequest();
+  await checkNodeRejectsEmptyJsonSuccess();
+  checkPythonRejectsEmptyJsonSuccess();
   console.log('runpane CLI contract checks passed');
 }
 

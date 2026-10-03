@@ -51,6 +51,7 @@ interface InvokeOptions {
   paneDir?: string;
   timeoutMs?: number;
   eventInclude?: string[] | null;
+  retry?: number;
 }
 
 interface TimeoutReference {
@@ -97,6 +98,7 @@ export class PaneDaemonClientError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly retryable = false,
   ) {
     super(message);
     this.name = 'PaneDaemonClientError';
@@ -129,6 +131,25 @@ export async function invokeDaemon<T>(
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
+  const retryCount = options.retry ?? 0;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await invokeDaemonOnce(channel, args, resultSchema, options);
+    } catch (error) {
+      if (attempt >= retryCount || !(error instanceof PaneDaemonClientError) || !error.retryable) {
+        throw error;
+      }
+      await delay(Math.min(50 * (2 ** attempt), 500));
+    }
+  }
+}
+
+async function invokeDaemonOnce<T>(
+  channel: string,
+  args: unknown[],
+  resultSchema: BoundarySchema<T>,
+  options: InvokeOptions,
+): Promise<T> {
   const endpoint = getPaneDaemonEndpoint(resolvePaneDirectory(options.paneDir));
   const request: PaneDaemonRequestFrame = {
     type: 'request',
@@ -144,6 +165,7 @@ export async function invokeDaemon<T>(
     const socket = net.createConnection(endpoint.path);
     const decoder = new PaneDaemonFrameDecoder();
     let settled = false;
+    let connected = false;
     const timeoutRef: TimeoutReference = {};
 
     const settle = (outcome: InvokeOutcome<T>) => {
@@ -170,8 +192,19 @@ export async function invokeDaemon<T>(
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     socket.once('connect', () => {
-      socket.write(encodePaneDaemonFrame(eventFilterRequest));
-      socket.write(encodePaneDaemonFrame(request));
+      connected = true;
+      try {
+        socket.write(encodePaneDaemonFrame(eventFilterRequest));
+        socket.write(encodePaneDaemonFrame(request));
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        settle({
+          error: new PaneDaemonClientError(
+            `Could not send a request to Pane daemon at ${endpoint.path}: ${failure.message}`,
+            'ERR_RUNPANE_DAEMON_WRITE_FAILED',
+          ),
+        });
+      }
     });
 
     socket.on('data', (chunk) => {
@@ -195,7 +228,13 @@ export async function invokeDaemon<T>(
 
     socket.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code ?? 'ERR_RUNPANE_DAEMON_CONNECT_FAILED';
-      settle({ error: new PaneDaemonClientError(`Could not connect to Pane daemon at ${endpoint.path}: ${error.message}`, code) });
+      settle({
+        error: new PaneDaemonClientError(
+          `Could not connect to Pane daemon at ${endpoint.path}: ${error.message}`,
+          code,
+          !connected && isRetryableConnectCode(code),
+        ),
+      });
     });
 
     socket.once('close', () => {
@@ -204,6 +243,24 @@ export async function invokeDaemon<T>(
       }
     });
   });
+}
+
+function isRetryableConnectCode(code: string): boolean {
+  return [
+    'EAGAIN',
+    'EBUSY',
+    'ECONNREFUSED',
+    'EMFILE',
+    'ENFILE',
+    'ENOENT',
+    'ENOBUFS',
+    'ENOMEM',
+    'ERROR_PIPE_BUSY',
+  ].includes(code);
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 function resolveAppDirectory(appDirectory: string, platform: NodeJS.Platform): string {

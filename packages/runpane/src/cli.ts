@@ -72,6 +72,11 @@ import { printVersion } from './version';
 
 const SOURCE = 'npm' as const;
 
+interface CliFailure {
+  message: string;
+  code: string;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
@@ -101,6 +106,52 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   return runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
+}
+
+export async function runCli(argv: string[]): Promise<number> {
+  const json = argv.includes('--json');
+  const stdoutBytesBefore = output.bytesWritten;
+  try {
+    const code = await main(argv);
+    if (json && output.bytesWritten === stdoutBytesBefore) {
+      printCliFailure({
+        message: code === 0
+          ? 'runpane completed without producing the requested JSON output.'
+          : `runpane failed with exit code ${code} without producing JSON output.`,
+        code: 'ERR_RUNPANE_EMPTY_JSON_OUTPUT',
+      }, true);
+      return code === 0 ? 1 : code;
+    }
+    return code;
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    let code = 'ERR_RUNPANE_CLI';
+    if ('code' in failure) {
+      try {
+        code = decodeBoundary(failure.code, boundary.string);
+      } catch {
+        // Unsupported error codes use the stable CLI fallback code.
+      }
+    }
+    printCliFailure({ message: failure.message, code }, json);
+    return 1;
+  }
+}
+
+function printCliFailure(error: CliFailure, json: boolean): void {
+  const message = error.message;
+  if (!json) {
+    console.error(message);
+    return;
+  }
+
+  output.write(`${JSON.stringify({
+    ok: false,
+    error: {
+      message,
+      code: error.code,
+    },
+  }, null, 2)}\n`);
 }
 
 type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext) => number | Promise<number>;
@@ -467,7 +518,8 @@ function createParsedArgs(command: ParsedArgs['command'], overrides: Partial<Par
     verbose: false,
     json: false,
     remoteSetupArgs: [],
-    ...overrides
+    ...overrides,
+    retry: overrides.retry ?? 0,
   };
 }
 
@@ -628,10 +680,10 @@ function printDryRun(
 }
 
 if (require.main === module) {
-  main(process.argv.slice(2)).then((code) => {
+  runCli(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(`runpane failed to report its command result: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   });
 }

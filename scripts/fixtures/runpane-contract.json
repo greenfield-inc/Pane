@@ -147,6 +147,8 @@
       "list",
       "--repo",
       "active",
+      "--retry",
+      "2",
       "--json"
     ],
     [

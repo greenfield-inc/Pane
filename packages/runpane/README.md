@@ -121,6 +121,12 @@ runpane --help
 --verbose
 ```
 
+Local-control commands also accept `--json`, `--pane-dir <path>`, and
+`--retry <count>`. JSON failures are written to stdout as a structured
+`{"ok":false,"error":{"message":"...","code":"..."}}` object and exit
+nonzero. Retries apply only to transient failures before the daemon connection
+succeeds, which avoids replaying a delivered mutation.
+
 Daemon setup also forwards Pane remote-host options:
 
 ```bash

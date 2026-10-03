@@ -231,7 +231,7 @@ def build_doctor_report(parsed, source: str) -> Dict[str, Any]:
             if platform_result["ok"]
             else None
         )
-        daemon_future = executor.submit(collect_daemon_health, parsed.pane_dir, endpoint)
+        daemon_future = executor.submit(collect_daemon_health, parsed.pane_dir, endpoint, parsed.retry)
         release = (
             release_future.result()
             if release_future
@@ -276,7 +276,7 @@ def collect_remote_daemon_service_check(parsed, desktop_pane_dir: str, desktop_d
     pane_dir = requested_dir or (default_remote_dir if has_managed_remote_launcher(default_remote_dir) else desktop_pane_dir)
     endpoint = get_pane_daemon_endpoint(pane_dir)
     managed = has_managed_remote_launcher(pane_dir)
-    daemon = desktop_daemon if pane_dir == desktop_pane_dir else collect_daemon_health(pane_dir, endpoint)
+    daemon = desktop_daemon if pane_dir == desktop_pane_dir else collect_daemon_health(pane_dir, endpoint, parsed.retry)
     self_reported = ((daemon.get("result") or {}).get("daemon") or {}).get("executableHealth")
     result = {
         "paneDir": pane_dir,
@@ -641,12 +641,18 @@ def collect_installed_pane(pane_path: Optional[str]) -> Dict[str, Any]:
     }
 
 
-def collect_daemon_health(pane_dir: Optional[str], endpoint: Dict[str, str]) -> Dict[str, Any]:
+def collect_daemon_health(pane_dir: Optional[str], endpoint: Dict[str, str], retry: int = 0) -> Dict[str, Any]:
     try:
         return {
             "reachable": True,
             "endpoint": endpoint,
-            "result": invoke_daemon("runpane:doctor", [], pane_dir=pane_dir, timeout_ms=DOCTOR_DAEMON_TIMEOUT_MS),
+            "result": invoke_daemon(
+                "runpane:doctor",
+                [],
+                pane_dir=pane_dir,
+                timeout_ms=DOCTOR_DAEMON_TIMEOUT_MS,
+                retry=retry,
+            ),
         }
     except Exception as error:
         return {

@@ -440,7 +440,7 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
     ? collectReleaseCheck(parsed, source, platform.platform)
     : Promise.resolve({ ok: false, error: platform.error });
   const installedPane = collectInstalledPane(parsed.panePath);
-  const daemonPromise = collectDaemonHealth(parsed.paneDir, endpoint);
+  const daemonPromise = collectDaemonHealth(parsed.paneDir, endpoint, parsed.retry);
   const [release, daemon] = await Promise.all([releasePromise, daemonPromise]);
   const remoteDaemonService = await collectRemoteDaemonServiceCheck(parsed, paneDir, daemon);
   const remoteSetup = collectRemoteSetupCheck(
@@ -486,7 +486,7 @@ async function collectRemoteDaemonServiceCheck(
   const managed = hasManagedRemoteLauncher(paneDir);
   const daemon = paneDir === desktopPaneDir
     ? desktopDaemon
-    : await collectDaemonHealth(paneDir, endpoint);
+    : await collectDaemonHealth(paneDir, endpoint, parsed.retry);
   const selfReportedHealth = daemon.result?.daemon.executableHealth;
   return {
     paneDir,
@@ -891,7 +891,11 @@ function collectInstalledPane(panePath?: string): DoctorInstalledPaneCheck {
   };
 }
 
-async function collectDaemonHealth(paneDir: string | undefined, endpoint: PaneDaemonEndpoint): Promise<DoctorDaemonCheck> {
+async function collectDaemonHealth(
+  paneDir: string | undefined,
+  endpoint: PaneDaemonEndpoint,
+  retry = 0,
+): Promise<DoctorDaemonCheck> {
   try {
     return {
       reachable: true,
@@ -899,6 +903,7 @@ async function collectDaemonHealth(paneDir: string | undefined, endpoint: PaneDa
       result: await invokeDaemon('runpane:doctor', [], daemonDoctorResultSchema, {
         paneDir,
         timeoutMs: DOCTOR_DAEMON_TIMEOUT_MS,
+        retry,
       }),
     };
   } catch (error) {
