@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
 
 const execFileAsync = promisify(execFile);
 
@@ -106,6 +107,14 @@ export function windowsPathToWSLMount(windowsPath: string): string {
   const match = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
   if (!match) return windowsPath;
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, '/')}`;
+}
+
+/** Reverse the default drive-mount mapping used by windowsPathToWSLMount.
+ * Access DrvFs files directly: WSL's UNC server can deny re-exporting drives.
+ */
+export function wslMountToWindowsPath(linuxPath: string): string {
+  const match = /^\/mnt\/([a-z])(?:\/(.*))?$/.exec(path.posix.normalize(linuxPath));
+  return match ? `${match[1].toUpperCase()}:\\${(match[2] ?? '').replace(/\//g, '\\')}` : linuxPath;
 }
 
 /**

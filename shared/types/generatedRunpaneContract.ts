@@ -2388,7 +2388,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --pane <pane-id>              Pane to open the tab in; defaults to PANE_SESSION_ID.",
         "  --url <url>                   http(s) or file URL to open in a browser tab.",
-        "  --file <path>                 File inside the Pane worktree (relative or absolute).",
+        "  --file <path>                 File inside the Pane worktree (relative, Linux, Windows, or WSL UNC path).",
         "  --title <title>               Tab title override.",
         "  --split                       Open in split view beside the agent (default).",
         "  --tab                         Open in the current tab group instead.",
@@ -3481,7 +3481,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --pane <pane-id>              Pane to open the tab in; defaults to PANE_SESSION_ID.",
         "  --url <url>                   http(s) or file URL to open in a browser tab.",
-        "  --file <path>                 File inside the Pane worktree (relative or absolute).",
+        "  --file <path>                 File inside the Pane worktree (relative, Linux, Windows, or WSL UNC path).",
         "  --title <title>               Tab title override.",
         "  --split                       Open in split view beside the agent (default).",
         "  --tab                         Open in the current tab group instead.",
@@ -11298,13 +11298,13 @@ export const RUNPANE_CONTRACT = {
             "name": "--url",
             "value": "<url>",
             "required": false,
-            "description": "http(s) or file URL to open in a browser tab. Pass exactly one of --url or --file."
+            "description": "http(s) or file URL to open in a browser tab. WSL file URLs use the same automatic path conversion as --file. Pass exactly one of --url or --file."
           },
           {
             "name": "--file",
             "value": "<path>",
             "required": false,
-            "description": "File inside the Pane worktree, relative or absolute. .html/.htm renders in a browser tab; other files open in an editor tab."
+            "description": "File inside the Pane worktree, relative or absolute. WSL panes accept Linux, Windows drive, and WSL UNC paths without manual conversion. .html/.htm renders in a browser tab; other files open in an editor tab."
           },
           {
             "name": "--title",

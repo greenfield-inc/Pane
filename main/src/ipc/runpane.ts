@@ -1,7 +1,9 @@
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { browserFileContext } from '../services/browserFileContext';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -47,7 +49,6 @@ import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
 import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
-import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import {
@@ -1059,7 +1060,7 @@ export function registerRunpaneHandlers(
         throw new Error(`Pane ${pane.id} is archived; panels cannot be opened in it`);
       }
       const target = normalized.url !== undefined
-        ? resolvePanelOpenUrl(normalized.url)
+        ? await resolvePanelOpenUrl(normalized.url, services, pane)
         : await resolvePanelOpenFile(services, pane, normalized.filePath ?? '');
       const placement = normalized.placement ?? 'split';
       // Activates the tab inside its Pane; never raises or focuses the window.
@@ -3671,7 +3672,7 @@ type PanelOpenTarget =
 const PANEL_OPEN_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:']);
 const HTML_FILE_PATTERN = /\.html?$/iu;
 
-function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
+async function resolvePanelOpenUrl(rawUrl: string, services: AppServices, pane: Session): Promise<PanelOpenTarget> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -3680,6 +3681,19 @@ function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
   }
   if (!PANEL_OPEN_URL_PROTOCOLS.has(parsed.protocol)) {
     throw new Error(`Unsupported URL scheme ${parsed.protocol} (use http, https, or file)`);
+  }
+  if (parsed.protocol === 'file:' && process.platform === 'win32'
+    && (services.sessionManager.getProjectContext(pane.id) || (pane.isHidden && isOrchestrationInternalSessionId(pane.id)))) {
+    const { pathResolver, toFileSystem } = await browserFileContext(services, pane);
+    if (pathResolver.environment === 'wsl') {
+      const filePath = !parsed.hostname && !/^\/[a-z]:/i.test(parsed.pathname)
+        ? fileURLToPath(parsed, { windows: false })
+        : fileURLToPath(parsed);
+      const normalized = pathToFileURL(toFileSystem(filePath));
+      normalized.search = parsed.search;
+      normalized.hash = parsed.hash;
+      parsed = normalized;
+    }
   }
   const title = parsed.protocol === 'file:'
     ? path.basename(decodeURIComponent(parsed.pathname)) || 'Browser'
@@ -3693,19 +3707,11 @@ function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
  * project context, mirroring file.ts getFileContext.
  */
 async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPath: string): Promise<PanelOpenTarget> {
-  const context = services.sessionManager.getProjectContext(pane.id);
-  let pathResolver: PathResolver;
-  if (context) {
-    pathResolver = context.pathResolver;
-  } else if (pane.isHidden && isOrchestrationInternalSessionId(pane.id)) {
-    pathResolver = new PathResolver({ path: pane.worktreePath });
-  } else {
-    throw new Error(`No Pane repo found for pane ${pane.id}`);
-  }
+  const { pathResolver, toFileSystem } = await browserFileContext(services, pane);
 
-  const basePath = pathResolver.toFileSystem(pane.worktreePath);
+  const basePath = toFileSystem(pane.worktreePath);
   const requested = path.isAbsolute(rawPath)
-    ? path.relative(basePath, pathResolver.toFileSystem(rawPath))
+    ? path.relative(basePath, toFileSystem(rawPath))
     : rawPath;
   const relativePath = path.normalize(requested);
   if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {

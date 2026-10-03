@@ -6495,6 +6495,85 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ paneId: orchestrator.id, type: 'browser', filePath: 'plan.html' });
     });
 
+    it.skipIf(process.platform !== 'win32')('opens a WSL Session file using its Linux mount path', async () => {
+      const orchestrator: Session = { ...session, id: '__orchestration_session_wsl', isHidden: true, worktreePath: worktree };
+      const services = openServices(orchestrator, false);
+      // SAFETY: File resolution only reads the owning Session's runtime metadata.
+      services.orchestrationSessionManager = {
+        sessionIdForPane: async () => 'wsl-session',
+        get: async () => ({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' }),
+      } as never;
+      const registry = createRegistry(services);
+      const linuxPath = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}/plan.html`;
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, filePath: linuxPath }]);
+      expect(result).toMatchObject({ type: 'browser', filePath: 'plan.html' });
+    });
+
+    it.skipIf(process.platform !== 'win32')('normalizes a WSL Session file URL to the same target as --file', async () => {
+      const orchestrator: Session = { ...session, id: '__orchestration_session_wsl', isHidden: true, worktreePath: worktree };
+      const services = openServices(orchestrator, false);
+      // SAFETY: File resolution only reads the owning Session's runtime metadata.
+      services.orchestrationSessionManager = {
+        sessionIdForPane: async () => 'wsl-session',
+        get: async () => ({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' }),
+      } as never;
+      const registry = createRegistry(services);
+      const linuxPath = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}/plan.html`;
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, url: `file://${linuxPath}?mode=preview#heading` }]);
+      expect(result).toMatchObject({ url: `${pathToFileURL(path.join(worktree, 'plan.html')).href}?mode=preview#heading` });
+    });
+
+    it.skipIf(process.platform !== 'win32').each([
+      ['file:///home/me/Preview%20%23%25.html?view=1#section', 'file://wsl.localhost/Ubuntu/home/me/Preview%20%23%25.html?view=1#section'],
+      ['file://wsl$/Ubuntu/home/me/index.html', 'file://wsl.localhost/Ubuntu/home/me/index.html'],
+      ['file:///C:/repo/index.html', 'file:///C:/repo/index.html'],
+      ['file://wsl.localhost/Other/home/me/index.html', 'file://wsl.localhost/Other/home/me/index.html'],
+    ])('opens WSL project URL %s', async (url, expected) => {
+      const services = openServices({ ...session, worktreePath: '/home/me' });
+      // SAFETY: Browser resolution reads only pathResolver.
+      vi.mocked(services.sessionManager.getProjectContext).mockReturnValue({
+        pathResolver: new PathResolver({ path: '/home/me', wsl_enabled: true, wsl_distribution: 'Ubuntu' }),
+      } as never);
+      const registry = createRegistry(services);
+      expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, url }])).toMatchObject({ url: expected });
+    });
+
+    it('preserves native file URLs without project context', async () => {
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }, false));
+      const url = pathToFileURL(path.join(worktree, 'plan.html')).href;
+      expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, url }])).toMatchObject({ url });
+    });
+
+    it.skipIf(process.platform !== 'win32' || !process.env.PANE_TEST_WSL_DISTRO)('opens real WSL files and preserves containment', async () => {
+      const distro = process.env.PANE_TEST_WSL_DISTRO!;
+      const linuxRoot = `/tmp/pane-browser-${Date.now()}`;
+      const resolver = new PathResolver({ path: linuxRoot, wsl_enabled: true, wsl_distribution: distro });
+      const hostRoot = resolver.toFileSystem(linuxRoot);
+      fs.mkdirSync(hostRoot);
+      try {
+        fs.writeFileSync(path.join(hostRoot, 'plan #%.html'), '<h1>WSL plan</h1>');
+        const services = openServices({ ...session, worktreePath: linuxRoot });
+        // SAFETY: Browser resolution reads only pathResolver.
+        vi.mocked(services.sessionManager.getProjectContext).mockReturnValue({ pathResolver: resolver } as never);
+        const registry = createRegistry(services);
+        const url = pathToFileURL(path.join(hostRoot, 'plan #%.html')).href;
+        for (const filePath of ['plan #%.html', `${linuxRoot}/plan #%.html`, path.join(hostRoot, 'plan #%.html'), path.join(hostRoot, 'plan #%.html').replace('wsl.localhost', 'wsl$')]) {
+          expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath }])).toMatchObject({ url, filePath: 'plan #%.html' });
+        }
+        await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: '/etc/passwd' }])).rejects.toThrow('inside the Pane worktree');
+        const mounted = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}`;
+        const mountedServices = openServices({ ...session, worktreePath: mounted });
+        // SAFETY: Browser resolution reads only pathResolver.
+        vi.mocked(mountedServices.sessionManager.getProjectContext).mockReturnValue({ pathResolver: resolver } as never);
+        const mountedRegistry = createRegistry(mountedServices);
+        const fromWindows = await mountedRegistry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: path.join(worktree, 'plan.html') }]);
+        const fromLinux = await mountedRegistry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: `${mounted}/plan.html` }]);
+        expect(fromWindows).toEqual(fromLinux);
+      } finally {
+        fs.rmSync(hostRoot, { recursive: true, force: true });
+      }
+    });
+
     it('rejects paths outside the worktree, missing files, and unsupported URL schemes', async () => {
       const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
 

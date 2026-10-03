@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { getWSLShellSpawn, validateWSLAvailable } from './wslUtils';
+import { getWSLShellSpawn, validateWSLAvailable, wslMountToWindowsPath } from './wslUtils';
+
+describe('wslMountToWindowsPath', () => {
+  it.each([
+    ['/mnt/c/Users/me/preview.html', 'C:\\Users\\me\\preview.html'],
+    ['/mnt/d', 'D:\\'],
+    ['/mnt/c/repo/../preview.html', 'C:\\preview.html'],
+    ['/mnt/c/../d/preview.html', 'D:\\preview.html'],
+    ['/mnt/c/../../home/me/preview.html', '/mnt/c/../../home/me/preview.html'],
+    ['/home/me/preview.html', '/home/me/preview.html'],
+  ])('resolves %s according to Linux path semantics', (input, expected) => {
+    expect(wslMountToWindowsPath(input)).toBe(expected);
+  });
+});
 
 describe('getWSLShellSpawn', () => {
   it.each([
