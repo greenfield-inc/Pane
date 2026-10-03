@@ -35,8 +35,11 @@ if (mode === 'fail') { process.stderr.write('error connecting to github.com\\n')
 if (mode === 'expired') { process.stderr.write(${JSON.stringify(NON_TTY_OUTPUT)}); setTimeout(() => { process.stderr.write('error: the device code has expired\\n'); process.exit(1); }, 20); return; }
 if (mode === 'tty') {
   process.stderr.write(${JSON.stringify(TTY_OUTPUT)});
-  process.stdin.on('data', chunk => {
-    if (!chunk.toString().includes('\\n')) return;
+  // Like gh at "Press Enter", carry on only after a newline; stdin closing without one is an error.
+  let input = '';
+  process.stdin.on('data', chunk => { input += chunk.toString(); });
+  process.stdin.on('end', () => {
+    if (!input.includes('\\n')) { process.stderr.write('error: no Enter received\\n'); process.exit(3); }
     process.stderr.write('\\n✓ Authentication complete.\\n✓ Logged in as octocat\\n');
     process.exit(0);
   });
