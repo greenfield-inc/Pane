@@ -3,12 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PtyHostSupervisor } from './ptyHostSupervisor';
 import { MessageChannelMain, type FakeMessagePortMain } from '../test/setup';
 
-/**
- * `attachWindow` is the only thing that gives a renderer its ptyHost data port.
- * If it never runs — or early-returns on a reload whose preload has already
- * dropped its port reference — `electronAPI.ptyHost.onData` has no source and
- * every ptyHost-spawned terminal renders one frame and then goes silent.
- */
+/** Verifies renderer control/exit port registration and replacement across reloads. */
 function createPortTargetStub(id: number) {
   return {
     id,
@@ -67,7 +62,7 @@ describe('PtyHostSupervisor.attachWindow', () => {
     expect(secondPort.closed).toBe(false);
   });
 
-  it('routes data frames to the newest main-side port only', () => {
+  it('routes exit frames to the newest main-side port only', () => {
     const supervisor = new PtyHostSupervisor();
     const target = createPortTargetStub(3);
 
@@ -75,10 +70,10 @@ describe('PtyHostSupervisor.attachWindow', () => {
     supervisor.attachWindow(target);
     const [first, second] = MessageChannelMain.instances;
 
-    supervisor.postDataToRenderers('pty-3', 'out');
+    supervisor['broadcastToRenderers']({ type: 'exit', ptyId: 'pty-3', exitCode: 0, signal: 0 });
 
     expect(first.port1.posted).toHaveLength(0);
-    expect(second.port1.posted).toEqual([{ type: 'data', ptyId: 'pty-3', data: 'out' }]);
+    expect(second.port1.posted).toEqual([{ type: 'exit', ptyId: 'pty-3', exitCode: 0, signal: 0 }]);
   });
 
   it('registers the destroy cleanup once across repeated loads', () => {
