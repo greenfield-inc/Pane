@@ -206,7 +206,7 @@ describe('buildSidebar', () => {
     expect(failed.some(item => item.key === 'archived-loading' || item.key === 'archived-empty')).toBe(false);
     const cached = buildSidebar(input({ expanded, archivedError: 'Archive request failed', archivedProjects }));
     expect(cached.some(item => item.key === 'archived-error')).toBe(true);
-    expect(shape(cached)).toContain('restore old-spike � pane');
+    expect(cached.find(item => item.type === 'archived' && item.label === 'old-spike')).toMatchObject({ kind: 'pane', detail: 'pane' });
     expect(buildSidebar(input({ expanded: DEFAULT_EXPANSION, archivedError: 'Archive request failed' })).some(item => item.key === 'archived-error')).toBe(false);
   });
 
