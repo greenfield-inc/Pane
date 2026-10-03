@@ -3379,12 +3379,9 @@ function compareAgentContextParity() {
   assert.ok(nodeBrief.rules.some((rule) => rule.includes("user's visible cockpit")));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('do not register a pre-created worktree')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('normal subagent/worktree mechanism')));
-  assert.ok(nodeBrief.rules.some((rule) => rule.includes('treat three references as peer context')));
-  assert.ok(nodeBrief.rules.some((rule) => rule.includes("Pane's local skill cache under `<PANE_DIR>/skills/`")));
-  assert.ok(nodeBrief.rules.some((rule) => rule.includes('<PANE_DIR>/skills/pane-chat/runpane-orchestrator.md')));
-  assert.ok(nodeBrief.rules.some((rule) => rule.includes('https://github.com/greenfield-inc/Pane/pull/291')));
+  assert.ok(nodeBrief.rules.some((rule) => rule.includes('<PANE_DIR>/skills/pane-chat/skills/')));
+  assert.ok(nodeBrief.rules.some((rule) => rule.includes('<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('inspect upstream skill files with `gh` against https://github.com/greenfield-inc/skills')));
-  assert.ok(nodeBrief.rules.some((rule) => rule.includes('<PANE_DIR>/skills/docs/readme-workflow-map.png')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('do not clone or install it unless the user asks')));
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('creates Panes or panels')));
   assert.ok(nodeBrief.tools.some((tool) => tool.name === 'doctor'));
