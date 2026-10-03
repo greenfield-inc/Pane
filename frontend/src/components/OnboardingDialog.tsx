@@ -481,7 +481,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   const createProject = async (name: string, path: string): Promise<{ projectId: number } | { error: string }> => {
     try {
-      const response = await API.projects.create({ name, path, active: false });
+      const response = await API.projects.create({ name, path });
       if (response.success && response.data) return { projectId: response.data.id };
       return { error: `Couldn't open ${name}: ${reasonText(response.error, 'Pane could not add the project')}.` };
     } catch (cause) {

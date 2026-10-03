@@ -178,7 +178,7 @@ test('lists found repos newest first with only the newest checked', async ({ pag
 
   await expect(dialog).toBeHidden();
   await expect(page.getByText('billing-api').first()).toBeVisible();
-  expect(await createdProjects(page)).toEqual([{ name: 'billing-api', path: '/home/dev/code/billing-api', active: false }]);
+  expect(await createdProjects(page)).toEqual([{ name: 'billing-api', path: '/home/dev/code/billing-api' }]);
   expect(await landedInOnboarding(page)).toBe(true);
   expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_handoff: 'project' });
 });
@@ -192,8 +192,8 @@ test('opens every checked repo and lands in the Onboarding Session', async ({ pa
 
   await expect(dialog).toBeHidden();
   expect(await createdProjects(page)).toEqual([
-    { name: 'acme-web', path: '/home/dev/code/acme-web', active: false },
-    { name: 'mobile-app', path: '/home/dev/dev/mobile-app', active: false },
+    { name: 'acme-web', path: '/home/dev/code/acme-web' },
+    { name: 'mobile-app', path: '/home/dev/dev/mobile-app' },
   ]);
   expect(await landedInOnboarding(page)).toBe(true);
 });
@@ -208,7 +208,7 @@ test('a repo that fails to open keeps the dialog on it and still counts the ones
   await expect(dialog.getByRole('alert')).toHaveText("Opened acme-web. Couldn't open billing-api: Path is already a project.");
   await expect(boxes.nth(0)).not.toBeChecked();
   await expect(boxes.nth(1)).toBeChecked();
-  expect(await createdProjects(page)).toEqual([{ name: 'acme-web', path: '/home/dev/code/acme-web', active: false }]);
+  expect(await createdProjects(page)).toEqual([{ name: 'acme-web', path: '/home/dev/code/acme-web' }]);
 });
 
 test('arrow keys move between rows and Space checks one', async ({ page }) => {
@@ -394,8 +394,8 @@ test('Windows with WSL shows both columns, checks the newest repo across them an
 
   await expect(dialog).toBeHidden();
   expect(await createdProjects(page)).toEqual([
-    { name: 'acme-web', path: 'C:\\code\\acme-web', active: false },
-    { name: 'billing-api', path: '\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\code\\billing-api', active: false },
+    { name: 'acme-web', path: 'C:\\code\\acme-web' },
+    { name: 'billing-api', path: '\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\code\\billing-api' },
   ]);
   expect(await landedInOnboarding(page)).toBe(true);
 });

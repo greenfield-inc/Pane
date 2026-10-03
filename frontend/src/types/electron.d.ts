@@ -3,7 +3,7 @@ import type { PreferencesApi } from '../../../shared/types/preferences';
 import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
-import type { Project } from './project';
+import type { CreateProjectRequest, Project } from './project';
 import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
@@ -378,7 +378,7 @@ interface ElectronAPI {
   projects: {
     getAll: () => Promise<IPCResponse>;
     getActive: () => Promise<IPCResponse>;
-    create: (projectData: Omit<Project, 'id' | 'created_at' | 'updated_at'>) => Promise<IPCResponse>;
+    create: (projectData: CreateProjectRequest) => Promise<IPCResponse>;
     activate: (projectId: string) => Promise<IPCResponse>;
     update: (projectId: string, updates: Partial<Project>) => Promise<IPCResponse>;
     delete: (projectId: string) => Promise<IPCResponse>;
