@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { DatabaseService } from './database';
 
 /**
  * `DatabaseService.initializeSchema` splits this file on `;` and prepares each
@@ -38,5 +40,37 @@ describe('schema.sql', () => {
   it('every statement is idempotent, since the file runs on every startup', () => {
     const creates = sql.match(/CREATE\s+(TABLE|INDEX)(?!\s+IF\s+NOT\s+EXISTS)/gi) ?? [];
     expect(creates).toEqual([]);
+  });
+});
+
+describe('fresh database initialization', () => {
+  it('can save a session failure message on the first launch', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-fresh-schema-'));
+    const database = new DatabaseService(path.join(directory, 'sessions.db'));
+    try {
+      database.initialize();
+      const project = database.createProject('Test', path.join(directory, 'repo'));
+      database.createSession({
+        id: 'first-pane',
+        name: 'First pane',
+        initial_prompt: '',
+        worktree_name: 'first-pane',
+        worktree_path: path.join(directory, 'worktree'),
+        project_id: project.id,
+      });
+      database.updateSession('first-pane', {
+        status: 'error',
+        status_message: 'Agent executable was not found',
+        run_started_at: '2026-09-25 00:00:00',
+      });
+      expect(database.getSession('first-pane')).toMatchObject({
+        status: 'error',
+        status_message: 'Agent executable was not found',
+        run_started_at: '2026-09-25 00:00:00',
+      });
+    } finally {
+      database.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
