@@ -99,37 +99,8 @@ xcrun simctl openurl <simulator-udid> 'pane://pane/<session id>?host=http%3A%2F%
 CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base64-encoded. `.github/workflows/native-android.yml` decodes it into `native/google-services.json`, then builds the Android dev client. The step fails if the secret is missing or not for this package; fork PRs, which get no secrets, build without FCM. To rotate it:
 
 ```bash
-base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R dcouple/Pane
+base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R greenfield-inc/Pane
 ```
-
-## Notifications and links
-
-**Push.** The host sends APNs and FCM alerts itself when an agent is blocked or finishes a turn (`main/src/daemon/mobilePushSender.ts`, operator setup in `docs/NATIVE_MOBILE.md`). The app registers the raw device token from `getDevicePushTokenAsync`, not an Expo push token, through `mobile:push-status` and `mobile:push-register`. It registers on every connect, so a rotated token replaces the old one. It asks for notification permission only when the host reports that delivery is set up. Settings > Notifications shows the "Needs Input" and "Finished" switches (`mobile:push-controls`), and Sign Out revokes the registration before it deletes the token.
-
-Tapping a notification opens `/open?host=…&paneId=…&panelId=…`. That screen switches to the matching saved host if it isn't the active one, then replaces itself with the pane. It never connects to a host this phone hasn't paired with. On iOS the host's routing keys sit beside `aps`, so expo-notifications exposes them only as `trigger.payload`, not `content.data`. `parsePushTarget` reads both.
-
-**Links** (rewritten in `src/app/+native-intent.tsx`):
-
-| Link | Opens |
-| --- | --- |
-| `pane-remote://<code>` | The pairing screen with the code filled in (`features/pairing/deepLink.ts`). It connects only after you tap Connect. |
-| `pane://pane/<paneId>?host=<base URL or profile id>&panel=<panelId>` | That pane, switching hosts first. Without `host` it opens the pane on the active host. |
-
-**Try it on the Simulator.** A host reports push as ready only when `PANE_APNS_*` is set. For registration and the permission prompt, a throwaway P-256 key is enough (`openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out FakeAuthKey.p8`). Real delivery then fails at Apple, which is expected. To test taps, send an alert straight to the Simulator:
-
-```bash
-cat > /tmp/pane-push.apns <<'JSON'
-{ "Simulator Target Bundle": "com.dcouple.pane.mobile",
-  "aps": { "alert": { "title": "Pane needs attention", "body": "Open Pane to continue." }, "sound": "default" },
-  "eventId": "pane:demo:1", "hostProfileId": "<profile id or base URL>", "paneId": "<session id>", "panelId": "<panel id>" }
-JSON
-xcrun simctl push <simulator-udid> com.dcouple.pane.mobile /tmp/pane-push.apns
-xcrun simctl openurl <simulator-udid> 'pane://pane/<session id>?host=http%3A%2F%2F127.0.0.1%3A42157'
-```
-
-**Needs a real device:** APNs delivery end to end (a signed build with the Push Notifications capability and a real `.p8` key on the host), and FCM on Android. FCM also needs a Firebase app for `com.dcouple.pane.mobile` and its `google-services.json` set as `android.googleServicesFile`. Without that file, Android registration reports an error in Settings, and the rest of the app works.
-
-`panes.yaml` creates a pane, searches, favorites, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
 
 ## How the code is organised
 
