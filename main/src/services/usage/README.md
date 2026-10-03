@@ -5,6 +5,22 @@ and `~/.codex/sessions`. This includes Claude subagent transcripts and Codex
 `year/month/day` directories. Roots are rediscovered on every pass, including
 when their parent directories did not exist at startup.
 
+Cursor usage is not in those transcripts. On the same scan, Pane reads the
+access token Cursor already stored and calls Cursor's dashboard for the current
+plan meters and filtered usage events. Only events whose conversation id matches a Cursor chat Pane knows about
+are indexed. That is a chat id captured at launch, or a Cursor CLI chat
+stored for a Pane worktree (`~/.cursor/chats/<md5 of the worktree>`),
+including archived Panes. The `agent` command is that CLI. Other account usage is discarded
+before insert. The Auto and API limit bars are the account plan, not a per-Pane
+quota. The first sync covers the 180-day retention window. A later sync replaces
+the trailing 48 hours, because a request's token counts can still grow.
+If the watermark exists but no Cursor rows were stored, or a Pane chat id
+has no stored rows yet, the next pass uses the full window again.
+Dashboard pages are followed until a short page comes back. Rows with no
+tokens are skipped, and that skip does not end the scan. A failed
+fetch leaves the previous Cursor rows in place. Cost uses the same price table
+as Claude and Codex, including Cursor's published Composer and Grok rates.
+
 Indexing runs at startup, every four hours, and on manual Refresh from the usage dashboard or Settings → Usage. There are
 no native usage watchers or per-transcript watch handles. Unchanged files are
 checked by metadata and skipped; changed files resume from their stored cursor.

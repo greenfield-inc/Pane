@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3-multiple-ciphers';
-import type { UsageEvent, UsageProvider, UsageRateLimitSample } from '../../../../shared/types/usage';
+import { usageProviderFrom, type UsageEvent, type UsageProvider, type UsageRateLimitSample } from '../../../../shared/types/usage';
 import { usageEventId, type CodexContextSnapshot } from './usageParser';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
@@ -66,7 +66,7 @@ export class UsageRepository {
 
     return {
       path: row.path,
-      provider: row.provider === 'codex' ? 'codex' : 'claude',
+      provider: usageProviderFrom(row.provider),
       sizeBytes: row.size_bytes,
       mtimeMs: row.mtime_ms,
       offsetBytes: row.offset_bytes,
@@ -245,7 +245,7 @@ export class UsageRepository {
       if (expired) continue;
 
       const sample: UsageRateLimitSample = {
-        provider: row.provider === 'codex' ? 'codex' : 'claude',
+        provider: usageProviderFrom(row.provider),
         limitId: row.limit_id,
         scope: row.scope === 'secondary' ? 'secondary' : 'primary',
         usedPercent: row.used_percent,
@@ -291,6 +291,94 @@ export class UsageRepository {
 
     return [...newestPerWindow.values()]
       .sort((a, b) => a.provider.localeCompare(b.provider) || a.scope.localeCompare(b.scope));
+  }
+
+  /**
+   * Swap one provider's events inside a time window for a freshly fetched set.
+   *
+   * The delete runs only after the caller has the full replacement in hand, and
+   * it shares a transaction with the insert, so a failed fetch cannot erase the
+   * previous window.
+   */
+  replaceProviderWindow(options: {
+    sourcePath: string;
+    provider: UsageProvider;
+    fromMs: number;
+    toMs: number;
+    events: UsageEvent[];
+    limits: UsageRateLimitSample[];
+    nowMs: number;
+    parserVersion: number;
+    /** When set, Cursor rows for any other chat id are removed, including ones outside the window. */
+    keepSessionIds?: readonly string[];
+  }): void {
+    const remove = this.db.prepare(`
+      DELETE FROM usage_events
+      WHERE provider = ? AND timestamp_ms >= ? AND timestamp_ms <= ?
+    `);
+    const insert = this.db.prepare(`
+      INSERT INTO usage_events (
+        id, provider, timestamp_ms, model,
+        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+        agent_session_id, cwd, source_path
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const upsertFile = this.db.prepare(`
+      INSERT INTO usage_files (
+        path, provider, size_bytes, mtime_ms, offset_bytes, last_scanned_ms,
+        parser_version, parse_context
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET
+        provider = excluded.provider,
+        size_bytes = excluded.size_bytes,
+        mtime_ms = excluded.mtime_ms,
+        offset_bytes = excluded.offset_bytes,
+        last_scanned_ms = excluded.last_scanned_ms,
+        parser_version = excluded.parser_version,
+        parse_context = excluded.parse_context
+    `);
+
+    this.db.transaction(() => {
+      remove.run(options.provider, options.fromMs, options.toMs);
+      for (const event of options.events) {
+        insert.run(
+          usageEventId(event, options.sourcePath, 0),
+          event.provider,
+          event.timestampMs,
+          event.model,
+          event.inputTokens,
+          event.outputTokens,
+          event.cacheReadTokens,
+          event.cacheCreationTokens,
+          event.agentSessionId,
+          event.cwd,
+          options.sourcePath,
+        );
+      }
+      upsertFile.run(
+        options.sourcePath,
+        options.provider,
+        0,
+        options.nowMs,
+        1,
+        options.nowMs,
+        options.parserVersion,
+        null,
+      );
+      if (options.keepSessionIds) {
+        const keep = new Set(options.keepSessionIds);
+        // SAFETY: This SELECT returns the usage_events primary key and nullable session id.
+        const stale = this.db.prepare(`
+          SELECT id, agent_session_id FROM usage_events WHERE provider = ?
+        `).all(options.provider) as Array<{ id: string; agent_session_id: string | null }>;
+        const removeStale = this.db.prepare('DELETE FROM usage_events WHERE id = ?');
+        for (const row of stale) {
+          if (!row.agent_session_id || !keep.has(row.agent_session_id)) removeStale.run(row.id);
+        }
+      }
+      this.recordRateLimits(options.limits);
+    })();
   }
 
   countFiles(): number {

@@ -4,10 +4,17 @@
  * Pane runs Claude and Codex as PTY terminals, so no structured usage flows
  * through the app itself. The authoritative record is each CLI's own transcript
  * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`), which
- * Pane reads read-only and indexes incrementally.
+ * Pane reads read-only and indexes incrementally. Cursor usage comes from
+ * Cursor's dashboard API, limited to chat ids Pane captured at launch.
  */
 
-export type UsageProvider = 'claude' | 'codex';
+export type UsageProvider = 'claude' | 'codex' | 'cursor';
+
+/** Stored provider text, with unknown values kept on the original Claude path. */
+export function usageProviderFrom(value: string): UsageProvider {
+  if (value === 'claude' || value === 'codex' || value === 'cursor') return value;
+  return 'claude';
+}
 
 /** One assistant message's token accounting, normalised across providers. */
 export interface UsageEvent {

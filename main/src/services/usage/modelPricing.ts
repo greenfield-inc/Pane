@@ -59,10 +59,46 @@ const BUNDLED_PRICES: ModelPrice[] = [
   { model: 'gpt-5-mini', inputPerMTok: 0.25, outputPerMTok: 2, cacheReadPerMTok: 0.025, cacheWritePerMTok: 0.25 },
   { model: 'gpt-5-nano', inputPerMTok: 0.05, outputPerMTok: 0.4, cacheReadPerMTok: 0.005, cacheWritePerMTok: 0.05 },
   { model: 'gpt-5', inputPerMTok: 1.25, outputPerMTok: 10, cacheReadPerMTok: 0.125, cacheWritePerMTok: 1.25 },
+
+  // Third-party models Cursor reports that the tables above omit.
+  // Rates from OpenRouter's models API on 2026-10-03. Live OpenRouter prices still win.
+  { model: 'gemini-2.5-flash', inputPerMTok: 0.3, outputPerMTok: 2.5, cacheReadPerMTok: 0.03, cacheWritePerMTok: 0.0833 },
+  { model: 'gemini-3-flash', inputPerMTok: 0.5, outputPerMTok: 3, cacheReadPerMTok: 0.05, cacheWritePerMTok: 0.0833 },
+  { model: 'gemini-3-pro-image-preview', inputPerMTok: 2, outputPerMTok: 12, cacheReadPerMTok: 0.2, cacheWritePerMTok: 0.375 },
+  { model: 'gemini-3-pro', inputPerMTok: 2, outputPerMTok: 12, cacheReadPerMTok: 0.2, cacheWritePerMTok: 0.375 },
+  { model: 'gemini-3.1-pro', inputPerMTok: 2, outputPerMTok: 12, cacheReadPerMTok: 0.2, cacheWritePerMTok: 0.375 },
+  { model: 'gemini-3.5-flash', inputPerMTok: 1.5, outputPerMTok: 9, cacheReadPerMTok: 0.15, cacheWritePerMTok: 0.0833 },
+  { model: 'gemini-3.6-flash', inputPerMTok: 0.75, outputPerMTok: 3.75, cacheReadPerMTok: 0.075, cacheWritePerMTok: 0.0417 },
+  { model: 'gemini-3.7-flash', inputPerMTok: 0.75, outputPerMTok: 3.75, cacheReadPerMTok: 0.075, cacheWritePerMTok: 0.0417 },
+  { model: 'gemini-3.8-flash', inputPerMTok: 0.75, outputPerMTok: 3.75, cacheReadPerMTok: 0.075, cacheWritePerMTok: 0.0417 },
+  { model: 'glm-5.2', inputPerMTok: 0.41, outputPerMTok: 3.99, cacheReadPerMTok: 0.26, cacheWritePerMTok: 0.41 },
+  { model: 'glm-5.3-flash', inputPerMTok: 0.15, outputPerMTok: 0.5, cacheReadPerMTok: 0.03, cacheWritePerMTok: 0.15 },
+  { model: 'glm-5.3', inputPerMTok: 0.22, outputPerMTok: 3.39, cacheReadPerMTok: 0.176, cacheWritePerMTok: 0.22 },
+  { model: 'kimi-k2.7-code', inputPerMTok: 0.6712, outputPerMTok: 3.35, cacheReadPerMTok: 0.18, cacheWritePerMTok: 0.6712 },
+  { model: 'kimi-k3', inputPerMTok: 0.72, outputPerMTok: 13, cacheReadPerMTok: 0.7, cacheWritePerMTok: 0.72 },
+  { model: 'muse-spark-1.3', inputPerMTok: 1.25, outputPerMTok: 4.25, cacheReadPerMTok: 0.15, cacheWritePerMTok: 1.25 },
+];
+
+/**
+ * Cursor's own models, from cursor.com/docs/models-and-pricing on 2026-10-03.
+ * Cache write is unpublished, so it mirrors input. Checked before OpenRouter:
+ * a shorter live `grok-*` id must not price `grok-4.7`. `auto` is omitted.
+ */
+const CURSOR_FIRST_PARTY_PRICES: ModelPrice[] = [
+  { model: 'composer-2.5-fast', inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.5, cacheWritePerMTok: 3 },
+  { model: 'composer-2.5', inputPerMTok: 0.5, outputPerMTok: 2.5, cacheReadPerMTok: 0.2, cacheWritePerMTok: 0.5 },
+  { model: 'grok-4.5-fast', inputPerMTok: 4, outputPerMTok: 18, cacheReadPerMTok: 1, cacheWritePerMTok: 4 },
+  { model: 'grok-4.5', inputPerMTok: 2, outputPerMTok: 6, cacheReadPerMTok: 0.5, cacheWritePerMTok: 2 },
+  { model: 'grok-4.6-fast', inputPerMTok: 4, outputPerMTok: 12, cacheReadPerMTok: 1, cacheWritePerMTok: 4 },
+  { model: 'grok-4.6', inputPerMTok: 2, outputPerMTok: 6, cacheReadPerMTok: 0.5, cacheWritePerMTok: 2 },
+  { model: 'grok-4.7-500k-fast', inputPerMTok: 6, outputPerMTok: 18, cacheReadPerMTok: 1.5, cacheWritePerMTok: 6 },
+  { model: 'grok-4.7-500k', inputPerMTok: 4, outputPerMTok: 12, cacheReadPerMTok: 1, cacheWritePerMTok: 4 },
+  { model: 'grok-4.7-fast', inputPerMTok: 4, outputPerMTok: 12, cacheReadPerMTok: 1, cacheWritePerMTok: 4 },
+  { model: 'grok-4.7', inputPerMTok: 2, outputPerMTok: 6, cacheReadPerMTok: 0.5, cacheWritePerMTok: 2 },
 ];
 
 // ---------------------------------------------------------------------------
-// Live price tier — set by the OpenRouter provider, checked first.
+// Live price tier — set by the OpenRouter provider, checked after Cursor's own rates.
 // ---------------------------------------------------------------------------
 
 let livePrices: ModelPrice[] = [];
@@ -100,11 +136,13 @@ function findInTable(model: string, table: readonly ModelPrice[]): ModelPrice | 
  * Match the longest model substring, normalizing Claude version separators, so dated ids (`claude-sonnet-5-20260101`) and
  * region-prefixed ids resolve to their base model.
  *
- * Checks live (OpenRouter) prices first, then falls back to the bundled table.
+ * Checks Cursor's first-party rates, then live OpenRouter prices, then the bundled table.
  */
 export function findModelPrice(model: string): ModelPrice | null {
   if (!model) return null;
-  return findInTable(model, livePrices) ?? findInTable(model, BUNDLED_PRICES);
+  return findInTable(model, CURSOR_FIRST_PARTY_PRICES)
+    ?? findInTable(model, livePrices)
+    ?? findInTable(model, BUNDLED_PRICES);
 }
 
 export interface CostInput {

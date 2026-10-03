@@ -20,6 +20,7 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'direct Claude command', command: 'claude --dangerously-skip-permissions', expected: 'claude' },
   { name: 'direct Codex command', command: 'codex --yolo', expected: 'codex' },
   { name: 'direct Cursor command', command: 'cursor-agent --force --trust', expected: 'cursor' },
+  { name: 'Cursor agent command', command: 'agent', expected: 'cursor' },
   {
     name: 'POSIX single-quoted path with spaces',
     command: "'/opt/OpenAI tools/codex' --yolo",

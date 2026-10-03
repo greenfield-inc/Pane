@@ -149,6 +149,17 @@ describe('UsageAggregator.getTotals', () => {
     expect(aggregator.getTotals(NOW - DAY_MS, NOW).estimatedCostUsd).toBeCloseTo(18, 6);
   });
 
+  it('keeps a Cursor row on cursor and prices Composer from the bundled table', () => {
+    seed({ timestampMs: NOW - HOUR_MS, provider: 'cursor', model: 'composer-2.5', input: 1_000_000, output: 1_000_000 });
+
+    const totals = aggregator.getTotals(NOW - DAY_MS, NOW);
+    expect(totals.costIncomplete).toBe(false);
+    expect(totals.estimatedCostUsd).toBeCloseTo(3, 6);
+    expect(aggregator.getByModel(NOW - DAY_MS, NOW)).toMatchObject([
+      { provider: 'cursor', model: 'composer-2.5' },
+    ]);
+  });
+
   it('prices OpenAI / Codex models, not just Claude', () => {
     // gpt-5-codex: $1.25/Mtok input, $10/Mtok output.
     seed({ timestampMs: NOW - HOUR_MS, provider: 'codex', model: 'gpt-5-codex', input: 1_000_000, output: 1_000_000 });

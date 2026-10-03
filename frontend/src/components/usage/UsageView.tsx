@@ -36,11 +36,13 @@ const PROVIDER_OPTIONS: Array<{ value: UsageProvider | 'all'; label: string }> =
   { value: 'all', label: 'All' },
   { value: 'claude', label: 'Claude' },
   { value: 'codex', label: 'Codex' },
+  { value: 'cursor', label: 'Cursor' },
 ];
 
 const PROVIDER_META = {
   claude: { label: 'Anthropic', color: '#e0913a' },
   codex: { label: 'OpenAI', color: '#37b877' },
+  cursor: { label: 'Cursor', color: '#c765d6' },
 } satisfies Record<UsageProvider, { label: string; color: string }>;
 
 /** Chart palette, matching the graph view's lane colours. */
@@ -414,6 +416,7 @@ export function UsageView() {
   }, [report]);
 
   const bothRootsMissing = (report?.index.missingRoots.length ?? 0) >= 2;
+  const hasIndexedUsage = (report?.index.eventsIndexed ?? 0) > 0 || (report?.rateLimits.length ?? 0) > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -577,14 +580,14 @@ export function UsageView() {
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
             {error}
           </div>
-        ) : bothRootsMissing ? (
+        ) : bothRootsMissing && !hasIndexedUsage ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
-            <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
+            <h2 className="mb-2 text-sm font-medium text-text-primary">No usage indexed yet</h2>
             <p className="text-xs text-text-secondary">
-              Usage is read from the Claude Code and Codex transcript files in your home directory.
-              Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
-              <code className="font-mono">~/.codex/sessions</code> exists yet — run an agent once and
-              come back.
+              Claude Code and Codex usage is read from transcript files. Cursor usage is read for
+              agents launched in Pane. Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
+              <code className="font-mono">~/.codex/sessions</code> exists yet, and no Cursor chats have
+              been indexed — launch an agent and come back.
             </p>
           </div>
         ) : report ? (
@@ -710,7 +713,8 @@ export function UsageView() {
                 ) : (
                   <p className="mt-2 text-[11px] text-text-muted">
                     No provider-reported limits available. Codex writes quota state
-                    into its transcripts; Anthropic does not expose plan limits locally.
+                    into its transcripts. Cursor limits come from the signed-in Cursor account.
+                    Anthropic does not expose plan limits locally.
                   </p>
                 )}
               </section>
@@ -744,7 +748,7 @@ export function UsageView() {
                 <BarChart
                   data={providerBars}
                   formatValue={formatTokens}
-                  ariaLabel="Token usage split between Anthropic and OpenAI"
+                  ariaLabel="Token usage split between Anthropic, OpenAI and Cursor"
                 />
 
                 <h2 className="mb-2 mt-4 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">

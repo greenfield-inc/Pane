@@ -37,7 +37,7 @@ const usageReportSchema = boundary.object({
   byModel: boundary.array(boundary.object({
     ...usageTotalsFields,
     model: boundary.string,
-    provider: boundary.enumeration('claude', 'codex'),
+    provider: boundary.enumeration('claude', 'codex', 'cursor'),
   })),
 });
 const usageStatusSchema = boundary.object({ scanning: boundary.boolean });

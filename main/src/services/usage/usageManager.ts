@@ -7,6 +7,7 @@ import { databaseService } from '../database';
 import { UsageRepository } from './usageRepository';
 import { UsageAggregator, resolveReportRange } from './usageAggregator';
 import { isFileUnchanged, resolveStartOffset, scanJsonlFile } from './jsonlScanner';
+import { syncCursorUsage } from './cursorUsage';
 import { getPricingSource } from './modelPricing';
 import { OpenRouterPriceProvider } from './openRouterPriceProvider';
 import { getAppDirectory } from '../../utils/appDirectory';
@@ -67,6 +68,7 @@ export class UsageManager {
     repository?: UsageRepository;
     scanFile?: typeof scanJsonlFile;
     createPriceProvider?: () => Pick<OpenRouterPriceProvider, 'start' | 'stop'>;
+    syncCursor?: (repository: UsageRepository) => Promise<void>;
   } = {}) {}
 
   // Resolved on first use, not in the constructor: this module is imported at
@@ -245,6 +247,16 @@ export class UsageManager {
           await new Promise<void>(resolve => setImmediate(resolve));
         }
       }
+
+      if (generation !== this.generation) return;
+      if (this.dependencies.syncCursor) {
+        try {
+          await this.dependencies.syncCursor(this.repository);
+        } catch (error) {
+          if (generation !== this.generation) return;
+          console.warn('[Usage] Cursor sync failed:', error instanceof Error ? error.message : error);
+        }
+      }
     } catch (error) {
       if (generation !== this.generation) return;
       scanError = error instanceof Error ? error.message : String(error);
@@ -320,4 +332,6 @@ export class UsageManager {
   }
 }
 
-export const usageManager = new UsageManager();
+export const usageManager = new UsageManager({
+  syncCursor: repository => syncCursorUsage(repository, databaseService.getDb()),
+});

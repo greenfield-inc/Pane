@@ -6268,7 +6268,8 @@ export const RUNPANE_CONTRACT = {
             "provider": {
               "enum": [
                 "claude",
-                "codex"
+                "codex",
+                "cursor"
               ]
             },
             "inputTokens": {
