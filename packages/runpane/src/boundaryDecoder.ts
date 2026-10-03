@@ -2,7 +2,7 @@ type DecodePath = readonly (string | number)[];
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
 
-class BoundaryDecodeError extends Error {
+export class BoundaryDecodeError extends Error {
   readonly path: DecodePath;
 
   constructor(message: string, path: DecodePath = []) {
@@ -67,15 +67,17 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
   schemas: Schemas,
   current: BoundaryCursor,
 ): InferSchema<Schemas[number]> {
+  const failures: string[] = [];
   for (const schema of schemas) {
     try {
       // SAFETY: Schemas[number] is the schema being decoded in this iteration.
       return schema.decode(current) as InferSchema<Schemas[number]>;
     } catch (error) {
       if (!(error instanceof BoundaryDecodeError)) throw error;
+      failures.push(error.message);
     }
   }
-  return current.fail("did not match any allowed shape");
+  return current.fail(`did not match any allowed shape: ${failures.join("; ")}`);
 }
 
 function decodeJsonValue(current: BoundaryCursor): JsonValue {
@@ -95,6 +97,8 @@ function decodeJsonValue(current: BoundaryCursor): JsonValue {
     const source = current.value as ObjectValue;
     const decoded: { [key: string]: JsonValue } = {};
     for (const [key, value] of Object.entries(source)) {
+      // Match JSON.stringify: an undefined property is an absent key, not an invalid value.
+      if (value === undefined) continue;
       decoded[key] = decodeJsonValue(current.child(key, value));
     }
     return decoded;
@@ -201,4 +205,16 @@ export function decodeBoundary<Value>(
   schema: BoundarySchema<Value>,
 ): Value {
   return schema.decode(cursor(value));
+}
+
+export function decodeOptionalBoundary<Value>(
+  value: unknown,
+  schema: BoundarySchema<Value>,
+): Value | undefined {
+  try {
+    return decodeBoundary(value, schema);
+  } catch (error) {
+    if (error instanceof BoundaryDecodeError) return undefined;
+    throw error;
+  }
 }
