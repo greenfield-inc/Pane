@@ -6,7 +6,7 @@ import {
 } from './utils/windowControlsOverlay';
 import type { CreateSessionRequest, Session } from './types/session';
 import type { AppConfig, UpdateConfigRequest } from './types/config';
-import type { CreateProjectRequest, UpdateProjectRequest, Project } from '../../frontend/src/types/project';
+import type { CreateProjectRequest, UpdateProjectRequest, Project } from '../../shared/types/project';
 import type {
   RemoteDaemonClientRecord,
   RemoteDaemonConnectionPair,
