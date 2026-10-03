@@ -181,7 +181,7 @@ export async function fastGetDiffStats(cwd: string, wslContext?: WSLContext | nu
 
   try {
     // Use numstat for machine-readable output (faster to parse)
-    const result = (await commandExecutor.execFileAsync('git', ['diff', '--numstat'], { cwd }, wslContext)).stdout.trim();
+    const result = (await commandExecutor.execFileAsync('git', ['diff', '--numstat', 'HEAD'], { cwd }, wslContext)).stdout.trim();
 
     if (!result) {
       return { additions: 0, deletions: 0, filesChanged: 0 };
