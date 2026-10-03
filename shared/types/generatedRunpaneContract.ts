@@ -4457,9 +4457,10 @@ export const RUNPANE_CONTRACT = {
       "The PyPI package uses `source=pip` for all Python consumers, including pip, pipx, uvx, and `python -m runpane`.",
       "Wrappers should prefer `https://runpane.com/api/download?platform=<platform>&arch=<arch>&format=<format>&version=<version>&channel=<channel>&source=<npm|pip>`.",
       "If the website route cannot satisfy the download, wrappers may fall back to the matching GitHub release asset and print a warning that website attribution may be incomplete for that run.",
-      "Wrappers also emit best-effort lifecycle telemetry to `https://runpane.com/api/runpane/telemetry` for command start/success/failure, download request/success/failure, and GitHub fallback usage.",
-      "Wrapper telemetry uses a persisted anonymous `install_id` in the form `install_<uuid>` and PostHog `distinct_id = install:<install_id>` so distinct wrapper users can be counted with `count(DISTINCT properties.install_id)`.",
-      "Wrapper telemetry must be disabled in CI and when `RUNPANE_TELEMETRY_DISABLED` is set, and must not include raw paths, labels, prompts, raw error text, or environment values."
+      "Wrappers emit best-effort telemetry to `https://runpane.com/api/runpane/telemetry` for command failures, download request/success/failure, and GitHub fallback usage. Routine command starts and successes emit nothing.",
+      "Wrapper telemetry uses a persisted anonymous `install_id` in the form `install_<uuid>` and PostHog `distinct_id = install:<install_id>` so installs reporting failures or downloads can be counted with `count(DISTINCT properties.install_id)`; this is not a count of all CLI users.",
+      "Wrapper telemetry must be disabled in CI, when `RUNPANE_TELEMETRY_DISABLED` is set, and when the local config explicitly disables analytics. It must not include raw paths, labels, prompts, raw error text, or environment values.",
+      "Desktop local control reports useful failures as `runpane_local_control_failed`; normal polling, wait deadlines, and optional agent unavailability emit nothing. Reports contain coarse operation and failure classification only, with a five-minute deduplication interval and a maximum of 20 per hour per app process. Handled CLI failures are ordinary events, not exceptions."
     ],
     "publishingCredentials": [
       "Local implementation, build, and dry-run validation do not need npm or PyPI API tokens.",

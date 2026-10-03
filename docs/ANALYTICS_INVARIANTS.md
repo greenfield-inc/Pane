@@ -138,6 +138,60 @@ count buckets.
 | `remote_pane_pwa_client_disconnected` | `main/src/daemon/httpApiServer.ts` | Browser/PWA client disconnected |
 | `remote_pane_remote_runtime_used` | `main/src/daemon/client/remotePaneClient.ts` | Remote runtime actually used |
 
+## Failure Volume and Error Privacy
+
+Keep core desktop activity (`app_opened`, `app_closed`, `session_created`,
+`panel_switched`, `terminal_panel_created`). Neither wrapper emits routine
+command starts or successes. Preserve sanitized wrapper failures and download
+lifecycle events; honor explicit local analytics opt-out as well as CI and
+`RUNPANE_TELEMETRY_DISABLED`.
+
+Local control emits only `runpane_local_control_failed` for thrown failures or
+handled `ok: false` results. Normal wait deadlines and optional agent
+unavailability are excluded. Its properties are `action`, `status`, `command_ok`,
+`failure_kind`, `error_type`, `error_code`, and `failure_category`, plus app version,
+platform and Electron version. Each coarse operation/category/code combination
+reports at most once per five minutes, with an overall cap of 20 per hour per
+app process. Limits are in memory and reset on restart. Local logging remains
+independent of analytics suppression.
+
+Production ingestion drops legacy `runpane_wrapper_command_started`,
+`runpane_wrapper_command_succeeded`, and `runpane_local_control`. Keep the new
+failure event name separate so useful failures survive these exclusions.
+
+PostHog `$exception` events are reserved for app errors: renderer global errors
+and unhandled rejections, React error boundaries, unexpected renderer crashes/OOM,
+main uncaught exceptions, and shutdown errors. Console errors and handled CLI
+failures never become exceptions. Exceptions have their own five-minute
+deduplication and 20-per-hour cap. Both error event paths send directly from main
+through PostHog's capture API, with at most four concurrent requests and a 1.5s
+timeout; neither waits for delivery. Errors obey analytics opt-out and use only
+the existing install UUID identity, without person-profile updates, account
+properties, SDK URL enrichment or persistent error storage.
+
+Exception payloads contain coarse source, built-in error type, allowlisted error
+code/category, version/platform, a fixed message, and up to ten packaged app JS
+frames. Frames contain relative app filenames and numeric line/column offsets,
+never absolute paths, function names or source context. Raw messages, causes,
+CLI argv, terminal contents, prompts, source code, repository paths, usernames,
+home paths and environment values are excluded. Development/server URLs and
+external dependency frames are omitted. Restricted interactive-element
+autocapture and pageviews stay enabled, with text and attributes masked;
+automatic exception capture is disabled. Session replay policy is unchanged.
+
+Main fatal capture uses `uncaughtExceptionMonitor`, preserving exit behavior.
+Delivery during process exit is best effort. Native main-process aborts and
+segfaults cannot be captured by JavaScript; there is no minidump uploader or
+source-map upload pipeline. Renderer process loss reports a coarse crash reason
+without a native stack. Native crash reporting remains a separate follow-up.
+PostHog's [Electron support request](https://github.com/PostHog/posthog/issues/43993)
+does not provide native Electron crash support. The payload follows the supported
+[manual exception schema](https://posthog.com/docs/error-tracking/installation/manual)
+for JavaScript errors; this is not a replacement for native Electron crash reporting.
+Source-map symbolication is not wired or verified: current reports contain
+packaged JavaScript offsets only, and a future source-map upload integration must
+be verified against a packaged build before claiming original TypeScript locations.
+
 ## Test Coverage
 
 Changes to disclosure, analytics config, or first-run event ordering should update

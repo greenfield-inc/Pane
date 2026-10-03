@@ -246,6 +246,11 @@ let versionChecker: VersionChecker;
 let archiveProgressManager: ArchiveProgressManager;
 let leaderboardService: LeaderboardService;
 let analyticsManager: AnalyticsManager;
+// Observing preserves Node/Electron's existing fatal exception behavior.
+// Fatal unhandled rejections also reach this monitor under Node's default mode.
+process.on('uncaughtExceptionMonitor', (error) => {
+  analyticsManager?.captureException(error, 'main-uncaught');
+});
 let paneDaemonHost: PaneDaemonHost | null = null;
 let pendingPaneLink: string | undefined;
 let paneLinksReady = false;
@@ -1078,6 +1083,9 @@ async function createWindow() {
   // Handle renderer process crashes with recovery
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[RendererLifecycle] render-process-gone:', details.reason, details);
+    if (details.reason === 'crashed' || details.reason === 'oom') {
+      analyticsManager?.captureException(undefined, details.reason === 'oom' ? 'renderer-oom' : 'renderer-crash');
+    }
     if (details.reason === 'crashed' || details.reason === 'oom' || details.reason === 'killed') {
       // Attempt to reload the renderer
       console.log('[Main] Attempting to recover renderer...');
@@ -1264,6 +1272,14 @@ async function initializeServices() {
 
   ipcMain.handle('diagnostics:renderer-fatal', (_event, payload: RendererDiagnosticPayload) => {
     logger.error(`[RendererFatal] ${formatRendererDiagnostic(payload || {})}`);
+    const error = new Error();
+    error.stack = payload?.stack;
+    // The first line is used only to classify built-in types, never transmitted.
+    const name = error.stack?.split(':', 1)[0];
+    if (name) error.name = name;
+    const source = payload?.kind === 'error-boundary' ? 'react-boundary'
+      : payload?.kind === 'unhandledrejection' ? 'renderer-rejection' : 'renderer-error';
+    analyticsManager.captureException(error, source);
     return { success: true };
   });
 }
@@ -1746,6 +1762,7 @@ if (launchRemoteSetup) {
   } catch (error) {
     logToFile(`ERROR during shutdown: ${error}`);
     console.error('[Main] Error during graceful shutdown:', error);
+    analyticsManager?.captureException(error, 'shutdown');
   } finally {
     clearTimeout(shutdownSafetyTimeout);
 

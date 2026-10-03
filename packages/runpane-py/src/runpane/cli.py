@@ -258,13 +258,10 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
 
 
 def run_tracked_command(telemetry_context: WrapperTelemetryContext, execute: Callable[[], int]) -> int:
-    track_wrapper_event("runpane_wrapper_command_started", telemetry_context)
     try:
         code = execute()
         telemetry_context["exit_code"] = code
-        if code == 0:
-            track_wrapper_event("runpane_wrapper_command_succeeded", telemetry_context)
-        else:
+        if code != 0:
             telemetry_context.setdefault("failure_stage", infer_failure_stage(telemetry_context))
             telemetry_context.setdefault("failure_category", "process_exit")
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
