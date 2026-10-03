@@ -70,9 +70,12 @@ export const Modal: React.FC<ModalProps> = ({
   useLayoutEffect(() => {
     if (!isOpen) return;
 
-    openerRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Menu items unmount when their action opens a dialog. The menu's ARIA
+    // association identifies the persistent trigger to restore on dialog close.
+    const menuLabel = focused?.closest('[role="menu"]')?.getAttribute('aria-labelledby');
+    const menuTrigger = menuLabel ? document.getElementById(menuLabel) : null;
+    openerRef.current = menuTrigger?.matches('[aria-haspopup="menu"]') ? menuTrigger : focused;
     didRestoreRef.current = false;
   }, [isOpen]);
   
