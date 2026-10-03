@@ -42,7 +42,6 @@
         "chokidar",
         "electron-updater",
         "smol-toml",
-        "web-streams-polyfill",
         "ws",
         "electron-builder-squirrel-windows"
       ]
@@ -54,9 +53,14 @@
         "src/**/*.test.{ts,tsx}",
         "vite.config.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}", "vite.config.{ts,js}"],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "vite.config.{ts,js}"
+      ],
       "vite": {
-        "config": ["vite.config.ts"]
+        "config": [
+          "vite.config.ts"
+        ]
       }
     },
     "main": {
@@ -70,7 +74,10 @@
         "src/**/__tests__/**/*.ts",
         "build-mcp-bridge.js"
       ],
-      "project": ["src/**/*.ts", "build-mcp-bridge.js"],
+      "project": [
+        "src/**/*.ts",
+        "build-mcp-bridge.js"
+      ],
       "ignoreBinaries": [
         "fc-list",
         "system_profiler",
@@ -94,12 +101,25 @@
         "src/telemetry.ts",
         "scripts/mark-executable.js"
       ],
-      "project": ["src/**/*.ts", "scripts/**/*.js"],
-      "ignoreBinaries": ["ditto"]
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.js"
+      ],
+      "ignoreBinaries": [
+        "ditto"
+      ]
     },
     "mobile": {
-      "entry": ["capacitor.config.ts", "src/**/*.test.ts", "scripts/**/*.mjs"],
-      "project": ["src/**/*.ts", "scripts/**/*.mjs", "capacitor.config.ts"],
+      "entry": [
+        "capacitor.config.ts",
+        "src/**/*.test.ts",
+        "scripts/**/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.mjs",
+        "capacitor.config.ts"
+      ],
       "ignoreDependencies": [
         "@capacitor/app",
         "@capacitor/browser",
@@ -108,13 +128,34 @@
       ]
     },
     "native": {
-      "entry": ["src/app/**/*.tsx", "src/**/*.test.ts", "metro.config.js", "vitest.config.ts", "terminal-web/page.ts", "scripts/*.mjs"],
-      "project": ["src/**/*.{ts,tsx}", "metro.config.js", "vitest.config.ts", "terminal-web/*.ts", "scripts/*.mjs"],
-      "ignoreDependencies": ["expo-updates"]
+      "entry": [
+        "src/app/**/*.tsx",
+        "src/**/*.test.ts",
+        "metro.config.js",
+        "vitest.config.ts",
+        "terminal-web/page.ts",
+        "scripts/*.mjs"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "metro.config.js",
+        "vitest.config.ts",
+        "terminal-web/*.ts",
+        "scripts/*.mjs"
+      ],
+      "ignoreDependencies": [
+        "expo-updates"
+      ]
     },
     "shared": {
-      "entry": ["types/*.ts", "remoteClient/index.ts"],
-      "project": ["types/*.ts", "remoteClient/*.ts"]
+      "entry": [
+        "types/*.ts",
+        "remoteClient/index.ts"
+      ],
+      "project": [
+        "types/*.ts",
+        "remoteClient/*.ts"
+      ]
     }
   }
 }

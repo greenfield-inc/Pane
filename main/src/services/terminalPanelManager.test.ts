@@ -1,11 +1,11 @@
 import * as claudeTranscripts from './claudeSessionTranscript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
-import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
+import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHostRuntime, type PtyHandleLike } from '../core/runtime';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
-import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
+import { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
-import type { TerminalPanelState } from '../../../shared/types/panels';
+import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ShellDetector } from '../utils/shellDetector';
@@ -176,6 +176,119 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
     ...overrides,
   };
 }
+
+describe('session-owned agent terminals', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    resetPaneRuntimeForTests();
+  });
+
+  function fixture() {
+    vi.useFakeTimers();
+    const dataListeners = new Set<(data: string) => void>();
+    const exitListeners = new Set<(code: number | null, signal: number | null) => void>();
+    const handle: PtyHandleLike = {
+      id: 'pty-1', pid: 123,
+      onData: listener => { dataListeners.add(listener); return { dispose: () => dataListeners.delete(listener) }; },
+      onExit: listener => { exitListeners.add(listener); return { dispose: () => exitListeners.delete(listener) }; },
+      write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined),
+      kill: vi.fn().mockResolvedValue(undefined), pause: vi.fn().mockResolvedValue(undefined), resume: vi.fn().mockResolvedValue(undefined),
+    };
+    const spawn = vi.fn<PtyHostRuntime['spawn']>().mockResolvedValue({ ptyId: handle.id, pid: handle.pid });
+    const supervisor: PtyHostRuntime = {
+      spawn, getHandle: () => handle, write: handle.write, resize: vi.fn().mockResolvedValue(undefined),
+      kill: handle.kill, ack: vi.fn().mockResolvedValue(undefined), pause: handle.pause, resume: handle.resume,
+      postDataToRenderers: vi.fn(),
+    };
+    setPaneRuntime({
+      eventSink: { send: vi.fn() },
+      getConfigManager: () => partialMock<ConfigManager>({ getConfig: () => ({}), getPreferredShell: () => undefined, getUsePtyHost: () => true }),
+      getPtyHostRuntime: () => supervisor, getWebviewContextMap: () => new Map(),
+    });
+    vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ name: 'bash', path: '/bin/bash', args: [], isAvailable: true });
+    const panel: ToolPanel = {
+      id: 'owned', sessionId: 'session-owned', type: 'terminal', title: 'Claude',
+      state: { isActive: true, customState: {
+        agentType: 'claude', agentLaunch: { executable: '/path with spaces/claude', args: ['--model', 'sonnet'] },
+        agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
+        initialInput: 'next prompt', initialInputMode: 'stdin', isCliReady: false,
+      } },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    };
+    vi.spyOn(panelManager, 'getPanel').mockReturnValue(panel);
+    vi.spyOn(panelManager, 'updatePanel').mockResolvedValue(undefined);
+    return { manager: new TerminalPanelManager(inProcessEmulatorHost), panel, spawn, handle, dataListeners, exitListeners };
+  }
+
+  it('serializes concurrent renderer and session initialization across an asynchronous PTY spawn', async () => {
+    const { manager, panel, spawn } = fixture();
+    panel.state.customState = { ...panel.state.customState,
+      hasClaudeSessionId: false, initialInput: '--model evil', initialInputMode: 'argument',
+    };
+    const spawned = Promise.withResolvers<{ ptyId: string; pid: number }>();
+    spawn.mockReturnValue(spawned.promise);
+    const first = manager.initializeTerminal(panel, '/worktree');
+    const second = manager.initializeTerminal(panel, '/worktree');
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+    spawned.resolve({ ptyId: 'pty-1', pid: 123 });
+    await first;
+    await vi.advanceTimersByTimeAsync(10);
+    await second;
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const invocation = process.platform === 'win32'
+      ? { shell: 'powershell.exe', args: ['-NoLogo', '-NoProfile', '-Command', "$ErrorActionPreference = 'Stop'; & '/path with spaces/claude' '--model' 'sonnet' '--session-id' '22222222-2222-4222-8222-222222222222' '--' '--model evil'; exit $LASTEXITCODE"] }
+      : { shell: '/bin/bash', args: ['-l', '-c', "exec '/path with spaces/claude' '--model' 'sonnet' '--session-id' '22222222-2222-4222-8222-222222222222' '--' '--model evil'"] };
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining(invocation));
+    expect(manager.isCommandBoundTerminal(panel.id)).toBe(true);
+    await manager.destroyTerminal(panel.id, { saveState: false });
+  });
+
+  it('discards readiness and pending prompt delivery after a failed launch or agent exit', async () => {
+    const { manager, panel, handle, dataListeners, exitListeners } = fixture();
+    await manager.initializeTerminal(panel, '/worktree');
+    for (const listener of dataListeners) listener('Claude failed to start');
+    for (const listener of exitListeners) listener(1, null);
+    await vi.advanceTimersByTimeAsync(10000);
+    await manager.saveAllTerminalStates();
+    expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+    expect(manager.isCommandBoundTerminal(panel.id)).toBe(false);
+    expect(handle.write).not.toHaveBeenCalled();
+    expect(panel.state.customState).toMatchObject({ isCliReady: false });
+  });
+
+  it('persists the final answer before disposing an exited terminal or restarting it', async () => {
+    const { manager, panel, spawn, dataListeners, exitListeners } = fixture();
+    await manager.initializeTerminal(panel, '/worktree');
+    const snapshot = Promise.withResolvers<void>();
+    const flush = RemoteTerminalEmulator.prototype.restoreSnapshot;
+    vi.spyOn(RemoteTerminalEmulator.prototype, 'restoreSnapshot').mockImplementation(async function (this: RemoteTerminalEmulator) {
+      await snapshot.promise;
+      return await flush.call(this);
+    });
+    for (const listener of dataListeners) listener('Final answer before exit');
+    for (const listener of exitListeners) listener(0, null);
+    expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+    const restarted = manager.initializeTerminal(panel, '/worktree');
+    await Promise.resolve();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const persisted = manager.saveTerminalState(panel.id);
+    snapshot.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    await persisted;
+    expect(panelManager.updatePanel).toHaveBeenCalledWith(panel.id, {
+      state: expect.objectContaining({ customState: expect.objectContaining({
+        scrollbackBuffer: expect.stringContaining('Final answer before exit'),
+        cwd: '/worktree',
+      }) }),
+    });
+    await restarted;
+    expect(spawn).toHaveBeenCalledTimes(2);
+    await manager.destroyTerminal(panel.id, { saveState: false });
+  });
+});
 
 describe('TerminalPanelManager keyboard input', () => {
   it.each([

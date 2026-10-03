@@ -242,9 +242,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
   });
   const taskQueue = new TaskQueue({
+    claudeCodeManager: defaultCliManager,
     sessionManager,
     worktreeManager,
-    claudeCodeManager: defaultCliManager,
     gitDiffManager,
     executionTracker,
     worktreeNameGenerator,

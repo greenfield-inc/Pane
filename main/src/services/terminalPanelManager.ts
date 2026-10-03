@@ -8,6 +8,8 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { withLock } from '../utils/mutex';
+import { buildAgentShellCommand, quoteAgentArgument } from './agents/agentShellCommand';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
@@ -229,6 +231,7 @@ class PtyHandleShim implements pty.IPty {
 }
 
 interface TerminalProcess {
+  commandBound?: boolean;
   pty: pty.IPty;
   /** Host-allocated PTY id when routed through ptyHost; undefined under legacy `pty.spawn`. */
   ptyId?: string;
@@ -315,6 +318,7 @@ interface CliLaunchResolution {
 
 export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
+  private pendingStateSaves = new Map<string, Promise<void>>();
   private serializedBuffers = new Map<string, string>();
   private readonly visibleViewersByPanel = new Map<string, Map<string, number>>();
   private readonly MAX_SCROLLBACK_LINES = 10000;
@@ -1093,6 +1097,14 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   async initializeTerminal(panel: ToolPanel, cwd: string, wslContext?: WSLContext | null, priority: number = 1, initialDimensions?: { cols: number; rows: number }): Promise<void> {
+    await withLock('terminal-initialization-'+panel.id, () => this.initializeTerminalProcess(panel, cwd, wslContext, priority, initialDimensions));
+  }
+
+  private async initializeTerminalProcess(panel: ToolPanel, cwd: string, wslContext?: WSLContext | null, priority: number = 1, initialDimensions?: { cols: number; rows: number }): Promise<void> {
+    await this.terminals.get(panel.id)?.destroying;
+    await this.pendingStateSaves.get(panel.id)?.catch(error => {
+      console.warn('[TerminalPanelManager] Previous state save failed for '+panel.id+':', error);
+    });
     if (this.terminals.has(panel.id)) {
       return;
     }
@@ -1151,6 +1163,33 @@ export class TerminalPanelManager extends EventEmitter {
       shellType = shellInfo.name;
     }
 
+    const launchState = terminalCustomState(panel.state);
+    if (launchState.agentLaunch) {
+      const agentSessionId = launchState.agentSessionId ?? randomUUID();
+      const isResume = Boolean(launchState.hasClaudeSessionId);
+      const args = [...launchState.agentLaunch.args, isResume ? '--resume' : '--session-id', agentSessionId];
+      if (!isResume && launchState.initialInput && !launchState.initialInputSentAt) {
+        args.push('--', launchState.initialInput);
+        launchState.initialInputSentAt = new Date().toISOString();
+      }
+      launchState.agentSessionId = agentSessionId;
+      launchState.hasClaudeSessionId = true;
+      launchState.isCliReady = false;
+      const launch = { executable: launchState.agentLaunch.executable, args };
+      if (wslContext && process.platform === 'win32') {
+        shellArgs = ['-d', wslContext.distribution, '--exec', 'bash', '-lc',
+          `cd -- ${quoteAgentArgument(cwd)} && ${buildAgentShellCommand(launch)}`];
+      } else if (process.platform === 'win32') {
+        // cmd.exe cannot preserve arbitrary prompt arguments without expanding
+        // their contents. Use PowerShell's literal arguments for owned agents.
+        if (!/powershell|pwsh/i.test(shellPath)) shellPath = 'powershell.exe';
+        shellType = /pwsh/i.test(shellPath) ? 'pwsh' : 'powershell';
+        shellArgs = ['-NoLogo', '-NoProfile', '-Command', buildAgentShellCommand(launch, true)];
+      } else {
+        shellArgs = ['-l', '-c', buildAgentShellCommand(launch)];
+      }
+    }
+
     const isLinux = process.platform === 'linux';
     const enhancedPath = isLinux ? (process.env.PATH || '') : getShellPath();
 
@@ -1189,6 +1228,7 @@ export class TerminalPanelManager extends EventEmitter {
             'GIT_CEILING_DIRECTORIES',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
+            ...Object.keys(launchState.environmentVars ?? {}),
           ]),
         }
       : {};
@@ -1204,6 +1244,7 @@ export class TerminalPanelManager extends EventEmitter {
     delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
     const baseSpawnEnv = {
       ...inheritedEnv,
+      ...launchState.environmentVars,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
       PATH: enhancedPath,
       TERM: 'xterm-256color',
@@ -1285,6 +1326,7 @@ export class TerminalPanelManager extends EventEmitter {
       pty: ptyProcess,
       ptyId: ptyHostId,
       isPtyHost: usePtyHost,
+      commandBound: Boolean(launchState.agentLaunch),
       panelId: panel.id,
       sessionId: panel.sessionId,
       scrollbackBuffer: '',
@@ -1341,7 +1383,7 @@ export class TerminalPanelManager extends EventEmitter {
     // Wait for the shell prompt before sending an initial command.
     let commandToRun: string | undefined;
     let launchResolution: CliLaunchResolution | undefined;
-    if (initialCommand) {
+    if (initialCommand && !existingState.agentLaunch) {
       try {
         launchResolution = this.resolveCliLaunchCommand(panel.id, initialCommand, existingState || {}, shellType, terminalProcess.isWSL);
       } catch (error) {
@@ -1352,7 +1394,9 @@ export class TerminalPanelManager extends EventEmitter {
         this.flushOutputBuffer(terminalProcess);
       }
     }
-    if (initialCommand && launchResolution) {
+    if (existingState.agentLaunch) {
+      this.waitForOwnedAgentReady(terminalProcess);
+    } else if (initialCommand && launchResolution) {
       commandToRun = launchResolution.commandToRun;
       const isCliCommand = launchResolution.isCliCommand;
 
@@ -1452,6 +1496,30 @@ export class TerminalPanelManager extends EventEmitter {
   /** See syncBlockClearFilter.ts — state lives on the terminal object. */
   private filterSyncBlockClears(terminal: TerminalProcess, data: string): string {
     return filterSyncBlockClears(terminal, data);
+  }
+
+  private waitForOwnedAgentReady(terminal: TerminalProcess): void {
+    let signaled = false;
+    const ready = () => {
+      if (signaled || this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
+      signaled = true;
+      firstOutput?.dispose();
+      const panel = panelManager.getPanel(terminal.panelId);
+      if (!panel) return;
+      panel.state.customState = { ...terminalCustomState(panel.state), isCliReady: true };
+      void panelManager.updatePanel(panel.id, { state: panel.state }).catch(error => {
+        console.error('[TerminalPanelManager] Failed to persist owned-agent readiness:', error);
+      });
+      this.sendRendererEvent('terminal:cliReady', { panelId: panel.id });
+      this.sendInitialInputOnce(panel.id);
+    };
+    const firstOutput = terminal.pty.onData(() => {
+      firstOutput?.dispose();
+      setTimeout(ready, 300);
+    });
+    // An agent which produces no output still owns this PTY. A failed command
+    // exits the noninteractive shell; identity checks discard late callbacks.
+    setTimeout(ready, 10000);
   }
 
   private setupTerminalHandlers(terminal: TerminalProcess): void {
@@ -1574,11 +1642,7 @@ export class TerminalPanelManager extends EventEmitter {
         terminal.exitDuringDestroy ??= exitCode;
         return;
       }
-      try {
-        this.retireTerminal(terminal, exitCode);
-      } finally {
-        terminal.screenEmulator?.dispose();
-      }
+      terminal.destroying = this.finishExitedTerminal(terminal, exitCode);
 
       // Notify frontend (include signal for crash detection)
       this.sendRendererEvent('terminal:exited', {
@@ -1617,7 +1681,23 @@ export class TerminalPanelManager extends EventEmitter {
   }
   
   isTerminalInitialized(panelId: string): boolean {
-    return this.terminals.has(panelId);
+    const terminal = this.terminals.get(panelId);
+    return Boolean(terminal && !terminal.destroying);
+  }
+
+  isCommandBoundTerminal(panelId: string): boolean {
+    const terminal = this.terminals.get(panelId);
+    return Boolean(terminal?.commandBound && !terminal.destroying);
+  }
+
+  getSessionAgentState(sessionId: string): AgentState | undefined {
+    const states = [...this.terminals.values()]
+      .filter(terminal => terminal.sessionId === sessionId && terminal.commandBound && !terminal.destroying)
+      .map(terminal => this.getAgentStatus(terminal.panelId) ?? 'unknown');
+    if (states.includes('working')) return 'working';
+    if (states.includes('blocked')) return 'blocked';
+    if (states.includes('unknown')) return 'unknown';
+    return states.length > 0 ? 'idle' : undefined;
   }
 
   getLastOutputAt(panelId: string): string | undefined {
@@ -1734,6 +1814,16 @@ export class TerminalPanelManager extends EventEmitter {
   }
   
   async saveTerminalState(panelId: string): Promise<void> {
+    const pending = this.pendingStateSaves.get(panelId);
+    if (pending) return pending;
+    const save = this.saveTerminalStateNow(panelId);
+    this.pendingStateSaves.set(panelId, save);
+    try { await save; } finally {
+      if (this.pendingStateSaves.get(panelId) === save) this.pendingStateSaves.delete(panelId);
+    }
+  }
+
+  private async saveTerminalStateNow(panelId: string): Promise<void> {
     const terminal = this.terminals.get(panelId);
     if (!terminal) {
       console.warn(`[TerminalPanelManager] Terminal ${panelId} not found for state save`);
@@ -1979,6 +2069,7 @@ export class TerminalPanelManager extends EventEmitter {
     this.sendRendererEvent('panel:agentStatus', payload);
     this.emit('agent-status', payload);
     this.emitActivityStatus(terminal);
+    if (terminal.commandBound) panelManager.emitPanelEvent(terminal.panelId, 'terminal:agent_status', { state });
   }
 
   private ensureAgentStatusPoll(): void {
@@ -2214,6 +2305,19 @@ export class TerminalPanelManager extends EventEmitter {
     }
   }
 
+  async stopTerminal(panelId: string): Promise<void> {
+    await withLock('terminal-initialization-'+panelId, () => this.destroyTerminal(panelId));
+  }
+
+  private async finishExitedTerminal(terminal: TerminalProcess, exit: { exitCode: number; signal?: number }): Promise<void> {
+    try { await this.saveTerminalState(terminal.panelId); }
+    catch (error) { console.error('[TerminalPanelManager] Failed to save exited terminal '+terminal.panelId+':', error); }
+    finally {
+      try { this.retireTerminal(terminal, exit); }
+      finally { terminal.screenEmulator?.dispose(); }
+    }
+  }
+
   destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return Promise.resolve();
@@ -2245,7 +2349,7 @@ export class TerminalPanelManager extends EventEmitter {
       }
       if (!terminal.exitDuringDestroy) {
         try {
-          if (terminal.isWSL) {
+          if (terminal.isWSL && !terminal.commandBound) {
             try {
               terminal.pty.write('exit\r');
             } finally {
@@ -2284,7 +2388,7 @@ export class TerminalPanelManager extends EventEmitter {
     }
     this.emitAgentStatus(terminal, 'idle', exit ? 'exit' : 'destroyed');
 
-    const data = { ...exit, timestamp: new Date().toISOString() };
+    const data = { ...exit, commandBound: Boolean(terminal.commandBound), timestamp: new Date().toISOString() };
     if (panelManager.getPanel(panelId)) {
       void panelManager.emitPanelEvent(panelId, 'terminal:exit', data);
     } else {
@@ -2333,6 +2437,7 @@ export class TerminalPanelManager extends EventEmitter {
     for (const panelId of this.terminals.keys()) {
       await this.saveTerminalState(panelId);
     }
+    await Promise.all(this.pendingStateSaves.values());
   }
 
   /**

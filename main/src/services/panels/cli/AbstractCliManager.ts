@@ -81,6 +81,21 @@ export interface CliSpawnTuple {
   env: CliEnvironment;
 }
 
+export interface CliTerminalLaunchOptions {
+  sessionId: string;
+  prompt: string;
+  isResume: boolean;
+  model?: string;
+  permissionMode?: 'approve' | 'ignore';
+}
+
+export interface PreparedCliTerminalLaunch {
+  executable: string;
+  args: string[];
+  environment: Record<string, string>;
+  prompt: string;
+}
+
 const nodeFallbackTools = new Set<string>();
 
 class PtyHostUnavailableError extends Error {
@@ -370,13 +385,6 @@ export abstract class AbstractCliManager extends EventEmitter {
   }
 
   /**
-   * Check if a panel is running
-   */
-  isPanelRunning(panelId: string): boolean {
-    return this.processes.has(panelId);
-  }
-
-  /**
    * Kill all CLI processes on shutdown
    */
   async killAllProcesses(): Promise<void> {
@@ -418,6 +426,9 @@ export abstract class AbstractCliManager extends EventEmitter {
 
   // Abstract methods for CLI-specific implementations
 
+  /** Prepare interactive terminal arguments without spawning a second process. */
+  abstract prepareTerminalLaunch(options: CliTerminalLaunchOptions): Promise<PreparedCliTerminalLaunch>;
+
   /**
    * Start a CLI panel with the given options
    * This should be implemented by each CLI tool manager
@@ -442,43 +453,12 @@ export abstract class AbstractCliManager extends EventEmitter {
    */
   abstract restartPanelWithHistory(panelId: string, sessionId: string, worktreePath: string, initialPrompt: string, conversationHistory: ConversationMessage[]): Promise<void>;
 
-  // Legacy session-based methods for backward compatibility
-  // These provide default implementations that map to panel-based methods
-
-  /**
-   * @deprecated Use startPanel with real panel IDs instead
-   */
-  async startSession(sessionId: string, worktreePath: string, prompt: string, ...args: unknown[]): Promise<void> {
-    console.warn(`[${this.getCliToolName()}Manager] DEPRECATED: startSession called with virtual panel ID for session ${sessionId}. Use real panel IDs instead.`);
-    const virtualPanelId = `session-${sessionId}`;
-    return this.startPanel(virtualPanelId, sessionId, worktreePath, prompt, ...args);
-  }
-
-  /**
-   * @deprecated Use continuePanel with real panel IDs instead
-   */
-  async continueSession(sessionId: string, worktreePath: string, prompt: string, conversationHistory: ConversationMessage[], ...args: unknown[]): Promise<void> {
-    console.warn(`[${this.getCliToolName()}Manager] DEPRECATED: continueSession called with virtual panel ID for session ${sessionId}. Use real panel IDs instead.`);
-    const virtualPanelId = `session-${sessionId}`;
-    return this.continuePanel(virtualPanelId, sessionId, worktreePath, prompt, conversationHistory, ...args);
-  }
-
-  /**
-   * @deprecated Use stopPanel with real panel IDs instead
-   */
-  async stopSession(sessionId: string): Promise<void> {
-    console.warn(`[${this.getCliToolName()}Manager] DEPRECATED: stopSession called with virtual panel ID for session ${sessionId}. Use real panel IDs instead.`);
-    const virtualPanelId = `session-${sessionId}`;
-    await this.stopPanel(virtualPanelId);
-  }
-
-  /**
-   * @deprecated Use isPanelRunning with real panel IDs instead
-   */
-  isSessionRunning(sessionId: string): boolean {
-    console.warn(`[${this.getCliToolName()}Manager] DEPRECATED: isSessionRunning called with virtual panel ID for session ${sessionId}. Use real panel IDs instead.`);
-    const virtualPanelId = `session-${sessionId}`;
-    return this.isPanelRunning(virtualPanelId);
+  /** Stop every owned process in a session, including detached legacy processes. */
+  async killSessionProcesses(sessionId: string): Promise<void> {
+    const panelIds = [...this.processes.values()]
+      .filter(cliProcess => cliProcess.sessionId === sessionId)
+      .map(cliProcess => cliProcess.panelId);
+    await Promise.all(panelIds.map(panelId => this.stopPanel(panelId)));
   }
 
   // Protected utility methods

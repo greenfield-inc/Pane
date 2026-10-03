@@ -1,3 +1,4 @@
+import { runSessionClaude } from '../services/sessionClaudeTerminal';
 import type { IpcMain } from 'electron';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import { existsSync } from 'fs';
@@ -113,7 +114,7 @@ export function registerGitHandlers(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
 ): void {
-  const { sessionManager, gitDiffManager, worktreeManager, claudeCodeManager, gitStatusManager } = services;
+  const { sessionManager, gitDiffManager, worktreeManager, gitStatusManager, claudeCodeManager } = services;
   registerGitDiffRequestHandlers(commandRegistry, services);
 
   // Helper function to emit git operation events to all sessions in a project
@@ -769,13 +770,9 @@ export function registerGitHandlers(
 
       try {
         // Start Claude session to handle rebase
-        await claudeCodeManager.startSession(
-          sessionId,
-          session.worktreePath,
-          prompt,
-          session.permissionMode,
-          session.model
-        );
+        await runSessionClaude(sessionManager, sessionId, prompt, {
+          mode: 'start', permissionMode: session.permissionMode, model: session.model,
+        }, claudeCodeManager);
 
         // Add message to session output
         const message = `🤖 CLAUDE CODE\nStarted Claude session to handle rebase and resolve conflicts\nPrompt: ${prompt}`;
