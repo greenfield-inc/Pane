@@ -152,31 +152,6 @@ export function isDaemonOwnedChannel(channel: string): boolean {
   return DAEMON_OWNED_CHANNEL_PREFIXES.some((prefix) => channel.startsWith(prefix));
 }
 
-export function isPaneDaemonRequestFrame(frame: JsonValue): boolean {
-  return matchesSchema(frame, requestFrameSchema);
-}
-
-export function isPaneDaemonResponseFrame(frame: JsonValue): boolean {
-  return matchesSchema(frame, responseFrameSchema);
-}
-
-export function isPaneDaemonEventFrame(frame: JsonValue): boolean {
-  return matchesSchema(frame, eventFrameSchema);
-}
-
-export function isPaneDaemonFrame(frame: JsonValue): boolean {
-  return matchesSchema(frame, daemonFrameSchema);
-}
-
 export function parsePaneDaemonFrame(frame: JsonValue): PaneDaemonFrame {
   return decodeBoundary(frame, daemonFrameSchema);
-}
-
-function matchesSchema<Value>(frame: JsonValue, schema: BoundarySchema<Value>): boolean {
-  try {
-    decodeBoundary(frame, schema);
-    return true;
-  } catch {
-    return false;
-  }
 }

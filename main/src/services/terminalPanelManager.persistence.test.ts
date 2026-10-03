@@ -12,7 +12,7 @@ import { splitPanelBufferState } from '../database/panelBuffers';
 import { trimAnsiSafe } from '../utils/ansiTrim';
 import { ConfigManager } from './configManager';
 import { databaseService } from './database';
-import { panelManager as panelManagerMock } from '../test/setup';
+import { panelManager as panelManagerMock } from '../test/panelManagerFake';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import { MAX_RESTORE_PAYLOAD_SIZE, TerminalPanelManager } from './terminalPanelManager';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
@@ -159,7 +159,7 @@ describe('terminal panel persistence', () => {
   });
 
   async function startTerminal(panel: ToolPanel, visible = true): Promise<{ manager: TerminalPanelManager; handle: FakePtyHandle }> {
-    const manager = new TerminalPanelManager(inProcessEmulatorHost);
+    const manager = new TerminalPanelManager(inProcessEmulatorHost, undefined, panelManagerMock);
     managers.push(manager);
     panelManagerMock.getPanel.mockReturnValue(panel);
     if (!databaseService.getPanel(panel.id)) {
@@ -395,7 +395,7 @@ describe('terminal panel persistence', () => {
     expect(databaseService.updatePanel(panel.id, { state: lastPersisted ?? { isActive: false } })).toBe(true);
     await first.destroyTerminal(panel.id);
 
-    const second = new TerminalPanelManager(inProcessEmulatorHost);
+    const second = new TerminalPanelManager(inProcessEmulatorHost, undefined, panelManagerMock);
     managers.push(second);
     const reloaded = databaseService.getPanel(panel.id);
     expect(reloaded?.state.customState).not.toHaveProperty('scrollbackBuffer');

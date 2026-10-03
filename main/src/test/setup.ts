@@ -43,12 +43,6 @@ export const nativeTheme = {
   removeListener: vi.fn(),
 };
 
-export const panelManager = {
-  emitPanelEvent: vi.fn(),
-  getPanel: vi.fn(),
-  updatePanel: vi.fn(),
-};
-
 // Set up global test environment
 global.console = {
   ...console,

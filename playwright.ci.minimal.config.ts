@@ -6,7 +6,7 @@ const devServerPort = getPlaywrightPort();
 export default defineConfig({
   testDir: './tests',
   // Keep the fast startup checks and the maintained accessibility journeys in CI.
-  testMatch: ['smoke.spec.ts', 'health-check.spec.ts', 'accessibility.spec.ts', 'settings.spec.ts', 'remote-pwa-sidebar.spec.ts'],
+  testMatch: ['smoke.spec.ts', 'health-check.spec.ts', 'accessibility.spec.ts', 'settings.spec.ts', 'remote-pwa-sidebar.spec.ts', 'dropdown-keyboard-nav.spec.ts'],
   // Allow enough time for cold CI startup while keeping failures bounded.
   timeout: 30 * 1000,
   expect: {
@@ -58,13 +58,10 @@ export default defineConfig({
 
   // Run your local dev server before starting the tests
   webServer: {
-    command: 'pnpm electron-dev',
+    command: 'pnpm --filter frontend dev --host 127.0.0.1 --strictPort',
     port: devServerPort,
     reuseExistingServer: false,
     timeout: 45 * 1000,
-    env: getPlaywrightServerEnv(devServerPort, {
-      DISPLAY: ':99',
-      ELECTRON_DISABLE_SANDBOX: '1',
-    }),
+    env: getPlaywrightServerEnv(devServerPort),
   },
 });

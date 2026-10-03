@@ -335,6 +335,7 @@ export class TerminalPanelManager extends EventEmitter {
   constructor(
     private readonly emulatorHost: () => TerminalEmulatorHostConnection = sharedEmulatorThread,
     private readonly readForegroundExecutable: (shellPid: number) => Promise<string | undefined> = readForegroundExecutablePath,
+    private readonly panels: Pick<typeof panelManager, 'getPanel' | 'updatePanel' | 'emitPanelEvent'> = panelManager,
   ) {
     super();
     this.setMaxListeners(100);
@@ -592,7 +593,7 @@ export class TerminalPanelManager extends EventEmitter {
     input: string;
     submitStrategy: NonNullable<TerminalPanelState['initialInputSubmitStrategy']>;
   } | null> {
-    const currentPanel = panelManager.getPanel(panelId);
+    const currentPanel = this.panels.getPanel(panelId);
     if (!currentPanel) {
       return null;
     }
@@ -608,12 +609,12 @@ export class TerminalPanelManager extends EventEmitter {
     customState.initialInputSentAt = new Date().toISOString();
     customState.initialInputError = undefined;
     state.customState = customState;
-    await panelManager.updatePanel(panelId, { state });
+    await this.panels.updatePanel(panelId, { state });
     return { input, submitStrategy };
   }
 
   private async markInitialInputError(panelId: string, errorMessage: string): Promise<void> {
-    const currentPanel = panelManager.getPanel(panelId);
+    const currentPanel = this.panels.getPanel(panelId);
     if (!currentPanel) {
       return;
     }
@@ -622,7 +623,7 @@ export class TerminalPanelManager extends EventEmitter {
     const customState = terminalCustomState(state);
     customState.initialInputError = errorMessage;
     state.customState = customState;
-    await panelManager.updatePanel(panelId, { state });
+    await this.panels.updatePanel(panelId, { state });
   }
 
   private sendInitialInputOnce(panelId: string): void {
@@ -645,7 +646,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (!this.terminals.has(panelId)) {
       return;
     }
-    const currentPanel = panelManager.getPanel(panelId);
+    const currentPanel = this.panels.getPanel(panelId);
     if (!currentPanel) return;
     const customState = terminalCustomState(currentPanel.state);
     if (customState.isCliReady !== true) {
@@ -768,7 +769,7 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private captureAgentSessionId(terminal: TerminalProcess, output: string): void {
-    const panel = panelManager.getPanel(terminal.panelId);
+    const panel = this.panels.getPanel(terminal.panelId);
     if (!panel) return;
     const customState = terminalCustomState(panel.state);
     if (!customState.customResume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor') return;
@@ -795,7 +796,7 @@ export class TerminalPanelManager extends EventEmitter {
       agentSessionId
     };
 
-    void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
+    void this.panels.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
       console.warn(`[TerminalPanelManager] Failed to persist ${agentType} session id for panel ${terminal.panelId}:`, error);
     });
     console.log(`[TerminalPanelManager] Captured ${agentType} session id for panel ${terminal.panelId}: ${agentSessionId}`);
@@ -1083,12 +1084,12 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   async stageInitialCommand(panelId: string, initialCommand: string): Promise<void> {
-    const panel = panelManager.getPanel(panelId);
+    const panel = this.panels.getPanel(panelId);
     if (!panel) throw new Error(`Panel ${panelId} not found`);
     const state = terminalCustomState(panel.state);
     const launch = this.resolveCliLaunchCommand(panelId, initialCommand, state, state.shellType);
     panel.state.customState = launch.customState;
-    await panelManager.updatePanel(panelId, { state: panel.state });
+    await this.panels.updatePanel(panelId, { state: panel.state });
     this.writeToTerminal(panelId, launch.commandToRun);
   }
 
@@ -1358,7 +1359,7 @@ export class TerminalPanelManager extends EventEmitter {
 
       if (isCliCommand) {
         panel.state.customState = launchResolution.customState;
-        await panelManager.updatePanel(panel.id, { state: panel.state }).catch(error => {
+        await this.panels.updatePanel(panel.id, { state: panel.state }).catch(error => {
           console.warn(`[TerminalPanelManager] Failed to persist CLI launch state for panel ${panel.id}:`, error);
         });
       }
@@ -1387,13 +1388,13 @@ export class TerminalPanelManager extends EventEmitter {
             if (onCliOutput) onCliOutput.dispose();
 
             // Persist isCliReady on panel state (best-effort, fire-and-forget)
-            const currentPanel = panelManager.getPanel(panelId);
+            const currentPanel = this.panels.getPanel(panelId);
             if (currentPanel) {
               const ps = currentPanel.state;
               const cs2 = terminalCustomState(ps);
               cs2.isCliReady = true;
               ps.customState = cs2;
-              panelManager.updatePanel(panelId, { state: ps }); // async, not awaited
+              this.panels.updatePanel(panelId, { state: ps }); // async, not awaited
             }
 
             // Emit to renderer
@@ -1442,7 +1443,7 @@ export class TerminalPanelManager extends EventEmitter {
       dimensions: { cols: initialDimensions?.cols || 80, rows: initialDimensions?.rows || 30 }
     };
 
-    await panelManager.updatePanel(panel.id, { state });
+    await this.panels.updatePanel(panel.id, { state });
 
     } finally {
       this.releaseSpawnSlot();
@@ -1513,7 +1514,7 @@ export class TerminalPanelManager extends EventEmitter {
           }
 
           // Emit command executed event
-          panelManager.emitPanelEvent(
+          this.panels.emitPanelEvent(
             terminal.panelId,
             'terminal:command_executed',
             {
@@ -1524,7 +1525,7 @@ export class TerminalPanelManager extends EventEmitter {
 
           // Check for file operation commands
           if (this.isFileOperationCommand(terminal.currentCommand)) {
-            panelManager.emitPanelEvent(
+            this.panels.emitPanelEvent(
               terminal.panelId,
               'files:changed',
               {
@@ -1722,14 +1723,14 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     // Update panel state with new dimensions
-    const panel = panelManager.getPanel(panelId);
+    const panel = this.panels.getPanel(panelId);
     if (panel) {
       const state = panel.state;
       state.customState = {
         ...state.customState,
         dimensions: { cols, rows }
       };
-      panelManager.updatePanel(panelId, { state });
+      this.panels.updatePanel(panelId, { state });
     }
   }
   
@@ -1740,7 +1741,7 @@ export class TerminalPanelManager extends EventEmitter {
       return;
     }
     
-    const panel = panelManager.getPanel(panelId);
+    const panel = this.panels.getPanel(panelId);
     if (!panel) return;
 
     // Get current working directory (if possible)
@@ -1759,7 +1760,7 @@ export class TerminalPanelManager extends EventEmitter {
       console.warn(`[TerminalPanelManager] Could not get CWD for terminal ${panelId}:`, error);
     }
     
-    if (this.terminals.get(panelId) !== terminal || panelManager.getPanel(panelId) !== panel) return;
+    if (this.terminals.get(panelId) !== terminal || this.panels.getPanel(panelId) !== panel) return;
     await this.persistTerminalState(terminal, panel, cwd);
   }
 
@@ -1767,7 +1768,7 @@ export class TerminalPanelManager extends EventEmitter {
     const panelId = terminal.panelId;
     const restore = await terminal.screenEmulator?.restoreSnapshot();
     // The worker read can finish after this terminal or panel was replaced.
-    if (this.terminals.get(panelId) !== terminal || panelManager.getPanel(panelId) !== panel) return;
+    if (this.terminals.get(panelId) !== terminal || this.panels.getPanel(panelId) !== panel) return;
     const state = panel.state;
     const savedIsAlternateScreen = restore?.isAlternateScreen ?? terminal.isAlternateScreen;
     // Same source as getTerminalState: persist the rendered emulator model for
@@ -1795,7 +1796,7 @@ export class TerminalPanelManager extends EventEmitter {
     }
     state.customState = customState;
     
-    await panelManager.updatePanel(panelId, { state });
+    await this.panels.updatePanel(panelId, { state });
     
   }
   
@@ -1887,7 +1888,7 @@ export class TerminalPanelManager extends EventEmitter {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return null;
 
-    const panel = panelManager.getPanel(panelId);
+    const panel = this.panels.getPanel(panelId);
     const customState = panel ? terminalCustomState(panel.state) : {};
     const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand) ?? terminal.agentType;
 
@@ -1915,7 +1916,7 @@ export class TerminalPanelManager extends EventEmitter {
     }
     this.serializedBuffers.delete(panelId);
 
-    const panel = panelManager.getPanel(panelId);
+    const panel = this.panels.getPanel(panelId);
     if (!panel) return;
 
     const state = panel.state;
@@ -1925,7 +1926,7 @@ export class TerminalPanelManager extends EventEmitter {
       serializedBuffer: undefined,
     };
 
-    await panelManager.updatePanel(panelId, { state });
+    await this.panels.updatePanel(panelId, { state });
   }
   
   private deriveActivityStatus(panelId: string): 'active' | 'idle' {
@@ -2115,7 +2116,7 @@ export class TerminalPanelManager extends EventEmitter {
     terminal.agentProbe = undefined;
     terminal.lastStatusScan = undefined;
 
-    const panel = panelManager.getPanel(terminal.panelId);
+    const panel = this.panels.getPanel(terminal.panelId);
     if (!panel) return;
     const customState = terminalCustomState(panel.state);
     panel.state.customState = {
@@ -2127,7 +2128,7 @@ export class TerminalPanelManager extends EventEmitter {
       launchMode: 'wrapped',
       launchCommand: customState.launchCommand ?? customState.initialCommand,
     };
-    void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
+    void this.panels.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
       console.warn(`[TerminalPanelManager] Failed to persist detected ${agentType} for panel ${terminal.panelId}:`, error);
     });
     console.log(`[TerminalPanelManager] Detected ${agentType} in panel ${terminal.panelId} from its ${detection}`);
@@ -2285,8 +2286,8 @@ export class TerminalPanelManager extends EventEmitter {
     this.emitAgentStatus(terminal, 'idle', exit ? 'exit' : 'destroyed');
 
     const data = { ...exit, timestamp: new Date().toISOString() };
-    if (panelManager.getPanel(panelId)) {
-      void panelManager.emitPanelEvent(panelId, 'terminal:exit', data);
+    if (this.panels.getPanel(panelId)) {
+      void this.panels.emitPanelEvent(panelId, 'terminal:exit', data);
     } else {
       // The panel may already be deleted. Its terminal still owns enough
       // identity to notify the journal and transport consumers of the exit.
@@ -2372,7 +2373,7 @@ export class TerminalPanelManager extends EventEmitter {
         continue;
       }
 
-      const panel = panelManager.getPanel(panelId);
+      const panel = this.panels.getPanel(panelId);
       if (!panel) {
         console.warn(`[ptyHost] respawnAll: panel ${panelId} no longer exists, skipping`);
         terminal.screenEmulator?.dispose();
@@ -2511,7 +2512,7 @@ export class TerminalPanelManager extends EventEmitter {
       try {
         // Save state before killing. `saveTerminalState` is async, so no
         // synchronous `try` can observe its rejection; hence the explicit
-        // `.catch`. `panelManager.updatePanel` writes to SQLite mid-shutdown
+        // `.catch`. `this.panels.updatePanel` writes to SQLite mid-shutdown
         // and can reject.
         this.saveTerminalState(panelId).catch((error) => {
           console.error(`[TerminalPanelManager] Failed to save state for ${panelId}:`, error);
