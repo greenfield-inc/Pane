@@ -6,6 +6,7 @@ import type { IDisposable } from '@xterm/xterm';
 import type { LinkProviderConfig } from './types';
 import { createFileLinkProvider } from './fileLinkProvider';
 import { createGitLinkProvider } from './gitLinkProvider';
+import { createPaneLinkProvider } from './paneLinkProvider';
 
 /**
  * Registers all link providers for the terminal.
@@ -13,6 +14,7 @@ import { createGitLinkProvider } from './gitLinkProvider';
  */
 export function registerAllLinkProviders(config: LinkProviderConfig): IDisposable[] {
   const disposables: IDisposable[] = [
+    config.terminal.registerLinkProvider(createPaneLinkProvider(config)),
     config.terminal.registerLinkProvider(createFileLinkProvider(config)),
   ];
 

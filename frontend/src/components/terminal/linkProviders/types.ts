@@ -8,4 +8,5 @@ export interface LinkProviderConfig {
   onHideTooltip: () => void;
   onShowFilePopover: (event: MouseEvent, filePath: string, line?: number) => void;
   onOpenUrl: (url: string) => void;
+  onOpenPane: (url: string) => void;
 }

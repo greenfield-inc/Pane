@@ -3,6 +3,7 @@ import type { Terminal } from '@xterm/xterm';
 import type { LinkProviderConfig } from '../linkProviders/types';
 import { registerAllLinkProviders } from '../linkProviders';
 import { panelApi } from '../../../services/panelApi';
+import { openPaneLink } from '../openPaneLink';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
 import { useConfigStore } from '../../../stores/configStore';
@@ -110,6 +111,9 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       },
       onShowFilePopover: (event, path, line) => {
         setFilePopover({ visible: true, x: event.clientX, y: event.clientY, path, line: line ?? 0 });
+      },
+      onOpenPane: (url) => {
+        void openPaneLink(url).catch(error => console.error('Failed to open Pane link:', error));
       },
       onOpenUrl: (url) => {
         window.electronAPI.openExternal(url);

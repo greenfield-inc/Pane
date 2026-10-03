@@ -26,7 +26,6 @@ import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
 import { FileEdit, FolderOpen } from 'lucide-react';
 import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
 import { openPaneLink } from '../terminal/openPaneLink';
-import { PANE_LINK_REGEX } from '../terminal/paneLink';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
 import { TerminalPopover, PopoverButton } from '../terminal/TerminalPopover';
 import { SelectionPopover } from '../terminal/SelectionPopover';
@@ -250,7 +249,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const fitAddonRef = useRef<FitAddon | null>(null);
   const webglAddonRef = useRef<WebglAddon | null>(null);
   const webLinksAddonRef = useRef<WebLinksAddon | null>(null);
-  const paneLinksAddonRef = useRef<WebLinksAddon | null>(null);
   const serializeAddonRef = useRef<SerializeAddon | null>(null);
   // Restored output still being parsed. OSC 52 copies in it are history, not new copies.
   const pendingReplayWritesRef = useRef(0);
@@ -1220,13 +1218,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               });
               terminal.loadAddon(webLinksAddon);
               webLinksAddonRef.current = webLinksAddon;
-              const paneLinksAddon = new WebLinksAddonImpl((event, uri) => {
-                if (isMac ? event.metaKey : event.ctrlKey) {
-                  void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
-                }
-              }, { urlRegex: PANE_LINK_REGEX });
-              terminal.loadAddon(paneLinksAddon);
-              paneLinksAddonRef.current = paneLinksAddon;
               devLog.debug('[TerminalPanel] WebLinksAddon loaded for panel', panel.id);
             }
           } catch (e) {
@@ -1871,10 +1862,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (webLinksAddonRef.current) {
         try { webLinksAddonRef.current.dispose(); } catch { /* ignore */ }
         webLinksAddonRef.current = null;
-      }
-      if (paneLinksAddonRef.current) {
-        try { paneLinksAddonRef.current.dispose(); } catch { /* ignore */ }
-        paneLinksAddonRef.current = null;
       }
 
       // Save serialized terminal snapshot before disposing

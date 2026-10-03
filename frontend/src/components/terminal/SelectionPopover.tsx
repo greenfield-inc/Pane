@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, ExternalLink, FolderOpen, Globe } from 'lucide-react';
+import { Copy, ExternalLink, FolderOpen, Globe, PanelsTopLeft } from 'lucide-react';
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
 import { InterceptorToast } from './InterceptorToast';
 import { isWindows } from '../../utils/platformUtils';
 import { copyTerminalText } from '../../utils/terminalClipboard';
+import { openPaneLink } from './openPaneLink';
+import { parsePaneLink } from './paneLink';
 
 export interface SelectionPopoverProps {
   visible: boolean;
@@ -19,6 +21,7 @@ export interface SelectionPopoverProps {
 }
 
 const URL_PATTERN = /https?:\/\/[^\s<>"{}|\\^`[\]]+/;
+const PANE_URL_PATTERN = /pane:\/\/[^\s<>"{}|\\^`[\]]+/i;
 
 // File path patterns - detect Unix paths, Windows paths, and relative paths with extensions
 const FILE_PATH_PATTERNS = [
@@ -71,8 +74,11 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   // Skip computation when not visible
   const trimmedText = visible ? text.trim() : '';
   const urlMatch = visible ? trimmedText.match(URL_PATTERN) : null;
+  const paneMatch = visible ? trimmedText.match(PANE_URL_PATTERN) : null;
+  const paneUrl = paneMatch?.[0].replace(/[),.;!?]+$/, '');
+  const isPaneUrl = !!paneUrl && parsePaneLink(paneUrl);
   const isUrl = urlMatch !== null;
-  const isFile = visible && !isUrl && isFilePath(trimmedText);
+  const isFile = visible && !isUrl && !isPaneUrl && isFilePath(trimmedText);
 
   const handleCopy = async () => {
     try {
@@ -81,6 +87,17 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
       setErrorToast('Failed to copy terminal text');
+    }
+  };
+
+  const handleOpenPane = async () => {
+    if (!paneUrl) return;
+    try {
+      await openPaneLink(paneUrl);
+      onClose();
+    } catch (error) {
+      console.error('Failed to open Pane link:', error);
+      setErrorToast('Failed to open Pane');
     }
   };
 
@@ -145,6 +162,14 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
           Copy
         </span>
       </PopoverButton>
+      {isPaneUrl && (
+        <PopoverButton onClick={handleOpenPane}>
+          <span className="flex items-center gap-2">
+            <PanelsTopLeft className="w-4 h-4" />
+            Open Pane
+          </span>
+        </PopoverButton>
+      )}
       {isUrl && sessionId && (
         <PopoverButton onClick={handleOpenInBrowser}>
           <span className="flex items-center gap-2">

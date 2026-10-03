@@ -35,7 +35,7 @@ import { registerAgentUsageHandlers } from './agentUsage';
 import { registerFeedbackHandlers } from './feedback';
 import { registerMobilePushHandlers } from './mobilePush';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
-import { registerPaneLinkHandler } from '../services/paneLinks';
+import { OPEN_PANE_LINK_CHANNEL, registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 
@@ -99,6 +99,8 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
       getPaneEventSink().send('pane:open-link', target);
     },
   });
+  ipcMain.handle('pane:open-link-local', async (_event, link: string) =>
+    commandRegistry.invoke(OPEN_PANE_LINK_CHANNEL, [link]));
   registerClipboardHandlers(ipcMain, services);
   registerResourceMonitorHandlers(ipcMain, services, commandRegistry);
   registerAgentUsageHandlers(ipcMain, services, commandRegistry);

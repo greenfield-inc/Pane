@@ -56,6 +56,8 @@ The core set is built around the three jobs agents most often need, each finishe
 
 `docs_search` searches Pane's docs, `runpane` help, per-command context, and the Pane Chat skills installed in the Pane data directory. It returns short excerpts with paths. `docs_read` returns one path in full. Both work offline, and the same docs are listed as `runpane-docs:` MCP resources.
 
+When giving a user a link, print the full `pane://` URL verbatim on its own line. Do not wrap it in Markdown link syntax or present a label as the clickable text.
+
 `links_create` builds `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or `pane://open?session=<id>`. Pane registers the `pane://` scheme on macOS, Windows, and Linux. Opening a link (from a browser, a terminal, or `links_open`) raises Pane and selects what it names. It never changes Pane state, and a link with any unexpected part is rejected.
 
 ## Registering by hand

@@ -36,7 +36,7 @@ The tool panel system consists of several key components:
 - XTerm.js instances mount/unmount based on panel visibility to save memory
 - Working directories are maintained independently per panel
 - Command history and environment variables can be preserved across restarts
-- Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional.
+- Clicking opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional. Selecting the URL also offers Open Pane in the terminal popover.
 
 ## Database Schema
 

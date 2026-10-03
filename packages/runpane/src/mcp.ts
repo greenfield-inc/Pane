@@ -24,6 +24,7 @@ const INSTRUCTIONS = [
   '- `agents_send` types text, queues with Tab while Codex is working, and submits with Enter when ready. To answer a menu or prompt in an agent\'s terminal, send exact keys with `panels_input` (Down arrow \\u001b[B, Enter \\r, Escape \\u001b) and check the screen with `agents_status` afterwards. Ask the user before answering trust or permission prompts.',
   '- Discover before you change anything. Repo selectors come from `repos_list` (or `active`); pane ids come from `panes_list`, `workspace_state`, or `agents_start`; panel ids from `agents_start` or `panels_list`.',
   '- Tools with a `yes` input change Pane state. Pass `yes: true` only when the user asked for that change; without it the call is refused and nothing happens.',
+  '- When giving a user a pane:// link, print the full URL verbatim on its own line. Never wrap it in Markdown link syntax or use a label as the only clickable text.',
   '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
   '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns. The same docs are available as `runpane-docs:` resources.',
   '- Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) as text instead of a file.',

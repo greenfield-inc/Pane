@@ -12332,7 +12332,7 @@ export const RUNPANE_CONTRACT = {
       "links create": {
         "name": "links create",
         "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
-        "details": "Use this to hand the user a clickable link. It only builds the URL; opening it navigates and never changes Pane state.",
+        "details": "Print the returned URL verbatim on its own line for the user, without Markdown link syntax. It only builds the URL; opening it navigates and never changes Pane state.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -12483,7 +12483,7 @@ export const RUNPANE_CONTRACT = {
       "agents start": {
         "name": "agents start",
         "summary": "Start an agent on a task: create a Pane in a repository, launch the agent with the prompt, and wait until it is ready.",
-        "details": "Use this for the common job \"have an agent work on X in repo Y\". It returns the pane and panel ids and a pane:// link to hand the user.",
+        "details": "Use this for the common job \"have an agent work on X in repo Y\". It returns the pane and panel ids and a pane:// link to print verbatim on its own line, without Markdown link syntax.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -13096,7 +13096,8 @@ export const RUNPANE_CONTRACT = {
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
-      "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too."
+      "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.",
+      "When sharing a pane:// link, print the full URL verbatim on its own line. Do not wrap it in Markdown link syntax or use a label as the only clickable text."
     ]
   }
 } as const;
