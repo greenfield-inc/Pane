@@ -1,3 +1,4 @@
+import { cliAgentSchema } from '../../../shared/types/cli-agent';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
@@ -288,7 +289,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(cliAgentSchema),
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),
   goal: boundary.optional(boundary.string),
@@ -303,7 +304,7 @@ const orchestrationSessionUpdateSchema = boundary.object({
   name: boundary.optional(boundary.string),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(cliAgentSchema),
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),
   goal: boundary.optional(boundary.string),
@@ -3242,7 +3243,7 @@ interface OrchestrationSessionAgentRequest {
 function parseOrchestrationSessionAgentRequest(value: PaneCommandValue): OrchestrationSessionAgentRequest {
   if (!isRecord(value)) throw new Error('Session agent request must be an object');
   const selector = parseOrchestrationSessionSelector(value.selector);
-  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor'));
+  const agent = decodeBoundary(value.agent, cliAgentSchema);
   return { selector, agent };
 }
 

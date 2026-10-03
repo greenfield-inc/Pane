@@ -1,4 +1,5 @@
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
+import { cliAgentSchema } from '../../../shared/types/cli-agent';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -21,7 +22,6 @@ import {
 } from '../../../shared/types/orchestrationSession';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
-const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
 const MAX_STORE_BYTES = 2_000_000;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
@@ -77,7 +77,7 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: paneChatAgentSchema,
+  agent: cliAgentSchema,
   launchCommand: boundary.optional(boundary.string),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   profile: boundary.optional(boundary.string),

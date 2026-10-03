@@ -2,6 +2,7 @@
 import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
+import { cliAgentSchema } from '../../shared/types/cli-agent';
 
 import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg } from './utils/runtimeMode';
 import { getAppDirectory } from './utils/appDirectory';
@@ -1636,7 +1637,7 @@ if (launchRemoteSetup) {
 
       const customState = decodeBoundary(panel.state?.customState ?? {}, boundary.jsonObject);
       const resumeState = decodeBoundary(customState, boundary.object({
-        agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+        agentType: boundary.optional(cliAgentSchema),
         initialCommand: boundary.optional(boundary.string),
         customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
       }));

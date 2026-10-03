@@ -1,4 +1,6 @@
-export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor';
+import { CLI_AGENT_LABELS, type CliAgentType } from '../types/cli-agent';
+
+export type AgentLaunchPresetId = CliAgentType;
 
 export interface AgentLaunchPreset {
   id: AgentLaunchPresetId;
@@ -26,7 +28,7 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
   },
   {
     id: 'codex',
-    title: 'Codex',
+    title: CLI_AGENT_LABELS.codex,
     command: 'codex --yolo',
     iconKey: 'codex',
     hotkeyId: 'add-tool-terminal-codex',
@@ -34,7 +36,7 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
   },
   {
     id: 'cursor',
-    title: 'Cursor',
+    title: CLI_AGENT_LABELS.cursor,
     command: 'cursor-agent --force --trust',
     iconKey: 'cursor',
     hotkeyId: 'add-tool-terminal-cursor',

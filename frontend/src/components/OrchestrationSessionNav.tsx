@@ -1,3 +1,4 @@
+import { CLI_AGENTS, CLI_AGENT_LABELS } from '../../../shared/types/cli-agent';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ChevronDown, ChevronRight, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
@@ -11,7 +12,7 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { DEFAULT_PANE_CHAT_AGENT, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -76,8 +77,7 @@ function availabilityIsVisible(availability: OrchestrationSessionAvailability): 
   return availability === 'ready' || availability === 'loading' || availability === 'error';
 }
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
-  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
+const SESSION_AGENT_OPTIONS = CLI_AGENTS.map(id => ({ id, label: CLI_AGENT_LABELS[id] }));
 
 function availableSessionAgents(wsl = false): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
   if (wsl) return SESSION_AGENT_OPTIONS;

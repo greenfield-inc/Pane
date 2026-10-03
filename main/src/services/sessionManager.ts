@@ -1,4 +1,5 @@
 import { customCommandResumeSchema, type CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { cliAgentSchema, type CliAgentType } from '../../../shared/types/cli-agent';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -99,7 +100,7 @@ const terminalResumeStateSchema = boundary.object({
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   wasInterrupted: boundary.optional(boundary.boolean),
   initialCommand: boundary.optional(boundary.string),
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agentType: boundary.optional(cliAgentSchema),
   agentSessionId: boundary.optional(boundary.string),
   hasClaudeSessionId: boundary.optional(boundary.boolean),
 });
@@ -108,7 +109,7 @@ function parseTerminalResumeState(value: ToolPanelState['customState']): {
   customResume?: CustomCommandResume | null;
   wasInterrupted?: boolean;
   initialCommand?: string;
-  agentType?: 'claude' | 'codex' | 'cursor';
+  agentType?: CliAgentType;
   agentSessionId?: string;
   hasClaudeSessionId?: boolean;
 } | undefined {

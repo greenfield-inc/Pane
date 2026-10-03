@@ -5,6 +5,7 @@ import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
+import { cliAgentSchema, CLI_AGENTS, CLI_AGENT_LABELS } from '../../../shared/types/cli-agent';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { withLock } from '../utils/mutex';
@@ -47,7 +48,6 @@ import {
   DEFAULT_PANE_CHAT_AGENT,
   getPaneChatPanelId,
   normalizePaneChatAgent,
-  PANE_CHAT_AGENT_LABELS,
   PANE_CHAT_SESSION_ID,
   type PaneChatAgent,
 } from '../../../shared/types/paneChat';
@@ -60,7 +60,6 @@ import { readPanelAgentReport } from './agentReport';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 2;
@@ -601,7 +600,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
           prepareSessionWorkspace(record.id, record.profile, record);
         }
-        for (const agent of PANE_CHAT_AGENTS) {
+        for (const agent of CLI_AGENTS) {
           const panel = panelManager.getPanel(record.panelIds[agent]);
           if (panel) {
             // Inactive agents retain their own command and transcript identity.
@@ -667,7 +666,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     // get independent owners; persisted IDs make interrupted moves retryable.
     if (record.internalSessionId === PANE_CHAT_SESSION_ID) return;
     this.createInternalSession(record);
-    if (!PANE_CHAT_AGENTS.some(agent => record.id === getLegacyAgentSessionId(agent))) return;
+    if (!CLI_AGENTS.some(agent => record.id === getLegacyAgentSessionId(agent))) return;
     for (const panelId of Object.values(record.panelIds)) {
       const panel = panelManager.getPanel(panelId);
       if (panel?.sessionId === PANE_CHAT_SESSION_ID) {
@@ -690,7 +689,7 @@ export class OrchestrationSessionManager extends EventEmitter {
 
     // Fresh upgrades retain all fixed agent panels in one Session. Only repair
     // supplemental rows written by older versions; never create new ones.
-    for (const agent of PANE_CHAT_AGENTS) {
+    for (const agent of CLI_AGENTS) {
       const imported = sessions.find(session => session.id === getLegacyAgentSessionId(agent));
       if (!imported || imported.internalSessionId !== PANE_CHAT_SESSION_ID) continue;
       if (canReuniteLegacySession(legacy, imported, agent)) {
@@ -937,7 +936,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       : association.panelIds.map(panelId => panelManager.getPanel(panelId)).filter((panel): panel is ToolPanel => panel !== undefined);
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
-        agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+        agentType: boundary.optional(cliAgentSchema),
         isInitialized: boundary.optional(boundary.boolean),
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
@@ -1106,7 +1105,7 @@ function canReuniteLegacySession(
 ): boolean {
   // Be conservative: even unrecognized files/settings may represent user work.
   // Retain such rows as isolated Sessions rather than silently merging content.
-  const defaultName = `${legacy.name} · ${PANE_CHAT_AGENT_LABELS[agent]}`;
+  const defaultName = `${legacy.name} · ${CLI_AGENT_LABELS[agent]}`;
   if (imported.revision !== 1 || imported.name !== defaultName || imported.agent !== agent
     || imported.archived !== legacy.archived || imported.isPinned !== legacy.isPinned
     || imported.launchCommand || (imported.profile && imported.profile !== DEFAULT_SESSION_PROFILE)
@@ -1120,7 +1119,7 @@ function canReuniteLegacySession(
   if (original && (original.sessionId !== PANE_CHAT_SESSION_ID
     || terminalPanelManager.isTerminalInitialized(original.id))) return false;
   if (legacy.panelIds[agent] !== imported.panelIds[agent] && panelManager.getPanel(legacy.panelIds[agent])) return false;
-  return PANE_CHAT_AGENTS.every(other => other === agent || !panelManager.getPanel(imported.panelIds[other]));
+  return CLI_AGENTS.every(other => other === agent || !panelManager.getPanel(imported.panelIds[other]));
 }
 
 function validateAssociationInput(input: OrchestrationAssociationInput): void {
