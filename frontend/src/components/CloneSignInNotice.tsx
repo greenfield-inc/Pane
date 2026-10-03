@@ -17,6 +17,7 @@ export function CloneSignInNotice({ host, overSsh, retrying, onOpenTerminal, onT
       <div className="space-y-1 text-sm">
         <p className="font-semibold text-text-primary">{host} isn't signed in to GitHub.</p>
         <p className="text-text-secondary">Sign in on {host}, then try again.</p>
+        <p className="text-text-secondary">Open github.com/login/device on your computer, enter the code, and wait here.</p>
         {overSsh && <p className="text-text-secondary">This is an SSH URL; after signing in, use the HTTPS URL instead.</p>}
       </div>
       <div className="flex flex-wrap gap-2">

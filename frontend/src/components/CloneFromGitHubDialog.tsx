@@ -14,8 +14,12 @@ import { openHostTerminal } from '../utils/hostTerminal';
 import { CloneSignInNotice } from './CloneSignInNotice';
 import { GIT_CLONE_AUTH_REQUIRED } from '../../../shared/types/gitClone';
 
-/** Typed into the host terminal for the user to run; never submitted for them. */
-const GITHUB_SIGN_IN_COMMAND = 'gh auth login --web --git-protocol https && gh auth setup-git';
+/**
+ * Typed into the host terminal for the user to run; never submitted for them.
+ * BROWSER=false keeps gh from opening a browser on the host: it prints a
+ * one-time code for the user to enter on their own computer instead.
+ */
+const GITHUB_SIGN_IN_COMMAND = 'BROWSER=false gh auth login --web --git-protocol https && gh auth setup-git';
 
 interface CloneFromGitHubDialogProps {
   isOpen: boolean;

@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 
-const SIGN_IN_COMMAND = 'gh auth login --web --git-protocol https && gh auth setup-git';
+// BROWSER=false: gh must print its device code, never open a browser on the host.
+const SIGN_IN_COMMAND = 'BROWSER=false gh auth login --web --git-protocol https && gh auth setup-git';
+const DEVICE_HINT = 'Open github.com/login/device on your computer, enter the code, and wait here.';
 const REPO_URL = 'https://github.com/jamari-morrison/montlakev2';
 const LOCAL_HTTPS_MESSAGE = 'Authentication failed — check your credentials or use an SSH URL.';
 const SSH_URL = 'git@github.com:jamari-morrison/montlakev2.git';
@@ -89,6 +91,7 @@ test('a remote host that is not signed in offers its terminal, prefilled, and a 
   const notice = dialog.getByRole('alert');
   await expect(notice).toContainText("devbox isn't signed in to GitHub.");
   await expect(notice).toContainText('Sign in on devbox, then try again.');
+  await expect(notice.getByText(DEVICE_HINT, { exact: true })).toBeVisible();
   await expect(notice.getByRole('button')).toHaveText(['Open terminal on devbox to sign in', 'Try again']);
   await expect(dialog.getByText(LOCAL_HTTPS_MESSAGE)).toHaveCount(0);
   await expect(dialog.getByText(SSH_HINT)).toHaveCount(0);
@@ -129,6 +132,7 @@ test('this computer keeps the plain sign-in message', async ({ page }, testInfo)
   const dialog = await fillAndClone(page, '/tmp/pane-worktrees');
   await expect(dialog.getByText(LOCAL_HTTPS_MESSAGE)).toBeVisible();
   await expect(dialog.getByText(/isn't signed in to GitHub/)).toHaveCount(0);
+  await expect(dialog.getByText(DEVICE_HINT)).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: /Open terminal/ })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('local-https-message.png') });
@@ -170,6 +174,7 @@ for (const [failure, message] of SSH_FAILURES) {
     const notice = dialog.getByRole('alert');
     await expect(notice).toContainText("devbox isn't signed in to GitHub.");
     await expect(notice).toContainText('Sign in on devbox, then try again.');
+    await expect(notice.getByText(DEVICE_HINT, { exact: true })).toBeVisible();
     await expect(notice.getByText(SSH_HINT, { exact: true })).toBeVisible();
     await expect(notice.getByRole('button')).toHaveText(['Open terminal on devbox to sign in', 'Try again']);
     await page.screenshot({ path: testInfo.outputPath(`remote-ssh-${failure.replaceAll(' ', '-')}.png`) });
@@ -189,6 +194,7 @@ for (const [failure, message] of SSH_FAILURES) {
     const dialog = await fillAndClone(page, '/tmp/pane-worktrees', SSH_URL);
     await expect(dialog.getByText(message, { exact: true })).toBeVisible();
     await expect(dialog.getByText(SSH_HINT)).toHaveCount(0);
+    await expect(dialog.getByText(DEVICE_HINT)).toHaveCount(0);
     await expect(dialog.getByText(/isn't signed in to GitHub/)).toHaveCount(0);
   });
 }
