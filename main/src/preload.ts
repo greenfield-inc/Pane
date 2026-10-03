@@ -568,7 +568,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     detectBranch: (path: string): Promise<IPCResponse<string>> => invokeIpc('projects:detect-branch', path),
     cancelStatusForProject: (projectId: number): Promise<{ success: boolean; error?: string }> => invokeIpc('git:cancel-status-for-project', projectId),
     executeProject: (projectId: number, args: string[]): Promise<IPCResponse> => invokeIpc('git:execute-project', { projectId, args }),
-    cloneRepo: (url: string, destDir: string): Promise<IPCResponse> => invokeIpc('git:clone-repo', url, destDir),
+    cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }): Promise<IPCResponse> => invokeIpc('git:clone-repo', url, destDir, options),
   },
 
   // Folders

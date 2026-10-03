@@ -530,9 +530,9 @@ export class API {
 
   // Git operations
   static git = {
-    async cloneRepo(url: string, destDir: string) {
+    async cloneRepo(url: string, destDir: string, options?: { hostLabel?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.git.cloneRepo(url, destDir);
+      return window.electronAPI.git.cloneRepo(url, destDir, options);
     },
   };
 

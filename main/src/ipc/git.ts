@@ -15,6 +15,7 @@ import { getShellPath } from '../utils/shellPath';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
 import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import { registerGitDiffRequestHandlers } from './gitDiffRequests';
+import { hostPathFailure, resolveCloneDestination } from '../services/hostPaths';
 
 // Interface for generic error objects with git-related properties
 interface ErrorWithGitContext {
@@ -1807,9 +1808,19 @@ export function registerGitHandlers(
     }
   });
 
-  commandRegistry.register('git:clone-repo', async (url: string, destDir: string) => {
+  commandRegistry.register('git:clone-repo', async (url: string, requestedDestDir?: string, options?: { hostLabel?: string }) => {
     if (!isValidGitUrl(url)) {
       return { success: false, error: 'Invalid repository URL. Use https:// or git@ format.' };
+    }
+
+    // The destination is a folder on this host; it defaults to the home folder.
+    let destDir: string;
+    try {
+      destDir = resolveCloneDestination(requestedDestDir, { hostLabel: options?.hostLabel });
+    } catch (error) {
+      const pathFailure = hostPathFailure(error);
+      if (pathFailure) return pathFailure;
+      throw error;
     }
 
     const repoName = extractRepoName(url);

@@ -130,6 +130,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'file:write',
   'file:write-binary',
   'file:write-project',
+  'fs:browse-directories',
+  'fs:create-directory',
 ] as const;
 
 export const ELECTRON_ADAPTER_ONLY_CHANNELS = [

@@ -1,0 +1,205 @@
+import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { formatWindowsPathOnPosixHostError } from '../../../shared/types/hostPaths';
+import {
+  assertPathOnHost,
+  browseHostDirectories,
+  createHostDirectory,
+  HostPathError,
+  resolveCloneDestination,
+  validateHostProjectPath,
+} from './hostPaths';
+
+let home: string;
+const linuxHost = () => ({ platform: 'linux' as const, homeDir: home, hostLabel: 'testina' });
+
+beforeEach(async () => {
+  home = await mkdtemp(path.join(os.tmpdir(), 'pane-host-paths-'));
+  await mkdir(path.join(home, 'repo', '.git'), { recursive: true });
+  await mkdir(path.join(home, 'Notes'));
+  await mkdir(path.join(home, '.config'));
+  await writeFile(path.join(home, 'file.txt'), 'not a folder');
+});
+
+afterEach(async () => {
+  await chmod(home, 0o700).catch(() => {});
+  await rm(home, { recursive: true, force: true });
+});
+
+async function expectHostPathError<Result>(promise: Promise<Result>, code: string, message?: string): Promise<void> {
+  await expect(promise).rejects.toBeInstanceOf(HostPathError);
+  await expect(promise).rejects.toMatchObject(message === undefined ? { code } : { code, message });
+}
+
+describe('browseHostDirectories', () => {
+  it('opens at the host home and lists subfolders with git and hidden flags', async () => {
+    const result = await browseHostDirectories({}, linuxHost());
+
+    expect(result.path).toBe(home);
+    expect(result.home).toBe(home);
+    expect(result.parent).toBe(path.dirname(home));
+    expect(result.platform).toBe('linux');
+    expect(result.entries).toEqual([
+      { name: '.config', path: path.join(home, '.config'), isGitRepo: false, isHidden: true },
+      { name: 'Notes', path: path.join(home, 'Notes'), isGitRepo: false, isHidden: false },
+      { name: 'repo', path: path.join(home, 'repo'), isGitRepo: true, isHidden: false },
+    ]);
+  });
+
+  it('expands ~ paths on the host, hides dot folders on request and can go up', async () => {
+    await expect(browseHostDirectories({ path: '~' }, linuxHost())).resolves.toMatchObject({ path: home });
+
+    const visible = await browseHostDirectories({ path: '~/', showHidden: false }, linuxHost());
+    expect(visible.entries.map(entry => entry.name)).toEqual(['Notes', 'repo']);
+
+    const repo = await browseHostDirectories({ path: '~/repo' }, linuxHost());
+    expect(repo.path).toBe(path.join(home, 'repo'));
+    expect(repo.parent).toBe(home);
+    expect(repo.entries).toEqual([
+      { name: '.git', path: path.join(home, 'repo', '.git'), isGitRepo: false, isHidden: true },
+    ]);
+
+    const up = await browseHostDirectories({ path: repo.parent ?? '' }, linuxHost());
+    expect(up.path).toBe(home);
+  });
+
+  it('reports a null parent at the filesystem root', async () => {
+    const result = await browseHostDirectories({ path: '/' }, linuxHost());
+    expect(result.parent).toBeNull();
+  });
+
+  it('returns structured errors for missing paths, files and unreadable folders', async () => {
+    await expectHostPathError(browseHostDirectories({ path: '~/missing' }, linuxHost()), 'NOT_FOUND');
+    await expectHostPathError(browseHostDirectories({ path: '~/file.txt' }, linuxHost()), 'NOT_A_DIRECTORY');
+
+    if (process.getuid?.() !== 0) {
+      await chmod(path.join(home, 'Notes'), 0o000);
+      await expectHostPathError(
+        browseHostDirectories({ path: '~/Notes' }, linuxHost()),
+        'PERMISSION_DENIED',
+        `Permission denied: ${path.join(home, 'Notes')}`,
+      );
+      await chmod(path.join(home, 'Notes'), 0o700);
+    }
+  });
+
+  it('rejects a Windows path on a POSIX host with the host name', async () => {
+    await expectHostPathError(
+      browseHostDirectories({ path: 'C:\\Users\\me' }, linuxHost()),
+      'WINDOWS_PATH_ON_POSIX_HOST',
+      "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+    );
+  });
+});
+
+describe('assertPathOnHost', () => {
+  it.each([
+    'C:\\runpane-temp-home\\montlakev2',
+    'C:/Users/me/repo',
+    'D:',
+    '\\\\wsl$\\Ubuntu\\home\\user',
+    'repos\\montlakev2',
+  ])('rejects %s on a Linux host', input => {
+    expect(() => assertPathOnHost(input, linuxHost())).toThrow(
+      new HostPathError(
+        'WINDOWS_PATH_ON_POSIX_HOST',
+        "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+      ),
+    );
+  });
+
+  it('names macOS hosts and falls back to the machine name without a label', () => {
+    expect(() => assertPathOnHost('C:\\x', { platform: 'darwin', hostLabel: 'mini' })).toThrow(
+      "That's a path on this computer; mini is a macOS host. Pick a folder on mini.",
+    );
+    expect(() => assertPathOnHost('C:\\x', { platform: 'linux' })).toThrow(
+      formatWindowsPathOnPosixHostError(os.hostname()),
+    );
+  });
+
+  it('allows POSIX paths on POSIX hosts and Windows paths on Windows hosts', () => {
+    expect(() => assertPathOnHost('/home/user/repo', linuxHost())).not.toThrow();
+    expect(() => assertPathOnHost('~/repo', linuxHost())).not.toThrow();
+    expect(() => assertPathOnHost('C:\\Users\\me\\repo', { platform: 'win32' })).not.toThrow();
+    expect(() => assertPathOnHost('\\\\wsl$\\Ubuntu\\home\\user', { platform: 'win32' })).not.toThrow();
+  });
+});
+
+describe('createHostDirectory', () => {
+  it('creates one new folder under the parent', async () => {
+    const result = await createHostDirectory({ parent: '~', name: 'montlakev2' }, linuxHost());
+
+    expect(result).toEqual({ path: path.join(home, 'montlakev2') });
+    expect(existsSync(path.join(home, 'montlakev2'))).toBe(true);
+  });
+
+  it.each(['', ' ', '.', '..', 'a/b', 'a\\b'])('rejects the folder name %j', async name => {
+    await expectHostPathError(createHostDirectory({ parent: home, name }, linuxHost()), 'INVALID_NAME');
+  });
+
+  it('reports existing folders, missing parents and Windows parents', async () => {
+    await expectHostPathError(createHostDirectory({ parent: home, name: 'Notes' }, linuxHost()), 'ALREADY_EXISTS');
+    await expectHostPathError(createHostDirectory({ parent: '~/missing', name: 'x' }, linuxHost()), 'NOT_FOUND');
+    await expectHostPathError(createHostDirectory({ parent: 'C:\\x', name: 'x' }, linuxHost()), 'WINDOWS_PATH_ON_POSIX_HOST');
+  });
+});
+
+describe('validateHostProjectPath', () => {
+  it('accepts an existing repo for open', async () => {
+    await expect(validateHostProjectPath({ path: '~/repo', mode: 'open' }, linuxHost(), async () => true))
+      .resolves.toEqual({ path: path.join(home, 'repo'), isGitRepo: true });
+  });
+
+  it('rejects open on a missing path, a file or a non-repo, without creating anything', async () => {
+    const before = await readdir(home);
+    const isRepo = async () => false;
+
+    await expectHostPathError(validateHostProjectPath({ path: '~/missing', mode: 'open' }, linuxHost(), isRepo), 'NOT_FOUND');
+    await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'open' }, linuxHost(), isRepo), 'NOT_A_DIRECTORY');
+    await expectHostPathError(validateHostProjectPath({ path: '~/Notes', mode: 'open' }, linuxHost(), isRepo), 'NOT_A_GIT_REPO');
+
+    expect(await readdir(home)).toEqual(before);
+    expect(existsSync(path.join(home, 'Notes', '.git'))).toBe(false);
+  });
+
+  it('accepts a missing or existing folder for new, but not a file', async () => {
+    const isRepo = async () => false;
+    await expect(validateHostProjectPath({ path: '~/fresh', mode: 'new' }, linuxHost(), isRepo))
+      .resolves.toEqual({ path: path.join(home, 'fresh'), isGitRepo: false });
+    await expect(validateHostProjectPath({ path: '~/Notes', mode: 'new' }, linuxHost(), isRepo))
+      .resolves.toEqual({ path: path.join(home, 'Notes'), isGitRepo: false });
+    await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'new' }, linuxHost(), isRepo), 'NOT_A_DIRECTORY');
+    expect(existsSync(path.join(home, 'fresh'))).toBe(false);
+  });
+
+  it('rejects Windows paths in both modes on a POSIX host', async () => {
+    for (const mode of ['open', 'new'] as const) {
+      await expectHostPathError(
+        validateHostProjectPath({ path: 'C:\\runpane-temp-home\\montlakev2', mode }, linuxHost(), async () => true),
+        'WINDOWS_PATH_ON_POSIX_HOST',
+      );
+    }
+  });
+});
+
+describe('resolveCloneDestination', () => {
+  it('defaults to the host home', () => {
+    expect(resolveCloneDestination(undefined, linuxHost())).toBe(home);
+    expect(resolveCloneDestination('', linuxHost())).toBe(home);
+    expect(resolveCloneDestination('~', linuxHost())).toBe(home);
+  });
+
+  it('expands ~ on the host and keeps absolute host paths', () => {
+    expect(resolveCloneDestination('~/src', linuxHost())).toBe(path.join(home, 'src'));
+    expect(resolveCloneDestination('/srv/repos', linuxHost())).toBe('/srv/repos');
+  });
+
+  it('rejects a Windows destination on a POSIX host', () => {
+    expect(() => resolveCloneDestination('C:\\runpane-temp-home', linuxHost())).toThrow(
+      "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+    );
+  });
+});

@@ -309,7 +309,7 @@ interface ElectronAPI {
     detectBranch: (path: string) => Promise<IPCResponse<string>>;
     cancelStatusForProject: (projectId: number) => Promise<{ success: boolean; error?: string }>;
     executeProject: (projectId: number, args: string[]) => Promise<IPCResponse>;
-    cloneRepo: (url: string, destDir: string) => Promise<IPCResponse<{ clonedPath: string; repoName: string }>>;
+    cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }) => Promise<IPCResponse<{ clonedPath: string; repoName: string }>>;
   };
 
   // Folders
