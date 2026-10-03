@@ -64,7 +64,12 @@ Agent status (working, idle, blocked) is derived in
   `PANE_DIR` overrides it (`main/src/utils/appDirectory.ts`).
 - `sessions.db` is SQLite in WAL mode. The base schema is
   `main/src/database/schema.sql`; later changes are inline migrations in
-  `main/src/database/database.ts` that run at startup.
+  `main/src/database/database.ts` that run at startup. These guarded upgrades inspect
+  the existing schema (for example with `PRAGMA table_info` and `sqlite_master`);
+  there is no migration-version table or numbered SQL-file runner. For schema
+  changes, update the fresh-install schema and the guarded `runMigrations()`
+  upgrade, preserving ordering across table rebuilds. Verify fresh and older
+  databases in isolated tests; a standalone SQL file does not run an upgrade.
 - `config.json` holds app settings (`main/src/services/configManager.ts`,
   types in `main/src/types/config.ts`).
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
