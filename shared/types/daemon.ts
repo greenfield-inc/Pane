@@ -94,6 +94,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'prompts:',
   'resource-monitor:',
   'runpane:',
+  'schedules:',
   'sessions:',
   'terminal:',
   'usage:',

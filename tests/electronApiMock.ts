@@ -9,6 +9,7 @@ import type {
   RemotePaneConnectionState,
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
+import type { ScheduledRun, ScheduledRunInput } from '../shared/types/schedule';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
@@ -38,6 +39,7 @@ type ElectronApiMockOptions = {
   mainAnalyticsEvents?: AnalyticsMainEvent[];
   initialProjects?: JsonObject[];
   initialSessions?: JsonObject[];
+  initialSchedules?: ScheduledRun[];
   initialPanels?: JsonObject[];
   initialUiState?: Partial<{
     expandedProjects: number[];
@@ -230,6 +232,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
+    let mockSchedules = clone(mockOptions.initialSchedules ?? []);
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
     const mockLayouts = new Map<string, unknown>();
@@ -803,6 +806,50 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         startActive: () => success(),
         stopActive: () => success(),
       }),
+      schedules: namespace({
+        list: (projectId?: number) => success(clone(
+          mockSchedules.filter((schedule) => projectId === undefined || schedule.projectId === projectId),
+        )),
+        save: (input: ScheduledRunInput) => {
+          const existingIndex = input.id
+            ? mockSchedules.findIndex((schedule) => schedule.id === input.id)
+            : -1;
+          const existing = existingIndex >= 0 ? mockSchedules[existingIndex] : undefined;
+          const schedule: ScheduledRun = {
+            ...input,
+            id: input.id ?? `schedule-${mockSchedules.length + 1}`,
+            lastRunAtMs: existing?.lastRunAtMs ?? null,
+            lastRunStatus: existing?.lastRunStatus ?? null,
+            lastRunError: existing?.lastRunError ?? null,
+            lastSessionId: existing?.lastSessionId ?? null,
+            nextRunAtMs: input.enabled ? Date.now() + 60 * 60_000 : null,
+            createdAtMs: existing?.createdAtMs ?? Date.now(),
+          };
+          if (existingIndex >= 0) mockSchedules[existingIndex] = schedule;
+          else mockSchedules.push(schedule);
+          return success(clone(schedule));
+        },
+        delete: (id: string) => {
+          mockSchedules = mockSchedules.filter((schedule) => schedule.id !== id);
+          return success();
+        },
+        setEnabled: (id: string, enabled: boolean) => {
+          const schedule = mockSchedules.find((candidate) => candidate.id === id);
+          if (!schedule) return Promise.resolve({ success: false, error: 'Schedule not found' });
+          schedule.enabled = enabled;
+          schedule.nextRunAtMs = enabled ? Date.now() + 60 * 60_000 : null;
+          return success(clone(schedule));
+        },
+        runNow: (id: string) => {
+          const schedule = mockSchedules.find((candidate) => candidate.id === id);
+          if (!schedule) return Promise.resolve({ success: false, error: 'Schedule not found' });
+          schedule.lastRunAtMs = Date.now();
+          schedule.lastRunStatus = 'ok';
+          schedule.lastRunError = null;
+          schedule.lastSessionId = 'scheduled-session-1';
+          return success(clone(schedule));
+        },
+      }),
       sessions: namespace({
         getOrCreateMainRepoSession: async (projectId: number) => {
           const delayMs = mockOptions.mainRepoSessionDelayByProjectId?.[projectId] ?? 0;
@@ -1220,6 +1267,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionsReadCount() {
           return sessionsGetCount;
+        },
+        getSchedules() {
+          return clone(mockSchedules);
         },
         getSessionDeleteCalls() {
           return clone(sessionDeleteCalls);

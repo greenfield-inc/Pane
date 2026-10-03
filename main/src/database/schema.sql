@@ -113,6 +113,33 @@ CREATE TABLE IF NOT EXISTS usage_rate_limits (
   PRIMARY KEY (provider, limit_id, scope)
 );
 
+-- Recurring agent runs. Each row creates one session when it comes due. The
+-- schedule is three shapes rather than cron syntax, so the UI can state it in
+-- a sentence. NOTE this file is split on the statement separator at startup,
+-- so a comment must never contain one.
+CREATE TABLE IF NOT EXISTS scheduled_runs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  project_id INTEGER NOT NULL,
+  prompt TEXT NOT NULL,
+  tool_type TEXT NOT NULL DEFAULT 'claude',
+  worktree_template TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL,
+  interval_minutes INTEGER,
+  time_of_day TEXT,
+  weekday INTEGER,
+  last_run_at_ms INTEGER,
+  last_run_status TEXT,
+  last_run_error TEXT,
+  last_session_id TEXT,
+  next_run_at_ms INTEGER,
+  created_at_ms INTEGER NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_runs_next ON scheduled_runs(enabled, next_run_at_ms);
+
 -- Index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts ON usage_events(timestamp_ms);
 CREATE INDEX IF NOT EXISTS idx_usage_events_model_ts ON usage_events(model, timestamp_ms);

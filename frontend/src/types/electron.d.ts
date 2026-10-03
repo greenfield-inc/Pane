@@ -51,6 +51,7 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
+import type { ScheduledRun, ScheduledRunInput } from '../../../shared/types/schedule';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
@@ -183,6 +184,14 @@ interface ElectronAPI {
     shareImage: (data: string, filename: string) => Promise<IPCResponse<{ method: 'share' | 'clipboard' }>>;
   };
 
+  // Recurring agent runs
+  schedules: {
+    list: (projectId?: number) => Promise<IPCResponse<ScheduledRun[]>>;
+    save: (input: ScheduledRunInput) => Promise<IPCResponse<ScheduledRun>>;
+    delete: (id: string) => Promise<IPCResponse<void>>;
+    setEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<ScheduledRun>>;
+    runNow: (id: string) => Promise<IPCResponse<ScheduledRun>>;
+  };
   // Session management
   sessions: {
     getAll: () => Promise<IPCResponse>;

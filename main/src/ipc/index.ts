@@ -29,6 +29,7 @@ import { registerPaneChatHandlers } from './paneChat';
 import { registerUsageHandlers } from './usage';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
+import { registerScheduleHandlers } from './schedule';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerPermissionHandlers } from './permissions';
 import { registerAgentUsageHandlers } from './agentUsage';
@@ -106,6 +107,9 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  // Started here rather than in index.ts: the manager only exists once its
+  // handlers are registered, and it needs the task queue they close over.
+  registerScheduleHandlers(ipcMain, services, commandRegistry).start();
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);
 

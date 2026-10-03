@@ -1,3 +1,4 @@
+import { registerUsageHandlers } from './usage';
 import { describe, expect, it, vi } from 'vitest';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
@@ -15,7 +16,7 @@ import { registerPromptHandlers } from './prompt';
 import { registerScriptHandlers } from './script';
 import { registerSessionHandlers } from './session';
 import { registerVoiceHandlers } from './voice';
-import { registerUsageHandlers } from './usage';
+import { registerScheduleHandlers } from './schedule';
 import type { AppServices } from './types';
 import { isDaemonOwnedChannel } from '../../../shared/types/daemon';
 
@@ -23,6 +24,13 @@ const USAGE_CHANNELS = [
   'usage:get-report',
   'usage:get-status',
   'usage:rescan',
+] as const;
+const SCHEDULE_CHANNELS = [
+  'schedules:list',
+  'schedules:save',
+  'schedules:delete',
+  'schedules:set-enabled',
+  'schedules:run-now',
 ] as const;
 const PROJECT_CHANNELS = [
   'projects:get-all',
@@ -382,6 +390,15 @@ describe('daemon registry IPC bindings', () => {
     expect(ipcMain.boundChannels.sort()).toEqual([...USAGE_CHANNELS].sort());
   });
 
+  it('binds daemon-owned schedule channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    registerScheduleHandlers(ipcMain, createServicesStub(), registry);
+
+    expect(registry.listChannels()).toEqual([...SCHEDULE_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...SCHEDULE_CHANNELS].sort());
+  });
   it('binds daemon-owned prompt channels through the shared registry', () => {
     const registry = new PaneCommandRegistry();
     const ipcMain = createIpcMainStub();
