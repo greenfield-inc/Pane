@@ -2,21 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { GIT_CLONE_AUTH_REQUIRED } from '../../../shared/types/gitClone';
 import { classifyGitCloneFailure, describeGitCloneFailure } from './gitCloneFailure';
 
-const command = 'Command failed: git clone "https://github.com/jamari-morrison/montlakev2" "/home/user/montlakev2"\n';
+const command = 'Command failed: git clone "https://github.com/octocat/Hello-World" "/home/user/Hello-World"\n';
 
 // stderr as git 2.43 prints it on a fresh Ubuntu 24.04 host with no credentials (measured 2026-10-03).
-const httpsNoCredentials = `${command}Cloning into '/home/user/montlakev2'...\nfatal: could not read Username for 'https://github.com': No such device or address\n`;
-const sshUnknownHostKey = 'Command failed: git clone "git@github.com:jamari-morrison/montlakev2.git" "/home/user/montlakev2"\n'
-  + "Cloning into '/home/user/montlakev2'...\nHost key verification failed.\r\nfatal: Could not read from remote repository.\n\n"
+const httpsNoCredentials = `${command}Cloning into '/home/user/Hello-World'...\nfatal: could not read Username for 'https://github.com': No such device or address\n`;
+const sshUnknownHostKey = 'Command failed: git clone "git@github.com:octocat/Hello-World.git" "/home/user/Hello-World"\n'
+  + "Cloning into '/home/user/Hello-World'...\nHost key verification failed.\r\nfatal: Could not read from remote repository.\n\n"
   + 'Please make sure you have the correct access rights\nand the repository exists.\n';
-const sshNoKey = 'Command failed: git clone "git@github.com:jamari-morrison/montlakev2.git" "/home/user/montlakev2"\n'
-  + "Cloning into '/home/user/montlakev2'...\ngit@github.com: Permission denied (publickey).\r\nfatal: Could not read from remote repository.\n\n"
+const sshNoKey = 'Command failed: git clone "git@github.com:octocat/Hello-World.git" "/home/user/Hello-World"\n'
+  + "Cloning into '/home/user/Hello-World'...\ngit@github.com: Permission denied (publickey).\r\nfatal: Could not read from remote repository.\n\n"
   + 'Please make sure you have the correct access rights\nand the repository exists.\n';
-const httpsBadToken = `${command}Cloning into '/home/user/montlakev2'...\nremote: Invalid username or token. Password authentication is not supported for Git operations.\nfatal: Authentication failed for 'https://github.com/jamari-morrison/montlakev2/'\n`;
-const httpsForbidden = `${command}Cloning into '/home/user/montlakev2'...\nremote: Permission to jamari-morrison/montlakev2.git denied to someone.\nfatal: unable to access 'https://github.com/jamari-morrison/montlakev2/': The requested URL returned error: 403\n`;
-const notFound = `${command}Cloning into '/home/user/montlakev2'...\nremote: Repository not found.\nfatal: repository 'https://github.com/jamari-morrison/montlakev2/' not found\n`;
-const offline = `${command}Cloning into '/home/user/montlakev2'...\nfatal: unable to access 'https://github.com/jamari-morrison/montlakev2/': Could not resolve host: github.com\n`;
-const diskFull = `${command}Cloning into '/home/user/montlakev2'...\nfatal: write error: No space left on device\nfatal: fetch-pack: invalid index-pack output\n`;
+const httpsBadToken = `${command}Cloning into '/home/user/Hello-World'...\nremote: Invalid username or token. Password authentication is not supported for Git operations.\nfatal: Authentication failed for 'https://github.com/octocat/Hello-World/'\n`;
+const httpsForbidden = `${command}Cloning into '/home/user/Hello-World'...\nremote: Permission to octocat/Hello-World.git denied to someone.\nfatal: unable to access 'https://github.com/octocat/Hello-World/': The requested URL returned error: 403\n`;
+const notFound = `${command}Cloning into '/home/user/Hello-World'...\nremote: Repository not found.\nfatal: repository 'https://github.com/octocat/Hello-World/' not found\n`;
+const offline = `${command}Cloning into '/home/user/Hello-World'...\nfatal: unable to access 'https://github.com/octocat/Hello-World/': Could not resolve host: github.com\n`;
+const diskFull = `${command}Cloning into '/home/user/Hello-World'...\nfatal: write error: No space left on device\nfatal: fetch-pack: invalid index-pack output\n`;
 
 describe('classifyGitCloneFailure', () => {
   it.each([
