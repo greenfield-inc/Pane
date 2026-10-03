@@ -108,6 +108,7 @@ test('Clone on a cloud sandbox browses the sandbox, not this computer, and clone
 
   expect(await invokeCalls(page, 'dialog:open-directory')).toEqual([]);
   expect((await invokeCalls(page, 'fs:browse-directories')).every((call) => (
+    // SAFETY: fs:browse-directories takes one BrowseDirectoriesRequest, per shared/types/hostPaths.ts.
     (call.args[0] as { hostLabel?: string }).hostLabel === 'testina'
   ))).toBe(true);
   expect(await invokeCalls(page, 'git:clone-repo')).toEqual([{
