@@ -108,6 +108,8 @@ export type ElectronApiMockOptions = {
   sshSessionReadFailures?: number;
   /** Hold each SSH open until releaseSshOpens() answers it. */
   holdSshOpens?: boolean;
+  /** host-terminal:open fails with this message. */
+  hostTerminalOpenError?: string;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
@@ -1197,6 +1199,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           const calls = invokeCalls.get('host-terminal:open') ?? [];
           calls.push({ channel: 'host-terminal:open', args: [request] });
           invokeCalls.set('host-terminal:open', calls);
+          if (mockOptions.hostTerminalOpenError) return Promise.resolve({ success: false, error: mockOptions.hostTerminalOpenError });
           return success(createHostTerminalState());
         },
       }),
