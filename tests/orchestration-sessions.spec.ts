@@ -63,6 +63,8 @@ type UiSessionFixture = {
 };
 
 type SessionFixtureOptions = {
+  projects?: JsonObject[];
+  activeProjectId?: number;
   distributions?: string[];
   listDelayMs?: number;
   getDelayMs?: number;
@@ -154,7 +156,8 @@ async function installSessionsFixture(
 ): Promise<void> {
   await installElectronApiMock(page, {
     initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', ...fixtureOptions.initialConfig },
-    initialProjects: [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
+    initialProjects: fixtureOptions.projects ?? [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
+    activeProjectId: fixtureOptions.activeProjectId,
     initialSessions: paneSessions,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
@@ -1795,4 +1798,104 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
   await expect(page.getByTestId('session-workspace-tabs')).toHaveCount(1);
   await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
   await expect(page.getByTestId('orchestration-session-beta')).toBeVisible();
+});
+
+test('New offers Session and Pane, keeps one dialog, and restores keyboard focus', async ({ page }) => {
+  await installSessionsFixture(page, []);
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  const newButton = page.getByRole('button', { name: 'New', exact: true });
+  await newButton.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Close modal', exact: true })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await expect(dialog.getByText('An agent that directs work across Panes.', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('A workspace for one piece of work.', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Create Session', exact: false }).click();
+  await expect(dialog.getByLabel('Name your chat (optional)')).toBeFocused();
+  await expect(dialog.getByLabel('Run agent in')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Create Session', exact: false })).toBeFocused();
+  await dialog.getByRole('button', { name: 'Create Pane', exact: false }).click();
+  await expect(dialog.getByLabel('Repository', { exact: true })).toHaveValue('1');
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(newButton).toBeFocused();
+  await page.getByTestId('new-project').click();
+  await expect(page.getByRole('dialog').getByText('Add New Repository')).toBeVisible();
+});
+
+test('New creates a Session with its selected WSL runtime and agent', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04'] });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'Create Session An agent' }).click();
+  await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
+  await page.getByTestId('create-session-agent-cursor').click();
+  await page.getByLabel('Name your chat (optional)').fill('Coordinate new work');
+  await page.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Coordinate new work', exact: true })).toBeAttached();
+  const result = await page.evaluate(() => window.electronAPI.orchestrationSessions.list());
+  expect(result.data?.sessions.find(session => session.name === 'Coordinate new work')).toMatchObject({ agent: 'cursor', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
+});
+
+test('New defaults to the active repository and creates a Pane from the changed repository branch', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { projects: [
+    { id: 1, name: 'First repository', path: '/tmp/first' },
+    { id: 2, name: 'Active repository', path: '/tmp/active' },
+  ], activeProjectId: 2 });
+  await page.addInitScript(() => {
+    window.electronAPI.projects.listBranches = async projectId => ({ success: true, data: [{ name: projectId === '1' ? 'origin/other' : 'origin/main', isCurrent: true, hasWorktree: false, isRemote: true }] });
+    window.electronAPI.sessions.create = async request => {
+      localStorage.setItem('__newPaneRequest', JSON.stringify(request));
+      return { success: true, data: [] };
+    };
+  });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('2');
+  await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/main');
+  await page.getByLabel('Repository', { exact: true }).selectOption('1');
+  await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/other');
+  await page.locator('#worktreeTemplate').fill('unified-new');
+  await page.getByRole('button', { name: /^Create/ }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const request: unknown = await page.evaluate(() => JSON.parse(localStorage.getItem('__newPaneRequest') ?? 'null'));
+  expect(request).toMatchObject({ projectId: 1, baseBranch: 'origin/other', worktreeTemplate: 'unified-new', toolType: 'none', isMainRepo: false });
+});
+
+test('New explains the missing repository and remains available from the compact rail', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { projects: [] });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  const newButton = page.getByRole('button', { name: 'New', exact: true });
+  await newButton.click();
+  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await expect(page.getByText('A Pane needs a repository. Add one with the + beside Projects.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Create/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Create Pane A workspace' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(newButton).toBeFocused();
+});
+
+test('New can show Session settings when an older host has no Session API', async ({ page }) => {
+  await installElectronApiMock(page);
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'Create Session An agent' }).click();
+  await expect(page.getByLabel('Name your chat (optional)')).toBeVisible();
+  await expect(page.getByLabel('Run agent in')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('This host does not support Sessions.');
 });

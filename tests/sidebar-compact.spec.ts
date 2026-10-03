@@ -55,7 +55,7 @@ async function collapseSidebar(page: Page) {
 }
 
 test.describe('compact sidebar', () => {
-  test('opens new projects from the inline plus and the prominent button', async ({ page }) => {
+  test('keeps Projects + direct while the top New button opens the chooser', async ({ page }) => {
     await installElectronApiMock(page, {
       initialProjects: projects,
       initialConfig: { theme: 'night-owl' },
@@ -83,8 +83,9 @@ test.describe('compact sidebar', () => {
     await addProject.click();
     await expect(dialog).toBeVisible();
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'New project', exact: true }).filter({ hasText: 'New project' }).click();
-    await expect(dialog).toBeVisible();
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'New', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create Pane A workspace' })).toBeVisible();
   });
 
   for (const titleBar of [true, false]) {

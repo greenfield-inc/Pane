@@ -22,6 +22,10 @@ interface BranchInfo {
 }
 
 interface CreateSessionDialogProps {
+  onSubmittingChange?: (submitting: boolean) => void;
+  header?: React.ReactNode;
+  repositoryPicker?: React.ReactNode;
+  onBranchDropdownOpenChange?: (open: boolean) => void;
   isOpen: boolean;
   onClose: () => void;
   projectName?: string;
@@ -33,7 +37,18 @@ interface CreateSessionDialogProps {
   onSessionCreated?: () => void;
 }
 
-export function CreateSessionDialog({
+export function CreateSessionDialog(props: CreateSessionDialogProps) {
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  return <Modal isOpen={props.isOpen} onClose={props.onClose} size="lg" closeOnOverlayClick={false} closeOnEscape={!branchDropdownOpen}>
+    <CreatePaneForm {...props} onBranchDropdownOpenChange={setBranchDropdownOpen} />
+  </Modal>;
+}
+
+export function CreatePaneForm({
+  onSubmittingChange,
+  header,
+  repositoryPicker,
+  onBranchDropdownOpenChange,
   isOpen,
   onClose,
   projectName,
@@ -55,6 +70,10 @@ export function CreateSessionDialog({
     baseBranch: initialBaseBranch
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  useEffect(() => {
+    onSubmittingChange?.(isSubmitting);
+    return () => onSubmittingChange?.(false);
+  }, [isSubmitting, onSubmittingChange]);
 
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [branchesProjectId, setBranchesProjectId] = useState<number | null>(null);
@@ -66,6 +85,10 @@ export function CreateSessionDialog({
   const [branchSearch, setBranchSearch] = useState('');
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [highlightedBranchIndex, setHighlightedBranchIndex] = useState(0);
+  useEffect(() => {
+    onBranchDropdownOpenChange?.(isBranchDropdownOpen);
+    return () => onBranchDropdownOpenChange?.(false);
+  }, [isBranchDropdownOpen, onBranchDropdownOpenChange]);
   const [userEditedName, setUserEditedName] = useState(false);
   const userEditedNameRef = useRef(false);
   const branchDropdownRef = useRef<HTMLDivElement>(null);
@@ -308,7 +331,7 @@ export function CreateSessionDialog({
     e.preventDefault();
 
     // Block submission while branches are still loading
-    if (isLoadingBranches) return;
+    if (isSubmitting || isLoadingBranches) return;
 
     // Session name is always required
     if (!sessionName.trim()) {
@@ -395,20 +418,13 @@ export function CreateSessionDialog({
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={() => {
-          onClose();
-      }}
-      size="lg"
-      closeOnOverlayClick={false}
-      closeOnEscape={!isBranchDropdownOpen}
-    >
-      <ModalHeader title={`New Pane${projectName ? ` in ${projectName}` : ''}`} />
+    <>
+      {header ?? <ModalHeader title={`New Pane${projectName ? ` in ${projectName}` : ''}`} />}
 
       <ModalBody className="p-0">
         <div className="flex-1 overflow-y-auto">
           <form id="create-session-form" onSubmit={handleSubmit}>
+            {repositoryPicker}
             {/* 1. Base Branch (select first, auto-populates session name) */}
             {isLoadingBranches && branches.length === 0 ? (
               <div className="px-6 pt-6 pb-5 border-b border-border-primary animate-pulse">
@@ -771,6 +787,6 @@ export function CreateSessionDialog({
           </Button>
         </div>
       </ModalFooter>
-    </Modal>
+    </>
   );
 }

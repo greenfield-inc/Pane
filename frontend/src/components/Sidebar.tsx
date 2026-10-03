@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { NewDialog } from './NewDialog';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
@@ -168,10 +169,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     handleSidebarSectionExpandedChange('pinned', expanded);
   }, [handleSidebarSectionExpandedChange]);
 
-  const addRepositoryRef = useRef<(() => void) | null>(null);
-  const registerAddRepository = useCallback((open: () => void) => {
-    addRepositoryRef.current = open;
-  }, []);
 
   const handleRepositoriesSectionExpandedChange = useCallback((expanded: boolean) => {
     handleSidebarSectionExpandedChange('repositories', expanded);
@@ -235,6 +232,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   // State for collapsed sidebar
   const [projects, setProjects] = useState<Project[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showNewDialog, setShowNewDialog] = useState(false);
   const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const activeView = useNavigationStore((state) => state.activeView);
@@ -464,6 +462,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
+            <Tooltip content="New" side="right">
+              <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
+            </Tooltip>
             <Tooltip content="Home" side="right">
               <button
                 type="button"
@@ -702,6 +703,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           </div>
         </div>
 
+        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
         {showCreateDialog && activeProject && (
           <CreateSessionDialog
             isOpen={showCreateDialog}
@@ -748,11 +750,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
-          onClick={() => addRepositoryRef.current?.()}
-          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary"
+          onClick={() => setShowNewDialog(true)}
+          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >
           <Plus className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>New project</span>
+          <span>New</span>
         </button>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
@@ -765,7 +767,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             repositoriesSectionExpanded={sidebarSectionExpansion.repositories}
             onPinnedSectionExpandedChange={handlePinnedSectionExpandedChange}
             onRepositoriesSectionExpandedChange={handleRepositoriesSectionExpandedChange}
-            onRegisterAddRepository={registerAddRepository}
             showRemoteDesktopLink={showRemoteDesktopLink}
             onRemoteDesktopClick={handleOpenRemoteDesktop}
             remoteDesktopTooltip={REMOTE_DESKTOP_TOOLTIP}
@@ -830,6 +831,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         </div>
     </div>
+    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
     </>
   );
 }

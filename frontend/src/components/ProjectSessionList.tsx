@@ -49,8 +49,6 @@ interface ProjectSessionListProps {
   repositoriesSectionExpanded: boolean;
   onPinnedSectionExpandedChange: (expanded: boolean) => void;
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
-  /** Lets the sidebar's "New project" button open this list's dialog. */
-  onRegisterAddRepository?: (open: () => void) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -65,7 +63,6 @@ export function ProjectSessionList({
   repositoriesSectionExpanded,
   onPinnedSectionExpandedChange,
   onRepositoriesSectionExpandedChange,
-  onRegisterAddRepository,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -79,9 +76,6 @@ export function ProjectSessionList({
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
-  useEffect(() => {
-    onRegisterAddRepository?.(() => setShowAddProjectDialog(true));
-  }, [onRegisterAddRepository]);
 
   // Drag-to-reorder state
   const [dragProjectId, setDragProjectId] = useState<number | null>(null);
