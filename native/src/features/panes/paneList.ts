@@ -51,7 +51,7 @@ export type SidebarItem =
     nestedExpanded: boolean;
   }
   | { type: 'archived'; key: string; kind: 'session' | 'pane'; id: string; label: string; detail?: string }
-  | { type: 'note'; key: string; text: string; danger?: boolean };
+  | { type: 'note'; key: string; text: string; danger?: boolean; retry?: 'sessions' | 'archived' };
 
 interface StatusLookup {
   status: (paneId: string) => AgentDisplayStatus;
@@ -63,6 +63,7 @@ export interface SidebarInput {
   /** `unavailable` on hosts without Sessions; undefined while they load. */
   sessions: OrchestrationSessionRecord[] | 'unavailable' | undefined;
   sessionsError?: string;
+  archivedError?: string;
   /** Loaded the first time Archived opens; undefined until then. */
   archivedProjects: ProjectWithPanes[] | undefined;
   expanded: SectionExpansion;
@@ -140,7 +141,7 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
   }
   if (sessionsSupported && (!searching || activeSessions.length > 0)) {
     items.push(...section('sessions', 'Sessions', () => {
-      if (input.sessionsError) return [{ type: 'note', key: 'sessions-error', text: input.sessionsError, danger: true }];
+      if (input.sessionsError) return [{ type: 'note', key: 'sessions-error', text: input.sessionsError, danger: true, retry: 'sessions' }];
       if (Array.isArray(input.sessions) && activeSessions.length === 0) {
         return [{ type: 'note', key: 'sessions-empty', text: 'Create a Session to keep intent and discussion together.' }];
       }
@@ -163,9 +164,13 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
     .map(pane => ({ pane, project })));
   const archivedCount = input.archivedProjects ? archivedSessions.length + archivedPanes.length : undefined;
   items.push(...section('archived', 'Archived', () => {
+    const errors: SidebarItem[] = input.archivedError ? [{ type: 'note', key: 'archived-error', text: input.archivedError, danger: true, retry: 'archived' }] : [];
+    if (!input.archivedProjects && errors.length) return errors;
     if (!input.archivedProjects) return [{ type: 'note', key: 'archived-loading', text: 'Loading archived panes…' }];
+    if (archivedCount === 0 && errors.length) return errors;
     if (archivedCount === 0) return [{ type: 'note', key: 'archived-empty', text: 'No archived panes' }];
     return [
+      ...errors,
       ...archivedSessions.map(session => ({
         type: 'archived' as const, key: `archived-${session.id}`, kind: 'session' as const, id: session.id, label: session.name || 'Untitled',
       })),

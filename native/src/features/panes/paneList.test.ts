@@ -199,6 +199,17 @@ describe('buildSidebar', () => {
     expect(shape(buildSidebar(input({ expanded, sessions: [], archivedProjects: [] })))).toContain('note: No archived panes');
   });
 
+  it('offers archived retry after a failed load, without reporting empty or hiding cached rows', () => {
+    const expanded = { pinned: false, sessions: false, repositories: false, archived: true };
+    const failed = buildSidebar(input({ expanded, archivedError: 'Archive request failed', archivedProjects: undefined }));
+    expect(failed.find(item => item.key === 'archived-error')).toMatchObject({ text: 'Archive request failed', danger: true, retry: 'archived' });
+    expect(failed.some(item => item.key === 'archived-loading' || item.key === 'archived-empty')).toBe(false);
+    const cached = buildSidebar(input({ expanded, archivedError: 'Archive request failed', archivedProjects }));
+    expect(cached.some(item => item.key === 'archived-error')).toBe(true);
+    expect(shape(cached)).toContain('restore old-spike � pane');
+    expect(buildSidebar(input({ expanded: DEFAULT_EXPANSION, archivedError: 'Archive request failed' })).some(item => item.key === 'archived-error')).toBe(false);
+  });
+
   it('matches every search word against Sessions and panes, and returns nothing when nothing matches', () => {
     expect(shape(buildSidebar(input({ query: 'LOGIN' })))).toEqual([
       '# Repositories',
