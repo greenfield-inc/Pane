@@ -6,6 +6,7 @@ import {
   decodeOptionalBoundary,
   type BoundarySchema,
   type JsonObject,
+  type JsonValue,
 } from '../../../../../shared/validation/boundaryDecoder';
 
 // --- Notebook JSON types ---
@@ -103,12 +104,22 @@ function stripAnsi(str: string): string {
 function getMimeData(data: JsonObject, mime: string): string | undefined {
   const val = data[mime];
   if (val === undefined) return undefined;
-  const text = decodeOptionalBoundary(val, boundary.string);
-  if (text !== undefined) return text;
-  const lines = decodeOptionalBoundary(val, boundary.array(boundary.string));
-  if (lines) return lines.join('');
+  const text = decodeOptionalBoundary(val, stringOrLinesSchema);
+  if (text !== undefined) return Array.isArray(text) ? text.join('') : text;
   // For non-string values (e.g. application/json stored as object), stringify
   return JSON.stringify(val, null, 2);
+}
+
+function formatJsonOutput(value: JsonValue): string {
+  const jsonText = decodeOptionalBoundary(value, boundary.string);
+  if (jsonText !== undefined) {
+    try {
+      return JSON.stringify(JSON.parse(jsonText), null, 2);
+    } catch {
+      return jsonText;
+    }
+  }
+  return JSON.stringify(value, null, 2);
 }
 
 // --- Sub-components ---
@@ -183,18 +194,7 @@ function CellOutputRenderer({ output, index }: { output: NotebookCellOutput; ind
 
     const jsonVal = data['application/json'];
     if (jsonVal !== undefined) {
-      let formatted: string;
-      const jsonText = decodeOptionalBoundary(jsonVal, boundary.string);
-      if (jsonText !== undefined) {
-        try {
-          formatted = JSON.stringify(JSON.parse(jsonText), null, 2);
-        } catch {
-          formatted = jsonText;
-        }
-      } else {
-        formatted = JSON.stringify(jsonVal, null, 2);
-      }
-      return <pre className="nb-output-stream">{formatted}</pre>;
+      return <pre className="nb-output-stream">{formatJsonOutput(jsonVal)}</pre>;
     }
 
     const plain = getMimeData(data, 'text/plain');

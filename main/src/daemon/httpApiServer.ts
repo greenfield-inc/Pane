@@ -20,7 +20,9 @@ import {
   type RemoteDaemonConfig,
   type RemoteDaemonEventEnvelope,
   type RemoteDaemonHeartbeatPayload,
+  type RemoteInvokeErrorPayload,
   type RemoteInvokeRequest,
+  type RemoteInvokeSuccessPayload,
 } from '../../../shared/types/remoteDaemon';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getRemotePwaAssetResponse } from './pwaStaticAssets';
@@ -54,19 +56,6 @@ interface ConnectedRemoteEventClient {
   connectedAt: string;
   lastSeenAt: string;
   heartbeatTimer: NodeJS.Timeout;
-}
-
-interface RemoteInvokeSuccessPayload {
-  ok: true;
-  result: unknown;
-}
-
-interface RemoteInvokeErrorPayload {
-  ok: false;
-  error: {
-    message: string;
-    code: string;
-  };
 }
 
 interface RemoteReadyEventPayload {
@@ -534,7 +523,7 @@ export class PaneRemoteHttpApiServer {
       );
       this.writeJson(response, 200, {
         ok: true,
-        result,
+        result: result === undefined ? undefined : decodeBoundary(JSON.parse(JSON.stringify(result)), boundary.json),
       } satisfies RemoteInvokeSuccessPayload, request);
     } catch (error) {
       if (error instanceof RemoteDaemonBadRequestError) {

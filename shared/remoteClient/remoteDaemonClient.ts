@@ -2,12 +2,13 @@ import type { ParsedSseEvent } from '../sseParser';
 import {
   decodeRemoteDaemonEventEnvelope,
   decodeRemoteHeartbeatPayload,
+  decodeRemoteInvokeResponsePayload,
   type RemoteDaemonEventEnvelope,
   type RemoteDaemonHeartbeatPayload,
   type RemotePaneConnectionProfile,
   type RemotePaneConnectionStatus,
 } from '../types/remoteDaemon';
-import { boundary, decodeBoundary, type JsonValue } from '../validation/boundaryDecoder';
+import type { JsonValue } from '../validation/boundaryDecoder';
 import { RemoteInputQueue } from '../remoteInputQueue';
 
 // Structural fetch types, so browser fetch, Node fetch and `expo/fetch` all fit.
@@ -104,20 +105,6 @@ export class RemoteRequestError extends Error {
 export class RemoteUnconfirmedResultError extends Error {
   override name = 'RemoteUnconfirmedResultError';
 }
-
-const invokeResponseSchema = boundary.union(
-  boundary.object({
-    ok: boundary.literal(true),
-    result: boundary.optional(boundary.json),
-  }),
-  boundary.object({
-    ok: boundary.literal(false),
-    error: boundary.optional(boundary.object({
-      message: boundary.optional(boundary.string),
-      code: boundary.optional(boundary.string),
-    })),
-  }),
-);
 
 const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 15_000;
@@ -242,28 +229,31 @@ export class RemoteDaemonClient {
 
         const response = await this.fetch(this.endpoint('invoke'), request);
 
-        const payload = decodeInvokeResponse(await response.json().catch((cause: Error) => {
+        if (!response.ok) {
+          // Error pages can be HTML; classify status even when optional detail is absent.
+          let failure: { message: string; code?: string } | undefined;
+          try {
+            const payload = decodeRemoteInvokeResponsePayload(await response.json());
+            if (!payload.ok) failure = payload.error;
+          } catch { /* Proxy error pages need not implement the host envelope. */ }
           if (isAuthFailureResponse(response.status)) {
-            throw new RemoteAuthError(getRemoteAuthFailureMessage());
+            throw new RemoteAuthError(getRemoteAuthFailureMessage(failure?.message));
           }
-          throw cause;
-        }));
-        const failure = payload?.ok === false ? payload.error : undefined;
-        if (isAuthFailureResponse(response.status)) {
-          throw new RemoteAuthError(getRemoteAuthFailureMessage(failure?.message));
-        }
-        if (response.ok && payload?.ok) {
+          const message = failure?.message ?? ('Remote request failed with ' + response.status);
+          if (!isRetryableResponse(response.status)) {
+            throw new RemoteRequestError(message, response.status, failure?.code ?? null);
+          }
+          lastError = new Error(message);
+        } else {
+          // Successful HTTP responses must satisfy the shared strict envelope.
+          // A malformed result is retried only for the reviewed safe-read allowlist.
+          const payload = decodeRemoteInvokeResponsePayload(await response.json());
+          if (!payload.ok) {
+            throw new RemoteRequestError(payload.error.message, response.status, payload.error.code ?? null);
+          }
           // SAFETY: The named IPC/API channel contract establishes this response payload type.
           return payload.result as T;
         }
-
-        const message = payload?.ok
-          ? `Remote request failed with ${response.status}`
-          : failure?.message ?? 'Remote request failed';
-        if (!isRetryableResponse(response.status)) {
-          throw new RemoteRequestError(message, response.status, failure?.code ?? null);
-        }
-        lastError = new Error(message);
       } catch (error) {
         if (error instanceof RemoteAuthError || error instanceof RemoteRequestError || signal?.aborted) {
           throw error;
@@ -455,15 +445,6 @@ export function getRemoteAuthFailureMessage(serverMessage?: string): string {
     ? ` (${serverMessage})`
     : '';
   return `This connection code is not accepted by the remote host${detail}. Create and copy a new code from Pane Settings > Remote Pane, then reconnect.`;
-}
-
-/** Returns null for a body that is not an invoke envelope, such as a proxy's error page JSON. */
-function decodeInvokeResponse(body: JsonValue) {
-  try {
-    return decodeBoundary(body, invokeResponseSchema);
-  } catch {
-    return null;
-  }
 }
 
 function isRetryableResponse(status: number): boolean {
