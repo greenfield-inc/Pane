@@ -18,6 +18,8 @@ import {
 } from '../../../shared/types/hostTerminal';
 
 const HOST_TERMINAL_TITLE = 'Terminal';
+/** Ctrl-E then Ctrl-U: replace a half-typed or earlier prefilled line instead of appending to it. */
+const CLEAR_PROMPT_LINE = '\x05\x15';
 
 type HostTerminalPanels = Pick<typeof panelManager, 'getPanel' | 'createPanel' | 'updatePanel' | 'setActivePanel'>;
 type HostTerminalShells = Pick<typeof terminalPanelManager, 'isTerminalInitialized' | 'initializeTerminal' | 'writeToTerminal'>;
@@ -43,7 +45,7 @@ export class HostTerminalManager {
       const cwd = os.homedir();
 
       if (this.shells.isTerminalInitialized(panel.id)) {
-        if (input) this.shells.writeToTerminal(panel.id, input);
+        if (input) this.shells.writeToTerminal(panel.id, `${CLEAR_PROMPT_LINE}${input}`);
       } else {
         if (input) await this.stageInput(panel, input);
         await this.shells.initializeTerminal(this.panels.getPanel(panel.id) ?? panel, cwd);

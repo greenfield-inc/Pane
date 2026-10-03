@@ -117,7 +117,8 @@ describe('HostTerminalManager', () => {
 
     await manager.open({ input: 'gh auth login --web --git-protocol https && gh auth setup-git\n' });
 
-    expect(writes()).toEqual(['gh auth login --web --git-protocol https && gh auth setup-git']);
+    // The line is cleared first (Ctrl-E Ctrl-U), so a second prefill replaces the first.
+    expect(writes()).toEqual(['\x05\x15gh auth login --web --git-protocol https && gh auth setup-git']);
     expect(writes().join('')).not.toMatch(/[\r\n]/);
   });
 
