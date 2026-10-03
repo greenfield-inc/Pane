@@ -49,28 +49,45 @@
     },
     "frontend": {
       "entry": [
-        "src/main.tsx",
-        "src/remote/main.tsx",
+        "src/main.tsx!",
+        "src/remote/main.tsx!",
         "src/**/*.test.{ts,tsx}",
+        "src/test-fixtures/**/*.ts",
         "vite.config.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}", "vite.config.{ts,js}"],
+      "project": [
+        "src/**/*.{ts,tsx}!",
+        "vite.config.{ts,js}",
+        "!src/**/*.test.{ts,tsx}!",
+        "!src/**/*.spec.{ts,tsx}!",
+        "!src/**/__tests__/**!",
+        "!src/test/**!"
+      ],
       "vite": {
-        "config": ["vite.config.ts"]
+        "config": [
+          "vite.config.ts"
+        ]
       }
     },
     "main": {
       "entry": [
-        "src/index.ts",
-        "src/preload.ts",
-        "src/daemon/headless.ts",
-        "src/ptyHost/ptyHostMain.ts",
-        "src/services/mcpPermissionBridge.ts",
+        "src/index.ts!",
+        "src/preload.ts!",
+        "src/daemon/headless.ts!",
+        "src/ptyHost/ptyHostMain.ts!",
+        "src/services/mcpPermissionBridge.ts!",
         "src/**/*.test.ts",
         "src/**/__tests__/**/*.ts",
         "build-mcp-bridge.js"
       ],
-      "project": ["src/**/*.ts", "build-mcp-bridge.js"],
+      "project": [
+        "src/**/*.ts!",
+        "build-mcp-bridge.js",
+        "!src/**/*.test.{ts,tsx}!",
+        "!src/**/*.spec.{ts,tsx}!",
+        "!src/**/__tests__/**!",
+        "!src/test/**!"
+      ],
       "ignoreBinaries": [
         "fc-list",
         "system_profiler",
@@ -87,19 +104,36 @@
     },
     "packages/runpane": {
       "entry": [
-        "src/cli.ts",
-        "src/doctor.ts",
-        "src/installers.ts",
-        "src/releases.ts",
-        "src/telemetry.ts",
+        "src/cli.ts!",
+        "src/doctor.ts!",
+        "src/installers.ts!",
+        "src/releases.ts!",
+        "src/telemetry.ts!",
         "scripts/mark-executable.js"
       ],
-      "project": ["src/**/*.ts", "scripts/**/*.js"],
-      "ignoreBinaries": ["ditto"]
+      "project": [
+        "src/**/*.ts!",
+        "scripts/**/*.js",
+        "!src/**/*.test.{ts,tsx}!",
+        "!src/**/*.spec.{ts,tsx}!",
+        "!src/**/__tests__/**!",
+        "!src/test/**!"
+      ],
+      "ignoreBinaries": [
+        "ditto"
+      ]
     },
     "mobile": {
-      "entry": ["capacitor.config.ts", "src/**/*.test.ts", "scripts/**/*.mjs"],
-      "project": ["src/**/*.ts", "scripts/**/*.mjs", "capacitor.config.ts"],
+      "entry": [
+        "capacitor.config.ts",
+        "src/**/*.test.ts",
+        "scripts/**/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.mjs",
+        "capacitor.config.ts"
+      ],
       "ignoreDependencies": [
         "@capacitor/app",
         "@capacitor/browser",
@@ -114,7 +148,7 @@
     },
     "shared": {
       "entry": ["types/*.ts", "remoteClient/index.ts"],
-      "project": ["types/*.ts", "remoteClient/*.ts"]
+      "project": ["**/*.ts", "!**/*.test.ts"]
     }
   }
 }

@@ -38,7 +38,6 @@ interface SessionStore {
   setActiveSession: (sessionId: string | null) => Promise<void>;
   addSessionOutput: (output: SessionOutput) => void;
   setSessionOutput: (sessionId: string, output: string) => void;
-  setSessionOutputs: (sessionId: string, outputs: SessionOutput[]) => void;
   clearSessionOutput: (sessionId: string) => void;
   addTerminalOutput: (output: { sessionId: string; type: 'stdout' | 'stderr'; data: string }) => void;
   clearTerminalOutput: (sessionId: string) => void;
@@ -352,51 +351,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     let updatedActiveMainRepoSession = state.activeMainRepoSession;
     if (state.activeMainRepoSession && state.activeMainRepoSession.id === sessionId) {
       updatedActiveMainRepoSession = { ...state.activeMainRepoSession, output: [output] };
-    }
-    
-    return {
-      ...state,
-      sessions: updatedSessions,
-      activeMainRepoSession: updatedActiveMainRepoSession
-    };
-  }),
-  
-  setSessionOutputs: (sessionId, outputs) => set((state) => {
-    
-    const sessionIndex = state.sessions.findIndex(session => session.id === sessionId);
-    if (sessionIndex === -1 && state.activeMainRepoSession?.id !== sessionId) return state;
-
-    const MAX_STORED_OUTPUTS = 300;
-    const MAX_STORED_MESSAGES = 100;
-    const stdOutputs: string[] = [];
-    const jsonMessages: ClaudeJsonMessage[] = [];
-
-    // Read newest first so each category retains its own tail. Only normalize
-    // messages we keep, and stop when both bounded buffers are full.
-    for (let i = outputs.length - 1; i >= 0; i--) {
-      const output = outputs[i];
-      if (output.type === 'json' && jsonMessages.length < MAX_STORED_MESSAGES) {
-        // SAFETY: The output type discriminator is paired with this payload shape by the IPC contract.
-        jsonMessages.push({ ...(output.data as ClaudeJsonMessage), timestamp: normalizeSessionOutput(output).timestamp });
-      } else if ((output.type === 'stdout' || output.type === 'stderr') && stdOutputs.length < MAX_STORED_OUTPUTS) {
-        // SAFETY: The output type discriminator is paired with this payload shape by the IPC contract.
-        stdOutputs.push(output.data as string);
-      }
-      if (stdOutputs.length === MAX_STORED_OUTPUTS && jsonMessages.length === MAX_STORED_MESSAGES) break;
-    }
-    stdOutputs.reverse();
-    jsonMessages.reverse();
-
-    let updatedSessions = state.sessions;
-    if (sessionIndex !== -1) {
-      updatedSessions = state.sessions.slice();
-      updatedSessions[sessionIndex] = { ...state.sessions[sessionIndex], output: stdOutputs, jsonMessages };
-    }
-
-    // Also update activeMainRepoSession if it matches
-    let updatedActiveMainRepoSession = state.activeMainRepoSession;
-    if (state.activeMainRepoSession && state.activeMainRepoSession.id === sessionId) {
-      updatedActiveMainRepoSession = { ...state.activeMainRepoSession, output: stdOutputs, jsonMessages };
     }
     
     return {

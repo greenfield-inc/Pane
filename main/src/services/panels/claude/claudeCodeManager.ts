@@ -1,7 +1,7 @@
 import { app } from 'electron';
-import * as fs from 'fs';
+import fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import os from 'os';
 import { execSync } from 'child_process';
 import type { Logger } from '../../../utils/logger';
 import type { ConfigManager } from '../../configManager';
@@ -14,10 +14,12 @@ import {
   AbstractCliManager,
   type CliEnvironment,
   type CliSpawnTuple,
+  type CliTerminalLaunchOptions,
+  type PreparedCliTerminalLaunch,
 } from '../cli/AbstractCliManager';
 import { withLock } from '../../../utils/mutex';
 import { getAppDirectory } from '../../../utils/appDirectory';
-import { escapeForBash } from '../../../utils/wslUtils';
+import { escapeForBash, parseWSLPath } from '../../../utils/wslUtils';
 import { boundary, decodeBoundary, type JsonObject } from '../../../../../shared/validation/boundaryDecoder';
 import { createRequire } from 'node:module';
 import { logValidationFailure, validatePanelSessionOwnership } from '../../../utils/sessionValidation';
@@ -253,6 +255,53 @@ export class ClaudeCodeManager extends AbstractCliManager {
       }
       return foundPath;
     }
+  }
+
+  /**
+   * Reuse configured instructions and project MCP tools for a native Claude TUI.
+   * Approval stays in Claude's terminal UI; the stream-JSON permission bridge
+   * and its headless flags do not apply to this interactive launch.
+   * TerminalPanelManager supplies the conversation ID and delivers the prompt.
+   */
+  async prepareTerminalLaunch(options: CliTerminalLaunchOptions): Promise<PreparedCliTerminalLaunch> {
+    const config = this.configManager?.getConfig();
+    const dbSession = this.sessionManager.getDbSession(options.sessionId);
+    const permissionMode = options.permissionMode ?? dbSession?.permission_mode ?? config?.defaultPermissionMode ?? 'ignore';
+    const project = dbSession?.project_id ? this.sessionManager.getProjectById(dbSession.project_id) : undefined;
+    // WSL resolves its own executable inside the distro, not Windows' PATH.
+    const executable = config?.claudeExecutablePath
+      ?? (project?.wsl_enabled ? 'claude' : await this.getCliExecutablePath());
+    const args: string[] = [];
+    if (options.model && options.model !== 'auto') args.push('--model', options.model);
+    if (permissionMode === 'ignore') args.push('--dangerously-skip-permissions');
+
+    let mcpConfigPath = await this.setupBaseProjectMcpConfig(options.sessionId);
+    if (mcpConfigPath && project?.wsl_enabled) {
+      const wslPath = parseWSLPath(mcpConfigPath);
+      if (wslPath) {
+        mcpConfigPath = wslPath.linuxPath;
+      } else if (path.win32.isAbsolute(mcpConfigPath) && !path.posix.isAbsolute(mcpConfigPath)) {
+        const context = this.sessionManager.getProjectContext(options.sessionId);
+        if (!context?.commandRunner.wslContext) throw new Error('WSL project context is unavailable');
+        const { stdout } = await context.commandRunner.execAsync(
+          `wslpath -u ${escapeForBash(mcpConfigPath)}`, project.path, { timeout: 5000 },
+        );
+        mcpConfigPath = stdout.trim();
+        if (!mcpConfigPath) throw new Error('Could not resolve Claude MCP configuration inside WSL');
+      }
+    }
+    if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath);
+
+    const environment: PreparedCliTerminalLaunch['environment'] = { MCP_SOCKET_PATH: this.permissionIpcPath || '' };
+    if (config?.verbose) environment.MCP_DEBUG = '1';
+
+    const systemPrompt = options.isResume ? undefined : this.buildSystemPromptAppend(dbSession ?? {});
+    return {
+      executable,
+      args,
+      environment,
+      prompt: systemPrompt ? `${options.prompt}\n\n${systemPrompt}` : options.prompt,
+    };
   }
 
   protected parseCliOutput(data: string, panelId: string, sessionId: string): Array<{ panelId: string; sessionId: string; type: 'json' | 'stdout' | 'stderr'; data: unknown; timestamp: Date }> {

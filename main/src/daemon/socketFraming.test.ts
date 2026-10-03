@@ -4,10 +4,6 @@ import {
   PaneDaemonFrameDecoder,
 } from './socketFraming';
 import {
-  isPaneDaemonEventFrame,
-  isPaneDaemonFrame,
-  isPaneDaemonRequestFrame,
-  isPaneDaemonResponseFrame,
   type PaneDaemonEventFrame,
   type PaneDaemonRequestFrame,
   type PaneDaemonResponseFrame,
@@ -113,48 +109,5 @@ describe('Pane daemon shared protocol helpers', () => {
     expect(isDaemonOwnedChannel('sessions:set-active-session')).toBe(true);
     expect(isDaemonOwnedChannel('terminal:clipboard-paste-image')).toBe(false);
     expect(isDaemonOwnedChannel('openExternal')).toBe(false);
-  });
-
-  it('detects request frames', () => {
-    const frame = {
-      type: 'request',
-      id: 1,
-      channel: 'sessions:get-all',
-      args: [],
-    };
-
-    expect(isPaneDaemonRequestFrame(frame)).toBe(true);
-    expect(isPaneDaemonFrame(frame)).toBe(true);
-  });
-
-  it('detects response frames', () => {
-    const successFrame = {
-      type: 'response',
-      id: 1,
-      ok: true,
-      result: { success: true },
-    };
-    const errorFrame = {
-      type: 'response',
-      id: 2,
-      ok: false,
-      error: { message: 'boom', code: 'ERR_TEST' },
-    };
-
-    expect(isPaneDaemonResponseFrame(successFrame)).toBe(true);
-    expect(isPaneDaemonResponseFrame(errorFrame)).toBe(true);
-    expect(isPaneDaemonFrame(successFrame)).toBe(true);
-    expect(isPaneDaemonFrame(errorFrame)).toBe(true);
-  });
-
-  it('detects event frames', () => {
-    const frame = {
-      type: 'event',
-      channel: 'panel:created',
-      args: [{ id: 'panel-1' }],
-    };
-
-    expect(isPaneDaemonEventFrame(frame)).toBe(true);
-    expect(isPaneDaemonFrame(frame)).toBe(true);
   });
 });

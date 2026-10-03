@@ -25,6 +25,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   Playwright: install the browser once with `pnpm exec playwright install
   chromium`; `pnpm test:ci:minimal` launches the app, so set `PANE_DIR`.
 
+- Themes: `pnpm theme:contrast` gates every theme's muted text plus the 15 batch themes' token pairs in `frontend/src/styles/tokens/colors.css` (text/UI/terminal contrast, high-contrast overlay, CVD separation; `--all` reports all themes without enforcing thresholds, `--themes a,b` picks themes, `--markdown --cvd` prints PR tables — see `scripts/README.md`); `pnpm theme:screenshots` regenerates `screenshots/themes/batch/`.
+
 ## Rules
 
 - Never point a dev build, test run or script at your real `~/.pane`: set

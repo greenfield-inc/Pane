@@ -93,20 +93,3 @@ export const getTerminalTheme = (): ITheme => {
   if (selectionBg) theme.selectionBackground = selectionBg;
   return theme;
 };
-
-// Script terminal theme (slightly different background for better UI integration)
-export const getScriptTerminalTheme = () => {
-  const baseTheme = getTerminalTheme();
-  const isLight = document.documentElement.classList.contains('light');
-  const isOled = document.documentElement.classList.contains('oled');
-  const isForge = document.documentElement.classList.contains('forge');
-  const isDusk = document.documentElement.classList.contains('dusk');
-
-  // Use surface colors for better integration with the UI
-  const surfaceBackground = getCSSVariable('--color-surface-secondary');
-
-  return {
-    ...baseTheme,
-    background: surfaceBackground || (isLight ? '#f9fafb' : isForge ? '#1E1F22' : isDusk ? '#111827' : isOled ? '#080808' : '#1f2937'),
-  };
-};

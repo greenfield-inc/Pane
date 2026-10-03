@@ -9,6 +9,7 @@ import { debounce } from '../../../utils/debounce';
 export interface PositionTracker {
   /** Drop any queued save — used when the tab is re-targeted to another file. */
   cancel: () => void;
+  dispose: () => void;
 }
 
 export function trackEditorPosition(
@@ -22,8 +23,8 @@ export function trackEditorPosition(
     onStateChange({ scrollPosition: scrollTop });
   }, 500);
 
-  editor.onDidChangeCursorPosition?.((e) => saveCursor(e.position));
-  editor.onDidScrollChange?.((e) => {
+  const cursorListener = editor.onDidChangeCursorPosition((e) => saveCursor(e.position));
+  const scrollListener = editor.onDidScrollChange((e) => {
     if (e.scrollTop !== undefined) saveScroll(e.scrollTop);
   });
 
@@ -31,6 +32,12 @@ export function trackEditorPosition(
     cancel: () => {
       saveCursor.cancel();
       saveScroll.cancel();
+    },
+    dispose: () => {
+      cursorListener.dispose();
+      scrollListener.dispose();
+      saveCursor.flush();
+      saveScroll.flush();
     },
   };
 }
@@ -41,14 +48,10 @@ export function restoreEditorPosition(
 ): void {
   if (state?.cursorPosition) {
     const { line, column } = state.cursorPosition;
-    // Small delay so the editor has content and layout before it reveals.
-    setTimeout(() => {
-      editor.setPosition({ lineNumber: line, column });
-      editor.revealPositionInCenter({ lineNumber: line, column });
-    }, 50);
+    editor.setPosition({ lineNumber: line, column });
+    editor.revealPositionInCenter({ lineNumber: line, column });
   }
   if (state?.scrollPosition !== undefined) {
-    const scrollTop = state.scrollPosition;
-    setTimeout(() => editor.setScrollTop(scrollTop), 100);
+    editor.setScrollTop(state.scrollPosition);
   }
 }

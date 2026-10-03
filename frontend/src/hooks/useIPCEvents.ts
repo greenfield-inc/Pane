@@ -12,14 +12,13 @@ import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/
 import { API } from '../utils/api';
 import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
-import type { Session, SessionOutput, GitStatus } from '../types/session';
+import type { Session, GitStatus } from '../types/session';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 
 interface SessionEventData {
   sessionId: string;
 }
 
-type ValidatedEventData = SessionEventData | SessionOutput;
 
 async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
   if (hostChanged) {
@@ -88,7 +87,7 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
 }
 
 // Frontend validation helpers
-function validateEventSession(eventData: ValidatedEventData, activeSessionId?: string): boolean {
+function validateEventSession(eventData: SessionEventData, activeSessionId?: string): boolean {
   if (!eventData || !eventData.sessionId) {
     console.warn('[useIPCEvents] Event missing sessionId:', eventData);
     return false;
@@ -245,15 +244,6 @@ export function useIPCEvents() {
       
       updateSession(sessionWithArrays);
       
-      // Force a re-render if this is the active session and status changed to stopped
-      const state = useSessionStore.getState();
-      if (state.activeSessionId === session.id && 
-          (session.status === 'stopped' || session.status === 'error')) {
-        // Emit a custom event to trigger UI updates
-        window.dispatchEvent(new CustomEvent('session-status-changed', { 
-          detail: { sessionId: session.id, status: session.status } 
-        }));
-      }
     });
     unsubscribeFunctions.push(unsubscribeSessionUpdated);
 
@@ -294,11 +284,6 @@ export function useIPCEvents() {
         gitStatusUpdated.drain(sessionId);
       }
 
-      // Dispatch a custom event for other components to listen to
-      window.dispatchEvent(new CustomEvent('session-deleted', {
-        detail: { id: sessionId }
-      }));
-
       // Create a minimal session object for deletion
       deleteSession(sessionData);
     });
@@ -328,22 +313,6 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribeSessionsLoaded);
 
-    const unsubscribeSessionOutput = window.electronAPI.events.onSessionOutput((output: SessionOutput) => {
-      // Validate event has required session context
-      if (!validateEventSession(output)) {
-        return; // Ignore invalid events
-      }
-
-      devLog.debug(`[useIPCEvents] Received session output for ${output.sessionId}, type: ${output.type}`);
-
-      // Just emit custom event to notify that new output is available
-      // Include panelId (if present) so panel-based views can react precisely
-      window.dispatchEvent(new CustomEvent('session-output-available', {
-        detail: { sessionId: output.sessionId, panelId: output.panelId }
-      }));
-    });
-    unsubscribeFunctions.push(unsubscribeSessionOutput);
-
     const unsubscribeTerminalOutput = window.electronAPI.events.onTerminalOutput((output) => {
       // Panel output belongs to its TerminalPanel, which writes it to xterm.
       // Copying it here re-rendered the session view on every 32 ms flush.
@@ -356,21 +325,6 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribeTerminalOutput);
     
-    const unsubscribeOutputAvailable = window.electronAPI.events.onSessionOutputAvailable((info: { sessionId: string }) => {
-      // Validate event has required session context
-      if (!validateEventSession(info)) {
-        return; // Ignore invalid events
-      }
-
-      devLog.debug(`[useIPCEvents] Output available notification for session ${info.sessionId}`);
-      
-      // Emit custom event to notify that output is available
-      window.dispatchEvent(new CustomEvent('session-output-available', {
-        detail: { sessionId: info.sessionId }
-      }));
-    });
-    unsubscribeFunctions.push(unsubscribeOutputAvailable);
-
     const unsubscribeOrchestrationChanged = window.electronAPI.events.onOrchestrationSessionsChanged?.((change) => {
       window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: change }));
     });

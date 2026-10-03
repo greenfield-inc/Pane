@@ -98,7 +98,8 @@
     "test:ci": "playwright test --config=playwright.ci.config.ts",
     "test:ci:minimal": "playwright test --config=playwright.ci.minimal.config.ts",
     "test:ui": "playwright test --ui",
-    "test:headed": "playwright test --headed"
+    "test:headed": "playwright test --headed",
+    "deadcode:production": "knip --production --reporter compact"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",
@@ -113,7 +114,6 @@
     "electron-updater": "^6.6.8",
     "glob": "^11.0.0",
     "smol-toml": "1.7.1",
-    "web-streams-polyfill": "^3.3.3",
     "ws": "^8.20.1"
   },
   "devDependencies": {

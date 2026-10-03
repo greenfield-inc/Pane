@@ -54,6 +54,9 @@ export interface TerminalPanelState {
   cwd?: string;                  // Current working directory
   shellType?: string;            // bash, zsh, etc.
   initialCommand?: string;       // Command to run on terminal init (e.g., "claude --dangerously-skip-permissions")
+  // Session commands own the agent process, with no interactive shell left
+  // behind after it exits. Arguments are data, never shell fragments.
+  agentLaunch?: { executable: string; args: string[] };
   initialInput?: string;         // First input to send once the initial command is ready
   initialInputMode?: 'stdin' | 'argument'; // How initialInput is delivered to the initial command
   initialInputFile?: string;     // Prompt file an argument launch reads with "$(cat '<file>')" instead of inlining initialInput
@@ -314,6 +317,7 @@ export type PanelEventType =
   // Terminal panel events (✅ IMPLEMENTED IN PHASE 1-2)
   | 'terminal:command_executed'  // When a command is run in terminal
   | 'terminal:exit'              // When terminal process exits
+  | 'terminal:agent_status'      // Session-owned agent lifecycle changed
   | 'files:changed'              // When terminal detects file system changes
   | 'diff:refreshed'             // When diff panel refreshes its content
   // Explorer panel events

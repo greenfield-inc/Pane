@@ -211,20 +211,3 @@ export interface VersionUpdateInfo extends VersionInfo {
   version: string;
   mandatory?: boolean;
 }
-
-// Attachment types for Claude Code config
-export interface AttachedImage {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  dataUrl: string;
-}
-
-export interface AttachedText {
-  id: string;
-  name: string;
-  content: string;
-  size: number;
-  path?: string;
-}

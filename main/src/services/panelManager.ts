@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { ToolPanel, CreatePanelRequest, PanelEventType, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
@@ -82,7 +82,7 @@ class PanelManager {
       // This allows auto-creation to work again in the future if they close it again and create a new session
       databaseService.removeClosedPanelType(request.sessionId, request.type);
 
-      const panelId = request.id ?? uuidv4();
+      const panelId = request.id ?? randomUUID();
       const existingPanel = this.getPanel(panelId);
       if (existingPanel) {
         return existingPanel;

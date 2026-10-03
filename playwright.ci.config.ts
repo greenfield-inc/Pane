@@ -57,13 +57,10 @@ export default defineConfig({
 
   // Run your local dev server before starting the tests
   webServer: {
-    command: 'pnpm electron-dev',
+    command: 'pnpm --filter frontend dev --host 127.0.0.1 --strictPort',
     port: devServerPort,
     reuseExistingServer: false,
     timeout: 60 * 1000, // Reduce from 120s to 60s
-    env: getPlaywrightServerEnv(devServerPort, {
-      DISPLAY: ':99',
-      ELECTRON_DISABLE_SANDBOX: '1',
-    }),
+    env: getPlaywrightServerEnv(devServerPort),
   },
 });

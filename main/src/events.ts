@@ -16,6 +16,7 @@ import { resourceMonitorService } from './services/resourceMonitorService';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { PaneEventArgument } from './core/eventSink';
 import type { AgentState } from '../../shared/types/agentStatus';
+import { setupSessionTerminalLifecycle } from './services/sessionClaudeTerminal';
 
 function isArchivedSessionOutputValidation(validation: { error?: string; sessionId?: string }): boolean {
   return Boolean(
@@ -59,6 +60,7 @@ export function setupEventListeners(services: AppServices): void {
       console.error('[Sessions] Failed to persist live activity:', error);
     });
   });
+  setupSessionTerminalLifecycle(sessionManager);
 
   async function appendSessionSummary(sessionId: string, failed: boolean): Promise<void> {
     try {

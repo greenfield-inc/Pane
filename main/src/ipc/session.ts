@@ -16,6 +16,7 @@ import { convertDbFolderToRendererFolder } from '../services/folderEvents';
 import { sessionImageCounters } from './panels';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { runSessionClaude, stopSessionProcesses } from '../services/sessionClaudeTerminal';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import {
   validateSessionExists,
@@ -737,29 +738,7 @@ export function registerSessionHandlers(
         return { success: false, error: 'Session has no tool configured' };
       }
 
-      // Use session-based methods for all tool types
-      console.log(`[IPC] Sending input to session ${sessionId} via claudeCodeManager session methods`);
-
-      // Check if Claude Code is running for this session
-      const isClaudeRunning = claudeCodeManager.isSessionRunning(sessionId);
-
-      if (!isClaudeRunning) {
-        console.log(`[IPC] Claude Code not running for session ${sessionId}, starting it now...`);
-
-        // Start Claude Code with the input as the initial prompt
-        await claudeCodeManager.startSession(
-          sessionId,
-          session.worktreePath,
-          input,
-          session.permissionMode
-        );
-
-        // Update session status to running
-        await sessionManager.updateSession(sessionId, { status: 'running' });
-      } else {
-        // Claude Code is already running, just send the input using virtual panel ID
-        claudeCodeManager.sendInput(`session-${sessionId}`, input);
-      }
+      await runSessionClaude(sessionManager, sessionId, input, { mode: 'input' }, claudeCodeManager);
 
       return { success: true };
     } catch (error) {
@@ -817,12 +796,6 @@ export function registerSessionHandlers(
         return { success: false, error: 'Session has no tool configured' };
       }
 
-      // Check if Claude is already running for this session to prevent duplicate starts
-      if (claudeCodeManager.isSessionRunning(sessionId)) {
-        console.log(`[IPC] Session ${sessionId} is already running, preventing duplicate continue`);
-        return { success: false, error: 'Session is already processing a request' };
-      }
-
       // Always use session-based conversation history
       const conversationHistory = sessionManager.getConversationMessages(sessionId);
 
@@ -832,12 +805,6 @@ export function registerSessionHandlers(
       // Check if this is a main repo session that hasn't started Claude Code yet
       const dbSession = databaseService.getSession(sessionId);
       const isMainRepoFirstStart = dbSession?.is_main_repo && conversationHistory.length === 0 && continuePrompt;
-
-      // Update session status to initializing and clear run_started_at
-      sessionManager.updateSession(sessionId, {
-        status: 'initializing',
-        run_started_at: null // Clear previous run time
-      });
 
       if (isMainRepoFirstStart && continuePrompt) {
         // First message in main repo session - start Claude Code without --resume
@@ -901,33 +868,19 @@ export function registerSessionHandlers(
           console.log(`[IPC] Build script completed. Success: ${buildResult.success}`);
         }
 
-        // Use session-based start method
-        console.log(`[IPC] Starting Claude via session-based method for main repo session ${sessionId}`);
-        await claudeCodeManager.startSession(
-          sessionId,
-          session.worktreePath,
-          continuePrompt,
-          dbSession?.permission_mode,
-          model
-        );
+        await runSessionClaude(sessionManager, sessionId, continuePrompt, {
+          mode: 'start', permissionMode: dbSession?.permission_mode, model,
+        }, claudeCodeManager);
       } else {
         // Normal continue for existing sessions
         if (continuePrompt) {
           await sessionManager.continueConversation(sessionId, continuePrompt);
         }
 
-        // Use session-based continue method
-        console.log(`[IPC] Continuing Claude via session-based method for session ${sessionId}`);
-        await claudeCodeManager.continueSession(
-          sessionId,
-          session.worktreePath,
-          continuePrompt,
-          conversationHistory,
-          model
-        );
+        await runSessionClaude(sessionManager, sessionId, continuePrompt, { mode: 'continue', model }, claudeCodeManager);
       }
 
-      // The session manager will update status based on Claude output
+      // Terminal activity and output now follow the regular panel event stream.
       return { success: true };
     } catch (error) {
       console.error('Failed to continue conversation:', error);
@@ -1407,9 +1360,7 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:stop', async (sessionId: string) => {
     try {
-      // Use session-based stop
-      console.log(`[IPC] Stopping session ${sessionId} via session-based method`);
-      await claudeCodeManager.stopSession(sessionId);
+      await stopSessionProcesses(sessionManager, sessionId, claudeCodeManager);
 
       const timestamp = new Date();
       const cancellationMessage = {
@@ -1430,8 +1381,6 @@ export function registerSessionHandlers(
       } catch (loggingError) {
         console.warn('[IPC] Failed to record cancellation message for session stop:', loggingError);
       }
-
-      sessionManager.stopSession(sessionId);
 
       return { success: true };
     } catch (error) {

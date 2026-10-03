@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { useSessionHistoryStore } from '../stores/sessionHistoryStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useHotkey } from '../hooks/useHotkey';
 import { useCommittedRef } from '../hooks/useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
@@ -67,6 +67,8 @@ import type { InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 
+const EMPTY_PANELS: ToolPanel[] = [];
+
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
     || panelList.find(p => p.type === 'explorer')
@@ -80,7 +82,10 @@ function isInspectorPanelType(type: ToolPanel['type']): boolean {
 }
 
 export const SessionView = memo(() => {
-  const { activeView, activeProjectId } = useNavigationStore();
+  const { activeView, activeProjectId } = useNavigationStore(useShallow(state => ({
+    activeView: state.activeView,
+    activeProjectId: state.activeProjectId,
+  })));
   const [projectData, setProjectData] = useState<Project | null>(null);
   const [isProjectLoading, setIsProjectLoading] = useState(false);
   const [sessionProject, setSessionProject] = useState<Project | null>(null);
@@ -89,13 +94,17 @@ export const SessionView = memo(() => {
   const [currentUpstream, setCurrentUpstream] = useState<string | null>(null);
 
   // Config store for custom commands in terminal row pills
-  const { config, fetchConfig } = useConfigStore();
-  useEffect(() => { if (!config) { fetchConfig(); } }, [config, fetchConfig]);
+  const { hasConfig, configuredCommands, isRemoteMode, fetchConfig } = useConfigStore(useShallow(state => ({
+    hasConfig: Boolean(state.config),
+    configuredCommands: state.config?.customCommands,
+    isRemoteMode: state.config?.remoteDaemon?.client.mode === 'remote',
+    fetchConfig: state.fetchConfig,
+  })));
+  useEffect(() => { if (!hasConfig) { fetchConfig(); } }, [hasConfig, fetchConfig]);
   const customCommands = useMemo(
-    () => (config?.customCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
-    [config?.customCommands]
+    () => (configuredCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
+    [configuredCommands]
   );
-  const isRemoteMode = config?.remoteDaemon?.client.mode === 'remote';
 
   // Get active session by subscribing directly to store state
   // This ensures the component re-renders when git status or other session properties update
@@ -128,21 +137,30 @@ export const SessionView = memo(() => {
 
   // Panel store state and actions
   const {
-    panels,
-    activePanels,
+    sessionPanels,
+    activePanelId,
     setPanels,
     setActivePanel: setActivePanelInStore,
     addPanel,
     removePanel,
     updatePanelState,
-    layouts,
-    focusedGroupIds,
+    sessionLayout,
+    focusedGroupId,
     setLayout: setLayoutInStore,
     setFocusedGroup: setFocusedGroupInStore,
-  } = usePanelStore();
-  
-  // History store for navigation
-  const { addToHistory } = useSessionHistoryStore();
+  } = usePanelStore(useShallow(state => ({
+    sessionPanels: state.panels[activeSession?.id ?? ''] ?? EMPTY_PANELS,
+    activePanelId: state.activePanels[activeSession?.id ?? ''],
+    sessionLayout: state.layouts[activeSession?.id ?? ''],
+    focusedGroupId: state.focusedGroupIds[activeSession?.id ?? ''] ?? '',
+    setPanels: state.setPanels,
+    setActivePanel: state.setActivePanel,
+    addPanel: state.addPanel,
+    removePanel: state.removePanel,
+    updatePanelState: state.updatePanelState,
+    setLayout: state.setLayout,
+    setFocusedGroup: state.setFocusedGroup,
+  })));
 
   // --- Layout debounced persist ---
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -339,7 +357,7 @@ export const SessionView = memo(() => {
     const handlePanelCreated = (panel: ToolPanel) => {
       // Only add if it's for the current session
       if (panel.sessionId === sid) {
-        const existingPanels = panels[sid] || [];
+        const existingPanels = usePanelStore.getState().panels[sid] ?? EMPTY_PANELS;
         const panelExists = existingPanels.some(p => p.id === panel.id);
 
         if (!panelExists) {
@@ -416,14 +434,8 @@ export const SessionView = memo(() => {
       unsubscribeUpdated?.();
       unsubscribeDeleted?.();
     };
-  }, [activeSession?.id, addPanel, updatePanelState, removePanel, panels, applyLayout]);
-
-  // Get panels for current session with memoization
-  const sessionPanels = useMemo(
-    () => panels[activeSession?.id || ''] || [],
-    [panels, activeSession?.id]
-  );
-  const activeSessionPanelsLoaded = Boolean(activeSession && panels[activeSession.id]);
+  }, [activeSession?.id, addPanel, updatePanelState, removePanel, applyLayout]);
+  const activeSessionPanelsLoaded = Boolean(activeSession && usePanelStore.getState().panels[activeSession.id]);
   useEffect(() => {
     if (activeSession?.id && activeSessionPanelsLoaded) markPaneViewShown(activeSession.id);
   }, [activeSession?.id, activeSessionPanelsLoaded]);
@@ -465,19 +477,11 @@ export const SessionView = memo(() => {
   }, [tabBarPanels]);
 
   const currentActivePanel = useMemo(
-    () => sessionPanels.find(p => p.id === activePanels[activeSession?.id || '']),
-    [sessionPanels, activePanels, activeSession?.id]
+    () => sessionPanels.find(p => p.id === activePanelId),
+    [sessionPanels, activePanelId]
   );
 
   // --- Layout-derived memos ---
-  const sessionLayout = useMemo(
-    () => layouts[activeSession?.id || ''],
-    [layouts, activeSession?.id]
-  );
-  const focusedGroupId = useMemo(
-    () => focusedGroupIds[activeSession?.id || ''] ?? '',
-    [focusedGroupIds, activeSession?.id]
-  );
   const focusedGroup: PanelGroupNode | null = useMemo(
     () => sessionLayout ? findGroup(sessionLayout.root, focusedGroupId) : null,
     [sessionLayout, focusedGroupId]
@@ -553,16 +557,9 @@ export const SessionView = memo(() => {
     return fix(root);
   }, [activeSession]);
 
-  // Track current session/panel in history when they change
-  useEffect(() => {
-    if (activeSession?.id && currentActivePanel?.id) {
-      addToHistory(activeSession.id, currentActivePanel.id);
-    }
-  }, [activeSession?.id, currentActivePanel?.id, addToHistory]);
-
   // Debug logging - only in development with verbose enabled
   renderLog('[SessionView] Session panels:', sessionPanels);
-  renderLog('[SessionView] Active panel ID:', activePanels[activeSession?.id || '']);
+  renderLog('[SessionView] Active panel ID:', activePanelId);
   renderLog('[SessionView] Current active panel:', currentActivePanel);
 
   // --- Layout-aware panel select ---
@@ -576,18 +573,14 @@ export const SessionView = memo(() => {
       const next = activatePanelInLayout(currentLayout, panel.id);
       applyLayout(sid, next);
       setFocusedGroupInStore(sid, next.focusedGroupId ?? groupId);
-      addToHistory(sid, panel.id);
     },
-    [activeSession, applyLayout, setFocusedGroupInStore, addToHistory]
+    [activeSession, applyLayout, setFocusedGroupInStore]
   );
 
   // FIX: Memoize all callbacks to prevent re-renders
   const handlePanelSelect = useCallback(
     async (panel: ToolPanel) => {
       if (!activeSession) return;
-
-      // Add to history when panel is selected
-      addToHistory(activeSession.id, panel.id);
 
       // If layout exists, find which group contains this panel and update it
       const currentLayout = usePanelStore.getState().layouts[activeSession.id];
@@ -602,7 +595,7 @@ export const SessionView = memo(() => {
       setActivePanelInStore(activeSession.id, panel.id);
       await panelApi.setActivePanel(activeSession.id, panel.id);
     },
-    [activeSession, setActivePanelInStore, addToHistory, handleGroupPanelSelect]
+    [activeSession, setActivePanelInStore, handleGroupPanelSelect]
   );
 
   // --- Inspector (right rail: Details / Files / Changes) ---
