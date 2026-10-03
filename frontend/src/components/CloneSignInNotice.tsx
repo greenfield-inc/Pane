@@ -8,11 +8,14 @@ interface CloneSignInNoticeProps {
   host: string;
   /** The clone used an SSH URL, which the HTTPS sign-in below does not set up. */
   overSsh: boolean;
+  /** This app's Settings manage the host's GitHub credentials (the saved host's `githubSignIn: 'settings'`). */
+  managedInSettings: boolean;
   retrying: boolean;
   /** gh's device sign-in on the host, driven from Pane. */
   deviceLogin: GitHubDeviceLoginState;
   /** Why the sign-in could not be started or cancelled. */
   deviceLoginError: string;
+  onOpenSettings: () => void;
   onSignIn: () => void;
   onCancelSignIn: () => void;
   onOpenTerminal: () => void;
@@ -23,9 +26,11 @@ interface CloneSignInNoticeProps {
 export function CloneSignInNotice({
   host,
   overSsh,
+  managedInSettings,
   retrying,
   deviceLogin,
   deviceLoginError,
+  onOpenSettings,
   onSignIn,
   onCancelSignIn,
   onOpenTerminal,
@@ -36,6 +41,21 @@ export function CloneSignInNotice({
       Try again
     </Button>
   );
+
+  if (managedInSettings) {
+    return (
+      <div role="alert" className="space-y-3 rounded-lg border border-status-warning/30 bg-status-warning/10 p-4">
+        <p className="text-sm font-semibold text-text-primary">Add a GitHub token in Settings</p>
+        {overSsh && <p className="text-sm text-text-secondary">This is an SSH URL; after signing in, use the HTTPS URL instead.</p>}
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={onOpenSettings} variant="primary" size="sm">
+            Open Settings
+          </Button>
+          {tryAgain}
+        </div>
+      </div>
+    );
+  }
 
   if (deviceLogin.status === 'signed-in') {
     return (

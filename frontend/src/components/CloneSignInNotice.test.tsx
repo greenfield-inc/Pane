@@ -3,12 +3,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { CloneSignInNotice } from './CloneSignInNotice';
 import type { GitHubDeviceLoginState } from '../../../shared/types/githubDeviceLogin';
 
-function render(deviceLogin: GitHubDeviceLoginState, options: { overSsh?: boolean; deviceLoginError?: string } = {}) {
+function render(deviceLogin: GitHubDeviceLoginState, options: { overSsh?: boolean; deviceLoginError?: string; managedInSettings?: boolean } = {}) {
   const noop = () => undefined;
   return renderToStaticMarkup(
     <CloneSignInNotice
       host="devbox"
       overSsh={options.overSsh ?? false}
+      managedInSettings={options.managedInSettings ?? false}
+      onOpenSettings={noop}
       retrying={false}
       deviceLogin={deviceLogin}
       deviceLoginError={options.deviceLoginError ?? ''}
@@ -67,5 +69,21 @@ describe('CloneSignInNotice', () => {
     const line = 'This is an SSH URL; after signing in, use the HTTPS URL instead.';
     expect(render({ status: 'idle' }, { overSsh: true })).toContain(line);
     expect(render({ status: 'idle' })).not.toContain(line);
+  });
+
+  it('sends a host whose GitHub sign-in lives in Settings there instead', () => {
+    const markup = render({ status: 'idle' }, { managedInSettings: true });
+    expect(markup).toContain('>Add a GitHub token in Settings<');
+    expect(markup).toContain('>Open Settings<');
+    expect(markup).toContain('Try again');
+    expect(markup).not.toContain(HEADLINE);
+    expect(markup).not.toContain('Sign in to GitHub<');
+    expect(markup).not.toContain('Open terminal on devbox');
+    expect(markup).not.toContain(DEVICE_HINT);
+  });
+
+  it('keeps the SSH line on the Settings route', () => {
+    expect(render({ status: 'idle' }, { managedInSettings: true, overSsh: true }))
+      .toContain('This is an SSH URL; after signing in, use the HTTPS URL instead.');
   });
 });
