@@ -1,5 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
+import type { PullRequestDraft, PullRequestStatus } from '../shared/types/pullRequest';
 import { installElectronApiMock } from './electronApiMock';
 
 const project = {
@@ -113,6 +114,45 @@ const localCombinedDiff = {
   changedFiles: ['src/review.ts'],
 };
 
+const pullRequestDraft: PullRequestDraft = {
+  branch: 'feature/pull-request-workflow',
+  baseBranch: 'main',
+  baseBranches: ['main', 'release'],
+  localBaseBranches: ['main'],
+  title: 'Open pull requests from Pane',
+  body: '## Summary\n\nOpen and follow pull requests without leaving Pane.',
+  commitCount: 4,
+  hasUncommittedChanges: true,
+  targets: [
+    { nameWithOwner: 'dcouple/Pane', isParent: true, defaultBranch: 'main' },
+    { nameWithOwner: 'contributor/Pane', isParent: false, defaultBranch: 'main' },
+  ],
+  defaultTarget: 'dcouple/Pane',
+  blockers: [],
+};
+
+const pullRequestStatus: PullRequestStatus = {
+  number: 387,
+  url: 'https://github.com/dcouple/Pane/pull/387',
+  title: 'Open pull requests from Pane',
+  state: 'OPEN',
+  isDraft: false,
+  baseRefName: 'main',
+  headRefName: 'feature/pull-request-workflow',
+  headRepositoryOwner: 'contributor',
+  reviewDecision: 'changes_requested',
+  mergeable: 'CONFLICTING',
+  reviewers: [
+    { login: 'reviewer-one', state: 'APPROVED' },
+    { login: 'reviewer-two', state: 'CHANGES_REQUESTED' },
+  ],
+  commentCount: 3,
+  additions: 418,
+  deletions: 72,
+  changedFiles: 15,
+  fetchedAtMs: Date.parse('2026-08-23T12:00:00.000Z'),
+};
+
 async function openSession(
   page: Page,
   gitStatus: ReviewGitStatus = baseGitStatus,
@@ -162,6 +202,77 @@ async function capture(page: Page, testInfo: TestInfo, filename: string): Promis
   await page.screenshot({ path });
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
+
+test('Create Pull Request validates the selected target branch', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialSessions: [createSession()],
+    initialPanels: panels,
+    activeProjectId: project.id,
+    pullRequestDraft,
+    pullRequestDiff: { baseRef: 'origin/main', diff: localCombinedDiff.diff, truncated: false },
+    pullRequestBranches: { all: ['main', 'release'], local: ['main'] },
+    pullRequestChanges: {
+      baseRef: 'origin/main',
+      files: [{ path: 'frontend/src/components/git/CreatePullRequestDialog.tsx', status: 'modified', additions: 32, deletions: 4 }],
+      totalFiles: 1,
+      truncated: false,
+      additions: 32,
+      deletions: 4,
+    },
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
+  await page.getByRole('button', { name: 'Review changes before PR', exact: true }).click();
+
+  await page.getByRole('tab', { name: 'Details', exact: true }).click();
+  await page.getByRole('button', { name: 'Create Pull Request', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create pull request' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('input').first()).toHaveValue('Open pull requests from Pane');
+  await expect(dialog.locator('select')).toHaveValue('dcouple/Pane');
+  await expect(dialog.locator('option').first()).toHaveText('dcouple/Pane (upstream)');
+  await expect(dialog.getByText('1 file', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('cell', { name: '+ export const reviewAvailable = true;', exact: true })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Show diff', exact: true }).click();
+  await expect(dialog.getByRole('cell', { name: '+ export const reviewAvailable = true;', exact: true })).toBeVisible();
+  await capture(page, testInfo, 'pr-387-01-create-dialog.png');
+
+  await dialog.getByRole('combobox', { name: 'Base branch' }).fill('missing-branch');
+  await expect(dialog.getByText(/missing-branch is not a branch in dcouple\/Pane/)).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Create pull request', exact: true })).toBeDisabled();
+  await capture(page, testInfo, 'pr-387-02-invalid-base.png');
+});
+
+test('Review displays and expands current pull request status', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialSessions: [createSession({
+      ...baseGitStatus,
+      prNumber: 387,
+      prTitle: pullRequestStatus.title,
+      prUrl: pullRequestStatus.url,
+    })],
+    initialPanels: panels,
+    initialExecutions: localExecutions,
+    initialCombinedDiff: localCombinedDiff,
+    activeProjectId: project.id,
+    pullRequestStatus,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
+  await page.getByRole('button', { name: pullRequestStatus.title, exact: true }).click();
+  await page.getByRole('tab', { name: 'Changes', exact: true }).click();
+
+  const status = page.getByRole('button', { name: /Open #387 Open pull requests from Pane/ });
+  await expect(status).toBeVisible();
+  await expect(page.getByText('Changes requested', { exact: true })).toBeVisible();
+  await expect(page.getByText('Conflicts', { exact: true })).toBeVisible();
+  await status.click();
+  await expect(page.getByText('contributor:feature/pull-request-workflow → dcouple/Pane:main', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Reviewed by reviewer-one \(approved\), reviewer-two \(changes requested\)/)).toBeVisible();
+  await capture(page, testInfo, 'pr-387-03-review-status.png');
+});
 
 test('Pinned panes use the short repository and pane name', async ({ page }, testInfo) => {
   const pinnedProject = {
@@ -332,6 +443,60 @@ test('Review stays local until a newly discovered pull request is explicitly ope
   await diffTab.click();
   await expect(diffTab).toHaveAttribute('aria-selected', 'true');
   await expect(splitMode).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('Review expands commit file details and reveals the selected file diff', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialSessions: [createSession()],
+    initialPanels: panels,
+    initialExecutions: localExecutions,
+    initialGitGraph: { currentBranch: 'feature', entries: [{ hash: 'a'.repeat(40), parents: [], branch: 'feature', message: 'A reviewed commit', committerDate: '2026-08-06T12:00:00.000Z', author: 'Pane QA', filesChanged: 1, additions: 8, deletions: 3 }] },
+    diffManifests: {
+      ['commit:' + 'a'.repeat(40)]: {
+        scope: { kind: 'commit', hash: 'a'.repeat(40) },
+        files: [{ path: 'src/review.ts', kind: 'modified', additions: 8, deletions: 3, isBinary: false }],
+        resolvedBase: { kind: 'commit', hash: 'b'.repeat(40) },
+        resolvedTarget: { kind: 'commit', hash: 'a'.repeat(40) },
+        stats: { additions: 8, deletions: 3, filesChanged: 1 },
+      },
+    },
+    fileDiffs: {
+      ['commit:' + 'a'.repeat(40) + ':src/review.ts']: { file: { path: 'src/review.ts', kind: 'modified', additions: 8, deletions: 3, isBinary: false }, patch: localCombinedDiff.diff, status: 'changed' },
+    },
+    initialCommitFiles: [{
+      path: 'src/review.ts',
+      oldPath: 'src/review.ts',
+      status: 'modified',
+      additions: 8,
+      deletions: 3,
+      isBinary: false,
+    }],
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
+  await page.getByRole('button', { name: 'Review changes before PR', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details', exact: true }).click();
+
+  const fileToggle = page.getByRole('button', { name: 'Show files changed in aaaaaaa', exact: true });
+  await fileToggle.click();
+  await expect(page.getByRole('button', { name: 'Hide files changed in aaaaaaa', exact: true })).toHaveAttribute('aria-expanded', 'true');
+
+  const fileRow = page.getByRole('button', { name: 'Modified: src/review.ts. Show diff.', exact: true });
+  await expect(fileRow).toBeVisible();
+  await expect(fileRow.getByText('+8', { exact: true })).toBeVisible();
+  await expect(fileRow.getByText('-3', { exact: true })).toBeVisible();
+  await capture(page, testInfo, '06-commit-file-details-expanded.png');
+
+  await fileRow.click();
+  await expect(page.getByRole('tab', { name: 'review.ts (aaaaaaa)', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'review.ts (aaaaaaa)', exact: true }).getByRole('cell', { name: '+ export const reviewAvailable = true;', exact: true })).toBeVisible();
+  // SAFETY: installElectronApiMock installs this controller before page navigation.
+  await expect.poll(() => page.evaluate(() => (window as typeof window & {
+    __paneTestElectronMock: { getFileDiffCalls(): Array<{ sessionId: string; scope: { kind: string; hash?: string }; path: string }> };
+  }).__paneTestElectronMock.getFileDiffCalls())).toContainEqual({ sessionId: 'review-session', scope: { kind: 'commit', hash: 'a'.repeat(40) }, path: 'src/review.ts' });
+  await capture(page, testInfo, '07-selected-file-diff-revealed.png');
 });
 
 test('Review shows a clean local empty state before a pull request exists', async ({ page }) => {

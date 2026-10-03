@@ -39,6 +39,7 @@ import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
+import type { CreatePullRequestRequest } from '../../shared/types/pullRequest';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -431,6 +432,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
+  // Pull requests, opened from a session's branch
+  pullRequests: {
+    getDraft: (sessionId: string): Promise<IPCResponse> => invokeIpc('pr:get-draft', sessionId),
+    create: (request: CreatePullRequestRequest): Promise<IPCResponse> => invokeIpc('pr:create', request),
+    getChecks: (sessionId: string, repo: string, number: number): Promise<IPCResponse> => invokeIpc('pr:get-checks', sessionId, repo, number),
+    listBaseBranches: (sessionId: string, repo: string): Promise<IPCResponse> => invokeIpc('pr:list-base-branches', sessionId, repo),
+    getChanges: (sessionId: string, baseBranch?: string): Promise<IPCResponse> => invokeIpc('pr:get-changes', sessionId, baseBranch),
+    getDiff: (sessionId: string, baseBranch?: string): Promise<IPCResponse> => invokeIpc('pr:get-diff', sessionId, baseBranch),
+    getStatus: (sessionId: string, repo: string, number: number): Promise<IPCResponse> => invokeIpc('pr:get-status', sessionId, repo, number),
+  },
   // Session management
   sessions: {
     getAll: (): Promise<IPCResponse> => invokeIpc('sessions:get-all'),
@@ -461,6 +472,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     gitDiff: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:git-diff', sessionId),
     getDiffManifest: (sessionId: string, scope: DiffScope): Promise<IPCResponse> => invokeIpc('sessions:get-diff-manifest', sessionId, scope),
     getFileDiff: (sessionId: string, scope: DiffScope, request: FileDiffRequest): Promise<IPCResponse> => invokeIpc('sessions:get-file-diff', sessionId, scope, request),
+    getCommitDiffByHash: (sessionId: string, commitHash: string): Promise<IPCResponse> => invokeIpc('sessions:get-commit-diff-by-hash', sessionId, commitHash),
+    getCommitFiles: (sessionId: string, ref: string): Promise<IPCResponse> => invokeIpc('sessions:get-commit-files', sessionId, ref),
 
     // Main repo session
     getOrCreateMainRepoSession: (projectId: number): Promise<IPCResponse> => invokeIpc('sessions:get-or-create-main-repo', projectId),

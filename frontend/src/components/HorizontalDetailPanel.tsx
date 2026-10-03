@@ -29,6 +29,7 @@ interface HorizontalDetailPanelProps {
   changesPanel?: ToolPanel;
   changesCount?: number;
   isMainRepo?: boolean;
+  onCommitFileClick?: (hash: string, path: string) => void;
 }
 
 export function HorizontalDetailPanel({
@@ -48,6 +49,7 @@ export function HorizontalDetailPanel({
   changesPanel,
   changesCount,
   isMainRepo = false,
+  onCommitFileClick,
 }: HorizontalDetailPanelProps) {
   const hostedPanel = inspectorTab === 'files' ? filesPanel : inspectorTab === 'changes' ? changesPanel : undefined;
   const showDetails = inspectorTab === 'details' || !hostedPanel;
@@ -237,6 +239,8 @@ export function HorizontalDetailPanel({
               baseBranch={session.baseBranch || 'main'}
               layout="wide"
               onCommitClick={onCommitClick}
+              expandable
+              onFileClick={onCommitFileClick}
             />
           </div>
         )}

@@ -2,6 +2,13 @@ import type { Page } from '@playwright/test';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
 import type {
+  BaseBranchOptions,
+  PullRequestChanges,
+  PullRequestDiff,
+  PullRequestDraft,
+  PullRequestStatus,
+} from '../shared/types/pullRequest';
+import type {
   RemoteDaemonClientRecord,
   RemoteDaemonConfig,
   RemoteDaemonHostConfig,
@@ -47,6 +54,7 @@ type ElectronApiMockOptions = {
     repositoriesSectionExpanded: boolean;
   }>;
   initialExecutions?: JsonObject[];
+  initialGitGraph?: JsonObject;
   diffManifests?: Record<string, DiffManifest>;
   fileDiffs?: Record<string, FileDiffResult>;
   diffManifestDelayMs?: Record<string, number>;
@@ -57,6 +65,13 @@ type ElectronApiMockOptions = {
   gitCommands?: JsonObject;
   /** Seeded split layout for the session under test (panels:get-layout). */
   initialLayout?: JsonObject | null;
+  initialCommitDiff?: JsonObject | null;
+  initialCommitFiles?: JsonObject[];
+  pullRequestDraft?: PullRequestDraft;
+  pullRequestBranches?: BaseBranchOptions;
+  pullRequestChanges?: PullRequestChanges;
+  pullRequestDiff?: PullRequestDiff;
+  pullRequestStatus?: PullRequestStatus | null;
   initialTerminalStates?: Record<string, JsonObject>;
   initialAgentUsage?: JsonObject;
   initialUsageReport?: JsonObject;
@@ -400,6 +415,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       calls.push({ channel, args });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+      if (channel === 'panels:agent-statuses') return success([]);
+      if (channel === 'file:list') return Promise.resolve({ success: true, files: [] });
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
@@ -704,6 +721,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(createPaneChatState());
         },
       }),
+      pullRequests: namespace({
+        getDraft: () => success(clone(mockOptions.pullRequestDraft ?? null)),
+        listBaseBranches: () => success(clone(mockOptions.pullRequestBranches ?? { all: [], local: [] })),
+        getChanges: () => success(clone(mockOptions.pullRequestChanges ?? null)),
+        getDiff: () => success(clone(mockOptions.pullRequestDiff ?? null)),
+        getStatus: () => success(clone(mockOptions.pullRequestStatus ?? null)),
+      }),
       panels: namespace({
         getSessionPanels: (sessionId: string) => success(
           clone(mockPanels.filter((panel) => panel.sessionId === sessionId)),
@@ -831,6 +855,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getArchivedWithProjects: () => success([]),
         getResumable: () => success([]),
         getExecutions: () => success(clone(mockOptions.initialExecutions ?? [])),
+        getGitGraph: () => success(clone(mockOptions.initialGitGraph ?? { entries: [], currentBranch: 'main' })),
         getGitCommands: () => success(clone(mockOptions.gitCommands ?? null)),
         getDiffManifest: async (sessionId: string, scope: DiffScope) => {
           const key = scopeMockKey(scope);
@@ -865,6 +890,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           gitStageAndCommitCalls.push({ sessionId, message });
           return success();
         },
+        getCommitDiffByHash: () => success(clone(mockOptions.initialCommitDiff ?? null)),
+        getCommitFiles: (_sessionId: string, ref: string) => success({
+          ref,
+          files: clone(mockOptions.initialCommitFiles ?? []),
+          totalFiles: (mockOptions.initialCommitFiles ?? []).length,
+          truncated: false,
+          isMergeAgainstFirstParent: false,
+        }),
       }),
       remoteDaemon: namespace({
         getConfig: () => success(clone(remoteDaemonConfig)),

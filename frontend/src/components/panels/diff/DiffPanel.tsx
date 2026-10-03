@@ -5,6 +5,8 @@ import type { ToolPanel, DiffPanelState } from '../../../../../shared/types/pane
 import type { GitStatus } from '../../../types/session';
 import { AlertCircle, GitBranch, Globe } from 'lucide-react';
 import { useSession } from '../../../contexts/SessionContext';
+import { PullRequestChecks } from '../../git/PullRequestChecks';
+import { PullRequestStatusBar } from '../../git/PullRequestStatusBar';
 
 interface DiffPanelProps {
   panel: ToolPanel;
@@ -184,6 +186,10 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
           {session?.gitStatus?.prTitle && (
             <span className="text-xs text-text-tertiary truncate">{session.gitStatus.prTitle}</span>
           )}
+          {/* Did the agent break the build? Asked here because this is where it comes up. */}
+          {sessionId && (
+            <PullRequestChecks isVisible={isActive} sessionId={sessionId} prUrl={session?.gitStatus?.prUrl} />
+          )}
         </div>
 
         <button
@@ -201,6 +207,14 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
           Open PR
         </button>
       </div>
+
+      {/*
+        State of the pull request these changes belong to. Creating one is a
+        one-off action in the git menu; watching it is what happens here.
+      */}
+      {sessionId && (
+        <PullRequestStatusBar isVisible={isActive} sessionId={sessionId} prUrl={session?.gitStatus?.prUrl} />
+      )}
 
       {/* Stale indicator bar */}
       {isStale && !isActive && (
