@@ -40,7 +40,7 @@ export function formatHostChipText(host: ActiveHost): string {
 
 /**
  * Adds the host's display name to a host request, so host-side errors name the
- * host the user picked ("testina") instead of its machine hostname.
+ * host the user picked ("sandbox-1") instead of its machine hostname.
  */
 export function withHostLabel<Request extends object>(host: ActiveHost, request: Request): Request & { hostLabel?: string } {
   return host.remote ? { ...request, hostLabel: host.name } : request;

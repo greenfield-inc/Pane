@@ -16,7 +16,7 @@ const home: BrowseDirectoriesResult = {
   platform: 'linux',
   entries: [
     { name: '.config', path: '/home/user/.config', isGitRepo: false, isHidden: true },
-    { name: 'montlakev2', path: '/home/user/montlakev2', isGitRepo: true, isHidden: false },
+    { name: 'my-repo', path: '/home/user/my-repo', isGitRepo: true, isHidden: false },
     { name: 'notes', path: '/home/user/notes', isGitRepo: false, isHidden: false },
   ],
 };
@@ -29,7 +29,7 @@ const loaded: HostFolderBrowserState = hostFolderBrowserReducer(
 function renderView(state: HostFolderBrowserState, allowCreate: boolean) {
   return renderToStaticMarkup(
     <HostFolderBrowserView
-      hostName="testina"
+      hostName="sandbox-1"
       state={state}
       allowCreate={allowCreate}
       onOpenFolder={vi.fn()}
@@ -45,8 +45,8 @@ function renderView(state: HostFolderBrowserState, allowCreate: boolean) {
 
 describe('visibleEntries', () => {
   it('hides dot folders until asked', () => {
-    expect(visibleEntries(home, false).map((entry) => entry.name)).toEqual(['montlakev2', 'notes']);
-    expect(visibleEntries(home, true).map((entry) => entry.name)).toEqual(['.config', 'montlakev2', 'notes']);
+    expect(visibleEntries(home, false).map((entry) => entry.name)).toEqual(['my-repo', 'notes']);
+    expect(visibleEntries(home, true).map((entry) => entry.name)).toEqual(['.config', 'my-repo', 'notes']);
   });
 });
 
@@ -66,9 +66,9 @@ describe('hostFolderBrowserReducer', () => {
   it('shows a load failure without losing where the user was', () => {
     const failed = hostFolderBrowserReducer(
       hostFolderBrowserReducer(loaded, { type: 'load-start' }),
-      { type: 'failure', error: '/nope does not exist on testina.' },
+      { type: 'failure', error: '/nope does not exist on sandbox-1.' },
     );
-    expect(failed).toMatchObject({ listing: home, loading: false, error: '/nope does not exist on testina.' });
+    expect(failed).toMatchObject({ listing: home, loading: false, error: '/nope does not exist on sandbox-1.' });
   });
 
   it('toggles hidden folders without refetching state', () => {
@@ -95,7 +95,7 @@ describe('HostFolderBrowserView', () => {
     const markup = renderView(loaded, false);
     expect(markup).toContain('aria-label="Current folder"');
     expect(markup).toContain('/home/user');
-    expect(markup).toContain('aria-label="montlakev2, git repo"');
+    expect(markup).toContain('aria-label="my-repo, git repo"');
     expect(markup).toContain('git repo');
     expect(markup).toContain('aria-label="notes"');
     expect(markup).not.toContain('.config');
@@ -128,11 +128,11 @@ describe('HostFolderBrowserView', () => {
   it('shows host errors inline as an alert', () => {
     const failed = hostFolderBrowserReducer(loaded, {
       type: 'failure',
-      error: "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+      error: "That's a path on this computer; sandbox-1 is a Linux host. Pick a folder on sandbox-1.",
     });
     expect(renderView(failed, false)).toContain(
       'role="alert"',
     );
-    expect(renderView(failed, false)).toContain('That&#x27;s a path on this computer; testina is a Linux host. Pick a folder on testina.');
+    expect(renderView(failed, false)).toContain('That&#x27;s a path on this computer; sandbox-1 is a Linux host. Pick a folder on sandbox-1.');
   });
 });

@@ -22,10 +22,10 @@ const devbox: RemotePaneConnectionProfile = {
   token: 'synthetic',
   transport: 'http+sse',
 };
-const testina: RemotePaneConnectionProfile = {
+const sandboxProfile: RemotePaneConnectionProfile = {
   ...devbox,
-  id: 'testina',
-  label: 'testina',
+  id: 'sandbox-1',
+  label: 'sandbox-1',
   hostKind: { label: 'cloud sandbox', icon: 'cloud' },
 };
 
@@ -39,9 +39,9 @@ function connectedTo(profile: RemotePaneConnectionProfile): RemotePaneConnection
   };
 }
 
-const local = getActiveHost(createDefaultRemotePaneConnectionState(), [devbox, testina]);
-const selfHosted = getActiveHost(connectedTo(devbox), [devbox, testina]);
-const sandbox = getActiveHost(connectedTo(testina), [devbox, testina]);
+const local = getActiveHost(createDefaultRemotePaneConnectionState(), [devbox, sandboxProfile]);
+const selfHosted = getActiveHost(connectedTo(devbox), [devbox, sandboxProfile]);
+const sandbox = getActiveHost(connectedTo(sandboxProfile), [devbox, sandboxProfile]);
 
 describe('getActiveHost', () => {
   it('is this computer in local mode, even with saved hosts', () => {
@@ -50,12 +50,12 @@ describe('getActiveHost', () => {
 
   it('names the active saved host and its kind', () => {
     expect(selfHosted).toEqual({ id: 'devbox', remote: true, name: 'devbox', kindLabel: 'remote host', icon: 'server' });
-    expect(sandbox).toEqual({ id: 'testina', remote: true, name: 'testina', kindLabel: 'cloud sandbox', icon: 'cloud' });
+    expect(sandbox).toEqual({ id: 'sandbox-1', remote: true, name: 'sandbox-1', kindLabel: 'cloud sandbox', icon: 'cloud' });
   });
 
   it('stays remote when the active profile is missing, using the pushed label', () => {
-    const host = getActiveHost({ ...connectedTo(testina), activeProfileId: 'gone' }, []);
-    expect(host).toEqual({ id: 'gone', remote: true, name: 'testina', kindLabel: 'remote host', icon: 'server' });
+    const host = getActiveHost({ ...connectedTo(sandboxProfile), activeProfileId: 'gone' }, []);
+    expect(host).toEqual({ id: 'gone', remote: true, name: 'sandbox-1', kindLabel: 'remote host', icon: 'server' });
   });
 });
 
@@ -63,7 +63,7 @@ describe('formatHostChipText', () => {
   it.each<[string, ActiveHost, string]>([
     ['local', local, 'On: This computer'],
     ['self-hosted remote', selfHosted, 'On: devbox (remote host)'],
-    ['cloud sandbox', sandbox, 'On: testina (cloud sandbox)'],
+    ['cloud sandbox', sandbox, 'On: sandbox-1 (cloud sandbox)'],
   ])('reads right for a %s', (_kind, host, text) => {
     expect(formatHostChipText(host)).toBe(text);
   });
@@ -79,7 +79,7 @@ describe('buildCreateProjectRequest', () => {
 
   it('sends the host label on a remote so host errors name it, not its hostname', () => {
     expect(buildCreateProjectRequest(sandbox, { name: 'app', path: '~/app', mode: 'open' }))
-      .toEqual({ name: 'app', path: '~/app', mode: 'open', hostLabel: 'testina' });
+      .toEqual({ name: 'app', path: '~/app', mode: 'open', hostLabel: 'sandbox-1' });
   });
 
   it('keeps the optional scripts the dialog collected', () => {
@@ -103,7 +103,7 @@ describe('clone defaults', () => {
   });
 
   it('passes the host label to the clone on a remote only', () => {
-    expect(buildCloneOptions(sandbox)).toEqual({ hostLabel: 'testina' });
+    expect(buildCloneOptions(sandbox)).toEqual({ hostLabel: 'sandbox-1' });
     expect(buildCloneOptions(local)).toEqual({});
   });
 });

@@ -10,7 +10,7 @@ const hostFs = {
     '/home': {},
     '/home/user': {},
     '/home/user/.config': {},
-    '/home/user/montlakev2': { isGitRepo: true },
+    '/home/user/my-repo': { isGitRepo: true },
     '/home/user/notes': {},
   },
 };
@@ -24,14 +24,14 @@ async function boot(page: Page) {
 async function connectTo(page: Page, host: 'sandbox' | 'self-hosted') {
   await page.evaluate(async (host) => {
     const profile = host === 'sandbox'
-      ? { id: 'testina', label: 'testina', hostKind: { label: 'cloud sandbox', icon: 'cloud' as const } }
+      ? { id: 'sandbox-1', label: 'sandbox-1', hostKind: { label: 'cloud sandbox', icon: 'cloud' as const } }
       : { id: 'devbox', label: 'devbox' };
     await window.electronAPI.remoteDaemon.upsertConnectionProfile({
       ...profile, baseUrl: `https://${profile.label}.example.ts.net`, token: 'synthetic', transport: 'http+sse',
     });
     await window.electronAPI.remoteDaemon.updateClientState({ mode: 'remote', activeProfileId: profile.id });
   }, host);
-  const name = host === 'sandbox' ? 'testina' : 'devbox';
+  const name = host === 'sandbox' ? 'sandbox-1' : 'devbox';
   await expect(page.getByRole('button', { name: `Agents run on ${name}. Switch host` })).toBeVisible();
 }
 
@@ -67,15 +67,15 @@ test('Clone on a cloud sandbox browses the sandbox, not this computer, and clone
   await openHomeCard(page, 'GitHub');
 
   const clone = page.getByRole('dialog', { name: 'Clone from GitHub' });
-  await expect(clone.getByText('On: testina (cloud sandbox)', { exact: true })).toBeVisible();
+  await expect(clone.getByText('On: sandbox-1 (cloud sandbox)', { exact: true })).toBeVisible();
   await expect(clone.getByRole('textbox', { name: 'Destination' })).toHaveValue('~');
   await shot(page, testInfo, '01-clone-dialog-sandbox-chip');
 
   await clone.getByRole('button', { name: 'Browse' }).click();
-  const browser = folderBrowser(page, 'testina');
+  const browser = folderBrowser(page, 'sandbox-1');
   await expect(browser).toBeVisible();
   await expect(browser.getByLabel('Current folder')).toHaveText('/home/user');
-  await expect(browser.getByRole('button', { name: 'montlakev2, git repo' })).toBeVisible();
+  await expect(browser.getByRole('button', { name: 'my-repo, git repo' })).toBeVisible();
   await expect(browser.getByRole('button', { name: 'notes', exact: true })).toBeVisible();
   await expect(browser.getByRole('button', { name: '.config' })).toHaveCount(0);
   await shot(page, testInfo, '02-remote-browser-home');
@@ -95,29 +95,29 @@ test('Clone on a cloud sandbox browses the sandbox, not this computer, and clone
   await browser.getByRole('button', { name: 'Create folder' }).click();
   await expect(browser.getByLabel('Current folder')).toHaveText('/home/user/repos');
   expect(await invokeCalls(page, 'fs:create-directory')).toEqual([
-    { channel: 'fs:create-directory', args: [{ parent: '/home/user', name: 'repos', hostLabel: 'testina' }] },
+    { channel: 'fs:create-directory', args: [{ parent: '/home/user', name: 'repos', hostLabel: 'sandbox-1' }] },
   ]);
 
   await browser.getByRole('button', { name: 'Select this folder' }).click();
   await expect(browser).toHaveCount(0);
   await expect(clone.getByRole('textbox', { name: 'Destination' })).toHaveValue('/home/user/repos');
 
-  await clone.getByRole('textbox', { name: 'Repository URL' }).fill('https://github.com/jamari-morrison/demo');
+  await clone.getByRole('textbox', { name: 'Repository URL' }).fill('https://github.com/octocat/Hello-World');
   await clone.getByRole('button', { name: 'Clone', exact: true }).click();
   await expect(clone).toHaveCount(0);
 
   expect(await invokeCalls(page, 'dialog:open-directory')).toEqual([]);
   expect((await invokeCalls(page, 'fs:browse-directories')).every((call) => (
     // SAFETY: fs:browse-directories takes one BrowseDirectoriesRequest, per shared/types/hostPaths.ts.
-    (call.args[0] as { hostLabel?: string }).hostLabel === 'testina'
+    (call.args[0] as { hostLabel?: string }).hostLabel === 'sandbox-1'
   ))).toBe(true);
   expect(await invokeCalls(page, 'git:clone-repo')).toEqual([{
     channel: 'git:clone-repo',
-    args: ['https://github.com/jamari-morrison/demo', '/home/user/repos', { hostLabel: 'testina' }],
+    args: ['https://github.com/octocat/Hello-World', '/home/user/repos', { hostLabel: 'sandbox-1' }],
   }]);
   expect(await invokeCalls(page, 'projects:create')).toEqual([{
     channel: 'projects:create',
-    args: [{ name: 'demo', path: '/home/user/repos/demo', mode: 'open', hostLabel: 'testina' }],
+    args: [{ name: 'Hello-World', path: '/home/user/repos/Hello-World', mode: 'open', hostLabel: 'sandbox-1' }],
   }]);
 });
 
@@ -127,37 +127,37 @@ test('Open Project on a remote picks an existing repo there and rejects a path f
   await openHomeCard(page, 'Open Project');
 
   const dialog = page.getByRole('dialog', { name: 'Open Repository' });
-  await expect(dialog.getByText('On: testina (cloud sandbox)', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('On: sandbox-1 (cloud sandbox)', { exact: true })).toBeVisible();
 
   const path = dialog.getByRole('textbox', { name: 'Repository Path' });
-  await path.fill('C:\\runpane-temp-home\\montlakev2');
+  await path.fill('C:\\Users\\me\\my-repo');
   await expect(dialog.getByRole('alert')).toHaveText(
-    "That's a path on this computer; testina is a Linux host. Pick a folder on testina.",
+    "That's a path on this computer; sandbox-1 is a Linux host. Pick a folder on sandbox-1.",
   );
   // A rejected path has no branch to show.
   await expect(dialog.getByText('Detected Branch')).toHaveCount(0);
   await shot(page, testInfo, '05-open-windows-path-inline-error');
 
   await dialog.getByRole('button', { name: 'Browse' }).click();
-  const browser = folderBrowser(page, 'testina');
+  const browser = folderBrowser(page, 'sandbox-1');
   await expect(browser).toBeVisible();
   // Open never creates folders: the control is absent, not disabled.
   await expect(browser.getByRole('button', { name: 'New folder' })).toHaveCount(0);
   await shot(page, testInfo, '06-open-remote-browser-no-new-folder');
-  await browser.getByRole('button', { name: 'montlakev2, git repo' }).click();
-  await expect(browser.getByLabel('Current folder')).toHaveText('/home/user/montlakev2');
+  await browser.getByRole('button', { name: 'my-repo, git repo' }).click();
+  await expect(browser.getByLabel('Current folder')).toHaveText('/home/user/my-repo');
   await browser.getByRole('button', { name: 'Select this folder' }).click();
 
-  await expect(path).toHaveValue('/home/user/montlakev2');
+  await expect(path).toHaveValue('/home/user/my-repo');
   await expect(dialog.getByRole('alert')).toHaveCount(0);
-  await dialog.getByRole('textbox', { name: 'Enter project name' }).fill('montlakev2');
+  await dialog.getByRole('textbox', { name: 'Enter project name' }).fill('my-repo');
   await dialog.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
   expect(await invokeCalls(page, 'dialog:open-directory')).toEqual([]);
   expect(await invokeCalls(page, 'projects:create')).toEqual([{
     channel: 'projects:create',
-    args: [{ name: 'montlakev2', path: '/home/user/montlakev2', buildScript: '', runScript: '', mode: 'open', hostLabel: 'testina' }],
+    args: [{ name: 'my-repo', path: '/home/user/my-repo', buildScript: '', runScript: '', mode: 'open', hostLabel: 'sandbox-1' }],
   }]);
 });
 
@@ -187,9 +187,9 @@ test('New Project on a remote can create the folder in the browser and asks the 
   await openHomeCard(page, 'New Project');
 
   const dialog = page.getByRole('dialog', { name: 'New Project' });
-  await expect(dialog.getByText('On: testina (cloud sandbox)', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('On: sandbox-1 (cloud sandbox)', { exact: true })).toBeVisible();
   await dialog.getByRole('button', { name: 'Browse' }).click();
-  const browser = folderBrowser(page, 'testina');
+  const browser = folderBrowser(page, 'sandbox-1');
   await browser.getByRole('button', { name: 'New folder' }).click();
   await browser.getByRole('textbox', { name: 'New folder name' }).fill('fresh');
   await browser.getByRole('button', { name: 'Create folder' }).click();
@@ -204,7 +204,7 @@ test('New Project on a remote can create the folder in the browser and asks the 
   expect(await invokeCalls(page, 'dialog:open-directory')).toEqual([]);
   expect(await invokeCalls(page, 'projects:create')).toEqual([{
     channel: 'projects:create',
-    args: [{ name: 'fresh', path: '/home/user/fresh', buildScript: '', runScript: '', mode: 'new', hostLabel: 'testina' }],
+    args: [{ name: 'fresh', path: '/home/user/fresh', buildScript: '', runScript: '', mode: 'new', hostLabel: 'sandbox-1' }],
   }]);
 });
 
