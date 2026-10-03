@@ -39,6 +39,17 @@ async function hostTerminalOpenRequests(page: Page) {
   });
 }
 
+/** Back to the home page: a sidebar button here, an item of the sidebar's Home menu on newer layouts. */
+async function goHome(page: Page) {
+  const homeButton = page.getByRole('button', { name: 'Home', exact: true });
+  if (await homeButton.count() > 0) {
+    await homeButton.click();
+    return;
+  }
+  await page.getByRole('button', { name: 'Home menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Home', exact: true }).click();
+}
+
 async function connectRemote(page: Page) {
   await page.evaluate(async () => {
     await window.electronAPI.remoteDaemon.upsertConnectionProfile({
@@ -91,7 +102,7 @@ test('a remote host that is not signed in offers its terminal, prefilled, and a 
   await page.screenshot({ path: testInfo.outputPath('remote-terminal-opened.png') });
 
   // Coming back after signing in finds the same URL and destination.
-  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await goHome(page);
   await page.getByRole('button', { name: 'GitHub', exact: true }).click();
   const reopened = page.getByRole('dialog');
   await expect(reopened.getByRole('textbox', { name: 'Repository URL' })).toHaveValue(REPO_URL);
@@ -128,7 +139,7 @@ test('a sign-in draft stays with its host when the user switches hosts', async (
 
   await page.evaluate(() => window.electronAPI.remoteDaemon.updateClientState({ mode: 'local', activeProfileId: null }));
   await expect(page.getByRole('button', { name: 'Agents run on This computer. Switch host' })).toBeVisible();
-  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await goHome(page);
   await page.getByRole('button', { name: 'GitHub', exact: true }).click();
   const local = page.getByRole('dialog');
   await expect(local.getByRole('textbox', { name: 'Repository URL' })).toHaveValue('');
