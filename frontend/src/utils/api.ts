@@ -38,6 +38,7 @@ import type {
 } from '../../../shared/types/daemon';
 import type { ProjectDashboardSessionUpdateEvent, ProjectDashboardUpdateEvent } from '../types/projectDashboard';
 import type { DiffScope, FileDiffRequest } from '../../../shared/types/gitDiff';
+import type { GitHubDeviceLoginStartRequest, GitHubDeviceLoginState } from '../../../shared/types/githubDeviceLogin';
 
 // Type for IPC response
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -567,6 +568,24 @@ export class API {
     async createDirectory(request: CreateDirectoryRequest): Promise<IPCResponse<{ path: string }>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.invoke('fs:create-directory', request);
+    },
+  };
+
+  // Signing the active host in to GitHub with gh's device flow (runs on the host's daemon)
+  static githubDeviceLogin = {
+    async start(request: GitHubDeviceLoginStartRequest): Promise<IPCResponse<GitHubDeviceLoginState>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('github:device-login-start', request);
+    },
+
+    async status(): Promise<IPCResponse<GitHubDeviceLoginState>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('github:device-login-status');
+    },
+
+    async cancel(): Promise<IPCResponse<GitHubDeviceLoginState>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('github:device-login-cancel');
     },
   };
 

@@ -12,6 +12,9 @@ import { buildCloneOptions, buildCreateProjectRequest, defaultCloneDestination }
 import { EMPTY_CLONE_DRAFT, LOCAL_CLONE_HOST, useCloneDraftStore, type CloneDraft } from '../stores/cloneDraftStore';
 import { openHostTerminal } from '../utils/hostTerminal';
 import { getActiveHostPlatform, getGitHubSignInTerminalCommand } from '../utils/githubSignIn';
+import { buildDeviceLoginStartRequest } from '../utils/githubDeviceLogin';
+import { useGitHubDeviceLogin } from '../hooks/useGitHubDeviceLogin';
+import { useConfigStore } from '../stores/configStore';
 import { CloneSignInNotice } from './CloneSignInNotice';
 import { GIT_CLONE_AUTH_REQUIRED } from '../../../shared/types/gitClone';
 
@@ -40,6 +43,9 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
   const storedDraft = useCloneDraftStore();
   const { url, destPath, error, signInHost, signInOverSsh } = storedDraft.hostId === hostId ? storedDraft : EMPTY_CLONE_DRAFT;
   const updateDraft = (draft: Partial<CloneDraft>) => storedDraft.update(hostId, draft);
+  const profiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
+  const activeProfile = profiles?.find((profile) => profile.id === host.id) ?? null;
+  const deviceLogin = useGitHubDeviceLogin(isOpen && signInHost !== null);
 
   // A remote clone lands in the host's home unless the user picks a folder.
   useEffect(() => {
@@ -68,6 +74,11 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
     } catch (err) {
       setTerminalError(err instanceof Error ? err.message : `Could not open the terminal on ${signInHost}`);
     }
+  };
+
+  const handleSignIn = () => {
+    if (!signInHost) return;
+    void deviceLogin.start(buildDeviceLoginStartRequest(signInHost, activeProfile));
   };
 
   const handleClone = async () => {
@@ -156,6 +167,10 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
               host={signInHost}
               overSsh={signInOverSsh}
               retrying={cloning}
+              deviceLogin={deviceLogin.state}
+              deviceLoginError={deviceLogin.requestError}
+              onSignIn={handleSignIn}
+              onCancelSignIn={() => void deviceLogin.cancel()}
               onOpenTerminal={() => void handleOpenTerminal()}
               onTryAgain={() => void handleClone()}
             />
