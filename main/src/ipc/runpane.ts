@@ -4980,7 +4980,9 @@ function trackRunpaneAction(
   const analyticsManager = services.analyticsManager;
   const paneIdHash = metadata.paneId && analyticsManager?.hashSessionId(metadata.paneId);
   const panelIdHash = metadata.panelId && analyticsManager?.hashSessionId(metadata.panelId);
-  const errorMessage = cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
+  const errorMessage = status === 'failure'
+    ? cause instanceof Error ? cause.message : cause ? String(cause) : undefined
+    : undefined;
 
   // Handled CLI failures are product events, never Error Tracking exceptions.
   // Poll deadlines and optional agent availability are normal control flow.
