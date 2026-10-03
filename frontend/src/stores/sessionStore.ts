@@ -73,6 +73,7 @@ interface SessionStore {
 
 // Every selection (including clearing it) supersedes pending session fetches.
 let selectionVersion = 0;
+let pendingSelectionFetch: { sessionId: string; promise: ReturnType<typeof API.sessions.get> } | null = null;
 
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
@@ -173,6 +174,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const version = ++selectionVersion;
     const state = get();
     const wasAlreadyActive = state.activeSessionId === sessionId;
+    const reusableFetch = wasAlreadyActive && pendingSelectionFetch?.sessionId === sessionId
+      ? pendingSelectionFetch : null;
+    pendingSelectionFetch = null;
 
     if (!sessionId) {
       set({ activeSessionId: null, activeMainRepoSession: null });
@@ -235,8 +239,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ activeSessionId: sessionId, activeMainRepoSession: null });
 
     // If not in local store, fetch from backend (this might be a stale UI)
+    // Repeated clicks on this pending selection share its request. A different
+    // selection, including null, drops the reusable request above.
+    const fetch = reusableFetch ?? { sessionId, promise: API.sessions.get(sessionId) };
+    pendingSelectionFetch = fetch;
     try {
-      const response = await API.sessions.get(sessionId);
+      const response = await fetch.promise;
       if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       
       if (response.success && response.data) {
@@ -278,6 +286,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (error) {
       if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       console.error('[SessionStore] Error setting active session:', error);
+    } finally {
+      if (pendingSelectionFetch === fetch) pendingSelectionFetch = null;
     }
   },
   

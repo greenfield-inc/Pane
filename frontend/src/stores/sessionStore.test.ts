@@ -106,15 +106,29 @@ describe('session selection ordering', () => {
 
   it('marks an uncached session viewed when reselected before its data arrives', async () => {
     const first = deferred<{ success: boolean; data: Session }>();
+    getSession.mockReturnValueOnce(first.promise).mockResolvedValueOnce({ success: false });
+    const selecting = useSessionStore.getState().setActiveSession('missing');
+    const reselecting = useSessionStore.getState().setActiveSession('missing');
+    first.resolve({ success: true, data: session({ id: 'missing', name: 'Current data' }) });
+    await Promise.all([selecting, reselecting]);
+    expect(useSessionStore.getState().getActiveSession()?.name).toBe('Current data');
+    expect(getSession).toHaveBeenCalledExactlyOnceWith('missing');
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
+  });
+
+  it('starts a fresh fetch when returning to an uncached session after navigating away', async () => {
+    const first = deferred<{ success: boolean; data: Session }>();
     const second = deferred<{ success: boolean; data: Session }>();
     getSession.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     const selecting = useSessionStore.getState().setActiveSession('missing');
-    const reselecting = useSessionStore.getState().setActiveSession('missing');
-    second.resolve({ success: true, data: session({ id: 'missing', name: 'Current data' }) });
-    await reselecting;
-    first.resolve({ success: true, data: session({ id: 'missing', name: 'Old data' }) });
+    await useSessionStore.getState().setActiveSession(null);
+    const returning = useSessionStore.getState().setActiveSession('missing');
+    first.resolve({ success: true, data: session({ id: 'missing', name: 'Old host' }) });
     await selecting;
-    expect(useSessionStore.getState().getActiveSession()?.name).toBe('Current data');
+    expect(useSessionStore.getState().getActiveSession()).toBeUndefined();
+    second.resolve({ success: true, data: session({ id: 'missing', name: 'Current host' }) });
+    await returning;
+    expect(useSessionStore.getState().getActiveSession()?.name).toBe('Current host');
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
   });
 });
