@@ -33,6 +33,7 @@ const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundar
 });
 
 /** Returns null for anything that is not a usable memory, including older shapes. */
-export function decodeHostNavigationMemory<Value>(value: Value): HostNavigationMemory | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External saved data is decoded immediately with hostNavigationMemorySchema.
+export function decodeHostNavigationMemory(value: unknown): HostNavigationMemory | null {
   return decodeOptionalBoundary(value, hostNavigationMemorySchema) ?? null;
 }

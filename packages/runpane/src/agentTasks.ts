@@ -161,6 +161,7 @@ async function resolveAgentPanel(parsed: ParsedArgs): Promise<{ paneId: string; 
   return { paneId, panelId: panel.panelId };
 }
 
-function print<Result>(parsed: ParsedArgs, result: Result, text: string): void {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This output serializer receives results already decoded by the named daemon response schemas.
+function print(parsed: ParsedArgs, result: unknown, text: string): void {
   console.log(parsed.json ? JSON.stringify(result, null, 2) : text);
 }

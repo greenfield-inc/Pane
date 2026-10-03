@@ -462,7 +462,8 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-function getVoiceErrorMessage<ErrorValue>(error: ErrorValue): string {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Browser media and network failures are narrowed to Error before showing a message.
+function getVoiceErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
   }
