@@ -10,6 +10,7 @@ import { noteContextPath } from './noteFiles';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag, isPlainAgentCommand } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { HOST_TERMINAL_SESSION_ID } from '../../../shared/types/hostTerminal';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
@@ -18,6 +19,7 @@ import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionCont
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
 import { resolveTerminalPanelKind } from './terminalPanelKind';
+import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
@@ -932,6 +934,10 @@ export class TerminalPanelManager extends EventEmitter {
   ): Promise<void> {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return;
+    if (submitStrategy === 'none') {
+      this.writeToTerminal(panelId, input);
+      return;
+    }
     // An agent reads text and Enter arriving together as a paste and keeps
     // the Enter as a newline, so agents get the Enter as its own write.
     if (submitStrategy === 'codex-ctrl-enter' || terminal.agentType) {
@@ -1717,6 +1723,8 @@ export class TerminalPanelManager extends EventEmitter {
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
+    // The host terminal's session folder only anchors it; its shell starts at home.
+    if (panel.sessionId === HOST_TERMINAL_SESSION_ID) cwd = os.homedir();
     let sessionRuntimeRc: string | undefined;
     let claudeTrustFolder: string | undefined;
     if (sessionState.orchestrationSessionId) {

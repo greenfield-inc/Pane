@@ -36,6 +36,7 @@ import { registerOnboardingHandlers } from './onboarding';
 import { registerVoiceHandlers } from './voice';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerSshHostHandlers } from './sshHosts';
+import { registerHostTerminalHandlers } from './hostTerminal';
 import { registerUsageHandlers } from './usage';
 import { registerSessionImportHandlers } from './sessionImport';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
@@ -152,6 +153,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerVoiceHandlers(ipcMain, services, commandRegistry);
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerSshHostHandlers(ipcMain, services, commandRegistry);
+  registerHostTerminalHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
   registerSessionImportHandlers(ipcMain, services, commandRegistry);

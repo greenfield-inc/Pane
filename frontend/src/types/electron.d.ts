@@ -50,6 +50,7 @@ import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '.
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
 import type { SshHostList, SshHostOpenResult } from '../../../shared/types/sshHosts';
+import type { HostTerminalOpenRequest, HostTerminalState } from '../../../shared/types/hostTerminal';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -188,6 +189,10 @@ interface ElectronAPI {
 
   diagnostics: {
     rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
+  };
+
+  hostTerminal: {
+    open: (request?: HostTerminalOpenRequest) => Promise<IPCResponse<HostTerminalState<Session>>>;
   };
 
 

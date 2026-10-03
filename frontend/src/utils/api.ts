@@ -14,6 +14,7 @@ import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneCha
 import type { LoopInput } from '../../../shared/types/loop';
 import { startOwnPaneCreation } from './ownPaneCreations';
 import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
+import type { HostTerminalOpenRequest, HostTerminalState } from '../../../shared/types/hostTerminal';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -93,6 +94,13 @@ export class API {
     },
     async set(key: string, value: string): Promise<void> {
       return window.electronAPI.preferences.set(key, value);
+    },
+  };
+
+  static hostTerminal = {
+    async open(request?: HostTerminalOpenRequest): Promise<IPCResponse<HostTerminalState<Session>>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.hostTerminal.open(request);
     },
   };
 

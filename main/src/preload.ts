@@ -54,6 +54,7 @@ import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
+import type { HostTerminalOpenRequest } from '../../shared/types/hostTerminal';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type {
@@ -433,6 +434,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       line?: number;
       column?: number;
     }): Promise<IPCResponse> => invokeIpc('diagnostics:renderer-fatal', payload),
+  },
+
+  hostTerminal: {
+    open: (request?: HostTerminalOpenRequest): Promise<IPCResponse> => invokeIpc('host-terminal:open', request),
   },
 
   paneChat: {

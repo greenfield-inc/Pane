@@ -16,6 +16,8 @@ const toProjectIdArray = (projectIds: Set<number>): number[] =>
  * `shared` because per-host navigation memory crosses the IPC boundary; adding a
  * value there also requires a branch in `SessionView` and an entry in *both*
  * sidebar components (`Sidebar` compact rail and `ProjectSessionList` tree).
+ * The exception is `host-terminal`: it is opened from the host switcher, never
+ * from a sidebar row, because the host terminal is not a project or a Pane.
  */
 export type ActiveView = PaneNavigationView;
 
@@ -69,6 +71,7 @@ interface NavigationState {
   navigateToSsh: () => void;
   navigateToLoops: () => void;
   navigateToNotify: () => void;
+  navigateToHostTerminal: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -195,6 +198,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   // The Notify inbox lists questions from every project.
   navigateToNotify: () => set({
     activeView: 'notify',
+    activeProjectId: null
+  }),
+
+  navigateToHostTerminal: () => set({
+    activeView: 'host-terminal',
     activeProjectId: null
   }),
 }));

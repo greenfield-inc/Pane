@@ -11,6 +11,7 @@ import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
 import { SshView } from './SshView';
+import { HostTerminalView } from './HostTerminalView';
 import { LiveRegion } from './ui/LiveRegion';
 import '@xterm/xterm/css/xterm.css';
 import { useSessionView } from '../hooks/useSessionView';
@@ -1964,6 +1965,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'ssh') {
     return <SshView />;
+  }
+
+  if (activeView === 'host-terminal') {
+    return <HostTerminalView />;
   }
 
   if (activeView === 'loops') {

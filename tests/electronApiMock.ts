@@ -305,6 +305,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         started: false,
       };
     };
+    const createHostTerminalState = () => ({
+      session: { ...clone(paneChatSession), id: '__host_terminal__', name: 'Terminal', worktreePath: '/tmp/.pane/sessions/host-terminal' },
+      panel: {
+        id: '__host_terminal_panel__',
+        sessionId: '__host_terminal__',
+        type: 'terminal',
+        title: 'Terminal',
+        state: { isActive: true, hasBeenViewed: false, customState: { isCliPanel: false } },
+        metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 0, permanent: true },
+      },
+      cwd: '/home/user',
+      started: true,
+    });
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     const mockArchivedSessions: JsonObject[] = [];
@@ -1178,6 +1191,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success({ sampleProjectIds, archivedPaneIds });
         },
         supportProject: () => success({}),
+      }),
+      hostTerminal: namespace({
+        open: (request?: { input?: string }) => {
+          const calls = invokeCalls.get('host-terminal:open') ?? [];
+          calls.push({ channel: 'host-terminal:open', args: [request] });
+          invokeCalls.set('host-terminal:open', calls);
+          return success(createHostTerminalState());
+        },
       }),
       paneChat: namespace({
         getOrCreate: () => success(createPaneChatState()),

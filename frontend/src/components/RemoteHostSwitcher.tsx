@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react';
-import { Plus, Radio, Settings } from 'lucide-react';
+import { Plus, Radio, Settings, SquareTerminal } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { showActionError } from '../stores/errorStore';
+import { getHostTerminalPresentation, openHostTerminal } from '../utils/hostTerminal';
 import type { MachineEntry } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 
@@ -58,6 +59,14 @@ export function RemoteHostSwitcher({
     leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
     disabled: switching || unpickable(machine),
     onClick: () => void pick(machine),
+    // Only the active host's terminal can open: the window talks to one host at a time.
+    action: machine.active && machine.kind !== 'local' ? {
+      label: getHostTerminalPresentation(machine.profile ?? { label: machine.name }).openLabel,
+      icon: SquareTerminal,
+      onClick: () => {
+        openHostTerminal().catch((error: unknown) => showActionError('Could not open the host terminal', error));
+      },
+    } : undefined,
   }));
   if (allMachines) {
     items.unshift({
