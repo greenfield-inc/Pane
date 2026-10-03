@@ -899,7 +899,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
     await resizePtyToFit();
     // A refocus refresh may finish after switching to another session's terminal.
-    if (xtermRef.current !== terminal) return false;
+    if (xtermRef.current !== terminal) return;
     if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
 
     if (wasNearBottom) {

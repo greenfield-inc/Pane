@@ -437,7 +437,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             layoutDelay,
           ));
         }
-        return success(clone(mockOptions.initialLayout ?? null));
+        return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
       }
       if (channel === 'panels:set-layout') {
         if (key) mockLayouts.set(key, clone(args[1] ?? null));
