@@ -1,0 +1,1 @@
+terminal,shell,coding,developer,programming,devops,notify,voice,dictation,llm,agentic,vibe,tmux,push
