@@ -126,6 +126,17 @@ async function goHome(page: Page) {
   await page.getByRole('menuitem', { name: 'Home', exact: true }).click();
 }
 
+/** Out of Settings: its modal's close button here, the Settings page's own Back button on newer layouts. */
+async function leaveSettings(page: Page) {
+  const closeModal = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Remote Access' }) })
+    .getByRole('button', { name: 'Close modal' });
+  if (await closeModal.count() > 0) {
+    await closeModal.first().click();
+    return;
+  }
+  await page.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').first().click();
+}
+
 async function connectRemote(page: Page) {
   await page.evaluate(async () => {
     await window.electronAPI.remoteDaemon.upsertConnectionProfile({
@@ -411,7 +422,7 @@ test('a host whose GitHub sign-in lives in Settings sends the user there', async
   expect(await hostTerminalOpenRequests(page)).toEqual([]);
 
   // The URL and destination wait for the user to come back.
-  await page.keyboard.press('Escape');
+  await leaveSettings(page);
   await expect(page.getByRole('heading', { name: 'Remote Access' })).toHaveCount(0);
   await goHome(page);
   await page.getByRole('button', { name: 'GitHub', exact: true }).click();
