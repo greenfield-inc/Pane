@@ -40,79 +40,92 @@ interface SessionPreferencesStore {
   error: string | null;
   loadPreferences: () => Promise<void>;
   updatePreferences: (updates: Partial<SessionCreationPreferences>) => Promise<void>;
-  resetPreferences: () => void;
 }
 
-export const useSessionPreferencesStore = create<SessionPreferencesStore>((set, get) => ({
-  preferences: defaultPreferences,
-  isLoading: false,
-  error: null,
+export const useSessionPreferencesStore = create<SessionPreferencesStore>((set, get) => {
+  let savedPreferences = defaultPreferences;
+  let revision = 0;
+  let loadRequestId = 0;
+  let saveQueue = Promise.resolve();
 
-  loadPreferences: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const response = await API.config.getSessionPreferences();
-      if (response.success && response.data) {
-        // Merge with defaults to ensure all fields are present
-        const mergedPreferences: SessionCreationPreferences = {
-          ...defaultPreferences,
-          ...response.data,
-          selectedTools: {
-            ...defaultPreferences.selectedTools,
-            ...response.data.selectedTools
-          },
-          claudeConfig: {
-            ...defaultPreferences.claudeConfig,
-            ...response.data.claudeConfig
+  return {
+    preferences: defaultPreferences,
+    isLoading: false,
+    error: null,
+
+    loadPreferences: async () => {
+      const loadRevision = revision;
+      const requestId = ++loadRequestId;
+      set({ isLoading: true, error: null });
+      try {
+        // A dialog can reopen while its last edit is still being saved.
+        await saveQueue;
+        if (loadRevision !== revision || requestId !== loadRequestId) return;
+        const response = await API.config.getSessionPreferences();
+        if (loadRevision !== revision || requestId !== loadRequestId) return;
+        if (response.success && response.data) {
+          const mergedPreferences: SessionCreationPreferences = {
+            ...defaultPreferences,
+            ...response.data,
+            selectedTools: {
+              ...defaultPreferences.selectedTools,
+              ...response.data.selectedTools
+            },
+            claudeConfig: {
+              ...defaultPreferences.claudeConfig,
+              ...response.data.claudeConfig
+            },
+            sessionCount: defaultPreferences.sessionCount
+          };
+          savedPreferences = mergedPreferences;
+          set({ preferences: mergedPreferences });
+        } else {
+          set({ error: response.error || 'Failed to load session preferences' });
+        }
+      } catch {
+        if (loadRevision === revision && requestId === loadRequestId) {
+          set({ error: 'Failed to load session preferences' });
+        }
+      } finally {
+        if (requestId === loadRequestId) set({ isLoading: false });
+      }
+    },
+
+    updatePreferences: (updates: Partial<SessionCreationPreferences>) => {
+      const currentPreferences = get().preferences;
+      const newPreferences: SessionCreationPreferences = {
+        ...currentPreferences,
+        ...updates,
+        selectedTools: {
+          ...currentPreferences.selectedTools,
+          ...updates.selectedTools
+        },
+        claudeConfig: {
+          ...currentPreferences.claudeConfig,
+          ...updates.claudeConfig
+        },
+        sessionCount: defaultPreferences.sessionCount
+      };
+      const saveRevision = ++revision;
+      set({ preferences: newPreferences, error: null });
+
+      // Serialize full snapshots so an older request cannot overwrite a newer
+      // edit on the backend. Keep newer optimistic edits visible during failures.
+      saveQueue = saveQueue.then(async () => {
+        try {
+          const response = await API.config.updateSessionPreferences(newPreferences);
+          if (!response.success) throw new Error(response.error || 'Failed to save preferences');
+          savedPreferences = newPreferences;
+        } catch (error) {
+          if (saveRevision === revision) {
+            set({
+              preferences: savedPreferences,
+              error: error instanceof Error ? error.message : 'Failed to save preferences'
+            });
           }
-        };
-        mergedPreferences.sessionCount = defaultPreferences.sessionCount;
-        set({ preferences: mergedPreferences, isLoading: false });
-      } else {
-        set({ error: response.error || 'Failed to load session preferences', isLoading: false });
-      }
-    } catch {
-      set({ error: 'Failed to load session preferences', isLoading: false });
+        }
+      });
+      return saveQueue;
     }
-  },
-
-  updatePreferences: async (updates: Partial<SessionCreationPreferences>) => {
-    const allowedUpdates = { ...updates };
-    delete allowedUpdates.sessionCount;
-    const currentPreferences = get().preferences;
-    
-    // Deep merge the updates while keeping session count at its default
-    const newPreferences: SessionCreationPreferences = {
-      ...currentPreferences,
-      ...allowedUpdates,
-      selectedTools: {
-        ...currentPreferences.selectedTools,
-        ...(allowedUpdates.selectedTools || {})
-      },
-      claudeConfig: {
-        ...currentPreferences.claudeConfig,
-        ...(allowedUpdates.claudeConfig || {})
-      },
-      sessionCount: defaultPreferences.sessionCount
-    };
-
-    // Update local state immediately
-    set({ preferences: newPreferences });
-
-    // Save to backend
-    try {
-      const response = await API.config.updateSessionPreferences(newPreferences);
-      if (!response.success) {
-        // Revert on failure
-        set({ preferences: currentPreferences, error: response.error || 'Failed to save preferences' });
-      }
-    } catch {
-      // Revert on failure
-      set({ preferences: currentPreferences, error: 'Failed to save preferences' });
-    }
-  },
-
-  resetPreferences: () => {
-    set({ preferences: defaultPreferences });
-  }
-}));
+  };
+});

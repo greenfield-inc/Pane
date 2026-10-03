@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { API } from '../utils/api';
 import { useSessionStore } from '../stores/sessionStore';
 import type { Session } from '../types/session';
@@ -22,6 +23,8 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
 import { shouldActivateReopenedPanel } from '../utils/panelLayout';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
+
+const EMPTY_PANELS: ToolPanel[] = [];
 
 interface ProjectViewProps {
   projectId: number;
@@ -57,14 +60,22 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const displayBranch = activeMainRepoSession?.baseBranch ?? detectedBranch;
   // Panel store state and actions
   const {
-    panels,
-    activePanels,
+    sessionPanels,
+    activePanelId,
     setPanels,
     setActivePanel: setActivePanelInStore,
     addPanel,
     removePanel,
     updatePanelState,
-  } = usePanelStore();
+  } = usePanelStore(useShallow(state => ({
+    sessionPanels: state.panels[mainRepoSessionId ?? ''] ?? EMPTY_PANELS,
+    activePanelId: state.activePanels[mainRepoSessionId ?? ''],
+    setPanels: state.setPanels,
+    setActivePanel: state.setActivePanel,
+    addPanel: state.addPanel,
+    removePanel: state.removePanel,
+    updatePanelState: state.updatePanelState,
+  })));
 
   // Detail panel state
   const [detailVisible, setDetailVisible] = useState(() => {
@@ -117,12 +128,6 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     }
   }, [mainRepoSessionId, setPanels, setActivePanelInStore]);
   
-  // Get panels for current main repo session
-  const sessionPanels = useMemo(
-    () => panels[mainRepoSessionId || ''] || [],
-    [panels, mainRepoSessionId]
-  );
-
   const filesPanel = useMemo(() => sessionPanels.find(p => p.type === 'explorer'), [sessionPanels]);
   const changesPanel = useMemo(() => sessionPanels.find(p => p.type === 'diff'), [sessionPanels]);
   const workingPanels = useMemo(
@@ -131,8 +136,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   );
 
   const currentActivePanel = useMemo(
-    () => workingPanels.find(p => p.id === activePanels[mainRepoSessionId || '']),
-    [workingPanels, activePanels, mainRepoSessionId]
+    () => workingPanels.find(p => p.id === activePanelId),
+    [workingPanels, activePanelId]
   );
 
   // A persisted active panel that now lives in the inspector opens that tab
@@ -140,7 +145,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const staleActiveHandledRef = useRef<string | null>(null);
   useEffect(() => {
     if (!mainRepoSessionId) return;
-    const activeId = activePanels[mainRepoSessionId];
+    const activeId = activePanelId;
     const stale = activeId ? sessionPanels.find(p => p.id === activeId && (p.type === 'explorer' || p.type === 'diff')) : undefined;
     if (!stale) return;
     const key = `${mainRepoSessionId}:${stale.id}`;
@@ -152,7 +157,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       setActivePanelInStore(mainRepoSessionId, next.id);
       void panelApi.setActivePanel(mainRepoSessionId, next.id);
     }
-  }, [mainRepoSessionId, activePanels, sessionPanels, workingPanels, setActivePanelInStore]);
+  }, [mainRepoSessionId, activePanelId, sessionPanels, workingPanels, setActivePanelInStore]);
 
   const detailSession = useMemo(() => {
     if (!activeMainRepoSession || !displayBranch) return activeMainRepoSession;
