@@ -2,6 +2,7 @@ import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessi
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
 import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
+import { useProjectStore } from '../stores/project-store';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
@@ -42,8 +43,6 @@ const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0
 
 interface ProjectSessionListProps {
   projects: Project[];
-  onProjectsChange: (update: (projects: Project[]) => Project[]) => void;
-  onProjectsRefresh: () => void;
   sessionSortAscending: boolean;
   pinnedSectionExpanded: boolean;
   repositoriesSectionExpanded: boolean;
@@ -58,8 +57,6 @@ interface ProjectSessionListProps {
 
 export function ProjectSessionList({
   projects,
-  onProjectsChange,
-  onProjectsRefresh,
   sessionSortAscending,
   pinnedSectionExpanded,
   repositoriesSectionExpanded,
@@ -82,6 +79,10 @@ export function ProjectSessionList({
   useEffect(() => {
     onRegisterAddRepository?.(() => setShowAddProjectDialog(true));
   }, [onRegisterAddRepository]);
+
+  const reorderProjects = useProjectStore(s => s.reorder);
+  const isReordering = useProjectStore(s => s.isReordering);
+  const projectError = useProjectStore(s => s.error);
 
   // Drag-to-reorder state
   const [dragProjectId, setDragProjectId] = useState<number | null>(null);
@@ -208,14 +209,12 @@ export function ProjectSessionList({
   };
 
   const handleProjectUpdated = () => {
-    onProjectsRefresh();
     window.dispatchEvent(new Event('project-changed'));
   };
 
   const handleProjectSettingsDeleted = () => {
     setShowProjectSettings(false);
     setSettingsProject(null);
-    onProjectsRefresh();
     window.dispatchEvent(new Event('project-changed'));
   };
 
@@ -240,7 +239,6 @@ export function ProjectSessionList({
   const handleDeleteProject = async (projectId: number) => {
     try {
       await API.projects.delete(String(projectId));
-      onProjectsRefresh();
       window.dispatchEvent(new Event('project-changed'));
     } catch (e) {
       console.error('Failed to delete project:', e);
@@ -249,6 +247,10 @@ export function ProjectSessionList({
 
   // Drag-to-reorder handlers
   const handleProjectDragStart = (e: React.DragEvent, projectId: number) => {
+    if (isReordering) {
+      e.preventDefault();
+      return;
+    }
     setDragProjectId(projectId);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(projectId));
@@ -261,7 +263,7 @@ export function ProjectSessionList({
     }
   };
 
-  const handleProjectDrop = async (e: React.DragEvent, targetProjectId: number) => {
+  const handleProjectDrop = (e: React.DragEvent, targetProjectId: number) => {
     e.preventDefault();
     if (dragProjectId === null || dragProjectId === targetProjectId) {
       setDragProjectId(null);
@@ -269,32 +271,9 @@ export function ProjectSessionList({
       return;
     }
 
-    let payload: Array<{ id: number; displayOrder: number }> = [];
-    onProjectsChange(current => {
-      const newProjects = [...current];
-      const fromIndex = newProjects.findIndex(p => p.id === dragProjectId);
-      const toIndex = newProjects.findIndex(p => p.id === targetProjectId);
-      if (fromIndex === -1 || toIndex === -1) return current;
-
-      const [moved] = newProjects.splice(fromIndex, 1);
-      newProjects.splice(toIndex, 0, moved);
-
-      payload = newProjects.map((p, i) => ({ id: p.id, displayOrder: i }));
-      return newProjects;
-    });
-
+    void reorderProjects(dragProjectId, targetProjectId);
     setDragProjectId(null);
     setDragOverProjectId(null);
-
-    if (payload.length > 0) {
-      try {
-        await API.projects.reorder(payload);
-        window.dispatchEvent(new Event('project-changed'));
-      } catch (err) {
-        console.error('Failed to reorder projects:', err);
-        onProjectsRefresh();
-      }
-    }
   };
 
   const handleProjectDragEnd = () => {
@@ -442,6 +421,8 @@ export function ProjectSessionList({
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
+
+        {projectError && <p role="alert" className="px-3 py-1 text-xs text-status-error">{projectError}</p>}
 
         {/* Projects */}
         {repositoriesSectionExpanded && projects.map((project) => {
