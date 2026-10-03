@@ -122,6 +122,12 @@ export interface RemotePaneConnectionProfile {
   hostKind?: RemoteHostKind;
   /** Environment the host terminal's shell starts with on this host. Saved unencrypted with the profile: not for secrets. */
   hostTerminalEnv?: HostTerminalEnvVar[];
+  /**
+   * When Pane signs gh in on this host, keep the token in ~/.config/gh/hosts.yml (owner-only)
+   * instead of the keyring (`gh auth login --insecure-storage`), for a host whose keyring can't be
+   * used without someone at its screen. Absent means gh's default, the keyring.
+   */
+  ghInsecureStorage?: boolean;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -601,6 +607,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
   hostKind: boundary.optional(remoteHostKindSchema),
   hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
+  ghInsecureStorage: boundary.optional(boundary.boolean),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
