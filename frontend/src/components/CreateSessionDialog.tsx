@@ -130,8 +130,16 @@ export function CreatePaneForm({
     if (!isOpen || !projectId) return;
 
     let cancelled = false;
+    // Only branch-derived fields belong to this repository. Keep the user's
+    // worktree/count/pinning choices and any name they have explicitly edited.
+    setBranches([]);
     setBranchesProjectId(null);
     setIsLoadingBranches(true);
+    setFormData(current => ({ ...current, baseBranch: initialBaseBranch }));
+    if (!userEditedNameRef.current) setSessionName(initialSessionName ?? '');
+    setBranchDropdownOpen(false);
+    setBranchSearch('');
+    setHighlightedBranchIndex(0);
     // First get the project to get its path
     API.projects.getAll().then(projectsResponse => {
       if (!projectsResponse.success || !projectsResponse.data) {
@@ -166,7 +174,7 @@ export function CreatePaneForm({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, projectId]);
+  }, [isOpen, projectId, initialBaseBranch, initialSessionName, setBranchDropdownOpen]);
 
   useEffect(() => {
     if (!isOpen || branchesProjectId !== projectId || formData.baseBranch || branches.length === 0) return;

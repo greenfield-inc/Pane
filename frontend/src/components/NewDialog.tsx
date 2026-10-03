@@ -64,7 +64,7 @@ export function NewDialog({ projects, defaultProjectId, onClose }: NewDialogProp
       useSessionStore.getState().setActiveSession(null);
       useNavigationStore.getState().navigateToPaneChat();
       onClose();
-    }} /> : project ? <CreatePaneForm key={project.id} isOpen projectId={project.id} projectName={project.name} onClose={onClose} header={header} onBranchDropdownOpenChange={setBranchDropdownOpen} onSubmittingChange={setIsSubmitting} repositoryPicker={
+    }} /> : project ? <CreatePaneForm isOpen projectId={project.id} projectName={project.name} onClose={onClose} header={header} onBranchDropdownOpenChange={setBranchDropdownOpen} onSubmittingChange={setIsSubmitting} repositoryPicker={
       <div className="px-6 pt-4">
         <label htmlFor="new-pane-repository" className="mb-2 block text-sm font-medium text-text-primary">Repository</label>
         <select id="new-pane-repository" value={project.id} disabled={isSubmitting} onChange={event => { setBranchDropdownOpen(false); setProjectId(Number(event.target.value)); }} className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive">

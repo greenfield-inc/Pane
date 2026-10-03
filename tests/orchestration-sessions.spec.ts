@@ -1863,13 +1863,17 @@ test('New defaults to the active repository and creates a Pane from the changed 
   await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
   await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('2');
   await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/main');
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+  await page.getByRole('switch', { name: 'Use worktree', exact: true }).click();
+  await page.locator('#worktreeTemplate').fill('unified-new');
   await page.getByLabel('Repository', { exact: true }).selectOption('1');
   await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/other');
-  await page.locator('#worktreeTemplate').fill('unified-new');
+  await expect(page.getByRole('switch', { name: 'Use worktree', exact: true })).not.toBeChecked();
+  await expect(page.locator('#worktreeTemplate')).toHaveValue('unified-new');
   await page.getByRole('button', { name: /^Create/ }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const request: unknown = await page.evaluate(() => JSON.parse(localStorage.getItem('__newPaneRequest') ?? 'null'));
-  expect(request).toMatchObject({ projectId: 1, baseBranch: 'origin/other', worktreeTemplate: 'unified-new', toolType: 'none', isMainRepo: false });
+  expect(request).toMatchObject({ projectId: 1, baseBranch: 'origin/other', worktreeTemplate: 'unified-new', toolType: 'none', isMainRepo: true });
 });
 
 test('New explains the missing repository and remains available from the compact rail', async ({ page }) => {
@@ -1923,4 +1927,24 @@ test('New keeps a pending Session creation in its dialog and enables retry after
   await expect(dialog.getByRole('alert')).toHaveText('Creation unavailable; retry.');
   await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
+});
+
+test('New preserves multiple-Pane options while switching repositories', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { projects: [
+    { id: 1, name: 'First repository', path: '/tmp/first' },
+    { id: 2, name: 'Second repository', path: '/tmp/second' },
+  ] });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+  await page.getByRole('button', { name: 'Create multiple panes', exact: true }).click();
+  await page.locator('#count').fill('3');
+  await page.getByRole('switch', { name: 'Start pinned', exact: true }).click();
+  await page.getByLabel('Repository', { exact: true }).selectOption('2');
+  await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/main');
+  await expect(page.locator('#count')).toHaveValue('3');
+  await expect(page.getByRole('switch', { name: 'Start pinned', exact: true })).toBeChecked();
+  await expect(page.getByRole('button', { name: /Create 3 Panes/ })).toBeEnabled();
 });
