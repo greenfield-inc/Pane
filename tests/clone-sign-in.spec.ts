@@ -5,6 +5,7 @@ import type { GitHubDeviceLoginState } from '../shared/types/githubDeviceLogin';
 // BROWSER=false: gh must print its device code, never open a browser on the host.
 const SIGN_IN_COMMAND = 'BROWSER=false gh auth login --web --git-protocol https && gh auth setup-git';
 const POWERSHELL_SIGN_IN_COMMAND = "$env:BROWSER='false'; gh auth login --web --git-protocol https; if ($?) { gh auth setup-git }";
+const CMD_SIGN_IN_COMMAND = 'set BROWSER=false && gh auth login --web --git-protocol https && gh auth setup-git';
 const DEVICE_HINT = 'Open github.com/login/device on your computer, enter the code, and wait here.';
 const REPO_URL = 'https://github.com/octocat/Hello-World';
 const LOCAL_HTTPS_MESSAGE = 'Authentication failed — check your credentials or use an SSH URL.';
@@ -40,14 +41,14 @@ async function failClonesWithAuth(page: Page, error: string, authProtocol: 'http
   }, { error, authProtocol });
 }
 
-/** The host's daemon reports this `process.platform` from fs:browse-directories. */
-async function hostReportsPlatform(page: Page, platform: 'linux' | 'win32') {
-  await page.evaluate((platform) => {
+/** The host's daemon reports that its terminal runs this shell (host-terminal:shell). */
+async function hostTerminalRuns(page: Page, shell: string) {
+  await page.evaluate((shell) => {
     const invoke = window.electronAPI.invoke;
-    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => (channel === 'fs:browse-directories'
-      ? Promise.resolve({ success: true, data: { path: '/home/user', parent: '/home', home: '/home/user', platform, entries: [] } })
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => (channel === 'host-terminal:shell'
+      ? Promise.resolve({ success: true, data: { shell } })
       : invoke(channel, ...args));
-  }, platform);
+  }, shell);
 }
 
 interface FakeDeviceLogin {
@@ -151,7 +152,7 @@ test('a remote host that is not signed in offers its terminal, prefilled, and a 
   await installElectronApiMock(page);
   await page.goto('/');
   await connectRemote(page);
-  await hostReportsPlatform(page, 'linux');
+  await hostTerminalRuns(page, '/bin/bash');
   await failClonesWithAuth(page, LOCAL_HTTPS_MESSAGE);
 
   const dialog = await fillAndClone(page, '~');
@@ -266,19 +267,25 @@ for (const [failure, message] of SSH_FAILURES) {
   });
 }
 
-test('a Windows host gets the PowerShell sign-in line, still not submitted', async ({ page }) => {
-  await installElectronApiMock(page);
-  await page.goto('/');
-  await connectRemote(page);
-  await hostReportsPlatform(page, 'win32');
-  await failClonesWithAuth(page, LOCAL_HTTPS_MESSAGE);
+for (const [shell, command] of [
+  ['C:\\Program Files\\Git\\bin\\bash.exe', SIGN_IN_COMMAND],
+  ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', POWERSHELL_SIGN_IN_COMMAND],
+  ['C:\\Windows\\System32\\cmd.exe', CMD_SIGN_IN_COMMAND],
+] as const) {
+  test(`a host terminal running ${shell} gets its own sign-in line, still not submitted`, async ({ page }) => {
+    await installElectronApiMock(page);
+    await page.goto('/');
+    await connectRemote(page);
+    await hostTerminalRuns(page, shell);
+    await failClonesWithAuth(page, LOCAL_HTTPS_MESSAGE);
 
-  const dialog = await fillAndClone(page, '~');
-  await dialog.getByRole('button', { name: 'Open terminal on devbox to sign in' }).click();
-  await expect(page.getByRole('tab', { name: 'devbox · Terminal' })).toBeVisible();
-  expect(await hostTerminalOpenRequests(page)).toEqual([{ input: POWERSHELL_SIGN_IN_COMMAND }]);
-  expect(POWERSHELL_SIGN_IN_COMMAND).not.toMatch(/[\r\n]/);
-});
+    const dialog = await fillAndClone(page, '~');
+    await dialog.getByRole('button', { name: 'Open terminal on devbox to sign in' }).click();
+    await expect(page.getByRole('tab', { name: 'devbox · Terminal' })).toBeVisible();
+    expect(await hostTerminalOpenRequests(page)).toEqual([{ input: command }]);
+    expect(command).not.toMatch(/[\r\n]/);
+  });
+}
 
 test('signing in from Pane shows the code, opens GitHub on this computer and then tries the clone again', async ({ page }, testInfo) => {
   await installElectronApiMock(page);
@@ -343,7 +350,7 @@ test('a failed sign-in says why and keeps the terminal fallback', async ({ page 
   await installElectronApiMock(page);
   await page.goto('/');
   await connectRemote(page);
-  await hostReportsPlatform(page, 'linux');
+  await hostTerminalRuns(page, '/bin/bash');
   await fakeDeviceLogin(page);
   await failClonesWithAuth(page, LOCAL_HTTPS_MESSAGE);
 

@@ -11,7 +11,7 @@ import { useActiveHost } from '../hooks/useActiveHost';
 import { buildCloneOptions, buildCreateProjectRequest, defaultCloneDestination } from '../utils/hostRepoActions';
 import { EMPTY_CLONE_DRAFT, LOCAL_CLONE_HOST, useCloneDraftStore, type CloneDraft } from '../stores/cloneDraftStore';
 import { openHostTerminal } from '../utils/hostTerminal';
-import { getActiveHostPlatform, getGitHubSignInTerminalCommand } from '../utils/githubSignIn';
+import { getGitHubSignInTerminalCommand, getHostTerminalShell } from '../utils/githubSignIn';
 import { buildDeviceLoginStartRequest } from '../utils/githubDeviceLogin';
 import { useGitHubDeviceLogin } from '../hooks/useGitHubDeviceLogin';
 import { useConfigStore } from '../stores/configStore';
@@ -70,8 +70,8 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
     if (!signInHost) return;
     setTerminalError('');
     try {
-      const platform = await getActiveHostPlatform(signInHost);
-      await openHostTerminal({ input: getGitHubSignInTerminalCommand(platform) });
+      const shell = await getHostTerminalShell();
+      await openHostTerminal({ input: getGitHubSignInTerminalCommand(shell) });
       onClose();
     } catch (err) {
       setTerminalError(err instanceof Error ? err.message : `Could not open the terminal on ${signInHost}`);
