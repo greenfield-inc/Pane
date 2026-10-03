@@ -47,8 +47,8 @@ describe('getHostTerminalPresentation', () => {
 
   it('uses the icon from the host kind', async () => {
     const { getHostTerminalPresentation } = await load();
-    const presentation = getHostTerminalPresentation({ label: 'testina', hostKind: { label: 'cloud sandbox', icon: 'cloud' } });
-    expect(presentation).toMatchObject({ icon: 'cloud', name: 'Terminal on testina', tabTitle: 'testina · Terminal' });
+    const presentation = getHostTerminalPresentation({ label: 'sandbox-1', hostKind: { label: 'cloud sandbox', icon: 'cloud' } });
+    expect(presentation).toMatchObject({ icon: 'cloud', name: 'Terminal on sandbox-1', tabTitle: 'sandbox-1 · Terminal' });
   });
 });
 

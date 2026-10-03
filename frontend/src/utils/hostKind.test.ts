@@ -25,8 +25,8 @@ describe('describeHost', () => {
   });
 
   it('uses the label and icon the profile was saved with', () => {
-    expect(describeHost(profile({ label: 'testina', hostKind: { label: 'cloud sandbox', icon: 'cloud' } })))
-      .toEqual({ name: 'testina', kindLabel: 'cloud sandbox', icon: 'cloud' });
+    expect(describeHost(profile({ label: 'sandbox-1', hostKind: { label: 'cloud sandbox', icon: 'cloud' } })))
+      .toEqual({ name: 'sandbox-1', kindLabel: 'cloud sandbox', icon: 'cloud' });
   });
 
   it('draws each icon kind', () => {
