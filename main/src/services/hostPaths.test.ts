@@ -14,6 +14,8 @@ import {
 } from './hostPaths';
 
 let home: string;
+// Filesystem checks run against this machine; Windows-path checks fake a Linux host and throw before touching disk.
+const thisHost = () => ({ platform: process.platform, homeDir: home, hostLabel: 'testina' });
 const linuxHost = () => ({ platform: 'linux' as const, homeDir: home, hostLabel: 'testina' });
 
 beforeEach(async () => {
@@ -36,12 +38,12 @@ async function expectHostPathError<Result>(promise: Promise<Result>, code: strin
 
 describe('browseHostDirectories', () => {
   it('opens at the host home and lists subfolders with git and hidden flags', async () => {
-    const result = await browseHostDirectories({}, linuxHost());
+    const result = await browseHostDirectories({}, thisHost());
 
     expect(result.path).toBe(home);
     expect(result.home).toBe(home);
     expect(result.parent).toBe(path.dirname(home));
-    expect(result.platform).toBe('linux');
+    expect(result.platform).toBe(process.platform);
     expect(result.entries).toEqual([
       { name: '.config', path: path.join(home, '.config'), isGitRepo: false, isHidden: true },
       { name: 'Notes', path: path.join(home, 'Notes'), isGitRepo: false, isHidden: false },
@@ -50,35 +52,35 @@ describe('browseHostDirectories', () => {
   });
 
   it('expands ~ paths on the host, hides dot folders on request and can go up', async () => {
-    await expect(browseHostDirectories({ path: '~' }, linuxHost())).resolves.toMatchObject({ path: home });
+    await expect(browseHostDirectories({ path: '~' }, thisHost())).resolves.toMatchObject({ path: home });
 
-    const visible = await browseHostDirectories({ path: '~/', showHidden: false }, linuxHost());
+    const visible = await browseHostDirectories({ path: '~/', showHidden: false }, thisHost());
     expect(visible.entries.map(entry => entry.name)).toEqual(['Notes', 'repo']);
 
-    const repo = await browseHostDirectories({ path: '~/repo' }, linuxHost());
+    const repo = await browseHostDirectories({ path: '~/repo' }, thisHost());
     expect(repo.path).toBe(path.join(home, 'repo'));
     expect(repo.parent).toBe(home);
     expect(repo.entries).toEqual([
       { name: '.git', path: path.join(home, 'repo', '.git'), isGitRepo: false, isHidden: true },
     ]);
 
-    const up = await browseHostDirectories({ path: repo.parent ?? '' }, linuxHost());
+    const up = await browseHostDirectories({ path: repo.parent ?? '' }, thisHost());
     expect(up.path).toBe(home);
   });
 
   it('reports a null parent at the filesystem root', async () => {
-    const result = await browseHostDirectories({ path: '/' }, linuxHost());
+    const result = await browseHostDirectories({ path: '/' }, thisHost());
     expect(result.parent).toBeNull();
   });
 
   it('returns structured errors for missing paths, files and unreadable folders', async () => {
-    await expectHostPathError(browseHostDirectories({ path: '~/missing' }, linuxHost()), 'NOT_FOUND');
-    await expectHostPathError(browseHostDirectories({ path: '~/file.txt' }, linuxHost()), 'NOT_A_DIRECTORY');
+    await expectHostPathError(browseHostDirectories({ path: '~/missing' }, thisHost()), 'NOT_FOUND');
+    await expectHostPathError(browseHostDirectories({ path: '~/file.txt' }, thisHost()), 'NOT_A_DIRECTORY');
 
-    if (process.getuid?.() !== 0) {
+    if (process.platform !== 'win32' && process.getuid?.() !== 0) {
       await chmod(path.join(home, 'Notes'), 0o000);
       await expectHostPathError(
-        browseHostDirectories({ path: '~/Notes' }, linuxHost()),
+        browseHostDirectories({ path: '~/Notes' }, thisHost()),
         'PERMISSION_DENIED',
         `Permission denied: ${path.join(home, 'Notes')}`,
       );
@@ -130,26 +132,26 @@ describe('assertPathOnHost', () => {
 
 describe('createHostDirectory', () => {
   it('creates one new folder under the parent', async () => {
-    const result = await createHostDirectory({ parent: '~', name: 'montlakev2' }, linuxHost());
+    const result = await createHostDirectory({ parent: '~', name: 'montlakev2' }, thisHost());
 
     expect(result).toEqual({ path: path.join(home, 'montlakev2') });
     expect(existsSync(path.join(home, 'montlakev2'))).toBe(true);
   });
 
   it.each(['', ' ', '.', '..', 'a/b', 'a\\b'])('rejects the folder name %j', async name => {
-    await expectHostPathError(createHostDirectory({ parent: home, name }, linuxHost()), 'INVALID_NAME');
+    await expectHostPathError(createHostDirectory({ parent: home, name }, thisHost()), 'INVALID_NAME');
   });
 
   it('reports existing folders, missing parents and Windows parents', async () => {
-    await expectHostPathError(createHostDirectory({ parent: home, name: 'Notes' }, linuxHost()), 'ALREADY_EXISTS');
-    await expectHostPathError(createHostDirectory({ parent: '~/missing', name: 'x' }, linuxHost()), 'NOT_FOUND');
+    await expectHostPathError(createHostDirectory({ parent: home, name: 'Notes' }, thisHost()), 'ALREADY_EXISTS');
+    await expectHostPathError(createHostDirectory({ parent: '~/missing', name: 'x' }, thisHost()), 'NOT_FOUND');
     await expectHostPathError(createHostDirectory({ parent: 'C:\\x', name: 'x' }, linuxHost()), 'WINDOWS_PATH_ON_POSIX_HOST');
   });
 });
 
 describe('validateHostProjectPath', () => {
   it('accepts an existing repo for open', async () => {
-    await expect(validateHostProjectPath({ path: '~/repo', mode: 'open' }, linuxHost(), async () => true))
+    await expect(validateHostProjectPath({ path: '~/repo', mode: 'open' }, thisHost(), async () => true))
       .resolves.toEqual({ path: path.join(home, 'repo'), isGitRepo: true });
   });
 
@@ -157,9 +159,9 @@ describe('validateHostProjectPath', () => {
     const before = await readdir(home);
     const isRepo = async () => false;
 
-    await expectHostPathError(validateHostProjectPath({ path: '~/missing', mode: 'open' }, linuxHost(), isRepo), 'NOT_FOUND');
-    await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'open' }, linuxHost(), isRepo), 'NOT_A_DIRECTORY');
-    await expectHostPathError(validateHostProjectPath({ path: '~/Notes', mode: 'open' }, linuxHost(), isRepo), 'NOT_A_GIT_REPO');
+    await expectHostPathError(validateHostProjectPath({ path: '~/missing', mode: 'open' }, thisHost(), isRepo), 'NOT_FOUND');
+    await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'open' }, thisHost(), isRepo), 'NOT_A_DIRECTORY');
+    await expectHostPathError(validateHostProjectPath({ path: '~/Notes', mode: 'open' }, thisHost(), isRepo), 'NOT_A_GIT_REPO');
 
     expect(await readdir(home)).toEqual(before);
     expect(existsSync(path.join(home, 'Notes', '.git'))).toBe(false);
@@ -167,11 +169,11 @@ describe('validateHostProjectPath', () => {
 
   it('accepts a missing or existing folder for new, but not a file', async () => {
     const isRepo = async () => false;
-    await expect(validateHostProjectPath({ path: '~/fresh', mode: 'new' }, linuxHost(), isRepo))
+    await expect(validateHostProjectPath({ path: '~/fresh', mode: 'new' }, thisHost(), isRepo))
       .resolves.toEqual({ path: path.join(home, 'fresh'), isGitRepo: false });
-    await expect(validateHostProjectPath({ path: '~/Notes', mode: 'new' }, linuxHost(), isRepo))
+    await expect(validateHostProjectPath({ path: '~/Notes', mode: 'new' }, thisHost(), isRepo))
       .resolves.toEqual({ path: path.join(home, 'Notes'), isGitRepo: false });
-    await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'new' }, linuxHost(), isRepo), 'NOT_A_DIRECTORY');
+    await expectHostPathError(validateHostProjectPath({ path: '~/file.txt', mode: 'new' }, thisHost(), isRepo), 'NOT_A_DIRECTORY');
     expect(existsSync(path.join(home, 'fresh'))).toBe(false);
   });
 
@@ -187,14 +189,14 @@ describe('validateHostProjectPath', () => {
 
 describe('resolveCloneDestination', () => {
   it('defaults to the host home', () => {
-    expect(resolveCloneDestination(undefined, linuxHost())).toBe(home);
-    expect(resolveCloneDestination('', linuxHost())).toBe(home);
-    expect(resolveCloneDestination('~', linuxHost())).toBe(home);
+    expect(resolveCloneDestination(undefined, thisHost())).toBe(home);
+    expect(resolveCloneDestination('', thisHost())).toBe(home);
+    expect(resolveCloneDestination('~', thisHost())).toBe(home);
   });
 
   it('expands ~ on the host and keeps absolute host paths', () => {
-    expect(resolveCloneDestination('~/src', linuxHost())).toBe(path.join(home, 'src'));
-    expect(resolveCloneDestination('/srv/repos', linuxHost())).toBe('/srv/repos');
+    expect(resolveCloneDestination('~/src', thisHost())).toBe(path.join(home, 'src'));
+    expect(resolveCloneDestination(path.resolve('/srv/repos'), thisHost())).toBe(path.resolve('/srv/repos'));
   });
 
   it('rejects a Windows destination on a POSIX host', () => {
