@@ -13,6 +13,7 @@ import type { GitCommit, GitGraphCommit } from '../services/gitDiffManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { getShellPath } from '../utils/shellPath';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
+import { describeGitCloneFailure } from '../utils/gitCloneFailure';
 import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import { registerGitDiffRequestHandlers } from './gitDiffRequests';
 import { hostPathFailure, resolveCloneDestination } from '../services/hostPaths';
@@ -1864,18 +1865,7 @@ export function registerGitHandlers(
       return { success: true, data: { clonedPath: returnPath, repoName } };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-
-      if (errorMsg.includes('Could not resolve host') || errorMsg.includes('Connection timed out')) {
-        return { success: false, error: 'Network error — check your internet connection and try again.' };
-      }
-      if (errorMsg.includes('Authentication failed') || errorMsg.includes('could not read Username')) {
-        return { success: false, error: 'Authentication failed — check your credentials or use an SSH URL.' };
-      }
-      if (errorMsg.includes('not found') || errorMsg.includes('does not exist')) {
-        return { success: false, error: 'Repository not found — check the URL and try again.' };
-      }
-
-      return { success: false, error: errorMsg };
+      return { success: false, ...describeGitCloneFailure(errorMsg) };
     }
   });
 

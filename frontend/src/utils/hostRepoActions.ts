@@ -13,6 +13,8 @@ import type {
  * picks a path for them has to look at the same host.
  */
 export interface ActiveHost {
+  /** The saved remote profile's id; null for this computer. */
+  id: string | null;
   remote: boolean;
   name: string;
   kindLabel: string | null;
@@ -23,9 +25,10 @@ export function getActiveHost(
   connectionState: RemotePaneConnectionState,
   profiles: readonly RemotePaneConnectionProfile[],
 ): ActiveHost {
-  if (connectionState.mode !== 'remote') return { remote: false, ...describeHost(null) };
+  if (connectionState.mode !== 'remote') return { id: null, remote: false, ...describeHost(null) };
   const profile = profiles.find((candidate) => candidate.id === connectionState.activeProfileId);
   return {
+    id: connectionState.activeProfileId,
     remote: true,
     ...describeHost(profile ?? { label: connectionState.activeProfileLabel ?? 'Remote host' }),
   };

@@ -45,17 +45,17 @@ const sandbox = getActiveHost(connectedTo(testina), [devbox, testina]);
 
 describe('getActiveHost', () => {
   it('is this computer in local mode, even with saved hosts', () => {
-    expect(local).toEqual({ remote: false, name: 'This computer', kindLabel: null, icon: 'local' });
+    expect(local).toEqual({ id: null, remote: false, name: 'This computer', kindLabel: null, icon: 'local' });
   });
 
   it('names the active saved host and its kind', () => {
-    expect(selfHosted).toEqual({ remote: true, name: 'devbox', kindLabel: 'remote host', icon: 'server' });
-    expect(sandbox).toEqual({ remote: true, name: 'testina', kindLabel: 'cloud sandbox', icon: 'cloud' });
+    expect(selfHosted).toEqual({ id: 'devbox', remote: true, name: 'devbox', kindLabel: 'remote host', icon: 'server' });
+    expect(sandbox).toEqual({ id: 'testina', remote: true, name: 'testina', kindLabel: 'cloud sandbox', icon: 'cloud' });
   });
 
   it('stays remote when the active profile is missing, using the pushed label', () => {
     const host = getActiveHost({ ...connectedTo(testina), activeProfileId: 'gone' }, []);
-    expect(host).toEqual({ remote: true, name: 'testina', kindLabel: 'remote host', icon: 'server' });
+    expect(host).toEqual({ id: 'gone', remote: true, name: 'testina', kindLabel: 'remote host', icon: 'server' });
   });
 });
 
