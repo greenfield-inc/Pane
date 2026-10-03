@@ -8,13 +8,14 @@ import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandReg
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { CommandRunner } from '../utils/commandRunner';
 import { isDaemonOwnedChannel } from '../../../shared/types/daemon';
+import { formatWindowsPathOnPosixHostError } from '../../../shared/types/hostPaths';
 import type { AppServices } from './types';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerGitHandlers } from './git';
 import { registerHostFsHandlers } from './hostFs';
 import { registerProjectHandlers } from './project';
 
-const WINDOWS_PATH_MESSAGE = "That's a path on this computer; testina is a Linux host. Pick a folder on testina.";
+const WINDOWS_PATH_MESSAGE = formatWindowsPathOnPosixHostError('testina', process.platform);
 const posixOnly = process.platform === 'win32' ? it.skip : it;
 
 let home: string;
