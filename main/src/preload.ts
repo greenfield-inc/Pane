@@ -39,6 +39,7 @@ import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
+import type { CreatePullRequestResult } from '../../shared/types/git';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -486,6 +487,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Git pull/push operations
     gitPull: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:git-pull', sessionId),
     gitPush: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:git-push', sessionId),
+    createPr: (sessionId: string): Promise<IPCResponse<CreatePullRequestResult>> =>
+      invokeIpc('sessions:create-pr', sessionId),
     gitFetch: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:git-fetch', sessionId),
     gitStash: (sessionId: string, message?: string): Promise<IPCResponse> => invokeIpc('sessions:git-stash', sessionId, message),
     gitStashPop: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:git-stash-pop', sessionId),

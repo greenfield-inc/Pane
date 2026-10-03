@@ -286,6 +286,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const sessionFavoriteToggleCalls: string[] = [];
     const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
     const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[] }>>();
+    const sessionCreatePrCalls: string[] = [];
     let sessionsGetCount = 0;
     let terminalAckedBytes = 0;
 
@@ -804,6 +805,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         stopActive: () => success(),
       }),
       sessions: namespace({
+        createPr: (sessionId: string) => {
+          sessionCreatePrCalls.push(sessionId);
+          return success({
+            output: 'https://github.com/dcouple/Pane/pull/392\n',
+            url: 'https://github.com/dcouple/Pane/pull/392',
+          });
+        },
         getOrCreateMainRepoSession: async (projectId: number) => {
           const delayMs = mockOptions.mainRepoSessionDelayByProjectId?.[projectId] ?? 0;
           if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -1238,6 +1246,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getProjectUpdates() {
           return lastProjectUpdate ? [clone(lastProjectUpdate)] : [];
+        },
+        getSessionCreatePrCalls() {
+          return clone(sessionCreatePrCalls);
         },
       },
     });

@@ -12,8 +12,10 @@ import { worktreePoolManager } from '../worktreePoolManager';
 
 function commandRunner(
   execAsync: (command: string, cwd: string) => Promise<{ stdout: string; stderr: string }>,
+  wslContext: CommandRunner['wslContext'] = null,
 ): CommandRunner {
   return partialMock<CommandRunner>({
+    wslContext,
     execAsync: vi.fn(execAsync),
     execFile: vi.fn(async (file, args, cwd) => ({ ...await execAsync([file, ...args].join(' '), cwd), exitCode: 0 })),
   });
@@ -424,5 +426,66 @@ describe('WorktreeManager.getSessionLocalBaseBranch', () => {
     );
 
     expect(localBaseBranch).toBe('release');
+  });
+});
+
+describe('WorktreeManager.createPullRequest', () => {
+  it('creates a pull request against the normalized base and returns its URL', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    const runner = commandRunner(async () => ({
+      stdout: 'https://github.com/dcouple/Pane/pull/392\n',
+      stderr: '',
+    }));
+    const manager = new WorktreeManager();
+
+    await expect(manager.createPullRequest(
+      '/repo/worktrees/pane',
+      'origin/main',
+      'feature/create-pr',
+      runner,
+    )).resolves.toEqual({
+      output: 'https://github.com/dcouple/Pane/pull/392\n',
+      url: 'https://github.com/dcouple/Pane/pull/392',
+    });
+    expect(runner.execAsync).toHaveBeenCalledWith(
+      "gh pr create --fill --base 'main' --head 'feature/create-pr'",
+      '/repo/worktrees/pane',
+      { timeout: 120000 },
+    );
+  });
+
+  it('uses Bash escaping for WSL-backed repositories on Windows', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const runner = commandRunner(
+      async () => ({ stdout: '', stderr: '' }),
+      { enabled: true, distribution: 'Ubuntu', linuxPath: '/repo' },
+    );
+    const manager = new WorktreeManager();
+
+    await manager.createPullRequest(
+      '/repo/worktrees/pane',
+      'origin/$(touch-base)',
+      '`touch-head`',
+      runner,
+    );
+
+    expect(runner.execAsync).toHaveBeenCalledWith(
+      "gh pr create --fill --base '$(touch-base)' --head '`touch-head`'",
+      '/repo/worktrees/pane',
+      { timeout: 120000 },
+    );
+  });
+
+  it('preserves CLI output and the working directory when creation fails', async () => {
+    const runner = commandRunner(async () => {
+      throw Object.assign(new Error('gh failed'), { stderr: 'authentication required' });
+    });
+    const manager = new WorktreeManager();
+
+    await expect(manager.createPullRequest('/repo', 'main', 'feature', runner)).rejects.toMatchObject({
+      message: 'gh failed',
+      gitOutput: 'authentication required',
+      workingDirectory: '/repo',
+    });
   });
 });

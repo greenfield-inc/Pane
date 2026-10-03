@@ -1,5 +1,7 @@
 import { mkdir } from 'fs/promises';
 import { withLock } from '../utils/mutex';
+import { escapeShellArg } from '../utils/shellEscape';
+import { escapeForBash } from '../utils/wslUtils';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
 import { PathResolver } from '../utils/pathResolver';
@@ -10,6 +12,7 @@ import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
 import { removeWorktreeViaTrash, sweepWorktreeTrash, type WorktreeTrashDeletion } from './worktreeTrash';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { CreatePullRequestResult } from '../../../shared/types/git';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
 
@@ -58,6 +61,10 @@ class GitOperationError extends Error {
   workingDirectory?: string;
   projectPath?: string;
   originalError?: { message?: string; stderr?: string; stdout?: string };
+}
+
+function escapeCommandArg(arg: string, commandRunner: CommandRunner): string {
+  return commandRunner.wslContext ? escapeForBash(arg) : escapeShellArg(arg);
 }
 
 // Interface for raw commit data
@@ -1322,6 +1329,35 @@ export class WorktreeManager {
     } catch (error: unknown) {
       const err = decodeBoundary(error, commandErrorSchema);
       const gitError = new GitOperationError(err.message || 'Git push failed');
+      gitError.gitOutput = err.stderr || err.stdout || err.message || '';
+      gitError.workingDirectory = worktreePath;
+      throw gitError;
+    }
+  }
+
+  async createPullRequest(
+    worktreePath: string,
+    baseBranch: string,
+    currentBranch: string,
+    commandRunner: CommandRunner,
+  ): Promise<CreatePullRequestResult> {
+    try {
+      const normalizedBaseBranch = baseBranch.replace(/^origin\//, '');
+      const command = [
+        'gh pr create',
+        '--fill',
+        `--base ${escapeCommandArg(normalizedBaseBranch, commandRunner)}`,
+        `--head ${escapeCommandArg(currentBranch, commandRunner)}`,
+      ].join(' ');
+
+      const { stdout, stderr } = await commandRunner.execAsync(command, worktreePath, { timeout: 120000 });
+      const output = stdout || stderr || 'Pull request created successfully';
+      const url = output.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/)?.[0];
+
+      return { output, url };
+    } catch (error: unknown) {
+      const err = decodeBoundary(error, commandErrorSchema);
+      const gitError = new GitOperationError(err.message || 'Failed to create pull request');
       gitError.gitOutput = err.stderr || err.stdout || err.message || '';
       gitError.workingDirectory = worktreePath;
       throw gitError;

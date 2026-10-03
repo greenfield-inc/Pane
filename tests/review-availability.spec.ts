@@ -334,6 +334,69 @@ test('Review stays local until a newly discovered pull request is explicitly ope
   await expect(splitMode).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('PR action requires pushed commits and opens the created pull request', async ({ page }, testInfo) => {
+  await openSession(page, baseGitStatus, {
+    initialPanels: [
+      ...panels,
+      {
+        id: 'review-logs-pr-action',
+        sessionId: 'review-session',
+        type: 'logs',
+        title: 'Logs',
+        state: { isActive: false, hasBeenViewed: true, customState: { isRunning: false } },
+        metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 3 },
+      },
+    ],
+  });
+
+  await page.getByRole('tab', { name: 'Logs', exact: true }).click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  const createPrButton = page.getByRole('button', { name: 'PR', exact: true });
+  await expect(createPrButton).toBeVisible();
+  await expect(createPrButton).toBeDisabled();
+  const detailPanel = page.locator('.pane-detail-panel-vertical');
+  const disabledPath = testInfo.outputPath('04-create-pr-unpushed-disabled.png');
+  await detailPanel.screenshot({ path: disabledPath });
+  await testInfo.attach('04-create-pr-unpushed-disabled.png', { path: disabledPath, contentType: 'image/png' });
+
+  await page.evaluate((gitStatus) => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock: {
+        emitGitStatusUpdated: (sessionId: string, status: JsonObject) => void;
+      };
+    }).__paneTestElectronMock;
+    mock.emitGitStatusUpdated('review-session', gitStatus);
+  }, {
+    ...baseGitStatus,
+    ahead: 0,
+  });
+
+  await expect(createPrButton).toBeEnabled();
+  await createPrButton.hover();
+  await expect(page.getByRole('tooltip')).toContainText('Create a pull request from');
+  await createPrButton.click();
+
+  const result = await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock: {
+        getSessionCreatePrCalls: () => string[];
+        getOpenedExternalUrls: () => string[];
+      };
+    }).__paneTestElectronMock;
+    return {
+      calls: mock.getSessionCreatePrCalls(),
+      openedUrls: mock.getOpenedExternalUrls(),
+    };
+  });
+  expect(result.calls).toEqual(['review-session']);
+  expect(result.openedUrls).toEqual(['https://github.com/dcouple/Pane/pull/392']);
+  const readyPath = testInfo.outputPath('05-create-pr-ready.png');
+  await detailPanel.screenshot({ path: readyPath });
+  await testInfo.attach('05-create-pr-ready.png', { path: readyPath, contentType: 'image/png' });
+});
+
 test('Review shows a clean local empty state before a pull request exists', async ({ page }) => {
   await openSession(page, baseGitStatus, { withLocalChanges: false });
 

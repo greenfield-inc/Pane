@@ -1621,6 +1621,25 @@ export const SessionView = memo(() => {
       : activeSession.status === 'running' || activeSession.status === 'initializing'
         ? 'Session is currently running'
         : undefined;
+    const createPrState = activeSession.gitStatus?.prUrl
+      ? {
+          description: `Pull request already exists: ${activeSession.gitStatus.prUrl}`,
+          disabledReason: 'Pull request already exists',
+        }
+      : activeSession.gitStatus?.ahead
+        ? {
+            description: 'Push this branch before creating a pull request',
+            disabledReason: 'Push branch first',
+          }
+        : activeSession.gitStatus?.totalCommits
+          ? {
+              description: `Create a pull request from ${hook.gitCommands?.currentBranch || 'current branch'}`,
+              disabledReason: undefined,
+            }
+          : {
+              description: 'No commits for a pull request',
+              disabledReason: 'No commits for a pull request',
+            };
     
     return activeSession.isMainRepo ? [
       {
@@ -1731,6 +1750,16 @@ export const SessionView = memo(() => {
           ? `Push ${activeSession.gitStatus.ahead} commit(s)${hook.gitCommands?.currentBranch ? ` from ${hook.gitCommands.currentBranch}` : ''} to remote`
           : 'No commits to push',
         disabledReason: busyReason ?? (activeSession.gitStatus?.ahead ? undefined : 'No commits to push'),
+      },
+      {
+        id: 'create-pr',
+        label: 'PR',
+        icon: GitPullRequestArrow,
+        onClick: hook.handleCreatePr,
+        disabled: Boolean(busyReason ?? createPrState.disabledReason),
+        variant: 'default' as const,
+        description: createPrState.description,
+        disabledReason: busyReason ?? createPrState.disabledReason,
       },
       // --- Main branch operations (last) ---
       {

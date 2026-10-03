@@ -403,6 +403,11 @@ export class API {
       return window.electronAPI.sessions.gitPush(sessionId);
     },
 
+    async createPr(sessionId: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessions.createPr(sessionId);
+    },
+
     async gitFetch(sessionId: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.sessions.gitFetch(sessionId);
