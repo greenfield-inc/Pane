@@ -48,6 +48,7 @@ test('only the active remote host offers its terminal in the switcher', async ({
   await expect(tab).toBeVisible();
   await expect(tab.locator('..').locator('svg.lucide-server')).toHaveCount(1);
   await expect(page.getByRole('tablist', { name: 'Terminal on devbox' })).toBeVisible();
+  await expect(tab).toHaveAttribute('title', 'Terminal on devbox');
   expect(await hostTerminalOpenCalls(page)).toEqual([{}]);
   // It is not a project or a Pane, so nothing about it lands in the sidebar.
   await expect(page.getByRole('navigation').getByText('Terminal', { exact: true })).toHaveCount(0);
