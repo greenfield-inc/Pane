@@ -16,6 +16,7 @@ import { registerPromptHandlers } from './prompt';
 import { registerMediaPreview } from '../services/mediaPreview';
 import { registerFileHandlers } from './file';
 import { registerFolderHandlers } from './folders';
+import { registerHostFsHandlers } from './hostFs';
 import { registerUIStateHandlers } from './uiState';
 import { registerDashboardHandlers } from './dashboard';
 import { setupLogHandlers } from './logs';
@@ -116,6 +117,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerFileHandlers(ipcMain, services, commandRegistry);
   registerMediaPreview(commandRegistry);
   registerFolderHandlers(ipcMain, services, commandRegistry);
+  registerHostFsHandlers(ipcMain, commandRegistry);
   registerUIStateHandlers(services);
   registerDashboardHandlers(ipcMain, services);
   setupLogHandlers(ipcMain, services.sessionManager, commandRegistry);
