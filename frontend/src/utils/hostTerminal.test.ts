@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDefaultRemotePaneConnectionState, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, createDefaultRemotePaneConnectionState, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
@@ -73,6 +73,7 @@ describe('getActiveRemoteProfile', () => {
 
 describe('openHostTerminal', () => {
   const open = vi.fn();
+  const savedHost = { ...devbox, hostTerminalEnv: [{ name: 'BROWSER', value: 'false' }] };
   const api = {
     hostTerminal: { open },
     remoteDaemon: {
@@ -80,6 +81,11 @@ describe('openHostTerminal', () => {
         success: true,
         data: { ...createDefaultRemotePaneConnectionState(), mode: 'remote' as const, activeProfileId: 'devbox-id' },
       })),
+      getConfig: vi.fn(async () => {
+        const config = createDefaultRemoteDaemonConfig();
+        config.client.profiles = [savedHost];
+        return { success: true, data: config };
+      }),
     },
   };
 
@@ -94,7 +100,10 @@ describe('openHostTerminal', () => {
 
     await openHostTerminal({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' }, api);
 
-    expect(open).toHaveBeenCalledWith({ input: 'gh auth login --web --git-protocol https && gh auth setup-git' });
+    expect(open).toHaveBeenCalledWith({
+      input: 'gh auth login --web --git-protocol https && gh auth setup-git',
+      env: [{ name: 'BROWSER', value: 'false' }],
+    });
     expect(useHostTerminalStore.getState()).toMatchObject({ terminal, hostId: 'devbox-id' });
     expect(useNavigationStore.getState().activeView).toBe('host-terminal');
   });
@@ -105,7 +114,7 @@ describe('openHostTerminal', () => {
 
     await openHostTerminal({}, api);
 
-    expect(open).toHaveBeenCalledWith({});
+    expect(open.mock.calls[0][0]).toEqual({ input: undefined, env: [{ name: 'BROWSER', value: 'false' }] });
   });
 
   it('throws the host error and stays put when opening fails', async () => {

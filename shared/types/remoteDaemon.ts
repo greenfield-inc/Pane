@@ -98,6 +98,12 @@ export interface RemoteHostKind {
   icon: RemoteHostKindIcon;
 }
 
+/** One variable a host's terminal starts with, e.g. BROWSER=false where no browser should open. */
+export interface HostTerminalEnvVar {
+  name: string;
+  value: string;
+}
+
 export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
@@ -114,6 +120,8 @@ export interface RemotePaneConnectionProfile {
   tailnetMachine?: string;
   tailnetDomain?: string;
   hostKind?: RemoteHostKind;
+  /** Environment the host terminal's shell starts with on this host. Saved unencrypted with the profile: not for secrets. */
+  hostTerminalEnv?: HostTerminalEnvVar[];
 }
 
 export interface RemoteDaemonHostAccess {
@@ -578,6 +586,10 @@ const remoteHostKindSchema: BoundarySchema<RemoteHostKind> = boundary.object({
   label: boundary.nonEmptyString,
   icon: boundary.enumeration('server', 'cloud'),
 });
+export const hostTerminalEnvVarSchema: BoundarySchema<HostTerminalEnvVar> = boundary.object({
+  name: boundary.nonEmptyString,
+  value: boundary.string,
+});
 const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -588,6 +600,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
   hostKind: boundary.optional(remoteHostKindSchema),
+  hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {

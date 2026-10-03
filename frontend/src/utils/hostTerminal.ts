@@ -2,7 +2,7 @@ import { API } from './api';
 import { describeHost, type HostIcon } from './hostKind';
 import { useHostTerminalStore } from '../stores/hostTerminalStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { HostTerminalEnvVar, RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 
 interface HostTerminalPresentation {
   hostName: string;
@@ -42,7 +42,7 @@ export function getActiveRemoteProfile(
 /** The calls the host terminal makes; tests pass their own. */
 interface HostTerminalApi {
   hostTerminal: Pick<typeof API.hostTerminal, 'open'>;
-  remoteDaemon: Pick<typeof API.remoteDaemon, 'getConnectionState'>;
+  remoteDaemon: Pick<typeof API.remoteDaemon, 'getConnectionState' | 'getConfig'>;
 }
 
 /** The host this window talks to now: its saved profile id, or null for this computer. */
@@ -52,13 +52,21 @@ export async function getActiveHostId(api: HostTerminalApi = API): Promise<strin
   return state?.mode === 'remote' ? state.activeProfileId : null;
 }
 
+/** The environment the saved host asks its terminal to start with, e.g. no browser on a headless host. */
+async function getHostTerminalEnv(hostId: string, api: HostTerminalApi): Promise<HostTerminalEnvVar[] | undefined> {
+  const response = await api.remoteDaemon.getConfig();
+  if (!response.success || !response.data) throw new Error(response.error ?? 'Could not read the saved host');
+  return response.data.client.profiles.find((profile) => profile.id === hostId)?.hostTerminalEnv;
+}
+
 /**
  * Open the active host's terminal in the main area. `input` is typed at its
  * prompt without pressing Enter, so the user reviews it before running it.
  */
 export async function openHostTerminal(options: { input?: string } = {}, api: HostTerminalApi = API): Promise<void> {
   const hostId = await getActiveHostId(api);
-  const response = await api.hostTerminal.open(options.input === undefined ? {} : { input: options.input });
+  const env = hostId === null ? undefined : await getHostTerminalEnv(hostId, api);
+  const response = await api.hostTerminal.open({ input: options.input, env });
   if (!response.success || !response.data) {
     throw new Error(response.error ?? 'Could not open the host terminal');
   }

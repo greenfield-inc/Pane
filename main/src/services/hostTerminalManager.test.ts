@@ -132,6 +132,35 @@ describe('HostTerminalManager', () => {
     expect(customState()?.initialInputSentAt).toBeUndefined();
   });
 
+  it('starts a new shell with the environment the saved host asks for', async () => {
+    const { manager, shells, customState } = createFixture();
+
+    await manager.open({ env: [{ name: 'BROWSER', value: 'false' }, { name: 'GH_BROWSER', value: 'false' }] });
+
+    expect(customState()?.environmentVars).toEqual({ BROWSER: 'false', GH_BROWSER: 'false' });
+    // Stored before the spawn, so the shell starts with it.
+    expect(shells.initializeTerminal.mock.calls[0][0].state.customState).toMatchObject({
+      environmentVars: { BROWSER: 'false', GH_BROWSER: 'false' },
+    });
+  });
+
+  it('keeps a running shell and stores the environment for its next start', async () => {
+    const { manager, shells, customState } = createFixture();
+    await manager.open();
+
+    await manager.open({ env: [{ name: 'BROWSER', value: 'false' }] });
+
+    expect(shells.initializeTerminal).toHaveBeenCalledTimes(1);
+    expect(customState()?.environmentVars).toEqual({ BROWSER: 'false' });
+  });
+
+  it('rejects a variable name a shell could not export, changing nothing', async () => {
+    const { manager, createSessionWithId } = createFixture();
+
+    await expect(manager.open({ env: [{ name: 'BROWSER=x; rm', value: 'false' }] })).rejects.toThrow('not an environment variable name');
+    expect(createSessionWithId).not.toHaveBeenCalled();
+  });
+
   it('reports the terminal read-only, without creating it', async () => {
     const { manager, createSessionWithId } = createFixture();
 

@@ -1445,6 +1445,18 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     });
   });
 
+  it('starts the shell with the panel\'s own environment variables last, so they win', async () => {
+    vi.stubEnv('BROWSER', 'xdg-open');
+    try {
+      const panel = makePanel('host-shell-env');
+      panel.state.customState = { environmentVars: { BROWSER: 'false', GH_BROWSER: 'false' } };
+      await startTerminal(panel);
+      expect(ptyHost.spawnOptions.at(-1)?.env).toMatchObject({ BROWSER: 'false', GH_BROWSER: 'false', PANE_PANEL_ID: 'host-shell-env' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {
     vi.useFakeTimers();
     try {

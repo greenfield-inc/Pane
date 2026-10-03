@@ -1953,9 +1953,11 @@ export class TerminalPanelManager extends EventEmitter {
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
       ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
       : baseSpawnEnv;
+    // Variables the panel starts with (a host terminal's saved-host environment) win.
+    const panelEnv = { ...roleEnv, ...panelCustomState.environmentVars };
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
     // get it from the rcfile getWSLShellSpawn passes, as a Linux path.
-    const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
+    const launch = isWSL ? { args: shellArgs, env: panelEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, panelEnv);
     shellArgs = launch.args;
     const spawnEnv = launch.env;
     existingState = terminalCustomState(panel.state);

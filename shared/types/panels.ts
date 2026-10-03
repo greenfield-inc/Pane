@@ -118,7 +118,7 @@ export interface TerminalPanelState {
    * (Mission Control tiles, `runpane panels screen`) wants this instead.
    */
   screenText?: string;
-  environmentVars?: Record<string, string>; // Modified env vars
+  environmentVars?: Record<string, string>; // Variables the shell starts with (applied last at spawn)
   dimensions?: { cols: number; rows: number }; // Terminal size
   cursorPosition?: { x: number; y: number }; // Cursor location
   selectionText?: string;        // Any selected text

@@ -29,7 +29,11 @@ function saveConnection(): void {
   const code = fs.readFileSync(connectionFile ?? '', 'utf8').match(/pane-remote:\/\/\S+/)?.[0];
   if (!code) throw new Error('No connection code in PANE_E2E_CONNECTION_FILE');
   const payload = decodePaneRemoteConnection(code);
-  const profile = { id: 'self-hosted', label: HOST, baseUrl: payload.baseUrl, token: payload.token, transport: payload.transport };
+  const profile = {
+    id: 'self-hosted', label: HOST, baseUrl: payload.baseUrl, token: payload.token, transport: payload.transport,
+    // A headless host must never open a browser (gh prints its device URL instead).
+    hostTerminalEnv: [{ name: 'BROWSER', value: 'false' }, { name: 'GH_BROWSER', value: 'false' }],
+  };
   const config = { remoteDaemon: { client: { profiles: [profile], activeProfileId: null, mode: 'local' } } };
   fs.writeFileSync(path.join(clientDir ?? '', 'config.json'), JSON.stringify(config), { mode: 0o600 });
 }
@@ -61,6 +65,8 @@ async function dismissStartupDialogs(page: Page): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
+  // The assertions read the scrollback; give xterm a moment to paint it before the picture.
+  await page.waitForTimeout(1000);
   await page.screenshot({ path: path.join(evidenceDir ?? '', name) });
 }
 
@@ -115,6 +121,12 @@ test('the host terminal on a self-hosted remote is one plain shell at home', asy
     };
     await expect.poll(lastRun, { timeout: 15_000 }).toMatch(new RegExp(`^whoami; pwd\\r?\\n${user}\\r?\\n${home}\\r?\\n`));
     await shot(page, '03-host-terminal-whoami-pwd.png');
+
+    // The saved host's environment reached the shell.
+    await page.keyboard.type('echo "BROWSER=$BROWSER GH_BROWSER=$GH_BROWSER"');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => scrollback(page)).toContain('\nBROWSER=false GH_BROWSER=false');
+    await shot(page, '03b-host-terminal-no-browser-env.png');
 
     // Hidden: not a project, not a Pane, not in the sidebar.
     const listed = await page.evaluate(async () => {
