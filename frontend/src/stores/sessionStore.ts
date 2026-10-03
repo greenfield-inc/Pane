@@ -71,6 +71,9 @@ interface SessionStore {
   getSpotlightedSessionForProject: (projectId: number) => string | undefined;
 }
 
+// Every selection (including clearing it) supersedes pending session fetches.
+let selectionVersion = 0;
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -167,7 +170,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   }),
   
   setActiveSession: async (sessionId) => {
-    
+    const version = ++selectionVersion;
+    const state = get();
+    const wasAlreadyActive = state.activeSessionId === sessionId;
+
     if (!sessionId) {
       set({ activeSessionId: null, activeMainRepoSession: null });
       // Notify backend about active session change for smart git status polling
@@ -180,20 +186,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     
     // Emit session-switched event for cleanup
-    if (get().activeSessionId !== sessionId) {
+    if (!wasAlreadyActive) {
       startSwitchPane(sessionId);
       window.dispatchEvent(new CustomEvent('session-switched', { detail: { sessionId } }));
       
       // Notify backend about active session change for smart git status polling
       try {
-        await window.electronAPI.invoke('sessions:set-active-session', sessionId);
+        // This is a polling hint, not permission to select the pane. Never
+        // let its reply order determine the renderer's selection order.
+        void window.electronAPI.invoke('sessions:set-active-session', sessionId).catch(error => {
+          console.warn('Failed to notify backend about active session change:', error);
+        });
       } catch (error) {
         console.warn('Failed to notify backend about active session change:', error);
       }
     }
     
     // First check if the session is already in our local store
-    const state = get();
     const existingSession = state.sessions.find(s => s.id === sessionId);
     
     if (existingSession) {
@@ -215,16 +224,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       
       // Only mark session as viewed if it wasn't already active
       // This prevents the blue dot from disappearing when the session completes while you're viewing it
-      const wasAlreadyActive = state.activeSessionId === sessionId;
       if (!wasAlreadyActive) {
         get().markSessionAsViewed(sessionId);
       }
       return;
     }
     
+    // Publish the intent now, even when its data needs fetching. This also
+    // lets a clear/delete/host reset invalidate the eventual fetch result.
+    set({ activeSessionId: sessionId, activeMainRepoSession: null });
+
     // If not in local store, fetch from backend (this might be a stale UI)
     try {
       const response = await API.sessions.get(sessionId);
+      if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       
       if (response.success && response.data) {
         const session = normalizeSession(response.data);
@@ -256,18 +269,15 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // Regular session
           set({ activeSessionId: sessionId, activeMainRepoSession: null });
         }
-        // Only mark session as viewed if it wasn't already active
-        const currentState = get();
-        const wasAlreadyActive = currentState.activeSessionId === sessionId;
-        if (!wasAlreadyActive) {
-          get().markSessionAsViewed(sessionId);
-        }
+        // The data has only now become viewable. A second click while this
+        // fetch was pending must not lose the winning request's viewed hint.
+        get().markSessionAsViewed(sessionId);
       } else {
         console.error('[SessionStore] Failed to fetch session:', sessionId, response);
       }
     } catch (error) {
+      if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       console.error('[SessionStore] Error setting active session:', error);
-      set({ activeSessionId: sessionId, activeMainRepoSession: null });
     }
   },
   
