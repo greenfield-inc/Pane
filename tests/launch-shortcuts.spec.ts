@@ -117,3 +117,35 @@ for (const alternateScreen of [false, true]) {
     });
   });
 }
+
+test('the Superset profile launches Claude on its relocated chord and retires the classic one', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, get: () => 'Linux x86_64' });
+  });
+  const claude = AGENT_LAUNCH_PRESETS.find((preset) => preset.hotkeyId === 'add-tool-terminal-claude')!;
+  await installElectronApiMock(page, {
+    platform: 'linux',
+    initialConfig: { keyboardShortcutProfile: 'superset' },
+    initialProjects: [project],
+    initialSessions: [worktreeSession, mainSession],
+    initialPanels: allPanels,
+    initialTerminalStates: Object.fromEntries(allPanels.map((panel) => [panel.id, { scrollbackBuffer: 'ready\r\n' }])),
+    activeProjectId: project.id,
+  });
+  await openSession(page, worktreeSession.name);
+  const before = (await panelCreates(page)).length;
+
+  // The classic default chord is unbound under the Superset profile on this platform.
+  await page.keyboard.press('Control+Alt+3');
+  await page.waitForTimeout(300);
+  expect((await panelCreates(page)).length).toBe(before);
+
+  await page.keyboard.press('Control+Alt+C');
+  await expect.poll(async () => (await panelCreates(page)).length).toBe(before + 1);
+  expect((await panelCreates(page)).at(-1)).toMatchObject({
+    sessionId: worktreeSession.id,
+    type: 'terminal',
+    title: claude.title,
+    state: { customState: { initialCommand: claude.command } },
+  });
+});

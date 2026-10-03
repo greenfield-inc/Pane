@@ -154,8 +154,13 @@ export interface AppConfig {
   defaultSessionProfile?: string;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
+  // Active keymap profile; absent or unknown ids behave as 'pane'.
+  keyboardShortcutProfile?: string;
   // Missing follows defaults; null unassigns; an empty update resets all.
+  // This map belongs to the 'pane' profile.
   keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // Override maps for non-pane profiles, keyed by profile id.
+  keyboardShortcutProfileOverrides?: Record<string, KeyboardShortcutOverrides>;
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
   // Whether the Command Palette shortcut remains active when other shortcuts are disabled
@@ -216,8 +221,12 @@ export interface UpdateConfigRequest {
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
   terminalShortcuts?: TerminalShortcut[];
+  // Active keymap profile; absent or unknown ids behave as 'pane'.
+  keyboardShortcutProfile?: string;
   // Replaces the sparse override map wholesale; {} deletes it.
   keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // Replaces the per-profile override maps wholesale; {} deletes them.
+  keyboardShortcutProfileOverrides?: Record<string, KeyboardShortcutOverrides>;
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;
   kittyKeyboardEnabled?: boolean;

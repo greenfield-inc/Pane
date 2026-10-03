@@ -22,6 +22,11 @@ import {
   resolveEffectiveChord,
   type KeyboardShortcutOverrides,
 } from '../../../shared/utils/keyboardBindings';
+import {
+  normalizeShortcutProfileId,
+  profileDefaultChord,
+  type KeyboardShortcutProfileId,
+} from '../../../shared/constants/keyboardShortcutProfiles';
 import { parseChord } from '../../../shared/utils/keyboardChords';
 import { boundary, decodeOptionalBoundary, BoundaryDecodeError, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
@@ -40,7 +45,7 @@ export interface ShortcutMapRow {
   label: string;
   category: ShortcutCategory;
   scope: ShortcutScope;
-  /** Catalog default; null for snippet rows. */
+  /** Profile-level default (profile chord, else catalog default); null for snippet rows. */
   defaultChord: string | null;
   /** Override | unassigned (null) | default; invalid overrides fall back to the default. */
   effectiveChord: string | null;
@@ -57,6 +62,10 @@ export interface ShortcutMapInput {
   customCommands?: readonly CustomCommand[];
   /** Environment used only for the availability badge (`darwin` | `win32` | `linux` | `wsl`). */
   environment: string;
+  /** Active keymap profile; missing/unknown values resolve to `pane`. */
+  profile?: KeyboardShortcutProfileId;
+  /** Host platform picking profile chord variants (defaults to the environment). */
+  hostPlatform?: string;
 }
 
 export interface ShortcutMap {
@@ -123,12 +132,16 @@ export function buildShortcutMap(input: ShortcutMapInput): ShortcutMap {
   const customCommands = input.customCommands ?? [];
   const terminalShortcuts = input.terminalShortcuts ?? [];
   const environment = normalizeEnvironmentPlatform(input.environment);
+  const profile = normalizeShortcutProfileId(input.profile);
+  const hostPlatform = input.hostPlatform ?? environment;
 
   // Global validation: no platform gate, so platform-limited commands stay in the set.
   const conflicts = findChordConflicts(collectActiveBindings({
     overrides,
     terminalShortcuts,
     customCommands,
+    profile,
+    hostPlatform,
   }));
   const conflictIdsByRow = new Map<string, string[]>();
   for (const conflict of conflicts) {
@@ -145,6 +158,7 @@ export function buildShortcutMap(input: ShortcutMapInput): ShortcutMap {
       if (!command) continue;
       label = `Add ${command.name}`;
     }
+    const rowDefault = profileDefaultChord(entry.id, entry.defaultChord, profile, hostPlatform);
     let state: ShortcutRowState = 'default';
     if (raw.has(entry.id)) {
       if (raw.get(entry.id) === null) state = 'unassigned';
@@ -158,8 +172,8 @@ export function buildShortcutMap(input: ShortcutMapInput): ShortcutMap {
       label,
       category: entry.category,
       scope: entry.scope,
-      defaultChord: entry.defaultChord,
-      effectiveChord: resolveEffectiveChord(entry.id, overrides, entry.defaultChord),
+      defaultChord: rowDefault,
+      effectiveChord: resolveEffectiveChord(entry.id, overrides, rowDefault),
       state,
       availability: !entry.platforms || entry.platforms.includes(environment)
         ? 'available'
