@@ -190,6 +190,10 @@ On your local desktop machine:
 
 If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and pick the saved host again from `Switch to` or the sidebar's machine menu.
 
+### Terminal on the host
+
+To sign in to tools such as `gh` or `codex` before you open a repository, open the host switcher and click the terminal button on the connected host's row ("Open terminal on <host>"). It opens a plain shell on the host, in its home folder, as the tab `<host> · Terminal`. Each host has one such terminal: closing the tab keeps the shell running, and opening it again brings back the same shell. The host keeps it in a hidden session under `<pane dir>/sessions/host-terminal`, so it never shows up as a repository or a Pane.
+
 ## Use the Mobile / Browser App
 
 The same connection code works in the Remote Pane PWA:
