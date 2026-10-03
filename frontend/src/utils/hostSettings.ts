@@ -1,10 +1,10 @@
 import type { SettingsTarget } from '../types/settings';
 
 /** Fired to open the Settings that hold the active host's GitHub credentials (see `githubSignIn`). */
-export const OPEN_HOST_GITHUB_SETTINGS_EVENT = 'pane:open-host-github-settings';
+const OPEN_HOST_GITHUB_SETTINGS_EVENT = 'pane:open-host-github-settings';
 
 /** Where those credentials live in Settings. */
-export const HOST_GITHUB_SETTINGS_TARGET: SettingsTarget = { category: 'remote-access' };
+const HOST_GITHUB_SETTINGS_TARGET: SettingsTarget = { category: 'remote-access' };
 
 /** Open the Settings that hold the active host's GitHub credentials, from anywhere in the app. */
 export function openHostGitHubSettings(): void {
