@@ -117,7 +117,7 @@ function DeviceCode({ code, onCancel }: { code: string; onCancel: () => void }) 
   return (
     <div className="space-y-2 rounded-md border border-border-secondary bg-surface-primary p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <code aria-label="One-time code" className="font-mono text-lg font-semibold tracking-widest text-text-primary">{code}</code>
+        <code aria-label="One-time code" data-secret="github-device-code" className="font-mono text-lg font-semibold tracking-widest text-text-primary">{code}</code>
         <Button onClick={() => void copy()} variant="secondary" size="sm">
           {copied ? 'Copied' : 'Copy'}
         </Button>

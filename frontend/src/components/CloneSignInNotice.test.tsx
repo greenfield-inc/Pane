@@ -38,6 +38,8 @@ describe('CloneSignInNotice', () => {
   it('shows the code, Copy, the device page and Cancel while waiting', () => {
     const markup = render({ status: 'waiting', loginId: 'a', code: 'fake-0000', verificationUrl: 'https://github.com/login/device' });
     expect(markup).toContain('>fake-0000<');
+    // Screenshot and video kits mask the code by this name and marker.
+    expect(markup).toContain('aria-label="One-time code" data-secret="github-device-code"');
     expect(markup).toContain('>Copy<');
     expect(markup).toContain('Open github.com/login/device');
     expect(markup).toContain('Waiting for you to approve on GitHub…');
