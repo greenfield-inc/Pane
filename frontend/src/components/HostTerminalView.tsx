@@ -25,9 +25,13 @@ export function HostTerminalView() {
   // A reload keeps the view but not the store: ask the host for its terminal again.
   useEffect(() => {
     if (terminal) return;
-    openHostTerminal().catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    });
+    void (async () => {
+      try {
+        await openHostTerminal();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    })();
   }, [terminal]);
 
   return (

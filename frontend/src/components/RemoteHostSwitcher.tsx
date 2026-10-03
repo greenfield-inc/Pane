@@ -54,6 +54,14 @@ export function RemoteHostSwitcher({
     }
   };
 
+  const openTerminal = async () => {
+    try {
+      await openHostTerminal();
+    } catch (error) {
+      console.error('Failed to open the host terminal:', error);
+    }
+  };
+
   const items: DropdownItem[] = [
     ...profiles.map((profile) => {
       const active = remote && profile.id === model.selectedId;
@@ -68,9 +76,7 @@ export function RemoteHostSwitcher({
         action: active ? {
           label: getHostTerminalPresentation(profile).openLabel,
           icon: SquareTerminal,
-          onClick: () => {
-            openHostTerminal().catch((error: unknown) => console.error('Failed to open the host terminal:', error));
-          },
+          onClick: () => void openTerminal(),
         } : undefined,
       };
     }),
