@@ -15,7 +15,7 @@ import { registerGitHandlers } from './git';
 import { registerHostFsHandlers } from './hostFs';
 import { registerProjectHandlers } from './project';
 
-const WINDOWS_PATH_MESSAGE = formatWindowsPathOnPosixHostError('testina', process.platform);
+const WINDOWS_PATH_MESSAGE = formatWindowsPathOnPosixHostError('sandbox-1', process.platform);
 const posixOnly = process.platform === 'win32' ? it.skip : it;
 
 let home: string;
@@ -67,9 +67,9 @@ describe('projects:create on the active host', () => {
     const before = await readdir(home);
 
     const result = await registry.invoke('projects:create', [{
-      name: 'montlakev2',
-      path: 'C:\\runpane-temp-home\\montlakev2',
-      hostLabel: 'testina',
+      name: 'my-repo',
+      path: 'C:\\Users\\me\\my-repo',
+      hostLabel: 'sandbox-1',
     }]);
 
     expect(result).toEqual({ success: false, error: WINDOWS_PATH_MESSAGE, code: 'WINDOWS_PATH_ON_POSIX_HOST' });
@@ -80,7 +80,7 @@ describe('projects:create on the active host', () => {
 
   posixOnly.each(['open', 'new'] as const)('rejects a Windows path in %s mode', async mode => {
     const { registry } = createProjectRegistry();
-    await expect(registry.invoke('projects:create', [{ name: 'x', path: 'C:\\x', mode, hostLabel: 'testina' }]))
+    await expect(registry.invoke('projects:create', [{ name: 'x', path: 'C:\\x', mode, hostLabel: 'sandbox-1' }]))
       .resolves.toMatchObject({ code: 'WINDOWS_PATH_ON_POSIX_HOST', error: WINDOWS_PATH_MESSAGE });
   });
 
@@ -185,7 +185,7 @@ describe('git:clone-repo destination', () => {
   posixOnly('rejects a Windows destination on a POSIX host before cloning', async () => {
     const registry = createGitRegistry();
 
-    await expect(registry.invoke('git:clone-repo', ['https://github.com/acme/widgets.git', 'C:\\runpane-temp-home', { hostLabel: 'testina' }]))
+    await expect(registry.invoke('git:clone-repo', ['https://github.com/acme/widgets.git', 'C:\\Users\\me', { hostLabel: 'sandbox-1' }]))
       .resolves.toEqual({ success: false, error: WINDOWS_PATH_MESSAGE, code: 'WINDOWS_PATH_ON_POSIX_HOST' });
     expect(gitCommands).toEqual([]);
   });
@@ -208,10 +208,10 @@ describe('fs:* channels', () => {
     const handlers = new Map<string, (event: { readonly sender?: { readonly id?: number } }, ...args: PaneCommandValue[]) => Promise<PaneCommandValue>>();
     registerDaemonBridgeHandlers({ handle: (channel, listener) => handlers.set(channel, listener) }, createDaemonBridgeRouter(registry));
 
-    const result = await handlers.get('daemon:invoke')?.({}, 'fs:browse-directories', { hostLabel: 'testina' });
+    const result = await handlers.get('daemon:invoke')?.({}, 'fs:browse-directories', { hostLabel: 'sandbox-1' });
 
     expect(result).toEqual(remoteListing);
-    expect(remoteInvoke).toHaveBeenCalledWith('fs:browse-directories', [{ hostLabel: 'testina' }], expect.any(Function));
+    expect(remoteInvoke).toHaveBeenCalledWith('fs:browse-directories', [{ hostLabel: 'sandbox-1' }], expect.any(Function));
     expect(localBrowse).not.toHaveBeenCalled();
   });
 
