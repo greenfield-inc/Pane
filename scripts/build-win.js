@@ -276,7 +276,9 @@ function downloadBetterSqlitePrebuiltForArch(targetArch) {
  * electron-builder includes them in the packaged app.
  */
 function installNodePtyForArch(targetArch) {
-  const nodePtyVersion = '1.2.0-beta.3';
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf8'));
+  const nodePtyVersion = packageJson.dependencies?.['@lydell/node-pty']?.replace(/^[~^]/, '');
+  if (!nodePtyVersion) throw new Error('Missing @lydell/node-pty dependency version in package.json');
   const pkgName = `@lydell/node-pty-win32-${targetArch}`;
   const hoistedLink = path.join(NODE_MODULES, '@lydell', `node-pty-win32-${targetArch}`);
 
@@ -325,6 +327,7 @@ function installNodePtyForArch(targetArch) {
     console.log(`  ✅ Installed ${pkgName}`);
   } catch (error) {
     console.error(`  ❌ Failed to install ${targetArch} node-pty: ${error.message}`);
+    throw error;
   } finally {
     // Cleanup temp dir
     fs.rmSync(tmpDir, { recursive: true, force: true });
