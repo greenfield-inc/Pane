@@ -11,15 +11,10 @@ import { useActiveHost } from '../hooks/useActiveHost';
 import { buildCloneOptions, buildCreateProjectRequest, defaultCloneDestination } from '../utils/hostRepoActions';
 import { EMPTY_CLONE_DRAFT, LOCAL_CLONE_HOST, useCloneDraftStore, type CloneDraft } from '../stores/cloneDraftStore';
 import { openHostTerminal } from '../utils/hostTerminal';
+import { getActiveHostPlatform, getGitHubSignInTerminalCommand } from '../utils/githubSignIn';
 import { CloneSignInNotice } from './CloneSignInNotice';
 import { GIT_CLONE_AUTH_REQUIRED } from '../../../shared/types/gitClone';
 
-/**
- * Typed into the host terminal for the user to run; never submitted for them.
- * BROWSER=false keeps gh from opening a browser on the host: it prints a
- * one-time code for the user to enter on their own computer instead.
- */
-const GITHUB_SIGN_IN_COMMAND = 'BROWSER=false gh auth login --web --git-protocol https && gh auth setup-git';
 
 interface CloneFromGitHubDialogProps {
   isOpen: boolean;
@@ -67,7 +62,8 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
     if (!signInHost) return;
     setTerminalError('');
     try {
-      await openHostTerminal({ input: GITHUB_SIGN_IN_COMMAND });
+      const platform = await getActiveHostPlatform(signInHost);
+      await openHostTerminal({ input: getGitHubSignInTerminalCommand(platform) });
       onClose();
     } catch (err) {
       setTerminalError(err instanceof Error ? err.message : `Could not open the terminal on ${signInHost}`);
