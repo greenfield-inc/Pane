@@ -131,6 +131,21 @@ describe('session selection ordering', () => {
     expect(useSessionStore.getState().getActiveSession()?.name).toBe('Current host');
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
   });
+
+  it.each(['not-found', 'disconnected'])('clears an uncached selection when its current fetch fails: %s', async (failure) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      if (failure === 'disconnected') getSession.mockRejectedValueOnce(new Error('Disconnected'));
+      else getSession.mockResolvedValueOnce({ success: false });
+      await useSessionStore.getState().setActiveSession('missing');
+      expect(useSessionStore.getState().activeSessionId).toBeNull();
+      expect(useSessionStore.getState().activeMainRepoSession).toBeNull();
+      expect(invoke).toHaveBeenLastCalledWith('sessions:set-active-session', null);
+      expect(markViewed).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
 });
 
 describe('sessionStore', () => {

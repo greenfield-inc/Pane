@@ -282,10 +282,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         get().markSessionAsViewed(sessionId);
       } else {
         console.error('[SessionStore] Failed to fetch session:', sessionId, response);
+        void get().setActiveSession(null);
       }
     } catch (error) {
       if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       console.error('[SessionStore] Error setting active session:', error);
+      void get().setActiveSession(null);
     } finally {
       if (pendingSelectionFetch === fetch) pendingSelectionFetch = null;
     }
