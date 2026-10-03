@@ -1,5 +1,6 @@
 import { app } from 'electron';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as os from 'os';
 import { usageManager } from './usage/usageManager';
 import { ShellDetector } from '../utils/shellDetector';
@@ -11,6 +12,8 @@ import type {
   LeaderboardResponse,
   LeaderboardStatus,
 } from '../../../shared/types/leaderboard';
+import { leaderboardResponseSchema, leaderboardSubmitResultSchema } from '../../../shared/types/leaderboard';
+import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { UsageReport } from '../../../shared/types/usage';
 
 const LEADERBOARD_API_BASE =
@@ -18,19 +21,23 @@ const LEADERBOARD_API_BASE =
 const SUBMIT_TIMEOUT_MS = 10_000;
 const SCAN_WAIT_MS = 15_000;
 
-function resolveDoNotTrack(): boolean {
+const execFileAsync = promisify(execFile);
+
+async function resolveDoNotTrack(): Promise<boolean> {
   let value = process.env.DO_NOT_TRACK;
 
   if (value === undefined || value === '') {
     try {
-      const shell = ShellDetector.getDefaultShell().path;
-      const output = execFileSync(shell, ['-l', '-c', 'echo $DO_NOT_TRACK'], {
+      const shell = process.env.SHELL || (process.platform === 'win32'
+        ? ShellDetector.findGitBash()
+        : os.userInfo().shell || '/bin/sh');
+      if (!shell) return false;
+      const { stdout } = await execFileAsync(shell, ['-l', '-c', 'echo $DO_NOT_TRACK'], {
         encoding: 'utf8',
         timeout: 5000,
         cwd: os.homedir(),
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-      if (output) value = output;
+      });
+      if (stdout.trim()) value = stdout.trim();
     } catch {
       // Shell probe failed — treat as unset
     }
@@ -77,25 +84,28 @@ function buildSubmission(
 }
 
 export class LeaderboardService {
-  private doNotTrack: boolean;
+  private doNotTrack: Promise<boolean> | undefined;
 
-  constructor(private configManager: ConfigManager) {
-    this.doNotTrack = resolveDoNotTrack();
+  constructor(private configManager: ConfigManager) {}
+
+  private isDoNotTrack(): Promise<boolean> {
+    return this.doNotTrack ??= resolveDoNotTrack();
   }
 
-  getStatus(): LeaderboardStatus {
+  async getStatus(): Promise<LeaderboardStatus> {
+    const doNotTrack = await this.isDoNotTrack();
     const config = this.configManager.getConfig().leaderboard;
     return {
       optIn: config?.optIn ?? false,
       lastRank: config?.lastRank ?? null,
       lastDisplayName: config?.lastDisplayName ?? null,
       lastSubmittedAtMs: config?.lastSubmittedAtMs ?? null,
-      doNotTrack: this.doNotTrack,
+      doNotTrack,
     };
   }
 
   async join(): Promise<LeaderboardSubmitResult> {
-    if (this.doNotTrack) {
+    if (await this.isDoNotTrack()) {
       throw new Error('DO_NOT_TRACK is set — leaderboard submissions are blocked');
     }
 
@@ -138,7 +148,7 @@ export class LeaderboardService {
   }
 
   async submit(): Promise<LeaderboardSubmitResult> {
-    if (this.doNotTrack) {
+    if (await this.isDoNotTrack()) {
       throw new Error('DO_NOT_TRACK is set — leaderboard submissions are blocked');
     }
 
@@ -189,7 +199,7 @@ export class LeaderboardService {
       throw new Error(`Leaderboard submit failed (${response.status}): ${text}`);
     }
 
-    const result: LeaderboardSubmitResult = await response.json();
+    const result = decodeBoundary(await response.json(), leaderboardSubmitResultSchema);
 
     await this.configManager.updateConfig({
       leaderboard: {
@@ -217,12 +227,12 @@ export class LeaderboardService {
       throw new Error(`Failed to fetch leaderboard (${response.status})`);
     }
 
-    return response.json();
+    return decodeBoundary(await response.json(), leaderboardResponseSchema);
   }
 
   async submitOnAppOpen(): Promise<void> {
-    if (this.doNotTrack) return;
     if (!this.configManager.getConfig().leaderboard?.optIn) return;
+    if (await this.isDoNotTrack()) return;
 
     const status = usageManager.getStatus();
     if (status.scanning) {

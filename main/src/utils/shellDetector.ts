@@ -85,7 +85,7 @@ export class ShellDetector {
     return { path: 'cmd.exe', name: 'cmd', args: this.getShellArgs('cmd') };
   }
 
-  private static findGitBash(): string | null {
+  static findGitBash(): string | null {
     const locations = [
       path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
       path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Git', 'bin', 'bash.exe'),
