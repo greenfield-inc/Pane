@@ -384,8 +384,20 @@ def create_parsed_args(command: str, **overrides: object) -> ParsedArgs:
     return parsed
 
 
+def take_leading_pane_dir(args: List[str]) -> List[str]:
+    # `runpane --pane-dir <dir> <command>` puts the global flag before the command;
+    # set those tokens aside so the command matches, then parse them with the flags.
+    taken: List[str] = []
+    while args and (args[0] == "--pane-dir" or args[0].startswith("--pane-dir=")):
+        width = 2 if args[0] == "--pane-dir" else 1
+        taken.extend(args[:width])
+        del args[:width]
+    return taken
+
+
 def parse_args(argv: List[str]) -> ParsedArgs:
     args = list(argv)
+    leading_pane_dir_args = take_leading_pane_dir(args)
     if not args or args[0] in {"-h", "--help"}:
         return ParsedArgs(command="help")
     first = args[0]
@@ -416,6 +428,7 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "update":
         parsed.target = "client"
 
+    args[:0] = leading_pane_dir_args
     parse_flags(args, parsed)
     if parsed.command == "panes archive":
         validate_panes_archive_args(parsed)

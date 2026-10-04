@@ -156,8 +156,19 @@ const DEFAULTS: Omit<ParsedArgs, 'command'> = {
   remoteSetupArgs: []
 };
 
+// `runpane --pane-dir <dir> <command>` puts the global flag before the command;
+// set those tokens aside so the command matches, then parse them with the flags.
+function takeLeadingPaneDir(args: string[]): string[] {
+  const taken: string[] = [];
+  while (args[0] === '--pane-dir' || args[0]?.startsWith('--pane-dir=')) {
+    taken.push(...args.splice(0, args[0] === '--pane-dir' ? 2 : 1));
+  }
+  return taken;
+}
+
 export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   const args = [...argv];
+  const leadingPaneDirArgs = takeLeadingPaneDir(args);
   const first = args[0];
 
   if (!first || first === '-h' || first === '--help') {
@@ -211,6 +222,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     parsed.target = 'client';
   }
 
+  args.unshift(...leadingPaneDirArgs);
   parseFlags(args, parsed);
   if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
     throw new Error('--timeout-ms must be greater than 0 with --follow.');
