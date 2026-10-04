@@ -69,9 +69,6 @@ export interface AppConfig {
   autoStartOnBoot?: boolean;
   // Prevent idle sleep while Pane sessions are active
   keepAwakeWhileSessionsActive?: boolean;
-  // Stravu MCP integration
-  stravuApiKey?: string;
-  stravuServerUrl?: string;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -190,8 +187,6 @@ export interface UpdateConfigRequest {
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;
-  stravuApiKey?: string;
-  stravuServerUrl?: string;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: LightTheme;

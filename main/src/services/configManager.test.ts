@@ -46,6 +46,20 @@ describe('ConfigManager appearance persistence', () => {
     expect(manager.getConfig().agentContext).toMatchObject({ managedAgentsMd: false, registerMcp: true });
   });
 
+  it('loads a config with removed Stravu keys and drops them on the next save', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'forge', stravuApiKey: 'old-key', stravuServerUrl: 'https://example.invalid' }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig()).toMatchObject({ theme: 'forge' });
+    expect(manager.getConfig()).not.toHaveProperty('stravuApiKey');
+    expect(manager.getConfig()).not.toHaveProperty('stravuServerUrl');
+    await manager.updateConfig({ highContrast: true });
+    const saved = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(saved).toMatchObject({ theme: 'forge', highContrast: true });
+    expect(saved).not.toHaveProperty('stravuApiKey');
+    expect(saved).not.toHaveProperty('stravuServerUrl');
+  });
+
   it('migrates a legacy theme once', async () => {
     await fs.writeFile(configPath, JSON.stringify({ theme: 'forge' }));
     const manager = new ConfigManager();

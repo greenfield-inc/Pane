@@ -72,8 +72,6 @@ export class ConfigManager extends EventEmitter {
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,
-      stravuApiKey: undefined,
-      stravuServerUrl: '', // Stravu integration disabled
       notifications: {
         playSound: true,
         enabled: true
@@ -148,6 +146,10 @@ export class ConfigManager extends EventEmitter {
       const data = await fs.readFile(this.configPath, 'utf-8');
       // SAFETY: initialize immediately normalizes boundary-sensitive fields before assigning the parsed config.
       const loadedConfig = JSON.parse(data) as AppConfig;
+      // Drop keys from the removed Stravu integration so they leave the file on the next save.
+      for (const legacyKey of ['stravuApiKey', 'stravuServerUrl']) {
+        Reflect.deleteProperty(loadedConfig, legacyKey);
+      }
       const normalizedAppearance = normalizeAppearance(loadedConfig);
       for (const diagnostic of normalizedAppearance.diagnostics) {
         console.error(`[ConfigManager] appearance: ${diagnostic}`);
@@ -477,14 +479,6 @@ export class ConfigManager extends EventEmitter {
 
   getRunScript(): string[] | undefined {
     return this.config.runScript;
-  }
-
-  getStravuApiKey(): string | undefined {
-    return this.config.stravuApiKey;
-  }
-
-  getStravuServerUrl(): string {
-    return this.config.stravuServerUrl || ''; // Stravu integration disabled
   }
 
   getDefaultModel(): string {
