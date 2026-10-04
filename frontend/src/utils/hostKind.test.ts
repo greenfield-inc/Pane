@@ -41,6 +41,36 @@ describe('saved host kind', () => {
     expect(config.client.profiles[0].hostKind).toEqual(hostKind);
   });
 
+  it('reads a cloud sandbox saved before host kinds existed as a cloud sandbox', () => {
+    const cloud = { provider: 'boat' as const, sandboxId: 'bx_1', sessionId: 's1', nodeId: 'n1', hostname: 'rp-s1', version: 1 };
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [profile({ label: 'testina', cloud }), profile({ id: 'plain', label: 'devbox' })], activeProfileId: null, mode: 'local' },
+    });
+    expect(describeHost(config.client.profiles[0])).toEqual({ name: 'testina', kindLabel: 'cloud sandbox', icon: 'cloud' });
+    expect(describeHost(config.client.profiles[1])).toEqual({ name: 'devbox', kindLabel: 'remote host', icon: 'server' });
+  });
+
+  it('starts an older cloud sandbox\'s terminal without a browser, and leaves other hosts alone', () => {
+    const cloud = { provider: 'boat' as const, sandboxId: 'bx_1', sessionId: 's1', nodeId: 'n1', hostname: 'rp-s1', version: 1 };
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [profile({ label: 'sandbox-1', cloud }), profile({ id: 'plain', label: 'devbox' })], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles[0].hostTerminalEnv).toEqual([
+      { name: 'BROWSER', value: 'false' },
+      { name: 'GH_BROWSER', value: 'false' },
+    ]);
+    expect(config.client.profiles[1].hostTerminalEnv).toBeUndefined();
+  });
+
+  it('has gh keep an older cloud sandbox\'s token in a file, and leaves other hosts on their keyring', () => {
+    const cloud = { provider: 'boat' as const, sandboxId: 'bx_1', sessionId: 's1', nodeId: 'n1', hostname: 'rp-s1', version: 1 };
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [profile({ label: 'sandbox-1', cloud }), profile({ id: 'plain', label: 'devbox' })], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles[0].ghInsecureStorage).toBe(true);
+    expect(config.client.profiles[1].ghInsecureStorage).toBeUndefined();
+  });
+
   it('keeps whether gh on the host stores its token in a file', () => {
     const config = normalizeRemoteDaemonConfig({
       client: { profiles: [profile({ ghInsecureStorage: true }), profile({ id: 'plain' })], activeProfileId: null, mode: 'local' },
@@ -54,6 +84,15 @@ describe('saved host kind', () => {
       client: { profiles: [{ ...profile(), ghInsecureStorage: 'yes' }], activeProfileId: null, mode: 'local' },
     });
     expect(config.client.profiles).toEqual([]);
+  });
+
+  it('routes an older cloud sandbox\'s GitHub sign-in to Settings, and leaves other hosts alone', () => {
+    const cloud = { provider: 'boat' as const, sandboxId: 'bx_1', sessionId: 's1', nodeId: 'n1', hostname: 'rp-s1', version: 1 };
+    const config = normalizeRemoteDaemonConfig({
+      client: { profiles: [profile({ label: 'sandbox-1', cloud }), profile({ id: 'plain', label: 'devbox' })], activeProfileId: null, mode: 'local' },
+    });
+    expect(config.client.profiles[0].githubSignIn).toBe('settings');
+    expect(config.client.profiles[1].githubSignIn).toBeUndefined();
   });
 
   it('keeps a host whose GitHub sign-in lives in Settings', () => {

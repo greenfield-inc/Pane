@@ -185,6 +185,13 @@ async function dispatchWithWorkspaceHint(parsed: ParsedArgs, telemetryContext: W
   }
 }
 
+/** Loaded lazily so the rest of the CLI never pays for the cloud modules. */
+async function runCloudCommand(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.cloudArgv) throw new Error('Missing cloud arguments');
+  const { runCloud } = await import('./cloud/cli');
+  return runCloud(parsed.cloudArgv);
+}
+
 type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext) => number | Promise<number>;
 
 const commandHandlers = new Map<string, CommandHandler>(Object.entries({
@@ -410,6 +417,14 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'folders list': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
   'folders create': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
   'links open': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
+  'cloud setup': (parsed) => runCloudCommand(parsed),
+  'cloud new': (parsed) => runCloudCommand(parsed),
+  'cloud list': (parsed) => runCloudCommand(parsed),
+  'cloud status': (parsed) => runCloudCommand(parsed),
+  'cloud stop': (parsed) => runCloudCommand(parsed),
+  'cloud start': (parsed) => runCloudCommand(parsed),
+  'cloud update': (parsed) => runCloudCommand(parsed),
+  'cloud remove': (parsed) => runCloudCommand(parsed),
 } satisfies Record<RunpaneCommand, CommandHandler>));
 
 const contractCommands = new Set<string>(RUNPANE_CONTRACT.commands.map(command => command.name));

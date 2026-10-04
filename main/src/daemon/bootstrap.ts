@@ -57,6 +57,7 @@ import { createListeningPortMonitor } from '../services/listeningPorts';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { PhonePreviewHost } from './phonePreviews';
 import { createPreviewFiles } from './previewProxy';
+import { createPanelResume, createScrollbackCheckpoint } from '../services/panelResumeService';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
@@ -93,6 +94,18 @@ export interface PaneDaemonHost {
 }
 
 let powerMonitorDiagnosticsRegistered = false;
+
+/** How often the headless daemon saves live terminal scrollback and flushes the database. */
+const SCROLLBACK_CHECKPOINT_INTERVAL_MS = 10_000;
+
+/**
+ * Set to 1 where the machine can stop without a shutdown (a cloud sandbox's
+ * service sets it): the headless daemon then relaunches the agents that were
+ * running as soon as it starts. Elsewhere they resume when they are opened.
+ */
+function resumeAgentsOnStart(): boolean {
+  return process.env.PANE_RESUME_AGENTS_ON_START === '1';
+}
 
 function installPaneRuntime(
   eventSink: PaneEventSink,
@@ -170,6 +183,21 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const analyticsManager = new AnalyticsManager(configManager);
   const sessionManager = new SessionManager(databaseService, analyticsManager);
   sessionManager.initializeFromDatabase();
+
+  // Headless starts follow a crash, a restart or a power-off. Clear stale
+  // runtime flags before anything can start a PTY.
+  const logResume = (message: string, error?: Error) => {
+    if (error) logger.warn(message, error);
+    else logger.info(message);
+  };
+  const panelResume = mode === 'headless' ? createPanelResume(databaseService, sessionManager, logResume) : undefined;
+  const scrollbackCheckpoint = mode === 'headless'
+    ? createScrollbackCheckpoint(databaseService, SCROLLBACK_CHECKPOINT_INTERVAL_MS, logResume)
+    : undefined;
+  if (panelResume) {
+    const interrupted = await panelResume.recoverAfterRestart();
+    logger.info(`[PanelResume] ${interrupted.length} agent panel(s) were interrupted by the last stop`);
+  }
 
   if (process.platform === 'win32') {
     const wslDistros = databaseService.getAllProjects()
@@ -259,6 +287,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     paneChatManager,
     gitStatusManager,
   );
+  // A named Session's orchestrator lives in a hidden Pane; bring it back on start like other agents.
+  panelResume?.alsoResumePanes(() => orchestrationSessionManager.ownerPaneIds());
   await orchestrationSessionManager.initialize().catch(error => {
     // Keep the rest of Pane available when a previously-written Session store
     // cannot be read. Session APIs retry and return the exact failure instead
@@ -529,6 +559,17 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
   });
 
+  scrollbackCheckpoint?.start();
+  if (panelResume && resumeAgentsOnStart()) {
+    // Not awaited: the socket is up already, and each panel comes back on its own.
+    void panelResume.resumeInterruptedAgents().then(results => {
+      const failed = results.filter(result => result.state === 'failed').length;
+      logger.info(`[PanelResume] Resumed ${results.length - failed} of ${results.length} agent panel(s)`);
+    }, error => {
+      logResume('[PanelResume] Could not resume the interrupted agent panels', error instanceof Error ? error : new Error(String(error)));
+    });
+  }
+
   if (options.restoreSpotlights !== false) {
     try {
       await spotlightManager.restoreAll();
@@ -547,12 +588,26 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      if (mode === 'headless') logger.info('[Pane daemon] Shutting down');
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
       autoPauser.stop();
+      // Keep the latest scrollback; start-up recovery marks the agents interrupted.
+      if (scrollbackCheckpoint) {
+        scrollbackCheckpoint.stop();
+        await scrollbackCheckpoint.checkpoint();
+      }
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
+      if (mode === 'headless') {
+        // Stop the panels' processes here: systemd's stop does not reach them
+        // (see strayPanelProcesses.ts), and the next start resumes the agents.
+        const terminals = terminalPanelManager.getAllPanelIds().length;
+        const survivors = await terminalPanelManager.stopAllTerminalProcesses();
+        logger.info(`[Pane daemon] Stopped ${terminals} terminal(s)`);
+        if (survivors.length > 0) logger.warn(`[Pane daemon] ${survivors.length} terminal process(es) survived shutdown: ${survivors.join(', ')}`);
+      }
       resourceMonitorService.stop();
       listeningPortMonitor.stop();
       await spotlightManager.disableAll();

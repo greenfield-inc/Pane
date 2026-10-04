@@ -593,7 +593,16 @@
         "loops run",
         "loops pause",
         "loops resume",
-        "loops delete"
+        "loops delete",
+        "cloud",
+        "cloud setup",
+        "cloud new",
+        "cloud list",
+        "cloud status",
+        "cloud stop",
+        "cloud start",
+        "cloud update",
+        "cloud remove"
       ],
       "properties": {
         "default": {
@@ -930,6 +939,33 @@
           "$ref": "#/$defs/helpLines"
         },
         "pr list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud setup": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud new": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud stop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud start": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "cloud remove": {
           "$ref": "#/$defs/helpLines"
         }
       },

@@ -33,6 +33,12 @@ import type {
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../shared/types/glasses';
 import type { VoiceKeyCheck } from '../../shared/voice/voiceKeys';
+import type {
+  CloudCredentialsUpdate,
+  CloudLocalStartScript,
+  CloudSandboxCreateRequest,
+  CloudSandboxesSnapshot,
+} from '../../shared/types/cloudSandboxes';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
@@ -753,6 +759,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemoteDaemonHostRuntimeState) => callback(state);
       ipcRenderer.on('remote-daemon:host-state-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote-daemon:host-state-changed', wrappedCallback);
+    },
+    getCloudSandboxes: (): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:get-cloud-sandboxes'),
+    updateCloudCredentials: (update: CloudCredentialsUpdate): Promise<IPCResponse<CloudSandboxesSnapshot>> =>
+      invokeIpc('remote-daemon:update-cloud-credentials', update),
+    createCloudSandbox: (request: CloudSandboxCreateRequest): Promise<IPCResponse<CloudSandboxesSnapshot>> =>
+      invokeIpc('remote-daemon:create-cloud-sandbox', request),
+    startCloudSandbox: (id: string): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:start-cloud-sandbox', id),
+    stopCloudSandbox: (id: string): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:stop-cloud-sandbox', id),
+    updateCloudSandbox: (id: string): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:update-cloud-sandbox', id),
+    removeCloudSandbox: (id: string): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:remove-cloud-sandbox', id),
+    retryCloudSandbox: (id: string): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:retry-cloud-sandbox', id),
+    dismissCloudSandbox: (id: string): Promise<IPCResponse<CloudSandboxesSnapshot>> => invokeIpc('remote-daemon:dismiss-cloud-sandbox', id),
+    getCloudStartupScript: (): Promise<IPCResponse<{ script: string }>> => invokeIpc('remote-daemon:get-cloud-startup-script'),
+    saveCloudStartupScript: (script: string): Promise<IPCResponse<CloudSandboxesSnapshot>> =>
+      invokeIpc('remote-daemon:save-cloud-startup-script', script),
+    getCloudLocalStartScript: (): Promise<IPCResponse<CloudLocalStartScript>> => invokeIpc('remote-daemon:get-cloud-local-start-script'),
+    saveCloudLocalStartScript: (settings: CloudLocalStartScript): Promise<IPCResponse<CloudSandboxesSnapshot>> =>
+      invokeIpc('remote-daemon:save-cloud-local-start-script', settings),
+    readCloudSandboxStartupLog: (id: string): Promise<IPCResponse<{ log: string }>> =>
+      invokeIpc('remote-daemon:read-cloud-sandbox-startup-log', id),
+    onProfilesChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('remote-daemon:profiles-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote-daemon:profiles-changed', wrappedCallback);
+    },
+    onCloudSandboxesChanged: (callback: (snapshot: CloudSandboxesSnapshot) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: CloudSandboxesSnapshot) => callback(snapshot);
+      ipcRenderer.on('remote-daemon:cloud-sandboxes-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote-daemon:cloud-sandboxes-changed', wrappedCallback);
     },
   },
 

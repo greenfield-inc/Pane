@@ -11,6 +11,7 @@ import { MachineMark } from '../../machines/MachineMark';
 import { useMachines } from '../../../hooks/useMachines';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
+import { CloudSandboxesSettings } from '../CloudSandboxesSettings';
 import type { RemoteAccessSubviewId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
@@ -133,6 +134,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         )}
         <AddMachine key={addCodeRequest} controller={controller} startAdding={addCodeRequest !== undefined} />
       </RemoteGroup>
+
+      <CloudSandboxesSettings onTerminalOpened={controller.closeSettings} />
 
       <RemoteGroup title="Access" scope={scope}>
         <CodelessAccessRows tailnetName={tailnetName} />
