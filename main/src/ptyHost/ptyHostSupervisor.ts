@@ -419,7 +419,8 @@ export class PtyHostSupervisor extends EventEmitter {
       return;
     }
 
-    console.log('[ptyHost] unknown message frame, dropping', data);
+    // Never log the frame: data frames carry terminal output.
+    console.log('[ptyHost] unknown message frame, dropping');
   }
 
   /**

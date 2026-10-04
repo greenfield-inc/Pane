@@ -102,6 +102,7 @@ import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
+import { redactDeliveredSecrets } from './utils/deliveredSecrets';
 import * as fs from 'fs';
 import { terminalPanelManager } from './services/terminalPanelManager';
 import { panelManager } from './services/panelManager';
@@ -179,6 +180,8 @@ function safeDiagnosticValue(value: PaneEventArgument, maxLength = 4_000): strin
     }
   }
 
+  // Redact before truncating so a cut can't leave part of a value behind.
+  serialized = redactDeliveredSecrets(serialized);
   return serialized.length > maxLength
     ? `${serialized.slice(0, maxLength)} ... [truncated ${serialized.length - maxLength} chars]`
     : serialized;
@@ -862,7 +865,7 @@ async function createWindow() {
     // In development, log ALL console messages to help with debugging
     if (isDevelopment) {
       const timestamp = new Date().toISOString();
-      const logMessage = `[${timestamp}] [FRONTEND ${level.toUpperCase()}] ${message}`;
+      const logMessage = `[${timestamp}] [FRONTEND ${level.toUpperCase()}] ${redactDeliveredSecrets(message)}`;
 
       // Also write to debug log file for Claude Code to read
       const debugLogPath = path.join(process.cwd(), 'frontend-debug.log');
@@ -1230,7 +1233,7 @@ async function initializeServices() {
   // in production builds, where the preload wrapper is inactive.
   ipcMain.handle('console:log', (_event, logData: { level: string; args: string[]; timestamp: string; source: string; toMainLog?: boolean }) => {
     const { level, args, timestamp, source, toMainLog } = logData;
-    const message = args.join(' ');
+    const message = redactDeliveredSecrets(args.join(' '));
 
     if (isDevelopment) {
       const logLine = `[${timestamp}] [${source.toUpperCase()} ${level.toUpperCase()}] ${message}\n`;

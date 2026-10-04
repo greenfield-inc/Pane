@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getAppSubdirectory } from './appDirectory';
 import { formatForDatabase } from './timestampUtils';
+import { redactDeliveredSecrets } from './deliveredSecrets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 // Capture the ORIGINAL console methods immediately when this module loads
@@ -67,7 +68,7 @@ export class Logger {
   private isProcessingQueue = false;
   private isInErrorHandler = false; // Prevent recursion in error handling
 
-  constructor(private configManager: ConfigManager) {
+  constructor(private configManager: Pick<ConfigManager, 'isVerbose'>) {
     // Use the centralized Pane directory
     this.logDir = getAppSubdirectory('logs');
     
@@ -283,7 +284,7 @@ export class Logger {
   private log(level: string, message: string, error?: Error) {
     const timestamp = formatForDatabase();
     const errorInfo = error ? ` Error: ${error.message}\nStack: ${error.stack}` : '';
-    const fullMessage = `[${timestamp}] ${level}: ${message}${errorInfo}`;
+    const fullMessage = redactDeliveredSecrets(`[${timestamp}] ${level}: ${message}${errorInfo}`);
     const consoleMessage = this.normalizeLogEventForConsole(fullMessage);
     
     // Try to log to console, but handle EPIPE errors gracefully

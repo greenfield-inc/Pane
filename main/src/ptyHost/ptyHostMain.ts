@@ -137,7 +137,7 @@ function bootstrap(): void {
 
   parent.once('message', (event) => {
     if (!decodeFrame(event.data, initSchema)) {
-      console.error('[ptyHost] first parentPort message was not { type: "init" }; exiting', event.data);
+      console.error('[ptyHost] first parentPort message was not { type: "init" }; exiting');
       process.exit(1);
       return;
     }
@@ -181,7 +181,8 @@ function handleInboundFrame(frame: JsonValue): void {
     });
     return;
   }
-  console.error('[ptyHost] received unknown frame, dropping', frame);
+  // Never log the frame: a spawn frame carries the full spawn environment.
+  console.error('[ptyHost] received unknown frame, dropping');
 }
 
 /**
