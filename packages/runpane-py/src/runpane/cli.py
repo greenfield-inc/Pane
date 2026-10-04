@@ -416,6 +416,10 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "update":
         parsed.target = "client"
 
+    # `runpane cloud ...` ships in the npm package only: whatever its arguments, say where to run it.
+    if parsed.command.startswith("cloud "):
+        return parsed
+
     parse_flags(args, parsed)
     if parsed.command == "panes archive":
         validate_panes_archive_args(parsed)
@@ -1187,6 +1191,15 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "agents start": lambda parsed, context: run_unsupported_contract(parsed, context),
     "agents status": lambda parsed, context: run_unsupported_contract(parsed, context),
     "agents send": lambda parsed, context: run_unsupported_contract(parsed, context),
+    # Cloud sandboxes ship in the npm package only; the help points at `npx --yes runpane@latest cloud ...`.
+    "cloud setup": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud new": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud list": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud status": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud stop": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud start": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud update": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "cloud remove": lambda parsed, context: run_unsupported_contract(parsed, context),
 }
 _contract_commands = {command["name"] for command in RUNPANE_CONTRACT["commands"]}
 _missing_handlers = _contract_commands - COMMAND_HANDLERS.keys()
