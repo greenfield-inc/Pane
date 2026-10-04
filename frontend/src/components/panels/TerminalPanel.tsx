@@ -1187,6 +1187,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           devLog.debug('[TerminalPanel] Opening terminal in DOM element:', terminalRef.current);
           terminal.open(terminalRef.current);
           devLog.debug('[TerminalPanel] Terminal opened in DOM');
+          // xterm takes keys from here on, but the input handler is attached
+          // only after the awaits below. Hold early keys for it instead of
+          // emitting them to no listener.
+          const earlyInput: string[] = [];
+          const earlyInputDisposable = terminal.onData(data => earlyInput.push(data));
 
           // Wait for fonts to load before fitting so xterm measures correct cell dimensions
           await Promise.all([
@@ -1777,7 +1782,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           }));
 
           // Handle terminal input — route through interceptor first
-          const inputDisposable = terminal.onData((data) => {
+          const handleInput = (data: string) => {
             if (data === '\r' && isCliPanelRef.current) startSendPrompt(panel.id);
             // Skip interception for AltGr-produced @ (e.g. German keyboard)
             if (skipNextInterceptRef.current) {
@@ -1789,7 +1794,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (!result.consumed) {
               sendTerminalInput(panel.id, data);
             }
-          });
+          };
+          earlyInputDisposable.dispose();
+          earlyInput.forEach(handleInput);
+          const inputDisposable = terminal.onData(handleInput);
 
           // Handle resize — delegates to the guarded resizePtyToFit (single resize path)
           // Debounce so fit() only fires after transitions settle (300ms sidebar animations)
