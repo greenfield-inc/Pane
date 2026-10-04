@@ -57,7 +57,7 @@ export interface TerminalPanelState {
   initialInput?: string;         // First input to send once the initial command is ready
   initialInputMode?: 'stdin' | 'argument'; // How initialInput is delivered to the initial command
   initialInputFile?: string;     // Prompt file an argument launch reads with "$(cat '<file>')" instead of inlining initialInput
-  initialInputSubmitStrategy?: 'enter' | 'codex-ctrl-enter'; // How stdin initialInput should be submitted
+  initialInputSubmitStrategy?: 'enter' | 'codex-ctrl-enter' | 'none'; // How stdin initialInput should be submitted ('none' only types it)
   initialInputDeliveryVersion?: number; // Bumps when a feature changes delivery semantics
   initialInputSentAt?: string;   // Set after initialInput has been written once
   initialInputError?: string;    // Best-effort error if initialInput could not be written
@@ -69,7 +69,7 @@ export interface TerminalPanelState {
   alternateScreenBuffer?: string;         // Recent TUI/alternate-screen output, kept separate from shell scrollback
   isAlternateScreen?: boolean;            // Whether the live terminal is currently in alternate-screen/TUI mode
   serializedBuffer?: string;             // xterm.js serialized terminal state (includes full visual buffer)
-  environmentVars?: Record<string, string>; // Modified env vars
+  environmentVars?: Record<string, string>; // Variables the shell starts with (applied last at spawn)
   dimensions?: { cols: number; rows: number }; // Terminal size
   cursorPosition?: { x: number; y: number }; // Cursor location
   selectionText?: string;        // Any selected text

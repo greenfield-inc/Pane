@@ -8,6 +8,7 @@ import { useCommittedRef } from '../hooks/useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
+import { HostTerminalView } from './HostTerminalView';
 import { LiveRegion } from './ui/LiveRegion';
 import '@xterm/xterm/css/xterm.css';
 import { useSessionView } from '../hooks/useSessionView';
@@ -1820,6 +1821,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'pane-chat') {
     return <PaneChatView />;
+  }
+
+  if (activeView === 'host-terminal') {
+    return <HostTerminalView />;
   }
 
   if (!activeSession) {

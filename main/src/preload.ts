@@ -38,6 +38,7 @@ import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
+import type { HostTerminalOpenRequest } from '../../shared/types/hostTerminal';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type {
   PanePermissionRequest as PermissionRequest,
@@ -389,6 +390,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }): Promise<IPCResponse> => invokeIpc('diagnostics:renderer-fatal', payload),
   },
 
+  hostTerminal: {
+    open: (request?: HostTerminalOpenRequest): Promise<IPCResponse> => invokeIpc('host-terminal:open', request),
+  },
+
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
     setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
@@ -568,7 +573,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     detectBranch: (path: string): Promise<IPCResponse<string>> => invokeIpc('projects:detect-branch', path),
     cancelStatusForProject: (projectId: number): Promise<{ success: boolean; error?: string }> => invokeIpc('git:cancel-status-for-project', projectId),
     executeProject: (projectId: number, args: string[]): Promise<IPCResponse> => invokeIpc('git:execute-project', { projectId, args }),
-    cloneRepo: (url: string, destDir: string): Promise<IPCResponse> => invokeIpc('git:clone-repo', url, destDir),
+    cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }): Promise<IPCResponse> => invokeIpc('git:clone-repo', url, destDir, options),
   },
 
   // Folders

@@ -28,6 +28,7 @@ const PROJECT_CHANNELS = [
   'projects:get-all',
   'projects:get-active',
   'projects:create',
+  'projects:validate-path',
   'projects:activate',
   'projects:update',
   'projects:delete',

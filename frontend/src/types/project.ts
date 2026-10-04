@@ -1,4 +1,5 @@
 import type { ProjectEnvironment } from '../../../shared/types/panels';
+import type { ProjectPathMode } from '../../../shared/types/hostPaths';
 
 export interface Project {
   id: number;
@@ -35,6 +36,10 @@ export interface CreateProjectRequest {
   openIdeCommand?: string;
   wsl_enabled?: boolean;
   wsl_distribution?: string | null;
+  /** `open` registers an existing repo and never creates anything; `new` (and omitted, for older callers) creates the folder and repo. */
+  mode?: ProjectPathMode;
+  /** Display name of the active host, used in path error messages. */
+  hostLabel?: string;
 }
 
 export interface UpdateProjectRequest {

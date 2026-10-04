@@ -180,6 +180,10 @@ On your local desktop machine:
 
 If the tunnel is not reachable yet, Pane still saves the profile and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` on the saved profile.
 
+### Terminal on the host
+
+To sign in to tools such as `gh` or `codex` before you open a repository, open the host switcher and click the terminal button on the connected host's row ("Open terminal on <host>"). It opens a plain shell on the host, in its home folder, as the tab `<host> · Terminal`. Each host has one such terminal: closing the tab keeps the shell running, and opening it again brings back the same shell. The host keeps it in a hidden session under `<pane dir>/sessions/host-terminal`, so it never shows up as a repository or a Pane.
+
 ## Use the Mobile / Browser App
 
 The same connection code works in the Remote Pane PWA:
@@ -361,6 +365,16 @@ Some actions operate on the local desktop client machine rather than the remote 
 - opening a local IDE from the client
 - revealing files in the client OS file manager
 - the native clipboard-image fallback path
+
+### Which machine do repo paths refer to?
+
+The remote host. In remote mode, Open project, New project and Clone run on the host's daemon, so every path you pick or type is a path on that host. The daemon lists the host's folders through `fs:browse-directories` (it opens at the host's home folder) and checks typed paths there:
+
+- On a Linux or macOS host, a Windows path such as `C:\Users\me\repo` is rejected with "That's a path on this computer; <host> is a Linux host. Pick a folder on <host>."
+- Open project needs the root folder of an existing git repository on the host. It never creates a folder or runs `git init`; New project does both.
+- Clone defaults to the host's home folder, and `~` in the destination means the host's home.
+
+The dialogs show which host they act on with a chip at the top, for example "On: devbox (remote host)". On a remote host, Browse opens Pane's own folder browser instead of this computer's file dialog: it starts at the host's home, has Up and Show hidden folders, marks git repositories, and offers New folder when creating a project or picking a clone destination.
 
 ### Where does copied terminal text go?
 

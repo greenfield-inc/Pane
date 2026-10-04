@@ -666,6 +666,33 @@ describe('TerminalPanelManager hidden output delivery', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 
+  it('types initial input without pressing Enter when the panel asks for no submit', async () => {
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: terminal.panelId,
+      sessionId: terminal.sessionId,
+      type: 'terminal',
+      title: 'Terminal',
+      state: {
+        isActive: true,
+        customState: { initialInput: 'gh auth login --web', initialInputSubmitStrategy: 'none' as const },
+      },
+      metadata: {
+        createdAt: '2026-01-01T00:00:00.000Z',
+        lastActiveAt: '2026-01-01T00:01:00.000Z',
+        position: 0,
+      },
+    });
+
+    manager.sendInitialInputOnce(terminal.panelId);
+    await flushPromises();
+
+    expect(vi.mocked(terminal.pty.write).mock.calls).toEqual([['gh auth login --web']]);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
   it('does not treat input writes as output freshness', () => {
     const manager = testAccess<InitialInputAccess & TerminalPanelManager>(new TerminalPanelManager());
     const terminal = createTerminal();
