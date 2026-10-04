@@ -22,7 +22,7 @@ type AnalyticsMainEvent = {
   properties?: JsonObject;
 };
 
-type ElectronApiMockOptions = {
+export type ElectronApiMockOptions = {
   analyticsConsentShown?: boolean;
   analyticsIdentity?: JsonObject;
   initialConfig?: JsonObject;
@@ -41,6 +41,10 @@ type ElectronApiMockOptions = {
   initialSessions?: JsonObject[];
   initialArchiveProgress?: ArchiveProgressSnapshot;
   archiveRetryError?: string;
+  /** git:identity answer; git:set-identity marks it configured. */
+  gitIdentity?: { configured: boolean; name: string; email: string };
+  /** git:commit answers, in order; success once they run out. */
+  gitCommitResults?: Array<{ success: boolean; error?: string; details?: string; code?: string }>;
   initialPanels?: JsonObject[];
   initialUiState?: Partial<{
     expandedProjects: number[];
@@ -288,6 +292,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const sessionDeleteCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
     const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
+    let gitIdentity = mockOptions.gitIdentity ? clone(mockOptions.gitIdentity) : null;
+    const gitCommitResults = clone(mockOptions.gitCommitResults ?? []);
     const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[] }>>();
     let sessionsGetCount = 0;
     let terminalAckedBytes = 0;
@@ -459,6 +465,16 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'archive:retry-cleanup' && mockOptions.archiveRetryError) {
         return Promise.resolve({ success: false, error: mockOptions.archiveRetryError });
+      }
+      if (channel === 'git:identity' && gitIdentity) {
+        return success(clone(gitIdentity));
+      }
+      if (channel === 'git:set-identity' && gitIdentity) {
+        gitIdentity = { ...gitIdentity, configured: true };
+        return success();
+      }
+      if (channel === 'git:commit') {
+        return Promise.resolve(gitCommitResults.shift() ?? { success: true });
       }
       return success();
     };

@@ -91,6 +91,8 @@ const FILE_CHANNELS = [
   'file:write-binary',
   'file:getPath',
   'git:commit',
+  'git:identity',
+  'git:set-identity',
   'git:revert',
   'git:restore',
   'file:readAtRevision',

@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import type { DiffManifest } from '../shared/types/gitDiff';
-import { installElectronApiMock } from './electronApiMock';
+import { GIT_IDENTITY_MISSING } from '../shared/types/gitIdentity';
+import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
 const project = {
   id: 391,
@@ -107,7 +108,10 @@ test('main repository commit dialog submits title and description with Ctrl+Ente
   }]);
 });
 
-test('review commit dialog keeps its default title and submits the composed message', async ({ page }, testInfo) => {
+async function openReviewCommitDialog(
+  page: Page,
+  mockOptions: Pick<ElectronApiMockOptions, 'gitIdentity' | 'gitCommitResults'> = {},
+) {
   const session = createSession();
   const panels = [{
     id: 'commit-dialog-diff',
@@ -133,6 +137,7 @@ test('review commit dialog keeps its default title and submits the composed mess
   }];
 
   await installElectronApiMock(page, {
+    ...mockOptions,
     initialProjects: [project],
     initialSessions: [session],
     initialPanels: panels,
@@ -145,8 +150,11 @@ test('review commit dialog keeps its default title and submits the composed mess
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Review', exact: true }).click();
   await page.getByRole('button', { name: 'Commit', exact: true }).click();
+  return page.getByRole('dialog');
+}
 
-  const dialog = page.getByRole('dialog');
+test('review commit dialog keeps its default title and submits the composed message', async ({ page }, testInfo) => {
+  const dialog = await openReviewCommitDialog(page);
   const title = dialog.getByLabel('Title');
   const description = dialog.getByLabel('Description (optional)');
   await expect(title).toHaveValue('Update 1 file');
@@ -155,4 +163,56 @@ test('review commit dialog keeps its default title and submits the composed mess
   await description.press('Control+Enter');
 
   await expect(dialog).toHaveCount(0);
+});
+
+test('review commit dialog asks for a git identity before committing and saves it', async ({ page }, testInfo) => {
+  const dialog = await openReviewCommitDialog(page, {
+    gitIdentity: { configured: false, name: '', email: 'me@example.com' },
+  });
+  const identity = dialog.getByRole('region', { name: 'Set your git identity' });
+  await expect(identity).toBeVisible();
+  await expect(identity.getByLabel('Email')).toHaveValue('me@example.com');
+  await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled();
+  await capture(page, testInfo, '03-review-commit-dialog-identity-missing.png');
+
+  await identity.getByLabel('Name').fill('Pane QA');
+  await identity.getByRole('button', { name: 'Save identity' }).click();
+  await expect(identity).toHaveCount(0);
+  // SAFETY: installElectronApiMock creates this test-only bridge and owns the returned call shape.
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & {
+      __paneTestElectronMock: { getInvokeCalls: (channel: string) => Array<{ args: unknown[] }> };
+    }
+  ).__paneTestElectronMock.getInvokeCalls('git:set-identity').map(call => call.args))).toEqual([[{
+    sessionId: baseSession.id, name: 'Pane QA', email: 'me@example.com', scope: 'global',
+  }]]);
+
+  await dialog.getByRole('button', { name: 'Commit', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
+test('review commit dialog shows a short git error with expandable details', async ({ page }, testInfo) => {
+  const details = "Command failed: wsl.exe -d Ubuntu -- bash -c cd '/repo' && 'git' 'commit'\nfatal: unable to write new index file";
+  const dialog = await openReviewCommitDialog(page, {
+    gitIdentity: { configured: true, name: 'Pane QA', email: 'qa@example.com' },
+    gitCommitResults: [{ success: false, error: 'Git commit failed: unable to write new index file', details }],
+  });
+  await dialog.getByRole('button', { name: 'Commit', exact: true }).click();
+
+  const alert = dialog.getByRole('alert');
+  await expect(alert).toContainText('Git commit failed: unable to write new index file');
+  await expect(alert).not.toContainText('wsl.exe');
+  await alert.getByRole('button', { name: 'Show details' }).click();
+  await expect(alert).toContainText('wsl.exe');
+  await capture(page, testInfo, '04-review-commit-dialog-error-details.png');
+});
+
+test('review commit dialog switches to the identity form when the commit reports a missing identity', async ({ page }) => {
+  const dialog = await openReviewCommitDialog(page, {
+    gitIdentity: { configured: true, name: '', email: '' },
+    gitCommitResults: [{ success: false, code: GIT_IDENTITY_MISSING, error: 'Git needs your name and email before it can commit.' }],
+  });
+  await dialog.getByRole('button', { name: 'Commit', exact: true }).click();
+  await expect(dialog.getByRole('region', { name: 'Set your git identity' })).toBeVisible();
+  await expect(dialog).not.toContainText('wsl.exe');
 });

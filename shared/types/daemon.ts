@@ -109,6 +109,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'git:execute-project',
   'git:file-status',
   'git:get-github-remote',
+  'git:identity',
+  'git:set-identity',
   'remote:pwa-affordances',
   'git:restore',
   'git:revert',
