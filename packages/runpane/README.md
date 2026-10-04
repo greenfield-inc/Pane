@@ -110,6 +110,25 @@ runpane doctor
 runpane --help
 ```
 
+### Cloud Sandboxes (experimental)
+
+`runpane cloud` creates a [boat.dev](https://boat.dev) sandbox with Pane installed, joins it to your tailnet,
+pairs it and saves it as a remote host in desktop Pane. Desktop Pane's **Add cloud sandbox** uses the same code.
+
+```bash
+runpane cloud setup --boat-key-file - --tailscale-client-id <id> --tailscale-secret-file <path>
+runpane cloud new --label "Cloud sandbox" --yes
+runpane cloud list
+runpane cloud status <host>
+runpane cloud stop <host> --yes
+runpane cloud start <host>
+runpane cloud update <host> --pane-deb-url <https url> --pane-deb-sha256 <hex> --yes
+runpane cloud remove <host> --yes
+```
+
+Keys are read from files or stdin and stay in `~/.config/runpane-cloud` (0600). Prerequisites and details:
+[Cloud sandbox](https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_REMOTE_DAEMON.md#cloud-sandbox-experimental).
+
 ### Common Options
 
 ```bash

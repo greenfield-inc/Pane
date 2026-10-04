@@ -148,6 +148,16 @@ describe('remote daemon service launchers', () => {
     };
   }
 
+  it('stops the systemd user service by signalling the daemon first, not its Electron helpers', async () => {
+    const runCommand = vi.fn(() => ({ ok: true, stdout: '', stderr: '' }));
+    const { paneDir, dependencies } = await linuxServiceDependencies(runCommand);
+
+    await installRemoteDaemonService(paneDir, dependencies);
+
+    const unit = await fs.readFile(path.join(dependencies.homeDir, '.config', 'systemd', 'user', 'pane-remote-daemon.service'), 'utf8');
+    expect(unit).toContain('\nKillMode=mixed\n');
+  });
+
   it('keeps the systemd user service running after logout by enabling lingering', async () => {
     const runCommand = vi.fn((_command: string, _args: string[]) => ({ ok: true, stdout: '', stderr: '' }));
     const { paneDir, dependencies } = await linuxServiceDependencies(runCommand);

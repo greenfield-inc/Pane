@@ -9,6 +9,15 @@ import type {
   RemotePaneConnectionState,
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
+import type {
+  CloudCredentialsUpdate,
+  CloudLocalStartScript,
+  CloudSandboxAction,
+  CloudSandboxCreateRequest,
+  CloudSandboxesSnapshot,
+  CloudSandboxProgressStep,
+  CloudSandboxView,
+} from '../shared/types/cloudSandboxes';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
@@ -69,8 +78,23 @@ type ElectronApiMockOptions = {
   mainRepoSessionErrorByProjectId?: Record<number, string>;
   activeProjectId?: number | null;
   paneChatAgentChangeDelayMs?: number;
+  /** host-terminal:open fails with this message. */
+  hostTerminalOpenError?: string;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
+  /** Seeds the mocked cloud provisioning library; absent means this build has none. */
+  cloudSandboxes?: Pick<CloudSandboxesSnapshot, 'credentials' | 'sandboxes'> & {
+    /** Saved host profiles for the seeded sandboxes. */
+    profiles?: RemotePaneConnectionProfile[];
+    /** How long the first read takes, like main loading the cloud library. */
+    loadDelayMs?: number;
+  };
+  /**
+   * A fake POSIX host filesystem behind fs:browse-directories, fs:create-directory,
+   * projects:validate-path, projects.create and git.cloneRepo: absolute folder
+   * paths, with the ones that are git repos marked.
+   */
+  hostFs?: { home: string; folders: Record<string, { isGitRepo?: boolean }> };
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -133,7 +157,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         clients: [],
       },
       client: {
-        profiles: [],
+        profiles: clone(mockOptions.cloudSandboxes?.profiles ?? []),
         activeProfileId: null,
         mode: 'local',
       },
@@ -228,6 +252,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         started: false,
       };
     };
+    const createHostTerminalState = () => ({
+      session: { ...clone(paneChatSession), id: '__host_terminal__', name: 'Terminal', worktreePath: '/tmp/.pane/sessions/host-terminal' },
+      panel: {
+        id: '__host_terminal_panel__',
+        sessionId: '__host_terminal__',
+        type: 'terminal',
+        title: 'Terminal',
+        state: { isActive: true, hasBeenViewed: false, customState: { isCliPanel: false } },
+        metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 0, permanent: true },
+      },
+      cwd: '/home/user',
+      started: true,
+      shell: '/bin/bash',
+    });
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     let mockPanels = clone(mockOptions.initialPanels ?? []);
@@ -317,6 +355,120 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
     };
 
+    // Mocked cloud provisioning library: main's CloudSandboxManager as the renderer sees it. Creates
+    // wait for the test to report steps and finish them; failNext makes the next action of a kind fail.
+    interface CloudMockState {
+      available: boolean;
+      credentials: CloudSandboxesSnapshot['credentials'];
+      sandboxes: CloudSandboxView[];
+      credentialUpdates: CloudCredentialsUpdate[];
+      failNext: Map<CloudSandboxAction, string>;
+      pendingCreates: Map<string, (failure?: string) => void>;
+      calls: Array<{ action: CloudSandboxAction; id: string }>;
+      startupScript: string;
+      /** Every script the settings saved, in order. */
+      startupScriptSaves: string[];
+      localStartScript: CloudLocalStartScript;
+      /** Every local start script the settings saved, in order. */
+      localStartScriptSaves: CloudLocalStartScript[];
+      startupLogs: Map<string, string>;
+    }
+    const cloud: CloudMockState = {
+      available: mockOptions.cloudSandboxes !== undefined,
+      credentials: clone(mockOptions.cloudSandboxes?.credentials ?? { boat: false, tailscale: false, claude: false, github: false }),
+      sandboxes: clone(mockOptions.cloudSandboxes?.sandboxes ?? []),
+      credentialUpdates: [],
+      failNext: new Map(),
+      pendingCreates: new Map(),
+      calls: [],
+      startupScript: '',
+      startupScriptSaves: [],
+      localStartScript: { shell: 'sh', script: '' },
+      localStartScriptSaves: [],
+      startupLogs: new Map(),
+    };
+    const cloudSnapshot = (): CloudSandboxesSnapshot => clone({
+      available: cloud.available,
+      credentials: cloud.credentials,
+      sandboxes: cloud.sandboxes,
+      localStartScriptSet: Boolean(cloud.localStartScript.script.trim()),
+    });
+    const emitCloud = () => {
+      emit('remote-daemon:cloud-sandboxes-changed', cloudSnapshot());
+      return success(cloudSnapshot());
+    };
+    const findCloudSandbox = (id: string) => cloud.sandboxes.find((sandbox) => sandbox.id === id);
+    const updateCloudSandbox = (id: string, updates: Partial<CloudSandboxView>) => {
+      cloud.sandboxes = cloud.sandboxes.map((sandbox) => sandbox.id === id ? { ...sandbox, ...updates } : sandbox);
+    };
+    const cloudUnavailable = () => Promise.resolve({ success: false, error: 'Cloud sandboxes are not available in this build of Pane.' });
+    const createCloudSandbox = (request: CloudSandboxCreateRequest) => {
+      if (!cloud.available) return cloudUnavailable();
+      const id = `create:${request.name}`;
+      cloud.calls.push({ action: 'create', id });
+      cloud.sandboxes = [...cloud.sandboxes.filter((sandbox) => sandbox.id !== id), {
+        id,
+        label: request.name,
+        state: 'creating',
+        size: request.size,
+        steps: [],
+      }];
+      emitCloud();
+      return new Promise<{ success: true; data: CloudSandboxesSnapshot }>((resolve) => {
+        cloud.pendingCreates.set(request.name, (failure) => {
+          cloud.pendingCreates.delete(request.name);
+          if (failure) {
+            updateCloudSandbox(id, { state: 'error', error: failure, failedAction: 'create' });
+          } else {
+            const hostname = `rp-${request.name}`;
+            const profileId = `cloud-${request.name}`;
+            const profile: RemotePaneConnectionProfile = {
+              id: profileId,
+              label: request.name,
+              baseUrl: `https://${hostname}.tail1234.ts.net`,
+              token: 'synthetic-cloud-token',
+              transport: 'http+sse',
+              cloud: { provider: 'boat', sandboxId: `sbx-${request.name}`, sessionId: request.name, nodeId: `node-${request.name}`, hostname, version: 1 },
+            };
+            remoteDaemonConfig.client.profiles.push(profile);
+            syncRemoteDaemonConfig();
+            // Like main: a host the cloud library saves is announced, not returned.
+            emit('remote-daemon:profiles-changed');
+            cloud.sandboxes = [...cloud.sandboxes.filter((sandbox) => sandbox.id !== id), {
+              id: hostname,
+              label: request.name,
+              hostname,
+              profileId,
+              state: 'running',
+              size: request.size,
+              startedAt: new Date().toISOString(),
+            }];
+          }
+          void emitCloud().then(resolve);
+        });
+      });
+    };
+    const runCloudHostAction = (
+      action: Exclude<CloudSandboxAction, 'create'>,
+      id: string,
+      pending: CloudSandboxView['pending'],
+      finish: () => void,
+    ) => {
+      if (!cloud.available) return cloudUnavailable();
+      cloud.calls.push({ action, id });
+      updateCloudSandbox(id, { pending, error: undefined, failedAction: undefined });
+      emitCloud();
+      return new Promise<{ success: true; data: CloudSandboxesSnapshot }>((resolve) => {
+        setTimeout(() => {
+          const failure = cloud.failNext.get(action);
+          cloud.failNext.delete(action);
+          if (failure) updateCloudSandbox(id, { pending: undefined, error: failure, failedAction: action });
+          else finish();
+          void emitCloud().then(resolve);
+        }, 150);
+      });
+    };
+
     const syncRemoteDaemonConfig = () => {
       configState.remoteDaemon = clone(remoteDaemonConfig);
     };
@@ -376,6 +528,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onSessionDeleted') {
           return (callback: MockEventCallback) => subscribe('session:deleted', callback);
         }
+        if (prop === 'onSessionCreated') {
+          return (callback: MockEventCallback) => subscribe('session:created', callback);
+        }
         if (prop === 'onSessionCreationFailed') {
           return (callback: MockEventCallback) => subscribe('session:creation-failed', callback);
         }
@@ -395,11 +550,77 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
     });
 
-    const invoke = (channel: string, ...args: unknown[]) => {
+    const recordCall = (channel: string, args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
-      calls.push({ channel, args });
+      calls.push({ channel, args: clone(args) });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+    };
+
+    // The fake host answers like the daemon: paths resolve on the host, and a
+    // missing hostLabel falls back to the machine's hostname.
+    const hostFolders = new Map(Object.entries(clone(mockOptions.hostFs?.folders ?? {})));
+    const hostHome = mockOptions.hostFs?.home ?? '/home/user';
+    const hostFailure = (code: string, error: string) => Promise.resolve({ success: false, code, error });
+    type HostLabelled = { hostLabel?: string } | null | undefined;
+    const hostLabelOf = (request: HostLabelled) => request?.hostLabel || 'rp-fakehost';
+    const resolveHostPath = (path: string) => {
+      if (!path || path === '~') return hostHome;
+      if (path.startsWith('~/')) return `${hostHome}/${path.slice(2)}`.replace(/\/+$/, '');
+      return path.startsWith('/') ? path.replace(/(.)\/+$/, '$1') : `${hostHome}/${path}`;
+    };
+    const isWindowsStyle = (path: string) => /^[a-zA-Z]:/.test(path) || path.includes('\\');
+    const windowsPathFailure = (request: HostLabelled) => {
+      const host = hostLabelOf(request);
+      return hostFailure(
+        'WINDOWS_PATH_ON_POSIX_HOST',
+        `That's a path on this computer; ${host} is a Linux host. Pick a folder on ${host}.`,
+      );
+    };
+    const parentOf = (path: string) => (path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/');
+    const checkProjectPath = (request: { path: string; mode?: string; hostLabel?: string }) => {
+      if (isWindowsStyle(request.path)) return windowsPathFailure(request);
+      const path = resolveHostPath(request.path);
+      if (request.mode === 'open' && !hostFolders.has(path)) {
+        return hostFailure('NOT_FOUND', `${path} does not exist on ${hostLabelOf(request)}.`);
+      }
+      if (request.mode === 'open' && !hostFolders.get(path)?.isGitRepo) {
+        return hostFailure('NOT_A_GIT_REPO', `${path} is not a git repository.`);
+      }
+      return null;
+    };
+    const hostInvoke = (channel: string, request: { path?: string; parent?: string; name?: string; mode?: string; hostLabel?: string }) => {
+      if (channel === 'fs:browse-directories') {
+        if (isWindowsStyle(request.path ?? '')) return windowsPathFailure(request);
+        const path = resolveHostPath(request.path ?? '');
+        if (!hostFolders.has(path)) return hostFailure('NOT_FOUND', `${path} does not exist on ${hostLabelOf(request)}.`);
+        const entries = [...hostFolders.entries()]
+          .filter(([candidate]) => candidate !== path && parentOf(candidate) === path)
+          .map(([candidate, folder]) => {
+            const name = candidate.slice(candidate.lastIndexOf('/') + 1);
+            return { name, path: candidate, isGitRepo: Boolean(folder.isGitRepo), isHidden: name.startsWith('.') };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        return success({ path, parent: parentOf(path), home: hostHome, platform: 'linux', entries });
+      }
+      if (channel === 'fs:create-directory') {
+        const name = request.name ?? '';
+        if (!name || name === '.' || name === '..' || /[\\/]/.test(name)) {
+          return hostFailure('INVALID_NAME', `${name} is not a valid folder name.`);
+        }
+        const path = `${request.parent === '/' ? '' : request.parent}/${name}`;
+        if (hostFolders.has(path)) return hostFailure('ALREADY_EXISTS', `${name} already exists.`);
+        hostFolders.set(path, {});
+        return success({ path });
+      }
+      const failure = checkProjectPath({ ...request, path: request.path ?? '' });
+      if (failure) return failure;
+      const path = resolveHostPath(request.path ?? '');
+      return success({ path, isGitRepo: Boolean(hostFolders.get(path)?.isGitRepo) });
+    };
+
+    const invoke = (channel: string, ...args: unknown[]) => {
+      recordCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
@@ -453,6 +674,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'archive:get-progress') {
         return success(null);
+      }
+      if (mockOptions.hostFs && ['fs:browse-directories', 'fs:create-directory', 'projects:validate-path'].includes(channel)) {
+        // SAFETY: These host channels take one request object, per shared/types/hostPaths.ts.
+        return hostInvoke(channel, args[0] as { path?: string; parent?: string; name?: string; mode?: string; hostLabel?: string });
       }
       return success();
     };
@@ -677,9 +902,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       git: namespace({
         detectBranch: () => success('main'),
+        cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }) => {
+          recordCall('git:clone-repo', [url, destDir, options ?? null]);
+          if (isWindowsStyle(destDir)) return windowsPathFailure(options);
+          const repoName = url.replace(/\.git$/, '').split('/').pop() ?? 'repo';
+          const clonedPath = `${resolveHostPath(destDir)}/${repoName}`;
+          hostFolders.set(clonedPath, { isGitRepo: true });
+          return success({ clonedPath, repoName });
+        },
       }),
       dialog: namespace({
-        openDirectory: () => success('/tmp/pane-worktrees'),
+        openDirectory: () => {
+          recordCall('dialog:open-directory', []);
+          return success('/tmp/pane-worktrees');
+        },
       }),
       onboarding: namespace({
         detectEnvironment: () => success({}),
@@ -693,6 +929,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onGitHubAuthTerminalExit: (callback: MockEventCallback) => subscribe('onboarding:github-auth-pty-exit', callback),
         setupDefaultRepo: () => success({}),
         supportProject: () => success({}),
+      }),
+      hostTerminal: namespace({
+        open: (request?: { input?: string }) => {
+          const calls = invokeCalls.get('host-terminal:open') ?? [];
+          calls.push({ channel: 'host-terminal:open', args: [request] });
+          invokeCalls.set('host-terminal:open', calls);
+          if (mockOptions.hostTerminalOpenError) return Promise.resolve({ success: false, error: mockOptions.hostTerminalOpenError });
+          return success(createHostTerminalState());
+        },
       }),
       paneChat: namespace({
         getOrCreate: () => success(createPaneChatState()),
@@ -756,6 +1001,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       projects: namespace({
+        create: (request: { name: string; path: string; mode?: string; hostLabel?: string }) => {
+          recordCall('projects:create', [request]);
+          const failure = mockOptions.hostFs ? checkProjectPath(request) : null;
+          if (failure) return failure;
+          const now = new Date().toISOString();
+          const project = {
+            id: mockProjects.reduce((max, existing) => Math.max(max, Number(existing.id) || 0), 0) + 1,
+            name: request.name,
+            path: mockOptions.hostFs ? resolveHostPath(request.path) : request.path,
+            active: false,
+            created_at: now,
+            updated_at: now,
+            displayOrder: mockProjects.length,
+          };
+          mockProjects = [...mockProjects, project];
+          return success(clone(project));
+        },
         getAll: () => success(clone(mockProjects.map((project) => ({
           ...project,
           active: mockActiveProjectId === null
@@ -812,6 +1074,29 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(clone(
             mockSessions.find((session) => session.projectId === projectId && session.isMainRepo === true) ?? null,
           ));
+        },
+        // Like main: the Pane is saved, the call answers, then session:created reaches every window.
+        create: (request: { worktreeTemplate?: string; projectId?: number }) => {
+          const name = request.worktreeTemplate ?? 'pane';
+          const project = mockProjects.find((candidate) => candidate.id === request.projectId);
+          const session = {
+            id: `created-${name}`,
+            name,
+            worktreePath: `${String(project?.path ?? '/tmp/project')}/worktrees/${name}`,
+            prompt: '',
+            status: 'stopped',
+            createdAt: new Date().toISOString(),
+            output: [],
+            jsonMessages: [],
+            projectId: request.projectId,
+            isFavorite: false,
+            toolType: 'none',
+            archived: false,
+            baseBranch: 'main',
+          };
+          mockSessions = [...mockSessions, session];
+          setTimeout(() => emit('session:created', { ...clone(session), activateOnCreate: true }), 0);
+          return success({ sessionIds: [session.id] });
         },
         delete: (sessionId: string) => {
           sessionDeleteCalls.push(sessionId);
@@ -1050,6 +1335,83 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:connection-state-changed', callback),
         onHostStateChanged: (callback: MockEventCallback) =>
           subscribe('remote-daemon:host-state-changed', callback),
+        getCloudSandboxes: async () => {
+          const delay = mockOptions.cloudSandboxes?.loadDelayMs ?? 0;
+          if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+          return success(cloudSnapshot());
+        },
+        updateCloudCredentials: (update: CloudCredentialsUpdate) => {
+          if (!cloud.available) return cloudUnavailable();
+          cloud.credentialUpdates.push(clone(update));
+          cloud.credentials = {
+            boat: cloud.credentials.boat || Boolean(update.boatApiKey),
+            tailscale: cloud.credentials.tailscale || Boolean(update.tailscale),
+            claude: cloud.credentials.claude || Boolean(update.claudeToken),
+            github: cloud.credentials.github || Boolean(update.githubToken),
+            boatOrg: update.boatOrg ?? cloud.credentials.boatOrg,
+          };
+          return emitCloud();
+        },
+        createCloudSandbox,
+        startCloudSandbox: (id: string) => runCloudHostAction('start', id, 'starting', () => {
+          updateCloudSandbox(id, { state: 'running', pending: undefined, startedAt: new Date().toISOString() });
+        }),
+        stopCloudSandbox: (id: string) => runCloudHostAction('stop', id, 'stopping', () => {
+          const profileId = findCloudSandbox(id)?.profileId;
+          if (profileId && remoteDaemonConfig.client.activeProfileId === profileId) {
+            remoteDaemonConfig.client.mode = 'local';
+            setRemoteConnectionState({ mode: 'local', status: 'local', activeProfileId: null, activeProfileLabel: null, activeBaseUrl: null, lastError: null });
+            syncRemoteDaemonConfig();
+          }
+          updateCloudSandbox(id, { state: 'stopped', pending: undefined, startedAt: undefined, daemonVersion: undefined, updateAvailable: false });
+        }),
+        updateCloudSandbox: (id: string) => runCloudHostAction('update', id, 'updating', () => {
+          updateCloudSandbox(id, { pending: undefined, daemonVersion: 'test', updateAvailable: false });
+        }),
+        removeCloudSandbox: (id: string) => runCloudHostAction('remove', id, 'removing', () => {
+          const profileId = findCloudSandbox(id)?.profileId;
+          remoteDaemonConfig.client.profiles = remoteDaemonConfig.client.profiles.filter((profile) => profile.id !== profileId);
+          syncRemoteDaemonConfig();
+          emit('remote-daemon:profiles-changed');
+          cloud.sandboxes = cloud.sandboxes.filter((sandbox) => sandbox.id !== id);
+        }),
+        retryCloudSandbox: (id: string) => {
+          const sandbox = findCloudSandbox(id);
+          if (sandbox?.failedAction === 'create') {
+            return createCloudSandbox({ name: sandbox.label, size: sandbox.size });
+          }
+          return Promise.resolve({ success: false, error: 'The mock only retries creates.' });
+        },
+        dismissCloudSandbox: (id: string) => {
+          const sandbox = findCloudSandbox(id);
+          if (sandbox?.failedAction === 'create') cloud.sandboxes = cloud.sandboxes.filter((candidate) => candidate.id !== id);
+          else updateCloudSandbox(id, { error: undefined, failedAction: undefined });
+          return emitCloud();
+        },
+        getCloudLocalStartScript: () => (cloud.available ? success(clone(cloud.localStartScript)) : cloudUnavailable()),
+        // Like main: saved here only; no sandbox gets anything until its own create or start.
+        saveCloudLocalStartScript: (settings: CloudLocalStartScript) => {
+          if (!cloud.available) return cloudUnavailable();
+          cloud.localStartScript = clone(settings);
+          cloud.localStartScriptSaves.push(clone(settings));
+          return emitCloud();
+        },
+        getCloudStartupScript: () => (cloud.available ? success({ script: cloud.startupScript }) : cloudUnavailable()),
+        saveCloudStartupScript: (script: string) => {
+          if (!cloud.available) return cloudUnavailable();
+          cloud.startupScript = script;
+          cloud.startupScriptSaves.push(script);
+          // Like main: running sandboxes run the saved script; the test reports how each run ends.
+          for (const sandbox of cloud.sandboxes) {
+            if (sandbox.state === 'running' && !sandbox.pending) updateCloudSandbox(sandbox.id, { startupScript: { state: 'running' } });
+          }
+          return emitCloud();
+        },
+        readCloudSandboxStartupLog: (id: string) => success({ log: cloud.startupLogs.get(id) ?? '' }),
+        onProfilesChanged: (callback: MockEventCallback) =>
+          subscribe('remote-daemon:profiles-changed', callback),
+        onCloudSandboxesChanged: (callback: MockEventCallback) =>
+          subscribe('remote-daemon:cloud-sandboxes-changed', callback),
       }),
       uiState: namespace({
         getExpanded: () => success(clone(uiState)),
@@ -1108,6 +1470,38 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getConfig() {
           return clone(configState);
         },
+        reportCloudStep(name: string, step: CloudSandboxProgressStep) {
+          const id = `create:${name}`;
+          const steps = findCloudSandbox(id)?.steps ?? [];
+          const index = steps.findIndex((current) => current.step === step.step);
+          updateCloudSandbox(id, { steps: index === -1 ? [...steps, step] : steps.map((current, currentIndex) => currentIndex === index ? step : current) });
+          void emitCloud();
+        },
+        finishCloudCreate(name: string, failure?: string) {
+          cloud.pendingCreates.get(name)?.(failure);
+        },
+        failNextCloudAction(action: CloudSandboxAction, message: string) {
+          cloud.failNext.set(action, message);
+        },
+        setCloudSandbox(id: string, updates: Partial<CloudSandboxView>) {
+          updateCloudSandbox(id, updates);
+          void emitCloud();
+        },
+        getCloudCalls() {
+          return clone(cloud.calls);
+        },
+        getCloudLocalStartScriptSaves() {
+          return clone(cloud.localStartScriptSaves);
+        },
+        getCloudStartupScriptSaves() {
+          return clone(cloud.startupScriptSaves);
+        },
+        setCloudStartupLog(id: string, log: string) {
+          cloud.startupLogs.set(id, log);
+        },
+        getCloudCredentialUpdateKeys() {
+          return cloud.credentialUpdates.map((update) => Object.keys(update).sort());
+        },
         getPreferences() {
           return clone(preferences);
         },
@@ -1131,6 +1525,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitWindowFocusChanged(focused: boolean) {
           emit('window:focus-changed', focused);
+        },
+        emitSessionCreated(session: JsonObject) {
+          mockSessions = [...mockSessions, clone(session)];
+          emit('session:created', clone(session));
         },
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });

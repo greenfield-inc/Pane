@@ -93,6 +93,7 @@
         "src/installers.ts",
         "src/releases.ts",
         "src/telemetry.ts",
+        "src/cloud/api.ts",
         "scripts/mark-executable.js"
       ],
       "project": ["src/**/*.ts", "scripts/**/*.js"],

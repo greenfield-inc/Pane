@@ -1,0 +1,42 @@
+import type { IpcMain } from 'electron';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import type { AppServices } from './types';
+import { HostTerminalManager } from '../services/hostTerminalManager';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { HostTerminalOpenRequest } from '../../../shared/types/hostTerminal';
+import { hostTerminalEnvVarSchema } from '../../../shared/types/remoteDaemon';
+
+const openRequestSchema = boundary.optional(boundary.nullable(boundary.object({
+  input: boundary.optional(boundary.string),
+  env: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
+})));
+
+/** A remote client's /invoke sends an omitted request as null; both mean "just open". */
+export function decodeHostTerminalOpenRequest(request: PaneCommandValue): HostTerminalOpenRequest {
+  return decodeBoundary(request, openRequestSchema) ?? {};
+}
+
+export function registerHostTerminalHandlers(
+  ipcMain: IpcMain,
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  hostTerminal: Pick<HostTerminalManager, 'open' | 'get' | 'shell'> = new HostTerminalManager(services.sessionManager),
+): void {
+  commandRegistry.register('host-terminal:open', async (request: PaneCommandValue) => {
+    try {
+      const state = await hostTerminal.open(decodeHostTerminalOpenRequest(request));
+      return { success: true, data: state };
+    } catch (error) {
+      console.error('[HostTerminal IPC] Failed to open the host terminal:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to open the host terminal' };
+    }
+  });
+  commandRegistry.bindChannel(ipcMain, 'host-terminal:open');
+
+  commandRegistry.register('host-terminal:get', () => ({ success: true, data: hostTerminal.get() }));
+  commandRegistry.bindChannel(ipcMain, 'host-terminal:get');
+
+  // Read-only and works before the terminal exists: what the host terminal's shell is (or will be).
+  commandRegistry.register('host-terminal:shell', () => ({ success: true, data: { shell: hostTerminal.shell() } }));
+  commandRegistry.bindChannel(ipcMain, 'host-terminal:shell');
+}

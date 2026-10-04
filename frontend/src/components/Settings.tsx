@@ -41,6 +41,11 @@ interface SettingsProps {
   onSendFeedback: () => void;
 }
 
+/** How long an opened Settings link waits for its row to render. */
+const SETTING_FOCUS_WAIT_MS = 5000;
+/** Where the user types in a settings row: a text box, not its buttons, toggles or choices. */
+const SETTING_TEXT_FIELD = 'textarea, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"])';
+
 export function Settings({ isOpen, onClose, category, onCategoryChange, openRequest, onOpenRequestHandled, onShowKeyboardShortcuts, onUpdate, onSendFeedback }: SettingsProps) {
   const persistence = useSettingsPersistence(isOpen);
   const dirtyForms = useDirtySettingsForms();
@@ -72,14 +77,46 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     }
   }, [isOpen]);
 
+  // Some rows render only once their data loads (the cloud sandbox rows wait for the cloud
+  // library), so wait for the row to appear rather than looking for it once.
+  const stopFocusWaitRef = useRef<(() => void) | null>(null);
   const focusSetting = useCallback((setting?: SettingsSettingId) => {
+    stopFocusWaitRef.current?.();
+    stopFocusWaitRef.current = null;
     if (!setting) return;
-    window.setTimeout(() => {
-      const element = document.getElementById(settingDomId(setting));
-      element?.scrollIntoView({ block: 'center' });
-      element?.focus({ preventScroll: true });
-    }, 100);
+    // The field the user came to fill in gets focus; a row without one is focused itself. A field that
+    // is still disabled (its value loading) is waited for.
+    const focus = (settle: boolean) => {
+      const row = document.getElementById(settingDomId(setting));
+      if (!row) return false;
+      const field = row.querySelector<HTMLElement>(SETTING_TEXT_FIELD);
+      if (field?.matches(':disabled') && !settle) return false;
+      row.scrollIntoView({ block: 'center' });
+      (field && !field.matches(':disabled') ? field : row).focus({ preventScroll: true });
+      return true;
+    };
+    const observer = new MutationObserver(() => {
+      if (focus(false)) stop();
+    });
+    const timeout = window.setTimeout(() => {
+      focus(true);
+      stop();
+    }, SETTING_FOCUS_WAIT_MS);
+    const stop = () => {
+      observer.disconnect();
+      window.clearTimeout(timeout);
+      if (stopFocusWaitRef.current === stop) stopFocusWaitRef.current = null;
+    };
+    stopFocusWaitRef.current = stop;
+    // The category switch renders first; a row already there is focused on the next frame.
+    window.requestAnimationFrame(() => {
+      if (stopFocusWaitRef.current !== stop) return;
+      if (focus(false)) stop();
+      else observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+    });
   }, []);
+
+  useEffect(() => () => stopFocusWaitRef.current?.(), []);
 
   useEffect(() => {
     if (!isOpen || !openRequest || handledRequestRef.current === openRequest.nonce) return;

@@ -373,6 +373,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
   };
 
   return {
+    closeSettings,
     config,
     connectionState,
     hostState,

@@ -15,6 +15,7 @@ import { getThemeLabel, themeOptionsForSlot } from '../utils/themeOptions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { PreferredShell } from '../types/config';
+import type { ProjectPathMode } from '../../../shared/types/hostPaths';
 import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
@@ -239,6 +240,8 @@ export function HomePage() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [showAddProject, setShowAddProject] = useState(false);
+  // Open Project adds an existing repo; New Project creates one.
+  const [addProjectMode, setAddProjectMode] = useState<ProjectPathMode>('open');
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const { shells: availableShells, preferredShell, setPreferredShell } = useHostShellSettings();
 
@@ -319,11 +322,17 @@ export function HomePage() {
             <div className="grid justify-center gap-4 sm:grid-cols-3">
               <OpenProjectCard
                 projects={projects}
-                onAddProject={() => setShowAddProject(true)}
+                onAddProject={() => {
+                  setAddProjectMode('open');
+                  setShowAddProject(true);
+                }}
               />
               <button
                 type="button"
-                onClick={() => setShowAddProject(true)}
+                onClick={() => {
+                  setAddProjectMode('new');
+                  setShowAddProject(true);
+                }}
                 className={actionCardClassName}
               >
                 <PlusIcon className="w-8 h-8 text-text-secondary" />
@@ -491,6 +500,7 @@ export function HomePage() {
 
       <AddProjectDialog
         isOpen={showAddProject}
+        mode={addProjectMode}
         onClose={() => setShowAddProject(false)}
       />
       <CloneFromGitHubDialog

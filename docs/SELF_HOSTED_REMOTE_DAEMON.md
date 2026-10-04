@@ -128,8 +128,9 @@ pnpm remote:setup -- --no-tailscale-serve
 
 ## Run Pane on a Cloud VM
 
-Pane does not create or manage cloud machines. Create the VM yourself, then set
-it up as a Remote Pane host:
+To bring your own VM, create it yourself, then set it up as a Remote Pane host.
+For a sandbox that Pane creates and manages, see
+[Cloud sandbox (experimental)](#cloud-sandbox-experimental).
 
 1. Create an Ubuntu 24.04 VM with any provider. Size it for the agents and
    builds you plan to run. It only needs inbound SSH. The daemon listens on
@@ -169,6 +170,187 @@ To start, stop, or delete the VM, use your provider's console or CLI. If
 something fails, run `npx --yes runpane@latest doctor --json` on the VM and
 check [Troubleshooting](#troubleshooting).
 
+### Restarts and stopped VMs
+
+Panes, panels, worktrees and agent transcripts survive a daemon restart, a
+reboot and a VM stop. Running processes do not:
+
+- The headless daemon saves terminal scrollback and flushes its database every
+  10 seconds, because many providers stop a VM with a power-off and no
+  shutdown. Output from the last few seconds before a power-off can be lost.
+- An agent panel that was running comes back with its conversation (`claude
+  --resume`, `codex resume`, `cursor-agent --resume`) when you open it.
+- A plain shell starts fresh in its worktree when you open it.
+
+To bring agents back as soon as the daemon starts, without opening each Pane,
+set `PANE_RESUME_AGENTS_ON_START=1` for the service:
+
+```bash
+mkdir -p ~/.config/systemd/user/pane-remote-daemon.service.d
+printf '[Service]\nEnvironment=PANE_RESUME_AGENTS_ON_START=1\n' \
+  > ~/.config/systemd/user/pane-remote-daemon.service.d/resume-agents.conf
+systemctl --user daemon-reload
+```
+
+Then every agent that was running when the VM stopped relaunches on the next
+start, including after a daemon upgrade, and uses tokens and memory right away.
+Before relaunching an agent, the daemon stops anything an earlier daemon process
+left running for that panel, so a conversation never has two agents.
+
+## Cloud sandbox (experimental)
+
+A cloud sandbox is a [boat.dev](https://boat.dev) sandbox that Pane creates for you, already set up as a
+Remote Pane host: Pane is installed, the sandbox has joined your tailnet, and it is paired and saved in your
+remote hosts. Stop it when you are done (a stopped sandbox costs nothing) and start it again later: the tailnet
+name, the Sessions and the agents' conversations come back.
+
+> **A running sandbox bills until you stop it.** Nothing stops an idle sandbox automatically, even when no
+> agent is working and no app is connected. **Settings > Remote Access** shows how long each sandbox has been
+> running ("running for 5h"); stop the ones you are not using.
+
+### What you need
+
+- **A boat.dev API key**, on a plan that allows sandboxes without a time limit. If your account bills more
+  than one wallet (organization), choose the wallet once; every new sandbox bills it.
+- **A Tailscale OAuth client** whose client is allowed to create auth keys tagged `tag:rp-session` and to
+  read and delete devices (scopes `auth_keys` and `devices:core`). Your tailnet policy must define the tag,
+  for example `"tagOwners": { "tag:rp-session": ["autogroup:admin"] }`. Recommended grants, so your devices
+  reach the sandboxes but sandboxes reach nothing else:
+
+  ```json
+  "grants": [
+    { "src": ["autogroup:member"], "dst": ["tag:rp-session"], "ip": ["tcp:443", "tcp:42137"] }
+  ]
+  ```
+
+- **Tailscale on every device that connects**, including the desktop.
+- Optional: **a Claude token** (`claude setup-token`). Claude Code agents in every new sandbox sign in with it.
+
+### Create one
+
+In desktop Pane, open **Settings > Remote Access**, enter the keys once, then choose **Add cloud sandbox**.
+The **Cloud sandboxes (experimental)** section there:
+
+- shows each credential only as **Set** or **Not set**, plus the boat wallet's name. Saving checks the keys
+  with boat.dev and Tailscale first. Leave a field blank to keep what is saved.
+- takes a name (lowercase letters, digits and dashes) and a size, and lists each provisioning step while the
+  sandbox is created. A failed create leaves nothing behind; **Retry** runs it again.
+- lists each sandbox with its state (Running, Stopped, Creating, Error) and **Stop**, **Start** and **Remove**,
+  which asks for confirmation first. A running sandbox shows how long it has been running.
+- offers **Update Pane** when the sandbox's daemon reports a different Pane version than the desktop. It installs
+  the desktop's own release `.deb`, checked against that release's `SHA256SUMS.txt`.
+- has a **Startup script** editor: one script, kept on this computer, that every sandbox runs each time it starts.
+  A failed run shows on the sandbox's row with **View log**. See
+  [Cloud sandbox startup script](CLOUD_SANDBOX_STARTUP_SCRIPT.md).
+- has a **Local start script** editor: a script that runs on this computer before each sandbox create and start, whose
+  `NAME=value` output becomes variables on that sandbox only (for example a Doppler token). See
+  [Local start script](CLOUD_SANDBOX_STARTUP_SCRIPT.md#local-start-script).
+
+Stopping or removing the host the desktop is connected to switches the desktop back to **This computer**
+first. In the host switcher, a stopped sandbox reads **Stopped · Select to start**: choosing it starts the
+sandbox and then connects.
+
+From a terminal, the same library is the `runpane cloud` command:
+
+```bash
+runpane cloud setup --boat-key-file - --boat-org <org|personal> \
+  --tailscale-client-id <id> --tailscale-secret-file <path> --claude-token-file <path>
+runpane cloud new --label "Cloud sandbox" --yes
+runpane cloud list
+runpane cloud stop <host> --yes
+runpane cloud start <host>
+runpane cloud remove <host> --yes
+```
+
+Secrets are read from files or stdin (`-`), never from arguments. They stay on this machine, in
+`~/.config/runpane-cloud` (mode 0600; `$RUNPANE_CLOUD_DIR` overrides it), and are never printed. `new` adds the
+host to desktop Pane's saved remote hosts in `~/.pane/config.json` (`$RUNPANE_CLOUD_DESKTOP_DIR` overrides it).
+`runpane help cloud <command>` lists every option.
+
+`new` takes about 1.5 minutes when the HTTPS certificate comes, and about 3.5 minutes when it falls back to
+plain HTTP (below). It:
+
+1. creates the sandbox in the chosen wallet;
+2. resets its identity: a fresh machine-id and SSH host keys, and no credentials or Pane state left from the image.
+   The OS takes the sandbox's tailnet name (`rp-…`), so `hostname` and shell prompts show it. A resumed sandbox comes
+   back with boat's machine name, so Start, Update and a boot unit (`rp-hostname.service`) give the name back;
+3. closes inbound tailnet traffic except Tailscale Serve (an nftables table, reloaded at every boot);
+4. joins your tailnet with a single-use, pre-authorized auth key tagged `tag:rp-session`, with Tailscale SSH off;
+5. prepares agents: Claude Code signs in with the saved token, its first-run, folder-trust and
+   bypass-permissions prompts are answered ahead of time (`~/.claude.json`, plus `CLAUDE_CODE_SANDBOXED=1`
+   in the daemon's environment so a repository added later is trusted too), and the daemon relaunches
+   interrupted agent panels when the sandbox starts again (`PANE_RESUME_AGENTS_ON_START=1`);
+6. installs Pane (the latest release, or the `.deb` given with `--pane-deb-url` and its required
+   `--pane-deb-sha256`) and pairs it;
+7. waits for the daemon at `https://<host>.<tailnet>.ts.net` through Tailscale Serve.
+
+Every new tailnet name needs a Let's Encrypt certificate, and Let's Encrypt issues at most 50 a week for a
+tailnet's domain. When the certificate doesn't come within about 50 seconds, the sandbox is served over plain
+HTTP inside the tailnet instead, at `http://<host>.<tailnet>.ts.net:42137`. WireGuard still encrypts that
+traffic, but the phone app at `runpane.com/app` can't use it. `--transport https` or `--transport http` picks
+one explicitly.
+
+If any step fails, `new` removes the sandbox and its tailnet device before it reports the error.
+
+The sandbox tells Claude Code it is sandboxed (`CLAUDE_CODE_SANDBOXED=1`, set only for the sandbox's Pane daemon),
+so Claude Code skips its folder-trust prompt there, also for repositories you add later. This computer and remote
+hosts you set up yourself are not affected.
+
+New Claude Code panels in a sandbox start with the same default model as Claude Code on this computer. An
+explicit default wins: `ANTHROPIC_MODEL`, else `model` in `~/.claude/settings.json`. With neither, Pane detects the
+model your Claude Code picks for itself (your account's default). It starts your `claude` once with its network
+blocked (every proxy variable points at a closed local port), reads the model from the first line Claude prints, and
+stops it. No message reaches Anthropic, nothing is saved, and Pane reads only that line. The result is cached until
+`claude` or your settings file changes. Create, Start and Update apply the model again, and so does connecting to a
+sandbox, so a change follows. While the desktop is connected to a sandbox, it also watches Claude's settings folder
+(read-only): when `settings.json` changes and the default it now gives differs from the one a running sandbox last got,
+the desktop sends the new one, so it reaches the sandbox's next new panel within seconds. If detection fails (no
+`claude` on `PATH`, no answer within 15 s), Pane sends no model: the sandbox keeps the model it has (a new one uses
+Claude Code's own default), and a notice saying why is logged. It is not a pin: a model picked inside
+the sandbox with `/model` is kept.
+
+Codex is installed in every sandbox but not signed in. Sign it in yourself: run `codex login --device-auth` in the
+sandbox's terminal (**Terminal on <sandbox>**).
+First enable device code authorization in your ChatGPT settings (Security), then run codex login --device-auth.
+Claude Code signs in by itself when a Claude token is saved.
+
+On cloud sandboxes, Pane stores the GitHub token in ~/.config/gh/hosts.yml (owner-only).
+
+Detection is best effort. Known limits:
+
+- When this computer's Claude Code is signed in only with a token (`CLAUDE_CODE_OAUTH_TOKEN`), it prints no
+  model before it calls the API, so detection finds nothing: no model is sent, and the sandbox keeps its own
+  default. Set `model` in `~/.claude/settings.json` to choose one; an explicit setting always wins.
+- `ANTHROPIC_MODEL` is read from the desktop app's own environment. An app started from the dock or Start menu
+  doesn't see variables exported in your shell profile; use `model` in `~/.claude/settings.json` instead.
+- Signing Claude Code in to a different account doesn't refresh a detected default by itself. It refreshes when
+  `claude` or `~/.claude/settings.json` changes, or when Pane restarts.
+
+### Stop, start, update and remove
+
+- **Stop** syncs the disk, then boat snapshots the sandbox and powers it off. Billing stops; the disk and the
+  tailnet name are kept. Stop can take a few minutes when boat is slow to save the sandbox: Pane shows
+  "Saving the sandbox…" and waits up to 15 minutes.
+- **Start** resumes the sandbox and waits until the daemon answers. A resume has been seen to bring the
+  Tailscale node back logged out, or without its Serve config. Start repairs either: it re-applies Serve, or
+  re-enrolls the node under the same name, so the saved host keeps working.
+- **Update** (`runpane cloud update <host> --pane-deb-url <url> --pane-deb-sha256 <hex> --yes`) installs another
+  Pane `.deb` on a running sandbox and restarts its daemon. Pairing and Sessions are kept, and the agent
+  preparation from step 5 is applied again.
+- **Remove** deletes the sandbox and its disk, its tailnet device, the saved remote host and the local record.
+  Only devices tagged `tag:rp-session` under the sandbox's name are deleted. Any other device with that name is
+  left alone and reported.
+
+### Signing in on a sandbox
+
+Nobody sits at a sandbox's screen, so its saved host tells Pane two things:
+
+- The sandbox's host terminal starts with `BROWSER=false` and `GH_BROWSER=false`. `gh auth login` and `codex login`
+  print their sign-in URL and code instead of opening a browser on the sandbox.
+- gh keeps a cloud sandbox's GitHub token in its hosts.yml (see above), not the keyring: the sandbox's keyring
+  can't be unlocked without someone at its screen, so when Pane signs gh in on a sandbox it uses
+  `gh auth login --insecure-storage`. Self-hosted remotes keep gh's default, the keyring.
+
 ## Import Locally
 
 On your local desktop machine:
@@ -179,6 +361,10 @@ On your local desktop machine:
 4. Click `Import & Connect`.
 
 If the tunnel is not reachable yet, Pane still saves the profile and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` on the saved profile.
+
+### Terminal on the host
+
+To sign in to tools such as `gh` or `codex` before you open a repository, open the host switcher and click the terminal button on the connected host's row ("Open terminal on <host>"). It opens a plain shell on the host, in its home folder, as the tab `<host> · Terminal`. Each host has one such terminal: closing the tab keeps the shell running, and opening it again brings back the same shell. The host keeps it in a hidden session under `<pane dir>/sessions/host-terminal`, so it never shows up as a repository or a Pane.
 
 ## Use the Mobile / Browser App
 
@@ -361,6 +547,16 @@ Some actions operate on the local desktop client machine rather than the remote 
 - opening a local IDE from the client
 - revealing files in the client OS file manager
 - the native clipboard-image fallback path
+
+### Which machine do repo paths refer to?
+
+The remote host. In remote mode, Open project, New project and Clone run on the host's daemon, so every path you pick or type is a path on that host. The daemon lists the host's folders through `fs:browse-directories` (it opens at the host's home folder) and checks typed paths there:
+
+- On a Linux or macOS host, a Windows path such as `C:\Users\me\repo` is rejected with "That's a path on this computer; <host> is a Linux host. Pick a folder on <host>."
+- Open project needs the root folder of an existing git repository on the host. It never creates a folder or runs `git init`; New project does both.
+- Clone defaults to the host's home folder, and `~` in the destination means the host's home.
+
+The dialogs show which host they act on with a chip at the top, for example "On: devbox (remote host)". On a remote host, Browse opens Pane's own folder browser instead of this computer's file dialog: it starts at the host's home, has Up and Show hidden folders, marks git repositories, and offers New folder when creating a project or picking a clone destination.
 
 ### Where does copied terminal text go?
 

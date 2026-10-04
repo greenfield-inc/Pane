@@ -1258,6 +1258,100 @@
         "lockListResult"
       ],
       "localControl": true
+    },
+    {
+      "name": "cloud setup",
+      "summary": "Save the boat API key, the Tailscale OAuth client and an optional Claude token for cloud sandboxes (0600, on this machine only).",
+      "usage": [
+        "runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--claude-token-file <path|->] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud new",
+      "summary": "Create a cloud sandbox running a Pane daemon, joined to your tailnet and saved as a remote host.",
+      "usage": [
+        "runpane cloud new [--label <name>] [--size <small|default|large>] [--boat-org <org|personal>] [--transport <auto|https|http>] [--pane-deb-url <url> --pane-deb-sha256 <hex>|--pane-npm-spec <spec>] [--name-prefix <prefix>] [--keep-on-failure] --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud list",
+      "summary": "List cloud sandboxes with their state.",
+      "usage": [
+        "runpane cloud list [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud status",
+      "summary": "Show one cloud sandbox: its state and, when it runs, its daemon's health and version.",
+      "usage": [
+        "runpane cloud status <host> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud stop",
+      "summary": "Stop a cloud sandbox: flush its disk, snapshot it and power it off (billing stops; disk and tailnet name are kept).",
+      "usage": [
+        "runpane cloud stop <host> --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud start",
+      "summary": "Start a stopped cloud sandbox and wait until its Pane daemon answers.",
+      "usage": [
+        "runpane cloud start <host> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud update",
+      "summary": "Install another Pane .deb on a running cloud sandbox and restart its daemon.",
+      "usage": [
+        "runpane cloud update <host> --pane-deb-url <url> --pane-deb-sha256 <hex> --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
+    },
+    {
+      "name": "cloud remove",
+      "summary": "Delete a cloud sandbox, its disk, its tailnet device and its saved remote host.",
+      "usage": [
+        "runpane cloud remove <host> --yes [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": false
     }
   ],
   "flags": {
@@ -2879,6 +2973,114 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "cloud": [
+        "Usage:",
+        "  runpane cloud <setup|new|list|status|stop|start|update|remove> [options]",
+        "",
+        "Run Pane on a cloud sandbox (boat.dev) joined to your tailnet, saved as a remote host in Pane desktop.",
+        "Keys stay on this machine (~/.config/runpane-cloud, 0600).",
+        "",
+        "Start with: runpane cloud setup, then runpane cloud new --yes.",
+        "Run \"runpane help cloud <command>\" for options."
+      ],
+      "cloud setup": [
+        "Usage:",
+        "  runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--claude-token-file <path|->] [--json]",
+        "",
+        "Save the boat API key, the Tailscale OAuth client and an optional Claude token for cloud sandboxes (0600, on this machine only).",
+        "",
+        "Options:",
+        "  --boat-key-file <path|->           File (or - for stdin) holding the boat.dev API key.",
+        "  --boat-org <org|personal>          Boat wallet new sandboxes bill: an organization id or name, or personal. Unset, boat bills the account's active wallet.",
+        "  --tailscale-client-id <id>         Tailscale OAuth client id (auth_keys and devices scopes, tag:rp-session).",
+        "  --tailscale-secret-file <path|->   File (or - for stdin) holding the Tailscale OAuth client secret.",
+        "  --tailscale-tailnet <name>         Tailnet name; default is the OAuth client's own tailnet.",
+        "  --claude-token-file <path|->       File (or - for stdin) holding a Claude token (claude setup-token) that agents in new sandboxes sign in with.",
+        "  --json                             Print machine-readable output."
+      ],
+      "cloud new": [
+        "Usage:",
+        "  runpane cloud new [--label <name>] [--size <small|default|large>] [--boat-org <org|personal>] [--transport <auto|https|http>] [--pane-deb-url <url> --pane-deb-sha256 <hex>|--pane-npm-spec <spec>] [--name-prefix <prefix>] [--keep-on-failure] --yes [--json]",
+        "",
+        "Create a cloud sandbox running a Pane daemon, joined to your tailnet and saved as a remote host.",
+        "",
+        "Options:",
+        "  --label <name>                  Name shown in Pane.",
+        "  --size <small|default|large>    Machine size (default: default).",
+        "  --boat-org <org|personal>       Bill this sandbox to that boat wallet instead of the saved one.",
+        "  --transport <auto|https|http>   How Pane reaches the daemon: https (Tailscale Serve with a certificate), http (plain HTTP inside the tailnet), or auto (https, then http; default).",
+        "  --pane-deb-url <url>            Install Pane from this https:// .deb instead of the latest release.",
+        "  --pane-deb-sha256 <hex>         sha256 the sandbox checks the .deb against; required with --pane-deb-url.",
+        "  --pane-npm-spec <spec>          Install Pane with this runpane npm spec (default runpane@latest).",
+        "  --name-prefix <prefix>          Prefix of the sandbox and tailnet host name (default rp).",
+        "  --keep-on-failure               Keep the sandbox when setup fails, for debugging.",
+        "  --yes                           Confirm this change; required because it costs money or deletes data.",
+        "  --json                          Print machine-readable output."
+      ],
+      "cloud list": [
+        "Usage:",
+        "  runpane cloud list [--json]",
+        "",
+        "List cloud sandboxes with their state.",
+        "",
+        "Options:",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud status": [
+        "Usage:",
+        "  runpane cloud status <host> [--json]",
+        "",
+        "Show one cloud sandbox: its state and, when it runs, its daemon's health and version.",
+        "",
+        "Options:",
+        "  <host>   Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud stop": [
+        "Usage:",
+        "  runpane cloud stop <host> --yes [--json]",
+        "",
+        "Stop a cloud sandbox: flush its disk, snapshot it and power it off (billing stops; disk and tailnet name are kept).",
+        "",
+        "Options:",
+        "  <host>   Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id.",
+        "  --yes    Confirm this change; required because it costs money or deletes data.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud start": [
+        "Usage:",
+        "  runpane cloud start <host> [--json]",
+        "",
+        "Start a stopped cloud sandbox and wait until its Pane daemon answers.",
+        "",
+        "Options:",
+        "  <host>   Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id.",
+        "  --json   Print machine-readable output."
+      ],
+      "cloud update": [
+        "Usage:",
+        "  runpane cloud update <host> --pane-deb-url <url> --pane-deb-sha256 <hex> --yes [--json]",
+        "",
+        "Install another Pane .deb on a running cloud sandbox and restart its daemon.",
+        "",
+        "Options:",
+        "  <host>                    Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id.",
+        "  --pane-deb-url <url>      The https:// .deb to install.",
+        "  --pane-deb-sha256 <hex>   sha256 the sandbox checks the .deb against.",
+        "  --yes                     Confirm this change; required because it costs money or deletes data.",
+        "  --json                    Print machine-readable output."
+      ],
+      "cloud remove": [
+        "Usage:",
+        "  runpane cloud remove <host> --yes [--json]",
+        "",
+        "Delete a cloud sandbox, its disk, its tailnet device and its saved remote host.",
+        "",
+        "Options:",
+        "  <host>   Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id.",
+        "  --yes    Confirm this change; required because it costs money or deletes data.",
+        "  --json   Print machine-readable output."
       ]
     },
     "pip": {
@@ -3941,6 +4143,69 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "cloud": [
+        "Usage:",
+        "  runpane cloud <setup|new|list|status|stop|start|update|remove> [options]",
+        "",
+        "`runpane cloud` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud"
+      ],
+      "cloud setup": [
+        "Usage:",
+        "  runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--claude-token-file <path|->] [--json]",
+        "",
+        "`runpane cloud setup` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud setup"
+      ],
+      "cloud new": [
+        "Usage:",
+        "  runpane cloud new [--label <name>] [--size <small|default|large>] [--boat-org <org|personal>] [--transport <auto|https|http>] [--pane-deb-url <url> --pane-deb-sha256 <hex>|--pane-npm-spec <spec>] [--name-prefix <prefix>] [--keep-on-failure] --yes [--json]",
+        "",
+        "`runpane cloud new` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud new"
+      ],
+      "cloud list": [
+        "Usage:",
+        "  runpane cloud list [--json]",
+        "",
+        "`runpane cloud list` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud list"
+      ],
+      "cloud status": [
+        "Usage:",
+        "  runpane cloud status <host> [--json]",
+        "",
+        "`runpane cloud status` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud status"
+      ],
+      "cloud stop": [
+        "Usage:",
+        "  runpane cloud stop <host> --yes [--json]",
+        "",
+        "`runpane cloud stop` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud stop"
+      ],
+      "cloud start": [
+        "Usage:",
+        "  runpane cloud start <host> [--json]",
+        "",
+        "`runpane cloud start` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud start"
+      ],
+      "cloud update": [
+        "Usage:",
+        "  runpane cloud update <host> --pane-deb-url <url> --pane-deb-sha256 <hex> --yes [--json]",
+        "",
+        "`runpane cloud update` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud update"
+      ],
+      "cloud remove": [
+        "Usage:",
+        "  runpane cloud remove <host> --yes [--json]",
+        "",
+        "`runpane cloud remove` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest cloud remove"
       ]
     }
   },
@@ -13085,6 +13350,312 @@
           "lockListResult"
         ],
         "notes": []
+      },
+      "cloud setup": {
+        "name": "cloud setup",
+        "summary": "Save the boat API key, the Tailscale OAuth client and an optional Claude token for cloud sandboxes (0600, on this machine only).",
+        "details": "Secrets are read from files or stdin, never from arguments, checked against boat and Tailscale, and stored in ~/.config/runpane-cloud (override with $RUNPANE_CLOUD_DIR). Without options it shows what is saved, never the values.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--boat-key-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding the boat.dev API key."
+          },
+          {
+            "name": "--boat-org",
+            "value": "<org|personal>",
+            "required": false,
+            "description": "Boat wallet new sandboxes bill: an organization id or name, or personal. Unset, boat bills the account's active wallet."
+          },
+          {
+            "name": "--tailscale-client-id",
+            "value": "<id>",
+            "required": false,
+            "description": "Tailscale OAuth client id (auth_keys and devices scopes, tag:rp-session)."
+          },
+          {
+            "name": "--tailscale-secret-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding the Tailscale OAuth client secret."
+          },
+          {
+            "name": "--tailscale-tailnet",
+            "value": "<name>",
+            "required": false,
+            "description": "Tailnet name; default is the OAuth client's own tailnet."
+          },
+          {
+            "name": "--claude-token-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "File (or - for stdin) holding a Claude token (claude setup-token) that agents in new sandboxes sign in with."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud setup --boat-key-file - --tailscale-client-id <id> --tailscale-secret-file ~/ts-secret"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud new": {
+        "name": "cloud new",
+        "summary": "Create a cloud sandbox running a Pane daemon, joined to your tailnet and saved as a remote host.",
+        "details": "Resets the sandbox identity, closes inbound tailnet ports except Tailscale Serve, joins with a single-use tagged auth key, installs Pane and pairs it. Pane desktop's saved remote hosts get the new host. With --transport auto, a host whose HTTPS certificate does not come is served over plain HTTP inside the tailnet. If setup fails, the sandbox and its tailnet device are removed unless --keep-on-failure.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--label",
+            "value": "<name>",
+            "required": false,
+            "description": "Name shown in Pane."
+          },
+          {
+            "name": "--size",
+            "value": "<small|default|large>",
+            "required": false,
+            "description": "Machine size (default: default)."
+          },
+          {
+            "name": "--boat-org",
+            "value": "<org|personal>",
+            "required": false,
+            "description": "Bill this sandbox to that boat wallet instead of the saved one."
+          },
+          {
+            "name": "--transport",
+            "value": "<auto|https|http>",
+            "required": false,
+            "description": "How Pane reaches the daemon: https (Tailscale Serve with a certificate), http (plain HTTP inside the tailnet), or auto (https, then http; default)."
+          },
+          {
+            "name": "--pane-deb-url",
+            "value": "<url>",
+            "required": false,
+            "description": "Install Pane from this https:// .deb instead of the latest release."
+          },
+          {
+            "name": "--pane-deb-sha256",
+            "value": "<hex>",
+            "required": false,
+            "description": "sha256 the sandbox checks the .deb against; required with --pane-deb-url."
+          },
+          {
+            "name": "--pane-npm-spec",
+            "value": "<spec>",
+            "required": false,
+            "description": "Install Pane with this runpane npm spec (default runpane@latest)."
+          },
+          {
+            "name": "--name-prefix",
+            "value": "<prefix>",
+            "required": false,
+            "description": "Prefix of the sandbox and tailnet host name (default rp)."
+          },
+          {
+            "name": "--keep-on-failure",
+            "required": false,
+            "description": "Keep the sandbox when setup fails, for debugging."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud new --label \"Cloud sandbox\" --yes"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud list": {
+        "name": "cloud list",
+        "summary": "List cloud sandboxes with their state.",
+        "details": "Reads the saved records and one provider list; it never probes daemons.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud list --json"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud status": {
+        "name": "cloud status",
+        "summary": "Show one cloud sandbox: its state and, when it runs, its daemon's health and version.",
+        "details": "Exit code 1 means the provider no longer has the sandbox.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud status rp-abc12345 --json"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud stop": {
+        "name": "cloud stop",
+        "summary": "Stop a cloud sandbox: flush its disk, snapshot it and power it off (billing stops; disk and tailnet name are kept).",
+        "details": "boat's stop is a hard power-off right after a snapshot, so the disk is synced first. Pane panels come back when the sandbox starts again.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud stop rp-abc12345 --yes"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud start": {
+        "name": "cloud start",
+        "summary": "Start a stopped cloud sandbox and wait until its Pane daemon answers.",
+        "details": "A resume can lose the tailnet node's login or its Tailscale Serve config; start repairs either under the same tailnet name.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud start rp-abc12345"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud update": {
+        "name": "cloud update",
+        "summary": "Install another Pane .deb on a running cloud sandbox and restart its daemon.",
+        "details": "Pairing, Sessions and the tailnet name are kept; panels resume when the daemon restarts.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id."
+          },
+          {
+            "name": "--pane-deb-url",
+            "value": "<url>",
+            "required": true,
+            "description": "The https:// .deb to install."
+          },
+          {
+            "name": "--pane-deb-sha256",
+            "value": "<hex>",
+            "required": true,
+            "description": "sha256 the sandbox checks the .deb against."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud update rp-abc12345 --pane-deb-url https://example.com/pane.deb --pane-deb-sha256 <hex> --yes"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
+      },
+      "cloud remove": {
+        "name": "cloud remove",
+        "summary": "Delete a cloud sandbox, its disk, its tailnet device and its saved remote host.",
+        "details": "Only tailnet devices tagged tag:rp-session under the sandbox's name are deleted.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<host>",
+            "required": true,
+            "description": "Cloud sandbox: its host name (rp-...), label, cloud session id or sandbox id."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm this change; required because it costs money or deletes data."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane cloud remove rp-abc12345 --yes"
+        ],
+        "notes": [
+          "Pane desktop's Remotes settings drive the same library (Add cloud sandbox); both share ~/.config/runpane-cloud."
+        ]
       }
     },
     "managedBlock": [

@@ -108,6 +108,8 @@ export interface ParsedArgs {
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** `runpane cloud <subcommand> ...`: the arguments after `cloud`, parsed by cloud/cli.ts. */
+  cloudArgv?: string[];
   remoteSetupArgs: string[];
 }
 
@@ -177,6 +179,10 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     };
   }
 
+  if (first === 'cloud') {
+    return parseCloudEntry(args);
+  }
+
   const groupHelpTopic = matchCommandGroupHelp(args);
   if (groupHelpTopic) {
     return {
@@ -239,6 +245,28 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'report') validateReportArgs(parsed);
   return parsed;
+}
+
+/** `runpane cloud ...` keeps its own flags (cloud/cli.ts); only the subcommand is matched here. */
+function parseCloudEntry(args: string[]): ParsedArgs {
+  const wantsHelp = (arg: string) => arg === '-h' || arg === '--help';
+  if (args.length === 1 || wantsHelp(args[1])) {
+    return { command: 'help', helpTopic: 'cloud', ...DEFAULTS };
+  }
+  const matched = matchCommand(args);
+  if (!matched) {
+    throw new Error(`Unknown cloud command: ${args[1]}\n\n${helpText('cloud')}`);
+  }
+  const rest = args.slice(matched.tokens.length);
+  if (rest.some(wantsHelp)) {
+    return { command: 'help', helpTopic: matched.name, ...DEFAULTS };
+  }
+  return {
+    command: decodeBoundary(matched.name, commandSchema),
+    ...DEFAULTS,
+    cloudArgv: [...matched.tokens.slice(1), ...rest],
+    remoteSetupArgs: []
+  };
 }
 
 function validateReportArgs(parsed: ParsedArgs): void {

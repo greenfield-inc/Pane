@@ -8,12 +8,14 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { HOST_TERMINAL_SESSION_ID } from '../../../shared/types/hostTerminal';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
 import { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
+import * as os from 'os';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
@@ -95,6 +97,7 @@ import {
 } from './agents/agentIdentity';
 import { detectAgentFromScreen } from './agents/agentScreenSignature';
 import { readForegroundExecutablePath } from '../utils/foregroundProcess';
+import { processTrees, terminateProcesses } from './strayPanelProcesses';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import {
   bracketedPaste,
@@ -274,6 +277,8 @@ interface TerminalProcess {
   agentType?: CliAgentType;
   /** Basename of the shell Pane spawned, to tell its prompt from a program running in it. */
   shellProcessName?: string;
+  /** The shell executable this terminal was spawned with. */
+  shellPath?: string;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
   /** Last status scan, reused while the emulator pushes no new screen. */
@@ -681,6 +686,10 @@ export class TerminalPanelManager extends EventEmitter {
   ): void {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return;
+    if (submitStrategy === 'none') {
+      this.writeToTerminal(panelId, input);
+      return;
+    }
     // An agent reads text and Enter arriving together as a paste and keeps
     // the Enter as a newline, so agents get the Enter as its own write.
     if (submitStrategy === 'codex-ctrl-enter' || terminal.agentType) {
@@ -1104,6 +1113,8 @@ export class TerminalPanelManager extends EventEmitter {
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
+    // The host terminal's session folder only anchors it; its shell starts at home.
+    if (panel.sessionId === HOST_TERMINAL_SESSION_ID) cwd = os.homedir();
     let sessionRuntimeRc: string | undefined;
     if (sessionState.orchestrationSessionId) {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
@@ -1219,9 +1230,11 @@ export class TerminalPanelManager extends EventEmitter {
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
       ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
       : baseSpawnEnv;
+    // Variables the panel starts with (a host terminal's saved-host environment) win.
+    const panelEnv = { ...roleEnv, ...panelCustomState.environmentVars };
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
     // cannot run the Windows Electron binary, so they keep their own PATH.
-    const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
+    const launch = isWSL ? { args: shellArgs, env: panelEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, panelEnv);
     shellArgs = launch.args;
     const spawnEnv = launch.env;
 
@@ -1310,6 +1323,7 @@ export class TerminalPanelManager extends EventEmitter {
       filterInAltScreen: false,
       agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
       shellProcessName: normalizeProcessName(shellPath),
+      shellPath,
       agentSessionScrapeBuffer: ''
     };
 
@@ -1618,6 +1632,15 @@ export class TerminalPanelManager extends EventEmitter {
   
   isTerminalInitialized(panelId: string): boolean {
     return this.terminals.has(panelId);
+  }
+
+  /**
+   * The shell a terminal runs, or the one a terminal that hasn't started would run (the
+   * spawn's own choice: the preferred shell, else the detected default; WSL panels aside).
+   */
+  getShellPath(panelId: string): string {
+    return this.terminals.get(panelId)?.shellPath
+      ?? ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).path;
   }
 
   getLastOutputAt(panelId: string): string | undefined {
@@ -2556,6 +2579,18 @@ export class TerminalPanelManager extends EventEmitter {
     this.terminals.clear();
     this.visibleViewersByPanel.clear();
     this.serializedBuffers.clear();
+  }
+
+  /**
+   * Destroy every terminal and wait for its whole process tree to exit
+   * (SIGTERM, then SIGKILL after `graceMs`). `destroyAllTerminals` signals
+   * only each PTY's shell; a daemon stop must not leave agents running under
+   * a shell that ignored it. Returns the pids that survived.
+   */
+  async stopAllTerminalProcesses(graceMs = 5_000): Promise<number[]> {
+    const pids = processTrees([...this.terminals.values()].map(terminal => terminal.pty.pid));
+    this.destroyAllTerminals();
+    return terminateProcesses(pids, { graceMs });
   }
 
   getActiveTerminals(): string[] {

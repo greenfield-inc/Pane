@@ -1,10 +1,15 @@
 import { useState, type ReactElement } from 'react';
-import { Laptop, Plug, Radio, Server } from 'lucide-react';
+import { Laptop, Plug, Radio, SquareTerminal } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
+import { useErrorStore } from '../stores/errorStore';
 import { LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { getCloudHostSwitcherEntry } from '../utils/cloudSandboxPresentation';
+import { HOST_ICONS, describeHost } from '../utils/hostKind';
+import { getHostTerminalPresentation, openHostTerminal } from '../utils/hostTerminal';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { CloudSandboxView } from '../../../shared/types/cloudSandboxes';
 
 interface RemoteHostSwitcherProps {
   trigger: ReactElement;
@@ -12,6 +17,8 @@ interface RemoteHostSwitcherProps {
   model: RemoteHostSwitcherModel;
   profiles: RemotePaneConnectionProfile[];
   connectionState: RemotePaneConnectionState;
+  /** Cloud sandboxes behind saved hosts, so a stopped one offers Start instead of a dead connection. */
+  cloudSandboxes: CloudSandboxView[];
   onManageConnections: () => void;
   onOpenHosting: () => void;
 }
@@ -23,10 +30,12 @@ export function RemoteHostSwitcher({
   model,
   profiles,
   connectionState,
+  cloudSandboxes,
   onManageConnections,
   onOpenHosting,
 }: RemoteHostSwitcherProps) {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const showError = useErrorStore((state) => state.showError);
   // Main does not serialize client transitions, so one switch at a time.
   const [switching, setSwitching] = useState(false);
   const remote = connectionState.mode === 'remote';
@@ -52,17 +61,62 @@ export function RemoteHostSwitcher({
     }
   };
 
+  // A stopped sandbox has no daemon to connect to: start it first, then switch to it.
+  const startAndSwitchTo = async (sandbox: CloudSandboxView, profileId: string) => {
+    if (switching) return;
+    setSwitching(true);
+    try {
+      const response = await API.remoteDaemon.startCloudSandbox(sandbox.id);
+      const started = response.data?.sandboxes.find((candidate) => candidate.id === sandbox.id);
+      if (!response.success || started?.state !== 'running' || started.error) {
+        // The sandbox row carries the failure; the switcher shows it next time it opens.
+        console.error('Failed to start cloud sandbox:', response.error ?? started?.error);
+        return;
+      }
+    } finally {
+      setSwitching(false);
+    }
+    await switchTo(profileId);
+  };
+
+  const openTerminal = async (hostName: string) => {
+    try {
+      await openHostTerminal();
+    } catch (error) {
+      showError({
+        title: `Could not open the terminal on ${hostName}`,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const items: DropdownItem[] = [
-    ...profiles.map((profile) => ({
-      id: profile.id,
-      label: profile.label,
-      description: remote && profile.id === model.selectedId
+    ...profiles.map((profile) => {
+      const sandbox = cloudSandboxes.find((candidate) => candidate.profileId === profile.id);
+      const cloudEntry = getCloudHostSwitcherEntry(sandbox);
+      const active = remote && profile.id === model.selectedId;
+      const description = cloudEntry?.description ?? (active
         ? `${activeStatusText} · ${profile.baseUrl}`
-        : profile.baseUrl,
-      icon: Server,
-      disabled: switching,
-      onClick: () => void switchTo(profile.id),
-    })),
+        : profile.baseUrl);
+      return {
+        id: profile.id,
+        label: profile.label,
+        description,
+        icon: HOST_ICONS[describeHost(profile).icon],
+        disabled: switching || cloudEntry?.action === 'wait',
+        onClick: () => {
+          if (sandbox && cloudEntry?.action === 'start') void startAndSwitchTo(sandbox, profile.id);
+          else void switchTo(profile.id);
+        },
+        // Only the active host's terminal can open: the window talks to one host at a time.
+        // A sandbox that is not running has no shell to open.
+        action: active && !cloudEntry ? {
+          label: getHostTerminalPresentation(profile).openLabel,
+          icon: SquareTerminal,
+          onClick: () => void openTerminal(profile.label),
+        } : undefined,
+      };
+    }),
     {
       id: LOCAL_RUNTIME_ID,
       label: 'This computer',

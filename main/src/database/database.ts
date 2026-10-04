@@ -5469,6 +5469,15 @@ export class DatabaseService {
     };
   }
 
+  /**
+   * Copy committed WAL frames into the database file without waiting for readers or writers.
+   * SQLite fsyncs the WAL and the database file while it does, which a commit under
+   * `synchronous = NORMAL` does not, so the commits reach the disk before a power-off.
+   */
+  checkpointWal(): void {
+    this.db.pragma('wal_checkpoint(PASSIVE)');
+  }
+
   close(): void {
     this.db.close();
   }

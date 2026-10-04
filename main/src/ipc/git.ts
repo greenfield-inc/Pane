@@ -13,8 +13,10 @@ import type { GitCommit, GitGraphCommit } from '../services/gitDiffManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { getShellPath } from '../utils/shellPath';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
+import { describeGitCloneFailure } from '../utils/gitCloneFailure';
 import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import { registerGitDiffRequestHandlers } from './gitDiffRequests';
+import { hostPathFailure, resolveCloneDestination } from '../services/hostPaths';
 
 // Interface for generic error objects with git-related properties
 interface ErrorWithGitContext {
@@ -1807,9 +1809,19 @@ export function registerGitHandlers(
     }
   });
 
-  commandRegistry.register('git:clone-repo', async (url: string, destDir: string) => {
+  commandRegistry.register('git:clone-repo', async (url: string, requestedDestDir?: string, options?: { hostLabel?: string }) => {
     if (!isValidGitUrl(url)) {
       return { success: false, error: 'Invalid repository URL. Use https:// or git@ format.' };
+    }
+
+    // The destination is a folder on this host; it defaults to the home folder.
+    let destDir: string;
+    try {
+      destDir = resolveCloneDestination(requestedDestDir, { hostLabel: options?.hostLabel });
+    } catch (error) {
+      const pathFailure = hostPathFailure(error);
+      if (pathFailure) return pathFailure;
+      throw error;
     }
 
     const repoName = extractRepoName(url);
@@ -1853,18 +1865,7 @@ export function registerGitHandlers(
       return { success: true, data: { clonedPath: returnPath, repoName } };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-
-      if (errorMsg.includes('Could not resolve host') || errorMsg.includes('Connection timed out')) {
-        return { success: false, error: 'Network error — check your internet connection and try again.' };
-      }
-      if (errorMsg.includes('Authentication failed') || errorMsg.includes('could not read Username')) {
-        return { success: false, error: 'Authentication failed — check your credentials or use an SSH URL.' };
-      }
-      if (errorMsg.includes('not found') || errorMsg.includes('does not exist')) {
-        return { success: false, error: 'Repository not found — check the URL and try again.' };
-      }
-
-      return { success: false, error: errorMsg };
+      return { success: false, ...describeGitCloneFailure(errorMsg) };
     }
   });
 

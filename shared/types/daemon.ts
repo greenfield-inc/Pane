@@ -85,6 +85,7 @@ const daemonFrameSchema: BoundarySchema<PaneDaemonFrame> = boundary.union(
 export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'agent-usage:',
   'folders:',
+  'host-terminal:',
   'logs:',
   'mobile:',
   'panels:',
@@ -130,6 +131,11 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'file:write',
   'file:write-binary',
   'file:write-project',
+  'fs:browse-directories',
+  'fs:create-directory',
+  'github:device-login-cancel',
+  'github:device-login-start',
+  'github:device-login-status',
 ] as const;
 
 export const ELECTRON_ADAPTER_ONLY_CHANNELS = [

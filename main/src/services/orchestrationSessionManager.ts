@@ -478,6 +478,16 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * The hidden Panes that hold the orchestrator of each Session that is not archived, for the
+   * headless start-up resume. Reads the in-memory store without taking the Session lock.
+   */
+  activeOrchestratorPaneIds(): string[] {
+    return this.store.read().sessions
+      .filter(session => session.archived !== true)
+      .map(session => session.internalSessionId);
+  }
+
+  /**
    * Panes associated with a Session that is not archived, for the Session PR monitor. Reads the
    * in-memory store without taking the Session lock, like `workspaceMembership`.
    */

@@ -9,6 +9,8 @@ import { panelManager } from '../services/panelManager';
 import { validateWSLAvailable } from '../utils/wslUtils';
 import { PathResolver } from '../utils/pathResolver';
 import { resolveProjectRegistration } from '../services/projectRegistration';
+import { assertPathOnHost, hostPathFailure, validateHostProjectPath } from '../services/hostPaths';
+import type { ValidateProjectPathRequest } from '../../../shared/types/hostPaths';
 import { detectProjectBranch } from '../utils/detectProjectBranch';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { detectProjectConfig } from '../services/projectConfigDetector';
@@ -76,6 +78,7 @@ const DAEMON_PROJECT_CHANNELS = [
   'projects:get-all',
   'projects:get-active',
   'projects:create',
+  'projects:validate-path',
   'projects:activate',
   'projects:update',
   'projects:delete',
@@ -130,6 +133,14 @@ export function registerProjectHandlers(
     try {
       console.log('[Main] Creating project:', projectData);
 
+      // Paths come from the desktop, which may be a different OS than this host.
+      const hostContext = { hostLabel: projectData.hostLabel };
+      assertPathOnHost(projectData.path, hostContext);
+      const openExisting = projectData.mode === 'open';
+      if (openExisting) {
+        await validateHostProjectPath({ path: projectData.path, mode: 'open' }, hostContext);
+      }
+
       const registration = resolveProjectRegistration(projectData.path);
       const { path: actualPath, wsl_enabled: wslEnabled, wsl_distribution: wslDistribution, pathResolver, commandRunner } = registration;
       let isGitRepo = false;
@@ -138,9 +149,12 @@ export function registerProjectHandlers(
         if (wslError) return { success: false, error: wslError };
       }
 
-      // Create directory if needed (recursive: true is a no-op if it already exists)
-      await mkdir(pathResolver.toFileSystem(actualPath), { recursive: true });
-      console.log('[Main] Ensured project directory exists');
+      // Open project registers an existing repo as is; only New project creates the folder.
+      if (!openExisting) {
+        // Create directory if needed (recursive: true is a no-op if it already exists)
+        await mkdir(pathResolver.toFileSystem(actualPath), { recursive: true });
+        console.log('[Main] Ensured project directory exists');
+      }
 
       // Check if it's a git repository
       try {
@@ -152,7 +166,7 @@ export function registerProjectHandlers(
       }
 
       // Initialize git if needed
-      if (!isGitRepo) {
+      if (!isGitRepo && !openExisting) {
         try {
           const branchName = 'main';
           await commandRunner.execAsync('git init', actualPath);
@@ -227,6 +241,8 @@ export function registerProjectHandlers(
 
       return { success: true, data: projectWithEnv };
     } catch (error) {
+      const pathFailure = hostPathFailure(error);
+      if (pathFailure) return pathFailure;
       console.error('[Main] Failed to create project:', error);
 
       // Extract detailed error information
@@ -262,6 +278,14 @@ export function registerProjectHandlers(
         details: errorDetails,
         command: command
       };
+    }
+  });
+
+  commandRegistry.register('projects:validate-path', async (request: ValidateProjectPathRequest) => {
+    try {
+      return { success: true, data: await validateHostProjectPath(request, { hostLabel: request.hostLabel }) };
+    } catch (error) {
+      return hostPathFailure(error) ?? { success: false, error: error instanceof Error ? error.message : 'Failed to check project path' };
     }
   });
 

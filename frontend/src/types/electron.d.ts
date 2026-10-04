@@ -1,7 +1,7 @@
 /// <reference types="electron" />
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
-import type { Project } from './project';
+import type { CreateProjectRequest, Project } from './project';
 import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
@@ -23,6 +23,12 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type {
+  CloudCredentialsUpdate,
+  CloudLocalStartScript,
+  CloudSandboxCreateRequest,
+  CloudSandboxesSnapshot,
+} from '../../../shared/types/cloudSandboxes';
+import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
   PanePermissionResponse,
@@ -36,9 +42,11 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { GitCloneAuthProtocol } from '../../../shared/types/gitClone';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { HostTerminalOpenRequest, HostTerminalState } from '../../../shared/types/hostTerminal';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -141,6 +149,10 @@ interface ElectronAPI {
 
   diagnostics: {
     rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
+  };
+
+  hostTerminal: {
+    open: (request?: HostTerminalOpenRequest) => Promise<IPCResponse<HostTerminalState<Session>>>;
   };
 
   paneChat: {
@@ -287,7 +299,7 @@ interface ElectronAPI {
   projects: {
     getAll: () => Promise<IPCResponse>;
     getActive: () => Promise<IPCResponse>;
-    create: (projectData: Omit<Project, 'id' | 'created_at' | 'updated_at'>) => Promise<IPCResponse>;
+    create: (projectData: CreateProjectRequest) => Promise<IPCResponse>;
     activate: (projectId: string) => Promise<IPCResponse>;
     update: (projectId: string, updates: Partial<Project>) => Promise<IPCResponse>;
     delete: (projectId: string) => Promise<IPCResponse>;
@@ -309,7 +321,7 @@ interface ElectronAPI {
     detectBranch: (path: string) => Promise<IPCResponse<string>>;
     cancelStatusForProject: (projectId: number) => Promise<{ success: boolean; error?: string }>;
     executeProject: (projectId: number, args: string[]) => Promise<IPCResponse>;
-    cloneRepo: (url: string, destDir: string) => Promise<IPCResponse<{ clonedPath: string; repoName: string }>>;
+    cloneRepo: (url: string, destDir: string, options?: { hostLabel?: string }) => Promise<IPCResponse<{ clonedPath: string; repoName: string }> & { authProtocol?: GitCloneAuthProtocol }>;
   };
 
   // Folders
@@ -352,6 +364,23 @@ interface ElectronAPI {
     updateClientState: (updates: Partial<Pick<RemoteDaemonClientSettings, 'activeProfileId' | 'mode'>>) => Promise<IPCResponse<RemoteDaemonClientSettings>>;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;
+    getCloudSandboxes: () => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    updateCloudCredentials: (update: CloudCredentialsUpdate) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    createCloudSandbox: (request: CloudSandboxCreateRequest) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    startCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    stopCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    updateCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    removeCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    retryCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    dismissCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    getCloudStartupScript: () => Promise<IPCResponse<{ script: string }>>;
+    saveCloudStartupScript: (script: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    readCloudSandboxStartupLog: (id: string) => Promise<IPCResponse<{ log: string }>>;
+    getCloudLocalStartScript: () => Promise<IPCResponse<CloudLocalStartScript>>;
+    saveCloudLocalStartScript: (settings: CloudLocalStartScript) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    /** Main saved or forgot a host on its own (e.g. a cloud sandbox); refetch the config. */
+    onProfilesChanged: (callback: () => void) => () => void;
+    onCloudSandboxesChanged: (callback: (snapshot: CloudSandboxesSnapshot) => void) => () => void;
   };
 
   // Prompts

@@ -87,8 +87,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Remote Access',
     description: 'Remote Pane hosts and saved connections.',
     icon: Link2,
-    settingIds: ['remote-pane', 'remote-host-setup', 'remote-connections', 'remote-advanced-host'],
-    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host'],
+    settingIds: ['remote-pane', 'remote-cloud-sandboxes', 'remote-cloud-credentials', 'remote-cloud-github-token', 'remote-cloud-startup-script', 'remote-host-setup', 'remote-connections', 'remote-advanced-host'],
+    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'cloud sandbox', 'boat', 'startup script', 'github token'],
   },
   {
     id: 'integrations',

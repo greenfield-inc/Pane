@@ -1,3 +1,6 @@
+import { spawn } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import * as claudeTranscripts from './claudeSessionTranscript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
@@ -607,6 +610,33 @@ describe('TerminalPanelManager hidden output delivery', () => {
         }),
       }),
     });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('types initial input without pressing Enter when the panel asks for no submit', async () => {
+    const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: terminal.panelId,
+      sessionId: terminal.sessionId,
+      type: 'terminal',
+      title: 'Terminal',
+      state: {
+        isActive: true,
+        customState: { initialInput: 'gh auth login --web', initialInputSubmitStrategy: 'none' as const },
+      },
+      metadata: {
+        createdAt: '2026-01-01T00:00:00.000Z',
+        lastActiveAt: '2026-01-01T00:01:00.000Z',
+        position: 0,
+      },
+    });
+
+    manager.sendInitialInputOnce(terminal.panelId);
+    await flushPromises();
+
+    expect(vi.mocked(terminal.pty.write).mock.calls).toEqual([['gh auth login --web']]);
     disposeFlowControlRecord(terminal.flowControl);
   });
 
@@ -1318,6 +1348,35 @@ describe('TerminalPanelManager destroyAllTerminals', () => {
       expect.anything(),
     );
     warn.mockRestore();
+  });
+});
+
+describe('TerminalPanelManager stopAllTerminalProcesses', () => {
+  it.runIf(process.platform === 'linux')('stops the shell and what runs under it, even when they ignore SIGTERM', async () => {
+    // An ignored signal stays ignored across exec, so the sleep ignores SIGTERM too.
+    const shell = spawn('sh', ['-c', 'trap "" TERM; sleep 60 & wait'], { stdio: 'ignore' });
+    const shellPid = shell.pid ?? 0;
+    const childPids = async (): Promise<number[]> => {
+      try {
+        return (await readFile(`/proc/${shellPid}/task/${shellPid}/children`, 'utf8')).trim().split(/\s+/).filter(Boolean).map(Number);
+      } catch {
+        return [];
+      }
+    };
+    await vi.waitFor(async () => expect(await childPids()).toHaveLength(1));
+    const [sleepPid] = await childPids();
+    const manager = testAccess<DestroyAllAccess & { stopAllTerminalProcesses(graceMs?: number): Promise<number[]> }>(new TerminalPanelManager());
+    const terminal = createTerminal({ panelId: 'panel-agent' });
+    terminal.pty.pid = shellPid;
+    manager.terminals.set(terminal.panelId, terminal);
+
+    const survivors = await manager.stopAllTerminalProcesses(200);
+
+    expect(survivors).toEqual([]);
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.size).toBe(0);
+    const isLive = (pid: number) => existsSync(`/proc/${pid}/stat`) && !readFileSync(`/proc/${pid}/stat`, 'utf8').includes(') Z ');
+    await vi.waitFor(() => expect([shellPid, sleepPid].filter(isLive)).toEqual([]));
   });
 });
 

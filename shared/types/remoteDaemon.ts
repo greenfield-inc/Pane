@@ -72,6 +72,37 @@ export interface RemoteDaemonClientRecord {
   lastUsedAt?: string;
 }
 
+/**
+ * Set on profiles for a cloud sandbox (packages/runpane/src/cloud): the host is a Pane daemon on a provider
+ * sandbox. `version` goes up whenever the address or the tailnet node changes.
+ */
+export interface RemotePaneCloudInfo {
+  provider: 'boat';
+  sandboxId: string;
+  sessionId: string;
+  nodeId: string;
+  hostname: string;
+  version: number;
+}
+
+export type RemoteHostKindIcon = 'server' | 'cloud';
+
+/**
+ * How the app names and draws a saved host, set by whatever created the
+ * profile. Profiles without one are self-hosted remotes.
+ */
+export interface RemoteHostKind {
+  /** Lowercase noun shown after the host name, e.g. "remote host". */
+  label: string;
+  icon: RemoteHostKindIcon;
+}
+
+/** One variable a host's terminal starts with, e.g. BROWSER=false where no browser should open. */
+export interface HostTerminalEnvVar {
+  name: string;
+  value: string;
+}
+
 export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
@@ -79,6 +110,21 @@ export interface RemotePaneConnectionProfile {
   token: string;
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
+  cloud?: RemotePaneCloudInfo;
+  hostKind?: RemoteHostKind;
+  /** Environment the host terminal's shell starts with on this host. Saved unencrypted with the profile: not for secrets. */
+  hostTerminalEnv?: HostTerminalEnvVar[];
+  /**
+   * When Pane signs gh in on this host, keep the token in ~/.config/gh/hosts.yml (owner-only)
+   * instead of the keyring (`gh auth login --insecure-storage`), for a host whose keyring can't be
+   * used without someone at its screen. Absent means gh's default, the keyring.
+   */
+  ghInsecureStorage?: boolean;
+  /**
+   * Where the user signs this host in to GitHub. 'settings': its credentials are managed in this app's
+   * Settings, so a clone that needs a sign-in points there. Absent: sign in on the host itself.
+   */
+  githubSignIn?: 'settings';
 }
 
 export interface RemoteDaemonHostAccess {
@@ -436,6 +482,22 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
+const remoteCloudInfoSchema: BoundarySchema<RemotePaneCloudInfo> = boundary.object({
+  provider: boundary.literal('boat'),
+  sandboxId: boundary.nonEmptyString,
+  sessionId: boundary.nonEmptyString,
+  nodeId: boundary.string,
+  hostname: boundary.nonEmptyString,
+  version: boundary.number,
+});
+const remoteHostKindSchema: BoundarySchema<RemoteHostKind> = boundary.object({
+  label: boundary.nonEmptyString,
+  icon: boundary.enumeration('server', 'cloud'),
+});
+export const hostTerminalEnvVarSchema: BoundarySchema<HostTerminalEnvVar> = boundary.object({
+  name: boundary.nonEmptyString,
+  value: boundary.string,
+});
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -443,6 +505,11 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  cloud: boundary.optional(remoteCloudInfoSchema),
+  hostKind: boundary.optional(remoteHostKindSchema),
+  hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
+  ghInsecureStorage: boundary.optional(boundary.boolean),
+  githubSignIn: boundary.optional(boundary.literal('settings')),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),
@@ -525,6 +592,26 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
   return payload;
 }
 
+/** Nobody is at a cloud sandbox's screen, so its host terminal never opens a browser there. */
+const CLOUD_SANDBOX_HOST_TERMINAL_ENV: HostTerminalEnvVar[] = [
+  { name: 'BROWSER', value: 'false' },
+  { name: 'GH_BROWSER', value: 'false' },
+];
+
+/** Sandboxes saved before profiles carried a host kind or terminal environment still read as cloud sandboxes. */
+function withCloudSandboxHostKind(profile: RemotePaneConnectionProfile): RemotePaneConnectionProfile {
+  if (!profile.cloud) return profile;
+  return {
+    ...profile,
+    hostKind: profile.hostKind ?? { label: 'cloud sandbox', icon: 'cloud' },
+    hostTerminalEnv: profile.hostTerminalEnv ?? CLOUD_SANDBOX_HOST_TERMINAL_ENV,
+    // Its GitHub token is set in Settings > Cloud sandboxes, not by signing in on the sandbox.
+    githubSignIn: profile.githubSignIn ?? 'settings',
+    // Nobody can unlock a sandbox's keyring, so gh keeps its token in ~/.config/gh/hosts.yml.
+    ghInsecureStorage: profile.ghInsecureStorage ?? true,
+  };
+}
+
 /**
  * Names the host whose runtime is active: a saved remote profile id, or null for
  * this computer. Per-host state keys off this on both sides of the IPC boundary.
@@ -556,7 +643,7 @@ export function normalizeRemoteDaemonConfig<Value>(value: Value): RemoteDaemonCo
   const client = readJsonObject(config.client) ?? {};
   const profiles = readJsonArray(client.profiles).flatMap((profile) => {
     try {
-      return [decodeBoundary(profile, remoteProfileSchema)];
+      return [withCloudSandboxHostKind(decodeBoundary(profile, remoteProfileSchema))];
     } catch {
       return [];
     }

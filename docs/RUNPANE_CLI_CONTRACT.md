@@ -305,6 +305,14 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `cloud setup`: Save the boat API key, the Tailscale OAuth client and an optional Claude token for cloud sandboxes (0600, on this machine only).
+- `cloud new`: Create a cloud sandbox running a Pane daemon, joined to your tailnet and saved as a remote host.
+- `cloud list`: List cloud sandboxes with their state.
+- `cloud status`: Show one cloud sandbox: its state and, when it runs, its daemon's health and version.
+- `cloud stop`: Stop a cloud sandbox: flush its disk, snapshot it and power it off (billing stops; disk and tailnet name are kept).
+- `cloud start`: Start a stopped cloud sandbox and wait until its Pane daemon answers.
+- `cloud update`: Install another Pane .deb on a running cloud sandbox and restart its daemon.
+- `cloud remove`: Delete a cloud sandbox, its disk, its tailnet device and its saved remote host.
 
 ```bash
 runpane help [command]
@@ -385,6 +393,14 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane cloud setup [--boat-key-file <path|->] [--boat-org <org|personal>] [--tailscale-client-id <id> --tailscale-secret-file <path|->] [--tailscale-tailnet <name>] [--claude-token-file <path|->] [--json]
+runpane cloud new [--label <name>] [--size <small|default|large>] [--boat-org <org|personal>] [--transport <auto|https|http>] [--pane-deb-url <url> --pane-deb-sha256 <hex>|--pane-npm-spec <spec>] [--name-prefix <prefix>] [--keep-on-failure] --yes [--json]
+runpane cloud list [--json]
+runpane cloud status <host> [--json]
+runpane cloud stop <host> --yes [--json]
+runpane cloud start <host> [--json]
+runpane cloud update <host> --pane-deb-url <url> --pane-deb-sha256 <hex> --yes [--json]
+runpane cloud remove <host> --yes [--json]
 ```
 
 ## Agent Context
