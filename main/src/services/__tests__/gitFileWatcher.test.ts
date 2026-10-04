@@ -1,4 +1,6 @@
 import os from 'os';
+import { EventEmitter } from 'events';
+import type { spawn } from 'child_process';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GitFileWatcher } from '../gitFileWatcher';
 import type { CommandRunner } from '../../utils/commandRunner';
@@ -227,6 +229,90 @@ describe('GitFileWatcher pure logic', () => {
       build();
       internals.handleWatcherFailure('ghost', new Error('EMFILE'));
       expect(logger.warns).toHaveLength(0);
+      expect(internals.watchedSessions.size).toBe(0);
+    });
+  });
+
+  describe('WSL native watcher', () => {
+    const originalPlatform = process.platform;
+    type FakeStream = EventEmitter & { setEncoding: () => void };
+    let child: EventEmitter & { stdout: FakeStream; stderr: FakeStream; kill: () => void };
+    let spawnMock: ReturnType<typeof vi.fn<(file: string, args: string[]) => typeof child>>;
+
+    function makeStream(): FakeStream {
+      return Object.assign(new EventEmitter(), { setEncoding: () => {} });
+    }
+
+    beforeEach(() => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      child = Object.assign(new EventEmitter(), { stdout: makeStream(), stderr: makeStream(), kill: vi.fn() });
+      spawnMock = vi.fn(() => child);
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
+
+    function buildWsl(exec: (command: string) => string = () => ''): void {
+      const runner = partialMock<CommandRunner>({
+        execAsync: async (command) => ({ stdout: exec(command), stderr: '' }),
+        wslContext: { enabled: true, distribution: 'Ubuntu', linuxPath: '/home/me/repo' },
+      });
+      // SAFETY: the fake child implements every ChildProcess member the WSL watcher touches.
+      watcher = new GitFileWatcher(logger, runner, undefined, partialMock<typeof spawn>(spawnMock));
+      internals = watcherInternals(watcher);
+    }
+
+    it('execs bash directly so the script and worktree path reach it verbatim', async () => {
+      buildWsl();
+      await watcher.startWatching('s1', '/home/me/repo');
+
+      // `wsl.exe -- …` re-parses the command line through the distro's login
+      // shell, which expands "$1" and "$(git status …)" before our bash runs:
+      // the watcher then cd's nowhere and never reports a change.
+      const [file, args] = spawnMock.mock.calls[0];
+      expect(file).toBe('wsl.exe');
+      expect(args.slice(0, 4)).toEqual(['-d', 'Ubuntu', '--exec', 'bash']);
+      expect(args).not.toContain('--');
+      expect(args.slice(-2)).toEqual(['pane-wsl-watch', '/home/me/repo']);
+      expect(internals.watchedSessions.get('s1')?.mode).toBe('wsl');
+    });
+
+    it('reports a change printed by the in-distro watcher', async () => {
+      buildWsl((command) => (command.startsWith('git ls-files --others') ? 'new.txt\n' : ''));
+      const emits: string[] = [];
+      watcher.on('needs-refresh', (sid: string) => emits.push(sid));
+      await watcher.startWatching('s1', '/home/me/repo');
+
+      child.stdout.emit('data', '__PANE_WSL_POLL__\n');
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(emits).toEqual(['s1']);
+    });
+
+    it('degrades to git status polling when the in-distro watcher dies', async () => {
+      let status = '';
+      buildWsl((command) => (command.startsWith('git status') ? status : ''));
+      const emits: string[] = [];
+      watcher.on('needs-refresh', (sid: string) => emits.push(sid));
+      await watcher.startWatching('s1', '/home/me/repo');
+
+      child.emit('exit', 1, null);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(internals.watchedSessions.get('s1')?.mode).toBe('polling');
+      expect(emits).toEqual(['s1']);
+
+      status = '?? new.txt\n';
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(emits).toEqual(['s1', 's1']);
+    });
+
+    it('does not degrade when the watcher was stopped on purpose', async () => {
+      buildWsl();
+      await watcher.startWatching('s1', '/home/me/repo');
+      watcher.stopWatching('s1');
+      child.emit('exit', null, 'SIGTERM');
+      await vi.advanceTimersByTimeAsync(0);
       expect(internals.watchedSessions.size).toBe(0);
     });
   });
