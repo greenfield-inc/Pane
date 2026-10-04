@@ -3,6 +3,17 @@ import { installElectronApiMock } from './electronApiMock';
 import type { CloudSandboxAction, CloudSandboxProgressStep, CloudSandboxView } from '../shared/types/cloudSandboxes';
 import type { RemotePaneConnectionProfile } from '../shared/types/remoteDaemon';
 
+/** Out of Settings: its modal's close button here, the Settings page's own Back button on newer layouts. */
+async function leaveSettings(page: Page) {
+  const closeModal = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Remote Access' }) })
+    .getByRole('button', { name: 'Close modal' });
+  if (await closeModal.count() > 0) {
+    await closeModal.first().click();
+    return;
+  }
+  await page.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').first().click();
+}
+
 type CloudMockControls = {
   reportCloudStep(name: string, step: CloudSandboxProgressStep): void;
   finishCloudCreate(name: string, failure?: string): void;
@@ -129,7 +140,7 @@ test('adding a cloud sandbox shows live progress, a failure with Retry, then the
   expect((await cloudMock(page, (mock) => mock.getCloudCalls())).map((call) => call.action)).toEqual(['create', 'create']);
 
   // The new host is in the switcher like any other saved host.
-  await page.getByRole('button', { name: 'Close modal' }).click();
+  await leaveSettings(page);
   await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
   await expect(page.getByRole('menuitemradio', { name: /alpha/ })).toContainText('https://rp-alpha.tail1234.ts.net');
 });
@@ -240,7 +251,7 @@ test('a sandbox boat is still saving shows Stopping in the row and the switcher,
   await cloudMock(page, (mock) => mock.setCloudSandbox('rp-beta', { state: 'stopping', pending: undefined, progress: undefined }));
   await expect(row.getByText('Stopping', { exact: true })).toBeVisible();
   await expect(row.getByRole('button', { name: /^(Stop|Start) beta$/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close modal' }).click();
+  await leaveSettings(page);
   await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
   const switcherRow = page.getByRole('menuitemradio', { name: /beta/ });
   await expect(switcherRow).toContainText('Stopping cloud sandbox…');
@@ -366,7 +377,7 @@ test('the first cloud sandbox brings up the host switcher, and removing the last
   await page.getByLabel('Name', { exact: true }).fill('alpha');
   await page.getByRole('button', { name: 'Add Cloud Sandbox' }).click();
   // A create takes minutes: the user closes Settings and keeps working.
-  await page.getByRole('button', { name: 'Close modal' }).click();
+  await leaveSettings(page);
   await expect(switcher).toHaveCount(0);
 
   await cloudMock(page, (mock) => mock.finishCloudCreate('alpha'));
@@ -377,7 +388,7 @@ test('the first cloud sandbox brings up the host switcher, and removing the last
   await page.getByRole('button', { name: 'Remove alpha' }).click();
   await page.getByRole('dialog', { name: 'Remove alpha?' }).getByRole('button', { name: 'Remove' }).click();
   await expect(page.getByRole('listitem', { name: 'Cloud sandbox alpha' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close modal' }).click();
+  await leaveSettings(page);
   await expect(switcher).toHaveCount(0);
 });
 
