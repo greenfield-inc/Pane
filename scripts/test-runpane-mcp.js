@@ -279,7 +279,8 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   for (const tool of list.tools) {
     assert.match(tool.name, /^[A-Za-z0-9_.-]{1,128}$/);
     assert.equal(tool.inputSchema.type, 'object', `${tool.name} inputSchema`);
-    assert.equal(tool.outputSchema.type, 'object', `${tool.name} outputSchema`);
+    // js returns text and images rather than structured content, so it has no output schema.
+    if (tool.outputSchema !== undefined) assert.equal(tool.outputSchema.type, 'object', `${tool.name} outputSchema`);
     assert.ok(tool.title && tool.description, `${tool.name} needs a title and description`);
     const { readOnlyHint, destructiveHint } = tool.annotations;
     assert.ok(!(readOnlyHint && destructiveHint), `${tool.name} cannot be read-only and destructive`);
@@ -348,7 +349,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
 
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
-    'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+    'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'js', 'js_reset', 'links_create',
     'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
   ]);
   const git = await names(['--toolsets', 'git']);
@@ -555,6 +556,56 @@ test('destructive pane actions return a review link, and folder actions pass the
         { channel: 'sessions:git-fetch', args: ['pane-1'] },
         { channel: 'folders:create', args: ['Reviews', 3] },
       ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('js runs a script in the daemon under one connection id and returns text and images; js_reset ends it', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const pixel = { mime: 'image/png', base64: 'iVBORw0KGgo=' };
+  try {
+    await withStubDaemon(paneDir, {
+      'computer-use:run': ([request]) => (request.code === 'throw 1'
+        ? { ok: false, text: 'Uncaught 1', images: [] }
+        : { ok: true, text: 'clicked', images: [pixel] }),
+      'computer-use:reset': { ok: true, reset: true },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const ran = await client.callTool({ name: 'js', arguments: { code: 'return 1' } });
+        assert.notEqual(ran.isError, true);
+        assert.deepEqual(ran.content, [{ type: 'text', text: 'clicked' }, { type: 'image', data: pixel.base64, mimeType: pixel.mime }]);
+
+        const failed = await client.callTool({ name: 'js', arguments: { code: 'throw 1', machine: 'local' } });
+        assert.equal(failed.isError, true);
+        assert.equal(failed.content[0].text, 'Uncaught 1');
+
+        const reset = await client.callTool({ name: 'js_reset', arguments: {} });
+        assert.equal(reset.content[0].text, 'Script state discarded.');
+      }, { args: [], env: { PANE_DIR: paneDir } });
+
+      assert.deepEqual(requests.map((request) => request.channel), ['computer-use:run', 'computer-use:run', 'computer-use:reset']);
+      const ids = new Set(requests.map((request) => request.args[0].connectionId));
+      assert.equal(ids.size, 1);
+      assert.match([...ids][0], /^[0-9a-f-]{36}$/);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('js refuses another machine without reaching the daemon', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, {}, async (requests) => {
+      const result = await withMcpClient(
+        (client) => client.callTool({ name: 'js', arguments: { code: 'return 1', machine: 'windows-pc' } }),
+        { args: [], env: { PANE_DIR: paneDir } },
+      );
+      assert.equal(result.isError, true);
+      assert.equal(result.content[0].text, 'Only this machine is supported yet.');
+      assert.deepEqual(requests, []);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

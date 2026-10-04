@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
+import { callComputerUseTool, COMPUTER_USE_TOOLS, type ComputerUseContent, type ComputerUseTool } from './computerUseTools';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -8,7 +10,7 @@ import { getWrapperVersion } from './version';
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
-  content: { type: 'text'; text: string }[];
+  content: ComputerUseContent[];
   structuredContent?: JsonObject;
   isError?: boolean;
 };
@@ -37,8 +39,10 @@ interface McpServerOptions {
   readOnly?: boolean;
 }
 
+type ServedTool = McpTool | ComputerUseTool;
+
 /** The tools a `--toolsets` / `--read-only` selection serves. `all` and `read` are built in. */
-function selectTools(tools: readonly McpTool[], options: McpServerOptions): McpTool[] {
+function selectTools(tools: readonly ServedTool[], options: McpServerOptions): ServedTool[] {
   const wanted = new Set(options.toolsets && options.toolsets.length > 0 ? options.toolsets : DEFAULT_TOOLSETS);
   const known = new Set(['all', 'read', ...tools.flatMap((tool) => tool.toolsets)]);
   const unknown = [...wanted].filter((name) => !known.has(name));
@@ -59,22 +63,24 @@ function selectTools(tools: readonly McpTool[], options: McpServerOptions): McpT
  */
 export async function runMcpServer(options: McpServerOptions = {}): Promise<number> {
   const allTools = buildMcpTools();
-  let tools: McpTool[];
+  let tools: ServedTool[];
   try {
-    tools = selectTools(allTools, options);
+    tools = selectTools([...allTools, ...COMPUTER_USE_TOOLS], options);
   } catch (error) {
     process.stderr.write(`runpane mcp: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
+  // One agent connection per stdio server: the daemon keys its `js` script state by this id.
+  const connectionId = randomUUID();
   const listResult = {
     tools: tools.map((tool) => ({
       name: tool.name,
       title: tool.title,
       description: rewrite(tool.description),
       inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
+      outputSchema: 'outputSchema' in tool ? tool.outputSchema : undefined,
       annotations: tool.annotations,
     })),
   };
@@ -92,7 +98,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
     server.setRequestHandler('tools/call', (request, ctx) => {
       const tool = toolsByName.get(request.params.name);
       if (!tool) {
-        const other = allTools.find((candidate) => candidate.name === request.params.name);
+        const other = [...allTools, ...COMPUTER_USE_TOOLS].find((candidate) => candidate.name === request.params.name);
         const set = other?.toolsets[0] ?? 'all';
         const hint = other ? ` It is in the "${set}" toolset: run the server with --toolsets ${set} (or all).` : ' Call tools/list for the available tools.';
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${request.params.name}.${hint}`);
@@ -103,6 +109,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      if (!('command' in tool)) return callComputerUseTool(tool, input, connectionId, ctx.mcpReq.signal);
       return callTool(tool, input, ctx.mcpReq.signal, rewrite);
     });
     server.setRequestHandler('resources/list', () => ({
@@ -137,7 +144,7 @@ function docUri(docPath: string): string {
  * The CLI names next steps as CLI commands (`runpane repos list`). For an MCP client, name the
  * tool instead, and say which toolset holds it when this server does not serve it.
  */
-function rewriteCliHints(text: string, allTools: readonly McpTool[], served: ReadonlyMap<string, McpTool>): string {
+function rewriteCliHints(text: string, allTools: readonly McpTool[], served: ReadonlyMap<string, ServedTool>): string {
   const byLongestCommand = [...allTools].sort((a, b) => b.command.length - a.command.length);
   return text.replace(/`runpane ([^`]+)`/g, (whole, spoken: string) => {
     const tool = byLongestCommand.find((candidate) => spoken === candidate.command || spoken.startsWith(`${candidate.command} `));

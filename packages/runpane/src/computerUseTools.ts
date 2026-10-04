@@ -1,0 +1,146 @@
+import os from 'node:os';
+import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
+import { invokeDaemon } from './daemonClient';
+
+/**
+ * The hand-written `js` and `js_reset` tools. Unlike the generated tools they keep state: the
+ * daemon holds one script host per agent connection, keyed by the id this MCP server sends.
+ */
+export interface ComputerUseTool {
+  name: 'js' | 'js_reset';
+  title: string;
+  toolsets: readonly string[];
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, { type: 'string'; description: string }>;
+    required?: string[];
+    additionalProperties: false;
+  };
+  annotations: {
+    title: string;
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+    idempotentHint: boolean;
+    openWorldHint: boolean;
+  };
+}
+
+export type ComputerUseContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
+// A type alias, unlike an interface, is assignable to the SDK's open result type.
+export type ComputerUseToolResult = {
+  content: ComputerUseContent[];
+  isError?: boolean;
+};
+
+const TOOLSETS = ['core', 'computer-use'] as const;
+// The daemon stops a script after 300 s; leave room for the reply.
+const RUN_TIMEOUT_MS = 330_000;
+const MACHINE_DESCRIPTION = 'The Pane machine to run on. Defaults to this machine, the only one supported yet.';
+const OTHER_MACHINE_REFUSAL = 'Only this machine is supported yet.';
+
+export const COMPUTER_USE_TOOLS: readonly ComputerUseTool[] = [
+  {
+    name: 'js',
+    title: 'Run a desktop script',
+    toolsets: TOOLSETS,
+    description: [
+      'Run a JavaScript script that sees and operates desktop apps on a Pane machine, in the background.',
+      '`code` is the body of an async function: top-level await works, `return` gives the text result, `console.log` adds lines, and `image(...)` adds a picture.',
+      'Start with `globalThis.app = await cua.getApp("<name or bundle id>")`, read `await app.getAXState()`, act by element index, then read again to verify.',
+      'Only `globalThis` values persist to the next call. Scripts stop after 300 s; output is capped at about 25k tokens.',
+      'Background is the default. A `needs_foreground` result means retry that action with `{ foreground: true }`, which shows the user a notice first.',
+      'Each run saves step screenshots and a replay; on a public repo, ask the user before attaching them to a PR.',
+      '`machine` defaults to this machine. For the full API and rules, load the pane-computer-use skill or call `docs_read` on docs/COMPUTER_USE.md.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'The script: the body of an async function.' },
+        machine: { type: 'string', description: MACHINE_DESCRIPTION },
+      },
+      required: ['code'],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Run a desktop script', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  },
+  {
+    name: 'js_reset',
+    title: 'Reset desktop script state',
+    toolsets: TOOLSETS,
+    description: 'Discard your `js` script state on a Pane machine. Use when state is confusing or a script hangs; the next `js` call starts fresh.',
+    inputSchema: {
+      type: 'object',
+      properties: { machine: { type: 'string', description: MACHINE_DESCRIPTION } },
+      additionalProperties: false,
+    },
+    annotations: { title: 'Reset desktop script state', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+];
+
+const jsInputSchema = boundary.object({ code: boundary.string, machine: boundary.optional(boundary.string) });
+const resetInputSchema = boundary.object({ machine: boundary.optional(boundary.string) });
+const runResultSchema = boundary.object({
+  ok: boundary.boolean,
+  text: boundary.string,
+  images: boundary.array(boundary.object({ mime: boundary.string, base64: boundary.string })),
+});
+const resetResultSchema = boundary.object({ ok: boundary.boolean, reset: boundary.boolean });
+
+/** Names that mean this machine. M2 resolves other Pane machines here. */
+function isThisMachine(machine: string | undefined): boolean {
+  if (machine === undefined) return true;
+  const wanted = machine.trim().toLowerCase();
+  const host = os.hostname().toLowerCase();
+  return ['', 'local', 'localhost', 'this', host, host.replace(/\.local$/, '')].includes(wanted);
+}
+
+export async function callComputerUseTool(
+  tool: ComputerUseTool,
+  input: JsonObject,
+  connectionId: string,
+  signal: AbortSignal,
+): Promise<ComputerUseToolResult> {
+  try {
+    if (tool.name === 'js_reset') {
+      const { machine } = decodeBoundary(input, resetInputSchema);
+      if (!isThisMachine(machine)) return errorText(OTHER_MACHINE_REFUSAL);
+      const { reset } = await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema);
+      return { content: [{ type: 'text', text: reset ? 'Script state discarded.' : 'There was no script state to discard.' }] };
+    }
+    const { code, machine } = decodeBoundary(input, jsInputSchema);
+    if (!isThisMachine(machine)) return errorText(OTHER_MACHINE_REFUSAL);
+    const run = invokeDaemon('computer-use:run', [{ connectionId, code }], runResultSchema, { timeoutMs: RUN_TIMEOUT_MS });
+    const result = await abortable(run, signal);
+    const toolResult: ComputerUseToolResult = {
+      content: [
+        { type: 'text', text: result.text || '(no output)' },
+        ...result.images.map((image): ComputerUseContent => ({ type: 'image', data: image.base64, mimeType: image.mime })),
+      ],
+    };
+    if (!result.ok) toolResult.isError = true;
+    return toolResult;
+  } catch (error) {
+    if (signal.aborted) {
+      // A cancelled run may still be going; ending its host is the only way to stop it.
+      await invokeDaemon('computer-use:reset', [{ connectionId }], resetResultSchema).catch(() => undefined);
+    }
+    return errorText(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error('Cancelled.'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error('Cancelled.'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+function errorText(text: string): ComputerUseToolResult {
+  return { content: [{ type: 'text', text }], isError: true };
+}
