@@ -35,7 +35,17 @@ function getElectronApp(): ElectronAppLike | null {
   }
 }
 
-export function getAppDirectoryOverrideFromArgs(args = process.argv.slice(2)): string | undefined {
+/**
+ * Everything after the executable. User args start at argv[1] in packaged
+ * builds (`Pane.exe --pane-dir X`) but at argv[2] in dev (`electron . --pane-dir X`),
+ * so `slice(2)` would drop a packaged first argument. Scanning the dev script
+ * path as well is harmless: it never looks like a flag.
+ */
+function getLaunchArgs(): string[] {
+  return process.argv.slice(1);
+}
+
+export function getAppDirectoryOverrideFromArgs(args = getLaunchArgs()): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg.startsWith('--pane-dir=')) {
@@ -54,7 +64,7 @@ export function getAppDirectoryOverrideFromArgs(args = process.argv.slice(2)): s
   return undefined;
 }
 
-export function applyAppDirectoryOverrideFromArgs(args = process.argv.slice(2)): string | undefined {
+export function applyAppDirectoryOverrideFromArgs(args = getLaunchArgs()): string | undefined {
   const override = getAppDirectoryOverrideFromArgs(args);
   if (override) {
     setAppDirectory(override);
