@@ -69,23 +69,44 @@ describe('readGitIdentity', () => {
 });
 
 describe('writeGitIdentity', () => {
-  it('writes trimmed values globally or to the repository', async () => {
+  const configured = {
+    'var GIT_AUTHOR_IDENT': ok('Me <me@example.com> 1700000000 +0000\n'),
+    'config user.name': ok('Me\n'),
+    'config user.email': ok('me@example.com\n'),
+  };
+
+  it('writes trimmed values globally or to the repository, then rereads the identity', async () => {
     const { runner, execFile } = gitRunner({
+      ...configured,
       'config --global user.name Me': ok(''),
       'config --global user.email me@example.com': ok(''),
       'config --local user.name Me': ok(''),
       'config --local user.email me@example.com': ok(''),
     });
 
-    await writeGitIdentity(runner, '/repo', { name: ' Me ', email: ' me@example.com ', scope: 'global' });
+    await expect(writeGitIdentity(runner, '/repo', { name: ' Me ', email: ' me@example.com ', scope: 'global' }))
+      .resolves.toMatchObject({ configured: true });
     await writeGitIdentity(runner, '/repo', { name: 'Me', email: 'me@example.com', scope: 'local' });
 
-    expect(execFile.mock.calls.map(([, args]) => args.join(' '))).toEqual([
+    expect(execFile.mock.calls.map(([, args]) => args.join(' ')).filter(call => call.startsWith('config --'))).toEqual([
       'config --global user.name Me',
       'config --global user.email me@example.com',
       'config --local user.name Me',
       'config --local user.email me@example.com',
     ]);
+  });
+
+  it('reports an identity that a repository setting still overrides', async () => {
+    const { runner } = gitRunner({
+      'config --global user.name Me': ok(''),
+      'config --global user.email me@example.com': ok(''),
+      'var GIT_AUTHOR_IDENT': exit(128),
+      'config user.name': ok('\n'),
+      'config user.email': ok('me@example.com\n'),
+    });
+
+    await expect(writeGitIdentity(runner, '/repo', { name: 'Me', email: 'me@example.com', scope: 'global' }))
+      .resolves.toMatchObject({ configured: false });
   });
 
   it('rejects an empty name or an email without @', async () => {
@@ -108,6 +129,27 @@ describe('describeGitFailure', () => {
     expect(failure.message).not.toContain('wsl.exe');
     expect(failure.details).toContain('wsl.exe');
     expect(failure.details).toContain('Author identity unknown');
+  });
+
+  it('ignores identity phrases echoed from the commit message', () => {
+    const error = Object.assign(
+      new Error("Command failed: git commit -m 'Handle Author identity unknown errors'\nerror: gpg failed to sign the data"),
+      { stderr: 'error: gpg failed to sign the data\nfatal: failed to write commit object', code: 128 },
+    );
+
+    expect(describeGitFailure(error)).toMatchObject({ identityMissing: false, message: 'failed to write commit object' });
+  });
+
+  it('reads stdout when git explains itself there, as with nothing to commit', () => {
+    const error = Object.assign(
+      new Error("Command failed: git commit -m 'Handle Author identity unknown errors\n\nCo-Authored-By: Pane'"),
+      { stdout: 'On branch main\nnothing to commit, working tree clean\n', stderr: '', code: 1 },
+    );
+
+    expect(describeGitFailure(error)).toMatchObject({
+      identityMissing: false,
+      message: 'nothing to commit, working tree clean',
+    });
   });
 
   it('uses the last fatal or error line for other failures', () => {

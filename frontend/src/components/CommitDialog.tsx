@@ -48,6 +48,9 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
   const [identityGlobal, setIdentityGlobal] = useState(true);
   const [isSavingIdentity, setIsSavingIdentity] = useState(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
+  // Only the latest identity read may apply; saving or closing invalidates older ones.
+  const identityRequest = useRef(0);
+  const invalidateIdentityReads = useCallback(() => { identityRequest.current++; }, []);
   const titleRef = useRef<HTMLInputElement>(null);
   const keyboardShortcutsEnabled = useConfigStore((state) => areKeyboardShortcutsEnabled(state.config));
 
@@ -73,11 +76,12 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
     }
   }, [isOpen, fileCount]);
 
-  const loadIdentity = useCallback(async (isCurrent: () => boolean = () => true) => {
+  const loadIdentity = useCallback(async () => {
+    const request = ++identityRequest.current;
     try {
       const response = await window.electronAPI.invoke('git:identity', { sessionId });
       const identity: GitIdentity | null = response.success ? response.data : null;
-      if (!isCurrent() || !identity) return;
+      if (request !== identityRequest.current || !identity) return;
       setIdentityName(identity.name);
       setIdentityEmail(identity.email);
       if (!identity.configured) setNeedsIdentity(true);
@@ -89,12 +93,12 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
   // Check up front that git can commit as someone where the repo lives (native or WSL)
   useEffect(() => {
     if (!isOpen) return;
-    let current = true;
-    void loadIdentity(() => current);
-    return () => { current = false; };
-  }, [isOpen, loadIdentity]);
+    void loadIdentity();
+    return invalidateIdentityReads;
+  }, [invalidateIdentityReads, isOpen, loadIdentity]);
 
   const handleSaveIdentity = useCallback(async () => {
+    invalidateIdentityReads();
     setIsSavingIdentity(true);
     setIdentityError(null);
     try {
@@ -114,7 +118,7 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
     } finally {
       setIsSavingIdentity(false);
     }
-  }, [identityEmail, identityGlobal, identityName, sessionId]);
+  }, [identityEmail, identityGlobal, identityName, invalidateIdentityReads, sessionId]);
 
   const handleCommit = useCallback(async () => {
     if (!title.trim()) {

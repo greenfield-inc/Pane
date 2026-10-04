@@ -109,7 +109,7 @@ test('main repository commit dialog submits title and description with Ctrl+Ente
 
 async function openReviewCommitDialog(
   page: Page,
-  mockOptions: Pick<ElectronApiMockOptions, 'gitIdentity' | 'gitCommitResults'> = {},
+  mockOptions: Pick<ElectronApiMockOptions, 'gitIdentity' | 'gitIdentityDelayMs' | 'gitCommitResults'> = {},
 ) {
   const session = createSession();
   const panels = [{
@@ -150,7 +150,10 @@ async function openReviewCommitDialog(
   // Move off the session row so its hover card doesn't cover the dialog.
   await page.mouse.move(640, 700);
   await page.getByRole('button', { name: 'Commit', exact: true }).click();
-  return page.getByRole('dialog');
+  const dialog = page.getByRole('dialog');
+  // The dialog focuses Title shortly after opening; wait so it can't steal later typing.
+  await expect(dialog.getByLabel('Title')).toBeFocused();
+  return dialog;
 }
 
 test('review commit dialog keeps its default title and submits the composed message', async ({ page }, testInfo) => {
@@ -171,11 +174,11 @@ test('review commit dialog asks for a git identity before committing and saves i
   });
   const identity = dialog.getByRole('region', { name: 'Set your git identity' });
   await expect(identity).toBeVisible();
-  await expect(identity.getByLabel('Email')).toHaveValue('me@example.com');
+  await expect(identity.getByLabel('Email', { exact: true })).toHaveValue('me@example.com');
   await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled();
   await capture(page, testInfo, '03-review-commit-dialog-identity-missing.png');
 
-  await identity.getByLabel('Name').fill('Pane QA');
+  await identity.getByLabel('Name', { exact: true }).fill('Pane QA');
   await identity.getByRole('button', { name: 'Save identity' }).click();
   await expect(identity).toHaveCount(0);
   // SAFETY: installElectronApiMock creates this test-only bridge and owns the returned call shape.
@@ -215,4 +218,23 @@ test('review commit dialog switches to the identity form when the commit reports
   await dialog.getByRole('button', { name: 'Commit', exact: true }).click();
   await expect(dialog.getByRole('region', { name: 'Set your git identity' })).toBeVisible();
   await expect(dialog).not.toContainText('wsl.exe');
+});
+
+test('review commit dialog ignores an identity read that finishes after the identity was saved', async ({ page }) => {
+  const dialog = await openReviewCommitDialog(page, {
+    gitIdentity: { configured: false, name: '', email: '' },
+    gitIdentityDelayMs: 2_000,
+    gitCommitResults: [{ success: false, code: GIT_IDENTITY_MISSING, error: 'Git needs your name and email before it can commit.' }],
+  });
+  // Commit before the up-front check answers, so two identity reads are in flight.
+  await dialog.getByRole('button', { name: 'Commit', exact: true }).click();
+  const identity = dialog.getByRole('region', { name: 'Set your git identity' });
+  await identity.getByLabel('Name', { exact: true }).fill('Pane QA');
+  await identity.getByLabel('Email', { exact: true }).fill('qa@example.com');
+  await identity.getByRole('button', { name: 'Save identity' }).click();
+  await expect(identity).toHaveCount(0);
+
+  await page.waitForTimeout(2_500);
+  await expect(identity).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeEnabled();
 });

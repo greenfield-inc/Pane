@@ -43,6 +43,8 @@ export type ElectronApiMockOptions = {
   archiveRetryError?: string;
   /** git:identity answer; git:set-identity marks it configured. */
   gitIdentity?: { configured: boolean; name: string; email: string };
+  /** Delay before git:identity answers with the identity as it was when called. */
+  gitIdentityDelayMs?: number;
   /** git:commit answers, in order; success once they run out. */
   gitCommitResults?: Array<{ success: boolean; error?: string; details?: string; code?: string }>;
   initialPanels?: JsonObject[];
@@ -467,7 +469,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return Promise.resolve({ success: false, error: mockOptions.archiveRetryError });
       }
       if (channel === 'git:identity' && gitIdentity) {
-        return success(clone(gitIdentity));
+        const snapshot = clone(gitIdentity);
+        return new Promise(resolve => setTimeout(resolve, mockOptions.gitIdentityDelayMs ?? 0))
+          .then(() => success(snapshot));
       }
       if (channel === 'git:set-identity' && gitIdentity) {
         gitIdentity = { ...gitIdentity, configured: true };

@@ -507,7 +507,15 @@ export function registerFileHandlers(
       if (!session) throw new Error(`Session not found: ${request.sessionId}`);
       const ctx = sessionManager.getProjectContext(request.sessionId);
       if (!ctx) throw new Error('Project not found for session');
-      await writeGitIdentity(ctx.commandRunner, session.worktreePath, request);
+      const identity = await writeGitIdentity(ctx.commandRunner, session.worktreePath, request);
+      if (!identity.configured) {
+        return {
+          success: false,
+          error: request.scope === 'global'
+            ? "Saved, but this repository's own git config still overrides it. Untick \"Use for all repositories\" to save it for this repository."
+            : 'Saved, but git still has no usable name and email here.',
+        };
+      }
       return { success: true };
     } catch (error) {
       const failure = describeGitFailure(error instanceof Error ? error : new Error(String(error)));

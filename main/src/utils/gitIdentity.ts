@@ -31,7 +31,7 @@ export async function writeGitIdentity(
   runner: GitFileRunner,
   cwd: string,
   identity: { name: string; email: string; scope: GitIdentityScope },
-): Promise<void> {
+): Promise<GitIdentity> {
   const name = identity.name.trim();
   const email = identity.email.trim();
   if (!name) throw new Error('Enter a name for your commits');
@@ -39,13 +39,18 @@ export async function writeGitIdentity(
   const scopeFlag = identity.scope === 'global' ? '--global' : '--local';
   await runner.execFile('git', ['config', scopeFlag, 'user.name', name], cwd);
   await runner.execFile('git', ['config', scopeFlag, 'user.email', email], cwd);
+  // A repository-local setting (even an empty one) still wins over --global.
+  return readGitIdentity(runner, cwd);
 }
 
 export function describeGitFailure(error: Error): GitFailure {
   const details = error.message;
-  const stderr = 'stderr' in error ? String(error.stderr ?? '') : '';
-  const lines = (stderr || details).split('\n').map(line => line.trim()).filter(Boolean);
+  const stderr = 'stderr' in error ? String(error.stderr ?? '').trim() : '';
+  const stdout = 'stdout' in error ? String(error.stdout ?? '').trim() : '';
+  // Read only git's own output: the message also echoes the command, commit text included.
+  const output = stderr || stdout;
+  const lines = output.split('\n').map(line => line.trim()).filter(Boolean);
   const conclusion = lines.filter(line => /^(fatal|error):/i.test(line)).pop();
   const message = conclusion?.replace(/^(fatal|error):\s*/i, '') ?? lines[lines.length - 1] ?? details;
-  return { message, details, identityMissing: IDENTITY_MISSING_PATTERN.test(details) };
+  return { message, details, identityMissing: IDENTITY_MISSING_PATTERN.test(output) };
 }
