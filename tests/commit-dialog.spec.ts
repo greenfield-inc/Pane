@@ -79,7 +79,6 @@ test('main repository commit dialog submits title and description with Ctrl+Ente
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   await page.locator('.pane-detail-panel-vertical').getByRole('button', { name: 'Commit 1 file', exact: true }).click();
 
   const dialog = page.getByRole('dialog');
@@ -148,7 +147,8 @@ async function openReviewCommitDialog(
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: session.name, exact: true }).click();
-  await page.getByRole('tab', { name: 'Review', exact: true }).click();
+  // Move off the session row so its hover card doesn't cover the dialog.
+  await page.mouse.move(640, 700);
   await page.getByRole('button', { name: 'Commit', exact: true }).click();
   return page.getByRole('dialog');
 }

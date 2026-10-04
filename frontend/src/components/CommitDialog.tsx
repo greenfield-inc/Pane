@@ -259,7 +259,7 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
                   {showFailureDetails ? 'Hide details' : 'Show details'}
                 </button>
                 {showFailureDetails && (
-                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface-secondary p-2 text-xs text-text-secondary">
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-secondary p-2 text-xs text-text-secondary">
                     {failure.details}
                   </pre>
                 )}
