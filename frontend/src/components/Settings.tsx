@@ -116,7 +116,12 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     });
   }, []);
 
-  useEffect(() => () => stopFocusWaitRef.current?.(), []);
+  // Settings mounts when it opens, and StrictMode remounts it at once in development: cancelling the wait on
+  // unmount must let the remount handle the same open request again, or its field never gets focus.
+  useEffect(() => () => {
+    stopFocusWaitRef.current?.();
+    handledRequestRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!isOpen || !openRequest || handledRequestRef.current === openRequest.nonce) return;
