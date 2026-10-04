@@ -280,6 +280,11 @@ interface TerminalProcess {
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
   initialInputHeld?: boolean;
+  /**
+   * Input written before a native Windows shell is ready, set until its first
+   * prompt. Git Bash can discard console input that arrives while it starts.
+   */
+  heldInput?: string[];
   /** The program asked for bracketed paste (`CSI ?2004h`), so a paste reaches it as one. */
   bracketedPasteMode?: boolean;
   pasteModeSequenceTail?: string;
@@ -725,14 +730,23 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private stripAnsiSequences(output: string): string {
+    // OSC goes first: the two-byte range [@-Z\\-_] also matches its `]`.
     // oxlint-disable-next-line eslint/no-control-regex
-    return output.replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g, '');
+    return output.replace(/\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-Z\\-_])/g, '');
   }
 
   private extractCodexResumeId(output: string): string | undefined {
     const clean = this.stripAnsiSequences(output);
     const match = clean.match(/\bcodex\s+resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i);
     return match?.[1];
+  }
+
+  /** Stop holding input: write `first` (the launch command), then whatever arrived while held. */
+  private releaseHeldInput(terminal: TerminalProcess, first?: string): void {
+    const held = terminal.heldInput ?? [];
+    terminal.heldInput = undefined;
+    if (first) this.writeToTerminal(terminal.panelId, first);
+    if (held.length > 0) this.writeToTerminal(terminal.panelId, held.join(''));
   }
 
   private scheduleAfterShellPrompt(ptyProcess: pty.IPty, callback: () => void): void {
@@ -750,9 +764,8 @@ export class TerminalPanelManager extends EventEmitter {
 
     const onPromptReady = ptyProcess.onData((data: string) => {
       if (callbackInvoked) return;
-      const lastLine = data.split(/\r?\n/).filter(line => line.length > 0).pop() || '';
-      // oxlint-disable-next-line eslint/no-control-regex
-      const cleanLine = lastLine.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      // Strip OSC too: Git Bash ends its prompt with a window-title sequence.
+      const cleanLine = this.stripAnsiSequences(data).split(/\r?\n/).filter(line => line.length > 0).pop() || '';
       if (promptPattern.test(cleanLine)) {
         setTimeout(invokeOnce, SHELL_PROMPT_SETTLE_MS);
       }
@@ -1310,7 +1323,8 @@ export class TerminalPanelManager extends EventEmitter {
       filterInAltScreen: false,
       agentType: this.resolveTerminalAgentType(terminalCustomState(panel.state)),
       shellProcessName: normalizeProcessName(shellPath),
-      agentSessionScrapeBuffer: ''
+      agentSessionScrapeBuffer: '',
+      heldInput: process.platform === 'win32' && !wslContext ? [] : undefined,
     };
 
     // Store in map (ptyHost path: pid is already populated on the shim).
@@ -1373,7 +1387,8 @@ export class TerminalPanelManager extends EventEmitter {
       const panelId = panel.id;
       const injectCommand = () => {
         if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
-        this.writeToTerminal(panelId, commandToRun! + '\r');
+        // The launch command goes ahead of anything typed while the shell started.
+        this.releaseHeldInput(terminalProcess, commandToRun! + '\r');
 
         // For CLI tool terminals, signal the frontend when the CLI responds
         if (isCliCommand) {
@@ -1426,10 +1441,13 @@ export class TerminalPanelManager extends EventEmitter {
       };
 
       this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
-    } else if (initialInput) {
-      setTimeout(() => {
-        if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
-      }, 1000);
+    } else {
+      if (terminalProcess.heldInput) this.scheduleAfterShellPrompt(ptyProcess, () => this.releaseHeldInput(terminalProcess));
+      if (initialInput) {
+        setTimeout(() => {
+          if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
+        }, 1000);
+      }
     }
 
     // Update panel state
@@ -1651,6 +1669,10 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     if (terminal.destroying) return;
+    if (terminal.heldInput) {
+      terminal.heldInput.push(data);
+      return;
+    }
     try {
       terminal.pty.write(data);
     } catch (err) {

@@ -56,6 +56,7 @@ type TerminalUnderTest = {
   capturedAgentSessionId?: string;
   agentProbe?: unknown;
   bracketedPasteMode?: boolean;
+  heldInput?: string[];
 };
 
 type FlushOutputBufferAccess = {
@@ -124,6 +125,10 @@ type ShellPromptSchedulerAccess = {
   scheduleAfterShellPrompt(ptyProcess: TerminalUnderTest['pty'] & {
     onData(listener: (data: string) => void): { dispose(): void };
   }, callback: () => void): void;
+};
+
+type HeldInputAccess = {
+  releaseHeldInput(terminal: TerminalUnderTest, first?: string): void;
 };
 
 function testAccess<Access>(manager: TerminalPanelManager | RunCommandManager): Access {
@@ -246,6 +251,21 @@ describe('TerminalPanelManager keyboard input', () => {
     expect(terminal.pty.write.mock.calls).toEqual([[data]]);
     disposeFlowControlRecord(terminal.flowControl);
   });
+
+  it('holds input sent before the shell is ready and delivers it after the launch command', () => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal({ heldInput: [] });
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+
+    manager.writeToTerminal(terminal.panelId, 'p');
+    manager.writeToTerminal(terminal.panelId, 'wd\r');
+    expect(terminal.pty.write).not.toHaveBeenCalled();
+
+    testAccess<HeldInputAccess>(manager).releaseHeldInput(terminal, 'claude\r');
+    manager.writeToTerminal(terminal.panelId, 'ls\r');
+    expect(terminal.pty.write.mock.calls).toEqual([['claude\r'], ['pwd\r'], ['ls\r']]);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
 });
 
 describe('TerminalPanelManager terminal resize', () => {
@@ -329,6 +349,19 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
     await vi.runAllTimersAsync();
     expect(callback).toHaveBeenCalledTimes(1);
     expect(promptPty.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('detects a Git Bash prompt that ends with a window-title sequence', async () => {
+    vi.useFakeTimers();
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const promptPty = createPromptPty();
+    const callback = vi.fn();
+
+    manager.scheduleAfterShellPrompt(promptPty.pty, callback);
+    promptPty.emit('\x1b[32m\r\nme@host \x1b[35mMINGW64 \x1b[33m~\x1b[m\r\n$ \x1b]0;MINGW64:/c/Users/me\x07');
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
   it('falls back after five seconds when no prompt is detected', async () => {
