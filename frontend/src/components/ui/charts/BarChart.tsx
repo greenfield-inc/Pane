@@ -16,6 +16,8 @@ interface BarDatum {
   detailTitle?: string;
   /** Extra chip after the label, e.g. "no price". */
   note?: string;
+  /** Shown instead of the formatted value, e.g. a message count when no tokens were recorded. */
+  valueText?: string;
 }
 
 /**
@@ -87,7 +89,7 @@ export function BarChart({ data, formatValue, ariaLabel }: BarChartProps) {
                 {datum.share !== undefined && (
                   <span className="text-text-muted">{formatShare(datum.share)}</span>
                 )}
-                <span>{formatValue(datum.value)}</span>
+                <span>{datum.valueText ?? formatValue(datum.value)}</span>
                 {datum.detail && (
                   <span className="w-16 text-right text-text-muted" title={datum.detailTitle}>
                     {datum.detail}

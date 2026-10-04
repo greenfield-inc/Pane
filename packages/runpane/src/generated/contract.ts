@@ -6234,6 +6234,9 @@ export const RUNPANE_CONTRACT = {
             "messageCount": {
               "type": "number"
             },
+            "unmeteredMessageCount": {
+              "type": "number"
+            },
             "estimatedCostUsd": {
               "type": "number"
             },
@@ -6268,7 +6271,8 @@ export const RUNPANE_CONTRACT = {
             "provider": {
               "enum": [
                 "claude",
-                "codex"
+                "codex",
+                "cursor"
               ]
             },
             "inputTokens": {
@@ -6287,6 +6291,9 @@ export const RUNPANE_CONTRACT = {
               "type": "number"
             },
             "messageCount": {
+              "type": "number"
+            },
+            "unmeteredMessageCount": {
               "type": "number"
             },
             "estimatedCostUsd": {
@@ -6335,6 +6342,9 @@ export const RUNPANE_CONTRACT = {
               "type": "number"
             },
             "messageCount": {
+              "type": "number"
+            },
+            "unmeteredMessageCount": {
               "type": "number"
             },
             "estimatedCostUsd": {
@@ -6425,6 +6435,9 @@ export const RUNPANE_CONTRACT = {
               "type": "number"
             },
             "messageCount": {
+              "type": "number"
+            },
+            "unmeteredMessageCount": {
               "type": "number"
             },
             "estimatedCostUsd": {

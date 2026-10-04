@@ -375,6 +375,8 @@ interface UsageTotalsResult {
   cacheCreationTokens: number;
   totalTokens: number;
   messageCount: number;
+  /** Messages recorded without tokens (Cursor). Absent from apps that predate them. */
+  unmeteredMessageCount?: number;
   estimatedCostUsd: number;
   costIncomplete: boolean;
   cacheSavingsUsd: number;
@@ -382,7 +384,8 @@ interface UsageTotalsResult {
 
 interface UsageByModelResult extends UsageTotalsResult {
   model: string;
-  provider: 'claude' | 'codex';
+  /** Printed as reported, so an app with a newer provider still lists its rows. */
+  provider: string;
 }
 
 interface PaneCostSliceResult extends UsageTotalsResult {
@@ -1288,19 +1291,21 @@ const usageTotalsResultSchema: BoundarySchema<UsageTotalsResult> = boundary.obje
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
 });
 const usageByModelResultSchema: BoundarySchema<UsageByModelResult> = boundary.object({
   model: boundary.string,
-  provider: boundary.enumeration('claude', 'codex'),
+  provider: boundary.string,
   inputTokens: boundary.number,
   outputTokens: boundary.number,
   cacheReadTokens: boundary.number,
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -1312,6 +1317,7 @@ const paneCostSliceResultSchema: BoundarySchema<PaneCostSliceResult> = boundary.
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -1333,6 +1339,7 @@ const paneCostEntryResultSchema: BoundarySchema<PaneCostEntryResult> = boundary.
   cacheCreationTokens: boundary.number,
   totalTokens: boundary.number,
   messageCount: boundary.number,
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -3381,26 +3388,56 @@ function printPaneListResult(result: PaneListResult): void {
 
 function printPaneCostResult(result: PaneCostResult): void {
   for (const pane of result.panes) {
-    console.log(`${pane.paneId}\t${pane.paneName}\t${formatPaneCost(pane.uncachedCostUsd, pane.costIncomplete)} uncached\t${formatPaneCost(pane.estimatedCostUsd, pane.costIncomplete)} total\t${Math.round(pane.cacheHitRate * 100)}% hit`);
+    console.log(`${pane.paneId}\t${pane.paneName}\t${formatPaneCost(pane, pane.byModel, pane.uncachedCostUsd)} uncached\t${formatPaneCost(pane, pane.byModel, pane.estimatedCostUsd)} total\t${Math.round(pane.cacheHitRate * 100)}% hit${cursorCostNote(pane, pane.byModel)}`);
     printPaneCostModels(pane.byModel);
   }
-  if (result.unattributed) {
-    console.log(`Unattributed\t${formatPaneCost(result.unattributed.uncachedCostUsd, result.unattributed.costIncomplete)} uncached\t${formatPaneCost(result.unattributed.estimatedCostUsd, result.unattributed.costIncomplete)} total\t${Math.round(result.unattributed.cacheHitRate * 100)}% hit`);
-    printPaneCostModels(result.unattributed.byModel);
+  const unattributed = result.unattributed;
+  if (unattributed) {
+    console.log(`Unattributed\t${formatPaneCost(unattributed, unattributed.byModel, unattributed.uncachedCostUsd)} uncached\t${formatPaneCost(unattributed, unattributed.byModel, unattributed.estimatedCostUsd)} total\t${Math.round(unattributed.cacheHitRate * 100)}% hit${cursorCostNote(unattributed, unattributed.byModel)}`);
+    printPaneCostModels(unattributed.byModel);
   }
   if (result.totals) {
-    console.log(`Total\t${formatPaneCost(result.totals.estimatedCostUsd, result.totals.costIncomplete)}\t${result.totals.totalTokens} tokens`);
+    // The totals carry no model rows; the panes and unattributed slice together cover the same range.
+    const models = [...result.panes.flatMap(pane => pane.byModel), ...(unattributed?.byModel ?? [])];
+    console.log(`Total\t${formatPaneCost(result.totals, models, result.totals.estimatedCostUsd)}\t${result.totals.totalTokens} tokens${cursorCostNote(result.totals, models)}`);
   }
 }
 
-function formatPaneCost(costUsd: number, costIncomplete: boolean): string {
-  return costIncomplete ? 'n/a' : `$${costUsd.toFixed(4)}`;
+/**
+ * Whether a slice's dollars are known except for Cursor messages, which carry
+ * no cost: every metered model is priced and some messages are metered.
+ */
+function costKnownExceptCursor(slice: UsageTotalsResult, models: UsageByModelResult[]): boolean {
+  const unmetered = slice.unmeteredMessageCount ?? 0;
+  return slice.costIncomplete
+    && unmetered > 0
+    && unmetered < slice.messageCount
+    && models.every(model => (model.unmeteredMessageCount ?? 0) > 0 || !model.costIncomplete);
+}
+
+/** Dollars, "~" dollars when only Cursor messages are unpriced, or "n/a". */
+function formatPaneCost(slice: UsageTotalsResult, models: UsageByModelResult[], costUsd: number): string {
+  if (!slice.costIncomplete) return `$${costUsd.toFixed(4)}`;
+  return costKnownExceptCursor(slice, models) ? `~$${costUsd.toFixed(4)}` : 'n/a';
+}
+
+function cursorCostNote(slice: UsageTotalsResult, models: UsageByModelResult[]): string {
+  return costKnownExceptCursor(slice, models)
+    ? `\t+ ${slice.unmeteredMessageCount ?? 0} Cursor messages, cost not reported`
+    : '';
+}
+
+/** A row whose every message was recorded without tokens (Cursor) has no token figure. */
+function formatModelTokens(model: UsageByModelResult): string {
+  const unmetered = model.unmeteredMessageCount ?? 0;
+  if (unmetered > 0 && unmetered === model.messageCount) return `${model.messageCount} messages, tokens not reported`;
+  return `${model.totalTokens} tokens`;
 }
 
 function printPaneCostModels(models: UsageByModelResult[]): void {
   for (const model of models) {
     const cost = model.costIncomplete ? 'n/a' : `$${model.estimatedCostUsd.toFixed(4)}`;
-    console.log(`  ${model.model}\t${model.totalTokens} tokens\t${cost}`);
+    console.log(`  ${model.model}\t${formatModelTokens(model)}\t${cost}`);
   }
 }
 

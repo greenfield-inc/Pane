@@ -78,6 +78,7 @@ function buildEvent(
     outputTokens,
     cacheReadTokens,
     cacheCreationTokens,
+    metered: true,
     agentSessionId: meta.agentSessionId,
     messageId: meta.messageId,
     cwd: meta.cwd,
@@ -291,9 +292,36 @@ export function parseCodexLine(
   });
 }
 
+/** Cursor's transcripts name no model, so every Cursor message is filed under this one. */
+const CURSOR_MODEL = 'cursor';
+
+/**
+ * Cursor agent transcript line: `{role, message}` entries and `{type:
+ * "turn_ended"}` markers, with no id, timestamp, model or token counts. Each
+ * assistant line is one unmetered message at the caller's fallback time. Its
+ * chat id and cwd come from Pane's launch record, not from the line.
+ */
+function parseCursorLine(value: JsonValue, fallbackTimestampMs: number): UsageEvent | null {
+  if (asObject(value)?.role !== 'assistant') return null;
+  return {
+    provider: 'cursor',
+    timestampMs: fallbackTimestampMs,
+    model: CURSOR_MODEL,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    metered: false,
+    agentSessionId: null,
+    messageId: null,
+    cwd: null,
+  };
+}
+
 /**
  * Parse one raw JSONL line for a provider. Returns `null` for blank lines,
- * malformed JSON, and lines that carry no token accounting.
+ * malformed JSON, and lines that record no assistant message (for Claude and
+ * Codex, no token accounting).
  */
 export function parseUsageLine(
   provider: UsageProvider,
@@ -311,9 +339,9 @@ export function parseUsageLine(
     return null;
   }
 
-  return provider === 'claude'
-    ? parseClaudeLine(value, fallbackTimestampMs)
-    : parseCodexLine(value, fallbackTimestampMs, context);
+  if (provider === 'claude') return parseClaudeLine(value, fallbackTimestampMs);
+  if (provider === 'cursor') return parseCursorLine(value, fallbackTimestampMs);
+  return parseCodexLine(value, fallbackTimestampMs, context);
 }
 
 /**

@@ -6232,6 +6232,9 @@
             "messageCount": {
               "type": "number"
             },
+            "unmeteredMessageCount": {
+              "type": "number"
+            },
             "estimatedCostUsd": {
               "type": "number"
             },
@@ -6266,7 +6269,8 @@
             "provider": {
               "enum": [
                 "claude",
-                "codex"
+                "codex",
+                "cursor"
               ]
             },
             "inputTokens": {
@@ -6285,6 +6289,9 @@
               "type": "number"
             },
             "messageCount": {
+              "type": "number"
+            },
+            "unmeteredMessageCount": {
               "type": "number"
             },
             "estimatedCostUsd": {
@@ -6333,6 +6340,9 @@
               "type": "number"
             },
             "messageCount": {
+              "type": "number"
+            },
+            "unmeteredMessageCount": {
               "type": "number"
             },
             "estimatedCostUsd": {
@@ -6423,6 +6433,9 @@
               "type": "number"
             },
             "messageCount": {
+              "type": "number"
+            },
+            "unmeteredMessageCount": {
               "type": "number"
             },
             "estimatedCostUsd": {

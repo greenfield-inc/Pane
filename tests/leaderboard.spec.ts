@@ -172,3 +172,32 @@ test('DO_NOT_TRACK disables join button', async ({ page }, testInfo) => {
 
   await capture(page, testInfo, '04-do-not-track.png');
 });
+
+test('a submission the server rejects is shown on the tab and leaves usage readable', async ({ page }) => {
+  const rejection = 'Leaderboard submit failed (400): {"error":"invalid byModel entry"}';
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    activeProjectId: project.id,
+    initialLeaderboardStatus: {
+      optIn: true,
+      lastRank: 3,
+      lastDisplayName: '@testuser',
+      lastSubmittedAtMs: Date.now() - 60_000,
+      doNotTrack: false,
+    },
+    initialLeaderboard: leaderboardEntries,
+    leaderboardSendError: rejection,
+  });
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await openUsageAndLimits(page);
+  await page.getByRole('tab', { name: 'Leaderboard' }).click();
+
+  await page.getByRole('button', { name: 'Send now' }).click();
+
+  await expect(page.getByText(rejection, { exact: true })).toBeVisible();
+  await expect(page.getByText('@jdoe')).toBeVisible();
+  await page.getByRole('tab', { name: 'My usage' }).click();
+  await expect(page.getByRole('group', { name: 'Provider', exact: true })).toBeVisible();
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+});

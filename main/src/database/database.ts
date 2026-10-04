@@ -2552,6 +2552,24 @@ export class DatabaseService {
       console.log("[Database] Added credit and limit-state columns to usage_rate_limits table");
     }
 
+    // Cursor's transcripts record messages without token counts. Those rows
+    // are stored unmetered so reports count them without pricing zeros.
+    // SAFETY: SQLite PRAGMA table_info returns the SqliteTableInfo projection.
+    const usageEventsInfo = this.db
+      .prepare("PRAGMA table_info(usage_events)")
+      .all() as SqliteTableInfo[];
+    if (
+      usageEventsInfo.length > 0 &&
+      !usageEventsInfo.some((col: SqliteTableInfo) => col.name === "metered")
+    ) {
+      this.db
+        .prepare(
+          "ALTER TABLE usage_events ADD COLUMN metered INTEGER NOT NULL DEFAULT 1",
+        )
+        .run();
+      console.log("[Database] Added metered column to usage_events table");
+    }
+
     ensureUsageRollup(this.db);
 
     // Keep this ownership migration after legacy table-rebuild migrations above,

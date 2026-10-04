@@ -1568,31 +1568,67 @@ def print_pane_list_result(result: Dict[str, Any]) -> None:
 def print_pane_cost_result(result: Dict[str, Any]) -> None:
     for pane in result.get("panes", []):
         hit_rate = int(pane.get("cacheHitRate", 0) * 100 + 0.5)
-        uncached_cost = format_pane_cost(pane.get("uncachedCostUsd", 0), pane.get("costIncomplete", False))
-        total_cost = format_pane_cost(pane.get("estimatedCostUsd", 0), pane.get("costIncomplete", False))
-        print(f"{pane.get('paneId')}\t{pane.get('paneName')}\t{uncached_cost} uncached\t{total_cost} total\t{hit_rate}% hit")
+        models = pane.get("byModel", [])
+        uncached_cost = format_slice_cost(pane, models, pane.get("uncachedCostUsd", 0))
+        total_cost = format_slice_cost(pane, models, pane.get("estimatedCostUsd", 0))
+        note = cursor_cost_note(pane, models)
+        print(f"{pane.get('paneId')}\t{pane.get('paneName')}\t{uncached_cost} uncached\t{total_cost} total\t{hit_rate}% hit{note}")
         print_pane_cost_models(pane.get("byModel", []))
     unattributed = result.get("unattributed")
     if unattributed:
         hit_rate = int(unattributed.get("cacheHitRate", 0) * 100 + 0.5)
-        uncached_cost = format_pane_cost(unattributed.get("uncachedCostUsd", 0), unattributed.get("costIncomplete", False))
-        total_cost = format_pane_cost(unattributed.get("estimatedCostUsd", 0), unattributed.get("costIncomplete", False))
-        print(f"Unattributed\t{uncached_cost} uncached\t{total_cost} total\t{hit_rate}% hit")
+        models = unattributed.get("byModel", [])
+        uncached_cost = format_slice_cost(unattributed, models, unattributed.get("uncachedCostUsd", 0))
+        total_cost = format_slice_cost(unattributed, models, unattributed.get("estimatedCostUsd", 0))
+        note = cursor_cost_note(unattributed, models)
+        print(f"Unattributed\t{uncached_cost} uncached\t{total_cost} total\t{hit_rate}% hit{note}")
         print_pane_cost_models(unattributed.get("byModel", []))
     totals = result.get("totals")
     if totals:
-        total_cost = format_pane_cost(totals.get("estimatedCostUsd", 0), totals.get("costIncomplete", False))
-        print(f"Total\t{total_cost}\t{totals.get('totalTokens', 0)} tokens")
+        # The totals carry no model rows; the panes and unattributed slice cover the same range.
+        models = [model for pane in result.get("panes", []) for model in pane.get("byModel", [])]
+        models += (unattributed or {}).get("byModel", [])
+        total_cost = format_slice_cost(totals, models, totals.get("estimatedCostUsd", 0))
+        note = cursor_cost_note(totals, models)
+        print(f"Total\t{total_cost}\t{totals.get('totalTokens', 0)} tokens{note}")
 
 
-def format_pane_cost(cost_usd: float, cost_incomplete: bool) -> str:
-    return "n/a" if cost_incomplete else f"${cost_usd:.4f}"
+def cost_known_except_cursor(slice_: Dict[str, Any], models: list) -> bool:
+    # Dollars are known except for Cursor messages, which carry no cost:
+    # every metered model is priced and some messages are metered.
+    unmetered = slice_.get("unmeteredMessageCount", 0)
+    return bool(
+        slice_.get("costIncomplete")
+        and unmetered > 0
+        and unmetered < slice_.get("messageCount", 0)
+        and all(model.get("unmeteredMessageCount", 0) > 0 or not model.get("costIncomplete") for model in models)
+    )
+
+
+def format_slice_cost(slice_: Dict[str, Any], models: list, cost: float) -> str:
+    if not slice_.get("costIncomplete"):
+        return f"${cost:.4f}"
+    return f"~${cost:.4f}" if cost_known_except_cursor(slice_, models) else "n/a"
+
+
+def cursor_cost_note(slice_: Dict[str, Any], models: list) -> str:
+    if not cost_known_except_cursor(slice_, models):
+        return ""
+    return f"\t+ {slice_.get('unmeteredMessageCount', 0)} Cursor messages, cost not reported"
+
+
+def format_model_tokens(model: Dict[str, Any]) -> str:
+    # A row whose every message was recorded without tokens (Cursor) has no token figure.
+    unmetered = model.get("unmeteredMessageCount", 0)
+    if unmetered > 0 and unmetered == model.get("messageCount"):
+        return f"{model.get('messageCount')} messages, tokens not reported"
+    return f"{model.get('totalTokens', 0)} tokens"
 
 
 def print_pane_cost_models(models: list[Dict[str, Any]]) -> None:
     for model in models:
         cost = "n/a" if model.get("costIncomplete") else f"${model.get('estimatedCostUsd', 0):.4f}"
-        print(f"  {model.get('model')}\t{model.get('totalTokens', 0)} tokens\t{cost}")
+        print(f"  {model.get('model')}\t{format_model_tokens(model)}\t{cost}")
 
 
 def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, action: str = "create") -> None:

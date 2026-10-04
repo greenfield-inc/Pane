@@ -1,5 +1,6 @@
 import type { UsageByPaneReport } from '../../../../shared/types/usage';
-import { formatTokens, formatUsd } from '../ui/charts/chartScales';
+import { formatTokens } from '../ui/charts/chartScales';
+import { formatSliceCost, tokensUnreported, unpricedCursorNote } from './usageMetering';
 
 export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
   byPane: UsageByPaneReport;
@@ -10,21 +11,42 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
   const count = panes.length;
   const cut = trim ? Math.floor(count * 0.1) : 0;
   const retained = count - cut * 2;
+  // Trimmed per metric, since a metric may average a subset of the panes.
   const mean = (values: number[]): number => {
-    const sample = values.sort((a, b) => a - b).slice(cut, count - cut);
-    return sample.reduce((sum, value) => sum + value, 0) / retained;
+    const cut = trim ? Math.floor(values.length * 0.1) : 0;
+    const sample = values.sort((a, b) => a - b).slice(cut, values.length - cut);
+    return sample.reduce((sum, value) => sum + value, 0) / sample.length;
   };
   const costIncomplete = panes.some(pane => pane.costIncomplete);
+  const unmetered = panes.some(pane => pane.unmeteredMessageCount > 0);
+  // Panes whose messages recorded no tokens (Cursor) would average in as 0.
+  const tokenPanes = panes.filter(pane => !tokensUnreported(pane));
+  const tokenCut = trim ? Math.floor(tokenPanes.length * 0.1) : 0;
+  const priceMissing = panes.some(pane => pane.byModel.some(model => model.costIncomplete && model.unmeteredMessageCount === 0));
+  // The sample as one slice, so its cost reads the way a pane's does.
+  const sample = {
+    messageCount: panes.reduce((sum, pane) => sum + pane.messageCount, 0),
+    unmeteredMessageCount: panes.reduce((sum, pane) => sum + pane.unmeteredMessageCount, 0),
+    costIncomplete,
+    byModel: panes.flatMap(pane => pane.byModel),
+  };
   const metrics = [
     {
       label: 'Tokens / pane',
-      value: count ? formatTokens(mean(panes.map(pane => pane.inputTokens + pane.outputTokens + pane.cacheCreationTokens))) : '—',
-      detail: 'Input + output + cache writes; excludes cache reads',
+      value: !count ? '—' : tokenPanes.length === 0 ? 'Not reported' : formatTokens(mean(tokenPanes.map(pane => pane.inputTokens + pane.outputTokens + pane.cacheCreationTokens))),
+      detail: unmetered
+        ? 'Input + output + cache writes; Cursor messages carry no tokens'
+        : 'Input + output + cache writes; excludes cache reads',
     },
     {
       label: 'Est. cost / pane',
-      value: !count ? '—' : costIncomplete ? 'n/a' : formatUsd(mean(panes.map(pane => pane.estimatedCostUsd))),
-      detail: costIncomplete ? 'Missing model prices in this sample' : 'All tokens at API rates, not subscription charges',
+      // Cursor-only panes have no dollars, so the mean is over panes that recorded tokens.
+      value: !count || tokenPanes.length === 0 ? '—' : formatSliceCost(sample, mean(tokenPanes.map(pane => pane.estimatedCostUsd))),
+      detail: !costIncomplete
+        ? 'All tokens at API rates, not subscription charges'
+        : unpricedCursorNote(sample) ?? (unmetered && !priceMissing
+          ? 'Cursor messages carry no tokens to price'
+          : 'Missing model prices in this sample'),
     },
     {
       label: 'Messages / pane',
@@ -64,7 +86,10 @@ export function PaneUsageSummary({ byPane, trim, onTrimChange }: {
       <p className="mt-2 text-[11px] text-text-tertiary">
         {count ? `${count.toLocaleString()} panes with recorded usage in this period, including archived panes.` : 'No pane-attributed usage in this period.'}
         {' '}Empty panes and unattributed usage are excluded.
-        {trim && ` Each metric drops its ${cut} highest and ${cut} lowest values; ${retained} panes remain per metric.`}
+        {tokenPanes.length > 0 && tokenPanes.length < count && ` Tokens / pane and Est. cost / pane average the ${tokenPanes.length.toLocaleString()} panes that recorded tokens.`}
+        {trim && (tokenPanes.length < count
+          ? ` Tokens and cost drop ${tokenCut} from each end, so ${tokenPanes.length - tokenCut * 2} panes remain. Messages drop ${cut} highest and ${cut} lowest values; ${retained} panes remain.`
+          : ` Each metric drops its ${cut} highest and ${cut} lowest values; ${retained} panes remain per metric.`)}
         {trim && count > 0 && cut === 0 && ' At least 10 panes are needed to trim.'}
       </p>
     </section>

@@ -12,7 +12,7 @@ import type {
   LeaderboardResponse,
   LeaderboardStatus,
 } from '../../../shared/types/leaderboard';
-import { USAGE_PROVIDER_IDS, type UsageReport, type UsageReportRequest } from '../../../shared/types/usage';
+import { usageProviderFrom, type UsageReport, type UsageReportRequest, type UsageTotals } from '../../../shared/types/usage';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 const LEADERBOARD_API_BASE =
@@ -27,6 +27,8 @@ const usageTotalsFields = {
   cacheReadTokens: boundary.number,
   cacheCreationTokens: boundary.number,
   messageCount: boundary.number,
+  // Absent from backends that predate unmetered (Cursor) messages.
+  unmeteredMessageCount: boundary.optional(boundary.number),
   estimatedCostUsd: boundary.number,
   costIncomplete: boundary.boolean,
   cacheSavingsUsd: boundary.number,
@@ -37,7 +39,8 @@ const usageReportSchema = boundary.object({
   byModel: boundary.array(boundary.object({
     ...usageTotalsFields,
     model: boundary.string,
-    provider: boundary.enumeration(...USAGE_PROVIDER_IDS),
+    // A newer backend may report a provider this version does not know; that row is skipped.
+    provider: boundary.string,
   })),
 });
 const usageStatusSchema = boundary.object({ scanning: boundary.boolean });
@@ -79,6 +82,42 @@ function resolveDoNotTrack(): boolean {
   return true;
 }
 
+function withUnmeteredCount(totals: Omit<UsageTotals, 'unmeteredMessageCount'> & { unmeteredMessageCount?: number }): UsageTotals {
+  return { ...totals, unmeteredMessageCount: totals.unmeteredMessageCount ?? 0 };
+}
+
+function sumTotals(rows: UsageTotals[]): UsageTotals {
+  return rows.reduce<UsageTotals>((sum, row) => ({
+    inputTokens: sum.inputTokens + row.inputTokens,
+    outputTokens: sum.outputTokens + row.outputTokens,
+    cacheReadTokens: sum.cacheReadTokens + row.cacheReadTokens,
+    cacheCreationTokens: sum.cacheCreationTokens + row.cacheCreationTokens,
+    totalTokens: sum.totalTokens + row.totalTokens,
+    messageCount: sum.messageCount + row.messageCount,
+    unmeteredMessageCount: sum.unmeteredMessageCount + row.unmeteredMessageCount,
+    estimatedCostUsd: sum.estimatedCostUsd + row.estimatedCostUsd,
+    costIncomplete: sum.costIncomplete || row.costIncomplete,
+    cacheSavingsUsd: sum.cacheSavingsUsd + row.cacheSavingsUsd,
+  }), {
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0,
+    messageCount: 0, unmeteredMessageCount: 0, estimatedCostUsd: 0, costIncomplete: false, cacheSavingsUsd: 0,
+  });
+}
+
+const MAX_SUBMITTED_MODELS = 50;
+
+/**
+ * The model rows that fit the server's limit, largest first. Cursor rows have
+ * no tokens and would sort last, so they are kept ahead of the cut: the totals
+ * count their messages, and the rows must too.
+ */
+function submittedModelRows<Row extends Pick<UsageTotals, 'messageCount' | 'unmeteredMessageCount'>>(rows: Row[]): Row[] {
+  const unmetered = rows.filter(row => row.unmeteredMessageCount > 0);
+  const metered = rows.filter(row => row.unmeteredMessageCount === 0);
+  return [...metered.slice(0, Math.max(0, MAX_SUBMITTED_MODELS - unmetered.length)), ...unmetered]
+    .slice(0, MAX_SUBMITTED_MODELS);
+}
+
 function buildSubmission(
   report: Pick<UsageReport, 'totals' | 'byModel'>,
   identity: AnalyticsIdentity,
@@ -97,7 +136,7 @@ function buildSubmission(
     estimatedCostUsd: report.totals.estimatedCostUsd,
     costIncomplete: report.totals.costIncomplete,
     cacheSavingsUsd: report.totals.cacheSavingsUsd,
-    byModel: report.byModel.slice(0, 50).map(m => ({
+    byModel: submittedModelRows(report.byModel).map(m => ({
       model: m.model,
       provider: m.provider,
       inputTokens: m.inputTokens,
@@ -105,6 +144,7 @@ function buildSubmission(
       cacheReadTokens: m.cacheReadTokens,
       cacheCreationTokens: m.cacheCreationTokens,
       totalTokens: m.totalTokens,
+      messageCount: m.messageCount,
       estimatedCostUsd: m.estimatedCostUsd,
       costIncomplete: m.costIncomplete,
     })),
@@ -128,7 +168,14 @@ export class LeaderboardService {
     const response = await (this.dependencies.runtime ?? remotePaneClientController).invoke('usage:get-report', [request], async () => ({
       success: true, data: (this.dependencies.usage ?? usageManager).getReport(request),
     }));
-    return readUsageResponse(decodeBoundary(response, usageResponseSchema), usageReportSchema);
+    const report = readUsageResponse(decodeBoundary(response, usageResponseSchema), usageReportSchema);
+    const byModel = report.byModel.flatMap(row => {
+      const provider = usageProviderFrom(row.provider);
+      return provider ? [{ ...withUnmeteredCount(row), model: row.model, provider }] : [];
+    });
+    // The report's totals fold every row, so once a row is skipped they are rebuilt from the rest.
+    const totals = byModel.length === report.byModel.length ? withUnmeteredCount(report.totals) : sumTotals(byModel);
+    return { totals, byModel };
   }
 
   private async getUsageStatus(): Promise<{ scanning: boolean }> {
@@ -136,6 +183,21 @@ export class LeaderboardService {
       success: true, data: (this.dependencies.usage ?? usageManager).getStatus(),
     }));
     return readUsageResponse(decodeBoundary(response, usageResponseSchema), usageStatusSchema);
+  }
+
+  private async post(submission: LeaderboardSubmission): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
+    try {
+      return await fetch(`${LEADERBOARD_API_BASE}/api/runpane/leaderboard/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submission),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   getStatus(): LeaderboardStatus {
@@ -223,25 +285,21 @@ export class LeaderboardService {
       toMs,
     });
 
-    const submission = buildSubmission(report, identity, app.getVersion());
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
-
-    const response = await fetch(
-      `${LEADERBOARD_API_BASE}/api/runpane/leaderboard/submit`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submission),
-        signal: controller.signal,
-      },
-    );
-    clearTimeout(timer);
+    let response = await this.post(buildSubmission(report, identity, app.getVersion()));
+    // Read once: the body says why a submission was rejected.
+    let rejection = response.ok ? '' : await response.text().catch(() => '');
+    if (response.status === 400 && rejection.includes('byModel') && report.byModel.some(row => row.provider === 'cursor')) {
+      // A server that predates Cursor rejects the whole submission over its
+      // model rows. Send the rest once more, so Claude and Codex keep updating
+      // until it is deployed.
+      const withoutCursor = report.byModel.filter(row => row.provider !== 'cursor');
+      console.warn('[Leaderboard] Server rejected Cursor usage; resubmitting without it.');
+      response = await this.post(buildSubmission({ totals: sumTotals(withoutCursor), byModel: withoutCursor }, identity, app.getVersion()));
+      rejection = response.ok ? '' : await response.text().catch(() => '');
+    }
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`Leaderboard submit failed (${response.status}): ${text}`);
+      throw new Error(`Leaderboard submit failed (${response.status}): ${rejection}`);
     }
 
     const result: LeaderboardSubmitResult = await response.json();

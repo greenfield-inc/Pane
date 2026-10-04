@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, type Stats } from 'fs';
 import { stat } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -7,6 +7,8 @@ import { databaseService } from '../database';
 import { UsageRepository } from './usageRepository';
 import { UsageAggregator, resolveReportRange } from './usageAggregator';
 import { isFileUnchanged, resolveStartOffset, scanJsonlFile } from './jsonlScanner';
+import { cursorChatIdFromTranscript, listPaneCursorChats, type PaneCursorChat } from './cursorChats';
+import { usageEventId } from './usageParser';
 import { getPricingSource } from './modelPricing';
 import { OpenRouterPriceProvider } from './openRouterPriceProvider';
 import { getAppDirectory } from '../../utils/appDirectory';
@@ -28,6 +30,19 @@ interface TranscriptRoot {
   path: string;
 }
 
+/** Which files under each root are transcripts. */
+const TRANSCRIPT_GLOBS = {
+  claude: '**/*.jsonl',
+  codex: '**/*.jsonl',
+  cursor: '**/agent-transcripts/**/*.jsonl',
+} satisfies Record<UsageProvider, string>;
+
+/** The Pane chat a Cursor transcript belongs to, which its lines never name. */
+interface TranscriptAttribution {
+  agentSessionId: string;
+  cwd: string | null;
+}
+
 interface PaneCostsReport {
   fromMs: number;
   toMs: number;
@@ -47,6 +62,7 @@ function transcriptRoots(): TranscriptRoot[] {
   return [
     { provider: 'claude', path: join(home, '.claude', 'projects') },
     { provider: 'codex', path: join(home, '.codex', 'sessions') },
+    { provider: 'cursor', path: join(home, '.cursor', 'projects') },
   ];
 }
 
@@ -55,7 +71,10 @@ function transcriptRoots(): TranscriptRoot[] {
  * rolling-window utilisation.
  *
  * Read-only by construction: it never writes to, creates or deletes anything
- * under `~/.claude` or `~/.codex`.
+ * under `~/.claude`, `~/.codex` or `~/.cursor`.
+ *
+ * Cursor transcripts are read only for chats Pane launched (see
+ * `listPaneCursorChats`), and record messages without tokens.
  *
  * Known limitation: only the Electron host's home directory is scanned. On
  * Windows with WSL-based projects the agents write inside the distro's home,
@@ -67,6 +86,7 @@ export class UsageManager {
     repository?: UsageRepository;
     scanFile?: typeof scanJsonlFile;
     createPriceProvider?: () => Pick<OpenRouterPriceProvider, 'start' | 'stop'>;
+    cursorChats?: () => readonly PaneCursorChat[];
   } = {}) {}
 
   // Resolved on first use, not in the constructor: this module is imported at
@@ -220,19 +240,31 @@ export class UsageManager {
       this.status.rootsChecked = roots.length;
       this.status.missingRoots = roots.filter(root => !existsSync(root.path)).map(root => root.path);
 
-      const files: Array<{ path: string; provider: UsageProvider }> = [];
+      const files: Array<{ path: string; provider: UsageProvider; attribution?: TranscriptAttribution }> = [];
+      let cursorChats: Map<string, PaneCursorChat> | null = null;
       for (const root of roots) {
         if (!existsSync(root.path)) continue;
-        const matches = await glob('**/*.jsonl', { cwd: root.path, absolute: true, nodir: true });
+        const matches = await glob(TRANSCRIPT_GLOBS[root.provider], { cwd: root.path, absolute: true, nodir: true });
         if (generation !== this.generation) return;
-        for (const path of matches) files.push({ path, provider: root.provider });
+        if (root.provider !== 'cursor') {
+          for (const path of matches) files.push({ path, provider: root.provider });
+          continue;
+        }
+        cursorChats ??= this.readCursorChats();
+        for (const path of matches) {
+          const chatId = cursorChatIdFromTranscript(path);
+          const chat = chatId ? cursorChats.get(chatId) : undefined;
+          // Chats Pane did not launch, such as the Cursor editor's, are never read.
+          if (!chat) continue;
+          files.push({ path, provider: 'cursor', attribution: { agentSessionId: chat.chatId, cwd: chat.cwd } });
+        }
       }
 
       this.status.filesTotal = files.length;
       for (const file of files) {
         if (generation !== this.generation) return;
         try {
-          await this.scanOne(file.path, file.provider, generation);
+          await this.scanOne(file.path, file.provider, generation, file.attribution);
         } catch (error) {
           if (generation !== this.generation) return;
           // Keep indexing readable files, but report the pass as incomplete.
@@ -265,14 +297,78 @@ export class UsageManager {
   }
 
   /**
+   * Cursor transcripts are re-read in full whenever they change, because Cursor
+   * may rewrite one in place and a resumed offset would land mid-line. Each
+   * assistant line is identified by its position in the file, so a re-read
+   * keeps the time a message was first indexed. Lines carry no time, so a new
+   * message gets the transcript's last write, the latest it can be.
+   */
+  private async scanCursorTranscript(
+    path: string,
+    stats: Stats,
+    attribution: TranscriptAttribution,
+    generation: number,
+  ): Promise<void> {
+    const recorded = this.repository.getFileCursor(path);
+    if (recorded?.parserVersion === USAGE_PARSER_VERSION && isFileUnchanged(recorded, stats)) return;
+
+    const scanned = await (this.dependencies.scanFile ?? scanJsonlFile)(path, 'cursor', 0, stats.mtimeMs, null);
+    if (generation !== this.generation) return;
+
+    const indexedAt = this.repository.eventTimes(path);
+    const writtenAt = Math.floor(stats.mtimeMs);
+    const events = scanned.events.map(({ event }, position) => {
+      const placed = { ...event, ...attribution, messageId: `${path}#${position}` };
+      return {
+        event: { ...placed, timestampMs: indexedAt.get(usageEventId(placed, path, 0)) ?? writtenAt },
+        byteOffset: 0,
+      };
+    });
+    this.repository.replaceFile(
+      {
+        path,
+        provider: 'cursor',
+        sizeBytes: stats.size,
+        mtimeMs: stats.mtimeMs,
+        offsetBytes: scanned.nextOffsetBytes,
+        lastScannedMs: Date.now(),
+        parserVersion: USAGE_PARSER_VERSION,
+        parseContext: null,
+      },
+      events,
+      Date.now(),
+    );
+  }
+
+  /** Pane-launched Cursor chats by id; none when Pane's own records cannot be read. */
+  private readCursorChats(): Map<string, PaneCursorChat> {
+    try {
+      const chats = this.dependencies.cursorChats?.() ?? listPaneCursorChats(databaseService.getDb());
+      return new Map(chats.map(chat => [chat.chatId, chat]));
+    } catch (error) {
+      console.warn('[Usage] Skipped Cursor transcripts:', error instanceof Error ? error.message : error);
+      return new Map();
+    }
+  }
+
+  /**
    * Index one transcript, resuming from its stored cursor. Files whose size
    * and mtime are unchanged are skipped without being opened, which is what
    * makes subsequent launches fast.
    */
-  private async scanOne(path: string, provider: UsageProvider, generation: number): Promise<void> {
+  private async scanOne(
+    path: string,
+    provider: UsageProvider,
+    generation: number,
+    attribution?: TranscriptAttribution,
+  ): Promise<void> {
     try {
       const stats = await stat(path);
       if (generation !== this.generation) return;
+      if (attribution) {
+        await this.scanCursorTranscript(path, stats, attribution, generation);
+        return;
+      }
       let recorded = this.repository.getFileCursor(path);
 
       // A parser fix must reach transcripts that were already indexed, so a

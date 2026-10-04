@@ -9,7 +9,7 @@ function rollupHourOf(column: string): string {
 
 /**
  * `usage_hourly` holds the token sums of `usage_events` per hour, provider,
- * model and cwd. A month of events collapses about 60 times, so reports read
+ * model and cwd, plus how many of those messages were unmetered. A month of events collapses about 60 times, so reports read
  * whole hours from here instead of every event. Triggers keep it exact on
  * every insert and delete, whichever code path makes them. Events are never
  * updated in place, so there is no update trigger. A missing cwd is
@@ -23,11 +23,25 @@ function rollupHourOf(column: string): string {
  * so a crash can never leave an empty rollup next to existing events.
  */
 export function ensureUsageRollup(db: Database): void {
+  const startedMs = Date.now();
+  let rebuilt = false;
   db.transaction(() => {
     const exists = db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_hourly'")
       .get();
-    if (exists) return;
+    if (exists) {
+      const hasUnmetered = db
+        .prepare("SELECT 1 FROM pragma_table_info('usage_hourly') WHERE name = 'unmetered_count'")
+        .get();
+      if (hasUnmetered) return;
+      // A rollup from before unmetered events is rebuilt from the events below.
+      db.exec(`
+        DROP TRIGGER IF EXISTS usage_hourly_insert;
+        DROP TRIGGER IF EXISTS usage_hourly_delete;
+        DROP TABLE usage_hourly;
+      `);
+      rebuilt = true;
+    }
 
     const key = (row: 'NEW' | 'OLD') =>
       `${rollupHourOf(`${row}.timestamp_ms`)}, ${row}.provider, ${row}.model, COALESCE(${row}.cwd, '')`;
@@ -42,6 +56,7 @@ export function ensureUsageRollup(db: Database): void {
         cache_read_tokens INTEGER NOT NULL,
         cache_creation_tokens INTEGER NOT NULL,
         message_count INTEGER NOT NULL,
+        unmetered_count INTEGER NOT NULL,
         first_ms INTEGER NOT NULL,
         last_ms INTEGER NOT NULL,
         PRIMARY KEY (hour_ms, provider, model, cwd)
@@ -50,7 +65,7 @@ export function ensureUsageRollup(db: Database): void {
       CREATE TRIGGER usage_hourly_insert AFTER INSERT ON usage_events BEGIN
         INSERT INTO usage_hourly VALUES (
           ${key('NEW')}, NEW.input_tokens, NEW.output_tokens,
-          NEW.cache_read_tokens, NEW.cache_creation_tokens, 1,
+          NEW.cache_read_tokens, NEW.cache_creation_tokens, 1, 1 - NEW.metered,
           NEW.timestamp_ms, NEW.timestamp_ms
         )
         ON CONFLICT (hour_ms, provider, model, cwd) DO UPDATE SET
@@ -59,6 +74,7 @@ export function ensureUsageRollup(db: Database): void {
           cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens,
           cache_creation_tokens = cache_creation_tokens + excluded.cache_creation_tokens,
           message_count = message_count + 1,
+          unmetered_count = unmetered_count + excluded.unmetered_count,
           first_ms = MIN(first_ms, excluded.first_ms),
           last_ms = MAX(last_ms, excluded.last_ms);
       END;
@@ -69,7 +85,8 @@ export function ensureUsageRollup(db: Database): void {
           output_tokens = output_tokens - OLD.output_tokens,
           cache_read_tokens = cache_read_tokens - OLD.cache_read_tokens,
           cache_creation_tokens = cache_creation_tokens - OLD.cache_creation_tokens,
-          message_count = message_count - 1
+          message_count = message_count - 1,
+          unmetered_count = unmetered_count - (1 - OLD.metered)
         WHERE (hour_ms, provider, model, cwd) = (${key('OLD')});
         DELETE FROM usage_hourly
         WHERE (hour_ms, provider, model, cwd) = (${key('OLD')}) AND message_count = 0;
@@ -78,9 +95,14 @@ export function ensureUsageRollup(db: Database): void {
       INSERT INTO usage_hourly
       SELECT ${rollupHourOf('timestamp_ms')}, provider, model, COALESCE(cwd, ''),
         SUM(input_tokens), SUM(output_tokens), SUM(cache_read_tokens),
-        SUM(cache_creation_tokens), COUNT(*), MIN(timestamp_ms), MAX(timestamp_ms)
+        SUM(cache_creation_tokens), COUNT(*), SUM(1 - metered), MIN(timestamp_ms), MAX(timestamp_ms)
       FROM usage_events
       GROUP BY 1, 2, 3, 4;
     `);
   })();
+  if (rebuilt) {
+    // SAFETY: COUNT(*) always returns one numeric n column.
+    const { n } = db.prepare('SELECT COUNT(*) AS n FROM usage_events').get() as { n: number };
+    console.log(`[Usage] Rebuilt the hourly usage rollup from ${n} events in ${Date.now() - startedMs}ms`);
+  }
 }

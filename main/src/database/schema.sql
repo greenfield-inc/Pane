@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   cache_read_tokens INTEGER NOT NULL DEFAULT 0,
   cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+  -- 0 when the source recorded the message but no tokens (Cursor)
+  metered INTEGER NOT NULL DEFAULT 1,
   agent_session_id TEXT,
   cwd TEXT,
   source_path TEXT NOT NULL

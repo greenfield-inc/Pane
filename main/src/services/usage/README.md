@@ -1,9 +1,49 @@
 # Transcript usage indexing
 
 UsageManager scans all JSONL files recursively beneath `~/.claude/projects`
-and `~/.codex/sessions`. This includes Claude subagent transcripts and Codex
-`year/month/day` directories. Roots are rediscovered on every pass, including
-when their parent directories did not exist at startup.
+and `~/.codex/sessions`, and Cursor agent transcripts under
+`~/.cursor/projects/**/agent-transcripts/`. This includes Claude subagent
+transcripts and Codex `year/month/day` directories. Roots are rediscovered on
+every pass, including when their parent directories did not exist at startup.
+
+## Cursor
+
+Cursor transcripts are read only for chats Pane launched. Pane captures the
+chat id when it starts `cursor-agent` (`agents/cursorLaunch.ts`) and stores it
+in the panel's state; `cursorChats.ts` lists those ids with their Pane's
+worktree. A transcript is matched by its file name, or the folder holding it,
+being one of those ids. Everything else under `~/.cursor`, including the
+Cursor editor's chats and chats started outside Pane, is never read. Rows
+already indexed stay when their panel is removed.
+
+Cursor's transcripts hold `{role, message}` lines and turn markers: no model,
+time, or token counts. Each assistant line is one event with `metered = 0`,
+model `cursor`, zero placeholder tokens, and the chat id and worktree from
+Pane's launch record.
+
+The lines carry no time, so a message is timed at the transcript's modification
+time in the scan that first indexed it, the latest it can have been written.
+Cursor may rewrite a transcript in place, so a changed transcript is re-read
+from the top. Each assistant line is identified by its position in the file
+(`<path>#<n>`), so a re-read, including one after a parser change, keeps the
+time already stored for every position it has seen and times only new
+positions. For a chat scanned as it grows, a message lands between when it was
+written and the next scan (startup, every four hours, or Refresh). A chat's
+history indexed for the first time, for example on the first scan after
+upgrading, all lands at the transcript's last write.
+
+Unmetered messages are counted, never priced: totals carry
+`unmeteredMessageCount`, and any slice holding one has `costIncomplete`. The
+dashboard and `runpane panes cost` show them as "N messages, tokens not
+reported". Where Cursor messages are mixed with priced Claude or Codex usage,
+those surfaces show the known dollars marked "~" with "+ N Cursor messages, cost
+not reported"; a missing model price still shows "n/a", and a Cursor-only
+selection shows no dollar figure. The leaderboard receives each model's message count with zero tokens
+and `costIncomplete`, so runpane.com marks the total as estimated. There are no
+Cursor limit bars.
+
+Measured Cursor tokens are a follow-up: a Cursor `stop` hook that records each
+turn's usage by `conversation_id`, pending a spike on a machine with Cursor.
 
 Indexing runs at startup, every four hours, and on manual Refresh from the usage dashboard or Settings → Usage. There are
 no native usage watchers or per-transcript watch handles. Unchanged files are
@@ -33,8 +73,12 @@ processes, and delete only fixtures created by that run.
 ## Report queries
 
 Reports read whole hours from `usage_hourly`, a per hour, provider, model and
-cwd rollup of `usage_events` that triggers keep in step with every insert and
-delete. Only the partial hours at each end of a range, and hours a custom-date
+cwd rollup of `usage_events`, with its unmetered message count, that triggers
+keep in step with every insert and delete. A rollup from before
+`unmetered_count` existed is rebuilt from the events once.
+
+Rows whose provider this version does not know are left out of every report
+and limit, never counted as another provider. Only the partial hours at each end of a range, and hours a custom-date
 boundary falls inside, are read from raw events, so results match a scan of
 every event. Pane attribution resolves each rollup row once; a row whose
 events straddle a pane's creation or archive time rereads those events.

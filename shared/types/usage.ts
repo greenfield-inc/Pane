@@ -1,10 +1,12 @@
 /**
  * Token usage, cost and rate-limit types.
  *
- * Pane runs Claude and Codex as PTY terminals, so no structured usage flows
- * through the app itself. The authoritative record is each CLI's own transcript
- * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`), which
- * Pane reads read-only and indexes incrementally.
+ * Pane runs Claude, Codex and Cursor as PTY terminals, so no structured usage
+ * flows through the app itself. The authoritative record is each CLI's own
+ * transcript (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`,
+ * and for chats Pane launched, `~/.cursor/projects/**\/agent-transcripts/`),
+ * which Pane reads read-only and indexes incrementally. Cursor's transcripts
+ * record messages without tokens, so its events are unmetered.
  */
 
 interface UsageProviderMeta {
@@ -48,6 +50,14 @@ export const USAGE_PROVIDER_CATALOG = defineUsageProviders({
     color: '#37b877',
     limitsNote: 'Codex writes quota state into its transcripts.',
   },
+  cursor: {
+    value: 'cursor',
+    label: 'Cursor',
+    cliLabel: 'Cursor CLI',
+    vendorLabel: 'Cursor',
+    color: '#c765d6',
+    limitsNote: 'Cursor does not expose plan limits locally.',
+  },
 });
 
 export type UsageProvider = keyof typeof USAGE_PROVIDER_CATALOG;
@@ -56,6 +66,14 @@ export const USAGE_PROVIDER_IDS =
   // SAFETY: the catalog is a literal object, so its own keys are exactly UsageProvider;
   // Object.keys just loses that in its return type.
   Object.keys(USAGE_PROVIDER_CATALOG) as UsageProvider[];
+
+/**
+ * Stored provider text as a known provider, or null. The set is closed: a row
+ * written by a newer Pane is left out of reports, never counted as another provider.
+ */
+export function usageProviderFrom(value: string): UsageProvider | null {
+  return USAGE_PROVIDER_IDS.find(provider => provider === value) ?? null;
+}
 
 /** One assistant message's token accounting, normalised across providers. */
 export interface UsageEvent {
@@ -67,6 +85,12 @@ export interface UsageEvent {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /**
+   * False when the source recorded the message but not its tokens (Cursor's
+   * interactive transcripts). The token fields are then 0 as placeholders,
+   * never a measurement: reports count the message as unmetered.
+   */
+  metered: boolean;
   /** Provider session id from the transcript, when present. */
   agentSessionId: string | null;
   /** Message id — the primary dedupe key across re-scans. */
@@ -90,9 +114,13 @@ export interface UsageTotals {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   totalTokens: number;
+  /** Every recorded message, metered or not. */
   messageCount: number;
+  /** Messages whose source recorded no tokens (Cursor). A subset of messageCount. */
+  unmeteredMessageCount: number;
+  /** Cost of the metered, priced part only. */
   estimatedCostUsd: number;
-  /** True when at least one model in the range had no price entry. */
+  /** True when a model in the range had no price entry, or any message was unmetered. */
   costIncomplete: boolean;
   /**
    * What the cached input would have cost at the full input rate, minus what

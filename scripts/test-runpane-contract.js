@@ -2553,11 +2553,26 @@ async function checkPanesCostParity() {
     cacheCreationTokens: 0,
     totalTokens: 170,
     messageCount: 1,
+    unmeteredMessageCount: 0,
     estimatedCostUsd: 0.004,
     costIncomplete: false,
     cacheSavingsUsd: 0.0001,
   };
   const model = { ...totals, model: 'claude-sonnet-5', provider: 'claude' };
+  const cursorModel = {
+    model: 'cursor',
+    provider: 'cursor',
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    messageCount: 3,
+    unmeteredMessageCount: 3,
+    estimatedCostUsd: 0,
+    costIncomplete: true,
+    cacheSavingsUsd: 0,
+  };
   const payload = {
     ok: true,
     fromMs: 1,
@@ -2592,7 +2607,7 @@ async function checkPanesCostParity() {
       ...pane,
       estimatedCostUsd: 0,
       costIncomplete: true,
-      byModel: [incompleteModel],
+      byModel: [incompleteModel, cursorModel],
     })),
     unattributed: {
       ...payload.unattributed,
@@ -2602,14 +2617,28 @@ async function checkPanesCostParity() {
     },
     totals: { ...totals, estimatedCostUsd: 0, costIncomplete: true },
   };
+  // Known Claude dollars plus Cursor messages, which carry no cost.
+  const mixedPayload = {
+    ...payload,
+    panes: payload.panes.map((pane) => ({
+      ...pane,
+      messageCount: 4,
+      unmeteredMessageCount: 3,
+      costIncomplete: true,
+      byModel: [model, cursorModel],
+    })),
+    totals: { ...totals, messageCount: 4, unmeteredMessageCount: 3, costIncomplete: true },
+  };
   const originalInvokeDaemon = daemonClient.invokeDaemon;
   const originalConsoleLog = console.log;
   const calls = [];
   const jsonOutputs = [];
   const textOutput = [];
   const incompleteTextOutput = [];
+  const mixedTextOutput = [];
   daemonClient.invokeDaemon = async (channel, args) => {
     calls.push({ channel, request: args[0] });
+    if (calls.length === 6) return mixedPayload;
     return calls.length === 5 ? incompletePayload : payload;
   };
   try {
@@ -2625,6 +2654,8 @@ async function checkPanesCostParity() {
     await runPanesCost(parseRunpaneArgs(['panes', 'cost']));
     console.log = line => incompleteTextOutput.push(String(line));
     await runPanesCost(parseRunpaneArgs(['panes', 'cost']));
+    console.log = line => mixedTextOutput.push(String(line));
+    await runPanesCost(parseRunpaneArgs(['panes', 'cost']));
   } finally {
     daemonClient.invokeDaemon = originalInvokeDaemon;
     console.log = originalConsoleLog;
@@ -2639,9 +2670,12 @@ from runpane.cli import parse_args
 
 payload = json.loads(${JSON.stringify(JSON.stringify(payload))})
 incomplete_payload = json.loads(${JSON.stringify(JSON.stringify(incompletePayload))})
+mixed_payload = json.loads(${JSON.stringify(JSON.stringify(mixedPayload))})
 calls = []
 def fake_invoke(channel, args, **kwargs):
     calls.append({"channel": channel, "request": args[0]})
+    if len(calls) == 6:
+        return mixed_payload
     return incomplete_payload if len(calls) == 5 else payload
 
 local_control.invoke_daemon = fake_invoke
@@ -2662,10 +2696,13 @@ with contextlib.redirect_stdout(stdout):
 incomplete_stdout = io.StringIO()
 with contextlib.redirect_stdout(incomplete_stdout):
     local_control.run_panes_cost(parse_args(["panes", "cost"]))
-print(json.dumps({"calls": calls, "jsonOutputs": json_outputs, "textOutput": stdout.getvalue().splitlines(), "incompleteTextOutput": incomplete_stdout.getvalue().splitlines()}))
+mixed_stdout = io.StringIO()
+with contextlib.redirect_stdout(mixed_stdout):
+    local_control.run_panes_cost(parse_args(["panes", "cost"]))
+print(json.dumps({"calls": calls, "jsonOutputs": json_outputs, "textOutput": stdout.getvalue().splitlines(), "incompleteTextOutput": incomplete_stdout.getvalue().splitlines(), "mixedTextOutput": mixed_stdout.getvalue().splitlines()}))
 `));
 
-  assert.strictEqual(calls.length, 5);
+  assert.strictEqual(calls.length, 6);
   assert.ok(calls.every(call => call.channel === 'runpane:panes:cost'));
   const nodeCalls = JSON.parse(JSON.stringify(calls));
   assert.deepStrictEqual(nodeCalls.slice(0, 3), [
@@ -2687,7 +2724,15 @@ print(json.dumps({"calls": calls, "jsonOutputs": json_outputs, "textOutput": std
   assert.ok(incompleteTextOutput.some(line => line.includes('p1\tPane one\tn/a uncached\tn/a total')));
   assert.ok(incompleteTextOutput.some(line => line.includes('Unattributed\tn/a uncached\tn/a total')));
   assert.ok(incompleteTextOutput.some(line => line.includes('Total\tn/a\t')));
+  assert.ok(incompleteTextOutput.includes('  cursor\t3 messages, tokens not reported\tn/a'));
+  for (const [index, output] of jsonOutputs.entries()) {
+    assertMatchesJsonSchema(JSON.parse(output), contract.jsonSchemas.paneCostResult, `panes cost result ${index + 1}`);
+  }
   assert.deepStrictEqual(python.incompleteTextOutput, incompleteTextOutput);
+  assert.ok(mixedTextOutput.includes('p1\tPane one\t~$0.0030 uncached\t~$0.0040 total\t25% hit\t+ 3 Cursor messages, cost not reported'));
+  assert.ok(mixedTextOutput.includes('Unattributed\t$0.0030 uncached\t$0.0040 total\t25% hit'));
+  assert.ok(mixedTextOutput.includes('Total\t~$0.0040\t170 tokens\t+ 3 Cursor messages, cost not reported'));
+  assert.deepStrictEqual(python.mixedTextOutput, mixedTextOutput);
 }
 
 async function checkPaneArchiveDryRunParity() {

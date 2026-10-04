@@ -11,6 +11,15 @@ import { formatTokens, formatUsd } from '../ui/charts/chartScales';
 import { ProviderLimitsPanel } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
 import { PaneUsageSummary } from './PaneUsageSummary';
+import {
+  formatSliceCost,
+  formatSliceTokens,
+  tokensUnreported,
+  UNREPORTED_CHART_TEXT,
+  UNREPORTED_COST_TITLE,
+  unpricedCursorNote,
+  unreportedLabel,
+} from './usageMetering';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
 import { USAGE_PROVIDERS, joinLabels } from './usageProviders';
 import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
@@ -93,22 +102,28 @@ function StatCard({
 }
 
 function PaneCostCells({ pane }: { pane: UsagePaneCostSlice }) {
-  const cost = (value: number) => pane.costIncomplete ? 'n/a' : formatUsd(value);
+  const cost = (value: number) => formatSliceCost(pane, value);
+  const cursorNote = unpricedCursorNote(pane);
   return (
     <>
-      <td className="px-2 py-2 tabular-nums text-text-secondary">{formatTokens(pane.totalTokens)}</td>
-      <td className="px-2 py-2 tabular-nums text-text-secondary">{cost(pane.estimatedCostUsd)}</td>
+      <td className="px-2 py-2 tabular-nums text-text-secondary">{formatSliceTokens(pane, pane.totalTokens)}</td>
+      <td className="px-2 py-2 tabular-nums text-text-secondary">
+        {cost(pane.estimatedCostUsd)}
+        {cursorNote && <div className="text-[10px] text-text-muted">{cursorNote}</div>}
+      </td>
       <td className="px-2 py-2 tabular-nums text-text-primary">{cost(pane.uncachedCostUsd)}</td>
-      <td className="px-2 py-2 tabular-nums text-text-secondary">{Math.round(pane.cacheHitRate * 100)}%</td>
-      <td className="px-2 py-2 tabular-nums text-text-secondary">{formatTokens(pane.cacheReadTokens)}</td>
-      <td className="px-2 py-2 tabular-nums text-text-secondary">{formatTokens(pane.uncachedInputTokens)}</td>
+      <td className="px-2 py-2 tabular-nums text-text-secondary">{tokensUnreported(pane) ? '—' : `${Math.round(pane.cacheHitRate * 100)}%`}</td>
+      <td className="px-2 py-2 tabular-nums text-text-secondary">{formatSliceTokens(pane, pane.cacheReadTokens)}</td>
+      <td className="px-2 py-2 tabular-nums text-text-secondary">{formatSliceTokens(pane, pane.uncachedInputTokens)}</td>
       <td className="px-2 py-2 tabular-nums text-status-success">{cost(pane.cacheSavingsUsd)}</td>
       <td className="px-2 py-2 text-[10px] text-text-tertiary">
         {pane.byModel.length > 0 ? (
           <ul className="space-y-0.5">
             {pane.byModel.map(model => (
               <li key={`${model.provider}-${model.model}`} className="whitespace-nowrap">
-                {model.model} · {formatTokens(model.totalTokens)} · {model.costIncomplete ? 'n/a' : formatUsd(model.estimatedCostUsd)}
+                {tokensUnreported(model)
+                  ? `${model.model} · ${unreportedLabel(model.messageCount)}`
+                  : `${model.model} · ${formatTokens(model.totalTokens)} · ${model.costIncomplete ? 'n/a' : formatUsd(model.estimatedCostUsd)}`}
               </li>
             ))}
           </ul>
@@ -325,18 +340,32 @@ export function UsageView() {
 
   const modelBars = useMemo(() => {
     const total = report?.totals.totalTokens ?? 0;
-    return (report?.byModel ?? []).slice(0, 10).map((entry, index) => ({
-      label: entry.model,
-      value: entry.totalTokens,
-      color: MODEL_COLORS[index % MODEL_COLORS.length],
-      tag: USAGE_PROVIDER_CATALOG[entry.provider].vendorLabel,
-      share: total > 0 ? entry.totalTokens / total : 0,
-      detail: entry.costIncomplete ? 'n/a' : formatUsd(entry.estimatedCostUsd),
-      note: entry.costIncomplete ? 'no price' : 'at API rates',
-      detailTitle: entry.costIncomplete
-        ? 'No published price for this id. Codex reports sub-agent profiles (for example codex-auto-review) in the model field, and those are billed under the model they run on.'
-        : 'Estimated at published API rates. Not what a flat-rate plan charges.',
-    }));
+    return (report?.byModel ?? []).slice(0, 10).map((entry, index) => {
+      const bar = {
+        label: entry.model,
+        value: entry.totalTokens,
+        color: MODEL_COLORS[index % MODEL_COLORS.length],
+        tag: USAGE_PROVIDER_CATALOG[entry.provider].vendorLabel,
+      };
+      if (tokensUnreported(entry)) {
+        return {
+          ...bar,
+          valueText: `${entry.messageCount.toLocaleString()} messages`,
+          note: 'tokens not reported',
+          detail: 'n/a',
+          detailTitle: UNREPORTED_COST_TITLE,
+        };
+      }
+      return {
+        ...bar,
+        share: total > 0 ? entry.totalTokens / total : 0,
+        detail: entry.costIncomplete ? 'n/a' : formatUsd(entry.estimatedCostUsd),
+        note: entry.costIncomplete ? 'no price' : 'at API rates',
+        detailTitle: entry.costIncomplete
+          ? 'No published price for this id. Codex reports sub-agent profiles (for example codex-auto-review) in the model field, and those are billed under the model they run on.'
+          : 'Estimated at published API rates. Not what a flat-rate plan charges.',
+      };
+    });
   }, [report]);
 
   /** Which worktree spent the tokens — the question only Pane can answer. */
@@ -347,7 +376,9 @@ export function UsageView() {
       title: entry.path || 'No working directory recorded',
       value: entry.totalTokens,
       color: MODEL_COLORS[index % MODEL_COLORS.length],
-      share: total > 0 ? entry.totalTokens / total : 0,
+      ...(tokensUnreported(entry)
+        ? { valueText: `${entry.messageCount.toLocaleString()} messages`, note: 'tokens not reported' }
+        : { share: total > 0 ? entry.totalTokens / total : 0 }),
     }));
   }, [report]);
 
@@ -381,12 +412,12 @@ export function UsageView() {
 
   /** Per-vendor roll-up — the split the model list alone doesn't show. */
   const providerBars = useMemo(() => {
-    const byProvider = new Map<UsageProvider, { tokens: number; cost: number; incomplete: boolean }>();
+    const byProvider = new Map<UsageProvider, { tokens: number; messageCount: number; unmeteredMessageCount: number }>();
     for (const entry of report?.byModel ?? []) {
-      const acc = byProvider.get(entry.provider) ?? { tokens: 0, cost: 0, incomplete: false };
+      const acc = byProvider.get(entry.provider) ?? { tokens: 0, messageCount: 0, unmeteredMessageCount: 0 };
       acc.tokens += entry.totalTokens;
-      acc.cost += entry.estimatedCostUsd;
-      acc.incomplete = acc.incomplete || entry.costIncomplete;
+      acc.messageCount += entry.messageCount;
+      acc.unmeteredMessageCount += entry.unmeteredMessageCount;
       byProvider.set(entry.provider, acc);
     }
 
@@ -397,7 +428,9 @@ export function UsageView() {
         label: USAGE_PROVIDER_CATALOG[key].vendorLabel,
         value: value.tokens,
         color: USAGE_PROVIDER_CATALOG[key].color,
-        share: total > 0 ? value.tokens / total : 0,
+        ...(tokensUnreported(value)
+          ? { valueText: `${value.messageCount.toLocaleString()} messages`, note: 'tokens not reported' }
+          : { share: total > 0 ? value.tokens / total : 0 }),
       }));
   }, [report]);
 
@@ -583,6 +616,7 @@ export function UsageView() {
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
               Usage is read from the {CLI_NAMES} transcript files in your home directory.
+              Cursor chats count only when Pane launched them.
               None of these exist yet: {missingRoots.map((root, index) => (
                 <span key={root}>
                   {index > 0 && ', '}
@@ -598,11 +632,15 @@ export function UsageView() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <StatCard
                 label="Total tokens"
-                value={formatTokens(report.totals.totalTokens)}
-                detail={`${report.totals.messageCount.toLocaleString()} messages`}
+                value={formatSliceTokens(report.totals, report.totals.totalTokens)}
+                detail={tokensUnreported(report.totals)
+                  ? unreportedLabel(report.totals.messageCount)
+                  : `${report.totals.messageCount.toLocaleString()} messages${report.totals.unmeteredMessageCount > 0
+                    ? ` · ${report.totals.unmeteredMessageCount.toLocaleString()} without tokens`
+                    : ''}`}
               />
-              <StatCard label="Input" value={formatTokens(report.totals.inputTokens)} />
-              <StatCard label="Output" value={formatTokens(report.totals.outputTokens)} />
+              <StatCard label="Input" value={formatSliceTokens(report.totals, report.totals.inputTokens)} />
+              <StatCard label="Output" value={formatSliceTokens(report.totals, report.totals.outputTokens)} />
               {cacheHitRate !== null ? (
                 <StatCard
                   label="Cache hit rate"
@@ -623,24 +661,26 @@ export function UsageView() {
                   label="Messages"
                   value={report.totals.messageCount.toLocaleString()}
                   detail={`${formatTokens(
-                    report.totals.messageCount > 0
-                      ? report.totals.totalTokens / report.totals.messageCount
+                    report.totals.messageCount > report.totals.unmeteredMessageCount
+                      ? report.totals.totalTokens / (report.totals.messageCount - report.totals.unmeteredMessageCount)
                       : 0
-                  )} per message`}
+                  )} per message${report.totals.unmeteredMessageCount > 0 ? ' with tokens' : ''}`}
                 />
                 <StatCard
                   label="Busiest project"
                   value={report.byProject[0]?.label ?? '—'}
                   detail={report.byProject[0]
-                    ? `${formatTokens(report.byProject[0].totalTokens)} tokens`
+                    ? tokensUnreported(report.byProject[0])
+                      ? unreportedLabel(report.byProject[0].messageCount)
+                      : `${formatTokens(report.byProject[0].totalTokens)} tokens`
                     : undefined}
                 />
                 {report.totals.cacheReadTokens > 0 && (
                   <StatCard
                     label="Saved by caching"
                     value={formatTokens(report.totals.cacheReadTokens)}
-                    detail={report.totals.cacheSavingsUsd > 0 && !report.totals.costIncomplete
-                      ? `${formatUsd(report.totals.cacheSavingsUsd)} at API rates`
+                    detail={report.totals.cacheSavingsUsd > 0 && formatSliceCost({ ...report.totals, byModel: report.byModel }, report.totals.cacheSavingsUsd) !== 'n/a'
+                      ? `${formatSliceCost({ ...report.totals, byModel: report.byModel }, report.totals.cacheSavingsUsd)} at API rates`
                       : 'tokens served from cache instead of recomputed'}
                   />
                 )}
@@ -655,43 +695,49 @@ export function UsageView() {
                 <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
                   Tokens over time
                 </h2>
-                <AreaChart
-                  labels={seriesLabels}
-                  series={visibleAreaSeries}
-                  formatValue={formatTokens}
-                  ariaLabel={`Token usage ${customRange ? `from ${rangeLabel}` : `over the last ${rangeDays} days`}, totalling ${formatTokens(report.totals.totalTokens)} tokens`}
-                />
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {areaSeries.map(entry => {
-                    const hidden = hiddenSeries.includes(entry.label);
-                    const total = entry.values.reduce((sum, value) => sum + value, 0);
+                {tokensUnreported(report.totals) ? (
+                  <p className="py-6 text-center text-xs text-text-muted">{UNREPORTED_CHART_TEXT}</p>
+                ) : (
+                  <>
+                    <AreaChart
+                      labels={seriesLabels}
+                      series={visibleAreaSeries}
+                      formatValue={formatTokens}
+                      ariaLabel={`Token usage ${customRange ? `from ${rangeLabel}` : `over the last ${rangeDays} days`}, totalling ${formatTokens(report.totals.totalTokens)} tokens`}
+                    />
+                    <ul className="mt-2 flex flex-wrap gap-2">
+                      {areaSeries.map(entry => {
+                        const hidden = hiddenSeries.includes(entry.label);
+                        const total = entry.values.reduce((sum, value) => sum + value, 0);
 
-                    return (
-                      <li key={entry.label}>
-                        <button
-                          type="button"
-                          onClick={() => toggleSeries(entry.label)}
-                          aria-pressed={!hidden}
-                          title={hidden ? `Show ${entry.label}` : `Hide ${entry.label}`}
-                          className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-interactive ${
-                            hidden ? 'text-text-muted' : 'text-text-tertiary'
-                          }`}
-                        >
-                          <span
-                            className="h-2 w-2 rounded-sm border"
-                            style={{
-                              backgroundColor: hidden ? 'transparent' : entry.color,
-                              borderColor: entry.color,
-                            }}
-                            aria-hidden="true"
-                          />
-                          <span className={hidden ? 'line-through' : undefined}>{entry.label}</span>
-                          <span className="tabular-nums text-text-muted">{formatTokens(total)}</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                        return (
+                          <li key={entry.label}>
+                            <button
+                              type="button"
+                              onClick={() => toggleSeries(entry.label)}
+                              aria-pressed={!hidden}
+                              title={hidden ? `Show ${entry.label}` : `Hide ${entry.label}`}
+                              className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-interactive ${
+                                hidden ? 'text-text-muted' : 'text-text-tertiary'
+                              }`}
+                            >
+                              <span
+                                className="h-2 w-2 rounded-sm border"
+                                style={{
+                                  backgroundColor: hidden ? 'transparent' : entry.color,
+                                  borderColor: entry.color,
+                                }}
+                                aria-hidden="true"
+                              />
+                              <span className={hidden ? 'line-through' : undefined}>{entry.label}</span>
+                              <span className="tabular-nums text-text-muted">{formatTokens(total)}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                )}
               </section>
 
               {/* Provider-reported limits */}
@@ -735,13 +781,17 @@ export function UsageView() {
                 <h2 className="mb-2 mt-4 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
                   Token mix
                 </h2>
-                <DonutChart
-                  slices={cacheSlices}
-                  formatValue={formatTokens}
-                  ariaLabel="Share of input, output and cache tokens"
-                  centerLabel={formatTokens(report.totals.totalTokens)}
-                  centerSublabel="tokens"
-                />
+                {tokensUnreported(report.totals) ? (
+                  <p className="py-6 text-center text-xs text-text-muted">{UNREPORTED_CHART_TEXT}</p>
+                ) : (
+                  <DonutChart
+                    slices={cacheSlices}
+                    formatValue={formatTokens}
+                    ariaLabel="Share of input, output and cache tokens"
+                    centerLabel={formatTokens(report.totals.totalTokens)}
+                    centerSublabel="tokens"
+                  />
+                )}
               </section>
             </div>
 

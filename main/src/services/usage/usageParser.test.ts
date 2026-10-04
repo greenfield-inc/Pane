@@ -385,3 +385,36 @@ describe('usageEventId', () => {
     expect(usageEventId(event, '/t.jsonl', 512)).toBe('/t.jsonl:512');
   });
 });
+
+describe('Cursor transcript lines', () => {
+  it('counts an assistant line as one unmetered message at the file time', () => {
+    const line = JSON.stringify({ role: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } });
+
+    expect(parseUsageLine('cursor', line, FALLBACK_MS)).toEqual({
+      provider: 'cursor',
+      timestampMs: FALLBACK_MS,
+      model: 'cursor',
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      metered: false,
+      agentSessionId: null,
+      messageId: null,
+      cwd: null,
+    });
+  });
+
+  it('ignores user lines, turn markers and token-shaped keys', () => {
+    expect(parseUsageLine('cursor', JSON.stringify({ role: 'user', message: { content: 'hi' } }), FALLBACK_MS)).toBeNull();
+    expect(parseUsageLine('cursor', JSON.stringify({ type: 'turn_ended' }), FALLBACK_MS)).toBeNull();
+    const withUsage = parseUsageLine('cursor', JSON.stringify({ role: 'assistant', usage: { input_tokens: 99 } }), FALLBACK_MS);
+    expect(withUsage).toMatchObject({ inputTokens: 0, metered: false });
+  });
+});
+
+describe('metered events', () => {
+  it('marks Claude and Codex token accounting as measured', () => {
+    expect(parseUsageLine('claude', claudeLine(), FALLBACK_MS)?.metered).toBe(true);
+  });
+});

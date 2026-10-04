@@ -27,6 +27,8 @@ export interface LeaderboardModelEntry {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   totalTokens: number;
+  /** Cursor rows carry only this: their tokens and cost are unmetered, so 0 with costIncomplete. */
+  messageCount: number;
   estimatedCostUsd: number;
   costIncomplete: boolean;
 }

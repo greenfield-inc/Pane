@@ -209,7 +209,7 @@ const report = {
     lastScanFinishedMs: Date.now(),
     filesTracked: 3,
     eventsIndexed: 42,
-    rootsChecked: 2,
+    rootsChecked: 3,
     missingRoots: [],
     scanning: false,
     filesScanned: 3,
@@ -248,13 +248,13 @@ test('opens Usage & Limits from Settings with the sidebar expanded and compact',
 
   await openUsageAndLimits(page);
   const providerFilters = page.getByRole('group', { name: 'Provider', exact: true });
-  for (const label of ['All', 'Claude', 'Codex']) {
+  for (const label of ['All', 'Claude', 'Codex', 'Cursor']) {
     await expect(providerFilters.getByRole('button', { name: label, exact: true })).toBeVisible();
   }
   const limits = page.getByRole('region', { name: 'Provider limits' });
   await expect(limits).toContainText('OpenAI');
   await expect(limits.getByText('58% left', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Token usage split between Anthropic and OpenAI', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Token usage split between Anthropic, OpenAI, and Cursor', { exact: true })).toBeVisible();
   await expect(page.getByText('6.1M', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('gpt-5.6-sol', { exact: true })).toBeVisible();
   await expect(page.getByTestId('settings-content').getByText('Usage fixture', { exact: true }).last()).toBeVisible();
@@ -432,12 +432,12 @@ test('empty pane history shows unavailable averages', async ({ page }) => {
 });
 
 test('missing transcript roots name every provider and the paths that were checked', async ({ page }) => {
-  const missingRoots = ['/home/test/.claude/projects', '/home/test/.codex/sessions'];
+  const missingRoots = ['/home/test/.claude/projects', '/home/test/.codex/sessions', '/home/test/.cursor/projects'];
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, index: { ...report.index, missingRoots } }, activeProjectId: project.id });
   await page.goto('/');
   await openUsageAndLimits(page);
   await expect(page.getByRole('heading', { name: 'No agent transcripts found' })).toBeVisible();
-  await expect(page.getByText(/Usage is read from the Claude Code and Codex transcript files/)).toBeVisible();
+  await expect(page.getByText(/Usage is read from the Claude Code, Codex, and Cursor CLI transcript files/)).toBeVisible();
   for (const root of missingRoots) await expect(page.getByText(root, { exact: true })).toBeVisible();
 });
 
@@ -483,4 +483,125 @@ test('rescan completion keeps the latest filter and late requests cannot replace
   await page.waitForTimeout(300);
   await expect(summary.getByText('123', { exact: true })).toBeVisible();
   await expect(summary.getByText('999', { exact: true })).toHaveCount(0);
+});
+
+const cursorMessages = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+  totalTokens: 0,
+  messageCount: 7,
+  unmeteredMessageCount: 7,
+  estimatedCostUsd: 0,
+  costIncomplete: true,
+  cacheSavingsUsd: 0,
+};
+
+const cursorReport = {
+  ...report,
+  totals: cursorMessages,
+  series: [{ bucketStartMs: Date.UTC(2026, 7, 23), ...cursorMessages }],
+  byModel: [{ model: 'cursor', provider: 'cursor', ...cursorMessages }],
+  byProject: [{ path: '/tmp/usage-fixture-cursor', label: 'usage-fixture-cursor', ...cursorMessages }],
+  byPane: {
+    panes: [{
+      paneId: 'pane-cursor',
+      paneName: 'Cursor pane',
+      worktreePath: '/tmp/usage-fixture-cursor',
+      repoId: project.id,
+      archived: false,
+      createdAtMs: Date.UTC(2026, 7, 3),
+      ...cursorMessages,
+      uncachedCostUsd: 0,
+      uncachedInputTokens: 0,
+      cacheHitRate: 0,
+      byModel: [{ model: 'cursor', provider: 'cursor', ...cursorMessages }],
+    }],
+    unattributed: { ...report.byPane.unattributed, ...cursorMessages, messageCount: 0, unmeteredMessageCount: 0, costIncomplete: false, byModel: [] },
+  },
+  rateLimits: [],
+};
+
+test('filters to Cursor and shows its messages without tokens or a cost', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialUsageReport: report,
+    usageReportByProvider: { cursor: cursorReport },
+    activeProjectId: project.id,
+  });
+  await page.setViewportSize({ width: 1_600, height: 900 });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await openUsageAndLimits(page);
+
+  await page.getByRole('group', { name: 'Provider', exact: true }).getByRole('button', { name: 'Cursor', exact: true }).click();
+
+  const content = page.getByTestId('settings-content');
+  await expect(content.getByText('7 messages · tokens not reported').first()).toBeVisible();
+  const models = page.getByLabel('Token usage broken down by model', { exact: true });
+  await expect(models).toContainText('cursor');
+  await expect(models).toContainText('7 messages');
+  await expect(models).toContainText('tokens not reported');
+  const panes = page.getByTestId('usage-by-pane');
+  await expect(panes.getByText('cursor · 7 messages · tokens not reported', { exact: true })).toBeVisible();
+  await expect(panes.locator('tbody tr').first()).not.toContainText('0%');
+  await expect(page.getByRole('region', { name: 'Provider limits' })).toContainText('Cursor does not expose plan limits locally.');
+  await expect(content.getByText('Cursor records messages but not their tokens, so there are no tokens to chart.')).toHaveCount(2);
+  await expect(content.getByText('$0.00')).toHaveCount(0);
+  await expect(content.getByText('0 tokens')).toHaveCount(0);
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  await capture(page, testInfo, '06-usage-cursor-filter.png');
+});
+
+test('per-pane footnote says when tokens and cost leave out Cursor-only panes', async ({ page }) => {
+  const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1000];
+  const panes = values.map((value, i) => ({
+    ...report.byPane.panes[0], paneId: `sample-${i}`, paneName: `Sample ${i}`,
+    inputTokens: value * 1000, outputTokens: 0, cacheCreationTokens: 0, totalTokens: value * 1000, messageCount: value,
+  }));
+  panes.push({ ...cursorReport.byPane.panes[0] });
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialUsageReport: { ...report, byPane: { ...report.byPane, panes } }, activeProjectId: project.id,
+  });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+  const summary = page.getByTestId('pane-usage-summary');
+  await expect(summary).toContainText('11 panes with recorded usage');
+  await expect(summary).toContainText('Tokens / pane and Est. cost / pane average the 10 panes that recorded tokens.');
+
+  await summary.getByRole('button', { name: 'Trim 10%' }).click();
+  await expect(summary).toContainText('Tokens and cost drop 1 from each end, so 8 panes remain.');
+  await expect(summary).toContainText('Messages drop 1 highest and 1 lowest values; 9 panes remain.');
+});
+
+test('shows known dollars with ~ when Cursor messages are mixed in', async ({ page }) => {
+  const cursorModel = { model: 'cursor', provider: 'cursor', ...cursorMessages, messageCount: 4, unmeteredMessageCount: 4 };
+  const mixedPane = {
+    ...report.byPane.panes[0],
+    messageCount: report.byPane.panes[0].messageCount + 4,
+    unmeteredMessageCount: 4,
+    costIncomplete: true,
+    byModel: [...report.byPane.panes[0].byModel, cursorModel],
+  };
+  const mixedReport = {
+    ...report,
+    totals: { ...report.totals, messageCount: report.totals.messageCount + 4, unmeteredMessageCount: 4, costIncomplete: true },
+    byModel: [...report.byModel, cursorModel],
+    byPane: { ...report.byPane, panes: [mixedPane] },
+  };
+  await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: mixedReport, activeProjectId: project.id });
+  await page.setViewportSize({ width: 1_600, height: 900 });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+
+  const row = page.getByTestId('usage-by-pane').locator('tbody tr').first();
+  await expect(row).toContainText('~$5.50');
+  await expect(row).toContainText('~$5.00');
+  await expect(row).toContainText('~$4.50');
+  await expect(row).toContainText('+ 4 Cursor messages, cost not reported');
+  await expect(row).not.toContainText('n/a');
+  const summary = page.getByTestId('pane-usage-summary');
+  await expect(summary.getByText('~$5.50', { exact: true })).toBeVisible();
+  await expect(summary).toContainText('+ 4 Cursor messages, cost not reported');
+  await expect(page.getByText('~$9.87 at API rates', { exact: true })).toBeVisible();
 });

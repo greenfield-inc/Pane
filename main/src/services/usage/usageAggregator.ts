@@ -8,6 +8,8 @@ import {
   type UsageByModel,
   type UsageByProject,
   type UsageProvider,
+  USAGE_PROVIDER_IDS,
+  usageProviderFrom,
   type UsageReportRequest,
   type UsageTotals,
 } from '../../../../shared/types/usage';
@@ -25,6 +27,7 @@ interface TokenRow {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   message_count: number;
+  unmetered_count: number;
 }
 
 interface BucketRow extends TokenRow {
@@ -86,6 +89,7 @@ function emptyTotals(): UsageTotals {
     cacheCreationTokens: 0,
     totalTokens: 0,
     messageCount: 0,
+    unmeteredMessageCount: 0,
     estimatedCostUsd: 0,
     costIncomplete: false,
     cacheSavingsUsd: 0,
@@ -106,6 +110,9 @@ function foldCostSummary(rows: TokenRow[]): FoldedCostSummary {
     totals.cacheReadTokens += row.cache_read_tokens;
     totals.cacheCreationTokens += row.cache_creation_tokens;
     totals.messageCount += row.message_count;
+    totals.unmeteredMessageCount += row.unmetered_count;
+    // Unmetered messages have no tokens to price, so any total holding them is partial.
+    if (row.unmetered_count > 0) totals.costIncomplete = true;
 
     const estimate = estimateCostUsd({
       model: row.model,
@@ -129,15 +136,17 @@ function foldTotals(rows: TokenRow[]): UsageTotals {
   return foldCostSummary(rows).totals;
 }
 
+function byModelRows(rows: TokenRow[]): UsageByModel[] {
+  return rows.flatMap(row => {
+    const provider = usageProviderFrom(row.provider);
+    return provider ? [{ model: row.model, provider, ...foldTotals([row]) }] : [];
+  });
+}
+
 function foldPaneSlice(rows: TokenRow[]) {
   const { totals, cacheReadCostUsd } = foldCostSummary(rows);
   const denominator = totals.inputTokens + totals.cacheReadTokens;
-  const byModel = rows
-    .map(row => ({
-      model: row.model,
-      provider: row.provider === 'codex' ? 'codex' as const : 'claude' as const,
-      ...foldTotals([row]),
-    }))
+  const byModel = byModelRows(rows)
     .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd);
   return {
     ...totals,
@@ -172,7 +181,8 @@ const AGGREGATE_COLUMNS = `
   SUM(output_tokens)         AS output_tokens,
   SUM(cache_read_tokens)     AS cache_read_tokens,
   SUM(cache_creation_tokens) AS cache_creation_tokens,
-  SUM(message_count)         AS message_count
+  SUM(message_count)         AS message_count,
+  SUM(unmetered_count)       AS unmetered_count
 `;
 
 export class UsageAggregator {
@@ -192,11 +202,7 @@ export class UsageAggregator {
       ORDER BY SUM(input_tokens + output_tokens) DESC
     `).all(...source.params) as TokenRow[];
 
-    return rows.map(row => ({
-      model: row.model,
-      provider: row.provider === 'codex' ? 'codex' : 'claude',
-      ...foldTotals([row]),
-    }));
+    return byModelRows(rows);
   }
 
   /**
@@ -230,7 +236,8 @@ export class UsageAggregator {
         label: path ? basename(path) || path : 'Unknown',
         ...foldTotals(pathRows),
       }))
-      .sort((a, b) => b.totalTokens - a.totalTokens);
+      // Cursor-only projects all have 0 tokens; their messages break the tie.
+      .sort((a, b) => b.totalTokens - a.totalTokens || b.messageCount - a.messageCount);
   }
 
   getByPane(fromMs: number, toMs: number, providers?: UsageProvider[]): UsageByPaneReport {
@@ -258,6 +265,7 @@ export class UsageAggregator {
           cache_read_tokens: row.cache_read_tokens,
           cache_creation_tokens: row.cache_creation_tokens,
           message_count: row.message_count,
+          unmetered_count: row.unmetered_count,
         });
         return;
       }
@@ -266,6 +274,7 @@ export class UsageAggregator {
       sum.cache_read_tokens += row.cache_read_tokens;
       sum.cache_creation_tokens += row.cache_creation_tokens;
       sum.message_count += row.message_count;
+      sum.unmetered_count += row.unmetered_count;
     };
 
     const splitRows: Array<[number, string, string, string]> = [];
@@ -282,7 +291,8 @@ export class UsageAggregator {
       // SAFETY: The fixed projection aliases every SourceRow field used below.
       const eventRows = this.db.prepare(`
         SELECT timestamp_ms, cwd, usage_events.model, usage_events.provider, input_tokens,
-          output_tokens, cache_read_tokens, cache_creation_tokens, 1 AS message_count
+          output_tokens, cache_read_tokens, cache_creation_tokens, 1 AS message_count,
+          1 - metered AS unmetered_count
         FROM json_each(?) AS split
         JOIN usage_events
           ON timestamp_ms >= split.value ->> 0
@@ -449,13 +459,13 @@ export class UsageAggregator {
     return {
       sql: `
         SELECT hour_ms AS timestamp_ms, first_ms, last_ms, cwd, model, provider, input_tokens,
-          output_tokens, cache_read_tokens, cache_creation_tokens, message_count
+          output_tokens, cache_read_tokens, cache_creation_tokens, message_count, unmetered_count
         FROM usage_hourly
         WHERE hour_ms >= ? AND hour_ms < ?
           AND hour_ms NOT IN (SELECT value FROM json_each(?)) ${clause}
         UNION ALL
         SELECT timestamp_ms, timestamp_ms, timestamp_ms, COALESCE(cwd, ''), model, provider,
-          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, 1
+          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, 1, 1 - metered
         FROM json_each(?) AS raw_window
         JOIN usage_events
           ON timestamp_ms >= raw_window.value ->> 0 AND timestamp_ms < raw_window.value ->> 1
@@ -488,10 +498,11 @@ export class UsageAggregator {
     return byPath;
   }
 
+  /** No filter means every known provider; rows from a provider this version lacks are left out. */
   private providerFilter(providers?: UsageProvider[]): ProviderFilter {
-    if (!providers || providers.length === 0) return { clause: '', params: [] };
-    const placeholders = providers.map(() => '?').join(', ');
-    return { clause: `AND provider IN (${placeholders})`, params: [...providers] };
+    const selected = providers && providers.length > 0 ? providers : USAGE_PROVIDER_IDS;
+    const placeholders = selected.map(() => '?').join(', ');
+    return { clause: `AND provider IN (${placeholders})`, params: [...selected] };
   }
 }
 

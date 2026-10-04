@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3-multiple-ciphers';
-import type { UsageEvent, UsageProvider, UsageRateLimitSample } from '../../../../shared/types/usage';
+import { usageProviderFrom, type UsageEvent, type UsageProvider, type UsageRateLimitSample } from '../../../../shared/types/usage';
 import { usageEventId, type CodexContextSnapshot } from './usageParser';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
@@ -62,11 +62,12 @@ export class UsageRepository {
     const row = this.db
       .prepare('SELECT * FROM usage_files WHERE path = ?')
       .get(path) as UsageFileRow | undefined;
-    if (!row) return null;
+    const provider = row ? usageProviderFrom(row.provider) : null;
+    if (!row || !provider) return null;
 
     return {
       path: row.path,
-      provider: row.provider === 'codex' ? 'codex' : 'claude',
+      provider,
       sizeBytes: row.size_bytes,
       mtimeMs: row.mtime_ms,
       offsetBytes: row.offset_bytes,
@@ -89,8 +90,8 @@ export class UsageRepository {
       INSERT OR IGNORE INTO usage_events (
         id, provider, timestamp_ms, model,
         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-        agent_session_id, cwd, source_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        metered, agent_session_id, cwd, source_path
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const upsertFile = this.db.prepare(`
@@ -121,6 +122,7 @@ export class UsageRepository {
           event.outputTokens,
           event.cacheReadTokens,
           event.cacheCreationTokens,
+          event.metered ? 1 : 0,
           event.agentSessionId,
           event.cwd,
           cursor.path
@@ -242,10 +244,11 @@ export class UsageRepository {
       const expired = row.resets_at_ms !== null
         ? row.resets_at_ms <= nowMs
         : windowMs > 0 && row.captured_at_ms + windowMs <= nowMs;
-      if (expired) continue;
+      const provider = usageProviderFrom(row.provider);
+      if (expired || !provider) continue;
 
       const sample: UsageRateLimitSample = {
-        provider: row.provider === 'codex' ? 'codex' : 'claude',
+        provider,
         limitId: row.limit_id,
         scope: row.scope === 'secondary' ? 'secondary' : 'primary',
         usedPercent: row.used_percent,
@@ -315,6 +318,26 @@ export class UsageRepository {
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM usage_events WHERE source_path = ?').run(path);
       this.db.prepare('DELETE FROM usage_files WHERE path = ?').run(path);
+    })();
+  }
+
+  /** When each of a file's events was recorded, by event id. */
+  eventTimes(path: string): Map<string, number> {
+    // SAFETY: The projection names the primary key and its integer timestamp.
+    const rows = this.db.prepare('SELECT id, timestamp_ms FROM usage_events WHERE source_path = ?')
+      .all(path) as Array<{ id: string; timestamp_ms: number }>;
+    return new Map(rows.map(row => [row.id, row.timestamp_ms]));
+  }
+
+  /** Swap all of a file's events for a fresh full read, in one transaction. */
+  replaceFile(
+    cursor: UsageFileCursor,
+    events: Array<{ event: UsageEvent; byteOffset: number }>,
+    nowMs: number
+  ): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM usage_events WHERE source_path = ?').run(cursor.path);
+      this.commitFile(cursor, events, nowMs);
     })();
   }
 }

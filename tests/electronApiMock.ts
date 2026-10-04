@@ -60,8 +60,12 @@ type ElectronApiMockOptions = {
   initialTerminalStates?: Record<string, JsonObject>;
   initialAgentUsage?: JsonObject;
   initialUsageReport?: JsonObject;
+  /** Report returned when the page filters to exactly one provider, keyed by provider. */
+  usageReportByProvider?: Record<string, JsonObject>;
   initialLeaderboardStatus?: JsonObject;
   initialLeaderboard?: JsonObject;
+  /** Error the leaderboard submit returns, as the server's rejection would surface. */
+  leaderboardSendError?: string;
   forcedAgentUsageError?: string;
   detectedBranch?: string | null;
   detectedBranchByPath?: Record<string, string | null>;
@@ -546,7 +550,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         shareImage: () => success({ method: 'clipboard' }),
       }),
       usage: namespace({
-        getReport: () => success(clone(mockOptions.initialUsageReport ?? {
+        getReport: (request?: { providers?: string[] }) => success(clone(
+          (request?.providers?.length === 1 ? mockOptions.usageReportByProvider?.[request.providers[0]] : undefined)
+          ?? mockOptions.initialUsageReport ?? {
           totals: {
             inputTokens: 0,
             outputTokens: 0,
@@ -554,6 +560,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             cacheCreationTokens: 0,
             totalTokens: 0,
             messageCount: 0,
+            unmeteredMessageCount: 0,
             estimatedCostUsd: 0,
             costIncomplete: false,
             cacheSavingsUsd: 0,
@@ -570,6 +577,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
               cacheCreationTokens: 0,
               totalTokens: 0,
               messageCount: 0,
+              unmeteredMessageCount: 0,
               estimatedCostUsd: 0,
               costIncomplete: false,
               cacheSavingsUsd: 0,
@@ -629,7 +637,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         })),
         join: () => success({ rank: 1, displayName: '@testuser', verified: true, total: 1, installs: 1 }),
         leave: () => success(undefined),
-        sendNow: () => success({ rank: 1, displayName: '@testuser', verified: true, total: 1, installs: 1 }),
+        sendNow: () => mockOptions.leaderboardSendError
+          ? Promise.resolve({ success: false, error: mockOptions.leaderboardSendError })
+          : success({ rank: 1, displayName: '@testuser', verified: true, total: 1, installs: 1 }),
         fetch: () => success(clone(mockOptions.initialLeaderboard ?? {
           windowDays: 30,
           total: 0,

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3-multiple-ciphers';
 import type { UsageProvider, UsageTotals } from '../../../../shared/types/usage';
 import { UsageAggregator } from './usageAggregator';
@@ -16,7 +16,7 @@ const START = Date.UTC(2026, 4, 10);
 const TOKENS = `
   SUM(input_tokens) AS input, SUM(output_tokens) AS output,
   SUM(cache_read_tokens) AS cacheRead, SUM(cache_creation_tokens) AS cacheWrite,
-  COUNT(*) AS messages`;
+  COUNT(*) AS messages, SUM(1 - metered) AS unmetered`;
 
 interface Tokens {
   input: number;
@@ -24,6 +24,7 @@ interface Tokens {
   cacheRead: number;
   cacheWrite: number;
   messages: number;
+  unmetered: number;
 }
 
 function sqliteDate(ms: number): string {
@@ -37,7 +38,8 @@ function createDb() {
       id TEXT PRIMARY KEY, provider TEXT NOT NULL, timestamp_ms INTEGER NOT NULL,
       model TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_creation_tokens INTEGER NOT NULL DEFAULT 0, agent_session_id TEXT, cwd TEXT,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0, metered INTEGER NOT NULL DEFAULT 1,
+      agent_session_id TEXT, cwd TEXT,
       source_path TEXT NOT NULL
     );
     CREATE TABLE sessions (
@@ -52,17 +54,22 @@ function createDb() {
 function insertEvents(db: Database.Database, count: number, idPrefix: string) {
   const insert = db.prepare(`
     INSERT OR IGNORE INTO usage_events (id, provider, timestamp_ms, model, input_tokens,
-      output_tokens, cache_read_tokens, cache_creation_tokens, cwd, source_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '/t.jsonl')
+      output_tokens, cache_read_tokens, cache_creation_tokens, cwd, metered, source_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '/t.jsonl')
   `);
   const cwds = ['/w/shared', '/w/solo', '/w/archived', '/w/restored', '/w/none', null];
-  const models = ['claude-sonnet-5', 'claude-haiku-4-5', 'gpt-5.1-codex'];
+  // Cursor rows are unmetered: counted messages with no tokens.
+  const models = ['claude-sonnet-5', 'claude-haiku-4-5', 'gpt-5.1-codex', 'cursor'];
   for (let i = 0; i < count; i++) {
     // Every 7m 13s, so events land on and around hour and day boundaries.
     const timestampMs = START + i * (7 * MINUTE_MS + 13_000);
     const model = models[i % models.length];
+    if (model === 'cursor') {
+      insert.run(`${idPrefix}${i}`, 'cursor', timestampMs, model, 0, 0, 0, 0, cwds[i % cwds.length], 0);
+      continue;
+    }
     insert.run(`${idPrefix}${i}`, model.startsWith('gpt') ? 'codex' : 'claude', timestampMs, model,
-      100 + (i % 37), 10 + (i % 11), 1000 + (i % 101), i % 5 === 0 ? 50 : 0, cwds[i % cwds.length]);
+      100 + (i % 37), 10 + (i % 11), 1000 + (i % 101), i % 5 === 0 ? 50 : 0, cwds[i % cwds.length], 1);
   }
 }
 
@@ -126,6 +133,7 @@ function tokensOf(totals: UsageTotals): Tokens {
     cacheRead: totals.cacheReadTokens,
     cacheWrite: totals.cacheCreationTokens,
     messages: totals.messageCount,
+    unmetered: totals.unmeteredMessageCount,
   };
 }
 
@@ -140,7 +148,8 @@ function sumOf(rows: Tokens[]): Tokens {
     cacheRead: sum.cacheRead + row.cacheRead,
     cacheWrite: sum.cacheWrite + row.cacheWrite,
     messages: sum.messages + row.messages,
-  }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0 });
+    unmetered: sum.unmetered + row.unmetered,
+  }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, unmetered: 0 });
 }
 
 const RANGES: Array<{ name: string; fromMs: number; toMs: number; providers?: UsageProvider[] }> = [
@@ -209,5 +218,54 @@ describe.each([
     expect(keyed(aggregator.getSeries(fromMs, toMs, 'day', undefined, boundaries).map(row => ({
       groupKey: row.bucketStartMs, ...tokensOf(row),
     })))).toEqual(keyed(referenceGroups(db, dayOf, fromMs, toMs)));
+  });
+});
+
+describe('ensureUsageRollup', () => {
+  it('rebuilds a rollup from before unmetered events, keeping their counts', () => {
+    const db = createDb();
+    db.exec(`
+      CREATE TABLE usage_hourly (
+        hour_ms INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, cwd TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+        cache_read_tokens INTEGER NOT NULL, cache_creation_tokens INTEGER NOT NULL,
+        message_count INTEGER NOT NULL, first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL,
+        PRIMARY KEY (hour_ms, provider, model, cwd)
+      ) WITHOUT ROWID;
+      CREATE TRIGGER usage_hourly_insert AFTER INSERT ON usage_events BEGIN
+        INSERT INTO usage_hourly VALUES (
+          CAST(NEW.timestamp_ms / 3600000 AS INTEGER) * 3600000, NEW.provider, NEW.model, COALESCE(NEW.cwd, ''),
+          NEW.input_tokens, NEW.output_tokens, NEW.cache_read_tokens, NEW.cache_creation_tokens, 1,
+          NEW.timestamp_ms, NEW.timestamp_ms
+        )
+        ON CONFLICT (hour_ms, provider, model, cwd) DO UPDATE SET message_count = message_count + 1;
+      END;
+      CREATE TRIGGER usage_hourly_delete AFTER DELETE ON usage_events BEGIN
+        UPDATE usage_hourly SET message_count = message_count - 1
+        WHERE (hour_ms, provider, model, cwd) = (CAST(OLD.timestamp_ms / 3600000 AS INTEGER) * 3600000, OLD.provider, OLD.model, COALESCE(OLD.cwd, ''));
+      END;
+    `);
+    db.prepare(`
+      INSERT INTO usage_events (id, provider, timestamp_ms, model, metered, source_path)
+      VALUES ('a', 'cursor', ?, 'cursor', 0, '/t.jsonl'), ('b', 'cursor', ?, 'cursor', 0, '/t.jsonl')
+    `).run(START + HOUR_MS, START + HOUR_MS + 1);
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    ensureUsageRollup(db);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^\[Usage\] Rebuilt the hourly usage rollup from 2 events in \d+ms$/));
+    log.mockRestore();
+    db.prepare(`
+      INSERT INTO usage_events (id, provider, timestamp_ms, model, metered, source_path)
+      VALUES ('c', 'cursor', ?, 'cursor', 0, '/t.jsonl')
+    `).run(START + HOUR_MS + 2);
+
+    db.prepare(`
+      INSERT INTO usage_events (id, provider, timestamp_ms, model, input_tokens, source_path)
+      VALUES ('d', 'claude', ?, 'claude-sonnet-5', 10, '/c.jsonl')
+    `).run(START + HOUR_MS + 3);
+    db.prepare("DELETE FROM usage_events WHERE id = 'a'").run();
+
+    const totals = new UsageAggregator(db).getTotals(START, START + DAY_MS);
+    expect(totals).toMatchObject({ messageCount: 3, unmeteredMessageCount: 2, inputTokens: 10 });
   });
 });
