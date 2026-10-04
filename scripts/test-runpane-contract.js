@@ -3330,7 +3330,11 @@ function compareAgentContextParity() {
 function checkPipNpmOnlyCommands() {
   const python = findPython();
   const env = { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: pythonSource, RUNPANE_TELEMETRY_DISABLED: '1' };
-  const runPip = (args) => childProcess.spawnSync(python, ['-m', 'runpane', ...args], { cwd: rootDir, encoding: 'utf8', env, input: 'NOT-FOR-RUNPANE\n' });
+  // Python writes CRLF to stderr on Windows; compare lines, not line endings.
+  const runPip = (args) => {
+    const result = childProcess.spawnSync(python, ['-m', 'runpane', ...args], { cwd: rootDir, encoding: 'utf8', env, input: 'NOT-FOR-RUNPANE\n' });
+    return { ...result, stdout: result.stdout.replace(/\r\n/g, '\n'), stderr: result.stderr.replace(/\r\n/g, '\n') };
+  };
   // No `wrappers` means both wrappers ship the command.
   const npmOnly = contract.commands.filter((command) => command.wrappers && !command.wrappers.includes('pip'));
   assert.ok(npmOnly.some((command) => command.name === 'cloud setup'), 'cloud commands are npm-only');
