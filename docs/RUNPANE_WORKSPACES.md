@@ -50,6 +50,7 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 - A tagged device is refused: Serve sends no identity for it.
 - Pane answers only requests that arrive through Serve: Serve's target path carries a secret that changes every launch, and requests straight to the loopback port are refused. Another OS user on the same machine who can read `tailscale serve status` could learn it, so give other accounts on a joined machine only the trust you would give the owner.
 - Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login.
+- Any device signed in as you, your phone included, is trusted. `runpane workspace list` shows only Macs, Windows PCs, and Linux machines, but that is a listing choice, not a block.
 - Removing a device from Tailscale revokes it everywhere.
 
 ## What `write` and `exec` can do
@@ -61,7 +62,7 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 `read`, `write`, and `exec --cwd` take any path form and translate it on the machine that runs the request, so agents do not need `cat` on one machine and `Get-Content` on another:
 
 - `C:\Users\me\notes.md` and `/mnt/c/Users/me/notes.md` reach the same Windows file.
-- On Windows, WSL paths such as `/home/me/repo/README.md` are read through `\\wsl.localhost\<distro>\...` using the default distribution. Name another distribution with `\\wsl.localhost\<distro>\...`.
+- On Windows, WSL paths such as `/home/me/repo/README.md` are read through `\\wsl.localhost\<distro>\...` using the default distribution (the one `wsl -l -v` marks with `*`). Name another distribution with `\\wsl.localhost\<distro>\...`.
 - Inside WSL, `C:\...` becomes `/mnt/c/...`.
 - `~` is the home directory of the machine that runs the request.
 
