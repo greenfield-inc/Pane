@@ -821,6 +821,13 @@
       "--tab",
       "--yes",
       "--json"
+    ],
+    [
+      "computer-use",
+      "on",
+      "--engine",
+      "cua-driver",
+      "--json"
     ]
   ],
   "help": {

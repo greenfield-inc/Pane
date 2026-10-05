@@ -470,7 +470,7 @@ export function DropdownMenuItem({
           <Icon className="w-3.5 h-3.5 text-text-tertiary group-hover:text-current stroke-[1.5]" />
         </div>
       )}
-      <span className="text-[13px] group-hover:text-inherit">{label}</span>
+      <span className="min-w-0 text-[13px] group-hover:text-inherit">{label}</span>
     </button>
   );
 }

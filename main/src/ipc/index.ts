@@ -21,12 +21,14 @@ import { registerSpotlightHandlers } from './spotlight';
 import { registerJourneyTimingHandlers } from './journeyTimings';
 import { registerRemoteDaemonHandlers } from './remoteDaemon';
 import { registerRunpaneHandlers } from './runpane';
+import { registerComputerUseHandlers } from './computerUse';
 import { registerClipboardHandlers } from './clipboard';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
 import { registerOnboardingHandlers } from './onboarding';
 import { registerVoiceHandlers } from './voice';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerUsageHandlers } from './usage';
+import { registerComputerUseReadinessHandlers } from './computerUseReadiness';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
@@ -87,6 +89,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerJourneyTimingHandlers(ipcMain, services);
   registerRemoteDaemonHandlers(ipcMain, services);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
+  registerComputerUseHandlers(commandRegistry, services.configManager);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {
@@ -106,6 +109,9 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  if (services.computerUseReadiness) {
+    registerComputerUseReadinessHandlers(ipcMain, commandRegistry, services.computerUseReadiness);
+  }
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);
 

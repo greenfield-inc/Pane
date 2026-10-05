@@ -28,6 +28,7 @@ from .local_control import (
     run_agents_doctor,
     run_lock_acquire,
     run_lock_list,
+    run_computer_use,
     run_lock_release,
     run_panels_create,
     run_panels_input,
@@ -82,6 +83,7 @@ AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
+COMMAND_GROUP_HELP_TOPICS.add("computer-use")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -207,6 +209,7 @@ class ParsedArgs:
     lock_ttl_ms: Optional[int] = None
     lock_wait_ms: Optional[int] = None
     note: Optional[str] = None
+    engine: Optional[str] = None
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -904,6 +907,11 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--note":
         parsed.note = value
         return
+    if flag == "--engine":
+        if value not in ("auto", "cua-driver"):
+            raise ValueError("--engine must be auto or cua-driver.")
+        parsed.engine = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -1138,6 +1146,9 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "lock acquire": lambda parsed, context: run_lock_acquire(parsed),
     "lock release": lambda parsed, context: run_lock_release(parsed),
     "lock list": lambda parsed, context: run_lock_list(parsed),
+    "computer-use status": lambda parsed, context: run_computer_use(parsed, "status"),
+    "computer-use on": lambda parsed, context: run_computer_use(parsed, "on"),
+    "computer-use off": lambda parsed, context: run_computer_use(parsed, "off"),
     "panes list": lambda parsed, context: run_panes_list(parsed),
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),

@@ -514,7 +514,11 @@
         "lock",
         "lock acquire",
         "lock release",
-        "lock list"
+        "lock list",
+        "computer-use",
+        "computer-use status",
+        "computer-use on",
+        "computer-use off"
       ],
       "properties": {
         "default": {
@@ -734,6 +738,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "computer-use": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "computer-use status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "computer-use on": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "computer-use off": {
           "$ref": "#/$defs/helpLines"
         }
       },

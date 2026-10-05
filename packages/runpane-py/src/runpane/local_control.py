@@ -222,6 +222,30 @@ def run_lock_list(parsed: Any) -> int:
     return 0
 
 
+def run_computer_use(parsed: Any, action: str) -> int:
+    """`runpane computer-use status|on|off`. Not an MCP tool: only a person turns computer use on."""
+    if action == "status":
+        report = invoke_daemon("computer-use:readiness", [], pane_dir=parsed.pane_dir)
+    else:
+        request: Dict[str, Any] = {"enabled": action == "on"}
+        if parsed.engine:
+            request["engine"] = parsed.engine
+        report = invoke_daemon("computer-use:set", [request], pane_dir=parsed.pane_dir)
+    state = report.get("state")
+    if parsed.json:
+        print_json(report)
+    else:
+        print(f"Computer use: {report.get('statusText')}")
+        if state == "needs-permission" and report.get("appName") and report.get("permission"):
+            print(
+                f"Turn on {report['appName']} in System Settings → Privacy & Security → {report['permission']}, "
+                "then run `runpane computer-use status`."
+            )
+        if state == "failed" and report.get("detail"):
+            print(report["detail"])
+    return 0 if action == "status" or state in ("ready", "off") else 1
+
+
 def _require_lock_name(parsed: Any, action: str) -> str:
     name = (parsed.name or "").strip()
     if not name:

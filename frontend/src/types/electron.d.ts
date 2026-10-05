@@ -57,6 +57,7 @@ import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpa
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
+import type { ComputerUseEngineChoice, ComputerUseReadiness } from '../../../shared/types/computerUse';
 import type {
   ProjectDashboardData,
   ProjectDashboardSessionUpdateEvent,
@@ -166,6 +167,13 @@ interface ElectronAPI {
     getReport: (request?: UsageReportRequest) => Promise<IPCResponse<UsageReport>>;
     getStatus: () => Promise<IPCResponse<UsageIndexStatus>>;
     rescan: () => Promise<IPCResponse<UsageIndexStatus>>;
+  };
+
+  computerUseReadiness: {
+    get: () => Promise<ComputerUseReadiness>;
+    set: (request: { enabled: boolean; engine?: ComputerUseEngineChoice }) => Promise<ComputerUseReadiness>;
+    recheck: () => Promise<ComputerUseReadiness>;
+    openPermissionSettings: () => Promise<boolean>;
   };
 
   // Leaderboard opt-in and submission
@@ -419,6 +427,7 @@ interface ElectronAPI {
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
     onRemoteSettingsChanged: (callback: () => void) => () => void;
+    onComputerUseReadinessChanged: (callback: () => void) => () => void;
     onSessionDeleted: (callback: (session: Pick<Session, 'id'>) => void) => () => void;
     onSessionsLoaded: (callback: (sessions: Session[]) => void) => () => void;
     onSessionOutput: (callback: (output: SessionOutput) => void) => () => void;
