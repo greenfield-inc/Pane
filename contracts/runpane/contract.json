@@ -294,6 +294,76 @@
       "localControl": true
     },
     {
+      "name": "workspace list",
+      "summary": "List your machines on Tailscale and whether each has joined workspaces.",
+      "usage": [
+        "runpane workspace list [--json] [--pane-dir <path>]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace enable",
+      "summary": "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
+      "usage": [
+        "runpane workspace enable [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace disable",
+      "summary": "Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.",
+      "usage": [
+        "runpane workspace disable [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace read",
+      "summary": "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+      "usage": [
+        "runpane workspace [<machine>] read <path> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace write",
+      "summary": "Write stdin to a file on one of your machines, creating parent folders.",
+      "usage": [
+        "runpane workspace [<machine>] write <path> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace exec",
+      "summary": "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
+      "usage": [
+        "runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
       "name": "watch",
       "summary": "Wait for workspace agent and Pane transitions using a daemon-held cursor.",
       "usage": [
@@ -1648,6 +1718,11 @@
         "name": "--question",
         "value": "<text>",
         "description": "What a blocked worker needs answered; required with --state blocked."
+      },
+      {
+        "name": "--cwd",
+        "value": "<path>",
+        "description": "Working directory on the target machine for workspace exec."
       }
     ],
     "localBoolean": [
@@ -1791,6 +1866,8 @@
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
+        "  runpane workspace list [--json]",
+        "  runpane workspace <machine> read|write|exec|<command>",
         "  runpane watch --follow",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
@@ -2016,11 +2093,20 @@
         "  --json                         Print machine-readable output"
       ],
       "workspace": [
-        "Workspace observation commands.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
-        "  runpane watch --follow"
+        "  runpane watch --follow",
+        "  runpane workspace list [--json]",
+        "  runpane workspace <machine> read <path>",
+        "  runpane workspace <machine> write <path>          (content from stdin)",
+        "  runpane workspace <machine> exec -- <command>",
+        "  runpane workspace <machine> <any runpane command>  (e.g. sessions list --json)",
+        "  runpane workspace enable|disable",
+        "",
+        "<machine> is a Tailscale name, unique prefix, or IP. Only machines signed in to your own Tailscale login are reachable.",
+        "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits."
       ],
       "workspace state": [
         "Usage:",
@@ -2879,6 +2965,68 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "workspace list": [
+        "Usage:",
+        "  runpane workspace list [--json] [--pane-dir <path>]",
+        "",
+        "List your machines on Tailscale and whether each has joined workspaces.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace enable": [
+        "Usage:",
+        "  runpane workspace enable [--json] [--pane-dir <path>]",
+        "",
+        "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace disable": [
+        "Usage:",
+        "  runpane workspace disable [--json] [--pane-dir <path>]",
+        "",
+        "Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace read": [
+        "Usage:",
+        "  runpane workspace [<machine>] read <path> [--json]",
+        "",
+        "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "",
+        "Options:",
+        "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
+        "  <path>                          Absolute path in any form; ~ is that machine's home.",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace write": [
+        "Usage:",
+        "  runpane workspace [<machine>] write <path> [--json]",
+        "",
+        "Write stdin to a file on one of your machines, creating parent folders.",
+        "",
+        "Options:",
+        "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
+        "  <path>                          Absolute path in any form.",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace exec": [
+        "Usage:",
+        "  runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>",
+        "",
+        "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
+        "",
+        "Options:",
+        "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
+        "  --cwd <path>                    Working directory on that machine, in any path form; defaults to its home.",
+        "  --timeout-ms <milliseconds>     Stop the command after this long (default 120000, at most 540000).",
+        "  --json                          Print machine-readable output.",
+        "  -- <command>                    The command line, run by that machine's shell."
       ]
     },
     "pip": {
@@ -3117,11 +3265,13 @@
         "  --json"
       ],
       "workspace": [
-        "Workspace observation commands.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
-        "  runpane watch --follow"
+        "  runpane watch --follow",
+        "",
+        "runpane workspace list|read|write|exec|enable|disable ship in the npm package: npx --yes runpane@latest workspace list"
       ],
       "workspace state": [
         "Usage:",
@@ -3941,6 +4091,48 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "workspace list": [
+        "Usage:",
+        "  runpane workspace list [--json] [--pane-dir <path>]",
+        "",
+        "`runpane workspace list` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace list"
+      ],
+      "workspace enable": [
+        "Usage:",
+        "  runpane workspace enable [--json] [--pane-dir <path>]",
+        "",
+        "`runpane workspace enable` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace enable"
+      ],
+      "workspace disable": [
+        "Usage:",
+        "  runpane workspace disable [--json] [--pane-dir <path>]",
+        "",
+        "`runpane workspace disable` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace disable"
+      ],
+      "workspace read": [
+        "Usage:",
+        "  runpane workspace [<machine>] read <path> [--json]",
+        "",
+        "`runpane workspace read` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace read"
+      ],
+      "workspace write": [
+        "Usage:",
+        "  runpane workspace [<machine>] write <path> [--json]",
+        "",
+        "`runpane workspace write` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace write"
+      ],
+      "workspace exec": [
+        "Usage:",
+        "  runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>",
+        "",
+        "`runpane workspace exec` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace exec"
       ]
     }
   },
@@ -5391,9 +5583,79 @@
           "items": {
             "type": "string"
           }
+        },
+        "workspaces": {
+          "$ref": "#/jsonSchemas/workspacesSummary"
         }
       },
       "additionalProperties": false
+    },
+    "workspacesSummary": {
+      "type": "object",
+      "required": [
+        "state",
+        "machine",
+        "otherMachines",
+        "lines"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "machine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "This machine's Tailscale name."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why workspaces are off."
+        },
+        "fix": {
+          "type": "string",
+          "description": "The one step that turns them on."
+        },
+        "otherMachines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "os",
+              "online"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "os": {
+                "enum": [
+                  "macOS",
+                  "Windows",
+                  "Linux"
+                ]
+              },
+              "online": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The block printed by help, doctor, and agent-context."
+        }
+      }
     },
     "daemonRepairResult": {
       "type": "object",
@@ -7595,6 +7857,9 @@
         },
         "detailCommand": {
           "type": "string"
+        },
+        "workspaces": {
+          "$ref": "#/jsonSchemas/workspacesSummary"
         }
       },
       "additionalProperties": false
@@ -13099,6 +13364,169 @@
           "lockListResult"
         ],
         "notes": []
+      },
+      "workspace list": {
+        "name": "workspace list",
+        "summary": "List your machines on Tailscale and whether each has joined workspaces.",
+        "details": "Shows this machine's workspace state, then each of your other Mac, Windows, and Linux machines with its OS, online state, and shell. Only machines signed in to your own Tailscale login appear.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace list --json"
+        ],
+        "notes": [
+          "A machine has joined when Pane runs there with workspaces on; it answers on https://<machine>.<tailnet>.ts.net:8443."
+        ]
+      },
+      "workspace enable": {
+        "name": "workspace enable",
+        "summary": "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
+        "details": "Serves this Pane's daemon with tailscale serve on port 8443 in HTTP proxy mode. Only your own Tailscale login is accepted; nothing is opened to the internet.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace enable"
+        ],
+        "notes": [
+          "Workspaces are on by default when Tailscale is installed and signed in; this undoes runpane workspace disable."
+        ]
+      },
+      "workspace disable": {
+        "name": "workspace disable",
+        "summary": "Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.",
+        "details": "Turns workspaces off for this machine until runpane workspace enable. The remote daemon on port 443 and pairing codes are unaffected.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace disable"
+        ],
+        "notes": [
+          "Other machines can no longer reach this one; this machine can still reach theirs."
+        ]
+      },
+      "workspace read": {
+        "name": "workspace read",
+        "summary": "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "details": "Reads the same way on every OS. On Windows, /mnt/c/... reaches C:\\... and WSL paths such as /home/<user>/... are read through \\\\wsl.localhost\\<distro>\\. Directories list their entries.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<machine>",
+            "required": false,
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          },
+          {
+            "name": "<path>",
+            "required": true,
+            "description": "Absolute path in any form; ~ is that machine's home."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace parsa-devbox read 'C:\\Users\\me\\.pane\\plans\\topic\\index.html'",
+          "runpane workspace read /mnt/c/Users/me/notes.md"
+        ],
+        "notes": [
+          "--json returns content with encoding utf8 or base64."
+        ]
+      },
+      "workspace write": {
+        "name": "workspace write",
+        "summary": "Write stdin to a file on one of your machines, creating parent folders.",
+        "details": "Takes the same path forms as workspace read. Content comes from stdin and replaces the file.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<machine>",
+            "required": false,
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          },
+          {
+            "name": "<path>",
+            "required": true,
+            "description": "Absolute path in any form."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "echo done | runpane workspace parsa-devbox write '~/notes/status.md'"
+        ],
+        "notes": [
+          "Binary stdin is sent as base64 and written byte for byte."
+        ]
+      },
+      "workspace exec": {
+        "name": "workspace exec",
+        "summary": "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
+        "details": "Runs in the shell Pane uses for terminals on that machine (PowerShell or Git Bash on Windows, the login shell elsewhere). The exit code becomes runpane's exit code. Without <machine>, a --cwd that cannot exist here picks the machine.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<machine>",
+            "required": false,
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          },
+          {
+            "name": "--cwd",
+            "value": "<path>",
+            "required": false,
+            "description": "Working directory on that machine, in any path form; defaults to its home."
+          },
+          {
+            "name": "--timeout-ms",
+            "value": "<milliseconds>",
+            "required": false,
+            "description": "Stop the command after this long (default 120000, at most 540000)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The command line, run by that machine's shell."
+          }
+        ],
+        "examples": [
+          "runpane workspace parsa-devbox exec --json -- git -C C:\\src\\app status --short"
+        ],
+        "notes": [
+          "This is SSH-level power: a local agent's sandbox and permission prompts see only runpane workspace exec, not what runs on the other machine."
+        ]
       }
     },
     "managedBlock": [

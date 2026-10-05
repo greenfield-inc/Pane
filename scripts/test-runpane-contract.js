@@ -3191,9 +3191,11 @@ function compareAgentContextParity() {
     cwd: rootDir
   }).trim();
 
-  const nodeBrief = JSON.parse(runNode(['agent-context', '--json']));
-  const pyBrief = JSON.parse(runPython(['agent-context', '--json']));
+  // The workspaces block reports live Tailscale and Pane state, which can change between the two runs.
+  const { workspaces: nodeWorkspaces, ...nodeBrief } = JSON.parse(runNode(['agent-context', '--json']));
+  const { workspaces: pyWorkspaces, ...pyBrief } = JSON.parse(runPython(['agent-context', '--json']));
   assert.deepStrictEqual(pyBrief, nodeBrief);
+  for (const workspaces of [nodeWorkspaces, pyWorkspaces]) assert.match(workspaces.lines[0], /^Workspaces: (on|off)/);
   assert.strictEqual(nodeBrief.mode, 'brief');
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('runpane doctor --json')));
   assert.ok(nodeBrief.summary.includes('Pane-managed git worktree'));
@@ -3297,9 +3299,10 @@ function compareAgentContextParity() {
   assertIncludes(runNode(['agent-context']), 'Detailed definitions: runpane agent-context --command <command> [--json]');
   assertIncludes(runPython(['agent-context', '--command', 'panes create']), 'runpane panes create');
 
-  // --pane-dir is accepted and ignored by the offline commands.
-  assert.deepStrictEqual(JSON.parse(runNode(['agent-context', '--json', '--pane-dir', '/tmp/pane'])), nodeBrief);
-  assert.deepStrictEqual(JSON.parse(runPython(['agent-context', '--json', '--pane-dir', '/tmp/pane'])), nodeBrief);
+  // --pane-dir only picks which Pane the workspaces block asks; the rest of the brief is offline.
+  const withoutWorkspaces = ({ workspaces, ...brief }) => brief;
+  assert.deepStrictEqual(withoutWorkspaces(JSON.parse(runNode(['agent-context', '--json', '--pane-dir', '/tmp/pane']))), nodeBrief);
+  assert.deepStrictEqual(withoutWorkspaces(JSON.parse(runPython(['agent-context', '--json', '--pane-dir', '/tmp/pane']))), nodeBrief);
   assertIncludes(runNode(['version', '--pane-dir', '/tmp/pane']), 'runpane');
   assertIncludes(runPython(['version', '--pane-dir', '/tmp/pane']), 'runpane');
 

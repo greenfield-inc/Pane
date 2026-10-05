@@ -94,3 +94,38 @@ function safeTokenHashEquals(expectedHash: string, actualHash: string): boolean 
     return false;
   }
 }
+
+type WorkspaceIdentityResult = { ok: true; client: null } | RemoteDaemonAuthFailure;
+
+/**
+ * Tailscale Serve (proxy mode) sets `Tailscale-User-Login` for user-owned devices and strips any
+ * copy the caller sent; tagged devices get no identity. Only the machine owner's login passes.
+ */
+export function authenticateWorkspaceIdentity(
+  loginHeader: string | string[] | undefined,
+  ownerLogin: string | null,
+): WorkspaceIdentityResult {
+  // Serve sends exactly one login; a repeated header is not Serve's.
+  const login = Array.isArray(loginHeader) ? '' : (loginHeader ?? '').trim();
+  if (!login) {
+    return {
+      ok: false,
+      statusCode: 403,
+      error: {
+        message: 'Workspaces accept only requests that Tailscale Serve signs with a user login; tagged devices are refused.',
+        code: 'ERR_WORKSPACE_IDENTITY_REQUIRED',
+      },
+    };
+  }
+  if (!ownerLogin || login.toLowerCase() !== ownerLogin.toLowerCase()) {
+    return {
+      ok: false,
+      statusCode: 403,
+      error: {
+        message: `This machine's workspace trusts only its owner's Tailscale login; ${login} is refused.`,
+        code: 'ERR_WORKSPACE_IDENTITY_REFUSED',
+      },
+    };
+  }
+  return { ok: true, client: null };
+}

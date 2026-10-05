@@ -252,6 +252,12 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
+- `workspace list`: List your machines on Tailscale and whether each has joined workspaces.
+- `workspace enable`: Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).
+- `workspace disable`: Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.
+- `workspace read`: Print a file from one of your machines; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
+- `workspace write`: Write stdin to a file on one of your machines, creating parent folders.
+- `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
 - `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
 - `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
@@ -325,6 +331,12 @@ runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <pa
 runpane panes list [--repo <selector>] [--json] [--pane-dir <path>]
 runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane workspace state [--repo <selector>] [--json] [--pane-dir <path>]
+runpane workspace list [--json] [--pane-dir <path>]
+runpane workspace enable [--json] [--pane-dir <path>]
+runpane workspace disable [--json] [--pane-dir <path>]
+runpane workspace [<machine>] read <path> [--json]
+runpane workspace [<machine>] write <path> [--json]
+runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
 runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>|--session <id|name>] [--include-shells] [--self-test] [--quiet] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
@@ -527,6 +539,7 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--cwd <path>
 --json
 --wait-ready
 --no-focus

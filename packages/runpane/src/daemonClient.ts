@@ -123,12 +123,67 @@ export function getPaneDaemonEndpoint(appDirectory: string, platform: NodeJS.Pla
   };
 }
 
+/** Another machine's Pane, reached through `tailscale serve` (see `runpane workspace`). */
+export interface RemoteDaemonTarget {
+  machine: string;
+  baseUrl: string;
+}
+
+const remoteInvokeResponseSchema = boundary.union(
+  boundary.object({ ok: boundary.literal(true), result: boundary.optional(boundary.json) }),
+  boundary.object({ ok: boundary.literal(false), error: boundary.object({ message: boundary.string, code: boundary.optional(boundary.string) }) }),
+);
+
+let routedTarget: RemoteDaemonTarget | null = null;
+
+/** Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`). */
+export function routeDaemonCallsTo(target: RemoteDaemonTarget | null): void {
+  routedTarget = target;
+}
+
+export async function invokeRemoteDaemon<T>(
+  target: RemoteDaemonTarget,
+  channel: string,
+  args: unknown[],
+  resultSchema: BoundarySchema<T>,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
+  const unreachable = (detail: string) => new PaneDaemonClientError(
+    `Could not reach Pane on ${target.machine} (${target.baseUrl}): ${detail}. Pane must be running there with workspaces on; check with "runpane workspace list".`,
+    'ERR_WORKSPACE_UNREACHABLE',
+  );
+  let response: Response;
+  try {
+    response = await fetch(`${target.baseUrl}/invoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel, args }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : String(error);
+    throw unreachable(cause);
+  }
+  const text = await response.text();
+  let payload: ReturnType<typeof remoteInvokeResponseSchema.decode>;
+  try {
+    payload = decodeBoundary(JSON.parse(text), remoteInvokeResponseSchema);
+  } catch {
+    throw unreachable(response.status === 502 ? 'Pane is not running there' : `HTTP ${response.status}`);
+  }
+  if (!payload.ok) throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}`, payload.error.code);
+  return decodeBoundary(payload.result, resultSchema);
+}
+
 export async function invokeDaemon<T>(
   channel: string,
   args: unknown[] = [],
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
+  if (routedTarget) {
+    return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
+  }
   const endpoint = getPaneDaemonEndpoint(resolvePaneDirectory(options.paneDir));
   const request: PaneDaemonRequestFrame = {
     type: 'request',

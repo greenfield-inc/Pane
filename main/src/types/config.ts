@@ -166,6 +166,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  // runpane workspace: unset means on for the desktop Pane that owns ~/.pane
+  workspaces?: { enabled?: boolean };
   terminalFontFamily?: string;
   terminalFontSize?: number;
   // Leaderboard opt-in and cached state

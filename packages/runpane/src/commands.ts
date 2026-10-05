@@ -108,6 +108,11 @@ export interface ParsedArgs {
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** `runpane workspace <machine> ...` */
+  workspaceMachine?: string;
+  workspacePath?: string;
+  execCommand?: string[];
+  cwd?: string;
   remoteSetupArgs: string[];
 }
 
@@ -197,12 +202,14 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     };
   }
 
+  const workspaceMachine = takeWorkspaceMachine(args);
   const matched = matchCommand(args);
   if (!matched) {
     throw new Error(`Unknown command: ${first}\n\n${helpText()}`);
   }
 
   args.splice(0, matched.tokens.length);
+  const workspaceArgs = takeWorkspaceVerbArgs(matched.name, args);
 
   const parsed: ParsedArgs = {
     command: decodeBoundary(matched.name, commandSchema),
@@ -222,6 +229,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     parsed.target = 'client';
   }
 
+  Object.assign(parsed, workspaceArgs, workspaceMachine ? { workspaceMachine } : {});
   args.unshift(...leadingPaneDirArgs);
   parseFlags(args, parsed);
   if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
@@ -251,6 +259,41 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'report') validateReportArgs(parsed);
   return parsed;
+}
+
+const WORKSPACE_VERBS = new Set(['read', 'write', 'exec']);
+
+/** Machine names `runpane workspace <name>` cannot take: they are its own subcommands. */
+const WORKSPACE_SUBCOMMANDS = new Set(
+  RUNPANE_CONTRACT.commands.filter((command) => command.name.startsWith('workspace ')).map((command) => command.name.split(' ')[1]),
+);
+
+/** `workspace <machine> read|write|exec ...` → `workspace read|write|exec ...` plus the machine. */
+function takeWorkspaceMachine(args: string[]): string | undefined {
+  if (args[0] !== 'workspace' || !args[1] || WORKSPACE_SUBCOMMANDS.has(args[1]) || args[1].startsWith('-')) return undefined;
+  if (!WORKSPACE_VERBS.has(args[2] ?? '')) return undefined;
+  return args.splice(1, 1)[0];
+}
+
+/** `--` takes the rest of the line for exec; read and write take one path. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand'> {
+  if (command === 'workspace exec') {
+    const separator = args.indexOf('--');
+    return separator === -1 ? {} : { execCommand: args.splice(separator).slice(1) };
+  }
+  if ((command === 'workspace read' || command === 'workspace write') && args[0] && !args[0].startsWith('-')) {
+    return { workspacePath: args.shift() };
+  }
+  return {};
+}
+
+/** `runpane workspace <machine> <command...>` for any command other than read, write, and exec. */
+export function splitWorkspacePassThrough(argv: string[]): { machine: string; command: string[] } | null {
+  const args = [...argv];
+  takeLeadingPaneDir(args);
+  if (args[0] !== 'workspace' || !args[1] || WORKSPACE_SUBCOMMANDS.has(args[1]) || args[1].startsWith('-')) return null;
+  if (!args[2] || WORKSPACE_VERBS.has(args[2])) return null;
+  return { machine: args[1], command: args.slice(2) };
 }
 
 function validateReportArgs(parsed: ParsedArgs): void {
@@ -533,6 +576,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--path') {
     parsed.repoPath = value;
+    return;
+  }
+  if (flag === '--cwd') {
+    parsed.cwd = value;
     return;
   }
   if (flag === '--url') {

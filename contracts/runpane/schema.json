@@ -457,6 +457,12 @@
         "panes cost",
         "workspace",
         "workspace state",
+        "workspace list",
+        "workspace enable",
+        "workspace disable",
+        "workspace read",
+        "workspace write",
+        "workspace exec",
         "watch",
         "panes create",
         "panes adopt",
@@ -560,6 +566,24 @@
           "$ref": "#/$defs/helpLines"
         },
         "workspace state": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace enable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace disable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace read": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace write": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace exec": {
           "$ref": "#/$defs/helpLines"
         },
         "watch": {

@@ -23,6 +23,7 @@ from .installers import (
     spawn_pane,
     spawn_pane_captured,
 )
+from .workspaces import read_workspace_summary
 from .local_control import (
     has_cadence_value_flag,
     run_agents_doctor,
@@ -1127,6 +1128,13 @@ def help_text(topic: Optional[str]) -> str:
     return "\n".join(help_topics.get(topic or "default", help_topics["default"]))
 
 
+def print_help(parsed: ParsedArgs) -> int:
+    print(help_text(parsed.help_topic))
+    if not parsed.help_topic or parsed.help_topic == "workspace":
+        print("\n".join(["", *read_workspace_summary(parsed.pane_dir)["lines"]]))
+    return 0
+
+
 def run_unsupported_contract(parsed: ParsedArgs, context: WrapperTelemetryContext) -> int:
     print(help_text(parsed.command), file=sys.stderr)
     return 2
@@ -1155,6 +1163,12 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),
     "watch": lambda parsed, context: run_watch(parsed),
+    "workspace list": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace enable": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace disable": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace read": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace write": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace exec": lambda parsed, context: run_unsupported_contract(parsed, context),
     "panes create": lambda parsed, context: run_panes_create(parsed),
     "panes archive": lambda parsed, context: run_panes_archive(parsed),
     "panes pin": lambda parsed, context: run_panes_pin(parsed, True),
@@ -1174,7 +1188,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "report": lambda parsed, context: run_report(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
     "panes adopt": lambda parsed, context: run_panes_adopt(parsed),
-    "help": lambda parsed, context: print(help_text(parsed.help_topic)) or 0,
+    "help": lambda parsed, context: print_help(parsed),
     "install": lambda parsed, context: install_or_update(parsed, context),
     "update": lambda parsed, context: install_or_update(parsed, context),
     "mcp": lambda parsed, context: run_unsupported_contract(parsed, context),

@@ -1,4 +1,5 @@
 import { installRunpaneShimBestEffort } from '../services/runpaneShim';
+import os from 'os';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { startupPanelBufferMigration, startupRetentionResult } from '../services/database';
@@ -30,6 +31,8 @@ import { isLockOwnerLive } from '../ipc/runpane';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
+import { PaneWorkspaceHostController } from './workspaceHost';
+import { registerWorkspaceCommands } from '../ipc/workspace';
 import { getMobilePushSender } from './mobilePushSender';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
@@ -354,6 +357,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+  // On by default only for the desktop Pane that owns ~/.pane; other data dirs opt in through config.
+  const workspaceHost = new PaneWorkspaceHostController(
+    commandRegistry,
+    configManager,
+    mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
+  );
+  registerWorkspaceCommands(commandRegistry, workspaceHost, configManager);
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
@@ -377,6 +387,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await paneDaemonServer?.stop();
     });
   }
+
+  void workspaceHost.start();
 
   const daemonSinks: PaneEventSink[] = [workspaceJournal, namedLockService];
   if (paneDaemonServer) {
@@ -449,6 +461,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       workspaceJournal.dispose();
       await permissionIpcServer?.stop();
       await remoteTransportController.stopWatchingAndShutdown();
+      await workspaceHost.shutdown();
       if (paneDaemonServer) {
         await paneDaemonServer.stop();
       }

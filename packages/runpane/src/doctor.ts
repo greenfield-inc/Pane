@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readWorkspaceSummary, type WorkspaceSummary } from './workspace';
 import { boundary } from './boundaryDecoder';
 import {
   getPaneDaemonEndpoint,
@@ -187,6 +188,7 @@ interface DoctorReport {
   remoteDaemonService: RemoteDaemonServiceDoctorCheck;
   remoteSetup: RemoteSetupDoctorCheck;
   watchDefaults: DoctorWatchDefaults;
+  workspaces: WorkspaceSummary;
   nextCommands: string[];
 }
 
@@ -441,7 +443,7 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
     : Promise.resolve({ ok: false, error: platform.error });
   const installedPane = collectInstalledPane(parsed.panePath);
   const daemonPromise = collectDaemonHealth(parsed.paneDir, endpoint);
-  const [release, daemon] = await Promise.all([releasePromise, daemonPromise]);
+  const [release, daemon, workspaces] = await Promise.all([releasePromise, daemonPromise, readWorkspaceSummary(parsed.paneDir)]);
   const remoteDaemonService = await collectRemoteDaemonServiceCheck(parsed, paneDir, daemon);
   const remoteSetup = collectRemoteSetupCheck(
     platform.ok ? platform.platform : undefined,
@@ -465,6 +467,7 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
     remoteDaemonService,
     remoteSetup,
     watchDefaults: watchDefaults(),
+    workspaces,
     nextCommands: [
       'runpane agent-context --json',
       'runpane agent-context --command "<command>" --json',
@@ -979,6 +982,7 @@ function renderDoctorText(report: DoctorReport): void {
   }
 
   console.log(formatWatchDefaults(report.watchDefaults));
+  for (const line of report.workspaces.lines) console.log(line);
   console.log('Agent discovery: run "runpane doctor --json" before Pane actions, then "runpane agent-context --json" for full CLI context.');
   console.log('Remote setup: run "runpane setup" for guided setup, or "runpane install daemon --label <name>" for scripting.');
 }

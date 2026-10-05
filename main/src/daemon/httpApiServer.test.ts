@@ -766,3 +766,56 @@ describe('PaneRemoteHttpApiServer', () => {
     );
   });
 });
+
+describe('workspace identity mode', () => {
+  async function startWorkspaceServer(ownerLogin: string | null) {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
+      workspace: { listenPort: 0, ownerLogin: () => ownerLogin },
+    });
+    activeServers.push(server);
+    await server.start();
+    return server;
+  }
+  const invoke = { channel: 'runpane:machine:info', args: [] };
+
+  it('serves the owner\'s own Tailscale login without a pairing token', async () => {
+    const server = await startWorkspaceServer('owner@example.com');
+    const response = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+      'Tailscale-User-Login': 'owner@example.com',
+    });
+    expect(response).toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'devbox' } } });
+  });
+
+  it('refuses another Tailscale user and requests without an identity, such as tagged devices', async () => {
+    const server = await startWorkspaceServer('owner@example.com');
+    const otherUser = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+      'Tailscale-User-Login': 'teammate@example.com',
+    });
+    expect(otherUser.statusCode).toBe(403);
+    expect(JSON.stringify(otherUser.body)).toContain('ERR_WORKSPACE_IDENTITY_REFUSED');
+
+    const tagged = await requestJson(server, 'POST', '/invoke', invoke);
+    expect(tagged.statusCode).toBe(403);
+    expect(JSON.stringify(tagged.body)).toContain('ERR_WORKSPACE_IDENTITY_REQUIRED');
+  });
+
+  it('refuses everyone while the owner is unknown', async () => {
+    const server = await startWorkspaceServer(null);
+    const response = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+      'Tailscale-User-Login': 'owner@example.com',
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('keeps machine commands off the pairing-token transport', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const response = await requestJson(server, 'POST', '/invoke', invoke, 'secret-token');
+    expect(response.statusCode).toBe(403);
+  });
+});

@@ -6,6 +6,7 @@ import sys
 from typing import Any, Dict, List, Optional, Sequence
 
 from .generated_contract import RUNPANE_CONTRACT
+from .workspaces import read_workspace_summary
 
 MAX_COMMAND_CANDIDATES = 5
 
@@ -13,7 +14,7 @@ MAX_COMMAND_CANDIDATES = 5
 def run_agent_context(parsed: Any) -> int:
     if parsed.context_command is not None and find_command_detail(parsed.context_command) is None:
         return print_unknown_command(parsed.context_command, parsed.json)
-    result = build_agent_context_result(parsed.context_command)
+    result = build_agent_context_result(parsed.context_command, getattr(parsed, "pane_dir", None))
     if parsed.json:
         print(json.dumps(result, indent=2))
         return 0
@@ -25,7 +26,7 @@ def run_agent_context(parsed: Any) -> int:
     return 0
 
 
-def build_agent_context_result(command_name: Optional[str] = None) -> Dict[str, Any]:
+def build_agent_context_result(command_name: Optional[str] = None, pane_dir: Optional[str] = None) -> Dict[str, Any]:
     if command_name:
         return {
             "ok": True,
@@ -43,6 +44,7 @@ def build_agent_context_result(command_name: Optional[str] = None) -> Dict[str, 
         "rules": brief["rules"],
         "tools": brief["tools"],
         "detailCommand": brief["detailCommand"],
+        "workspaces": read_workspace_summary(pane_dir),
     }
 
 
@@ -121,6 +123,8 @@ def render_brief(result: Dict[str, Any]) -> str:
         RUNPANE_CONTRACT["agentContext"]["brief"]["title"],
         "",
         result["summary"],
+        "",
+        *result["workspaces"]["lines"],
         "",
         "Rules:",
     ]
