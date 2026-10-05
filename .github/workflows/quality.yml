@@ -40,6 +40,7 @@ jobs:
             - 'scripts/test-runpane-contract.js'
             - 'scripts/test-runpane-mcp.js'
             - 'scripts/test-runpane-package-smoke.js'
+            - 'scripts/test-runpane-workspace.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
           main:
@@ -209,6 +210,9 @@ jobs:
 
     - name: Run package manager smoke tests
       run: node scripts/test-runpane-package-smoke.js
+
+    - name: Run workspace routing tests
+      run: node --test scripts/test-runpane-workspace.js
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
