@@ -66,6 +66,9 @@ export type ElectronApiMockOptions = {
   gitCommands?: JsonObject;
   /** Seeded split layout for the session under test (panels:get-layout). */
   initialLayout?: JsonObject | null;
+  initialCombinedDiff?: JsonObject | null;
+  initialGitGraph?: JsonObject;
+  initialCommitDetail?: JsonObject;
   initialTerminalStates?: Record<string, JsonObject>;
   initialAgentUsage?: JsonObject;
   initialUsageReport?: JsonObject;
@@ -816,6 +819,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         detectConfig: () => success(null),
         refreshGitStatus: () => success(),
+        getGitGraph: (request: { focusRef?: string }) => {
+          const data = clone(mockOptions.initialGitGraph ?? {});
+          if (request.focusRef) data.focusRef = request.focusRef;
+          return success(data);
+        },
+        getCommitDetail: () => success(clone(mockOptions.initialCommitDetail ?? null)),
       }),
       prompts: namespace({
         getAll: () => success([]),

@@ -53,6 +53,7 @@ interface NavigationState {
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
+  navigateToGitGraph: (projectId: number) => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -133,5 +134,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   navigateToPaneChat: () => set({
     activeView: 'pane-chat',
     activeProjectId: null
+  }),
+
+  // The commit graph is repo-wide, so it keeps the project it belongs to.
+  navigateToGitGraph: (projectId) => set({
+    activeView: 'git-graph',
+    activeProjectId: projectId
   }),
 }));

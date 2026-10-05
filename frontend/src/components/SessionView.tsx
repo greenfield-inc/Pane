@@ -17,6 +17,7 @@ import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectView } from './ProjectView';
+import { GitGraphView } from './gitGraph/GitGraphView';
 import { API } from '../utils/api';
 import { markPaneViewShown } from '../utils/journeyTimings';
 import { useObservedContentBox } from '../hooks/useObservedContentBox';
@@ -1368,9 +1369,11 @@ export const SessionView = memo(() => {
     return () => { cancelled = true; };
   }, [activeSession?.id, activeSession?.isMainRepo]);
 
-  // Load project data when activeProjectId changes
+  // Load project data when activeProjectId changes. The commit graph needs it
+  // too: without a name in its header there is nothing on screen saying which
+  // repository is being graphed.
   useEffect(() => {
-    if (activeView === 'project' && activeProjectId) {
+    if ((activeView === 'project' || activeView === 'git-graph') && activeProjectId) {
       const loadProjectData = async () => {
         setIsProjectLoading(true);
         try {
@@ -1775,6 +1778,11 @@ export const SessionView = memo(() => {
   })();
   
   // Removed unused variables - now handled by panels
+
+  // Repository-wide commit graph — project-scoped, not session-scoped.
+  if (activeView === 'git-graph' && activeProjectId) {
+    return <GitGraphView key={activeProjectId} projectId={activeProjectId} projectName={projectData?.name} />;
+  }
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {
