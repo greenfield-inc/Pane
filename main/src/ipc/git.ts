@@ -74,6 +74,8 @@ const DAEMON_GIT_STATUS_CHANNELS = [
   'sessions:git-diff',
   'sessions:get-diff-manifest',
   'sessions:get-file-diff',
+  'sessions:get-commit-diff-by-hash',
+  'sessions:get-commit-files',
   'sessions:check-rebase-conflicts',
   'sessions:has-stash',
   'sessions:get-upstream',
@@ -537,6 +539,61 @@ export function registerGitHandlers(
         console.error('Failed to get git diff:', error);
       }
       return { success: false, error: errorMessage };
+    }
+  });
+
+  commandRegistry.register('sessions:get-commit-diff-by-hash', async (sessionId: string, commitHash: string) => {
+    try {
+      const session = await sessionManager.getSession(sessionId);
+      if (!session || !session.worktreePath) {
+        return { success: false, error: 'Session or worktree path not found' };
+      }
+
+      if (session.archived) {
+        return { success: false, error: 'Cannot access git diff for archived session' };
+      }
+
+      const ctx = sessionManager.getProjectContext(sessionId);
+      if (!ctx) throw new Error('Project context not found for session');
+
+      if (commitHash === 'index') {
+        const data = await gitDiffManager.captureWorkingDirectoryDiff(session.worktreePath, ctx.commandRunner);
+        return { success: true, data };
+      }
+
+      const data = await gitDiffManager.getCommitDiff(session.worktreePath, commitHash, ctx.commandRunner);
+      return { success: true, data };
+    } catch (error) {
+      console.error('Failed to get commit diff by hash:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to get commit diff';
+      return { success: false, error: errorMessage };
+    }
+  });
+
+  commandRegistry.register('sessions:get-commit-files', async (sessionId: string, ref: string) => {
+    try {
+      const session = await sessionManager.getSession(sessionId);
+      if (!session || !session.worktreePath) {
+        return { success: false, error: 'Session or worktree path not found' };
+      }
+
+      if (session.archived) {
+        return { success: false, error: 'Cannot list changed files for an archived session' };
+      }
+
+      const ctx = sessionManager.getProjectContext(sessionId);
+      if (!ctx) {
+        return { success: false, error: 'Project context not found for session' };
+      }
+
+      const data = await gitDiffManager.getCommitFileChanges(session.worktreePath, ref, ctx.commandRunner);
+      return { success: true, data };
+    } catch (error) {
+      console.error('Failed to list commit files:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list commit files',
+      };
     }
   });
 

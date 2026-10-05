@@ -209,6 +209,8 @@ const GIT_STATUS_CHANNELS = [
   'sessions:git-diff',
   'sessions:get-diff-manifest',
   'sessions:get-file-diff',
+  'sessions:get-commit-diff-by-hash',
+  'sessions:get-commit-files',
   'sessions:check-rebase-conflicts',
   'sessions:has-stash',
   'sessions:get-upstream',

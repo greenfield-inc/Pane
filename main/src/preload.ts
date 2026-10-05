@@ -461,6 +461,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     gitDiff: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:git-diff', sessionId),
     getDiffManifest: (sessionId: string, scope: DiffScope): Promise<IPCResponse> => invokeIpc('sessions:get-diff-manifest', sessionId, scope),
     getFileDiff: (sessionId: string, scope: DiffScope, request: FileDiffRequest): Promise<IPCResponse> => invokeIpc('sessions:get-file-diff', sessionId, scope, request),
+    getCommitDiffByHash: (sessionId: string, commitHash: string): Promise<IPCResponse> => invokeIpc('sessions:get-commit-diff-by-hash', sessionId, commitHash),
+    getCommitFiles: (sessionId: string, ref: string): Promise<IPCResponse> => invokeIpc('sessions:get-commit-files', sessionId, ref),
 
     // Main repo session
     getOrCreateMainRepoSession: (projectId: number): Promise<IPCResponse> => invokeIpc('sessions:get-or-create-main-repo', projectId),

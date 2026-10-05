@@ -334,6 +334,60 @@ test('Review stays local until a newly discovered pull request is explicitly ope
   await expect(splitMode).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('Review expands commit file details and reveals the selected file diff', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project],
+    initialSessions: [createSession()],
+    initialPanels: panels,
+    initialExecutions: localExecutions,
+    initialGitGraph: { currentBranch: 'feature', entries: [{ hash: 'a'.repeat(40), parents: [], branch: 'feature', message: 'A reviewed commit', committerDate: '2026-08-06T12:00:00.000Z', author: 'Pane QA', filesChanged: 1, additions: 8, deletions: 3 }] },
+    diffManifests: {
+      ['commit:' + 'a'.repeat(40)]: {
+        scope: { kind: 'commit', hash: 'a'.repeat(40) },
+        files: [{ path: 'src/review.ts', kind: 'modified', additions: 8, deletions: 3, isBinary: false }],
+        resolvedBase: { kind: 'commit', hash: 'b'.repeat(40) },
+        resolvedTarget: { kind: 'commit', hash: 'a'.repeat(40) },
+        stats: { additions: 8, deletions: 3, filesChanged: 1 },
+      },
+    },
+    fileDiffs: {
+      ['commit:' + 'a'.repeat(40) + ':src/review.ts']: { file: { path: 'src/review.ts', kind: 'modified', additions: 8, deletions: 3, isBinary: false }, patch: localCombinedDiff.diff, status: 'changed' },
+    },
+    initialCommitFiles: [{
+      path: 'src/review.ts',
+      oldPath: 'src/review.ts',
+      status: 'modified',
+      additions: 8,
+      deletions: 3,
+      isBinary: false,
+    }],
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
+  await page.getByRole('button', { name: 'Review changes before PR', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details', exact: true }).click();
+
+  const fileToggle = page.getByRole('button', { name: 'Show files changed in aaaaaaa', exact: true });
+  await fileToggle.click();
+  await expect(page.getByRole('button', { name: 'Hide files changed in aaaaaaa', exact: true })).toHaveAttribute('aria-expanded', 'true');
+
+  const fileRow = page.getByRole('button', { name: 'Modified: src/review.ts. Show diff.', exact: true });
+  await expect(fileRow).toBeVisible();
+  await expect(fileRow.getByText('+8', { exact: true })).toBeVisible();
+  await expect(fileRow.getByText('-3', { exact: true })).toBeVisible();
+  await capture(page, testInfo, '06-commit-file-details-expanded.png');
+
+  await fileRow.click();
+  await expect(page.getByRole('tab', { name: 'review.ts (aaaaaaa)', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'review.ts (aaaaaaa)', exact: true }).getByRole('cell', { name: '+ export const reviewAvailable = true;', exact: true })).toBeVisible();
+  // SAFETY: installElectronApiMock installs this controller before page navigation.
+  await expect.poll(() => page.evaluate(() => (window as typeof window & {
+    __paneTestElectronMock: { getFileDiffCalls(): Array<{ sessionId: string; scope: { kind: string; hash?: string }; path: string }> };
+  }).__paneTestElectronMock.getFileDiffCalls())).toContainEqual({ sessionId: 'review-session', scope: { kind: 'commit', hash: 'a'.repeat(40) }, path: 'src/review.ts' });
+  await capture(page, testInfo, '07-selected-file-diff-revealed.png');
+});
+
 test('Review shows a clean local empty state before a pull request exists', async ({ page }) => {
   await openSession(page, baseGitStatus, { withLocalChanges: false });
 
