@@ -75,7 +75,7 @@ describe('machine file and command operations', () => {
     const result = await execOnMachine({ command: 'echo out; echo err 1>&2; exit 3', cwd: dir });
     expect(result).toMatchObject({ exitCode: 3, stdout: 'out\n', stderr: 'err\n', cwd: dir, timedOut: false });
     expect(result.shell).toMatch(/sh(\.exe)?$/);
-    expect(result.os).toBe(process.platform === 'darwin' ? 'macOS' : 'Linux');
+    expect(result.os).toBe(new Map([['darwin', 'macOS'], ['win32', 'Windows']]).get(process.platform) ?? 'Linux');
   });
 
   it('answers when the shell exits even if a background job still holds its output', async () => {
