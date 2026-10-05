@@ -66,6 +66,7 @@
         "src/preload.ts",
         "src/daemon/headless.ts",
         "src/ptyHost/ptyHostMain.ts",
+        "src/services/computerUse/scriptHostChild.ts",
         "src/services/mcpPermissionBridge.ts",
         "src/**/*.test.ts",
         "src/**/__tests__/**/*.ts",
