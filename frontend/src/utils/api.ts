@@ -4,6 +4,7 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { CreatePullRequestRequest } from '../../../shared/types/pullRequest';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -171,6 +172,43 @@ export class API {
     },
   };
 
+  // Pull requests, opened from a session's branch
+  static pullRequests = {
+    /** Everything the create dialog opens with, in one round trip. */
+    async getDraft(sessionId: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.getDraft(sessionId);
+    },
+    async create(request: CreatePullRequestRequest) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.create(request);
+    },
+    /** CI state for an open pull request. */
+    async getChecks(sessionId: string, repo: string, number: number) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.getChecks(sessionId, repo, number);
+    },
+    /** Base branch candidates for a repository. */
+    async listBaseBranches(sessionId: string, repo: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.listBaseBranches(sessionId, repo);
+    },
+    /** Files the pull request would carry, against the given base. */
+    async getChanges(sessionId: string, baseBranch?: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.getChanges(sessionId, baseBranch);
+    },
+    /** State, reviews and mergeability of an existing pull request. */
+    async getStatus(sessionId: string, repo: string, number: number) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.getStatus(sessionId, repo, number);
+    },
+    /** The patch itself — only fetched when the diff is opened. */
+    async getDiff(sessionId: string, baseBranch?: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.pullRequests.getDiff(sessionId, baseBranch);
+    },
+  };
   // Session management
   static sessions = {
     async getAll() {
@@ -295,6 +333,12 @@ export class API {
     async getFileDiff(sessionId: string, scope: DiffScope, request: FileDiffRequest) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.sessions.getFileDiff(sessionId, scope, request);
+    },
+
+    /** Per-file change details for one commit, or `index` for the working tree. */
+    async getCommitFiles(sessionId: string, ref: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessions.getCommitFiles(sessionId, ref);
     },
 
     // Main repo session

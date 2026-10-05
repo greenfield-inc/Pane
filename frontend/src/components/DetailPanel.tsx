@@ -36,6 +36,7 @@ interface DetailPanelProps {
   changesPanel?: ToolPanel;
   changesCount?: number;
   isMainRepo?: boolean;
+  onCommitFileClick?: (hash: string, path: string) => void;
 }
 
 const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
@@ -74,6 +75,7 @@ export function DetailPanel({
   changesPanel,
   changesCount,
   isMainRepo = false,
+  onCommitFileClick,
 }: DetailPanelProps) {
   const sessionContext = useSession();
   const immersiveMode = useNavigationStore(state => state.immersiveMode);
@@ -119,6 +121,7 @@ export function DetailPanel({
         changesPanel={changesPanel}
         changesCount={changesCount}
         isMainRepo={isMainRepo}
+        onCommitFileClick={onCommitFileClick}
       />
     );
   }
@@ -309,6 +312,8 @@ export function DetailPanel({
                 sessionId={session.id}
                 baseBranch={session.baseBranch || 'main'}
                 onCommitClick={onCommitClick}
+                expandable
+                onFileClick={onCommitFileClick}
               />
             </div>
           </div>

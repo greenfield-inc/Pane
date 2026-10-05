@@ -12,15 +12,15 @@ describe('pendingViewCommit', () => {
     setPendingViewCommit('session-a', 'abc123');
 
     expect(takePendingViewCommit('session-b')).toBeNull();
-    expect(takePendingViewCommit('session-a')).toBe('abc123');
+    expect(takePendingViewCommit('session-a')).toEqual({ commitHash: 'abc123', filePath: undefined });
     expect(takePendingViewCommit('session-a')).toBeNull();
   });
 
   it('replaces an older pending commit', () => {
     setPendingViewCommit('session-a', 'abc123');
-    setPendingViewCommit('session-b', 'def456');
+    setPendingViewCommit('session-b', 'def456', 'src/file.ts');
 
     expect(takePendingViewCommit('session-a')).toBeNull();
-    expect(takePendingViewCommit('session-b')).toBe('def456');
+    expect(takePendingViewCommit('session-b')).toEqual({ commitHash: 'def456', filePath: 'src/file.ts' });
   });
 });

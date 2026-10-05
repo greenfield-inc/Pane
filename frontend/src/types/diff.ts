@@ -19,6 +19,16 @@ export interface ExecutionDiff {
   history_limit_reached?: boolean;
 }
 
+export interface FileDiff {
+  path: string;
+  oldPath: string;
+  type: 'added' | 'deleted' | 'modified' | 'renamed';
+  isBinary: boolean;
+  additions: number;
+  deletions: number;
+  rawDiff: string;
+}
+
 export interface CombinedDiffViewProps {
   sessionId: string;
   isGitOperationRunning?: boolean;

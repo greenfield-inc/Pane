@@ -29,6 +29,7 @@ import { registerPaneChatHandlers } from './paneChat';
 import { registerUsageHandlers } from './usage';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
+import { registerPullRequestHandlers } from './pullRequest';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerPermissionHandlers } from './permissions';
 import { registerAgentUsageHandlers } from './agentUsage';
@@ -108,6 +109,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  registerPullRequestHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);
 
