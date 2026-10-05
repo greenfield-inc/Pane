@@ -67,6 +67,23 @@ describe('findModelPrice', () => {
     expect(price?.outputPerMTok).toBe(25);
   });
 
+  it('prices Cursor first-party models ahead of a shorter OpenRouter grok id', () => {
+    setLivePrices(
+      [{ model: 'grok-4', inputPerMTok: 9, outputPerMTok: 9, cacheReadPerMTok: 9, cacheWritePerMTok: 9 }],
+      'OpenRouter · 2026-10-03',
+    );
+
+    expect(findModelPrice('grok-4.7')).toMatchObject({ model: 'grok-4.7', inputPerMTok: 2, outputPerMTok: 6 });
+    expect(findModelPrice('composer-2.5')).toMatchObject({ model: 'composer-2.5', inputPerMTok: 0.5, outputPerMTok: 2.5 });
+    expect(findModelPrice('composer-2.5-fast')?.outputPerMTok).toBe(15);
+    expect(findModelPrice('grok-4.5-fast')?.outputPerMTok).toBe(18);
+    expect(findModelPrice('auto')).toBeNull();
+  });
+
+  it('prices a Cursor-reported OpenRouter model from the bundled table', () => {
+    expect(findModelPrice('gemini-3.5-flash')).toMatchObject({ inputPerMTok: 1.5, outputPerMTok: 9 });
+  });
+
   it('falls back to bundled when the model is not in live prices', () => {
     setLivePrices(
       [{ model: 'some-other-model', inputPerMTok: 1, outputPerMTok: 2, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1 }],

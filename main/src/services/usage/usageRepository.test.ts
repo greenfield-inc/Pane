@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { UsageRepository } from './usageRepository';
-import type { UsageRateLimitSample } from '../../../../shared/types/usage';
+import type { UsageEvent, UsageRateLimitSample } from '../../../../shared/types/usage';
+import { CURSOR_USAGE_SOURCE } from './cursorUsage';
 
 const HOUR_MS = 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 7, 26, 12, 0, 0);
@@ -186,5 +187,93 @@ describe('UsageRepository.getRateLimits', () => {
 
     const limits = repo.getRateLimits(NOW);
     expect(limits).toHaveLength(2);
+  });
+});
+
+describe('UsageRepository.replaceProviderWindow', () => {
+  function event(id: string, timestampMs: number): UsageEvent {
+    return {
+      provider: 'cursor',
+      timestampMs,
+      model: 'composer-2.5',
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      agentSessionId: 'chat-1',
+      messageId: id,
+      cwd: '/repo',
+    };
+  }
+
+  it('replaces Cursor rows inside the window and leaves older rows', () => {
+    repo.replaceProviderWindow({
+      sourcePath: CURSOR_USAGE_SOURCE,
+      provider: 'cursor',
+      fromMs: NOW - 2 * HOUR_MS,
+      toMs: NOW,
+      events: [event('old-in-window', NOW - HOUR_MS), event('also-in-window', NOW - 30 * 60_000)],
+      limits: [],
+      nowMs: NOW,
+      parserVersion: 4,
+    });
+    db.prepare(`
+      INSERT INTO usage_events (
+        id, provider, timestamp_ms, model, input_tokens, output_tokens,
+        cache_read_tokens, cache_creation_tokens, agent_session_id, cwd, source_path
+      ) VALUES ('outside', 'cursor', ?, 'composer-2.5', 1, 1, 0, 0, 'chat-1', '/repo', ?)
+    `).run(NOW - 10 * HOUR_MS, CURSOR_USAGE_SOURCE);
+
+    repo.replaceProviderWindow({
+      sourcePath: CURSOR_USAGE_SOURCE,
+      provider: 'cursor',
+      fromMs: NOW - 2 * HOUR_MS,
+      toMs: NOW,
+      events: [event('fresh', NOW - 10 * 60_000)],
+      limits: [],
+      nowMs: NOW,
+      parserVersion: 4,
+    });
+
+    // SAFETY: SELECT id returns the usage_events primary key.
+    const rows = db.prepare('SELECT id FROM usage_events ORDER BY timestamp_ms').all() as Array<{ id: string }>;
+    expect(rows.map(row => row.id)).toEqual(['outside', 'cursor:fresh']);
+    expect(repo.getFileCursor(CURSOR_USAGE_SOURCE)?.provider).toBe('cursor');
+  });
+
+  it('drops Cursor rows whose chat Pane no longer has', () => {
+    repo.replaceProviderWindow({
+      sourcePath: CURSOR_USAGE_SOURCE,
+      provider: 'cursor',
+      fromMs: NOW - HOUR_MS,
+      toMs: NOW,
+      events: [event('kept', NOW - 10 * 60_000)],
+      limits: [],
+      nowMs: NOW,
+      parserVersion: 4,
+      keepSessionIds: ['chat-1'],
+    });
+    db.prepare(`
+      INSERT INTO usage_events (
+        id, provider, timestamp_ms, model, input_tokens, output_tokens,
+        cache_read_tokens, cache_creation_tokens, agent_session_id, cwd, source_path
+      ) VALUES ('gone', 'cursor', ?, 'composer-2.5', 1, 1, 0, 0, 'other-chat', '/repo', ?)
+    `).run(NOW - 10 * HOUR_MS, CURSOR_USAGE_SOURCE);
+
+    repo.replaceProviderWindow({
+      sourcePath: CURSOR_USAGE_SOURCE,
+      provider: 'cursor',
+      fromMs: NOW - HOUR_MS,
+      toMs: NOW,
+      events: [event('kept', NOW - 10 * 60_000)],
+      limits: [],
+      nowMs: NOW,
+      parserVersion: 4,
+      keepSessionIds: ['chat-1'],
+    });
+
+    // SAFETY: SELECT id returns the usage_events primary key.
+    const rows = db.prepare('SELECT id FROM usage_events ORDER BY id').all() as Array<{ id: string }>;
+    expect(rows.map(row => row.id)).toEqual(['cursor:kept']);
   });
 });

@@ -7,6 +7,7 @@ import {
   type UsageByPaneReport,
   type UsageByModel,
   type UsageByProject,
+  usageProviderFrom,
   type UsageProvider,
   type UsageReportRequest,
   type UsageTotals,
@@ -135,7 +136,7 @@ function foldPaneSlice(rows: TokenRow[]) {
   const byModel = rows
     .map(row => ({
       model: row.model,
-      provider: row.provider === 'codex' ? 'codex' as const : 'claude' as const,
+      provider: usageProviderFrom(row.provider),
       ...foldTotals([row]),
     }))
     .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd);
@@ -194,7 +195,7 @@ export class UsageAggregator {
 
     return rows.map(row => ({
       model: row.model,
-      provider: row.provider === 'codex' ? 'codex' : 'claude',
+      provider: usageProviderFrom(row.provider),
       ...foldTotals([row]),
     }));
   }

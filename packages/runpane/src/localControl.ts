@@ -382,7 +382,7 @@ interface UsageTotalsResult {
 
 interface UsageByModelResult extends UsageTotalsResult {
   model: string;
-  provider: 'claude' | 'codex';
+  provider: 'claude' | 'codex' | 'cursor';
 }
 
 interface PaneCostSliceResult extends UsageTotalsResult {
@@ -1294,7 +1294,7 @@ const usageTotalsResultSchema: BoundarySchema<UsageTotalsResult> = boundary.obje
 });
 const usageByModelResultSchema: BoundarySchema<UsageByModelResult> = boundary.object({
   model: boundary.string,
-  provider: boundary.enumeration('claude', 'codex'),
+  provider: boundary.enumeration('claude', 'codex', 'cursor'),
   inputTokens: boundary.number,
   outputTokens: boundary.number,
   cacheReadTokens: boundary.number,

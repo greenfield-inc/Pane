@@ -3,6 +3,7 @@ import type { UsageProvider, UsageRateLimitSample } from '../../../../shared/typ
 const PROVIDER_META = {
   claude: { label: 'Anthropic' },
   codex: { label: 'OpenAI' },
+  cursor: { label: 'Cursor' },
 } satisfies Record<UsageProvider, { label: string }>;
 
 function formatWindow(minutes: number): string {

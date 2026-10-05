@@ -12,6 +12,8 @@ interface AgentExecutableLookup {
 
 const AGENT_EXECUTABLES: AgentExecutableLookup = {
   'cursor-agent': 'cursor',
+  // Cursor's installer exposes the same CLI as `agent`.
+  agent: 'cursor',
   claude: 'claude',
   codex: 'codex',
 };
