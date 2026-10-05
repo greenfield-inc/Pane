@@ -318,6 +318,23 @@ export interface RemoteInvokeRequest {
   clientLabel?: string;
 }
 
+export interface RemoteInvokeSuccessPayload<Result = JsonValue | undefined> {
+  ok: true;
+  result?: Result;
+}
+
+export interface RemoteInvokeErrorPayload {
+  ok: false;
+  error: {
+    message: string;
+    code?: string;
+  };
+}
+
+export type RemoteInvokeResponsePayload<Result = JsonValue | undefined> =
+  | RemoteInvokeSuccessPayload<Result>
+  | RemoteInvokeErrorPayload;
+
 export interface RemoteDaemonHeartbeatPayload {
   timestamp: string;
 }
@@ -332,6 +349,20 @@ const remoteHeartbeatPayloadSchema: BoundarySchema<RemoteDaemonHeartbeatPayload>
   timestamp: boundary.nonEmptyString,
 });
 
+export const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
+  boundary.object({
+    ok: boundary.literal(true),
+    result: boundary.optional(boundary.json),
+  }),
+  boundary.object({
+    ok: boundary.literal(false),
+    error: boundary.object({
+      message: boundary.string,
+      code: boundary.optional(boundary.string),
+    }),
+  }),
+);
+
 const remoteDaemonEventEnvelopeSchema = boundary.object({
   channel: boundary.string,
   args: boundary.array(boundary.json),
@@ -340,6 +371,10 @@ const remoteDaemonEventEnvelopeSchema = boundary.object({
 
 export function decodeRemoteHeartbeatPayload<Value>(value: Value): RemoteDaemonHeartbeatPayload {
   return decodeBoundary(value, remoteHeartbeatPayloadSchema);
+}
+
+export function decodeRemoteInvokeResponsePayload<Value>(value: Value): RemoteInvokeResponsePayload {
+  return decodeBoundary(value, remoteInvokeResponseSchema);
 }
 
 export function decodeRemoteDaemonEventEnvelope<Value>(value: Value): RemoteDaemonEventEnvelope {

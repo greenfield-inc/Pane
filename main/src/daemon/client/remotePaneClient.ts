@@ -12,6 +12,7 @@ import { isPaneDaemonEventChannel } from '../server';
 import {
   createDefaultRemotePaneConnectionState,
   normalizeRemoteDaemonConfig,
+  remoteInvokeResponseSchema,
   type RemoteDaemonHeartbeatPayload,
   type RemotePaneConnectionProfile,
   type RemotePaneConnectionState,
@@ -46,21 +47,6 @@ interface RemotePaneClientConnectOptions {
   retryOnInitialFailure?: boolean;
 }
 
-interface RemoteInvokeSuccessPayload {
-  ok: true;
-  result?: JsonValue;
-}
-
-interface RemoteInvokeErrorPayload {
-  ok: false;
-  error: {
-    message: string;
-    code?: string;
-  };
-}
-
-type RemoteInvokeResponsePayload = RemoteInvokeSuccessPayload | RemoteInvokeErrorPayload;
-
 interface JsonResponse {
   statusCode: number;
   body: string;
@@ -72,19 +58,6 @@ interface RemoteReadyEventPayload {
   timestamp: string;
 }
 
-const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
-  boundary.object({
-    ok: boundary.literal(true),
-    result: boundary.optional(boundary.json),
-  }),
-  boundary.object({
-    ok: boundary.literal(false),
-    error: boundary.object({
-      message: boundary.string,
-      code: boundary.optional(boundary.string),
-    }),
-  }),
-);
 const remoteErrorResponseSchema = boundary.object({
   error: boundary.object({ message: boundary.string }),
 });
