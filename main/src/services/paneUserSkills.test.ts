@@ -31,6 +31,19 @@ describe('Pane user skills', () => {
     await expect(fs.stat(skillFile(item))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('installs and removes the computer-use skill without touching the agents skill', async () => {
+    const item = await target('Claude Code');
+    const computerUseFile = path.join(item.skillsRoot, 'pane-computer-use', 'SKILL.md');
+    await syncPaneUserSkills([item], true);
+    await syncPaneUserSkills([item], true, 'pane-computer-use');
+    expect(await fs.readFile(computerUseFile, 'utf8')).toContain('name: pane-computer-use\n');
+
+    await syncPaneUserSkills([item], false, 'pane-computer-use');
+
+    await expect(fs.stat(computerUseFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readFile(skillFile(item), 'utf8')).toContain('name: pane-manage-and-message-agents\n');
+  });
+
   it('leaves a hand-added skill alone when enabled and disabled', async () => {
     const item = await target('Codex');
     await fs.mkdir(path.dirname(skillFile(item)), { recursive: true });

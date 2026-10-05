@@ -1258,6 +1258,32 @@
         "lockListResult"
       ],
       "localControl": true
+    },
+    {
+      "name": "computer-use status",
+      "summary": "Show whether computer use is on for this machine and whether it is ready.",
+      "usage": [
+        "runpane computer-use status [--json] [--pane-dir <path>]"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "computer-use on",
+      "summary": "Turn computer use on for this machine: install the engine, register the Pane MCP server and skill, check permissions, and self-test.",
+      "usage": [
+        "runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "localControl": true
+    },
+    {
+      "name": "computer-use off",
+      "summary": "Turn computer use off for this machine and stop its engine.",
+      "usage": [
+        "runpane computer-use off [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "localControl": true
     }
   ],
   "flags": {
@@ -1648,6 +1674,11 @@
         "name": "--question",
         "value": "<text>",
         "description": "What a blocked worker needs answered; required with --state blocked."
+      },
+      {
+        "name": "--engine",
+        "value": "<auto|cua-driver>",
+        "description": "Computer-use engine for this machine: auto (the Codex runtime when available, else Cua Driver) or cua-driver."
       }
     ],
     "localBoolean": [
@@ -1788,6 +1819,9 @@
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane computer-use status [--json] [--pane-dir <path>]",
+        "  runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]",
+        "  runpane computer-use off [--json] [--pane-dir <path>]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -2879,6 +2913,40 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "computer-use status": [
+        "Usage:",
+        "runpane computer-use status [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "computer-use on": [
+        "Usage:",
+        "runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses the Codex runtime where it works, else Cua Driver.",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "computer-use off": [
+        "Usage:",
+        "runpane computer-use off [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "computer-use": [
+        "Usage:",
+        "  runpane computer-use <status|on|off> [options]",
+        "",
+        "Computer use lets agents see and operate apps on this machine through the Pane js tool.",
+        "It is set per machine, off by default, and only from Pane's Remote Access settings or this command.",
+        "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test.",
+        "`on` refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run. That slows agents down but is no security boundary: a shell without that variable can still turn it on."
       ]
     },
     "pip": {
@@ -2940,6 +3008,9 @@
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane computer-use status [--json] [--pane-dir <path>]",
+        "  runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]",
+        "  runpane computer-use off [--json] [--pane-dir <path>]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -3941,6 +4012,40 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "computer-use status": [
+        "Usage:",
+        "python -m runpane computer-use status [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "computer-use on": [
+        "Usage:",
+        "python -m runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --engine <auto|cua-driver>   Engine for this machine (on). Auto uses the Codex runtime where it works, else Cua Driver.",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "computer-use off": [
+        "Usage:",
+        "python -m runpane computer-use off [--json] [--pane-dir <path>]",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "computer-use": [
+        "Usage:",
+        "  python -m runpane computer-use <status|on|off> [options]",
+        "",
+        "Computer use lets agents see and operate apps on this machine through the Pane js tool.",
+        "It is set per machine, off by default, and only from Pane's Remote Access settings or this command.",
+        "Turning it on installs Cua Driver, registers the Pane MCP server and skill, checks OS permissions, and runs a self-test.",
+        "`on` refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run. That slows agents down but is no security boundary: a shell without that variable can still turn it on."
       ]
     }
   },
@@ -4935,6 +5040,13 @@
         "http://localhost:3000",
         "--tab",
         "--yes",
+        "--json"
+      ],
+      [
+        "computer-use",
+        "on",
+        "--engine",
+        "cua-driver",
         "--json"
       ]
     ],
@@ -13085,6 +13197,84 @@
           "lockListResult"
         ],
         "notes": []
+      },
+      "computer-use status": {
+        "name": "computer-use status",
+        "summary": "Show whether computer use is on for this machine and whether it is ready.",
+        "details": "Prints the machine's status line, such as \"Computer use: Ready · Cua Driver · checked just now\". Use it on headless hosts, where Settings is not available.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane computer-use status --json"
+        ],
+        "notes": []
+      },
+      "computer-use on": {
+        "name": "computer-use on",
+        "summary": "Turn computer use on for this machine: install the engine, register the Pane MCP server and skill, check permissions, and self-test.",
+        "details": "For people setting up a machine, including headless hosts. It waits for the readiness step and prints the resulting status. It refuses inside Pane terminals ($PANE_SESSION_ID set), where agents run; that is a speed bump, not a security boundary. It is not a Pane MCP tool.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--engine",
+            "value": "<auto|cua-driver>",
+            "required": false,
+            "description": "Engine for this machine; defaults to the saved choice, else auto."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane computer-use on --json"
+        ],
+        "notes": []
+      },
+      "computer-use off": {
+        "name": "computer-use off",
+        "summary": "Turn computer use off for this machine and stop its engine.",
+        "details": "Running scripts stop, and later js tool calls are refused until computer use is turned on again.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane computer-use off --json"
+        ],
+        "notes": []
       }
     },
     "managedBlock": [
@@ -13094,7 +13284,9 @@
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
-      "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too."
+      "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.",
+      "",
+      "Computer use: where the user turned it on for a machine, the `pane` MCP server's `js` tool sees and operates desktop apps in the background, for example to QA a desktop app. Load the `pane-computer-use` skill before using it; docs: `runpane docs read --doc docs/COMPUTER_USE.md`."
     ]
   }
 }

@@ -305,6 +305,9 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `computer-use status`: Show whether computer use is on for this machine and whether it is ready.
+- `computer-use on`: Turn computer use on for this machine: install the engine, register the Pane MCP server and skill, check permissions, and self-test.
+- `computer-use off`: Turn computer use off for this machine and stop its engine.
 
 ```bash
 runpane help [command]
@@ -385,6 +388,9 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane computer-use status [--json] [--pane-dir <path>]
+runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]
+runpane computer-use off [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -446,6 +452,8 @@ This repository is used with [Pane](https://runpane.com). Drive it with the CLI 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
 MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = "npx"` and `args = ["--yes", "runpane@latest", "mcp"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.
+
+Computer use: where the user turned it on for a machine, the `pane` MCP server's `js` tool sees and operates desktop apps in the background, for example to QA a desktop app. Load the `pane-computer-use` skill before using it; docs: `runpane docs read --doc docs/COMPUTER_USE.md`.
 ```
 
 ## Wrapper Flags
@@ -527,6 +535,7 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--engine <auto|cua-driver>
 --json
 --wait-ready
 --no-focus

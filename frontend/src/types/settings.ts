@@ -53,6 +53,7 @@ export type SettingsSettingId =
   | 'remote-connections'
   | 'remote-connection-code'
   | 'remote-advanced-host'
+  | 'computer-use'
   | 'remote-paired-connection'
   | 'remote-existing-profile'
   | 'voice-transcription'

@@ -13,6 +13,7 @@ import { helpText, parseRunpaneArgs, type ParsedArgs, type RunpaneCommand } from
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
+import { runComputerUse } from './computerUse';
 import {
   installPaneArtifact,
   launchPaneClient,
@@ -191,6 +192,15 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   },
   'lock list': async (parsed, telemetryContext) => {
     return runLockList(parsed);
+  },
+  'computer-use status': async (parsed, telemetryContext) => {
+    return runComputerUse(parsed, 'status');
+  },
+  'computer-use on': async (parsed, telemetryContext) => {
+    return runComputerUse(parsed, 'on');
+  },
+  'computer-use off': async (parsed, telemetryContext) => {
+    return runComputerUse(parsed, 'off');
   },
   'workspace state': async (parsed, telemetryContext) => {
     return runWorkspaceState(parsed);
