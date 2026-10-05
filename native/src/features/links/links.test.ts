@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { openHref, parseIncomingLink, parsePushTarget, resolveOpenTarget } from './links';
+import { isPushForPane, openHref, parseIncomingLink, parsePushTarget, resolveOpenTarget } from './links';
 
 const work: RemotePaneConnectionProfile = { id: 'Work Mac:http://127.0.0.1:42157:abcd1234', label: 'Work Mac', baseUrl: 'http://127.0.0.1:42157', token: 't', transport: 'http+sse' };
 const home: RemotePaneConnectionProfile = { id: 'Home:https://home.tail.ts.net:efgh5678', label: 'Home', baseUrl: 'https://home.tail.ts.net', token: 't', transport: 'http+sse' };
@@ -46,6 +46,20 @@ describe('parsePushTarget', () => {
 
   it('opens the host when the notification names no pane', () => {
     expect(parsePushTarget({ content: { data: { hostProfileId: work.id } }, trigger: null })).toEqual({ host: work.id });
+  });
+});
+
+describe('isPushForPane', () => {
+  const worker = { trigger: { type: 'push', payload: { hostProfileId: work.id, paneId: 'worker', sessionPaneId: 'session', aps: {} } } };
+
+  it('matches an alert to its own Pane and to the Session it stacks under', () => {
+    expect(isPushForPane(worker, 'worker')).toBe(true);
+    expect(isPushForPane(worker, 'session')).toBe(true);
+    expect(isPushForPane(worker, 'other')).toBe(false);
+  });
+
+  it('ignores notifications that are not from a Pane host', () => {
+    expect(isPushForPane({ content: { data: { paneId: 'worker' } }, trigger: null }, 'worker')).toBe(false);
   });
 });
 

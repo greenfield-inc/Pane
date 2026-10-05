@@ -690,6 +690,7 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  source?: 'user' | 'agent';
 }
 
 interface PanelInputResult {
@@ -2862,6 +2863,7 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
   };
 }
 

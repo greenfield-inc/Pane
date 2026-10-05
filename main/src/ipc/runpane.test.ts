@@ -5,6 +5,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { Project } from '../database/models';
 import type { Session } from '../types/session';
@@ -2130,6 +2131,26 @@ describe('runpane IPC handlers', () => {
         input: 'echo hi\r',
       }),
     );
+  });
+
+  it('arms the phone\'s finished alert only for input a person submitted', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const services = createServices();
+    const registry = createRegistry(services);
+    const arm = vi.spyOn(getMobilePushSender(services.configManager), 'arm');
+    const send = async (channel: string, input: string, source?: 'user' | 'agent') => {
+      arm.mockClear();
+      await registry.invoke(channel, [{ panelId: terminalPanel.id, input, source }]);
+      return arm.mock.calls.length > 0;
+    };
+
+    expect(await send('runpane:panels:submit', 'ship it', 'user')).toBe(true);
+    expect(await send('runpane:panels:submit', 'ship it', 'agent')).toBe(false);
+    expect(await send('runpane:panels:submit', 'ship it')).toBe(false);
+    expect(await send('runpane:panels:input', 'ship it\r', 'user')).toBe(true);
+    expect(await send('runpane:panels:input', 'ship it', 'user')).toBe(false);
+    expect(await send('runpane:panels:input', 'line one\x1b\r', 'user')).toBe(false);
+    expect(await send('runpane:panels:input', 'ship it\r', 'agent')).toBe(false);
   });
 
   it('submits text with a terminal Enter and returns validation guidance', async () => {

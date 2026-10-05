@@ -57,9 +57,14 @@ const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSen
 
 type AttentionKind = 'needs-input' | 'completed';
 
+/** The name a Pane's alert is titled with, and the Pane whose alerts it stacks under. */
+export interface MobileAlertSubject {
+  title: string;
+  groupPaneId: string;
+}
+
 export interface MobilePushSenderOptions {
-  /** The Pane or Session name a panel's alert is titled with. */
-  resolveName?: (paneId: string) => string | undefined;
+  resolveSubject?: (paneId: string) => MobileAlertSubject;
 }
 
 /**
@@ -70,6 +75,8 @@ export class MobilePushSender {
   private mutationQueue: Promise<void> = Promise.resolve();
   /** Panels whose agent visibly worked and has not been reported finished yet. */
   private readonly unreportedWork = new Set<string>();
+  /** Panels a person sent a prompt to whose turn has not been reported finished yet. */
+  private readonly armed = new Set<string>();
   private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -157,6 +164,22 @@ export class MobilePushSender {
     await this.save(configWithRegistrations(config, registrations));
   }
 
+  /**
+   * A person submitted input to this panel, so its next finished turn tells the phone. A finish
+   * still settling from the turn before is theirs to see already, so it is dropped.
+   */
+  arm(panelId: string): void {
+    clearTimeout(this.finishTimers.get(panelId));
+    this.finishTimers.delete(panelId);
+    this.unreportedWork.delete(panelId);
+    this.armed.add(panelId);
+  }
+
+  /** Terminal input a person typed. Enter submits; ESC CR is a newline inside a pasted prompt. */
+  observeInput(panelId: string, data: string): void {
+    if (data.endsWith('\r') && !data.endsWith('\x1b\r')) this.arm(panelId);
+  }
+
   observeStatus(event: PanelAgentStatusEvent): Promise<void> {
     // Plain shells go quiet all the time; only agents tell the phone anything.
     if (!event.agentType) return Promise.resolve();
@@ -172,6 +195,7 @@ export class MobilePushSender {
     clearTimeout(this.finishTimers.get(event.panelId));
     this.finishTimers.delete(event.panelId);
     const ended = event.reason === 'exit' || event.reason === 'destroyed';
+    if (ended) this.armed.delete(event.panelId);
     if (ended || event.state === 'blocked') {
       this.unreportedWork.delete(event.panelId);
       return;
@@ -182,6 +206,8 @@ export class MobilePushSender {
     this.finishTimers.set(event.panelId, setTimeout(() => {
       this.finishTimers.delete(event.panelId);
       this.unreportedWork.delete(event.panelId);
+      // Self-wakes, timers and agent-sent prompts finish silently.
+      if (!this.armed.delete(event.panelId)) return;
       void this.mutate(() => this.notify(event, 'completed')).catch(() => {
         console.warn('[Pane mobile push] Could not send a finished alert');
       });
@@ -225,14 +251,14 @@ export class MobilePushSender {
   }
 
   private async deliver(registration: RemoteMobilePushRegistration, eventId: string, event: PanelAgentStatusEvent, kind: AttentionKind): Promise<void> {
-    const title = this.options.resolveName?.(event.sessionId)?.trim() || 'Pane';
+    const subject: MobileAlertSubject = this.options.resolveSubject?.(event.sessionId) ?? { title: '', groupPaneId: event.sessionId };
+    const title = subject.title.trim() || 'Pane';
     const body = kind === 'completed' ? `${title} needs your attention` : `${title} is blocked`;
-    // One alert per Pane: a newer one replaces the last, and the phone clears them by Pane.
+    // One alert per Pane: a newer one replaces the last. They stack under their Session, and the
+    // phone clears a Session's alerts with its own.
     const collapseId = createHash('sha256').update(event.sessionId).digest('hex');
-    const payload: JsonObject = {
-      eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId,
-      aps: { alert: { title, body }, sound: 'default', 'thread-id': event.sessionId },
-    };
+    const routing = { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId, sessionPaneId: subject.groupPaneId };
+    const payload: JsonObject = { ...routing, aps: { alert: { title, body }, sound: 'default', 'thread-id': subject.groupPaneId } };
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
       if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
@@ -247,7 +273,7 @@ export class MobilePushSender {
       payload: { message: {
         token: registration.token, notification: { title, body },
         android: { notification: { tag: collapseId } },
-        data: { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId },
+        data: routing,
       } },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');

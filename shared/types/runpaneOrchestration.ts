@@ -912,6 +912,8 @@ export interface RunpanePanelScreenResult {
 export interface RunpanePanelInputRequest {
   panelId: string;
   input: string;
+  /** `user` when a person typed it; their next finished turn notifies the phone. */
+  source?: 'user' | 'agent';
 }
 
 /** `runpane report`: a worker's structured hand-back for its panel. */
@@ -978,6 +980,8 @@ export interface RunpanePanelSubmitRequest {
   input: string;
   /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
   asFilePointer?: boolean;
+  /** `user` when a person typed it; their next finished turn notifies the phone. */
+  source?: 'user' | 'agent';
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';

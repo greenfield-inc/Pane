@@ -512,7 +512,7 @@ export const RUNPANE_CONTRACT = {
       "name": "panels input",
       "summary": "Send input bytes to a terminal panel.",
       "usage": [
-        "runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json] [--pane-dir <path>]"
+        "runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) [--source user|agent] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -529,7 +529,7 @@ export const RUNPANE_CONTRACT = {
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--source user|agent] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -7495,6 +7495,13 @@ export const RUNPANE_CONTRACT = {
         },
         "input": {
           "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
         }
       },
       "additionalProperties": false
@@ -7789,6 +7796,13 @@ export const RUNPANE_CONTRACT = {
         },
         "asFilePointer": {
           "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
         }
       },
       "additionalProperties": false

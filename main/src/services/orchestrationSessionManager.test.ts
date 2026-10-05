@@ -416,6 +416,19 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow('The launch command runs claude, but the Session agent is codex');
   });
 
+  it('titles phone alerts by Session and groups workers under their Session', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Launch' });
+    const worker = paneFixture(fixture, 'worker', { name: 'api-fix' });
+    paneFixture(fixture, 'loose', { name: 'docs' });
+    await fixture.manager.associate({ sessionId: created.session.id }, { paneId: worker.id });
+    const sessionPane = created.session.internalSessionId;
+
+    expect(fixture.manager.alertSubject(sessionPane)).toEqual({ title: 'Launch', groupPaneId: sessionPane });
+    expect(fixture.manager.alertSubject('worker')).toEqual({ title: 'Launch › api-fix', groupPaneId: sessionPane });
+    expect(fixture.manager.alertSubject('loose')).toEqual({ title: 'docs', groupPaneId: 'loose' });
+  });
+
   it('unpins first-time Session children and preserves later manual pins', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Coordinator' });

@@ -9,6 +9,7 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import { getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
 import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type PanelLayoutNode } from '../../../shared/types/panels';
 import type { AppServices } from './types';
@@ -745,6 +746,8 @@ export function registerPanelHandlers(
   
   // Terminal-specific handlers (internal use)
   commandRegistry.register('terminal:input', async (panelId: string, data: string) => {
+    // Desktop, phone and remote web all type through here, so it is always a person.
+    getMobilePushSender(services.configManager).observeInput(panelId, data);
     return terminalPanelManager.writeToTerminal(panelId, data);
   });
   

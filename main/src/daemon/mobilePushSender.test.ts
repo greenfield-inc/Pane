@@ -100,6 +100,7 @@ describe('MobilePushSender', () => {
     await sender.register('client-1', registration);
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
+    sender.arm('panel-1');
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working', agentType: 'claude' });
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'idle', reason: 'done', agentType: 'claude', workedVisibly: true });
     await vi.advanceTimersByTimeAsync(STABLE_IDLE_MS);
@@ -110,6 +111,7 @@ describe('MobilePushSender', () => {
     expect(manager.config.host.mobilePush.registrations[0]?.recentEventIds).toHaveLength(2);
 
     for (const reason of ['exit', 'destroyed']) {
+      sender.arm('panel-1');
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working', agentType: 'claude' });
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'idle', reason, agentType: 'claude', workedVisibly: true });
       await vi.advanceTimersByTimeAsync(STABLE_IDLE_MS);
@@ -131,7 +133,7 @@ describe('MobilePushSender', () => {
   });
 
   describe('attention timing and copy', () => {
-    async function apnsHost(names: Record<string, string> = { 'pane-1': 'api-fix' }) {
+    async function apnsHost(names: Record<string, string> = { 'pane-1': 'api-fix' }, groups: Record<string, string> = {}) {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const directory = await mkdtemp(path.join(os.tmpdir(), 'pane-mobile-push-'));
       temporaryDirectories.push(directory);
@@ -145,7 +147,9 @@ describe('MobilePushSender', () => {
         apns: async request => { requests.push(request); return { status: 200, body: '' }; },
         fcm: async () => ({ status: 200, body: '' }),
       };
-      const sender = new MobilePushSender(new ConfigManagerStub(config), transport, { resolveName: paneId => names[paneId] });
+      const sender = new MobilePushSender(new ConfigManagerStub(config), transport, {
+        resolveSubject: paneId => ({ title: names[paneId] ?? '', groupPaneId: groups[paneId] ?? paneId }),
+      });
       await sender.register('client-1', { platform: 'ios', token: 'token', installationId: 'install-1', hostProfileId: 'profile-1' });
       const alerts = () => requests.map(request => request.payload.aps);
       return { sender, requests, alerts };
@@ -157,6 +161,7 @@ describe('MobilePushSender', () => {
 
     it('says a pane finished only after it stays idle, and names the pane', async () => {
       const { sender, alerts } = await apnsHost();
+      sender.arm('panel-pane-1');
       await sender.observeStatus(event('working'));
       await sender.observeStatus(event('idle', { workedVisibly: true }));
       await vi.advanceTimersByTimeAsync(STABLE_IDLE_MS - 1);
@@ -167,6 +172,7 @@ describe('MobilePushSender', () => {
 
     it('waits out a pause inside a turn and sends one alert at the end', async () => {
       const { sender, alerts } = await apnsHost();
+      sender.arm('panel-pane-1');
       await sender.observeStatus(event('working'));
       await sender.observeStatus(event('idle', { workedVisibly: true }));
       await vi.advanceTimersByTimeAsync(3_500);
@@ -180,6 +186,7 @@ describe('MobilePushSender', () => {
 
     it('still reports a finished turn when typing or a redraw follows it', async () => {
       const { sender, alerts } = await apnsHost();
+      sender.arm('panel-pane-1');
       await sender.observeStatus(event('working'));
       await sender.observeStatus(event('idle', { workedVisibly: true }));
       await vi.advanceTimersByTimeAsync(2_000);
@@ -191,6 +198,7 @@ describe('MobilePushSender', () => {
 
     it('never says finished for output the agent did not visibly work on', async () => {
       const { sender, alerts } = await apnsHost();
+      sender.arm('panel-pane-1');
       for (let index = 0; index < 3; index += 1) {
         await sender.observeStatus(event('working'));
         await sender.observeStatus(event('idle', { workedVisibly: false }));
@@ -199,7 +207,7 @@ describe('MobilePushSender', () => {
       expect(alerts()).toEqual([]);
     });
 
-    it('says a pane is blocked at once and drops its pending finished alert', async () => {
+    it('says a pane is blocked at once, prompted or not, and drops its pending finished alert', async () => {
       const { sender, alerts } = await apnsHost();
       await sender.observeStatus(event('working'));
       await sender.observeStatus(event('idle', { workedVisibly: true }));
@@ -229,6 +237,44 @@ describe('MobilePushSender', () => {
       expect(other?.collapseId).not.toBe(first?.collapseId);
       expect(Buffer.byteLength(first?.collapseId ?? '')).toBeLessThanOrEqual(64);
       expect(requests.map(request => request.payload.aps)).toEqual(['pane-1', 'pane-1', 'pane-2'].map(thread => expect.objectContaining({ 'thread-id': thread })));
+    });
+
+    it('says finished only for a turn a person prompted, once', async () => {
+      const { sender, alerts } = await apnsHost();
+      const turn = async () => {
+        await sender.observeStatus(event('working'));
+        await sender.observeStatus(event('idle', { workedVisibly: true }));
+        await vi.advanceTimersByTimeAsync(STABLE_IDLE_MS);
+      };
+      await turn();
+      expect(alerts()).toEqual([]);
+      sender.arm('panel-pane-1');
+      await turn();
+      await turn();
+      expect(alerts()).toEqual([alert('api-fix', 'api-fix needs your attention')]);
+    });
+
+    it('lets a prompt replace a finish that is still settling', async () => {
+      const { sender, alerts } = await apnsHost();
+      await sender.observeStatus(event('working'));
+      await sender.observeStatus(event('idle', { workedVisibly: true }));
+      await vi.advanceTimersByTimeAsync(2_000);
+      sender.arm('panel-pane-1');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(alerts()).toEqual([]);
+      await sender.observeStatus(event('working'));
+      await sender.observeStatus(event('idle', { workedVisibly: true }));
+      await vi.advanceTimersByTimeAsync(STABLE_IDLE_MS);
+      expect(alerts()).toHaveLength(1);
+    });
+
+    it('stacks a worker under its Session and still replaces per Pane', async () => {
+      const { sender, requests } = await apnsHost({ 'pane-1': 'Launch › api-fix', 'pane-2': 'Launch › docs' }, { 'pane-1': 'session-pane', 'pane-2': 'session-pane' });
+      for (const sessionId of ['pane-1', 'pane-2']) await sender.observeStatus(event('blocked', { sessionId }));
+      const [first, second] = requests;
+      expect(first?.payload).toMatchObject({ paneId: 'pane-1', sessionPaneId: 'session-pane', aps: { 'thread-id': 'session-pane', alert: { title: 'Launch › api-fix', body: 'Launch › api-fix is blocked' } } });
+      expect(second?.payload).toMatchObject({ paneId: 'pane-2', sessionPaneId: 'session-pane', aps: { 'thread-id': 'session-pane' } });
+      expect(second?.collapseId).not.toBe(first?.collapseId);
     });
 
     it('falls back to "Pane" when the name is unknown', async () => {

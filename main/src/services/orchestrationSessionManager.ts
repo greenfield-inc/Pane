@@ -57,6 +57,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
+import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
@@ -461,14 +462,25 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * What a phone alert about a Pane is titled and grouped under: a Session's own pane is the
+   * Session, a worker is "Session › Pane", and any other Pane stands alone. `groupPaneId` is the
+   * Session's workspace pane, which the phone opens a Session by. Reads the in-memory store, like
+   * `workspaceMembership`.
+   */
+  alertSubject(paneId: string): MobileAlertSubject {
+    const sessions = this.store.read().sessions;
+    const own = sessions.find(session => session.internalSessionId === paneId);
+    if (own) return { title: own.name, groupPaneId: paneId };
+    const paneName = this.sessionManager.getSession(paneId)?.name ?? '';
+    const parent = sessions.find(session => session.associations.some(association => association.paneId === paneId));
+    if (!parent) return { title: paneName, groupPaneId: paneId };
+    return { title: paneName ? `${parent.name} › ${paneName}` : parent.name, groupPaneId: parent.internalSessionId };
+  }
+
+  /**
    * The Session's current members, for a Session-scoped `runpane watch`. The journal calls this on
    * every read, so it reads the in-memory store without taking the Session lock.
    */
-  /** The Session that owns a hidden workspace pane, by that pane's id. Reads the in-memory store, like `workspaceMembership`. */
-  nameForWorkspace(paneId: string): string | undefined {
-    return this.store.read().sessions.find(session => session.internalSessionId === paneId)?.name;
-  }
-
   workspaceMembership(sessionId: string): WorkspaceSessionMembership | undefined {
     const record = this.store.read().sessions.find(session => session.id === sessionId);
     if (!record) return undefined;

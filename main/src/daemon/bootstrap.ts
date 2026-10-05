@@ -243,10 +243,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     // of silently replacing the user's metadata.
     logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
   });
-  // Phone alerts are titled with the Session's name for its orchestrator, else the Pane's.
-  getMobilePushSender(configManager, {
-    resolveName: paneId => orchestrationSessionManager.nameForWorkspace(paneId) ?? sessionManager.getSession(paneId)?.name,
-  });
+  getMobilePushSender(configManager, { resolveSubject: paneId => orchestrationSessionManager.alertSubject(paneId) });
   const taskQueue = new TaskQueue({
     sessionManager,
     worktreeManager,

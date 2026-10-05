@@ -98,7 +98,7 @@ Tapping a notification opens `/open?host=…&paneId=…&panelId=…`. That scree
 cat > /tmp/pane-push.apns <<'JSON'
 { "Simulator Target Bundle": "com.dcouple.pane.mobile",
   "aps": { "alert": { "title": "api-fix", "body": "api-fix is blocked" }, "sound": "default", "thread-id": "<session id>" },
-  "eventId": "pane:demo:1", "hostProfileId": "<profile id or base URL>", "paneId": "<session id>", "panelId": "<panel id>" }
+  "eventId": "pane:demo:1", "hostProfileId": "<profile id or base URL>", "paneId": "<session id>", "panelId": "<panel id>", "sessionPaneId": "<session id>" }
 JSON
 xcrun simctl push <simulator-udid> com.dcouple.pane.mobile /tmp/pane-push.apns
 xcrun simctl openurl <simulator-udid> 'pane://pane/<session id>?host=http%3A%2F%2F127.0.0.1%3A42157'

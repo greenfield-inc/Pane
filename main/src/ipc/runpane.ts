@@ -162,6 +162,7 @@ import type {
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getAppDirectory } from '../utils/appDirectory';
 import { collectRemoteDaemonExecutableHealthAsync } from '../daemon/remoteDaemonExecutableHealth';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import {
   WorkspaceJournal,
   workspaceFilterKey,
@@ -1174,6 +1175,7 @@ export function registerRunpaneHandlers(
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
 
+      if (normalized.source === 'user') getMobilePushSender(configManager).observeInput(panel.id, normalized.input);
       terminalPanelManager.writeToTerminal(panel.id, normalized.input);
 
       return {
@@ -1211,6 +1213,7 @@ export function registerRunpaneHandlers(
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
+      if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
 
       let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
       const promptFile = normalized.asFilePointer
@@ -3779,6 +3782,7 @@ function parsePanelInputRequest(value: PaneCommandValue): RunpanePanelInputReque
   return {
     panelId,
     input,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
 
@@ -3846,6 +3850,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     panelId,
     input,
     asFilePointer: optionalBoolean(value.asFilePointer),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
 
