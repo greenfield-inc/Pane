@@ -10,6 +10,10 @@ The intended flow is:
 
 Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
 
+## Workspaces or pairing codes?
+
+To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines. Use the remote daemon and pairing codes in this guide for browsers and phones, for the desktop app's remote mode, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
+
 ## Guided quick start
 
 On the host machine, run `npx --yes runpane@latest` in an interactive terminal.

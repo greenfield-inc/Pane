@@ -133,7 +133,9 @@ export class PaneWorkspaceHostController {
         if (wasServed) await this.unserve();
         this.status = {
           state: 'off',
-          reason: this.defaultEnabled ? 'turned off on this machine' : 'off for this Pane data directory',
+          reason: this.configManager.getConfig().workspaces?.enabled === false
+            ? 'turned off with runpane workspace disable'
+            : 'off by default for a Pane data directory other than ~/.pane',
           fix: 'runpane workspace enable',
         };
         return;

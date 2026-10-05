@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
-import { invokeDaemon, invokeRemoteDaemon, type RemoteDaemonTarget } from './daemonClient';
+import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, type RemoteDaemonTarget } from './daemonClient';
 
 /** Tailnet port where each joined machine's Pane serves workspaces. */
 const WORKSPACE_HTTPS_PORT = 8443;
@@ -194,6 +194,9 @@ async function probeMachine(machine: TailnetMachine): Promise<{ info?: MachineIn
   try {
     return { info: await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
+    if (error instanceof PaneDaemonClientError && error.code === 'ERR_WORKSPACE_UNREACHABLE') {
+      return { error: 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale' };
+    }
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -208,14 +211,17 @@ async function requireTailnet(): Promise<Extract<Tailnet, { ok: true }>> {
 async function routePath(value: string, verb: string): Promise<TailnetMachine> {
   const tailnet = await requireTailnet();
   const candidates = machinesForPath(value, tailnet.machines).filter((machine) => machine.online);
-  const joined = (await Promise.all(candidates.map(async (machine) => ((await probeMachine(machine)).info ? machine : null))))
-    .filter((machine): machine is TailnetMachine => machine !== null);
+  const probes = await Promise.all(candidates.map(async (machine) => ({ machine, probe: await probeMachine(machine) })));
+  const joined = probes.filter(({ probe }) => probe.info).map(({ machine }) => machine);
   if (joined.length === 1) return joined[0];
   const names = (joined.length ? joined : candidates).map((machine) => machine.name);
   if (names.length > 1) {
     throw new Error(`"${value}" could be on ${names.join(', ')}. Name one: runpane workspace <machine> ${verb} ${quoteArg(value)}`);
   }
-  throw new Error(`"${value}" is not on this machine, and none of your joined machines fits it. Machines: ${describeMachines(tailnet.machines) || 'none'}. Check with: runpane workspace list`);
+  if (probes.length === 1) {
+    throw new Error(`"${value}" is not on this machine. It fits ${probes[0].machine.name}, but ${probes[0].probe.error}.`);
+  }
+  throw new Error(`"${value}" is not on this machine, and none of your online machines fits it. Machines: ${describeMachines(tailnet.machines) || 'none'}.`);
 }
 
 // ---------------------------------------------------------------- commands

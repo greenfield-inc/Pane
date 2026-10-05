@@ -36,7 +36,10 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
 - **Daemon** (`main/src/daemon`) serves the command registry over a local
   socket (a `pane-daemon-*` directory under the system temp directory, or a
   named pipe on Windows). The `runpane` CLI talks to it. For Remote Pane it also
-  serves HTTP and SSE (`httpApiServer.ts`). `pnpm daemon:headless` runs it
+  serves HTTP and SSE (`httpApiServer.ts`), and the same server, behind
+  `tailscale serve` on port 8443, gives your other machines `runpane workspace`
+  (`workspaceHost.ts`, [RUNPANE_WORKSPACES.md](RUNPANE_WORKSPACES.md)).
+  `pnpm daemon:headless` runs it
   without a window. Remote setup and lifecycle:
   [SELF_HOSTED_REMOTE_DAEMON.md](SELF_HOSTED_REMOTE_DAEMON.md) and
   [remote-daemon-lifecycle.md](remote-daemon-lifecycle.md).

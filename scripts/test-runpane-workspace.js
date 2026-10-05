@@ -58,7 +58,7 @@ test('an ambiguous or unknown name lists only the owner\'s own machines', posixO
 
 test('a path that cannot exist on this machine routes to the online machines whose OS fits it', posixOnly, () => {
   const windowsOnly = runpane('workspace', 'read', 'C:\\Users\\khaza\\.pane\\plans\\a\\index.html');
-  assert.match(windowsOnly.output, /none of your joined machines fits it/);
+  assert.match(windowsOnly.output, /is not on this machine\. It fits parsa-devbox, but Pane is not answering there/);
   const windowsOrLinux = runpane('workspace', 'read', '/mnt/c/Users/khaza/notes.md');
   assert.match(windowsOrLinux.output, /could be on build-server, parsa-devbox\. Name one: runpane workspace <machine> read/);
 });
