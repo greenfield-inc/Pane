@@ -169,6 +169,7 @@ export interface AppConfig {
   terminalFontSize?: number;
   // Leaderboard opt-in and cached state
   leaderboard?: LeaderboardConfig;
+  computerUse?: { enabled?: boolean; engine?: 'auto' | 'cua-driver' };
 }
 
 export interface UpdateConfigRequest {

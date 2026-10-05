@@ -27,6 +27,7 @@ import { OrchestrationSessionManager } from '../services/orchestrationSessionMan
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
+import { getComputerUseEngine } from '../services/computerUse/activeEngine';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
@@ -439,6 +440,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await spotlightManager.disableAll();
       await sessionManager.cleanup();
       await runCommandManager.stopAllRunCommands();
+      // The engine helper is its own process (on macOS, launched by LaunchServices) and outlives the daemon unless stopped.
+      await getComputerUseEngine().stop();
       gitStatusManager.stopPolling();
       sessionPrMonitor.stop();
       configManager.stopWatching();
