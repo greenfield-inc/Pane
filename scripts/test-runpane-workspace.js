@@ -31,6 +31,8 @@ fs.writeFileSync(path.join(bin, 'tailscale'), `#!/bin/sh\ncat <<'EOF'\n${JSON.st
 
 function runpane(...args) {
   const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: bin,
+    input: 'brief\n',
     encoding: 'utf8',
     timeout: 20_000,
     env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, PANE_DIR: bin, RUNPANE_TELEMETRY_DISABLED: '1' },
@@ -59,8 +61,17 @@ test('an ambiguous or unknown name lists only the owner\'s own machines', posixO
 test('a path that cannot exist on this machine routes to the online machines whose OS fits it', posixOnly, () => {
   const windowsOnly = runpane('workspace', 'read', 'C:\\Users\\khaza\\.pane\\plans\\a\\index.html');
   assert.match(windowsOnly.output, /is not on this machine\. It fits parsa-devbox, but Pane is not answering there/);
-  const windowsOrLinux = runpane('workspace', 'read', '/mnt/c/Users/khaza/notes.md');
-  assert.match(windowsOrLinux.output, /could be on build-server, parsa-devbox\. Name one: runpane workspace <machine> read/);
+  // /mnt/c is a real path shape on Linux, so it routes only from a Mac.
+  if (process.platform === 'darwin') {
+    const windowsOrLinux = runpane('workspace', 'read', '/mnt/c/Users/khaza/notes.md');
+    assert.match(windowsOrLinux.output, /could be on build-server, parsa-devbox\. Name one: runpane workspace <machine> read/);
+  }
+});
+
+test('writing a Windows path from a Mac or Linux routes it instead of writing a local file', posixOnly, () => {
+  const result = runpane('workspace', 'write', 'C:\\Users\\khaza\\brief.md');
+  assert.match(result.output, /It fits parsa-devbox, but Pane is not answering there/);
+  assert.deepEqual(fs.readdirSync(bin).filter((name) => name.includes('brief')), []);
 });
 
 test('a missing file shaped like another machine\'s path names that machine and the command', posixOnly, () => {

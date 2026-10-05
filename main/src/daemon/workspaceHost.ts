@@ -3,7 +3,14 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
 import type { PaneCommandRegistry } from './commandRegistry';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
-import { resolveTailscaleCommandAsync, type ResolvedCommand } from './tailscaleSetup';
+import { randomBytes } from 'crypto';
+import type { PaneEventSink } from '../core/eventSink';
+import {
+  isTailscaleServeDisabled,
+  isTailscaleServePermissionDenied,
+  resolveTailscaleCommandAsync,
+  type ResolvedCommand,
+} from './tailscaleSetup';
 
 /** Tailnet port for workspaces; the remote daemon keeps 443. */
 const WORKSPACE_HTTPS_PORT = 8443;
@@ -83,6 +90,11 @@ interface WorkspaceConfigProvider {
 export class PaneWorkspaceHostController {
   private server: PaneRemoteHttpApiServer | null = null;
   private servedPort: number | null = null;
+  /** Serve's target path, new each launch; see WorkspaceIdentityOptions.pathSecret. */
+  private readonly pathSecret = randomBytes(24).toString('hex');
+  private readonly eventSink: PaneEventSink = {
+    send: (channel, ...args) => this.server?.getEventSink().send(channel, ...args),
+  };
   private ownerLogin: string | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
   private syncQueue: Promise<void> = Promise.resolve();
@@ -98,6 +110,10 @@ export class PaneWorkspaceHostController {
     private readonly defaultEnabled: boolean,
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
   ) {}
+
+  getEventSink(): PaneEventSink {
+    return this.eventSink;
+  }
 
   getStatus(): WorkspaceHostStatus {
     return this.status;
@@ -121,7 +137,12 @@ export class PaneWorkspaceHostController {
       this.watching = false;
     }
     this.clearRetry();
-    await this.enqueue(() => this.stopServer());
+    await this.enqueue(async () => {
+      const wasServed = this.servedPort !== null;
+      await this.stopServer();
+      // A handler left behind would point tailnet traffic at a closed loopback port.
+      if (wasServed) await this.unserve();
+    });
   }
 
   sync(): Promise<void> {
@@ -158,9 +179,11 @@ export class PaneWorkspaceHostController {
       this.ownerLogin = self.ownerLogin;
       const port = await this.ensureServer();
       if (this.servedPort !== port) {
-        const serve = await this.runServe(tailscale, ['--bg', `--https=${WORKSPACE_HTTPS_PORT}`, `http://127.0.0.1:${port}`]);
+        const target = `http://127.0.0.1:${port}/${this.pathSecret}`;
+        const serve = await this.runServe(tailscale, ['--bg', `--https=${WORKSPACE_HTTPS_PORT}`, target]);
         if (!serve.ok) {
-          this.setOff(`tailscale serve failed: ${firstLine(serve.stderr || serve.stdout)}`, 'Run "runpane doctor" for details, then restart Pane.');
+          const output = `${serve.stderr}\n${serve.stdout}`;
+          this.setOff(`tailscale serve failed: ${firstLine(output)}`, serveFix(output));
           return;
         }
         this.servedPort = port;
@@ -189,7 +212,7 @@ export class PaneWorkspaceHostController {
     const address = this.server?.getAddress();
     if (address) return address.port;
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
-      workspace: { listenPort: 0, ownerLogin: () => this.ownerLogin },
+      workspace: { listenPort: 0, pathSecret: this.pathSecret, ownerLogin: () => this.ownerLogin },
     });
     await server.start();
     this.server = server;
@@ -217,7 +240,7 @@ export class PaneWorkspaceHostController {
   private enqueue(work: () => Promise<void>): Promise<void> {
     const next = this.syncQueue.then(work, work).catch((error) => {
       console.error('[Pane workspaces] Failed to sync workspace host', error);
-      this.status = { state: 'off', reason: error instanceof Error ? error.message : String(error), fix: 'Restart Pane.' };
+      this.setOff(error instanceof Error ? error.message : String(error), 'Pane retries every minute; restart Pane if it persists.');
     });
     this.syncQueue = next;
     return next;
@@ -226,4 +249,16 @@ export class PaneWorkspaceHostController {
 
 function firstLine(text: string): string {
   return text.trim().split(/\r?\n/)[0] ?? '';
+}
+
+/** The one step that fixes a failed `tailscale serve`; Pane retries on its own after it. */
+function serveFix(output: string): string {
+  if (isTailscaleServeDisabled(output)) {
+    const url = /https:\/\/login\.tailscale\.com\/\S+/.exec(output)?.[0];
+    return `Enable Tailscale Serve for your tailnet${url ? ` at ${url}` : ' in the Tailscale admin console'}.`;
+  }
+  if (isTailscaleServePermissionDenied(output)) {
+    return 'Allow Pane to configure Serve: run "sudo tailscale set --operator=$USER" once.';
+  }
+  return 'Run the same tailscale serve command in a terminal to see the full error.';
 }

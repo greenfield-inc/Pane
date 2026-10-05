@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getWSLShellSpawn, validateWSLAvailable, wslMountToWindowsPath } from './wslUtils';
+import { getDefaultWSLDistribution, getWSLShellSpawn, validateWSLAvailable, wslMountToWindowsPath } from './wslUtils';
 
 describe('wslMountToWindowsPath', () => {
   it.each([
@@ -51,5 +51,18 @@ describe('validateWSLAvailable', () => {
   it('reads UTF-8 output when WSL_UTF8 is set', async () => {
     const utf8List = Buffer.from('Ubuntu\nDébian\n', 'utf8');
     await expect(validateWSLAvailable('Débian', fakeWsl(utf8List))).resolves.toBeNull();
+  });
+});
+
+describe('getDefaultWSLDistribution', () => {
+  // What `wsl.exe -l -v` writes: UTF-16LE, the default distribution marked with "*".
+  const verbose = Buffer.from('﻿  NAME      STATE           VERSION\r\n  Debian    Stopped         2\r\n* Ubuntu    Running         2\r\n', 'utf16le');
+
+  it('returns the distribution marked as default', async () => {
+    await expect(getDefaultWSLDistribution(async () => verbose)).resolves.toBe('Ubuntu');
+  });
+
+  it('returns undefined when WSL is missing', async () => {
+    await expect(getDefaultWSLDistribution(async () => { throw new Error('wsl.exe not found'); })).resolves.toBeUndefined();
   });
 });

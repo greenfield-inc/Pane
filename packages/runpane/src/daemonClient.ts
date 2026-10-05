@@ -161,6 +161,9 @@ export async function invokeRemoteDaemon<T>(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new PaneDaemonClientError(`${target.machine} did not answer within ${timeoutMs} ms.`, 'ERR_WORKSPACE_TIMEOUT');
+    }
     const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : String(error);
     throw unreachable(cause);
   }

@@ -772,17 +772,19 @@ describe('workspace identity mode', () => {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
-      workspace: { listenPort: 0, ownerLogin: () => ownerLogin },
+      workspace: { listenPort: 0, pathSecret: 'serve-secret', ownerLogin: () => ownerLogin },
     });
     activeServers.push(server);
     await server.start();
     return server;
   }
   const invoke = { channel: 'runpane:machine:info', args: [] };
+  // Tailscale Serve forwards /invoke to the target path, /serve-secret/invoke.
+  const invokePath = '/serve-secret/invoke';
 
   it('serves the owner\'s own Tailscale login without a pairing token', async () => {
     const server = await startWorkspaceServer('owner@example.com');
-    const response = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'owner@example.com',
     });
     expect(response).toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'devbox' } } });
@@ -790,23 +792,41 @@ describe('workspace identity mode', () => {
 
   it('refuses another Tailscale user and requests without an identity, such as tagged devices', async () => {
     const server = await startWorkspaceServer('owner@example.com');
-    const otherUser = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+    const otherUser = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'teammate@example.com',
     });
     expect(otherUser.statusCode).toBe(403);
     expect(JSON.stringify(otherUser.body)).toContain('ERR_WORKSPACE_IDENTITY_REFUSED');
 
-    const tagged = await requestJson(server, 'POST', '/invoke', invoke);
+    const tagged = await requestJson(server, 'POST', invokePath, invoke);
     expect(tagged.statusCode).toBe(403);
     expect(JSON.stringify(tagged.body)).toContain('ERR_WORKSPACE_IDENTITY_REQUIRED');
   });
 
   it('refuses everyone while the owner is unknown', async () => {
     const server = await startWorkspaceServer(null);
-    const response = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'owner@example.com',
     });
     expect(response.statusCode).toBe(403);
+  });
+
+  it('answers only requests that came through Tailscale Serve with the per-launch path', async () => {
+    const server = await startWorkspaceServer('owner@example.com');
+    const direct = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
+      'Tailscale-User-Login': 'owner@example.com',
+    });
+    expect(direct.statusCode).toBe(404);
+  });
+
+  it('refuses browsers, so a web page cannot drive the owner\'s machines', async () => {
+    const server = await startWorkspaceServer('owner@example.com');
+    const fromPage = await requestJson(server, 'POST', invokePath, invoke, undefined, {
+      'Tailscale-User-Login': 'owner@example.com',
+      Origin: 'https://attacker.example',
+    });
+    expect(fromPage.statusCode).toBe(403);
+    expect(JSON.stringify(fromPage.body)).toContain('ERR_WORKSPACE_BROWSER_REFUSED');
   });
 
   it('keeps machine commands off the pairing-token transport', async () => {

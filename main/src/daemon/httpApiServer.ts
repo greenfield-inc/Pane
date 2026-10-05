@@ -173,6 +173,11 @@ interface PaneRemoteHttpApiServerOptions {
 
 interface WorkspaceIdentityOptions {
   listenPort: number;
+  /**
+   * Tailscale Serve's target path, secret per launch. Serve prefixes every request with it, so
+   * another OS user who finds the loopback port cannot call it directly.
+   */
+  pathSecret: string;
   /** The login of this machine's own Tailscale user; null refuses every request. */
   ownerLogin(): string | null;
 }
@@ -382,6 +387,10 @@ export class PaneRemoteHttpApiServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    if (this.workspace) {
+      socket.destroy();
+      return;
+    }
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
       socket.destroy();
@@ -477,6 +486,9 @@ export class PaneRemoteHttpApiServer {
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (this.workspace && !this.admitWorkspaceRequest(request, response, this.workspace.pathSecret)) {
+      return;
+    }
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
 
     if (request.method === 'OPTIONS') {
@@ -678,6 +690,30 @@ export class PaneRemoteHttpApiServer {
 
     request.on('close', cleanup);
     response.on('close', cleanup);
+  }
+
+  /** Strips Serve's secret path prefix; refuses direct loopback callers and every browser request. */
+  private admitWorkspaceRequest(request: IncomingMessage, response: ServerResponse, pathSecret: string): boolean {
+    const prefix = `/${pathSecret}`;
+    const rawUrl = request.url ?? '/';
+    if (rawUrl !== prefix && !rawUrl.startsWith(`${prefix}/`) && !rawUrl.startsWith(`${prefix}?`)) {
+      this.writeJson(response, 404, {
+        ok: false,
+        error: { message: 'Not found', code: 'ERR_REMOTE_DAEMON_HTTP_NOT_FOUND' },
+      } satisfies RemoteInvokeErrorPayload);
+      return false;
+    }
+    // Serve signs every request from the owner's devices, including ones a web page sends from
+    // the owner's browser; only the runpane CLI, which sends no Origin, may use workspaces.
+    if (request.headers.origin !== undefined || request.method === 'OPTIONS') {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: { message: 'Workspaces answer the runpane CLI, not browsers.', code: 'ERR_WORKSPACE_BROWSER_REFUSED' },
+      } satisfies RemoteInvokeErrorPayload);
+      return false;
+    }
+    request.url = rawUrl.slice(prefix.length) || '/';
+    return true;
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {

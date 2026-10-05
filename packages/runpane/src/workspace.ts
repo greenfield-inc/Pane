@@ -194,7 +194,7 @@ async function probeMachine(machine: TailnetMachine): Promise<{ info?: MachineIn
   try {
     return { info: await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
-    if (error instanceof PaneDaemonClientError && error.code === 'ERR_WORKSPACE_UNREACHABLE') {
+    if (error instanceof PaneDaemonClientError && (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT')) {
       return { error: 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale' };
     }
     return { error: error instanceof Error ? error.message : String(error) };
@@ -289,7 +289,7 @@ export async function runWorkspaceExec(parsed: ParsedArgs): Promise<number> {
   if (parsed.workspaceMachine) {
     const tailnet = await requireTailnet();
     machine = resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
-  } else if (parsed.cwd && !fs.existsSync(parsed.cwd)) {
+  } else if (parsed.cwd && foreignPathSystems(parsed.cwd, process.platform).length > 0) {
     machine = await routePath(parsed.cwd, `exec --cwd ${quoteArg(parsed.cwd)} --`);
   } else {
     throw new Error('runpane workspace exec needs a machine: runpane workspace <machine> exec -- <command>. List machines with: runpane workspace list');
@@ -323,8 +323,11 @@ async function pickMachine(parsed: ParsedArgs, target: string, verb: string, exi
     const tailnet = await requireTailnet();
     return resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
   }
-  if (existsHere) return null;
-  if (foreignPathSystems(target, process.platform).length === 0) {
+  // A path shaped like another OS's (C:\... on a Mac) never means this machine, even when
+  // a same-named relative file could exist here.
+  const foreign = foreignPathSystems(target, process.platform).length > 0;
+  if (existsHere && !foreign) return null;
+  if (!foreign) {
     throw new Error(`No such file on this machine: ${target}. To read another machine's file, name it: runpane workspace <machine> ${verb} ${quoteArg(target)}`);
   }
   return routePath(target, verb);

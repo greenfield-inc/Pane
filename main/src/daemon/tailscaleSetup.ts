@@ -440,11 +440,11 @@ function buildTailscaleInstallError(installAttempt: InstallAttempt): string {
   return lines.join('\n');
 }
 
-function isTailscaleServeDisabled(output: string): boolean {
+export function isTailscaleServeDisabled(output: string): boolean {
   return output.toLowerCase().includes('serve is not enabled on your tailnet');
 }
 
-function isTailscaleServePermissionDenied(output: string): boolean {
+export function isTailscaleServePermissionDenied(output: string): boolean {
   const normalized = output.toLowerCase();
   return normalized.includes('serve config denied')
     || normalized.includes('access denied');

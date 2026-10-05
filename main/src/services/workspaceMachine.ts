@@ -5,6 +5,7 @@ import path from 'path';
 import { getShellPath } from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import {
+  getDefaultWSLDistribution,
   linuxToUNCPath,
   listWSLDistributions,
   parseWSLPath,
@@ -51,6 +52,9 @@ export function resolveMachinePath(input: string, host: MachinePathHost): string
 
   if (wslPath) {
     if (!host.isWsl) throw new Error(`"${value}" is a WSL path on Windows; this machine runs ${machineOs(host.platform)}.`);
+    if (host.wslDistro && wslPath.distro.toLowerCase() !== host.wslDistro.toLowerCase()) {
+      throw new Error(`"${value}" is in the ${wslPath.distro} distribution; Pane here runs in ${host.wslDistro}. Name the Windows machine instead.`);
+    }
     return path.posix.normalize(wslPath.linuxPath);
   }
   if (WINDOWS_DRIVE_PATH.test(value)) {
@@ -100,6 +104,7 @@ const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 const MAX_EXEC_TIMEOUT_MS = 9 * 60_000;
+const OUTPUT_DRAIN_MS = 500;
 
 export async function describeMachine(preferredShell?: string): Promise<MachineInfo> {
   const wslDistros = process.platform === 'win32' ? await listWSLDistributions().catch(() => []) : [];
@@ -120,6 +125,9 @@ export async function readMachineFile(request: { path: string }): Promise<Machin
     const entries = await fs.readdir(target, { withFileTypes: true });
     const content = entries.map(entry => entry.isDirectory() ? `${entry.name}/` : entry.name).sort().join('\n');
     return { path: target, encoding: 'utf8', content: content ? `${content}\n` : '', bytes: 0 };
+  }
+  if (!stat.isFile()) {
+    throw new Error(`${target} is not a regular file or directory.`);
   }
   if (stat.size > MAX_READ_BYTES) {
     throw new Error(`${target} is ${stat.size} bytes; workspace read returns files up to ${MAX_READ_BYTES} bytes.`);
@@ -153,13 +161,16 @@ export async function execOnMachine(
   const env = process.platform === 'win32' ? process.env : { ...process.env, PATH: getShellPath() };
 
   return new Promise((resolve, reject) => {
-    const child = spawn(shell, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Its own process group on POSIX, so a timeout can stop everything the command started.
+    const child = spawn(shell, args, {
+      cwd, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const stdout = new OutputCollector();
     const stderr = new OutputCollector();
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killProcessTree(child.pid);
     }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
@@ -167,9 +178,11 @@ export async function execOnMachine(
       clearTimeout(timer);
       reject(error);
     });
-    child.once('close', (exitCode, signal) => {
+    // A background job (`server &`) keeps the pipes open after the shell exits; answer at exit
+    // and stop waiting for output shortly after.
+    child.once('exit', (exitCode, signal) => {
       clearTimeout(timer);
-      resolve({
+      const finish = () => resolve({
         os: machineOs(process.platform),
         shell: path.basename(shell),
         cwd,
@@ -179,8 +192,30 @@ export async function execOnMachine(
         stdout: stdout.text(),
         stderr: stderr.text(),
       });
+      const drain = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish();
+      }, OUTPUT_DRAIN_MS);
+      child.once('close', () => {
+        clearTimeout(drain);
+        finish();
+      });
     });
   });
+}
+
+function killProcessTree(pid: number | undefined): void {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // The group already exited.
+  }
 }
 
 class OutputCollector {
@@ -207,8 +242,7 @@ let defaultWslDistro: Promise<string | undefined> | null = null;
 
 async function currentHost(): Promise<MachinePathHost> {
   if (process.platform === 'win32') {
-    // `wsl -l -q` lists the default distribution first.
-    defaultWslDistro ??= listWSLDistributions().then(distros => distros[0]).catch(() => undefined);
+    defaultWslDistro ??= getDefaultWSLDistribution();
   }
   return {
     platform: process.platform,

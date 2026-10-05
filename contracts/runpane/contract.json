@@ -13525,7 +13525,8 @@
           "runpane workspace parsa-devbox exec --json -- git -C C:\\src\\app status --short"
         ],
         "notes": [
-          "This is SSH-level power: a local agent's sandbox and permission prompts see only runpane workspace exec, not what runs on the other machine."
+          "This is SSH-level power: a local agent's sandbox and permission prompts see only runpane workspace exec, not what runs on the other machine.",
+          "Pass the command as one quoted string; several words after -- are joined with spaces, so their own quoting is lost."
         ]
       }
     },

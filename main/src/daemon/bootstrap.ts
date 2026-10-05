@@ -397,6 +397,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   if (startRemoteTransport) {
     daemonSinks.push(remoteTransportController.getEventSink());
   }
+  daemonSinks.push(workspaceHost.getEventSink());
 
   installPaneRuntime(
     createFanoutEventSink([rendererEventSink, ...daemonSinks]),

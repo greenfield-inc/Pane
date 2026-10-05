@@ -241,6 +241,17 @@ export async function listWSLDistributions(run: RunWSL = runWSL): Promise<string
     .replace(/^\uFEFF/, '').replaceAll('\0', '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
 }
 
+/** The distribution `wsl.exe -l -v` marks with "*", or undefined without WSL. */
+export async function getDefaultWSLDistribution(run: RunWSL = runWSL): Promise<string | undefined> {
+  try {
+    const output = await run(['-l', '-v']);
+    const text = (output.includes(0) ? output.toString('utf16le') : output.toString('utf8')).replace(/^\uFEFF/, '').replaceAll('\0', '');
+    return /^\s*\*\s+(\S+)/m.exec(text)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Validate that WSL is available and the specified distro is installed.
  * Returns error message if invalid, null if OK.

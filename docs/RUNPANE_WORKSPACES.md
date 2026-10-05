@@ -48,7 +48,8 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 
 - A device signed in as another Tailscale user, including a teammate's Mac shared into your tailnet, is refused.
 - A tagged device is refused: Serve sends no identity for it.
-- A process on the machine itself can reach the loopback port and set the header. That grants nothing new, because local processes already have the owner's access.
+- Pane answers only requests that arrive through Serve: Serve's target path carries a secret that changes every launch, and requests straight to the loopback port are refused. Another OS user on the same machine who can read `tailscale serve status` could learn it, so give other accounts on a joined machine only the trust you would give the owner.
+- Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login.
 - Removing a device from Tailscale revokes it everywhere.
 
 ## What `write` and `exec` can do
@@ -64,7 +65,7 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 - Inside WSL, `C:\...` becomes `/mnt/c/...`.
 - `~` is the home directory of the machine that runs the request.
 
-`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields.
+`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree.
 
 ## Without a machine name
 

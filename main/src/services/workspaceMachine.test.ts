@@ -34,6 +34,7 @@ describe('resolveMachinePath', () => {
     expect(resolveMachinePath('C:\\Users\\khaza\\notes.md', wsl)).toBe('/mnt/c/Users/khaza/notes.md');
     expect(resolveMachinePath('\\\\wsl.localhost\\Ubuntu\\home\\khaza\\x', wsl)).toBe('/home/khaza/x');
     expect(resolveMachinePath('/home/khaza/x', wsl)).toBe('/home/khaza/x');
+    expect(() => resolveMachinePath('\\\\wsl.localhost\\Debian\\home\\khaza\\x', wsl)).toThrow(/Debian distribution/);
   });
 
   it('expands ~ against the machine home', () => {
@@ -65,12 +66,23 @@ describe('machine file and command operations', () => {
     expect(await readMachineFile({ path: target })).toMatchObject({ encoding: 'base64', content: '/wD+', bytes: 3 });
   });
 
+  it.skipIf(process.platform === 'win32')('refuses devices and pipes, which have no end to read', async () => {
+    await expect(readMachineFile({ path: '/dev/zero' })).rejects.toThrow(/not a regular file/);
+  });
+
   it('runs a command in the machine shell and reports output, exit code, and shell', async () => {
     const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pane-machine-')));
     const result = await execOnMachine({ command: 'echo out; echo err 1>&2; exit 3', cwd: dir });
     expect(result).toMatchObject({ exitCode: 3, stdout: 'out\n', stderr: 'err\n', cwd: dir, timedOut: false });
-    expect(result.shell).toMatch(/sh$/);
+    expect(result.shell).toMatch(/sh(\.exe)?$/);
     expect(result.os).toBe(process.platform === 'darwin' ? 'macOS' : 'Linux');
+  });
+
+  it('answers when the shell exits even if a background job still holds its output', async () => {
+    const started = Date.now();
+    const result = await execOnMachine({ command: 'sleep 5 & echo started' });
+    expect(result).toMatchObject({ exitCode: 0, stdout: 'started\n' });
+    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it('stops a command that runs past its timeout', async () => {
