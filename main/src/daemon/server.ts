@@ -15,6 +15,7 @@ import { serializeJsonTransport } from './jsonTransport';
 
 const DAEMON_EVENT_PREFIXES = [
   'archive:',
+  'computer-use:',
   'folder:',
   'panel:',
   'project:',

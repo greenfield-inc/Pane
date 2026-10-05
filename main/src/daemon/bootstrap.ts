@@ -27,11 +27,13 @@ import { OrchestrationSessionManager } from '../services/orchestrationSessionMan
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
+import { getComputerUseEngine } from '../services/computerUse/activeEngine';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
+  getPaneEventSink,
   setPaneRuntime,
   type PaneWebviewContext,
   type PtyHostRuntime,
@@ -52,6 +54,10 @@ import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { extractWorkspaceHeldInput } from '../services/workspaceHeldInput';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { ComputerUseReadinessService } from '../services/computerUse/readiness';
+import { installCuaDriver, selfTest } from '../services/computerUse/cuaDriver';
+import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
+import { COMPUTER_USE_READINESS_CHANGED_EVENT } from '../../../shared/types/computerUse';
 
 interface PaneDaemonHostOptions {
   app: App;
@@ -315,6 +321,23 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: (message, error) => logger.warn(message, error),
   });
 
+  // Runs on headless hosts too, so turning computer use on there registers the Pane MCP server and skill.
+  const computerUseReadiness = new ComputerUseReadinessService({
+    getSetting: () => configManager.getConfig().computerUse,
+    saveSetting: async (computerUse) => { await configManager.updateConfig({ computerUse }); },
+    engine: getComputerUseEngine,
+    install: installCuaDriver,
+    selfTest,
+    syncAgentSetup: () => syncPaneMcpForApp({
+      isPackaged: options.app.isPackaged,
+      config: configManager.getConfig(),
+      getProjects: () => databaseService.getAllProjects(),
+    }),
+    stopEngine: () => getComputerUseEngine().stop(),
+    onChange: () => getPaneEventSink().send(COMPUTER_USE_READINESS_CHANGED_EVENT),
+    now: Date.now,
+  });
+
   const archiveCleanupManager = new ArchiveCleanupManager(databaseService, sessionManager, archiveProgressManager);
   worktreeManager.setArchivePathGuard(target => archiveCleanupManager.assertPathAvailable(target));
   const daemonServices: DaemonHostServices = {
@@ -344,6 +367,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     workspaceStateReader,
     workspaceCursorStore,
     namedLockService,
+    computerUseReadiness,
   };
 
   const services: AppServices = {
@@ -394,6 +418,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   setupEventListeners(services);
   archiveCleanupManager.start();
+  void computerUseReadiness.start();
 
   const { logsManager } = await import('../services/panels/logPanel/logsManager');
   logsManager.setAnalyticsManager(analyticsManager);
@@ -435,6 +460,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
+      computerUseReadiness.dispose();
       resourceMonitorService.stop();
       await spotlightManager.disableAll();
       await sessionManager.cleanup();

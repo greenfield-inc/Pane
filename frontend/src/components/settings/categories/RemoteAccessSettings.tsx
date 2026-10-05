@@ -2,6 +2,7 @@ import { ExternalLink, Server } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
+import { ComputerUseSection } from '../ComputerUseSection';
 import type { RemoteAccessSubviewId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
@@ -75,6 +76,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
           </div>
         </SettingRow>
       </SettingsSection>
+      <ComputerUseSection connectionState={controller.connectionState} />
     </SettingsPage>
   );
 }

@@ -211,6 +211,9 @@ test('the server lists daemon and diagnostic commands but not installer commands
   for (const excluded of ['help', 'setup', 'install', 'update', 'version', 'mcp']) {
     assert.ok(!names.includes(excluded), `unexpected tool ${excluded}`);
   }
+  // Only a person turns computer use on, so no toolset may serve it to an agent.
+  const { buildMcpTools } = require(dist('mcpTools.js'));
+  assert.deepEqual(buildMcpTools().filter((tool) => tool.command.startsWith('computer-use')), []);
   const reposList = tools.find((tool) => tool.name === 'repos_list');
   assert.equal(reposList.annotations.readOnlyHint, true);
   assert.equal(tools.find((tool) => tool.name === 'repos_add').annotations.readOnlyHint, false);

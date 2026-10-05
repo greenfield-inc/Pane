@@ -305,6 +305,9 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `computer-use status`: Show whether computer use is on for this machine and whether it is ready.
+- `computer-use on`: Turn computer use on for this machine: install the engine, register the Pane MCP server and skill, check permissions, and self-test.
+- `computer-use off`: Turn computer use off for this machine and stop its engine.
 
 ```bash
 runpane help [command]
@@ -385,6 +388,9 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane computer-use status [--json] [--pane-dir <path>]
+runpane computer-use on [--engine auto|cua-driver] [--json] [--pane-dir <path>]
+runpane computer-use off [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -527,6 +533,7 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--engine <auto|cua-driver>
 --json
 --wait-ready
 --no-focus

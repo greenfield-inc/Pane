@@ -3,8 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 
-const SKILL_NAME = 'pane-manage-and-message-agents';
-const SOURCE = path.join(__dirname, 'userSkills', SKILL_NAME, 'SKILL.md');
+const AGENTS_SKILL = 'pane-manage-and-message-agents';
+export const COMPUTER_USE_SKILL = 'pane-computer-use';
 const MARKER = '.pane-managed';
 
 export interface UserSkillTarget {
@@ -12,19 +12,20 @@ export interface UserSkillTarget {
   skillsRoot: string;
 }
 
-export async function syncPaneUserSkills(targets: UserSkillTarget[], enabled: boolean): Promise<void> {
-  const source = enabled ? await fs.readFile(SOURCE) : undefined;
+/** Installs or removes one bundled skill (`userSkills/<skillName>/SKILL.md`) for each client. */
+export async function syncPaneUserSkills(targets: UserSkillTarget[], enabled: boolean, skillName = AGENTS_SKILL): Promise<void> {
+  const source = enabled ? await fs.readFile(path.join(__dirname, 'userSkills', skillName, 'SKILL.md')) : undefined;
   for (const target of targets) {
     try {
-      await syncSkill(target.skillsRoot, source);
+      await syncSkill(target.skillsRoot, skillName, source);
     } catch (error) {
       console.warn(`[PaneMcp] ${target.client} user skill sync failed:`, error);
     }
   }
 }
 
-async function syncSkill(root: string, source: Buffer | undefined): Promise<void> {
-  const folder = path.join(root, SKILL_NAME);
+async function syncSkill(root: string, skillName: string, source: Buffer | undefined): Promise<void> {
+  const folder = path.join(root, skillName);
   const file = path.join(folder, 'SKILL.md');
   const markerFile = path.join(folder, MARKER);
   const marker = await fs.readFile(markerFile, 'utf8').catch(missingOnly);

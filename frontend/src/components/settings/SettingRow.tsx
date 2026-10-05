@@ -8,6 +8,8 @@ interface SettingRowProps {
   settingId: SettingsSettingId;
   label: string;
   description?: string;
+  /** Live state shown under the description, such as a status line. */
+  status?: ReactNode;
   children: ReactNode;
   saveState?: SettingSaveState;
   disabled?: boolean;
@@ -18,6 +20,7 @@ export function SettingRow({
   settingId,
   label,
   description,
+  status,
   children,
   saveState = { state: 'idle' },
   disabled = false,
@@ -39,6 +42,7 @@ export function SettingRow({
       <div className="min-w-0">
         <div className="text-sm font-medium text-text-primary">{label}</div>
         {description && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-tertiary">{description}</p>}
+        {status && <div className="mt-2">{status}</div>}
         <SaveState state={saveState} />
       </div>
       <div className="min-w-0 sm:justify-self-end">{children}</div>

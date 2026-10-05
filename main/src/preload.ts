@@ -48,6 +48,7 @@ import type {
 // verification step rejects any remaining require other than Electron itself.
 import { boundary, decodeBoundary, type JsonObject } from '../../shared/validation/boundaryDecoder';
 import { decodeAppearanceSnapshotArg, type Theme } from '../../shared/types/appearance';
+import { COMPUTER_USE_READINESS_CHANGED_EVENT, type ComputerUseEngineChoice, type ComputerUseReadiness } from '../../shared/types/computerUse';
 
 interface LogEntry {
   timestamp: string;
@@ -414,6 +415,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     rescan: (): Promise<IPCResponse> => invokeIpc('usage:rescan'),
   },
 
+  // Computer use on the connected machine (this computer, or the remote host in remote mode).
+  computerUseReadiness: {
+    get: (): Promise<ComputerUseReadiness> => invokeIpc('computer-use:readiness'),
+    set: (request: { enabled: boolean; engine?: ComputerUseEngineChoice }): Promise<ComputerUseReadiness> => invokeIpc('computer-use:set', request),
+    recheck: (): Promise<ComputerUseReadiness> => invokeIpc('computer-use:recheck'),
+    openPermissionSettings: (): Promise<boolean> => invokeIpc('computer-use:open-permission-settings'),
+  },
+
   // Leaderboard opt-in and submission
   leaderboard: {
     getStatus: (): Promise<IPCResponse> => invokeIpc('leaderboard:get-status'),
@@ -772,6 +781,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
+    onComputerUseReadinessChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on(COMPUTER_USE_READINESS_CHANGED_EVENT, wrappedCallback);
+      return () => ipcRenderer.removeListener(COMPUTER_USE_READINESS_CHANGED_EVENT, wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);

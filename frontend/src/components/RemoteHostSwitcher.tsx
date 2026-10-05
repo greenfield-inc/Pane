@@ -2,6 +2,8 @@ import { useState, type ReactElement } from 'react';
 import { Laptop, Plug, Radio, Server } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { API } from '../utils/api';
+import { ComputerUseStatus } from './ComputerUseStatus';
+import { useComputerUseReadiness } from '../hooks/useComputerUseReadiness';
 import { useConfigStore } from '../stores/configStore';
 import { LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
@@ -30,6 +32,7 @@ export function RemoteHostSwitcher({
   // Main does not serialize client transitions, so one switch at a time.
   const [switching, setSwitching] = useState(false);
   const remote = connectionState.mode === 'remote';
+  const computerUse = useComputerUseReadiness(`${connectionState.mode}:${connectionState.activeProfileId ?? ''}:${connectionState.status}`);
   const activeStatusText = connectionState.status === 'connected'
     ? 'Connected'
     : connectionState.status === 'error' ? 'Connection failed' : 'Connecting';
@@ -82,6 +85,12 @@ export function RemoteHostSwitcher({
       width="lg"
       footer={({ close }) => (
         <>
+          {computerUse.readiness && (
+            <DropdownMenuItem
+              label={<ComputerUseStatus readiness={computerUse.readiness} now={computerUse.now} />}
+              onClick={() => { close(); onOpenHosting(); }}
+            />
+          )}
           {model.hostingSummary && (
             <DropdownMenuItem icon={Radio} label={model.hostingSummary} onClick={() => { close(); onOpenHosting(); }} />
           )}

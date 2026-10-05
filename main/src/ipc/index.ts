@@ -27,6 +27,7 @@ import { registerOnboardingHandlers } from './onboarding';
 import { registerVoiceHandlers } from './voice';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerUsageHandlers } from './usage';
+import { registerComputerUseReadinessHandlers } from './computerUseReadiness';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
@@ -106,6 +107,9 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  if (services.computerUseReadiness) {
+    registerComputerUseReadinessHandlers(ipcMain, commandRegistry, services.computerUseReadiness);
+  }
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);
 

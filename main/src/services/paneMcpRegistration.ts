@@ -10,7 +10,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { getShellPath } from '../utils/shellPath';
 import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/wslUtils';
 import { parse as parseToml } from 'smol-toml';
-import { syncPaneUserSkills, type UserSkillTarget } from './paneUserSkills';
+import { COMPUTER_USE_SKILL, syncPaneUserSkills, type UserSkillTarget } from './paneUserSkills';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);
@@ -478,7 +478,7 @@ let syncQueue: Promise<void> = Promise.resolve();
  */
 export function syncPaneMcpForApp(options: {
   isPackaged: boolean;
-  config: Pick<AppConfig, 'agentContext' | 'claudeExecutablePath'>;
+  config: Pick<AppConfig, 'agentContext' | 'claudeExecutablePath' | 'computerUse'>;
   /** Saved repositories; their WSL distros get registrations on Windows. */
   getProjects: () => Pick<Project, 'wsl_enabled' | 'wsl_distribution'>[];
 }): void {
@@ -522,6 +522,7 @@ async function syncRegistrations(
   await Promise.all(targets.map(async (target) => {
     if (!target) return;
     await syncPaneUserSkills(target.userSkills ?? [], enabled);
+    await syncPaneUserSkills(target.userSkills ?? [], enabled && options.config.computerUse?.enabled === true, COMPUTER_USE_SKILL);
     for (const outcome of await syncMcpRegistration(target, enabled)) {
       if (outcome.action === 'unchanged') continue;
       const detail = outcome.detail ? `: ${outcome.detail}` : '';
