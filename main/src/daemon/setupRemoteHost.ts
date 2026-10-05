@@ -42,6 +42,7 @@ import {
   installRemoteDaemonService,
   type RemoteDaemonServiceDependencies,
 } from './remoteDaemonService';
+import { readTargetPublicKeyForPairing } from '../services/vault/targetKey';
 
 export interface SetupRemoteHostOptions extends Omit<RemoteHostSetupRequest, 'dataDirectoryMode'> {
   printOnly?: boolean;
@@ -101,7 +102,9 @@ export async function setupRemoteHost(options: SetupRemoteHostOptions = {}): Pro
     label,
     baseUrl: tunnelSelection.baseUrl,
   });
-  const importPayload = createPaneRemoteConnectionImportPayload(pair, tunnelSelection.tunnel);
+  // printOnly writes nothing, so its code carries no vault key; the desktop can fetch one later over vault:target-key.
+  const vaultKey = options.printOnly ? undefined : await readTargetPublicKeyForPairing(paneDir);
+  const importPayload = createPaneRemoteConnectionImportPayload(pair, tunnelSelection.tunnel, vaultKey);
   const connectionCode = encodePaneRemoteConnection(importPayload);
 
   let wroteConfig = false;

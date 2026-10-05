@@ -79,6 +79,8 @@ export interface RemotePaneConnectionProfile {
   token: string;
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
+  /** The host's vault target public key, enrolled at pairing. Removing the profile revokes it. */
+  vaultKey?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -100,6 +102,8 @@ export interface PaneRemoteConnectionImportPayload {
     selected: boolean;
     tailscaleIp?: string;
   };
+  /** The host's vault target public key: raw X25519, base64url. */
+  vaultKey?: string;
 }
 
 export interface RemoteHostSetupRequest {
@@ -452,6 +456,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundar
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  vaultKey: boundary.optional(boundary.nonEmptyString),
 });
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),
@@ -460,6 +465,7 @@ const remoteImportSchema = boundary.object({
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  vaultKey: boundary.optional(boundary.nonEmptyString),
 });
 
 export function isRemoteDaemonClientRecord<Value>(value: Value): value is Value & RemoteDaemonClientRecord {
@@ -511,6 +517,9 @@ export function remoteImportPayloadToProfile(
   if (normalizedPayload.tunnel) {
     profile.tunnel = normalizedPayload.tunnel;
   }
+  if (normalizedPayload.vaultKey) {
+    profile.vaultKey = normalizedPayload.vaultKey;
+  }
   return profile;
 }
 
@@ -530,6 +539,11 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
   };
   if (tunnel) {
     payload.tunnel = tunnel;
+  }
+  const vaultKey = decoded.vaultKey?.trim();
+  // 32 raw bytes in unpadded base64url. Any other value is dropped, so a malformed key never blocks pairing.
+  if (vaultKey && /^[A-Za-z0-9_-]{43}$/.test(vaultKey)) {
+    payload.vaultKey = vaultKey;
   }
   return payload;
 }

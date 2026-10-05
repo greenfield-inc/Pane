@@ -132,6 +132,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'file:write',
   'file:write-binary',
   'file:write-project',
+  'vault:receive-sealed',
+  'vault:target-key',
 ] as const;
 
 export const ELECTRON_ADAPTER_ONLY_CHANNELS = [

@@ -55,6 +55,7 @@ export function createRemoteDaemonConnectionPair(
 export function createPaneRemoteConnectionImportPayload(
   pair: RemoteDaemonConnectionPair,
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'],
+  vaultKey?: string,
 ): PaneRemoteConnectionImportPayload {
   const payload: PaneRemoteConnectionImportPayload = {
     v: 1,
@@ -64,5 +65,6 @@ export function createPaneRemoteConnectionImportPayload(
     transport: pair.profile.transport,
   };
   if (tunnel) payload.tunnel = tunnel;
+  if (vaultKey) payload.vaultKey = vaultKey;
   return payload;
 }

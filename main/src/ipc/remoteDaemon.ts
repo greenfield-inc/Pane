@@ -38,6 +38,7 @@ import {
 import { remoteHostRuntimeStateStore } from '../daemon/remoteHostRuntimeState';
 import { readConfiguredTailscaleServeAccess, setupRemoteHost } from '../daemon/setupRemoteHost';
 import { getAppDirectory } from '../utils/appDirectory';
+import { readTargetPublicKeyForPairing } from '../services/vault/targetKey';
 import { ShellDetector } from '../utils/shellDetector';
 import { disconnectActiveRemoteHostClients } from '../daemon/remoteTransportController';
 import {
@@ -300,7 +301,7 @@ export function registerRemoteDaemonHandlers(
         baseUrl: access.baseUrl,
       });
       const connectionCode = encodePaneRemoteConnection(
-        createPaneRemoteConnectionImportPayload(pair, access.tunnel),
+        createPaneRemoteConnectionImportPayload(pair, access.tunnel, await readTargetPublicKeyForPairing(getAppDirectory())),
       );
       const buildNextConfig = (config: RemoteDaemonConfig): RemoteDaemonConfig => normalizeRemoteDaemonConfig({
         ...config,

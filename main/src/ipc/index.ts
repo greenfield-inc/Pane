@@ -38,6 +38,8 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
+import { registerVaultTargetKeyCommand } from '../services/vault/relay';
+import { getAppDirectory } from '../utils/appDirectory';
 
 
 export function registerIpcHandlers(services: AppServices): PaneCommandRegistry {
@@ -106,6 +108,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  registerVaultTargetKeyCommand(commandRegistry, getAppDirectory());
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);
 
