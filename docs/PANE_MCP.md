@@ -52,6 +52,10 @@ The core set is built around the three jobs agents most often need, each finishe
 - `agents_status`: whether the agent is working, ready, blocked (waiting on a person), idle, or exited, plus its current screen.
 - `agents_send`: submits a follow-up and reports whether the agent took it or queued it behind its current turn (`delivery`), read from the agent's transcript where Pane can find it.
 
+## Computer use
+
+The server also offers `js` and `js_reset`, which run short scripts that see and operate desktop apps. They work on machines where computer use is on. See [Computer Use](COMPUTER_USE.md).
+
 ## Docs and links
 
 `docs_search` searches Pane's docs, `runpane` help, per-command context, and the Pane Chat skills installed in the Pane data directory. It returns short excerpts with paths. `docs_read` returns one path in full. Both work offline, and the same docs are listed as `runpane-docs:` MCP resources.
