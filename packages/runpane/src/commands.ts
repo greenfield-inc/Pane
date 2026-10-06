@@ -113,6 +113,14 @@ export interface ParsedArgs {
   workspacePath?: string;
   execCommand?: string[];
   cwd?: string;
+  /** `runpane handoff <destination...>` */
+  handoffDestination?: string;
+  handoffTemplate?: boolean;
+  handoffNoteFile?: string;
+  handoffMachine?: string;
+  handoffModel?: string;
+  handoffEffort?: string;
+  handoffPush?: boolean;
   remoteSetupArgs: string[];
 }
 
@@ -276,7 +284,12 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
 }
 
 /** `--` takes the rest of the line for exec; read and write take one path. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand'> {
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination'> {
+  if (command === 'handoff') {
+    const words: string[] = [];
+    while (args[0] !== undefined && !args[0].startsWith('-')) words.push(args.shift() ?? '');
+    return words.length ? { handoffDestination: words.join(' ') } : {};
+  }
   if (command === 'workspace exec') {
     const separator = args.indexOf('--');
     return separator === -1 ? {} : { execCommand: args.splice(separator).slice(1) };
@@ -541,6 +554,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.readOnly = true;
     return;
   }
+  if (flag === '--template') {
+    parsed.handoffTemplate = true;
+    return;
+  }
+  if (flag === '--push') {
+    parsed.handoffPush = true;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -580,6 +601,22 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--cwd') {
     parsed.cwd = value;
+    return;
+  }
+  if (flag === '--note-file') {
+    parsed.handoffNoteFile = value;
+    return;
+  }
+  if (flag === '--machine') {
+    parsed.handoffMachine = value;
+    return;
+  }
+  if (flag === '--model') {
+    parsed.handoffModel = value;
+    return;
+  }
+  if (flag === '--effort') {
+    parsed.handoffEffort = value;
     return;
   }
   if (flag === '--url') {

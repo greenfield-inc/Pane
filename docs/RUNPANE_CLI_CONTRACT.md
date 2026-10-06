@@ -233,6 +233,8 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
+`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel.
+
 ## Command reference
 
 Every command and its options, from `commands` in `contracts/runpane/contract.json`.
@@ -258,6 +260,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `workspace read`: Print a file from one of your machines; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
 - `workspace write`: Write stdin to a file on one of your machines, creating parent folders.
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
+- `handoff`: Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
 - `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
 - `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
@@ -337,6 +340,8 @@ runpane workspace disable [--json] [--pane-dir <path>]
 runpane workspace [<machine>] read <path> [--json]
 runpane workspace [<machine>] write <path> [--json]
 runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
+runpane handoff --template
+runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]
 runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>|--session <id|name>] [--include-shells] [--self-test] [--quiet] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
@@ -540,6 +545,10 @@ These flags are consumed by local daemon-control commands:
 --summary-file <path|->
 --question <text>
 --cwd <path>
+--note-file <path|->
+--machine <name>
+--model <model>
+--effort <level>
 --json
 --wait-ready
 --no-focus
@@ -566,6 +575,8 @@ These flags are consumed by local daemon-control commands:
 --idle-backoff
 --report
 --read-only
+--template
+--push
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

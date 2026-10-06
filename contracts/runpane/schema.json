@@ -463,6 +463,7 @@
         "workspace read",
         "workspace write",
         "workspace exec",
+        "handoff",
         "watch",
         "panes create",
         "panes adopt",
@@ -584,6 +585,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "workspace exec": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "handoff": {
           "$ref": "#/$defs/helpLines"
         },
         "watch": {

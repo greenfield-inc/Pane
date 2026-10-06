@@ -1169,6 +1169,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "workspace read": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace write": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace exec": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
     "panes create": lambda parsed, context: run_panes_create(parsed),
     "panes archive": lambda parsed, context: run_panes_archive(parsed),
     "panes pin": lambda parsed, context: run_panes_pin(parsed, True),

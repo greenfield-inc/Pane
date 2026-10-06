@@ -90,6 +90,7 @@
       "entry": [
         "src/cli.ts",
         "src/doctor.ts",
+        "src/handoff.ts",
         "src/installers.ts",
         "src/releases.ts",
         "src/telemetry.ts",

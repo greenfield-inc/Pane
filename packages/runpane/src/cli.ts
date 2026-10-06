@@ -8,6 +8,7 @@ import { runAgentContext } from './agentContext';
 import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
 import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
+import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
 import { routeDaemonCallsTo } from './daemonClient';
@@ -123,7 +124,7 @@ export async function main(argv: string[]): Promise<number> {
 /** Commands that run on this machine only; everything else is a daemon call another machine can answer. */
 const THIS_MACHINE_ONLY = new Set<string>([
   'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
-  'docs search', 'docs read', 'agents start', 'agents status', 'agents send',
+  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
 ]);
@@ -257,6 +258,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'workspace read': async (parsed) => runWorkspaceRead(parsed),
   'workspace write': async (parsed) => runWorkspaceWrite(parsed),
   'workspace exec': async (parsed) => runWorkspaceExec(parsed),
+  'handoff': async (parsed) => runHandoff(parsed),
   'watch': async (parsed, telemetryContext) => {
     return runWatch(parsed);
   },
