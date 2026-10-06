@@ -41,6 +41,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `sessions` | the eight `sessions_*` tools and the three named-lock tools (`lock_acquire`, `lock_release`, `lock_list`) |
 | `repos`, `docs`, `links`, `admin` | repository, documentation, deep-link, and diagnostic tools |
 | `all` / `read` | every tool / every read-only tool |
+| `chatgpt` | the Chat agents panel for ChatGPT desktop: `agents_panel` plus two tools only the panel calls. See [ChatGPT desktop plugin](CHATGPT_PLUGIN.md). |
 
 Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field.
 

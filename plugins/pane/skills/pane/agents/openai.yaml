@@ -1,0 +1,9 @@
+interface:
+  display_name: "Pane"
+  short_description: "Run coding agents from chat"
+  default_prompt: "Start a Codex agent in my web repo to fix the flaky login test."
+policy:
+  products:
+    - CHAT
+    - CODEX
+  allow_implicit_invocation: true

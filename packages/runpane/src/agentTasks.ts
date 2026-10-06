@@ -16,7 +16,7 @@ import {
   workspaceStateResultSchema,
 } from './localControl';
 
-type AgentStatus = 'working' | 'ready' | 'blocked' | 'idle' | 'exited' | 'unknown';
+export type AgentStatus = 'working' | 'ready' | 'blocked' | 'idle' | 'exited' | 'unknown';
 
 interface AgentStatusResult {
   ok: true;
@@ -38,7 +38,7 @@ function hasControlCharacters(text: string): boolean {
   });
 }
 
-const STATUS_BY_KIND = new Map<string, AgentStatus>([
+export const STATUS_BY_KIND = new Map<string, AgentStatus>([
   ['agent.busy', 'working'],
   ['agent.ready', 'ready'],
   ['agent.blocked', 'blocked'],
