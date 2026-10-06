@@ -109,12 +109,25 @@ documents. Excalidraw scenes remain editable JSON, with PNG previews and readabl
 labels in agent-facing Markdown. Global destinations are Claude's user
 `CLAUDE.md`, Codex's user `AGENTS.md` (or existing override), and Cursor's local
 `rules/pane-memories.mdc`. Cursor CLI also receives the generated memory through
-a user `sessionStart` hook (`cursorNoteHook.ts`), preserving existing hooks. Project and feature content is exported into the base
-repository and known worktrees; Session content stays in its own workspace.
-Malformed marker pairs produce a visible export error without replacement.
-Changing notebooks only reads data. Saving updates files; this does not establish
-that an already-running agent has refreshed its context. Notes are local to this
-installation, without cross-machine synchronization.
+a user `sessionStart` hook (`cursorNoteHook.ts`), preserving existing hooks.
+Scoped content is exported outside repositories to
+`<PANE_DIR>/notes/contexts/<pane-id>.md`. Each new native Pane terminal receives
+its path through `PANE_NOTES_FILE`; the user-level integration tells agents to
+read that file before each turn. Project contexts contain only that project's
+notes plus the current feature; Session contexts contain only Session notes.
+Ordinary saves leave repositories clean. The existing `managedAgentsMd` opt-in
+additionally exports scoped notes into repository `AGENTS.md` and `CLAUDE.md`;
+turning it off removes those memory sections.
+
+Exports preserve symlinks and permissions and replace files atomically. A store
+ownership marker prevents a second Pane data directory from overwriting the
+first directory's user memory. Malformed marker pairs produce a visible error.
+Changing notebooks only reads data. Existing terminals need restarting to gain
+the context environment variable. Global-file changes refresh on Codex's next
+turn, Claude resume, or a new Cursor conversation in the tested CLI versions;
+updating a file alone cannot erase context already read. Notes support native
+macOS, Windows, and Linux installations; WSL agent exports report an unsupported
+destination instead of claiming delivery. There is no cross-machine sync.
 
 ## Subsystems
 

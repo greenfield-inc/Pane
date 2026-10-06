@@ -9,7 +9,7 @@ import { noteSchema, sameNoteScope, type Note, type NoteScope } from '../../../s
 export class Notes {
   constructor(private readonly root: string) {}
 
-  private read(): Note[] {
+  all(): Note[] {
     const file = path.join(this.root, 'notes.json');
     if (!fs.existsSync(file)) return [];
     return decodeBoundary(JSON.parse(fs.readFileSync(file, 'utf8')), boundary.array(noteSchema));
@@ -27,19 +27,19 @@ export class Notes {
   }
 
   list(scope: NoteScope): Note[] {
-    return this.read().filter(note => sameNoteScope(note.scope, scope) || note.references.some(ref => sameNoteScope(ref, scope)));
+    return this.all().filter(note => sameNoteScope(note.scope, scope) || note.references.some(ref => sameNoteScope(ref, scope)));
   }
 
   create(scope: NoteScope, title: string): Note {
     const note: Note = { id: randomUUID(), revision: 1, scope, references: [], title,
       blocks: [{ type: 'text', id: randomUUID(), text: '' }], createdAt: new Date().toISOString() };
-    this.write([...this.read(), note]);
+    this.write([...this.all(), note]);
     return note;
   }
 
   save(input: Note): Note {
     const validated = decodeBoundary(input, noteSchema);
-    const notes = this.read();
+    const notes = this.all();
     const index = this.currentIndex(notes, input.id, input.revision);
     const current = notes[index];
     const note = { ...current, title: validated.title, blocks: validated.blocks, revision: current.revision + 1 };
@@ -50,7 +50,7 @@ export class Notes {
   }
 
   move(id: string, revision: number, scope: NoteScope): Note {
-    const notes = this.read();
+    const notes = this.all();
     const index = this.currentIndex(notes, id, revision);
     const current = notes[index];
     const allowed = ((current.scope.kind === 'feature' || current.scope.kind === 'session') && scope.kind === 'project')
@@ -63,7 +63,7 @@ export class Notes {
   }
 
   remove(id: string, revision: number): void {
-    const notes = this.read();
+    const notes = this.all();
     notes.splice(this.currentIndex(notes, id, revision), 1);
     this.write(notes);
   }

@@ -116,7 +116,7 @@ export interface AppConfig {
   gitAttributionEnabled?: boolean;
   // Agent-facing Pane context
   agentContext?: {
-    /** Write a marked Pane section into repository AGENTS.md files (off by default; edits the repo). */
+    /** Publish Pane instructions and scoped Notes into repository instruction files (off by default; edits the repo). */
     managedAgentsMd?: boolean;
     /** Register Pane's MCP server with the user-level Claude Code, Codex, and Cursor configs. */
     registerMcp?: boolean;

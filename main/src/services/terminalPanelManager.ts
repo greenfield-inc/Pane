@@ -5,6 +5,7 @@ import { validateCustomCommandResume, customResumeAgentType } from '../../../sha
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
+import { noteContextPath } from './noteFiles';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
@@ -1226,6 +1227,7 @@ export class TerminalPanelManager extends EventEmitter {
       LANG: process.env.LANG || 'en_US.UTF-8',
       WORKTREE_PATH: cwd,
       PANE_SESSION_ID: panel.sessionId,
+      PANE_NOTES_FILE: isWSL ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
       PANE_PANEL_ID: panel.id,
       PANE_PORT: String(panePort),
       PANE_WORKSPACE_PATH: cwd,

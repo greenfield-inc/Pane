@@ -4,6 +4,7 @@ import type { Note, NoteBlock, NoteContext, NoteExportResult, NoteScope } from '
 import { noteSchema, sameNoteScope } from '../../../../../shared/types/notes';
 
 import { decodeBoundary } from '../../../../../shared/validation/boundaryDecoder';
+import { useConfigStore } from '../../../stores/configStore';
 
 const DrawingEditor = lazy(() => import('./NotesDrawing'));
 const scopeLabels = { feature: 'Feature Notes', project: 'Project Notes', global: 'Global Notes', session: 'Session Notes' };
@@ -17,8 +18,14 @@ const button = 'rounded px-3 py-1.5 text-sm hover:bg-surface-hover focus-visible
 const field = 'w-full rounded border border-border-primary bg-bg-primary p-2 text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive';
 
 export interface NoteCapture { text: string; source: string; at: string }
+interface NotesPanelProps { paneId: string; capture?: NoteCapture; viewId?: string }
 
-export default function NotesPanel({ paneId, capture, viewId = 'panel' }: { paneId: string; capture?: NoteCapture; viewId?: string }) {
+export default function NotesPanel(props: NotesPanelProps) {
+  const remote = useConfigStore(state => state.config?.remoteDaemon?.client.mode === 'remote');
+  return remote ? <p className="p-4 text-text-secondary">Notes are available in local Pane workspaces.</p> : <LocalNotesPanel {...props} />;
+}
+
+function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps) {
   const [context, setContext] = useState<NoteContext>();
   const [scope, setScope] = useState<NoteScope>();
   const [notes, setNotes] = useState<Note[]>([]);
@@ -103,12 +110,12 @@ export default function NotesPanel({ paneId, capture, viewId = 'panel' }: { pane
         </button>)}
       </aside>
       <div className="min-w-0 flex-1 overflow-auto p-4">
-        {current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${capture?.at ?? viewId}:${current.id}`} capture={capture}
+        {current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${viewId}:${current.id}`} capture={capture}
           onExports={setExports} onRefresh={refresh} />
           : <p className="mt-6 text-sm text-text-secondary">{capture ? 'Choose a note or create one to save this terminal excerpt.' : 'Select a note or create one. Text and drawings stay together.'}</p>}
       </div>
     </div>
-    <p className="border-t border-border-primary px-3 py-2 text-xs text-text-tertiary">Saved notes update instruction files. Running agents may need a new conversation or supported refresh to read changes.</p>
+    <p className="border-t border-border-primary px-3 py-2 text-xs text-text-tertiary">Scoped notes are shared through Pane terminals; agents may request read permission. After enabling notes, restart existing terminals and start a new agent conversation. Global edits refresh on Codex's next turn, Claude resume, or a new Cursor conversation.</p>
   </section>;
 }
 
@@ -127,14 +134,15 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
   const saving = useRef<Promise<boolean> | null>(null);
   const [status, setStatus] = useState(draft !== note ? 'Recovered draft' : 'Saved');
   const [error, setError] = useState(draft !== note ? 'Recovered an unsaved draft. Retry saving, or copy it before reloading.' : '');
+  const [recoveryWarning, setRecoveryWarning] = useState('');
   const [drawing, setDrawing] = useState<Extract<NoteBlock, { type: 'drawing' }>>();
-  const [insertAfter, setInsertAfter] = useState<string>();
+  const insertAfter = useRef<string | undefined>(undefined);
   const [project, setProject] = useState('');
   const [captured, setCaptured] = useState(false);
   const change = (next: Note) => {
     draftRef.current = next; dirty.current = true; setDraft(next); setStatus('Unsaved'); setError('');
     try { localStorage.setItem(draftKey, JSON.stringify(next)); }
-    catch { setError('Cannot keep a recovery copy of this draft. Retry saving before closing the note.'); }
+    catch { setRecoveryWarning('Recovery storage is full. Autosave is still active; wait for Saved before closing.'); }
   };
   useEffect(() => {
     if (!dirty.current && !saving.current) { draftRef.current = note; setDraft(note); }
@@ -153,8 +161,11 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
       dirty.current = draftRef.current !== snapshot;
       draftRef.current = { ...draftRef.current, revision: result.note.revision, scope: result.note.scope };
       setDraft(draftRef.current);
-      if (!dirty.current) localStorage.removeItem(draftKey);
-      else localStorage.setItem(draftKey, JSON.stringify(draftRef.current));
+      try {
+        if (!dirty.current) localStorage.removeItem(draftKey);
+        else localStorage.setItem(draftKey, JSON.stringify(draftRef.current));
+        setRecoveryWarning('');
+      } catch { setRecoveryWarning('Recovery storage is unavailable. Wait for Saved before closing.'); }
       setStatus(dirty.current ? 'Unsaved' : 'Saved');
       onExports(result.exports);
       return true;
@@ -172,7 +183,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
 
   const updateBlock = (block: NoteBlock) => change({ ...draftRef.current, blocks: draftRef.current.blocks.map(item => item.id === block.id ? block : item) });
   const addDrawing = (after: string) => {
-    setInsertAfter(after);
+    insertAfter.current = after;
     setDrawing({ type: 'drawing', id: crypto.randomUUID(), title: 'Drawing', labels: '', scene: { elements: [], appState: {}, files: {} }, png: '' });
   };
   const mutate = async (action: 'move' | 'remove', scope?: NoteScope) => {
@@ -193,6 +204,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
       }}><Trash2 size={15} /></button>
     </div>
     {draft.scope.kind === 'global' && <p className="text-sm text-text-secondary">Editing this note updates global memory for all your projects.</p>}
+    {recoveryWarning && <p role="status" className="text-sm text-text-secondary">{recoveryWarning}</p>}
     {error && <div role="alert" className="text-sm text-status-error">{error}
       <p>Your unsaved draft remains here. Copy it before reloading if you want to keep it.</p>
       <button type="button" className={button} onClick={() => { localStorage.removeItem(draftKey); dirty.current = false; draftRef.current = note; setDraft(note); setError(''); setStatus('Saved'); }}>Reload saved note</button>
@@ -208,8 +220,8 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
       {block.type === 'text' ? <>
         <textarea aria-label={`Text block ${index + 1}`} className={`${field} min-h-28 resize-y`} placeholder="Write a note… Type / for a drawing."
           value={block.text} onChange={event => updateBlock({ ...block, text: event.target.value })} />
-        {/\/(drawing)?\s*$/.test(block.text) && <button type="button" className={`${button} bg-surface-hover`} onClick={() => addDrawing(block.id)}>/drawing · Insert drawing</button>}
-      </> : <button type="button" className="block w-full rounded border border-border-primary p-3 text-left" onClick={() => { setInsertAfter(undefined); setDrawing(block); }}>
+        {/(?:^|\s)\/(drawing)?\s*$/.test(block.text) && <button type="button" className={`${button} bg-surface-hover`} onClick={() => addDrawing(block.id)}>/drawing · Insert drawing</button>}
+      </> : <button type="button" className="block w-full rounded border border-border-primary p-3 text-left" onClick={() => { insertAfter.current = undefined; setDrawing(block); }}>
         <span className="text-sm font-medium">{block.title} · Edit drawing</span>
         {block.png && <img src={block.png} alt={block.labels || block.title} className="mx-auto max-h-80 max-w-full" />}
       </button>}
@@ -235,8 +247,8 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
       onCancel={() => setDrawing(undefined)}
       onSave={block => {
         const blocks = draftRef.current.blocks.slice();
-        if (insertAfter) {
-          const index = blocks.findIndex(item => item.id === insertAfter);
+        if (insertAfter.current) {
+          const index = blocks.findIndex(item => item.id === insertAfter.current);
           const previous = blocks[index];
           if (previous?.type === 'text') blocks[index] = { ...previous, text: previous.text.replace(/\/(drawing)?\s*$/, '') };
           blocks.splice(index + 1, 0, block);

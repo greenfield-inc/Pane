@@ -105,7 +105,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="agent-context"
           label="Publish Pane instructions to AGENTS.md"
-          description="Edits files in your repositories: adds a marked Pane section to the AGENTS.md at each active repository's root, creating the file if needed. Off by default; turning it off removes only Pane's section."
+          description="Edits repository files: adds Pane instructions to AGENTS.md and exports scoped Notes to AGENTS.md and CLAUDE.md in their workspaces. These edits can appear in Git changes. Off by default; turning it off removes Pane's managed sections. Notes remain available through native Pane terminals."
           saveState={persistence.saveStates['agent-context']}
         >
           <ImmediateToggle

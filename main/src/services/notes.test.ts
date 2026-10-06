@@ -95,4 +95,38 @@ describe('Notes', () => {
     } });
     expect(JSON.parse(fs.readFileSync(path.join(root, 'pane-notes-context.json'), 'utf8'))).toEqual({ additional_context: 'Read the updated payment note.' });
   });
+
+  it('keeps another Pane data directory from replacing or removing owned memory', () => {
+    const first = notebook();
+    const second = notebook();
+    const file = path.join(first.root, 'AGENTS.md');
+    const note = first.notes.create({ kind: 'global', id: 'user' }, 'Primary memory');
+    exportNoteMemories(first.root, file, [note]);
+    const original = fs.readFileSync(file, 'utf8');
+    expect(() => exportNoteMemories(second.root, file, [])).toThrow('another Pane data directory');
+    expect(() => exportNoteMemories(second.root, file, [note])).toThrow('another Pane data directory');
+    expect(fs.readFileSync(file, 'utf8')).toBe(original);
+  });
+
+  it('updates symlinked instructions without replacing the link or changing authored permissions', () => {
+    const { root, notes } = notebook();
+    const target = path.join(root, 'dotfiles.md');
+    const link = path.join(root, 'CLAUDE.md');
+    fs.writeFileSync(target, 'My instructions\n', { mode: 0o640 });
+    fs.symlinkSync(target, link);
+    const note = notes.create({ kind: 'global', id: 'user' }, 'Symlink memory');
+    exportNoteMemories(root, link, [note]);
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(target, 'utf8')).toContain('My instructions\n');
+    expect(fs.readFileSync(target, 'utf8')).toContain('### Symlink memory');
+    if (process.platform !== 'win32') expect(fs.statSync(target).mode & 0o777).toBe(0o640);
+  });
+
+  it('delivers Unicode Cursor memory through legacy Windows code pages', () => {
+    const { root } = notebook();
+    exportCursorMemoryHook(root, 'Cart → 支払い · 🎨', 'win32');
+    const bytes = fs.readFileSync(path.join(root, 'pane-notes-context.json'));
+    expect(bytes.every(byte => byte < 128)).toBe(true);
+    expect(JSON.parse(bytes.toString('ascii'))).toEqual({ additional_context: 'Cart → 支払い · 🎨' });
+  });
 });
