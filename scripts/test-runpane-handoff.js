@@ -80,3 +80,46 @@ test('runpane handoff --template prints the template', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^## Next steps$/m);
 });
+
+ test('model and effort reject executable syntax from text and overrides', () => {
+  for (const value of ['gpt-5;id', 'gpt-5$(id)', 'gpt-5`id`', 'gpt-5&echo']) {
+    assert.throws(() => parseDestination(`codex model=${value} here`, machines), /model/i);
+    assert.throws(() => parseDestination('codex here', machines, { model: value }), /model/i);
+  }
+  assert.throws(() => parseDestination('codex effort=high;id here', machines), /effort/i);
+  assert.throws(() => parseDestination('codex here', machines, { effort: '$(id)' }), /effort/i);
+});
+
+const fs = require('node:fs');
+const os = require('node:os');
+const { execFileSync } = require('node:child_process');
+function fixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-review-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git('init', '-b', 'task'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test');
+  fs.writeFileSync(path.join(root, 'code.txt'), 'initial');
+  git('add', '.'); git('commit', '-m', 'initial');
+  git('init', '--bare', path.join(root, 'remote.git'));
+  fs.writeFileSync(path.join(root, '.git', 'info', 'exclude'), 'remote.git/\n');
+  git('remote', 'add', 'origin', path.join(root, 'remote.git')); git('push', '-u', 'origin', 'task');
+  return { root, git, run: (...args) => spawnSync(process.execPath, [cli, 'handoff', 'codex here', '--note-file', 'note.md', '--json', ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' } }) };
+}
+for (const existing of [false, true]) test(`staged ${existing ? 'modified' : 'added'} note refuses push without changing index or HEAD`, (t) => {
+  const f = fixture(t);
+  if (existing) { fs.writeFileSync(path.join(f.root, 'note.md'), filled()); f.git('add', 'note.md'); f.git('commit', '-m', 'existing note'); f.git('push'); }
+  fs.writeFileSync(path.join(f.root, 'note.md'), filled({ Goal: 'private marker' })); f.git('add', 'note.md');
+  fs.writeFileSync(path.join(f.root, 'code.txt'), 'changed');
+  const head = f.git('rev-parse', 'HEAD'); const index = f.git('write-tree');
+  const result = f.run('--push');
+  assert.notEqual(result.status, 0); assert.match(result.stderr, /note is staged/i);
+  assert.equal(f.git('rev-parse', 'HEAD'), head); assert.equal(f.git('write-tree'), index);
+  assert.equal(f.git('rev-parse', 'origin/task'), head);
+});
+test('an unstaged note is excluded from dry-run dirty count', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  f.git('add', 'note.md'); f.git('commit', '-m', 'note'); f.git('push');
+  fs.appendFileSync(path.join(f.root, 'note.md'), '\nprivate');
+  const result = f.run('--dry-run'); assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).git.dirty, 0);
+});

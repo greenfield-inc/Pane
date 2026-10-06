@@ -93,6 +93,8 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   const destination: HandoffDestination = { machine, agent };
   const model = overrides.model ?? models[0];
   const effort = overrides.effort ?? efforts[0];
+  if (model !== undefined && !/^[A-Za-z0-9._:/-]+$/.test(model)) throw new Error('Invalid model identifier. Use letters, numbers, dots, underscores, colons, slashes, or hyphens.');
+  if (effort !== undefined && !EFFORTS.has(effort)) throw new Error(`Invalid effort. Use ${[...EFFORTS].join(', ')}.`);
   if (model) destination.model = model;
   if (effort) destination.effort = effort;
   if (wsl) destination.wsl = true;
@@ -230,7 +232,7 @@ function readGitState(cwd: string): GitState {
     head,
     remote,
     remoteUrl,
-    dirty: git(['status', '--porcelain'], root).split('\n').filter(Boolean),
+    dirty: execFileSync('git', ['status', '--porcelain', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean),
     pushed: remoteHead !== null && tryGit(['merge-base', '--is-ancestor', head, remoteHead], root) !== null,
   };
 }
@@ -244,6 +246,10 @@ function withoutNote(state: GitState, notePath: string | undefined): GitState {
 }
 
 function pushWork(state: GitState, destination: string, notePath: string | undefined): GitState {
+  const noteRelative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)) : '';
+  if (noteRelative && !noteRelative.startsWith('..') && git(['diff', '--cached', '--name-only', '--', noteRelative], state.root)) {
+    throw new Error(`The handoff note is staged. Unstage it with git restore --staged -- ${JSON.stringify(noteRelative)}, then retry. Nothing was committed or pushed.`);
+  }
   if (state.dirty.length) {
     const relative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)) : '';
     git(['add', '-A', '--', '.', ...(relative && !relative.startsWith('..') ? [`:(exclude)${relative}`] : [])], state.root);
@@ -364,10 +370,10 @@ function agentCommand(destination: HandoffDestination): string | undefined {
   const base = RUNPANE_CONTRACT.agentTemplates[destination.agent].command;
   const { model, effort } = destination;
   const flags = destination.agent === 'codex'
-    ? [model && `-m ${model}`, effort && `-c model_reasoning_effort=${effort}`]
+    ? [model && `-m ${quote(model, false)}`, effort && `-c ${quote(`model_reasoning_effort=${effort}`, false)}`]
     : destination.agent === 'claude'
-      ? [model && `--model ${model}`, effort && `--effort ${effort}`]
-      : [model && `--model ${model}`];
+      ? [model && `--model ${quote(model, false)}`, effort && `--effort ${quote(effort, false)}`]
+      : [model && `--model ${quote(model, false)}`];
   return [base, ...flags].filter(Boolean).join(' ');
 }
 
