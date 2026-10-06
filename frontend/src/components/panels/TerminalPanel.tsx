@@ -2279,6 +2279,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         x={selectionPopover.x}
         y={selectionPopover.y}
         text={selectionPopover.text}
+        panelTitle={panel.title}
         workingDirectory={workingDirectory}
         sessionId={panel.sessionId}
         isRemoteMode={isRemoteMode}

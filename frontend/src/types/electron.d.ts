@@ -91,9 +91,13 @@ interface IPCResponse<T = any> {
 }
 
 interface ElectronAPI {
+  onNotesChanged: (callback: () => void) => () => void;
   // Generic invoke method. Daemon-owned channels route through the main-process
   // daemon bridge while adapter-only channels stay on direct Electron IPC.
   invoke: {
+    (channel: 'notes:context', paneId: string): Promise<import('../../../shared/types/notes').NoteContext>;
+    (channel: 'notes:list', paneId: string, scope: import('../../../shared/types/notes').NoteScope): Promise<import('../../../shared/types/notes').Note[]>;
+    (channel: 'notes:mutate', paneId: string, input: import('../../../shared/types/notes').NoteMutation): Promise<{ note?: import('../../../shared/types/notes').Note; exports: import('../../../shared/types/notes').NoteExportResult[] }>;
     (channel: 'panels:get-layout', sessionId: string): Promise<IPCResponse<SessionPanelLayout | null>>;
     (channel: 'panels:set-layout', sessionId: string, layout: SessionPanelLayout | null): Promise<IPCResponse<void>>;
     (channel: 'panels:emitEvent', panelId: string, eventType: PanelEventType, data: JsonValue): Promise<void>;

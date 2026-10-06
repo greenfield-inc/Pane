@@ -14,6 +14,8 @@ const DashboardPanel = lazy(() => import('./DashboardPanel'));
 const SetupTasksPanel = lazy(() => import('./SetupTasksPanel'));
 const BrowserPanel = lazy(() => import('./browser/BrowserPanel'));
 
+const NotesPanel = lazy(() => import('./notes/NotesPanel'));
+
 // Transient failures (a webview not ready yet after a pane switch) clear on remount,
 // so retry quietly a few times before showing the error.
 const MAX_AUTO_RETRIES = 3;
@@ -81,6 +83,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
 
     // Panel type rendering
     switch (panel.type) {
+      case 'notes':
+        return <NotesPanel paneId={panel.sessionId} viewId={panel.id} />;
       case 'terminal':
         return <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       case 'diff':

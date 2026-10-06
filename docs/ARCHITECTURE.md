@@ -9,7 +9,7 @@ is the reference for details.
 - **Pane (session):** one feature or PR workspace. It normally owns one
   Pane-managed git worktree and branch.
 - **Panel:** a tab inside a pane. Types are `terminal`, `diff`, `explorer`,
-  `editor`, `logs`, `dashboard`, `setup-tasks` and `browser`
+  `editor`, `logs`, `dashboard`, `setup-tasks`, `browser` and `notes`
   (`shared/types/panels.ts`). Agent CLIs run in `terminal` panels.
 
 ## Processes
@@ -94,6 +94,27 @@ Agent status (working, idle, blocked) is derived in
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
+
+## Notes
+
+Local Notes panels use `main/src/services/notes.ts` through `main/src/ipc/notes.ts`.
+Canonical documents live in `<PANE_DIR>/notes/notes.json`, outside disposable
+worktrees. A revision check rejects stale edits; writes atomically replace the
+store. Promotion changes the canonical scope and retains references to earlier
+scopes. The Session view derives associated project notebooks from existing Pane
+associations. Renderer recovery drafts retain edits when an autosave fails.
+
+`noteExports.ts` derives marked instruction sections and drawing assets from saved
+documents. Excalidraw scenes remain editable JSON, with PNG previews and readable
+labels in agent-facing Markdown. Global destinations are Claude's user
+`CLAUDE.md`, Codex's user `AGENTS.md` (or existing override), and Cursor's local
+`rules/pane-memories.mdc`. Cursor CLI also receives the generated memory through
+a user `sessionStart` hook (`cursorNoteHook.ts`), preserving existing hooks. Project and feature content is exported into the base
+repository and known worktrees; Session content stays in its own workspace.
+Malformed marker pairs produce a visible export error without replacement.
+Changing notebooks only reads data. Saving updates files; this does not establish
+that an already-running agent has refreshed its context. Notes are local to this
+installation, without cross-machine synchronization.
 
 ## Subsystems
 

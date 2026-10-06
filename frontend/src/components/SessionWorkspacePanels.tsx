@@ -30,7 +30,7 @@ const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
 /** Panels that always live on the Session stage as tabs; Files docks in the inspector. */
-const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser']);
+const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser', 'notes']);
 
 /** A terminal started with a command (an agent or a custom command) is always a tab. */
 function launchesCommand(panel: ToolPanel): boolean {

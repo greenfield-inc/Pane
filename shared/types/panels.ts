@@ -17,7 +17,7 @@ export interface ToolPanel {
   metadata: ToolPanelMetadata;   // Creation time, position, etc.
 }
 
-export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser';
+export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
 
 export interface ToolPanelState {
   isActive: boolean;
@@ -353,10 +353,12 @@ interface PanelCapabilityRegistry {
   dashboard: PanelCapabilities;
   'setup-tasks': PanelCapabilities;
   browser: PanelCapabilities;
+  notes: PanelCapabilities;
 }
 
 // Panel Registry - Currently only terminal is implemented
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
+  notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
   terminal: {
     canEmit: ['terminal:command_executed', 'terminal:exit', 'files:changed'],
     canConsume: [], // Terminal doesn't consume events in Phase 1-2

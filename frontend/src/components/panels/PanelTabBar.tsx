@@ -82,6 +82,8 @@ function getPanelIcon(type: ToolPanelType, panel?: ToolPanel) {
       return <GitBranch className="w-4 h-4" />;
     case 'explorer':
       return <FolderTree className="w-4 h-4" />;
+    case 'notes':
+      return <FileText className="w-4 h-4" />;
     case 'editor':
       return panel && editorPanelState(panel)?.diff ? <FileDiff className="w-4 h-4" /> : <FileText className="w-4 h-4" />;
     case 'logs':

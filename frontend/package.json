@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@git-diff-view/react": "^0.0.40",
     "@git-diff-view/shiki": "^0.0.40",
     "@headless-tree/core": "^1.6.3",

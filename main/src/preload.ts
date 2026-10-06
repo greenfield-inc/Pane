@@ -335,6 +335,11 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  onNotesChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('notes:changed', listener);
+    return () => ipcRenderer.removeListener('notes:changed', listener);
+  },
   // Generic invoke method for direct IPC calls
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   

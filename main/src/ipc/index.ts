@@ -1,6 +1,7 @@
 import { ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
+import { registerNotesHandlers } from './notes';
 import { registerUpdaterHandlers } from './updater';
 import { registerSessionHandlers } from './session';
 import { registerProjectHandlers } from './project';
@@ -64,6 +65,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);
+  registerNotesHandlers(ipcMain, services);
   registerFeedbackHandlers(ipcMain, services);
   registerUpdaterHandlers(ipcMain, services);
   registerSessionHandlers(ipcMain, services, commandRegistry);

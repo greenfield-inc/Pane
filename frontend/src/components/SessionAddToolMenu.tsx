@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Globe, Plus, Terminal, TerminalSquare } from 'lucide-react';
+import { FileText, Globe, Plus, Terminal, TerminalSquare } from 'lucide-react';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useConfigStore } from '../stores/configStore';
 import { visibleAgentPresets } from '../utils/agentPresets';
@@ -8,7 +8,7 @@ import { getCliBrandIcon } from './ui/brandIconRegistry';
 
 /** A tool the Session "+" menu can open as a tab. */
 export interface SessionToolSpec {
-  type: 'terminal' | 'browser';
+  type: 'terminal' | 'browser' | 'notes';
   title: string;
   initialCommand?: string;
   customResume?: CustomCommandResume | null;
@@ -29,6 +29,7 @@ export function SessionAddToolMenu({ onAdd, disabled = false }: {
       <span className="flex min-w-0 items-center gap-2">{icon}<span className="truncate">{text}</span></span>
     );
     return [
+      { id: 'notes', label: labelled(<FileText className="h-3.5 w-3.5" />, 'Notes'), onClick: () => onAdd({ type: 'notes', title: 'Notes' }) },
       { id: 'terminal', label: labelled(<Terminal className="h-3.5 w-3.5 flex-shrink-0" />, 'Terminal'), onClick: () => onAdd({ type: 'terminal', title: 'Terminal' }) },
       { id: 'browser', label: labelled(<Globe className="h-3.5 w-3.5 flex-shrink-0" />, 'Browser'), onClick: () => onAdd({ type: 'browser', title: 'Browser' }) },
       ...visibleAgentPresets().map(preset => ({
