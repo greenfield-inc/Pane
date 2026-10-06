@@ -1304,7 +1304,11 @@ export class TerminalPanelManager extends EventEmitter {
       sessionId: panel.sessionId,
       scrollbackBuffer: '',
       alternateScreenBuffer: '',
-      screenEmulator: this.emulatorHost().createEmulator(spawnCols, spawnRows),
+      screenEmulator: this.emulatorHost().createEmulator(spawnCols, spawnRows, {
+        reconnect: this.emulatorHost,
+        replay: () => terminalProcess.scrollbackBuffer + (terminalProcess.isAlternateScreen
+          ? `\x1b[?1049h${terminalProcess.alternateScreenBuffer}` : ''),
+      }),
       commandHistory: [],
       currentCommand: '',
       lastActivity: new Date(),
@@ -1331,6 +1335,7 @@ export class TerminalPanelManager extends EventEmitter {
 
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
+    panelManager.emitPanelEvent(panel.id, 'terminal:started', { timestamp: new Date().toISOString() });
 
     // Install lifetime guards before any launch-state persistence can yield.
     this.setupTerminalHandlers(terminalProcess);
