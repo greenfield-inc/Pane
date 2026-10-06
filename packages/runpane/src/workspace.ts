@@ -137,6 +137,8 @@ function runTailscale(args: string[]): Promise<string | null> {
       if (directory) candidates.push({ command: path.join(directory, 'Tailscale', 'tailscale.exe') });
     }
   }
+  // Inside WSL, Tailscale runs on Windows; its CLI is on PATH through interop.
+  if (process.platform === 'linux' && process.env.WSL_DISTRO_NAME) candidates.push({ command: 'tailscale.exe' });
   return candidates.reduce<Promise<string | null>>(async (found, candidate) => (await found) ?? new Promise((resolve) => {
     execFile(candidate.command, args, { encoding: 'utf8', timeout: TAILSCALE_TIMEOUT_MS, env: candidate.env ?? process.env, windowsHide: true },
       (error, stdout) => resolve(error && !stdout ? null : stdout));
