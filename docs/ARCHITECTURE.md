@@ -102,7 +102,10 @@ Canonical documents live in `<PANE_DIR>/notes/notes.json`, outside disposable
 worktrees. A revision check rejects stale edits; writes atomically replace the
 store. Promotion changes the canonical scope and retains references to earlier
 scopes. The Session view derives associated project notebooks from existing Pane
-associations. Renderer recovery drafts retain edits when an autosave fails.
+associations. Renderer recovery drafts retain edits when an autosave fails. The borderless
+editor inserts text/drawing blocks through inline plus or slash menus; the
+settings cog holds promotion and agent delivery details. Restoring an archived
+Pane refreshes its derived context from current project notes.
 
 `noteExports.ts` derives marked instruction sections and drawing assets from saved
 documents. Excalidraw scenes remain editable JSON, with PNG previews and readable

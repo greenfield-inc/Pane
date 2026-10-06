@@ -74,6 +74,18 @@ describe('Notes IPC delivery', () => {
     }
   });
 
+  it('refreshes a restored Pane from project edits made while it was archived', async () => {
+    const { mutate, sessionManager, panes } = fixture();
+    const note = await mutate('a', { action: 'create', scope: { kind: 'project', id: '1' }, title: 'Before archive' });
+    const activePanes = vi.spyOn(sessionManager, 'getSessionsForProject').mockImplementation(id => panes.filter(pane => pane.projectId === id && pane.id !== 'a'));
+    await mutate('b', { action: 'save', note: { ...note!, title: 'Edited while archived' } });
+    expect(read('data/notes/contexts/a.md')).toContain('Before archive');
+    activePanes.mockRestore();
+    sessionManager.emit('sessions-loaded', panes);
+    expect(read('data/notes/contexts/a.md')).toContain('Edited while archived');
+    expect(read('data/notes/contexts/a.md')).not.toContain('Before archive');
+  });
+
   it('does not let an unreadable notebook interrupt Pane creation or a Settings event', async () => {
     const { mutate, sessionManager, configManager, config } = fixture();
     await mutate('a', { action: 'create', scope: { kind: 'project', id: '1' } });
@@ -82,6 +94,7 @@ describe('Notes IPC delivery', () => {
     const laterListener = vi.fn();
     configManager.on('config-updated', laterListener);
     expect(() => sessionManager.emit('session-created', { projectId: 1 })).not.toThrow();
+    expect(() => sessionManager.emit('sessions-loaded', [])).not.toThrow();
     config.agentContext.managedAgentsMd = true;
     expect(() => configManager.emit('config-updated')).not.toThrow();
     expect(laterListener).toHaveBeenCalledOnce();

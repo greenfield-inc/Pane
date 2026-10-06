@@ -181,6 +181,9 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
   sessionManager.on('session-created', (session: Session) => {
     reconcile([{ kind: 'project', id: String(session.projectId) }]);
   });
+  // Restoring an archived Pane reloads sessions without emitting session-created.
+  // Refresh its derived context before another agent reads the retained file.
+  sessionManager.on('sessions-loaded', () => reconcile());
   let repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
   services.configManager.on('config-updated', () => {
     const enabled = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
