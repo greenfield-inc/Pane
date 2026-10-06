@@ -2,7 +2,8 @@
 // `tailscale` whose status lists the owner's machines. Their MagicDNS names do not resolve,
 // so every remote call fails fast and the error text shows where runpane routed it.
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const net = require('node:net');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -78,4 +79,66 @@ test('a missing file shaped like another machine\'s path names that machine and 
   const hinted = runpane('panes', 'create', '--from-json', 'C:\\Users\\khaza\\plan.json', '--yes');
   assert.match(hinted.output, /It looks like it is on parsa-devbox \(Windows, online\), parsa-devbox-old \(Windows, offline\)\. Read it with: runpane workspace parsa-devbox read 'C:\\Users\\khaza\\plan\.json'/);
   assert.notEqual(hinted.status, 0);
+});
+
+test('another machine answers daemon commands, including workspace state; local-only commands stay here', posixOnly, () => {
+  assert.match(runpane('workspace', 'parsa-devbox', 'workspace', 'state', '--json').output, /Could not reach Pane on parsa-devbox/);
+  assert.match(runpane('workspace', 'parsa-devbox', 'sessions', 'list', '--json').output, /Could not reach Pane on parsa-devbox/);
+  assert.match(runpane('workspace', 'parsa-devbox', 'workspace', 'list').output, /runs on this machine only/);
+  assert.match(runpane('workspace', 'parsa-devbox', 'doctor').output, /use: runpane workspace parsa-devbox exec -- runpane doctor/);
+});
+
+/** Runs runpane while a fake local Pane answers machine commands; returns the output and what Pane was asked. */
+async function runpaneWithLocalPane(input, ...args) {
+  const { getPaneDaemonEndpoint } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const endpoint = getPaneDaemonEndpoint(bin);
+  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
+  fs.rmSync(endpoint.path, { force: true });
+  const requests = [];
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
+        const frame = JSON.parse(buffer.slice(0, index));
+        buffer = buffer.slice(index + 1);
+        if (frame.id !== 1) continue;
+        requests.push({ channel: frame.channel, args: frame.args });
+        const result = frame.channel === 'runpane:machine:read'
+          ? { path: '/resolved', encoding: 'utf8', content: 'from this Pane\n', bytes: 15 }
+          : { path: '/resolved', bytes: 6 };
+        socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result })}\n`);
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(endpoint.path, resolve));
+  try {
+    const child = spawn(process.execPath, [cli, ...args], {
+      cwd: bin,
+      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, PANE_DIR: bin, RUNPANE_TELEMETRY_DISABLED: '1' },
+    });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    child.stdin.end(input);
+    const status = await new Promise((resolve) => child.on('close', resolve));
+    return { status, output, requests };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test('without a machine name, local reads and writes go through this machine\'s Pane', posixOnly, async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-local-'));
+  const read = await runpaneWithLocalPane('', 'workspace', 'read', directory);
+  assert.equal(read.output, 'from this Pane\n');
+  assert.deepEqual(read.requests, [{ channel: 'runpane:machine:read', args: [{ path: directory }] }]);
+
+  const home = await runpaneWithLocalPane('', 'workspace', 'read', '~/notes.md');
+  assert.deepEqual(home.requests, [{ channel: 'runpane:machine:read', args: [{ path: '~/notes.md' }] }]);
+
+  const nested = path.join(directory, 'new', 'parent', 'file.txt');
+  const write = await runpaneWithLocalPane('hello\n', 'workspace', 'write', nested);
+  assert.equal(write.status, 0, write.output);
+  assert.deepEqual(write.requests, [{ channel: 'runpane:machine:write', args: [{ path: nested, content: 'hello\n', encoding: 'utf8' }] }]);
 });

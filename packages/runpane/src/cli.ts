@@ -124,12 +124,14 @@ export async function main(argv: string[]): Promise<number> {
 const THIS_MACHINE_ONLY = new Set<string>([
   'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
   'docs search', 'docs read', 'agents start', 'agents status', 'agents send',
+  // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
+  'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
 ]);
 
 /** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
 async function runOnMachine(machineQuery: string, command: string[]): Promise<number> {
   const parsed = parseRunpaneArgs(command);
-  if (THIS_MACHINE_ONLY.has(parsed.command) || parsed.command.startsWith('workspace ')) {
+  if (THIS_MACHINE_ONLY.has(parsed.command)) {
     throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
   }
   const tailnet = await readTailnet();
