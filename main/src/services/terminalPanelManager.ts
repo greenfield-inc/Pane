@@ -1694,7 +1694,12 @@ export class TerminalPanelManager extends EventEmitter {
     // an older batch now so its bulk-output timer cannot delay the next frame.
     if (terminal.isVisible) {
       terminal.interactiveOutputUntil = Date.now() + INTERACTIVE_OUTPUT_WINDOW_MS;
-      this.flushOutputBuffer(terminal);
+      try {
+        this.flushOutputBuffer(terminal);
+      } catch (err) {
+        // A failed output subscriber must not prevent input reaching the PTY.
+        console.warn(`[TerminalPanelManager] Failed to flush output before input for ${panelId}:`, err);
+      }
     }
     try {
       const writeStarted = terminalTiming ? performance.now() : 0;

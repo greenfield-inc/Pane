@@ -2,6 +2,7 @@ import * as claudeTranscripts from './claudeSessionTranscript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
+import { createFanoutEventSink } from '../core/eventSink';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
 import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
@@ -436,6 +437,34 @@ describe('TerminalPanelManager hidden output delivery', () => {
     vi.advanceTimersByTime(visible ? 24 : 242);
     expect(outputs()).toHaveLength(visible ? 3 : 2);
     if (!visible) expect(send).not.toHaveBeenCalledWith('terminal:output', expect.anything());
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('delivers keyboard input when a subscriber fails during the pending output flush', () => {
+    const healthySend = vi.fn();
+    setPaneRuntime({
+      eventSink: createFanoutEventSink([
+        { send: () => { throw new Error('output transport failed'); } },
+        { send: healthySend },
+      ]),
+      getConfigManager: () => createConfigManagerStub(),
+      getPtyHostRuntime: () => null,
+      getWebviewContextMap: () => new Map(),
+    });
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal({ outputBuffer: 'pending output', isVisible: true });
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+
+    expect(() => manager.writeToTerminal(terminal.panelId, 'x')).not.toThrow();
+    manager.writeToTerminal(terminal.panelId, 'y');
+
+    expect(terminal.pty.write.mock.calls).toEqual([['x'], ['y']]);
+    expect(healthySend).toHaveBeenCalledTimes(1);
+    expect(healthySend).toHaveBeenCalledWith('terminal:output', {
+      panelId: terminal.panelId,
+      sessionId: terminal.sessionId,
+      output: 'pending output',
+    });
     disposeFlowControlRecord(terminal.flowControl);
   });
 
