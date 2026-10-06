@@ -52,7 +52,7 @@ type TerminalUnderTest = {
   isVisible: boolean;
   isAlternateScreen: boolean;
   inSyncBlock: boolean;
-  agentType?: 'claude' | 'codex' | 'cursor';
+  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode';
   agentSessionScrapeBuffer: string;
   capturedAgentSessionId?: string;
   agentProbe?: unknown;
@@ -918,6 +918,91 @@ describe('TerminalPanelManager hidden output delivery', () => {
         initialInputError: undefined,
       },
     });
+  });
+
+  it('allocates one stable selector for a fresh native OpenCode launch', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
+      agentType: 'opencode',
+    });
+
+    expect(result.customState.agentSessionId).toMatch(/^ses_[A-Za-z0-9]+$/);
+    expect(result.commandToRun).toBe(
+      `opencode --auto --session "${result.customState.agentSessionId}"`,
+    );
+    expect(result.commandToRun.match(/--session/g)).toHaveLength(1);
+    expect(result.customState).toMatchObject({
+      agentType: 'opencode',
+      isCliPanel: true,
+      isCliReady: false,
+      launchCommand: 'opencode --auto',
+      wasInterrupted: undefined,
+    });
+  });
+
+  it('reuses a persisted OpenCode id whether or not the panel was interrupted', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = 'ses_Persisted123';
+
+    for (const wasInterrupted of [undefined, true]) {
+      const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
+        agentType: 'opencode',
+        agentSessionId: sessionId,
+        wasInterrupted,
+      });
+      expect(result.commandToRun).toBe(`opencode --auto --session "${sessionId}"`);
+      expect(result.customState.agentSessionId).toBe(sessionId);
+      expect(result.customState.wasInterrupted).toBeUndefined();
+    }
+  });
+
+  it('adopts one explicit OpenCode selector without duplicating it', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'opencode --auto --session ses_Explicit123';
+
+    const result = manager.resolveCliLaunchCommand('panel-1', command, {});
+
+    expect(result.commandToRun).toBe(command);
+    expect(result.customState.agentSessionId).toBe('ses_Explicit123');
+    expect(result.commandToRun.match(/--session/g)).toHaveLength(1);
+  });
+
+  it('rejects conflicting OpenCode command and persisted selectors', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    expect(() => manager.resolveCliLaunchCommand(
+      'panel-1',
+      'opencode --session ses_Command123',
+      { agentType: 'opencode', agentSessionId: 'ses_Persisted123' },
+    )).toThrow('OpenCode command and persisted session ids differ');
+  });
+
+  it('keeps OpenCode initial input out of the launch command', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
+      agentType: 'opencode',
+      initialInputMode: 'argument',
+      initialInput: 'Review this change',
+    });
+
+    expect(result.commandToRun).not.toContain('Review this change');
+    expect(result.commandToRun).not.toContain('--prompt');
+    expect(result.customState.initialInputSentAt).toBeUndefined();
+  });
+
+  it('leaves wrapped OpenCode launches opaque without allocating an id', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'agent-farm run opencode';
+
+    const result = manager.resolveCliLaunchCommand('panel-1', command, {
+      agentType: 'opencode',
+      launchMode: 'wrapped',
+    });
+
+    expect(result.commandToRun).toBe(command);
+    expect(result.customState.agentSessionId).toBeUndefined();
   });
 
   it('escapes shell-sensitive startup prompt arguments without changing ordinary prompts', () => {

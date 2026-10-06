@@ -3555,7 +3555,7 @@ async function checkAgentTemplateParity() {
   const { runPanesCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
 
   const agents = [...RUNPANE_CONTRACT.enums.agents].sort();
-  assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor']);
+  assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor', 'opencode']);
   for (const agent of RUNPANE_CONTRACT.enums.agents) {
     const template = RUNPANE_CONTRACT.agentTemplates[agent];
     assert.ok(template, `agentTemplates missing entry for ${agent}`);
@@ -3564,6 +3564,7 @@ async function checkAgentTemplateParity() {
     assert.ok(template.description.trim().length > 0, `agentTemplates.${agent}.description is empty`);
   }
   assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.cursor.command, 'cursor-agent --force --trust');
+  assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.opencode.command, 'opencode --auto');
 
   const originalInvokeDaemon = daemonClient.invokeDaemon;
   const originalConsoleLog = console.log;

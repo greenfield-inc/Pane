@@ -41,6 +41,16 @@ export const GeminiIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) 
 );
 
 /**
+ * OpenCode brand icon
+ */
+export const OpenCodeIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 240 300" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M180 60H60v180h120V60ZM240 300H0V0h240v300Z" />
+    <path d="M180 240H60V120h120v120Z" opacity="0.45" />
+  </svg>
+);
+
+/**
  * Aider brand icon — stylized "A" mark (no official simple-icons entry)
  */
 export const AiderIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (

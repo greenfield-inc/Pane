@@ -12,8 +12,16 @@ import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../share
 import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
+import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
 
-const paneChatAgentOptions = visibleAgentPresets().map(({ id }) => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
+function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
+  return id === 'claude' || id === 'codex' || id === 'cursor';
+}
+
+const paneChatAgentOptions = visibleAgentPresets()
+  .map(({ id }) => id)
+  .filter(isPaneChatAgent)
+  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 type McpToolsetChoice = 'core' | 'all';
 const mcpToolsetOptions: { id: McpToolsetChoice; label: string }[] = [

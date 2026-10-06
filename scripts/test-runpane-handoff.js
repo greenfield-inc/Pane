@@ -264,6 +264,34 @@ test('Cursor effort fails before Git or receiver side effects', (t) => {
  }
 });
 
+test('OpenCode handoff fails before Git, commands, files, or receiver side effects', (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  fs.writeFileSync(path.join(f.root, 'code.txt'), 'dirty');
+  receiver(f);
+  const head = f.git('rev-parse', 'HEAD'); const index = f.git('write-tree'); const status = f.git('status', '--porcelain');
+  const commands = path.join(f.root, '.git', 'handoff-commands.jsonl');
+  fs.appendFileSync(path.join(f.root, '.git', 'isolated-tailnet.cjs'), `for(const method of ['spawn','execFileSync']){const original=cp[method];cp[method]=(...args)=>{require('node:fs').appendFileSync(${JSON.stringify(commands)},JSON.stringify(args.slice(0,2))+'\\n');return original(...args);};}\n`);
+  const rejection = /OpenCode is supported in terminal panes, but handoff to OpenCode is not supported yet/i;
+  const cases = [
+    ['opencode here'],
+    ['OpenCode model=openai/gpt-5 here'],
+    ['opencode gpt-5 high here'],
+    ['--agent', 'opencode'],
+    ['codex here', '--agent', 'opencode', '--model', 'openai/gpt-5', '--effort', 'high'],
+    ...['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].flatMap(effort => [
+      [`opencode effort=${effort} here`], ['opencode here', '--effort', effort],
+    ]),
+  ];
+  for (const args of cases) {
+    const result = spawnSync(process.execPath, [cli, 'handoff', ...args, '--note-file', 'note.md', '--push'], { cwd: f.root, encoding: 'utf8', env: f.env });
+    assert.notEqual(result.status, 0, JSON.stringify(args)); assert.match(result.stderr, rejection);
+    assert.equal(f.git('rev-parse', 'HEAD'), head); assert.equal(f.git('write-tree'), index); assert.equal(f.git('rev-parse', 'origin/task'), head);
+    assert.equal(f.git('status', '--porcelain'), status);
+    assert.equal(fs.existsSync(commands), false); assert.equal(fs.existsSync(path.join(f.root, 'receiver-args.jsonl')), false); assert.equal(fs.existsSync(f.env.HOME), false);
+  }
+});
+
 test('repository selector with mismatched remote gives actionable matching-remote guidance', (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled());
  const clone=path.join(f.root,'other-clone'); fs.mkdirSync(clone);

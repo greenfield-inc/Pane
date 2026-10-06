@@ -429,6 +429,48 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow('The launch command runs claude, but the Session agent is codex');
   });
 
+  it('rejects OpenCode from named Session command and default boundaries', async () => {
+    const fixture = createFixture();
+
+    await expect(fixture.manager.create({ name: 'OpenCode command', launchCommand: 'opencode --auto' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
+
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'opencode --auto' });
+    await expect(fixture.manager.create({ name: 'OpenCode default' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
+
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: '' });
+    const created = await fixture.manager.create({ name: 'OpenCode update baseline' });
+    await expect(fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'opencode --auto' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
+    expect((await fixture.manager.getView({ sessionId: created.session.id })).panel.state.customState?.agentType)
+      .not.toBe('opencode');
+  });
+
+  it('rejects OpenCode launch commands even when custom resume identifies another agent', async () => {
+    const fixture = createFixture();
+    const customResume = {
+      mode: 'claude',
+      initialTemplate: '{command} -- --session-id {sessionId}',
+      resumeTemplate: '{command} -- --resume {sessionId}',
+    } as const;
+
+    await expect(fixture.manager.create({
+      name: 'OpenCode with resume',
+      launchCommand: 'opencode --auto',
+      customResume,
+    })).rejects.toThrow(/OpenCode.*named Session/i);
+
+    const created = await fixture.manager.create({
+      name: 'Update OpenCode with resume',
+      launchCommand: 'my-launcher run',
+      customResume,
+    });
+    await expect(fixture.manager.update({ sessionId: created.session.id }, {
+      launchCommand: 'opencode --auto',
+    })).rejects.toThrow(/OpenCode.*named Session/i);
+  });
+
   it('titles phone alerts by Session and groups workers under their Session', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Launch' });
@@ -891,6 +933,28 @@ describe('OrchestrationSessionManager', () => {
     expect(afterReload.sessions.filter(session => session.id === LEGACY_ORCHESTRATION_SESSION_ID)).toHaveLength(1);
     expect(afterReload.selectedSessionId).toBe(orphan.id);
     expect(fixture.sessionManager.createSessionWithId).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes an associated OpenCode terminal without offering it as a Session orchestrator', async () => {
+    const fixture = createFixture();
+    const pane = paneFixture(fixture, 'opencode-worker-pane');
+    const worker = createPanel('opencode-worker-panel', pane.id, 'OpenCode worker');
+    worker.state.customState = { agentType: 'opencode', isInitialized: true };
+    await seedPanel(worker);
+    await seedPanel(createPanel('claude-worker-panel', pane.id, 'Claude worker'));
+    const named = await fixture.manager.create({ name: 'OpenCode workers', agent: 'claude' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+
+    expect(overview.session.agent).toBe('claude');
+    expect(overview.panes).toHaveLength(1);
+    expect(overview.panes[0].panels).toEqual(expect.arrayContaining([
+      expect.objectContaining({ panelId: worker.id, initialized: true, agentType: undefined }),
+      expect.objectContaining({ panelId: 'claude-worker-panel', agentType: 'claude' }),
+    ]));
+    await expect(fixture.manager.update({ sessionId: named.session.id }, { launchCommand: 'opencode --auto' }))
+      .rejects.toThrow(/OpenCode.*named Session/i);
   });
 
   it('enforces exclusive Pane ownership, validates tab membership, and permits reassignment after detach', async () => {

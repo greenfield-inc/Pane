@@ -383,6 +383,65 @@ export const CURSOR_MANIFEST: AgentManifest = {
   ],
 };
 
+/*
+ * Distilled from isolated OpenCode v2.0.19 PTY frames. OpenCode keeps its
+ * composer visible while work runs, so only the live footer distinguishes
+ * working from idle. Prompts are scoped to the bottom live region so matching
+ * approval or error text in conversation history cannot keep a pane blocked.
+ */
+export const OPENCODE_MANIFEST: AgentManifest = {
+  id: 'opencode',
+  rules: [
+    {
+      id: 'live_permission_action',
+      state: 'blocked',
+      priority: 1000,
+      region: 'bottom_non_empty_lines(2)',
+      visibleBlocker: true,
+      // Confirmation controls are current only at the bottom. Support the
+      // captured one-line layout and the established split-line fixture.
+      any: [
+        {
+          regex: [
+            /(?:^|\n)[^\S\n]*┃[^\S\n]+Allow once[^\S\n]+Always allow[^\S\n]+Reject[^\S\n]+ctrl\+f fullscreen[^\S\n]+⇆ select[^\S\n]+enter confirm[^\S\n]*$/iu,
+          ],
+        },
+        {
+          regex: [
+            /^[^\S\n]*┃[^\S\n]+Allow once[^\S\n]+Always allow[^\S\n]+Reject[^\S\n]*\n[^\S\n]*┃[^\S\n]+ctrl\+f fullscreen[^\S\n]+⇆ select[^\S\n]+enter confirm[^\S\n]*$/iu,
+          ],
+        },
+      ],
+    },
+    {
+      id: 'interruptible_composer',
+      state: 'working',
+      priority: 700,
+      region: 'bottom_non_empty_lines(4)',
+      visibleWorking: true,
+      lineRegex: [/\besc(?: again to)? interrupt\b.*\bctrl\+p commands\b/i],
+    },
+    {
+      id: 'idle_composer',
+      state: 'idle',
+      priority: 500,
+      region: 'bottom_non_empty_lines(4)',
+      visibleIdle: true,
+      contains: ['ctrl+p commands'],
+      any: [
+        { lineRegex: [/^\s*╹▀{3,}/u] },
+        // Transparent themes omit the bottom border; the metadata row still
+        // immediately precedes the live footer, separated only by blank rows.
+        { regex: [/(?:^|\n)[^\S\n]*┃[^\n]+\n\s*[^\n]*ctrl\+p commands[^\n]*\s*$/u] },
+      ],
+      not: [
+        { lineRegex: [/\besc(?: again to)? interrupt\b.*\bctrl\+p commands\b/i] },
+        { contains: ['permission required', 'enter confirm'] },
+      ],
+    },
+  ],
+};
+
 interface AgentManifestLookup {
   [agent: string]: AgentManifest;
 }
@@ -391,6 +450,7 @@ const MANIFESTS_BY_AGENT: AgentManifestLookup = {
   claude: CLAUDE_MANIFEST,
   codex: CODEX_MANIFEST,
   cursor: CURSOR_MANIFEST,
+  opencode: OPENCODE_MANIFEST,
 };
 
 /**

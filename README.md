@@ -386,10 +386,12 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 1. **Open Pane** and create or select a project (any git repository)
 2. **Create a pane** — enter a prompt and pick your agent
-3. **Add tabs** — launch a Claude, Codex, or Cursor terminal, diff viewer, file explorer, or any CLI tool
+3. **Add tabs** — launch a Claude, Codex, Cursor, or OpenCode terminal, diff viewer, file explorer, or any CLI tool
 4. **Work in parallel** — create multiple panes for different approaches
 5. **Review diffs** — see what changed with the built-in diff viewer
 6. **Ship** — commit, rebase, and merge from keyboard shortcuts
+
+OpenCode's native terminal preset preserves its exact conversation ID when you reopen a project. OpenCode is not yet available as a Pane Chat or named Session agent.
 
 You can reuse an archived or deleted pane's name. Pane keeps any old worktree
 identity and Git branches separate, choosing a free worktree name for the new
