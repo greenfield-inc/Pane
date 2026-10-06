@@ -53,6 +53,7 @@ interface WorkspaceWaiter {
   key: string;
   timer: ReturnType<typeof setTimeout>;
   resolve(result: WorkspaceJournalReadResult & { timedOut: boolean }): void;
+  cancel(): void;
 }
 
 /** A named Session's current members, as a Session-scoped filter sees them. */
@@ -212,7 +213,9 @@ export class WorkspaceJournal implements PaneEventSink {
     timeoutMs: number,
     limit = 256,
     key = 'anonymous',
+    signal?: AbortSignal,
   ): Promise<WorkspaceJournalReadResult & { timedOut: boolean }> {
+    signal?.throwIfAborted();
     const existing = this.readAfter(cursor, filter, limit);
     if (existing.entries.length > 0 || existing.dropped || timeoutMs === 0) {
       return Promise.resolve({ ...existing, timedOut: existing.entries.length === 0 });
@@ -226,19 +229,25 @@ export class WorkspaceJournal implements PaneEventSink {
       return Promise.reject(new Error(`Workspace watch limit reached for ${key} (${MAX_WAITERS_PER_KEY})`));
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(waiter.timer);
+        this.waiters.delete(waiter);
+        signal?.removeEventListener('abort', waiter.cancel);
+      };
       const waiter: WorkspaceWaiter = {
         cursor,
         filter,
         limit,
         key,
         timer: setTimeout(() => {
-          this.waiters.delete(waiter);
-          resolve({ ...this.readAfter(cursor, filter, limit), timedOut: true });
+          waiter.resolve({ ...this.readAfter(cursor, filter, limit), timedOut: true });
         }, timeoutMs),
-        resolve,
+        resolve: result => { cleanup(); resolve(result); },
+        cancel: () => { cleanup(); reject(signal?.reason ?? new Error('Workspace watch cancelled')); },
       };
       this.waiters.add(waiter);
+      signal?.addEventListener('abort', waiter.cancel, { once: true });
     });
   }
 

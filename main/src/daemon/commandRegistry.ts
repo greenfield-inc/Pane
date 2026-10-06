@@ -2,6 +2,12 @@ import { isDaemonOwnedChannel } from './daemonChannels';
 import type { IpcMainInvokeEvent } from 'electron';
 import { AsyncLocalStorage } from 'async_hooks';
 
+const invocationSignal = new AsyncLocalStorage<AbortSignal>();
+
+export function paneCommandSignal(): AbortSignal | undefined {
+  return invocationSignal.getStore();
+}
+
 const remoteInvocation = new AsyncLocalStorage<boolean>();
 
 export function isRemotePaneCommand(): boolean {
@@ -63,6 +69,11 @@ export class PaneCommandRegistry {
     }
 
     return handler(...args);
+  }
+
+  /** Transport-owned cancellation cannot be supplied through request arguments. */
+  invokeConnected(channel: string, args: readonly PaneCommandValue[], signal: AbortSignal): Promise<PaneCommandValue> {
+    return invocationSignal.run(signal, () => this.invoke(channel, args));
   }
 
   /** Provenance is set by the HTTP transport, never by caller-supplied arguments. */

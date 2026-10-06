@@ -454,7 +454,7 @@ composer text carry `heldInputPresent: true`, the JSON form of `STUCK`.
 | User present | Someone is waiting on the result | `--settle 60000 --blocked-settle 15000 --min-interval 120000`, no `--idle-backoff` | about 3 minutes |
 
 Both profiles use the same `--kinds` list, `--quiet`, and named cursor.
-Switch profiles by re-arming the same cursor.
+Switch profiles by stopping the previous monitor, then re-arming the same cursor. If a monitor reports that its cursor was superseded, keep the replacement and do not re-arm the old monitor.
 
 ## Worker reports
 

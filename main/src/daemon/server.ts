@@ -53,6 +53,7 @@ export function isPaneDaemonEventChannel(channel: string): boolean {
 
 interface ConnectedPaneDaemonClient {
   socket: net.Socket;
+  lifetime: AbortController;
   decoder: PaneDaemonFrameDecoder;
   pendingFrames: string[];
   pendingBytes: number;
@@ -194,6 +195,7 @@ export class PaneDaemonServer {
     const clientId = String(this.nextClientId++);
     const client: ConnectedPaneDaemonClient = {
       socket,
+      lifetime: new AbortController(),
       decoder: new PaneDaemonFrameDecoder(),
       pendingFrames: [],
       pendingBytes: 0,
@@ -228,7 +230,7 @@ export class PaneDaemonServer {
     });
 
     socket.on('close', () => {
-      this.clients.delete(clientId);
+      this.dropClient(clientId);
       try {
         client.decoder.finish();
       } catch {
@@ -244,6 +246,7 @@ export class PaneDaemonServer {
     }
 
     this.clients.delete(clientId);
+    client.lifetime.abort(new Error('Pane daemon client disconnected'));
     client.pendingFrames.length = 0;
     client.pendingBytes = 0;
     client.waitingForDrain = false;
@@ -255,7 +258,7 @@ export class PaneDaemonServer {
   private async handleRequest(clientId: string, frame: PaneDaemonRequestFrame): Promise<void> {
     const response = frame.channel === 'daemon:events'
       ? this.buildEventFilterResponse(clientId, frame)
-      : await this.buildResponseFrame(frame);
+      : await this.buildResponseFrame(frame, this.clients.get(clientId)?.lifetime.signal);
     const client = this.clients.get(clientId);
 
     if (!client || client.socket.destroyed) {
@@ -356,9 +359,12 @@ export class PaneDaemonServer {
 
   private async buildResponseFrame(
     frame: PaneDaemonRequestFrame,
+    signal?: AbortSignal,
   ): Promise<PaneDaemonSuccessResponseFrame | PaneDaemonErrorResponseFrame> {
     try {
-      const result = await this.commandRegistry.invoke(frame.channel, frame.args);
+      const result = signal
+        ? await this.commandRegistry.invokeConnected(frame.channel, frame.args, signal)
+        : await this.commandRegistry.invoke(frame.channel, frame.args);
       return {
         type: 'response',
         id: frame.id,

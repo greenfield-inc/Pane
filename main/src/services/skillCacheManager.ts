@@ -675,7 +675,7 @@ written:
   active pane per hour at worst, usually 1 to 3, which keeps overnight runs
   inside the usage cap.
 - User present: the user is waiting on a result in this conversation.
-  Re-arm the same cursor with \`--settle 60000 --blocked-settle 15000
+  Stop the previous monitor, then re-arm the same cursor with \`--settle 60000 --blocked-settle 15000
   --min-interval 120000\` and no \`--idle-backoff\`, so READY arrives within
   about 3 minutes. Switch back to unattended when the user steps away.
 
@@ -723,7 +723,9 @@ unattended, then user present):
 
 Dead watch: the monitor has died when it exits non-zero or prints a WATCH ERROR
 line (\`_error\`). Silence is expected, because \`--quiet\` drops HEARTBEAT.
-Re-arm once. If it dies again, save the last 20 output lines to a file, run
+If the error says "Workspace watch superseded by a new request for this cursor",
+another monitor has taken over: keep the replacement and do not re-arm the old one.
+For other failures, re-arm once. If it dies again, save the last 20 output lines to a file, run
 \`runpane doctor --report --title "runpane watch failed" --body-file <evidence-file> --json\`,
 and tell the human.
 

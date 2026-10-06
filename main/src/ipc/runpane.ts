@@ -1,3 +1,5 @@
+import { paneCommandSignal } from '../daemon/commandRegistry';
+import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
@@ -249,7 +251,6 @@ const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
 const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
 const GH_PR_LOOKUP_TIMEOUT_MS = 10_000;
 const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
-const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
 // Named cursors are keys in workspace-cursors.json, never file names. 128 fits `session-<id>` for
 // any Session ID; runpane shortens the names it derives to 64 for older daemons.
@@ -1454,193 +1455,201 @@ export function registerRunpaneHandlers(
     }, result => ({ resultCount: result.entries.length }));
   });
 
+  const watchLeases = new WorkspaceWatchLeases();
   commandRegistry.register('runpane:workspace:wait', async (request: PaneCommandValue = {}): Promise<RunpaneWorkspaceWaitResult> => {
     return withRunpaneAction(services, 'workspace:wait', {}, async () => {
       const normalized = parseWorkspaceWaitRequest(request);
       const project = normalized.repo
         ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
         : undefined;
-      // Resolve the Session (id or exact name) once; its members are re-read on every journal read.
+      // Validate selectors before taking over a healthy cursor.
       const sessionRecord = normalized.session
         ? await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })
         : undefined;
-      const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
-      const filter: WorkspaceJournalFilter = {
-        kinds: normalized.kinds,
-        paneIds: normalized.paneIds,
-        sessionId: session?.id,
-        excludePaneIds: normalized.excludePaneIds,
-        repoId: project?.id,
-        nameContains: normalized.nameContains,
-        agentsOnly: normalized.agentsOnly,
-        includeHeldInput: normalized.includeHeldInput,
-        includeHeldInputPresence: normalized.includeHeldInputPresence,
-      };
-      const timeoutMs = Math.min(normalized.timeoutMs ?? DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS, MAX_WORKSPACE_WAIT_TIMEOUT_MS);
-      const limit = normalized.limit ?? DEFAULT_WORKSPACE_WAIT_LIMIT;
-      const idleSchedule: WorkspaceIdleSchedule = { idleAfterMs: normalized.idleAfterMs ?? 0, backoff: normalized.idleBackoff ?? false };
-      const requestStartedAt = Date.now();
-      // Take the consumer's in-memory record now; it is put back only on a non-reset exit.
-      const runtime = normalized.as ? consumerRuntime.get(normalized.as) : undefined;
-      if (normalized.as) consumerRuntime.delete(normalized.as);
-      let idleWindowStart = normalized.idleWindowStartMs ?? (normalized.as
-        ? runtime?.lastReadAt ?? 0
-        : normalized.since !== undefined ? 0 : requestStartedAt);
-      let cursor = normalized.since ?? workspaceJournal.generation;
-      let reset: RunpaneWorkspaceWaitResult['reset'];
-      const cadenceOptions = normalized.as ? workspaceCadenceOptions(normalized, filter, idleSchedule) : undefined;
-      const readFilter = cadenceOptions ? WatchCadence.observeFilter(filter) : filter;
-      const currentIdleEntries = (candidates: readonly WorkspaceIdleCandidate[]): RunpaneWorkspaceEntry[] => dueIdleEntries(
-        candidates,
-        idleSchedule,
-        idleWindowStart,
-        Date.now(),
-        workspaceJournal.generation,
-      )
-        .filter(workspaceJournal.matcher(filter))
-        .map(entry => projectWorkspaceEntry(entry, filter));
-      // Baseline entries restate current state after a reset; replay marks them so a consumer never
-      // reads a replayed agent.ready as a turn that just ended.
-      const baselineEntries = (): RunpaneWorkspaceEntry[] => workspaceStateReader.read(project?.id).entries
-        .filter(workspaceJournal.matcher(filter))
-        .map(entry => ({ ...projectWorkspaceEntry(entry, filter), replay: true as const }));
+      const lease = watchLeases.acquire(normalized.as, paneCommandSignal());
+      try {
+        const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
+        const filter: WorkspaceJournalFilter = {
+          kinds: normalized.kinds,
+          paneIds: normalized.paneIds,
+          sessionId: session?.id,
+          excludePaneIds: normalized.excludePaneIds,
+          repoId: project?.id,
+          nameContains: normalized.nameContains,
+          agentsOnly: normalized.agentsOnly,
+          includeHeldInput: normalized.includeHeldInput,
+          includeHeldInputPresence: normalized.includeHeldInputPresence,
+        };
+        const timeoutMs = Math.min(normalized.timeoutMs ?? DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS, MAX_WORKSPACE_WAIT_TIMEOUT_MS);
+        const limit = normalized.limit ?? DEFAULT_WORKSPACE_WAIT_LIMIT;
+        const idleSchedule: WorkspaceIdleSchedule = { idleAfterMs: normalized.idleAfterMs ?? 0, backoff: normalized.idleBackoff ?? false };
+        const requestStartedAt = Date.now();
+        // Take the consumer's in-memory record now; it is put back only on a non-reset exit.
+        const runtime = normalized.as ? consumerRuntime.get(normalized.as) : undefined;
+        if (normalized.as) consumerRuntime.delete(normalized.as);
+        let idleWindowStart = normalized.idleWindowStartMs ?? (normalized.as
+          ? runtime?.lastReadAt ?? 0
+          : normalized.since !== undefined ? 0 : requestStartedAt);
+        let cursor = normalized.since ?? workspaceJournal.generation;
+        let reset: RunpaneWorkspaceWaitResult['reset'];
+        const cadenceOptions = normalized.as ? workspaceCadenceOptions(normalized, filter, idleSchedule) : undefined;
+        const readFilter = cadenceOptions ? WatchCadence.observeFilter(filter) : filter;
+        const currentIdleEntries = (candidates: readonly WorkspaceIdleCandidate[]): RunpaneWorkspaceEntry[] => dueIdleEntries(
+          candidates,
+          idleSchedule,
+          idleWindowStart,
+          Date.now(),
+          workspaceJournal.generation,
+        )
+          .filter(workspaceJournal.matcher(filter))
+          .map(entry => projectWorkspaceEntry(entry, filter));
+        // Baseline entries restate current state after a reset; replay marks them so a consumer never
+        // reads a replayed agent.ready as a turn that just ended.
+        const baselineEntries = (): RunpaneWorkspaceEntry[] => workspaceStateReader.read(project?.id).entries
+          .filter(workspaceJournal.matcher(filter))
+          .map(entry => ({ ...projectWorkspaceEntry(entry, filter), replay: true as const }));
 
-      if (normalized.as) {
-        const evicted = workspaceCursorStore.evictStale();
-        for (const name of evicted) consumerRuntime.delete(name);
-        let named = workspaceCursorStore.get(normalized.as);
-        if (!named) {
-          cursor = normalized.from === 'earliest'
-            ? Math.max(0, workspaceJournal.oldestGeneration - 1)
-            : workspaceJournal.generation;
-          workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
-          reset = { reason: evicted.includes(normalized.as) ? 'unknown-consumer' : 'first-use' };
-        } else if (named.epoch !== workspaceJournal.epoch) {
-          cursor = workspaceJournal.generation;
-          workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
-          reset = { reason: 'epoch-changed' };
-        } else {
-          named = workspaceCursorStore.commitPending(normalized.as) ?? named;
-          cursor = named.gen;
+        if (normalized.as) {
+          const evicted = workspaceCursorStore.evictStale();
+          for (const name of evicted) consumerRuntime.delete(name);
+          let named = workspaceCursorStore.get(normalized.as);
+          if (!named) {
+            cursor = normalized.from === 'earliest'
+              ? Math.max(0, workspaceJournal.oldestGeneration - 1)
+              : workspaceJournal.generation;
+            workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
+            reset = { reason: evicted.includes(normalized.as) ? 'unknown-consumer' : 'first-use' };
+          } else if (named.epoch !== workspaceJournal.epoch) {
+            cursor = workspaceJournal.generation;
+            workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
+            reset = { reason: 'epoch-changed' };
+          } else {
+            named = workspaceCursorStore.commitPending(normalized.as) ?? named;
+            cursor = named.gen;
+          }
         }
-      }
 
-      if (reset) {
-        const silentBaseline = reset.reason === 'first-use' && normalized.from !== 'earliest';
-        const baseline = silentBaseline ? [] : baselineEntries()
-          .map(entry => reset?.reason === 'epoch-changed' ? { ...entry, changedWhileAway: true as const } : entry);
-        const entries = [...baseline, ...currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id))];
-        if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now() });
+        if (reset) {
+          const silentBaseline = reset.reason === 'first-use' && normalized.from !== 'earliest';
+          const baseline = silentBaseline ? [] : baselineEntries()
+            .map(entry => reset?.reason === 'epoch-changed' ? { ...entry, changedWhileAway: true as const } : entry);
+          const entries = [...baseline, ...currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id))];
+          if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now() });
+          return {
+            ok: true,
+            epoch: workspaceJournal.epoch,
+            generation: workspaceJournal.generation,
+            entries,
+            timedOut: false,
+            reset,
+            session,
+            nextCommand: workspaceNextCommand(normalized, workspaceJournal.generation, session),
+          };
+        }
+
+        let cadence: WatchCadence | undefined;
+        if (cadenceOptions) {
+          cadence = runtime?.cadence?.options.key === cadenceOptions.key ? runtime.cadence : new WatchCadence(cadenceOptions);
+          cursor = cadence.readCursor ?? cursor;
+        }
+
+        const deadlineAt = requestStartedAt + timeoutMs;
+        const startCursor = cursor;
+        let readAny = false;
+        let waited: Awaited<ReturnType<WorkspaceJournal['waitAfter']>>;
+        let entries: RunpaneWorkspaceEntry[];
+        for (;;) {
+          const idleCandidates = workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id);
+          const initial = workspaceJournal.readAfter(cursor, readFilter, limit);
+          let idleEntries = currentIdleEntries(idleCandidates);
+          if (initial.entries.length > 0 || initial.dropped !== undefined || idleEntries.length > 0) {
+            waited = { ...initial, timedOut: initial.entries.length === 0 };
+          } else {
+            const now = Date.now();
+            const parkUntil = Math.min(
+              deadlineAt,
+              nextIdleDeadline(idleCandidates, idleSchedule, now) ?? Number.POSITIVE_INFINITY,
+              cadence?.nextDeadline(now) ?? Number.POSITIVE_INFINITY,
+            );
+            waited = await workspaceJournal.waitAfter(
+              cursor,
+              readFilter,
+              Math.max(0, parkUntil - now),
+              limit,
+              normalized.as ?? 'anonymous',
+              lease.signal,
+            );
+            lease.signal.throwIfAborted();
+            idleEntries = currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id));
+          }
+          if (waited.dropped) {
+            reset = { reason: 'cursor-truncated' };
+          }
+          entries = [...reset ? baselineEntries() : waited.entries, ...idleEntries];
+
+          if (!cadence || reset) {
+            if (normalized.as && (!waited.timedOut || waited.dropped !== undefined)) {
+              workspaceCursorStore.advance(
+                normalized.as,
+                waited.generation,
+                workspaceJournal.epoch,
+                !normalized.ackNow,
+              );
+            }
+            break;
+          }
+
+          // Drain the rest of the backlog before flushing so a BUSY on a later page
+          // can still cancel a READY on an earlier one.
+          const now = Date.now();
+          if (waited.entries.length > 0) readAny = true;
+          cadence.ingest(entries, now);
+          idleWindowStart = now;
+          cursor = Math.max(cursor, waited.generation);
+          if (waited.entries.length > 0 && cursor < workspaceJournal.generation) {
+            const rest = workspaceJournal.readAfter(cursor, readFilter, Number.MAX_SAFE_INTEGER);
+            cadence.ingest(rest.entries, now);
+            cursor = Math.max(cursor, rest.generation);
+          }
+          cadence.readCursor = cursor;
+          entries = cadence.flush(now);
+          // Held lines are delivered under the Session's membership at flush time: a Pane detached
+          // while its READY settled drops out.
+          if (filter.sessionId !== undefined) entries = entries.filter(workspaceJournal.matcher(filter));
+          if (entries.length > 0 || now >= deadlineAt) break;
+        }
+        if (cadence && !reset && readAny) {
+          // The durable cursor never passes an entry still pending or held in memory. The
+          // instance resumes from its own read cursor, so nothing repeats while it lives. If
+          // the instance is discarded (request shape change, eviction, reset, or a call without
+          // cadence flags) the re-read from the durable cursor re-delivers the held entries under
+          // the new filter, and later entries already delivered may repeat: that is the accepted
+          // at-least-once contract.
+          const lowestUnflushed = cadence.lowestUnflushedGen();
+          const durableGen = Math.max(
+            startCursor,
+            Math.min(cursor, lowestUnflushed === undefined ? cursor : lowestUnflushed - 1),
+          );
+          workspaceCursorStore.advance(normalized.as ?? '', durableGen, workspaceJournal.epoch, !normalized.ackNow);
+        }
+        // A reset drops the cadence; the idle window still moves forward.
+        if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now(), cadence: reset ? undefined : cadence });
+
+        const generation = cadence && !reset ? cursor : waited.generation;
         return {
           ok: true,
           epoch: workspaceJournal.epoch,
-          generation: workspaceJournal.generation,
+          generation,
           entries,
-          timedOut: false,
+          timedOut: entries.length === 0 && (cadence !== undefined || waited.timedOut),
+          dropped: waited.dropped,
           reset,
           session,
-          nextCommand: workspaceNextCommand(normalized, workspaceJournal.generation, session),
+          nextCommand: workspaceNextCommand(normalized, generation, session),
         };
+      } finally {
+        lease.release();
       }
-
-      let cadence: WatchCadence | undefined;
-      if (cadenceOptions) {
-        cadence = runtime?.cadence?.options.key === cadenceOptions.key ? runtime.cadence : new WatchCadence(cadenceOptions);
-        cursor = cadence.readCursor ?? cursor;
-      }
-
-      const deadlineAt = requestStartedAt + timeoutMs;
-      const startCursor = cursor;
-      let readAny = false;
-      let waited: Awaited<ReturnType<WorkspaceJournal['waitAfter']>>;
-      let entries: RunpaneWorkspaceEntry[];
-      for (;;) {
-        const idleCandidates = workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id);
-        const initial = workspaceJournal.readAfter(cursor, readFilter, limit);
-        let idleEntries = currentIdleEntries(idleCandidates);
-        if (initial.entries.length > 0 || initial.dropped !== undefined || idleEntries.length > 0) {
-          waited = { ...initial, timedOut: initial.entries.length === 0 };
-        } else {
-          const now = Date.now();
-          const parkUntil = Math.min(
-            deadlineAt,
-            nextIdleDeadline(idleCandidates, idleSchedule, now) ?? Number.POSITIVE_INFINITY,
-            cadence?.nextDeadline(now) ?? Number.POSITIVE_INFINITY,
-          );
-          waited = await workspaceJournal.waitAfter(
-            cursor,
-            readFilter,
-            Math.max(0, parkUntil - now),
-            limit,
-            normalized.as ?? 'anonymous',
-          );
-          idleEntries = currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id));
-        }
-        if (waited.dropped) {
-          reset = { reason: 'cursor-truncated' };
-        }
-        entries = [...reset ? baselineEntries() : waited.entries, ...idleEntries];
-
-        if (!cadence || reset) {
-          if (normalized.as && (!waited.timedOut || waited.dropped !== undefined)) {
-            workspaceCursorStore.advance(
-              normalized.as,
-              waited.generation,
-              workspaceJournal.epoch,
-              !normalized.ackNow,
-            );
-          }
-          break;
-        }
-
-        // Drain the rest of the backlog before flushing so a BUSY on a later page
-        // can still cancel a READY on an earlier one.
-        const now = Date.now();
-        if (waited.entries.length > 0) readAny = true;
-        cadence.ingest(entries, now);
-        idleWindowStart = now;
-        cursor = Math.max(cursor, waited.generation);
-        if (waited.entries.length > 0 && cursor < workspaceJournal.generation) {
-          const rest = workspaceJournal.readAfter(cursor, readFilter, Number.MAX_SAFE_INTEGER);
-          cadence.ingest(rest.entries, now);
-          cursor = Math.max(cursor, rest.generation);
-        }
-        cadence.readCursor = cursor;
-        entries = cadence.flush(now);
-        // Held lines are delivered under the Session's membership at flush time: a Pane detached
-        // while its READY settled drops out.
-        if (filter.sessionId !== undefined) entries = entries.filter(workspaceJournal.matcher(filter));
-        if (entries.length > 0 || now >= deadlineAt) break;
-      }
-      if (cadence && !reset && readAny) {
-        // The durable cursor never passes an entry still pending or held in memory. The
-        // instance resumes from its own read cursor, so nothing repeats while it lives. If
-        // the instance is discarded (request shape change, eviction, reset, or a call without
-        // cadence flags) the re-read from the durable cursor re-delivers the held entries under
-        // the new filter, and later entries already delivered may repeat: that is the accepted
-        // at-least-once contract.
-        const lowestUnflushed = cadence.lowestUnflushedGen();
-        const durableGen = Math.max(
-          startCursor,
-          Math.min(cursor, lowestUnflushed === undefined ? cursor : lowestUnflushed - 1),
-        );
-        workspaceCursorStore.advance(normalized.as ?? '', durableGen, workspaceJournal.epoch, !normalized.ackNow);
-      }
-      // A reset drops the cadence; the idle window still moves forward.
-      if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now(), cadence: reset ? undefined : cadence });
-
-      const generation = cadence && !reset ? cursor : waited.generation;
-      return {
-        ok: true,
-        epoch: workspaceJournal.epoch,
-        generation,
-        entries,
-        timedOut: entries.length === 0 && (cadence !== undefined || waited.timedOut),
-        dropped: waited.dropped,
-        reset,
-        session,
-        nextCommand: workspaceNextCommand(normalized, generation, session),
-      };
     }, result => ({ resultCount: result.entries.length, timedOut: result.timedOut }), result =>
       result.entries.length > 0 || result.reset !== undefined);
   });
@@ -4824,6 +4833,8 @@ async function withRunpaneAction<T extends { ok: boolean }>(
     }
     return result;
   } catch (error) {
+    // Disconnect and cursor takeover are normal lifecycle events, not failed commands.
+    if (error instanceof WorkspaceWatchCancelledError) throw error;
     trackRunpaneAction(services, action, 'failure', Date.now() - startedAt, {
       ...metadata,
       ok: false,

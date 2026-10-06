@@ -1,3 +1,7 @@
+import net from 'net';
+import { once } from 'events';
+import { PaneDaemonServer } from '../daemon/server';
+import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from '../daemon/socketFraming';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -882,6 +886,106 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       entries: [{ kind: 'agent.ready', gen: 1, paneId: session.id }],
     });
+  });
+
+  it('releases anonymous watch slots when their socket disconnects', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-disconnect-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({ workspaceJournal }));
+    const server = new PaneDaemonServer(registry, directory);
+    await server.start();
+    const socket = net.createConnection(server.getEndpoint().path);
+    try {
+      await once(socket, 'connect');
+      const decoder = new PaneDaemonFrameDecoder();
+      const armed = new Promise<void>(resolve => {
+        socket.on('data', chunk => {
+          if (decoder.push(chunk).some(frame => frame.type === 'response' && frame.id === 9)) resolve();
+        });
+      });
+      for (let id = 1; id <= 8; id++) {
+        socket.write(encodePaneDaemonFrame({ type: 'request', id, channel: 'runpane:workspace:wait', args: [{ since: 0, timeoutMs: 60_000 }] }));
+      }
+      socket.write(encodePaneDaemonFrame({ type: 'request', id: 9, channel: 'runpane:workspace:state', args: [] }));
+      await armed;
+      socket.destroy();
+      await vi.waitFor(() => expect(server.getSubscriberCount()).toBe(0));
+      const replacement = registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 60_000 }]);
+      const assertion = expect(replacement).resolves.toMatchObject({ ok: true, entries: [{ kind: 'pane.created' }] });
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+    } finally {
+      socket.destroy();
+      workspaceJournal.dispose();
+      await server.stop();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('allows the maximum long poll to time out normally before its lease expires', async () => {
+    vi.useFakeTimers();
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({ workspaceJournal }));
+    try {
+      const waiting = registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 120_000 }]);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await expect(waiting).resolves.toMatchObject({ ok: true, timedOut: true, entries: [] });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      workspaceJournal.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the current named watcher alive when a replacement has an invalid selector', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-invalid-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({
+      workspaceJournal,
+      workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
+    }));
+    const request = { as: 'healthy-monitor', timeoutMs: 60_000 };
+    try {
+      await registry.invoke('runpane:workspace:wait', [request]);
+      const healthy = registry.invoke('runpane:workspace:wait', [request]);
+      const assertion = expect(healthy).resolves.toMatchObject({ entries: [{ kind: 'pane.created' }] });
+      await expect(registry.invoke('runpane:workspace:wait', [{ ...request, repo: 'missing-repo' }])).rejects.toThrow();
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+    } finally {
+      workspaceJournal.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('lets a re-armed named cursor take over its slot after repeated restarts', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-takeover-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const services = createServices({
+      workspaceJournal,
+      workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
+    });
+    const registry = createRegistry(services);
+    const request = { as: 'restarted-monitor', timeoutMs: 60_000 };
+    try {
+      await registry.invoke('runpane:workspace:wait', [request]); // Establish the cursor.
+      const abandoned = Array.from({ length: 8 }, () =>
+        registry.invoke('runpane:workspace:wait', [request]).catch(error => error));
+      const replacement = registry.invoke('runpane:workspace:wait', [request]);
+      const assertion = expect(replacement).resolves.toMatchObject({ ok: true, entries: [{ kind: 'pane.created' }] });
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+      for (const result of await Promise.all(abandoned)) {
+        expect(result).toBeInstanceOf(Error);
+        expect(result).toEqual(expect.objectContaining({ message: expect.stringContaining('superseded') }));
+      }
+      expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
+        'runpane_local_control', expect.objectContaining({ action: 'workspace:wait', status: 'failure' }),
+      );
+    } finally {
+      workspaceJournal.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('emits session-scoped, re-firing idle events without advancing the journal cursor', async () => {
