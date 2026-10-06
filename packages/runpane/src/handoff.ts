@@ -368,9 +368,9 @@ function describeDestination(destination: HandoffDestination, machine: string): 
   return `${destination.agent}${detail ? ` (${detail})` : ''} on ${machine}`;
 }
 
-function receiverInstructions(origin: NoteOrigin, state: GitState, remote: string): string {
+function receiverInstructions(origin: NoteOrigin, state: GitState, remote: string, reporter: string): string {
   const reportTarget = origin.originPanel
-    ? `runpane workspace ${origin.originMachine} panels submit --panel ${origin.originPanel} --text "<one line: what you finished, the commit or PR, and anything blocked>" --yes`
+    ? `${reporter} workspace ${origin.originMachine} panels submit --panel ${origin.originPanel} --text "<one line: what you finished, the commit or PR, and anything blocked>" --yes`
     : `a comment on the PR, or a commit message on ${state.branch}, since the sender left no panel to report to`;
   return [
     '## Receiver instructions',
@@ -476,15 +476,18 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
 
   const target = destination.machine ? machines.find((machine) => machine.name === destination.machine) : undefined;
   const remote = target ? remoteDestination(target, target.os === 'Windows') : localDestination(self);
-  const runpane = (await remote.run('runpane --version', 30_000)).exitCode === 0 ? 'runpane' : 'npx --yes runpane@latest';
+  const installed = await remote.run('runpane --version', 30_000);
+  const runpane = installed.exitCode === 0 ? 'runpane' : 'npx --yes runpane@latest';
+  // `runpane workspace` arrived in 2.4.164; an older runpane there reports back through npx.
+  const reporter = installed.exitCode === 0 && versionAtLeast(installed.stdout, [2, 4, 164]) ? 'runpane' : 'npx --yes runpane@latest';
   const { repo, remote: repoRemote } = await findRepo(remote, runpane, state, parsed.repo);
   say(step('repo', `${repo.name} (${repo.path}), remote ${repoRemote}`));
   await mustRun(remote, `git -C ${quote(repo.path, remote.windows)} fetch ${quote(repoRemote, remote.windows)} ${quote(state.branch, remote.windows)}`, 'git fetch', 120_000);
 
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
-  const name = `handoff-${state.branch}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
+  const name = `handoff-${state.branch.replace(/^handoff[-/]/i, '')}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
   const noteOrigin = origin(state);
-  const stamped = stampNote(noteText ?? '', noteOrigin, receiverInstructions(noteOrigin, state, repoRemote));
+  const stamped = stampNote(noteText ?? '', noteOrigin, receiverInstructions(noteOrigin, state, repoRemote, reporter));
   const notePath = await remote.write(`~/.pane/handoffs/${stamp}-${name}.md`, stamped);
   say(step('note sent', notePath));
 
@@ -518,6 +521,13 @@ function tryReadGitState(cwd: string): GitState | null {
   } catch {
     return null;
   }
+}
+
+function versionAtLeast(output: string, minimum: readonly number[]): boolean {
+  const parts = /(\d+)\.(\d+)\.(\d+)/.exec(output)?.slice(1).map(Number);
+  if (!parts) return false;
+  const index = parts.findIndex((part, position) => part !== minimum[position]);
+  return index === -1 || parts[index] > minimum[index];
 }
 
 function step(label: string, detail: string, ok = true): string {
