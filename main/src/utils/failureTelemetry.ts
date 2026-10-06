@@ -44,7 +44,11 @@ export class FailureLimiter {
     if (now - this.windowStart >= 60 * 60 * 1000) {
       this.windowStart = now;
       this.count = 0;
-      this.lastReports.clear();
+      // Keep recent signatures suppressed across the hourly boundary. At most
+      // 20 carried signatures plus this hour's 20 reports can remain in memory.
+      for (const [signature, reportedAt] of this.lastReports) {
+        if (now - reportedAt >= 5 * 60 * 1000) this.lastReports.delete(signature);
+      }
     }
     const last = this.lastReports.get(key);
     if (this.count >= 20 || (last !== undefined && now - last < 5 * 60 * 1000)) return false;

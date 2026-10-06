@@ -125,6 +125,21 @@ describe('app error telemetry', () => {
     expect(send).toHaveBeenCalledTimes(21);
   });
 
+  it('keeps duplicate suppression across an hourly budget reset', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const { analytics } = setup();
+    await vi.advanceTimersByTimeAsync(3_599_000);
+    analytics.captureException(undefined, 'renderer-crash');
+    await vi.advanceTimersByTimeAsync(1_000);
+    analytics.captureException(undefined, 'renderer-crash');
+    expect(send).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(299_000);
+    analytics.captureException(undefined, 'renderer-crash');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it('bounds simultaneous requests and contains synchronous transport failures', async () => {
     const { analytics } = setup();
     let complete: (response: Response) => void = () => {};
