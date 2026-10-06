@@ -203,6 +203,21 @@ when `--kinds` lists it, and it skips the `--min-interval` batch.
 `runpane panels last-message --panel <panel-id>` reads an agent's last reply
 from its transcript.
 
+### Handing Work to Another Machine
+
+`runpane handoff` passes a task to a fresh agent on this or another of your
+machines. Write the note from the template, then name the agent and machine in
+plain words. The CLI checks every section is filled in, needs the branch pushed
+(`--push` commits uncommitted work as WIP and pushes, never forcing), and starts
+the agent in a new Pane there, branched from yours. It reports back to you.
+
+```bash
+runpane handoff --template > handoff.md
+runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --push
+```
+
+`runpane handoff --help` lists every option.
+
 ## Attribution
 
 npm package downloads use `source=npm` when requesting release artifacts from
