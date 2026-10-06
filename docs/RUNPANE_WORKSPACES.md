@@ -61,13 +61,24 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 
 `write` and `exec` give your agents SSH-level control of every joined machine. A local agent's permission prompts and sandbox see only `runpane workspace ... exec`, not what runs on the other machine. Turn workspaces off on any machine that should not accept this.
 
+## Hand a task to another machine
+
+`runpane handoff` uses workspaces to move a task to a fresh agent on another of your machines. The sending agent writes a handoff note; the CLI checks it, makes sure the branch is pushed, and starts the agent there:
+
+```
+runpane handoff --template > handoff.md                      # fill in every section
+runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --push
+```
+
+The destination machine needs Pane running, the repository saved in Pane with a remote for the same GitHub repository, and its own `runpane` on PATH (otherwise it uses `npx runpane@latest`). The note lands in that machine's `~/.pane/handoffs/`, the agent starts in a new Pane branched from your branch, and it reports back to your panel with `runpane workspace <your machine> panels submit`. The note's sections are in the `handoff` skill's [note template](../main/src/services/paneChatBundle/skills/handoff/references/note-template.md).
+
 ## Paths across Windows, WSL, and macOS
 
 `read`, `write`, and `exec --cwd` take any path form and translate it on the machine that runs the request, so agents do not need `cat` on one machine and `Get-Content` on another:
 
 - `C:\Users\me\notes.md` and `/mnt/c/Users/me/notes.md` reach the same Windows file.
 - On Windows, WSL paths such as `/home/me/repo/README.md` are read through `\\wsl.localhost\<distro>\...` using the default distribution (the one `wsl -l -v` marks with `*`). Name another distribution with `\\wsl.localhost\<distro>\...`.
-- Inside WSL, `C:\...` becomes `/mnt/c/...`.
+- Inside WSL, `C:\...` becomes `/mnt/c/...`, and runpane reads the tailnet from Windows' `tailscale.exe`.
 - `~` is the home directory of the machine that runs the request.
 
 `read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree. If that tree cannot be stopped, the result says so (`stillRunning` in `--json`, "may still be running" in text).

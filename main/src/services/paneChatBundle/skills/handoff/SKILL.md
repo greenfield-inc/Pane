@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Prepare a verified resumption brief when moving work to another agent, device, or session, including local-to-cloud coding handoffs. Use for "hand this off," "continue elsewhere," or "save where we are."
+description: Prepare a verified resumption brief when moving work to another agent, device, or session, including local-to-cloud coding handoffs, and start the receiving agent with `runpane handoff`. Use for "hand this off," "continue on my Mac," "give this to Codex," or "save where we are."
 ---
 
 # Handoff
@@ -21,6 +21,26 @@ You are the outgoing collaborator. Give the next person or agent the verified co
 - Transfer task-specific code and files through an authorized push or access-controlled destination. Preserve unrelated work and identify any files still awaiting transfer.
 - Record required tools, services, and credential setup references. Keep secret values in their approved secret store and check the receiving agent’s plugin, skill, and network prerequisites.
 - Keep private code and patches in access-controlled locations. Identify the next step needed to resolve any transfer or permission blocker.
+
+## Write the note
+
+Write the brief as the handoff note in [references/note-template.md](references/note-template.md): a compaction of your session, in the nine required sections, for a reader with none of your context. Start from `runpane handoff --template > handoff.md`.
+
+## Start the receiving agent
+
+When the person asks for another agent to continue (on this machine or another of theirs), send the note with `runpane handoff`. It works the same from any harness:
+
+```bash
+runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --dry-run
+runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --push
+```
+
+- The destination is freeform: the agent (claude, codex, cursor), and optionally the model, the effort and the machine, such as `"codex gpt-5 high on parsa-devbox wsl"` or `"cursor on this machine"`. `--machine`, `--agent`, `--model` and `--effort` override the text. Check what it resolved with `--dry-run`.
+- It refuses a note with a missing or empty section, and a branch the receiver cannot fetch. `--push` commits uncommitted work as WIP and pushes the branch; it never forces. Push only when the person authorized it.
+- It finds the destination's saved repository with the same remote, writes the note to that machine's `~/.pane/handoffs/`, and starts the agent in a new Pane branched from yours. The receiver reports back to your panel, so stop changing the branch yourself.
+- Return the Pane it printed and the `agents status` command for checking on it.
+
+The note is the handoff. Save a copy as below only when the person also wants a page, a Grain workspace, or a PR comment.
 
 ## Save one authoritative brief
 

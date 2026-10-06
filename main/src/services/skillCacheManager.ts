@@ -582,7 +582,7 @@ activity makes an older report stale. Keep findings in this conversation.
 | Review a PR | \`review\`, or the \`reviewer\` subagent |
 | Open, then shepherd, a PR | \`prepare-pr\`, then \`babysit-pr\` |
 | Clean up a large diff | \`refactor\` |
-| Hand work to another session | \`handoff\` |
+| Hand work to another agent or machine | \`handoff\` (\`runpane handoff\`) |
 | Share how a session went | \`session-trace\` |
 | The user's own work | \`pane-work\` |
 
