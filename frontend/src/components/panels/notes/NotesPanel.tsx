@@ -219,7 +219,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
         </button>}
         items={[
           ...((draft.scope.kind === 'feature' || draft.scope.kind === 'session') ? (projects.length > 1
-            ? projects.map(item => ({ id: `project-${item.scope.id}`, label: `Move to Project Notes · ${item.name}`, icon: ArrowUpRight, onClick: () => { void mutate('move', item.scope); } }))
+            ? projects.map(item => ({ id: `project-${item.scope.id}`, label: <span className="block whitespace-normal break-words">Move to {item.name}</span>, icon: ArrowUpRight, onClick: () => { void mutate('move', item.scope); } }))
             : [{ id: 'project', label: 'Move to Project Notes', icon: ArrowUpRight, disabled: !projects.length, onClick: () => { if (projects[0]) void mutate('move', projects[0].scope); } }]) : []),
           ...(draft.scope.kind === 'project' ? [{ id: 'global', label: 'Move to Global Notes', icon: ArrowUpRight, onClick: () => { void mutate('move', { kind: 'global', id: 'user' }); } }] : []),
           { id: 'delete', label: 'Delete note', icon: Trash2, variant: 'danger', onClick: () => { if (window.confirm('Delete this note and all its references?')) void mutate('remove'); } },
