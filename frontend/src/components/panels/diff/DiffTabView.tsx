@@ -7,12 +7,12 @@ import type { FileDiffResult } from '../../../../../shared/types/gitDiff';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { API } from '../../../utils/api';
+import { subscribeToSessionGitChanges } from '../../../utils/session-git-events';
 import { diffRefLabel, isMutableScope, normalizeEditorDiffRef, scopeKey } from './diffScope';
 import { getShikiHighlighter } from './diffSource';
 import '@git-diff-view/react/styles/diff-view.css';
 
 interface DiffTabViewProps { sessionId: string; filePath: string; diffRef: EditorDiffRef }
-const REFRESH_EVENTS = new Set(['git:operation_completed', 'diff:refreshed', 'terminal:command_executed', 'files:changed']);
 const resultCache = new Map<string, FileDiffResult>();
 const MAX_CACHE_ENTRIES = 50;
 
@@ -82,12 +82,8 @@ export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) 
 
   useEffect(() => {
     if (!normalized || !isMutableScope(normalized.scope)) return;
-    const handler = (event: Event) => {
-      if (event instanceof CustomEvent && REFRESH_EVENTS.has(event.detail?.type)) setReloadTick(value => value + 1);
-    };
-    window.addEventListener('panel:event', handler);
-    return () => window.removeEventListener('panel:event', handler);
-  }, [normalized]);
+    return subscribeToSessionGitChanges(sessionId, () => setReloadTick(value => value + 1));
+  }, [normalized, sessionId]);
 
   const handleViewTypeChange = useCallback((mode: DiffModeEnum) => {
     setViewType(mode);

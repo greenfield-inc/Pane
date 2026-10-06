@@ -70,17 +70,12 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
     await sessionContext.onOpenUrlInBrowser(reviewUrl, title);
   }, [reviewUrl, session?.gitStatus?.prNumber, sessionContext]);
 
-  // Listen for file change events from other panels
+  // Listen for completed git operations in this session
   useEffect(() => {
     const handlePanelEvent = (event: CustomEvent) => {
       const { type, source, data } = event.detail || {};
 
-      // Mark as stale when files change from other panels
-      if (type === 'files:changed' || type === 'terminal:command_executed') {
-        if (source.sessionId === sessionId && source.panelId !== panel.id) {
-          setIsStale(true);
-        }
-      } else if (type === 'git:operation_completed') {
+      if (type === 'git:operation_completed') {
         // Refresh diff when git operations complete for this session (e.g., merge to main)
         if (source?.sessionId === sessionId) {
           // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
@@ -99,7 +94,7 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
       // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
       window.removeEventListener('panel:event', handlePanelEvent as EventListener);
     };
-  }, [panel.id, sessionId]);
+  }, [sessionId]);
 
   // Listen for git-status-updated events (detects new commits from Claude, etc.)
   // Only mark stale when diff-relevant state actually changes, not on no-op refreshes
