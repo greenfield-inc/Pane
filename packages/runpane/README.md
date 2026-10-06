@@ -216,7 +216,7 @@ runpane handoff --template > ~/handoff.md
 runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --push
 ```
 
-`runpane handoff --help` lists every option.
+`runpane handoff --help` lists every option. Model selection works for Claude, Codex and Cursor. Effort selection works for Claude and Codex; Cursor effort is rejected before committing or sending.
 
 ## Attribution
 

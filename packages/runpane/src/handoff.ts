@@ -1,9 +1,11 @@
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { invokeRemoteDaemon } from './daemonClient';
+import { buildPaneCreateRequest } from './localControl';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
 
@@ -95,6 +97,7 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   const effort = overrides.effort ?? efforts[0];
   if (model !== undefined && !/^[A-Za-z0-9._:/-]+$/.test(model)) throw new Error('Invalid model identifier. Use letters, numbers, dots, underscores, colons, slashes, or hyphens.');
   if (effort !== undefined && !EFFORTS.has(effort)) throw new Error(`Invalid effort. Use ${[...EFFORTS].join(', ')}.`);
+  if (agent === 'cursor' && effort !== undefined) throw new Error('Cursor effort is not supported. Omit --effort and effort text; nothing was committed or sent.');
   if (model) destination.model = model;
   if (effort) destination.effort = effort;
   if (wsl) destination.wsl = true;
@@ -237,22 +240,32 @@ function readGitState(cwd: string): GitState {
   };
 }
 
+function noteInCheckout(root: string, notePath: string | undefined): string {
+  if (!notePath || notePath === '-') return '';
+  const resolved = path.resolve(notePath);
+  // Git may report a canonical root while Windows TEMP uses an 8.3 alias.
+  // Canonicalize directories, keeping the leaf so a note symlink is excluded too.
+  const canonicalNote = path.join(fs.realpathSync.native(path.dirname(resolved)), path.basename(resolved));
+  const relative = path.relative(fs.realpathSync.native(root), canonicalNote);
+  return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) ? '' : relative;
+}
+
 /** --push: commit uncommitted work as WIP and push the branch; never forces. */
 /** The note is not part of the work: leave it out of the uncommitted count and the WIP commit. */
 function withoutNote(state: GitState, notePath: string | undefined): GitState {
-  const relative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)).split(path.sep).join('/') : '';
-  if (!relative || relative.startsWith('..')) return state;
+  const relative = noteInCheckout(state.root, notePath).split(path.sep).join('/');
+  if (!relative) return state;
   return { ...state, dirty: state.dirty.filter((line) => line.slice(3) !== relative) };
 }
 
 function pushWork(state: GitState, destination: string, notePath: string | undefined): GitState {
-  const noteRelative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)) : '';
-  if (noteRelative && !noteRelative.startsWith('..') && git(['diff', '--cached', '--name-only', '--', noteRelative], state.root)) {
+  const noteRelative = noteInCheckout(state.root, notePath);
+  if (noteRelative && git(['diff', '--cached', '--name-only', '--', noteRelative], state.root)) {
     throw new Error(`The handoff note is staged. Unstage it with git restore --staged -- ${JSON.stringify(noteRelative)}, then retry. Nothing was committed or pushed.`);
   }
   if (state.dirty.length) {
-    const relative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)) : '';
-    git(['add', '-A', '--', '.', ...(relative && !relative.startsWith('..') ? [`:(exclude)${relative}`] : [])], state.root);
+    const relative = noteInCheckout(state.root, notePath);
+    git(['add', '-A', '--', '.', ...(relative ? [`:(exclude)${relative}`] : [])], state.root);
     git(['commit', '-m', `WIP: hand off to ${destination}`], state.root);
   }
   git(['push', '-u', state.remote, `HEAD:refs/heads/${state.branch}`], state.root);
@@ -368,7 +381,7 @@ async function findRepo(destination: Destination, runpane: string[], state: GitS
       .find(([, url]) => url && repositorySlug(url)?.toLowerCase() === wanted);
     if (match) return { repo, remote: match[0] };
   }
-  throw new Error(`No saved repository on ${destination.name} has a remote for ${wanted}. Add it there with: runpane workspace ${destination.name} exec -- runpane repos add --path <clone> --yes, or pass --repo <selector>.`);
+  throw new Error(`No saved repository on ${destination.name} has a remote for ${wanted}. Add a matching Git remote to the destination clone, then save the clone there with: runpane workspace ${destination.name} exec -- runpane repos add --path <clone> --yes.`);
 }
 
 function agentCommand(destination: HandoffDestination, shell: string): string | undefined {
@@ -514,18 +527,29 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const name = `handoff-${state.branch.replace(/^handoff[-/]/i, '')}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
   const noteOrigin = origin(state);
   const stamped = stampNote(noteText ?? '', noteOrigin, receiverInstructions(noteOrigin, state, repoRemote, reporter));
-  const notePath = await remote.write(`~/.pane/handoffs/${stamp}-${name}.md`, stamped);
+  const notePath = await remote.write(`~/.pane/handoffs/${stamp}-${name}-${randomUUID()}.md`, stamped);
   say(step('note sent', notePath));
 
   const toolCommand = agentCommand(destination, remote.shell);
   const prompt = `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
-  const create = [
+  let create = [
     ...runpane, 'panes', 'create', '--repo', String(repo.id), '--name', name, '--base', state.head, '--agent', destination.agent,
     ...(toolCommand ? ['--tool-command', toolCommand] : []),
     '--prompt', prompt, '--source', 'agent', '--no-focus', '--wait-ready', '--yes', '--json',
   ];
   let created: ReturnType<typeof paneCreateSchema.decode>;
   try {
+    // PowerShell 5.1 strips embedded quotes and empty arguments when launching
+    // native npm wrappers. Keep prompts and nested tool commands in JSON.
+    if (target && /(?:powershell|pwsh)(?:\.exe)?$/i.test(remote.shell)) {
+      const request = await buildPaneCreateRequest({
+        ...parsed, repo: String(repo.id), name, baseBranch: state.head, agent: destination.agent,
+        toolCommand, initialInput: prompt, source: 'agent', noFocus: true, focus: false,
+        waitReady: true, yes: true, noAssociate: true, fromJson: undefined,
+      });
+      const requestPath = await remote.write(`${notePath}.create.json`, JSON.stringify(request));
+      create = [...runpane, 'panes', 'create', '--from-json', requestPath, '--no-associate', '--yes', '--json'];
+    }
     created = decodeBoundary(JSON.parse(await mustRun(remote, create, 'runpane panes create', REPORT_TIMEOUT_MS)), paneCreateSchema);
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check runpane sessions list on ${remote.name} before retrying to avoid a duplicate Pane.`);

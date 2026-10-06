@@ -3087,7 +3087,7 @@ export const RUNPANE_CONTRACT = {
         "  --machine <name>                Destination machine (Tailscale name or unique prefix); overrides the text.",
         "  --agent <codex|claude|cursor>   Receiving agent; overrides the text.",
         "  --model <model>                 Model for the receiving agent; overrides the text.",
-        "  --effort <level>                minimal, low, medium, high, xhigh, or max; overrides the text.",
+        "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
         "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
         "  --push                          Commit uncommitted work (not the note) as WIP and push the branch first (never forces).",
         "  --dry-run                       Print what the destination resolved to, the note check, and git state; send nothing.",
@@ -13653,7 +13653,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--effort",
             "value": "<level>",
             "required": false,
-            "description": "minimal, low, medium, high, xhigh, or max; overrides the text."
+            "description": "minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected."
           },
           {
             "name": "--repo",
@@ -13686,7 +13686,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with the repository saved, and its own runpane on PATH (otherwise npx runpane@latest is used).",
           "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
-          "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model.",
+          "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
           "Run it from the checkout being handed off. The receiver works in a new Pane on the destination and pushes back to your branch, so stop changing that branch yourself."
         ]
       }
