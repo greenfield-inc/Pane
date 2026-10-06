@@ -2294,10 +2294,10 @@ describe('runpane IPC handlers', () => {
     expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([[terminalPanel.id, '\x1b']]);
   });
 
-  it('rejects an empty interrupt submission without cancelling work', async () => {
+  it.each([false, true])('rejects an empty interrupt submission without cancelling work (file pointer: %s)', async (asFilePointer) => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› Ask Codex to do anything', 'idle'));
     expect(await createRegistry().invoke('runpane:panels:submit', [{
-      panelId: terminalPanel.id, input: '\n', interrupt: true,
+      panelId: terminalPanel.id, input: '\n', interrupt: true, asFilePointer,
     }])).toMatchObject({ ok: false, inputBytes: 0 });
     expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
   });

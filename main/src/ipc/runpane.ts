@@ -1215,6 +1215,15 @@ export function registerRunpaneHandlers(
       }
       if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
 
+      const blocked = (message: string): RunpanePanelSubmitResult => ({
+        ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
+        enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: { kind: 'agent-prompt', message, suggestedCommand: panelScreenCommand(panel.id) },
+        nextCommand: panelScreenCommand(panel.id),
+      });
+      if (normalized.interrupt && !normalized.input.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
+
       let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
       const promptFile = normalized.asFilePointer
         ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
@@ -1232,14 +1241,6 @@ export function registerRunpaneHandlers(
             ? detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle === true &&
               /^\s*→\s+(?:Add a follow-up|Plan, search, build anything)\s*$/imu.test(screen.text)
             : screen.composer.isPresent && !screen.composer.hasUndeliveredText);
-        const blocked = (message: string): RunpanePanelSubmitResult => ({
-          ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
-          enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
-          sentAt: new Date().toISOString(),
-          blocked: { kind: 'agent-prompt', message, suggestedCommand: panelScreenCommand(panel.id) },
-          nextCommand: panelScreenCommand(panel.id),
-        });
-        if (!stagedInput.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
         if (agentType !== 'codex' && agentType !== 'claude' && agentType !== 'cursor') {
           return blocked('Pane cannot safely interrupt this agent: composer readiness is not supported. No input was sent.');
         }
