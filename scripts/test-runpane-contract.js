@@ -765,7 +765,7 @@ function spawnWatchCli(runtime, args) {
 const PARSER_DEFAULT_DIFFERENCES = {
   waitReady: false, noFocus: false, focus: false, pinned: false, noPinned: false,
   force: false, follow: false, agentsOnly: false, ackNow: false,
-  includeHeldInput: false, idleBackoff: false, allManaged: false,
+  includeHeldInput: false, idleBackoff: false, allManaged: false, allStopped: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
   asFilePointer: false, noAssociate: false, removeWorktree: false, merged: false,
