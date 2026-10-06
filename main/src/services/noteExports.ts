@@ -37,7 +37,7 @@ export function exportNoteMemories(root: string, file: string, notes: Note[], pr
   replaceMemory(existing, '');
   const owner = createHash('sha256').update(path.resolve(root)).digest('hex');
   const existingOwner = existing.match(/<!-- pane-memories:store ([a-f0-9]+) -->/)?.[1];
-  if (existingOwner && existingOwner !== owner) throw new Error('This instruction file contains notes from another Pane data directory. Its memory was left unchanged.');
+  if (existingOwner && existingOwner !== owner) throw new Error('This instruction file contains notes from another Pane data directory. To switch stores, back up the file and remove only its pane-memories section, then retry. Nothing was changed.');
   const lines: string[] = preamble ? [preamble, ''] : [];
   for (const note of notes) {
     lines.push(`### ${note.title.replace(/[\r\n]/g, ' ') || 'Untitled note'}`, '');
@@ -49,7 +49,8 @@ export function exportNoteMemories(root: string, file: string, notes: Note[], pr
       fs.mkdirSync(path.dirname(asset), { recursive: true, mode: 0o700 });
       if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(block.png)) throw new Error('Drawing preview is missing. Reopen and save the drawing.');
       if (!fs.existsSync(`${asset}.excalidraw`)) writeNoteFile(`${asset}.excalidraw`, scene);
-      if (!fs.existsSync(`${asset}.png`)) fs.writeFileSync(`${asset}.png`, Buffer.from(block.png.split(',')[1], 'base64'), { mode: 0o600 });
+      const png = Buffer.from(block.png.split(',')[1], 'base64');
+      if (fs.statSync(`${asset}.png`, { throwIfNoEntry: false })?.size !== png.length) writeNoteFile(`${asset}.png`, png);
       const label = block.title.replace(/[\r\n[\]]/g, ' ') || 'Drawing';
       lines.push(`Drawing: ${label}`, `Labels: ${block.labels.replace(/[\r\n]+/g, ' ')}`, `[Editable drawing](${reference(file, `${asset}.excalidraw`)})`,
         `![${label}](${reference(file, `${asset}.png`)})`, '');

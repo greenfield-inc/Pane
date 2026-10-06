@@ -120,7 +120,7 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
         const claude = path.join(directory, 'CLAUDE.md');
         // Session workspaces and many repos already import the shared instructions.
         const importsAgents = fs.existsSync(claude) && /^\s*@(?:\.\/)?AGENTS\.md\s*$/m.test(fs.readFileSync(claude, 'utf8'));
-        if (!importsAgents || !repositoryExports) write('Project / Claude', claude, content);
+        write('Project / Claude', claude, importsAgents ? [] : content);
       } catch (error) {
         results.push({ agent: 'Repository instructions', path: directory, error: String(error) });
       }
@@ -171,20 +171,27 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
     services.getMainWindow()?.webContents.send('notes:changed');
     return { note, exports };
   });
+  // Publication failures must not escape into unrelated host lifecycle events.
+  function reconcile(changed?: NoteScope[]): void {
+    if (!fs.existsSync(path.join(root, 'notes.json'))) return;
+    try { publish(changed); }
+    catch (error) { console.error('Could not reconcile saved note exports:', error); }
+  }
   // Reconcile saved project memory when a new worktree becomes available.
   sessionManager.on('session-created', (session: Session) => {
-    if (fs.existsSync(path.join(root, 'notes.json'))) publish([{ kind: 'project', id: String(session.projectId) }]);
+    reconcile([{ kind: 'project', id: String(session.projectId) }]);
+  });
+  sessionManager.on('session-deleted', (session: { id: string }) => {
+    try { fs.rmSync(noteContextPath(root, session.id), { force: true }); }
+    catch (error) { console.error('Could not remove deleted Pane note context:', error); }
   });
   let repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
   services.configManager.on('config-updated', () => {
     const enabled = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
     if (enabled !== repositoryExports) {
       repositoryExports = enabled;
-      if (fs.existsSync(path.join(root, 'notes.json'))) publish();
+      reconcile();
     }
   });
-  if (fs.existsSync(path.join(root, 'notes.json'))) {
-    try { publish(); }
-    catch (error) { console.error('Could not reconcile saved note exports:', error); }
-  }
+  reconcile();
 }

@@ -115,7 +115,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
           : <p className="mt-6 text-sm text-text-secondary">{capture ? 'Choose a note or create one to save this terminal excerpt.' : 'Select a note or create one. Text and drawings stay together.'}</p>}
       </div>
     </div>
-    <p className="border-t border-border-primary px-3 py-2 text-xs text-text-tertiary">Scoped notes are shared through Pane terminals; agents may request read permission. After enabling notes, restart existing terminals and start a new agent conversation. Global edits refresh on Codex's next turn, Claude resume, or a new Cursor conversation.</p>
+    <p className="border-t border-border-primary px-3 py-2 text-xs text-text-tertiary">Scoped notes are shared through Pane terminals; agents may request read permission. After your first scoped note, start a new agent conversation. Reopen terminals that predate this Pane update. Global edits refresh on Codex's next turn, Claude resume, or a new Cursor conversation.</p>
   </section>;
 }
 

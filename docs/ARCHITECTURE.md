@@ -122,8 +122,9 @@ turning it off removes those memory sections.
 Exports preserve symlinks and permissions and replace files atomically. A store
 ownership marker prevents a second Pane data directory from overwriting the
 first directory's user memory. Malformed marker pairs produce a visible error.
-Changing notebooks only reads data. Existing terminals need restarting to gain
-the context environment variable. Global-file changes refresh on Codex's next
+Changing notebooks only reads data. Terminals predating this update need reopening
+to gain the context environment variable. After the first scoped note, start a
+new agent conversation to load the scoped-reading instruction. Global-file changes refresh on Codex's next
 turn, Claude resume, or a new Cursor conversation in the tested CLI versions;
 updating a file alone cannot erase context already read. Notes support native
 macOS, Windows, and Linux installations; WSL agent exports report an unsupported

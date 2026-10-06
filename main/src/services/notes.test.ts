@@ -79,6 +79,9 @@ describe('Notes', () => {
     const scenePath = path.resolve(path.dirname(file), decodeURIComponent(drawingReference!));
     expect(JSON.parse(fs.readFileSync(scenePath, 'utf8'))).toEqual({ type: 'excalidraw', elements: [], files: {} });
     expect(fs.readFileSync(scenePath.replace('.excalidraw', '.png')).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    fs.truncateSync(scenePath.replace('.excalidraw', '.png'), 8);
+    exportNoteMemories(root, file, [saved]);
+    expect(fs.readFileSync(scenePath.replace('.excalidraw', '.png')).subarray(-12).toString('hex')).toBe('0000000049454e44ae426082');
     notes.remove(saved.id, saved.revision);
     exportNoteMemories(root, file, notes.list(saved.scope));
     expect(fs.readFileSync(file, 'utf8')).toBe('---\nalwaysApply: true\n---\n\n\n');
