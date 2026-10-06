@@ -59,7 +59,8 @@ export const RUNPANE_CONTRACT = {
     "agents": [
       "codex",
       "claude",
-      "cursor"
+      "cursor",
+      "opencode"
     ]
   },
   "agentTemplates": {
@@ -77,6 +78,11 @@ export const RUNPANE_CONTRACT = {
       "title": "Cursor",
       "command": "cursor-agent --force --trust",
       "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent."
+    },
+    "opencode": {
+      "title": "OpenCode",
+      "command": "opencode --auto",
+      "description": "Open an OpenCode terminal tab and allow the initial input to drive the agent."
     }
   },
   "terminalKeys": {

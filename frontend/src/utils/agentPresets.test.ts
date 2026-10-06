@@ -13,6 +13,7 @@ describe('visibleAgentPresets', () => {
       'claude',
       'codex',
       'cursor',
+      'opencode',
     ]);
   });
 
@@ -22,10 +23,12 @@ describe('visibleAgentPresets', () => {
     expect(visibleAgentPresets('windows').map(preset => preset.id)).toEqual([
       'claude',
       'codex',
+      'opencode',
     ]);
     expect(visibleAgentPresets().map(preset => preset.id)).toEqual([
       'claude',
       'codex',
+      'opencode',
     ]);
   });
 
@@ -34,6 +37,7 @@ describe('visibleAgentPresets', () => {
     expect(visibleAgentPresets('windows').map(preset => preset.id)).toEqual([
       'claude',
       'codex',
+      'opencode',
     ]);
 
     vi.stubGlobal('navigator', { platform: 'Win32' });
@@ -41,11 +45,13 @@ describe('visibleAgentPresets', () => {
       'claude',
       'codex',
       'cursor',
+      'opencode',
     ]);
     expect(visibleAgentPresets('linux').map(preset => preset.id)).toEqual([
       'claude',
       'codex',
       'cursor',
+      'opencode',
     ]);
   });
 });

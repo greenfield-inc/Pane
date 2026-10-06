@@ -1,3 +1,5 @@
+import type { TerminalPanelState } from '../../../shared/types/panels';
+
 export type ComposerEvidenceVerdict = 'staged' | 'cleared' | 'unknown';
 
 const COMPOSER_PROMPT_PATTERN = /^[>›❯▌]/u;
@@ -55,10 +57,25 @@ export function assessComposerEvidence(args: {
   beforeText: string;
   afterText: string;
   stagedText: string;
+  agentType?: TerminalPanelState['agentType'];
 }): ComposerEvidenceVerdict {
   const marker = firstNonEmptyLine(args.stagedText)?.slice(0, MAX_MARKER_LENGTH);
   if (!marker) {
     return 'unknown';
+  }
+
+  if (args.agentType === 'opencode') {
+    const before = openCodeComposer(args.beforeText);
+    const after = openCodeComposer(args.afterText);
+    // Soft wrapping inserts line breaks inside words; compare prompt content
+    // independently of the TUI's current column width.
+    if (before === undefined || after === undefined) return 'unknown';
+    const pasteMarker = `[Pasted ~${args.stagedText.trim().split(/\r?\n/u).length} lines]`.replace(/\s/gu, '');
+    const normalizedBefore = before.replace(/\s/gu, '');
+    const content = normalizedBefore.includes(pasteMarker) ? pasteMarker : marker.replace(/\s/gu, '');
+    if (!normalizedBefore.includes(content)) return 'unknown';
+    if (!after.replace(/\s/gu, '').includes(content)) return 'cleared';
+    return before === after ? 'staged' : 'unknown';
   }
 
   if (!args.afterText.includes(marker)) {
@@ -76,6 +93,23 @@ export function assessComposerEvidence(args: {
   }
 
   return 'unknown';
+}
+
+/** Scope input to the live footer's textarea, excluding padded agent/model metadata. */
+function openCodeComposer(text: string): string | undefined {
+  const lines = text.split(/\r?\n/u);
+  const footer = lines.map(line => line.includes('ctrl+p commands')).lastIndexOf(true);
+  if (footer < 0 || lines.slice(footer + 1).filter(line => line.trim()).length > 2) return undefined;
+  let end = footer;
+  // Transparent themes render the bottom border entirely as spaces.
+  while (end > 0 && !lines[end - 1].trim()) end -= 1;
+  if (end > 0 && /^\s*╹▀{3,}/u.test(lines[end - 1])) end -= 1;
+  let start = end;
+  while (start > 0 && /^\s*┃/u.test(lines[start - 1])) start -= 1;
+  const rows = lines.slice(start, end).map(line => line.replace(/^\s*┃\s?/u, '').trim());
+  const metadataGap = rows.lastIndexOf('');
+  if (rows[0] !== '' || metadataGap < 1 || metadataGap === rows.length - 1) return undefined;
+  return rows.slice(1, metadataGap).join('\n');
 }
 
 function firstNonEmptyLine(text: string): string | undefined {

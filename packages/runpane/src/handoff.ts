@@ -81,6 +81,7 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   }
   const agent = overrides.agent ?? agents[0];
   if (!agent) throw new Error(`Name the agent: claude, codex, or cursor. For example: runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md`);
+  if (agent === 'opencode') throw new Error('OpenCode is supported in terminal panes, but handoff to OpenCode is not supported yet. Choose claude, codex, or cursor; nothing was committed or sent.');
 
   let machine: string | null = null;
   if (overrides.machine) {

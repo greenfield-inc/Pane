@@ -35,6 +35,7 @@ import {
   readPanelAgentReport,
 } from '../services/agentReport';
 import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
+import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -852,6 +853,9 @@ export function registerRunpaneHandlers(
           const tool = resolveToolSpec(item.tool, new PathResolver(repo).environment);
           if (item.resume && tool.launchMode === 'wrapped') {
             throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
+          }
+          if (item.resume !== undefined && tool.agent === 'opencode' && !isValidOpenCodeSessionId(item.resume)) {
+            throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
           }
           if (normalized.dryRun) {
             items.push({ ok: true, index, name: item.name, pinned: item.pinned !== false, worktreePath: storedWorktreePath, tool: describeTool(tool) });
@@ -1949,6 +1953,8 @@ async function createTerminalPanelForSession(
   }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
+  } else if (tool.agent === 'opencode' && tool.initialInput) {
+    initialState.initialInputMode = 'stdin';
   }
   if (initialInputFile) {
     initialState.initialInputFile = initialInputFile;
@@ -2046,8 +2052,11 @@ async function submitCreateInitialInput(
   }
 
   if (tool.agent !== 'claude' && tool.agent !== 'codex') {
-    terminalPanelManager.writeToTerminal(panel.id, tool.initialInput);
+    const paste = tool.agent === 'opencode' && isLongPrompt(tool.initialInput)
+      && terminalPanelManager.isBracketedPasteEnabled(panel.id);
+    terminalPanelManager.writeToTerminal(panel.id, paste ? bracketedPaste(tool.initialInput) : tool.initialInput);
     await sleep(300);
+    if (paste) await waitForPanelOutputQuiet(panel.id);
     return submitCreateComposerInput(panel, tool, tool.initialInput);
   }
   const staged = await stageComposerText(panel, tool.agent, tool.initialInput);
@@ -2163,6 +2172,7 @@ async function submitCreateComposerInput(
         beforeText: beforeScreen.text,
         afterText: afterScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       });
 
       if (lastVerdict === 'cleared' && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) {
@@ -2185,11 +2195,13 @@ async function submitCreateComposerInput(
         beforeText: beforeScreen.text,
         afterText: confirmationScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       });
       const unchangedSinceFirstSample = assessComposerEvidence({
         beforeText: afterScreen.text,
         afterText: confirmationScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       }) === 'staged';
       const confirmationScreenHasFreshOutput = panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit);
       lastVerdict = confirmationVerdict;
@@ -3168,13 +3180,43 @@ async function runAgentDoctor(
     }
   }
 
+  let sessionCapabilityOk = true;
+  if (agent === 'opencode' && executablePath) {
+    try {
+      const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
+      const result = await context.commandRunner.execAsync(helpCommand, repo.path, {
+        timeout: 5_000,
+        silent: true,
+      });
+      const helpOutput = `${result.stdout}\n${result.stderr}`;
+      const sessionFlagPattern = /(?:^|\s)--session(?:,|\s|$)/m;
+      sessionCapabilityOk = sessionFlagPattern.test(helpOutput)
+        && helpOutput.split(/\r?\n/u).some(line => /^\s*--session(?:,|\s|$)/u.test(line));
+      checks.push({
+        name: 'session-capability',
+        ok: sessionCapabilityOk,
+        message: sessionCapabilityOk
+          ? 'OpenCode supports explicit sessions with --session.'
+          : 'Upgrade OpenCode to v2.0.19 or newer; Pane requires the --session flag for reliable resume.',
+      });
+    } catch (error) {
+      sessionCapabilityOk = false;
+      warnings.push(commandErrorMessage(error, `${executable} --help failed.`));
+      checks.push({
+        name: 'session-capability',
+        ok: false,
+        message: 'Upgrade OpenCode to v2.0.19 or newer; Pane could not verify the required --session flag.',
+      });
+    }
+  }
+
   if (environment === 'wsl' && !executablePath) {
     warnings.push(`Repo ${repo.name} is a WSL repo; install ${executable} inside the WSL distro Pane uses, not only on Windows.`);
   }
 
   const available = Boolean(executablePath);
   return {
-    ok: available,
+    ok: available && sessionCapabilityOk,
     agent,
     command,
     repo: repoSummary,
@@ -3185,6 +3227,13 @@ async function runAgentDoctor(
     checks,
     warnings: warnings.length > 0 ? warnings : undefined,
   };
+}
+
+function quoteAgentDoctorExecutable(executablePath: string, environment: ProjectEnvironment): string {
+  if (environment === 'windows') {
+    return `"${executablePath.replaceAll('"', '""')}"`;
+  }
+  return `'${executablePath.replaceAll("'", "'\\''")}'`;
 }
 
 function outputToRecord(output: SessionOutput): RunpanePanelOutputRecord {
@@ -3558,6 +3607,11 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
       if (!worktreePath) throw new Error(`Pane adopt item ${index} must include path`);
       if (!name) throw new Error(`Pane adopt item ${index} must include name`);
       const tool = parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`);
+      const resumeProvided = Object.prototype.hasOwnProperty.call(entry, 'resume');
+      const resume = optionalString(entry.resume);
+      if (resumeProvided && 'agent' in tool && tool.agent === 'opencode' && resume === undefined) {
+        throw new Error('OpenCode --resume must be a string matching the required ses_* format (^ses_[A-Za-z0-9]+$).');
+      }
       const launch = optionalBoolean(entry.launch);
       if (tool.initialInput !== undefined && launch !== true) {
         throw new Error(`Pane adopt item ${index} has a prompt but no launch. Pass --launch (launch: true) so the agent starts and receives the prompt.`);
@@ -3569,7 +3623,7 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
         folder: optionalString(entry.folder),
         pinned: optionalBoolean(entry.pinned),
         tool,
-        resume: optionalString(entry.resume),
+        resume,
         launch,
       };
     }),
@@ -4723,6 +4777,10 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
   }
 
   const declaredAgent = tool.agentType;
+  const commandAgent = resolveAgentTypeFromCommand(tool.command);
+  if (commandAgent === 'opencode' && (!declaredAgent || declaredAgent === 'opencode')) {
+    assertDirectOpenCodeLaunchCommand(tool.command, environment === 'windows' || (!environment && process.platform === 'win32'));
+  }
   if (!declaredAgent) {
     return {
       title: tool.title ?? 'Terminal',
@@ -4738,7 +4796,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
     title: tool.title ?? AGENT_TEMPLATES[declaredAgent].title,
     command: tool.command,
     agent: declaredAgent,
-    launchMode: resolveAgentTypeFromCommand(tool.command) === declaredAgent ? undefined : 'wrapped',
+    launchMode: commandAgent === declaredAgent ? undefined : 'wrapped',
     initialInput: tool.initialInput,
     initialInputAsFilePointer: tool.initialInputAsFilePointer,
   };

@@ -110,6 +110,25 @@ function createServicesStub(projects: Project[]): AppServices {
 }
 
 describe('config IPC handlers', () => {
+  it.each([
+    { platform: 'darwin', agents: ['claude', 'codex', 'cursor'] },
+    { platform: 'linux', agents: ['claude', 'codex', 'cursor'] },
+    { platform: 'win32', agents: ['claude', 'codex'] },
+  ])('keeps terminal-only OpenCode out of remote Session agents on $platform', async ({ platform, agents }) => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
+    try {
+      const ipcMain = createIpcMainStub();
+      const registry = new PaneCommandRegistry();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(ipcMain as IpcMain, createServicesStub([]), registry);
+      await expect(registry.invoke('remote:pwa-affordances')).resolves.toMatchObject({
+        sessionAgents: { agents, defaultAgent: 'claude' },
+      });
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
   afterEach(async () => {
     vi.unstubAllEnvs();
     while (tempDirs.length > 0) {
