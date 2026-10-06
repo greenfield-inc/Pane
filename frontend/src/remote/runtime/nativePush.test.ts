@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
+import type { RemotePaneConnectionProfile, RemoteMobilePushStatus } from '../../../../shared/types/remoteDaemon';
 import { RemoteRuntimeAdapter } from './remoteRuntimeAdapter';
 
 const profile: RemotePaneConnectionProfile = {
   id: 'My Mac:https://host.test:12345678', label: 'My Mac', baseUrl: 'https://host.test', token: 'token', transport: 'http+sse',
 };
+
+const pushStatus: RemoteMobilePushStatus = { platform: 'ios', registration: 'registered', provider: 'ready', code: 'ready', message: 'Ready' };
 
 beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -27,7 +29,7 @@ function setup() {
   vi.stubGlobal('window', { Capacitor: { isNativePlatform: () => true, Plugins: { PushNotifications: plugin, SecureStore: secureStore } } });
   vi.stubGlobal('navigator', { userAgent: 'iPhone' });
   const adapter = new RemoteRuntimeAdapter(profile);
-  const invoke = vi.spyOn(adapter, 'invoke').mockResolvedValue({ provider: 'ready', registration: 'registered' });
+  const invoke = vi.spyOn(adapter, 'invoke').mockResolvedValue(pushStatus);
   return { plugin, listeners, remove, adapter, invoke };
 }
 
@@ -60,7 +62,7 @@ it('installs a single routing listener during concurrent boot and registration',
 
 it('does not request OS permission when the host has no provider', async () => {
   const { invoke, adapter, plugin } = setup();
-  invoke.mockResolvedValue({ provider: 'missing-config', message: 'Configure APNs on this host.' });
+  invoke.mockResolvedValue({ ...pushStatus, provider: 'missing-config', message: 'Configure APNs on this host.' });
   const { setupNativePush } = await import('./nativePush');
   await expect(setupNativePush(profile, adapter)).resolves.toBe('Configure APNs on this host.');
   expect(plugin.requestPermissions).not.toHaveBeenCalled();

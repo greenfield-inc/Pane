@@ -60,13 +60,13 @@ export async function setupNativePush(profile: RemotePaneConnectionProfile, adap
 
 export async function revokeNativePush(profile: RemotePaneConnectionProfile, adapter: RemoteRuntimeAdapter): Promise<void> {
   if (!isNativeMobile()) return;
-  await adapter.invoke<void>('mobile:push-revoke', [{ platform: nativePlatform(), installationId: await getInstallationId(), hostProfileId: profile.id }]);
+  await adapter.invoke('mobile:push-revoke', [{ platform: nativePlatform(), installationId: await getInstallationId(), hostProfileId: profile.id }]);
   registrationByRuntime.delete(adapter);
 }
 
 export async function getNativePushStatus(adapter: RemoteRuntimeAdapter): Promise<RemoteMobilePushStatus | null> {
   if (!isNativeMobile()) return null;
-  return adapter.invoke<RemoteMobilePushStatus>('mobile:push-status', [{ platform: nativePlatform(), installationId: await getInstallationId() }]);
+  return adapter.invoke('mobile:push-status', [{ platform: nativePlatform(), installationId: await getInstallationId() }]);
 }
 
 export async function updateNativePushControls(
@@ -79,7 +79,7 @@ export async function updateNativePushControls(
   };
   if (controls.needsInputEnabled !== undefined) request.needsInputEnabled = controls.needsInputEnabled;
   if (controls.completedEnabled !== undefined) request.completedEnabled = controls.completedEnabled;
-  return adapter.invoke<RemoteMobilePushStatus>('mobile:push-controls', [request]);
+  return adapter.invoke('mobile:push-controls', [request]);
 }
 
 async function registerProfile(profile: RemotePaneConnectionProfile, adapter: RemoteRuntimeAdapter): Promise<string | null> {
@@ -100,7 +100,7 @@ async function registerProfile(profile: RemotePaneConnectionProfile, adapter: Re
   const token = await registerForToken(plugin);
   if (!token) return 'The operating system could not register this device for notifications.';
   try {
-    const status = await adapter.invoke<{ provider: string; message: string }>('mobile:push-register', [{ platform: nativePlatform(), token, installationId: await getInstallationId(), hostProfileId: profile.id }]);
+    const status = await adapter.invoke('mobile:push-register', [{ platform: nativePlatform(), token, installationId: await getInstallationId(), hostProfileId: profile.id }]);
     return status.provider === 'ready' ? null : status.message;
   } catch (error) { return error instanceof Error ? error.message : 'Notification registration failed.'; }
 }
