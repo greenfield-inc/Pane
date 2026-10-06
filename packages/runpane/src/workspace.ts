@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
-import type { JsonValue } from './boundaryDecoder';
+import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, type RemoteDaemonTarget } from './daemonClient';
 
@@ -66,6 +66,7 @@ const execResultSchema = boundary.object({
   exitCode: boundary.nullable(boundary.number),
   signal: boundary.nullable(boundary.string),
   timedOut: boundary.boolean,
+  stillRunning: boundary.optional(boundary.literal(true)),
   stdout: boundary.string,
   stderr: boundary.string,
 });
@@ -256,10 +257,8 @@ export async function runWorkspaceSetEnabled(parsed: ParsedArgs, enabled: boolea
 
 export async function runWorkspaceRead(parsed: ParsedArgs): Promise<number> {
   const target = requirePath(parsed, 'read');
-  const machine = await pickMachine(parsed, target, 'read', fs.existsSync(target));
-  const result = machine
-    ? await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:read', [{ path: target }], readResultSchema)
-    : readLocalFile(target);
+  const machine = await pickMachine(parsed, target, 'read');
+  const result = await callMachine(parsed, machine, 'runpane:machine:read', [{ path: target }], readResultSchema);
   if (parsed.json) {
     console.log(JSON.stringify({ ok: true, machine: machine?.name ?? null, ...result }, null, 2));
   } else {
@@ -270,13 +269,11 @@ export async function runWorkspaceRead(parsed: ParsedArgs): Promise<number> {
 
 export async function runWorkspaceWrite(parsed: ParsedArgs): Promise<number> {
   const target = requirePath(parsed, 'write');
-  const machine = await pickMachine(parsed, target, 'write', fs.existsSync(path.dirname(target)));
+  const machine = await pickMachine(parsed, target, 'write');
   const content = fs.readFileSync(0);
   const encoding = isUtf8(content) ? 'utf8' : 'base64';
   const request = { path: target, content: content.toString(encoding), encoding };
-  const result = machine
-    ? await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:write', [request], writeResultSchema)
-    : (fs.writeFileSync(target, content), { path: target, bytes: content.length });
+  const result = await callMachine(parsed, machine, 'runpane:machine:write', [request], writeResultSchema);
   if (parsed.json) console.log(JSON.stringify({ ok: true, machine: machine?.name ?? null, ...result }, null, 2));
   else console.log(`Wrote ${result.bytes} bytes to ${machine?.name ?? 'this machine'}:${result.path}`);
   return 0;
@@ -306,7 +303,9 @@ export async function runWorkspaceExec(parsed: ParsedArgs): Promise<number> {
   } else {
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
-    const ending = result.timedOut ? 'timed out' : result.signal ? `signal ${result.signal}` : `exit ${result.exitCode}`;
+    const ending = result.stillRunning
+      ? 'timed out, and could not be stopped; it may still be running'
+      : result.timedOut ? 'timed out' : result.signal ? `signal ${result.signal}` : `exit ${result.exitCode}`;
     process.stderr.write(`[${machine.name}: ${result.os}, ${result.shell}, ${ending}]\n`);
   }
   return result.exitCode ?? 1;
@@ -317,27 +316,29 @@ function requirePath(parsed: ParsedArgs, verb: string): string {
   return parsed.workspacePath;
 }
 
-/** null means this machine. */
-async function pickMachine(parsed: ParsedArgs, target: string, verb: string, existsHere: boolean): Promise<TailnetMachine | null> {
+/**
+ * null means this machine. A path shaped like another OS's (C:\... on a Mac) goes to the machine
+ * it fits; every other path is this machine's.
+ */
+async function pickMachine(parsed: ParsedArgs, target: string, verb: string): Promise<TailnetMachine | null> {
   if (parsed.workspaceMachine) {
     const tailnet = await requireTailnet();
     return resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
   }
-  // A path shaped like another OS's (C:\... on a Mac) never means this machine, even when
-  // a same-named relative file could exist here.
-  const foreign = foreignPathSystems(target, process.platform).length > 0;
-  if (existsHere && !foreign) return null;
-  if (!foreign) {
-    throw new Error(`No such file on this machine: ${target}. To read another machine's file, name it: runpane workspace <machine> ${verb} ${quoteArg(target)}`);
-  }
-  return routePath(target, verb);
+  return foreignPathSystems(target, process.platform).length > 0 ? routePath(target, verb) : null;
 }
 
-function readLocalFile(target: string): ReturnType<typeof readResultSchema.decode> {
-  const buffer = fs.readFileSync(target);
-  return isUtf8(buffer)
-    ? { path: target, encoding: 'utf8', content: buffer.toString('utf8'), bytes: buffer.length }
-    : { path: target, encoding: 'base64', content: buffer.toString('base64'), bytes: buffer.length };
+/** Another machine's Pane over the tailnet, or this machine's own Pane; both resolve paths the same way. */
+function callMachine<T>(
+  parsed: ParsedArgs,
+  machine: TailnetMachine | null,
+  channel: string,
+  args: unknown[],
+  schema: BoundarySchema<T>,
+): Promise<T> {
+  return machine
+    ? invokeRemoteDaemon(workspaceTarget(machine), channel, args, schema)
+    : invokeDaemon(channel, args, schema, { paneDir: parsed.paneDir });
 }
 
 // ---------------------------------------------------------------- discovery
