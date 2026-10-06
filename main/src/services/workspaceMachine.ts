@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { terminateProcessTrees } from '../utils/processTree';
 import { getShellPath } from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import {
@@ -96,6 +97,8 @@ export interface MachineExecResult {
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
+  /** Set when a timeout could not stop the command's process tree. */
+  stillRunning?: true;
   stdout: string;
   stderr: string;
 }
@@ -105,6 +108,8 @@ const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 const MAX_EXEC_TIMEOUT_MS = 9 * 60_000;
 const OUTPUT_DRAIN_MS = 500;
+/** How long a timed-out command's tree gets to die before the request answers anyway. */
+const STOP_TIMEOUT_MS = 1_500;
 
 export async function describeMachine(preferredShell?: string): Promise<MachineInfo> {
   const wslDistros = process.platform === 'win32' ? await listWSLDistributions().catch(() => []) : [];
@@ -168,30 +173,41 @@ export async function execOnMachine(
     const stdout = new OutputCollector();
     const stderr = new OutputCollector();
     let timedOut = false;
+    let settled = false;
+    const result = (fields: Pick<MachineExecResult, 'exitCode' | 'signal'> & { stillRunning?: true }): MachineExecResult => ({
+      os: machineOs(process.platform),
+      shell: path.basename(shell),
+      cwd,
+      ...fields,
+      timedOut,
+      stdout: stdout.text(),
+      stderr: stderr.text(),
+    });
+    const settle = (value: MachineExecResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      killProcessTree(child.pid);
+      void stopProcessTree(child.pid).then((stopped) => {
+        if (!stopped) settle(result({ exitCode: null, signal: null, stillRunning: true }));
+      });
     }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
     child.once('error', (error) => {
       clearTimeout(timer);
-      reject(error);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
     });
     // A background job (`server &`) keeps the pipes open after the shell exits; answer at exit
     // and stop waiting for output shortly after.
     child.once('exit', (exitCode, signal) => {
       clearTimeout(timer);
-      const finish = () => resolve({
-        os: machineOs(process.platform),
-        shell: path.basename(shell),
-        cwd,
-        exitCode,
-        signal,
-        timedOut,
-        stdout: stdout.text(),
-        stderr: stderr.text(),
-      });
+      const finish = () => settle(result({ exitCode, signal }));
       const drain = setTimeout(() => {
         child.stdout.destroy();
         child.stderr.destroy();
@@ -205,17 +221,18 @@ export async function execOnMachine(
   });
 }
 
-function killProcessTree(pid: number | undefined): void {
-  if (!pid) return;
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-    return;
+/** Whether the command and everything it started are gone. Never throws. */
+async function stopProcessTree(pid: number | undefined): Promise<boolean> {
+  if (!pid) return true;
+  if (process.platform !== 'win32') {
+    // The group also reaches background jobs whose parent shell already exited.
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // The group already exited.
+    }
   }
-  try {
-    process.kill(-pid, 'SIGKILL');
-  } catch {
-    // The group already exited.
-  }
+  return (await terminateProcessTrees([pid], { timeoutMs: STOP_TIMEOUT_MS })).length === 0;
 }
 
 class OutputCollector {

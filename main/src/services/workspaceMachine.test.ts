@@ -1,8 +1,12 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execOnMachine, readMachineFile, resolveMachinePath, writeMachineFile } from './workspaceMachine';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const windows = { platform: 'win32' as const, homeDir: 'C:\\Users\\khaza', wslDistro: 'Ubuntu' };
 const wsl = { platform: 'linux' as const, homeDir: '/home/khaza', isWsl: true, wslDistro: 'Ubuntu' };
@@ -89,5 +93,17 @@ describe('machine file and command operations', () => {
     const result = await execOnMachine({ command: 'sleep 5', timeoutMs: 200 });
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);
+    expect(result.stillRunning).toBeUndefined();
+  });
+
+  // Kills go through process.kill on POSIX; Windows uses taskkill, whose failures are caught.
+  it.skipIf(process.platform === 'win32')('answers, and says the command may still run, when the process tree cannot be stopped', async () => {
+    // Every SIGKILL is lost, as when the kill itself fails; existence checks still work.
+    const realKill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation((pid, signal) => (signal === 'SIGKILL' ? true : realKill(pid, signal)));
+    const started = Date.now();
+    const result = await execOnMachine({ command: 'sleep 4', timeoutMs: 200 });
+    expect(result).toMatchObject({ timedOut: true, stillRunning: true, exitCode: null });
+    expect(Date.now() - started).toBeLessThan(3500);
   });
 });
