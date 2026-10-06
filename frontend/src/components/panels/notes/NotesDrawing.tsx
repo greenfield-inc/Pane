@@ -49,8 +49,9 @@ export default function NotesDrawing({ block, onSave, onCancel }: {
     finally { setSaving(false); }
   };
   // Excalidraw uses Escape for its own menus/tools without always preventing the
-  // native cancel event. Only the explicit Cancel button may discard this scene.
-  return createPortal(<dialog ref={dialog} aria-label="Edit drawing" onCancel={event => event.preventDefault()} className="fixed inset-4 m-0 h-auto w-auto max-h-none max-w-none flex-col rounded-lg border border-border-primary bg-bg-primary p-0 text-text-primary shadow-xl open:flex">
+  // native cancel event. Prevent the key default too: repeated native cancel
+  // requests can force-close a dialog despite preventDefault on its cancel event.
+  return createPortal(<dialog ref={dialog} aria-label="Edit drawing" onKeyDownCapture={event => { if (event.key === 'Escape') event.preventDefault(); }} onCancel={event => event.preventDefault()} className="fixed inset-4 m-0 h-auto w-auto max-h-none max-w-none flex-col rounded-lg border border-border-primary bg-bg-primary p-0 text-text-primary shadow-xl open:flex">
     <div className="flex items-center gap-3 border-b border-border-primary p-3">
       <input aria-label="Drawing title" value={title} onChange={event => setTitle(event.target.value)} className="min-w-0 flex-1 rounded bg-bg-secondary p-2" />
       <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>

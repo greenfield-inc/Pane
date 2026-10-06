@@ -181,10 +181,6 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
   sessionManager.on('session-created', (session: Session) => {
     reconcile([{ kind: 'project', id: String(session.projectId) }]);
   });
-  sessionManager.on('session-deleted', (session: { id: string }) => {
-    try { fs.rmSync(noteContextPath(root, session.id), { force: true }); }
-    catch (error) { console.error('Could not remove deleted Pane note context:', error); }
-  });
   let repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
   services.configManager.on('config-updated', () => {
     const enabled = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
