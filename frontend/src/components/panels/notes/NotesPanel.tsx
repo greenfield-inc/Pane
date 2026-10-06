@@ -11,10 +11,10 @@ import { useConfigStore } from '../../../stores/configStore';
 const DrawingEditor = lazy(() => import('./NotesDrawing'));
 const scopeLabels = { feature: 'Feature Notes', project: 'Project Notes', global: 'Global Notes', session: 'Session Notes' };
 const descriptions = {
-  feature: 'Notes for this worktree. Shared with agents working here.',
-  project: 'Notes for this project. Shared across its worktrees and agents.',
-  global: 'Notes for all your projects. Shared with your Claude, Codex, and Cursor agents.',
-  session: 'Notes for this session. Choose an associated project when moving a note.',
+  feature: 'Notes for this worktree.',
+  project: 'Notes for this project.',
+  global: 'Notes for all your projects.',
+  session: 'Notes for this session.',
 };
 const button = 'rounded px-3 py-1.5 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50';
 const field = 'w-full bg-transparent text-text-primary outline-none placeholder:text-text-tertiary';
@@ -78,7 +78,6 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
     } catch (cause) { setError(String(cause)); }
   };
   const current = notes.find(note => note.id === selected) ?? notes[0];
-  const activeName = context?.scopes.find(item => scope && sameNoteScope(item.scope, scope))?.name;
   const scopes = context?.scopes.slice().sort((a, b) => {
     const order = { session: 0, feature: 0, project: 1, global: 2 };
     return order[a.scope.kind] - order[b.scope.kind];
@@ -92,7 +91,6 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
           items={[...notes.map(note => ({ id: note.id, label: note.title || 'Untitled', onClick: () => { void choose(undefined, note.id); } })),
             { id: 'new', label: 'New note', icon: Plus, onClick: () => { void create(); } }]}
           menuClassName="!z-modal" />
-        <button type="button" aria-label="New note" title="New note" className="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary" onClick={() => void create()} disabled={!scope}><Plus size={15} /></button>
       </div>
       <div className="ml-auto flex min-w-0 gap-0.5 overflow-x-auto" aria-label="Note scope">
         {scopes?.map(item => <button key={`${item.scope.kind}-${item.scope.id}`} type="button"
@@ -111,7 +109,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
     </div>}
     <div className="min-h-0 flex-1 overflow-auto">
       {current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${viewId}:${current.id}`} capture={capture}
-        scopeName={activeName} viewedScope={scope} exports={exports} onExports={setExports} onRefresh={refresh} />
+        viewedScope={scope} exports={exports} onExports={setExports} onRefresh={refresh} />
         : <div className="notes-document">
           <button type="button" aria-label="Start a note" onClick={() => void create()} disabled={!scope} className="block w-full py-8 text-left">
             <span className="block text-3xl font-semibold tracking-tight text-text-tertiary">Untitled</span>
@@ -123,9 +121,9 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
 
 }
 
-function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefresh, draftKey, exports, scopeName, viewedScope }: {
+function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefresh, draftKey, exports, viewedScope }: {
   paneId: string; note: Note; context: NoteContext; draftKey: string; flush: React.MutableRefObject<(() => Promise<boolean>) | null>;
-  exports: NoteExportResult[]; scopeName?: string; viewedScope?: NoteScope;
+  exports: NoteExportResult[]; viewedScope?: NoteScope;
   capture?: NoteCapture; onExports: (results: NoteExportResult[]) => void; onRefresh: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => {
@@ -143,7 +141,6 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
   const [drawing, setDrawing] = useState<Extract<NoteBlock, { type: 'drawing' }>>();
   const insertAfter = useRef<string | null | undefined>(undefined);
   const [captured, setCaptured] = useState(false);
-  const [showDelivery, setShowDelivery] = useState(false);
   const change = (next: Note) => {
     draftRef.current = next; dirty.current = true; setDraft(next); setStatus('Unsaved'); setError('');
     try { localStorage.setItem(draftKey, JSON.stringify(next)); }
@@ -212,7 +209,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
   return <div className="notes-document">
     <div className="mb-4 flex min-h-7 items-center justify-end gap-2 text-xs text-text-tertiary">
       {viewedScope && !sameNoteScope(draft.scope, viewedScope) && <span className="mr-auto">Reference to {scopeLabels[draft.scope.kind]}</span>}
-      <span role="status" className={error ? 'text-status-error' : ''}>{status}</span>
+      <span role="status" className={error ? 'text-status-error' : status === 'Saved' && !recoveryWarning ? 'sr-only' : ''}>{status}</span>
       <Dropdown position="bottom-right" width="lg" menuClassName="!z-modal"
         trigger={<button type="button" aria-label="Note settings" title="Note settings" className="flex items-center gap-1.5 rounded p-1.5 hover:bg-surface-hover hover:text-text-primary">
           {failedExports.length > 0 && <span className="text-status-error">Export issue</span>}<Settings size={15} />
@@ -224,18 +221,11 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
           ...(draft.scope.kind === 'project' ? [{ id: 'global', label: 'Move to Global Notes', icon: ArrowUpRight, onClick: () => { void mutate('move', { kind: 'global', id: 'user' }); } }] : []),
           { id: 'delete', label: 'Delete note', icon: Trash2, variant: 'danger', onClick: () => { if (window.confirm('Delete this note and all its references?')) void mutate('remove'); } },
         ]}
-        footer={<div className="space-y-3 p-3 text-xs text-text-secondary">
-          <p><strong className="font-medium">{scopeName || scopeLabels[draft.scope.kind]}</strong><br />{descriptions[draft.scope.kind]}</p>
-          {failedExports.length > 0 && <div role="alert" className="space-y-2 text-status-error"><p>Note saved. Agent exports need attention.</p>
-            {failedExports.map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
-            <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(String(cause))); }}>Retry exports</button>
-          </div>}
-          <div><button type="button" aria-expanded={showDelivery} className="rounded text-left hover:text-text-primary focus-visible:ring-2 focus-visible:ring-interactive" onClick={() => setShowDelivery(value => !value)}>Agent delivery</button>{showDelivery && <div className="mt-2 space-y-2 leading-relaxed">
-            <p>Scoped notes are read through Pane terminals. After your first scoped note, start a new agent conversation. Agents may request read permission.</p>
-            <p>Global edits refresh on Codex's next turn, Claude resume, or a new Cursor conversation.</p>
-            {exports.map(result => <p key={result.path} className="break-words">{result.agent}: {result.error ? 'Needs attention' : 'Updated'}<br />{result.path}</p>)}
-          </div>}</div>
-        </div>} />
+        footer={failedExports.length > 0 ? <div role="alert" className="space-y-2 p-3 text-xs text-status-error">
+          <p>Note saved. Agent exports need attention.</p>
+          {failedExports.map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
+          <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(String(cause))); }}>Retry exports</button>
+        </div> : undefined} />
     </div>
     {recoveryWarning && <p role="status" className="mb-3 text-xs text-status-error">{recoveryWarning}</p>}
     {error && <div role="alert" className="mb-4 text-sm text-status-error">{error}

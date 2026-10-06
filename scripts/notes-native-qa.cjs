@@ -116,7 +116,8 @@ async function addCanvasText(text, x, y) {
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
   await page.getByRole('menuitem', { name: 'notes', exact: true }).click();
   await selectScope('Feature Notes');
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose note', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New note', exact: true }).click();
   await page.getByRole('textbox', { name: 'Note title', exact: true }).fill('Native checkout');
   const text = page.getByRole('textbox', { name: 'Text block 1', exact: true });
   await text.fill('Review cart before payment.');
@@ -125,6 +126,9 @@ async function addCanvasText(text, x, y) {
   await selectScope('Feature Notes');
   await expect(text).toHaveValue('Review cart before payment.');
   await shot('01-autosave-scope-reopen');
+  await page.getByRole('button', { name: 'Note settings', exact: true }).click();
+  await shot('01b-settings');
+  await page.keyboard.press('Escape');
   pass('Editing, autosave, scope switch and reopening');
 
   await page.getByRole('button', { name: 'Add block after block 1', exact: true }).click();
