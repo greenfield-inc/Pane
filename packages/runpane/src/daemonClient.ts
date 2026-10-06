@@ -97,6 +97,7 @@ export class PaneDaemonClientError extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    readonly connectionFailure = false,
   ) {
     super(message);
     this.name = 'PaneDaemonClientError';
@@ -253,7 +254,7 @@ export async function invokeDaemon<T>(
 
     socket.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code ?? 'ERR_RUNPANE_DAEMON_CONNECT_FAILED';
-      settle({ error: new PaneDaemonClientError(`Could not connect to Pane daemon at ${endpoint.path}: ${error.message}`, code) });
+      settle({ error: new PaneDaemonClientError(`Could not connect to Pane daemon at ${endpoint.path}: ${error.message}`, code, true) });
     });
 
     socket.once('close', () => {

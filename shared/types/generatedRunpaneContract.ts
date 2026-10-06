@@ -3095,7 +3095,7 @@ export const RUNPANE_CONTRACT = {
         "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
         "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
         "  --push                          Commit uncommitted work (not the note) as WIP and push the branch first (never forces).",
-        "  --dry-run                       Print what the destination resolved to, the note check, and git state; send nothing.",
+        "  --dry-run                       Check destination reachability, saved repo and OS; print note and git state; send nothing.",
         "  --json                          Print machine-readable output.",
         "",
         "Examples:",
@@ -13701,7 +13701,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--dry-run",
             "required": false,
-            "description": "Print the resolved destination, the note check, and git state, and send nothing."
+            "description": "Check destination daemon reachability and resolve its saved repository name, path, environment and OS; print the note check and git state without committing, pushing, fetching, writing notes or creating a Pane."
           },
           {
             "name": "--json",
@@ -13716,7 +13716,9 @@ export const RUNPANE_CONTRACT = {
           "runpane handoff --machine build-server --agent cursor --note-file ~/handoff.md"
         ],
         "notes": [
-          "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with the repository saved, and its own runpane on PATH (otherwise npx runpane@latest is used).",
+          "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with workspaces enabled and the repository saved. Repository listing and Pane creation call the reached daemon directly; no global destination CLI installation is required.",
+          "Destination preflight runs before sender commit/push. Inside WSL, an absent or refused local Linux daemon can fall back to its Windows host through reachable Windows Tailscale and enabled workspaces; explicit Pane directory selection keeps its instance. Select a native Windows saved repository; WSL saved repositories are rejected before sending.",
+          "A successful handoff requires initialInput.verifiedSubmitted and delivery taken or queued without blocked/error evidence. Unverified delivery exits nonzero with the created Pane, panel and a panels screen inspection command; inspect before retrying.",
           "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
           "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
           "Run it from the checkout being handed off. The receiver works in a new Pane on the destination and pushes back to your branch, so stop changing that branch yourself."

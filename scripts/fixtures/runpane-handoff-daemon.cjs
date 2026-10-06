@@ -22,7 +22,13 @@ const server = net.createServer(socket => {
       }
       fs.appendFileSync(config.log, JSON.stringify({ ...frame, paneDir: config.paneDir }) + '\n');
       let result;
-      if (frame.channel === 'runpane:repos:list') result = { ok: true, repos: [repo] };
+      if (frame.channel === 'runpane:repos:list') {
+        if (config.reposError) {
+          socket.write(JSON.stringify({ type: 'response', id: frame.id, ok: false, error: config.reposError }) + '\n');
+          continue;
+        }
+        result = { ok: true, repos: [repo] };
+      }
       else if (frame.channel === 'runpane:panes:create') {
         if (config.createError) {
           socket.write(JSON.stringify({ type: 'response', id: frame.id, ok: false, error: { message: config.createError } }) + '\n');

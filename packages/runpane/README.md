@@ -216,6 +216,23 @@ runpane handoff --template > ~/handoff.md
 runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --push
 ```
 
+`--dry-run` checks destination daemon reachability and resolves its saved repository
+(name, path, environment and OS) without committing, pushing, fetching, writing a
+note or creating a Pane. These checks also run before `--push` changes sender work.
+
+From WSL, when no local Linux daemon exists, handoff can use the Windows host's
+Pane through its enabled workspaces connection (Windows Tailscale and Pane
+workspaces must be reachable). Repository listing and Pane creation use the
+reached daemon directly, so the host needs no global CLI installation. Select a Windows-native saved
+repository with `--repo`. Saved WSL repositories are rejected before sending.
+An explicit `--pane-dir` or `PANE_DIR` keeps that instance selected instead of
+falling back to a different host instance.
+
+Success requires verified prompt delivery (`taken` or `queued`). If a startup
+dialog blocks delivery or evidence is missing, handoff exits nonzero and includes
+the created Pane, panel ID and a `runpane panels screen` inspection command.
+Inspect that receiver before retrying to avoid creating a duplicate Pane.
+
 `runpane handoff --help` lists every option. Model selection works for Claude, Codex and Cursor. Effort selection works for Claude and Codex; Cursor effort is rejected before committing or sending.
 
 ## Attribution
