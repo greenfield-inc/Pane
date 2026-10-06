@@ -70,7 +70,8 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
     });
   }
 
-  setError<ErrorValue>(config: RemoteDaemonHostConfig | null | undefined, error: ErrorValue): void {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Runtime startup errors are narrowed before conversion to a display message.
+  setError(config: RemoteDaemonHostConfig | null | undefined, error: unknown): void {
     this.setState({
       enabled: config?.enabled === true,
       status: 'error',
@@ -111,7 +112,8 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
   }
 }
 
-function getErrorMessage<ErrorValue>(error: ErrorValue, fallback: string): string {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This error boundary accepts caught values and decodes the supported message forms.
+function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
