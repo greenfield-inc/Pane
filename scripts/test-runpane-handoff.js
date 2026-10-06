@@ -134,7 +134,7 @@ const fs=require('node:fs'); const args=process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(args)+'\\n');
 if(args.includes('--version')) console.log('2.4.165');
 else if(args.includes('list')) console.log(JSON.stringify({repos:[{id:7,name:'receiver',path:${JSON.stringify(f.root)}}]}));
-else console.log(JSON.stringify({items:[{ok:true,sessionId:'test-pane',panelId:'test-panel'}]}));
+else console.log(JSON.stringify({items:[${JSON.stringify(options.item ?? {ok:true,sessionId:'test-pane',panelId:'test-panel'})}]}));
 `, { mode: 0o700 });
   f.env.PATH = `${bin}${path.delimiter}${f.env.PATH}`;
   f.env.HOME = path.join(f.root, 'home');
@@ -163,4 +163,32 @@ test('local receiver preserves shell metacharacters and multiword prompts as arg
  assert.equal(result.status,0,result.stderr); const create=calls().find(a=>a.includes('create'));
  assert.equal(create[create.indexOf('--pane-dir')+1],selected);
  assert.match(create[create.indexOf('--prompt')+1],/^Read the handoff note at .* and continue the work it describes/);
+});
+
+test('dry-run with --push leaves HEAD, index, remote and destination untouched', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); fs.writeFileSync(path.join(f.root,'code.txt'),'dirty');
+ receiver(f); const head=f.git('rev-parse','HEAD'); const index=f.git('write-tree'); const status=f.git('status','--porcelain');
+ const result=f.run('--push','--dry-run'); assert.equal(result.status,0,result.stderr);
+ assert.equal(f.git('rev-parse','HEAD'),head); assert.equal(f.git('write-tree'),index); assert.equal(f.git('rev-parse','origin/task'),head); assert.equal(f.git('status','--porcelain'),status);
+ assert.equal(fs.existsSync(path.join(f.root,'receiver-args.jsonl')),false); assert.equal(fs.existsSync(path.join(f.root,'home')),false);
+});
+test('failed sender push prevents note transfer and receiver discovery', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); fs.writeFileSync(path.join(f.root,'code.txt'),'dirty'); receiver(f);
+ fs.writeFileSync(path.join(f.root,'remote.git','hooks','pre-receive'),'#!/bin/sh\nexit 1\n',{mode:0o700});
+ const result=f.run('--push'); assert.notEqual(result.status,0); assert.equal(fs.existsSync(path.join(f.root,'receiver-args.jsonl')),false); assert.equal(fs.existsSync(path.join(f.root,'home')),false);
+});
+test('failed destination fetch prevents note transfer and launch', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); const calls=receiver(f);
+ f.git('remote','set-url','origin',path.join(f.root,'missing.git'));
+ // Keep receiver remote identity equal to sender while making fetch unavailable.
+ const result=f.run(); assert.notEqual(result.status,0); assert.match(result.stderr,/git fetch failed/);
+ assert.equal(calls().some(a=>a.includes('create')),false); assert.equal(fs.existsSync(path.join(f.root,'home')),false);
+});
+test('failed note write prevents agent launch', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); const calls=receiver(f); fs.writeFileSync(f.env.HOME,'not a directory');
+ const result=f.run(); assert.notEqual(result.status,0); assert.equal(calls().some(a=>a.includes('create')),false);
+});
+test('partial receiver failure names sent note and created Pane for recovery', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); receiver(f,{item:{ok:false,sessionId:'partial-pane',panelId:'partial-panel',error:{message:'agent readiness failed'}}});
+ const result=f.run(); assert.notEqual(result.status,0); assert.match(result.stderr,/agent readiness failed/); assert.match(result.stderr,/partial-pane/); assert.match(result.stderr,/handoffs.*\.md/); assert.match(result.stderr,/agents status/);
 });

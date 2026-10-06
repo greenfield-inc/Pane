@@ -524,9 +524,14 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     ...(toolCommand ? ['--tool-command', toolCommand] : []),
     '--prompt', prompt, '--source', 'agent', '--no-focus', '--wait-ready', '--yes', '--json',
   ];
-  const created = decodeBoundary(JSON.parse(await mustRun(remote, create, 'runpane panes create', REPORT_TIMEOUT_MS)), paneCreateSchema);
+  let created: ReturnType<typeof paneCreateSchema.decode>;
+  try {
+    created = decodeBoundary(JSON.parse(await mustRun(remote, create, 'runpane panes create', REPORT_TIMEOUT_MS)), paneCreateSchema);
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check runpane sessions list on ${remote.name} before retrying to avoid a duplicate Pane.`);
+  }
   const item = created.items[0];
-  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item?.error?.message ?? 'no pane was created'}`);
+  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item?.error?.message ?? 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Check runpane agents status --pane ${item.sessionId} on ${remote.name} before retrying.` : ` Check runpane sessions list on ${remote.name} before retrying.`}`);
   say(step('started', `${item.name ?? name} on ${remote.name}${item.worktreePath ? ` (${item.worktreePath})` : ''}`));
 
   result.repo = { id: repo.id, name: repo.name, path: repo.path };
