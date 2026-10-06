@@ -2261,6 +2261,26 @@ describe('runpane IPC handlers', () => {
     ]);
   });
 
+  it('waits beyond the activity monitor settling period after Escape', async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    let staged = false;
+    let submitted = false;
+    vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_id, input) => {
+      if (input === 'replacement') staged = true;
+      if (input === '\r') submitted = true;
+    });
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      terminalSnapshot(submitted ? 'Working' : staged ? '› replacement' : '› Ask Codex to do anything',
+        Date.now() - started < 12_000 || submitted ? 'active' : 'idle'),
+    );
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(await pending).toMatchObject({ ok: true, delivery: { state: 'taken' } });
+  });
+
   it('does not send replacement text when interruption never reaches idle', async () => {
     vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
@@ -2269,7 +2289,7 @@ describe('runpane IPC handlers', () => {
     const pending = createRegistry().invoke('runpane:panels:submit', [{
       panelId: terminalPanel.id, input: 'replacement', interrupt: true,
     }]);
-    await vi.advanceTimersByTimeAsync(11_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     expect(await pending).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'agent-prompt' } });
     expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([[terminalPanel.id, '\x1b']]);
   });

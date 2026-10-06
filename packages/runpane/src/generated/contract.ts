@@ -11417,7 +11417,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--interrupt",
             "required": false,
-            "description": "Interrupt the current turn and wait up to 10 seconds for an empty idle composer before delivering. Escape for Codex/Claude; Ctrl+C for Cursor."
+            "description": "Interrupt the current turn and wait up to 30 seconds for an empty idle composer before delivering. Escape for Codex/Claude; Ctrl+C for Cursor."
           },
           {
             "name": "--yes",

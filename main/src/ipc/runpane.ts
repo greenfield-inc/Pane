@@ -1248,7 +1248,8 @@ export function registerRunpaneHandlers(
         }
         if (beforeScreen.state.activityStatus === 'active') {
           terminalPanelManager.writeToTerminal(panel.id, agentType === 'cursor' ? '\x03' : '\x1b');
-          beforeScreen = await waitForPanelScreen(panel, ready, 10_000);
+          // Activity stays working for 10 seconds after the final interrupt redraw.
+          beforeScreen = await waitForPanelScreen(panel, ready, DEFAULT_PANEL_WAIT_TIMEOUT_MS);
         }
         if (!ready(beforeScreen)) {
           return blocked('The agent did not reach an empty idle composer. The replacement text was not sent; inspect the screen before retrying.');
