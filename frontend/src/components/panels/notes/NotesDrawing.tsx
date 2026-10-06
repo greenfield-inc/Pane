@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useRef, useState } from 'react';
 import { Excalidraw, exportToBlob, restore, serializeAsJSON } from '@excalidraw/excalidraw';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ImportedDataState } from '@excalidraw/excalidraw/data/types';
 import '@excalidraw/excalidraw/index.css';
+import NotesDialog from './NotesDialog';
 import type { NoteBlock } from '../../../../../shared/types/notes';
 import { boundary, decodeBoundary } from '../../../../../shared/validation/boundaryDecoder';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
@@ -21,9 +21,7 @@ export default function NotesDrawing({ block, onSave, onCancel }: {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
   const { theme } = useTheme();
-  useEffect(() => { dialog.current?.showModal(); }, []);
   // SAFETY: restore is Excalidraw's own import validator/normalizer for saved JSON.
   const initial = useMemo(() => restore(block.scene as ImportedDataState, null, null), [block.scene]);
   const save = async () => {
@@ -48,10 +46,7 @@ export default function NotesDrawing({ block, onSave, onCancel }: {
     } catch (cause) { setError(String(cause)); }
     finally { setSaving(false); }
   };
-  // Excalidraw uses Escape for its own menus/tools without always preventing the
-  // native cancel event. Prevent the key default too: repeated native cancel
-  // requests can force-close a dialog despite preventDefault on its cancel event.
-  return createPortal(<dialog ref={dialog} aria-label="Edit drawing" onKeyDownCapture={event => { if (event.key === 'Escape') event.preventDefault(); }} onCancel={event => event.preventDefault()} className="fixed inset-4 m-0 h-auto w-auto max-h-none max-w-none flex-col rounded-lg border border-border-primary bg-bg-primary p-0 text-text-primary shadow-xl open:flex">
+  return <NotesDialog label="Edit drawing">
     <div className="flex items-center gap-3 border-b border-border-primary p-3">
       <input aria-label="Drawing title" value={title} onChange={event => setTitle(event.target.value)} className="min-w-0 flex-1 rounded bg-bg-secondary p-2" />
       <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
@@ -60,5 +55,5 @@ export default function NotesDrawing({ block, onSave, onCancel }: {
     {error && <p role="alert" className="p-2 text-status-error">{error}</p>}
     <div className="min-h-0 flex-1"><Excalidraw theme={isLightTheme(theme) ? 'light' : 'dark'} initialData={initial} excalidrawAPI={value => { api.current = value; }}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false } }} /></div>
-  </dialog>, document.body);
+  </NotesDialog>;
 }

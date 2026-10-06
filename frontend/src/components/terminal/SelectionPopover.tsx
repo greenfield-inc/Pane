@@ -1,9 +1,10 @@
-import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy, ExternalLink, FolderOpen, Globe, FileText } from 'lucide-react';
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
 import { InterceptorToast } from './InterceptorToast';
 import { isWindows } from '../../utils/platformUtils';
+import NotesDialog from '../panels/notes/NotesDialog';
 import { copyTerminalText } from '../../utils/terminalClipboard';
 
 const NotesPanel = lazy(() => import('../panels/notes/NotesPanel'));
@@ -70,8 +71,6 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   onClose,
 }) => {
   const [capture, setCapture] = useState<{ text: string; source: string; at: string }>();
-  const captureDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => { if (capture) captureDialog.current?.showModal(); }, [capture]);
   // Stays mounted while hidden so the error toast can outlive the popover
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
@@ -185,10 +184,10 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         </PopoverButton>
       )}
     </TerminalPopover>
-    {capture && sessionId && createPortal(<dialog ref={captureDialog} aria-label="Add to notes" onCancel={() => setCapture(undefined)} className="fixed inset-8 m-0 h-auto w-auto max-h-none max-w-none flex-col rounded border border-border-primary bg-bg-primary p-0 text-text-primary shadow-xl open:flex">
+    {capture && sessionId && <NotesDialog label="Add to notes" onDismiss={() => setCapture(undefined)}>
       <button type="button" className="self-end px-4 py-2" onClick={() => setCapture(undefined)}>Close</button>
       <div className="min-h-0 flex-1"><Suspense fallback={<p>Loading notes…</p>}><NotesPanel paneId={sessionId} capture={capture} viewId="capture" /></Suspense></div>
-    </dialog>, document.body)}
+    </NotesDialog>}
     {errorToast && createPortal(
       <div className="fixed inset-0 z-[10002] pointer-events-none">
         <InterceptorToast
