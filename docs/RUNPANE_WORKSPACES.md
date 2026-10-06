@@ -7,10 +7,14 @@ runpane workspace list
 runpane workspace <machine> read  <path>
 runpane workspace <machine> write <path>          # content from stdin
 runpane workspace <machine> exec -- <command>     # runs in that machine's shell
-runpane workspace <machine> <any runpane command> # e.g. sessions list --json
+runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 ```
 
 `<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP.
+
+These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
+
+`workspace <machine> <runpane command>` runs any command that talks to Pane, such as `sessions list`, `panes list`, or `workspace state`, against that machine's Pane. Commands that only make sense on the machine you type them on (`doctor`, `agent-context`, `mcp`, `docs`, `install`) are refused with the alternative: run them there with `runpane workspace <machine> exec -- 'runpane doctor'`.
 
 ## Turning it on
 
@@ -66,11 +70,11 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 - Inside WSL, `C:\...` becomes `/mnt/c/...`.
 - `~` is the home directory of the machine that runs the request.
 
-`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree.
+`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree. If that tree cannot be stopped, the result says so (`stillRunning` in `--json`, "may still be running" in text).
 
 ## Without a machine name
 
-With no `<machine>`, `read`, `write`, and `exec --cwd` route a path that cannot exist on this machine to the one joined machine it fits. `C:\...` on a Mac goes to your Windows machine; if several fit, runpane lists them and asks for a name.
+With no `<machine>`, `read`, `write`, and `exec --cwd` route a path that cannot exist on this machine to the one joined machine it fits. `C:\...` on a Mac goes to your Windows machine; if several fit, runpane lists them and asks for a name. Any other path is this machine's: `read` and `write` hand it to this machine's Pane, so it follows the same rules as a named machine (`~`, directories, new parent folders), and Pane must be running here.
 
 Other commands help in the same way. When a file such as a `--from-json` or `--prompt-file` path is missing and looks like another machine's path, the error names the likely machine and the exact `runpane workspace <machine> read` command. When a Session is not found here, runpane checks your other online machines and names the one that has it.
 

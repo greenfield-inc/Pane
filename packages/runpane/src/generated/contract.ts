@@ -2104,11 +2104,12 @@ export const RUNPANE_CONTRACT = {
         "  runpane workspace <machine> read <path>",
         "  runpane workspace <machine> write <path>          (content from stdin)",
         "  runpane workspace <machine> exec -- <command>",
-        "  runpane workspace <machine> <any runpane command>  (e.g. sessions list --json)",
+        "  runpane workspace <machine> <runpane command>      (any command that talks to Pane, e.g. sessions list --json)",
         "  runpane workspace enable|disable",
         "",
         "<machine> is a Tailscale name, unique prefix, or IP. Only machines signed in to your own Tailscale login are reachable.",
-        "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits."
+        "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits.",
+        "Commands that only run here (doctor, agent-context, mcp, docs) run there with: runpane workspace <machine> exec -- 'runpane doctor'"
       ],
       "workspace state": [
         "Usage:",
