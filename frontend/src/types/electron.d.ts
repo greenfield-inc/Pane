@@ -1,4 +1,5 @@
 /// <reference types="electron" />
+import type { PreferencesApi } from '../../../shared/types/preferences';
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
 import type { Project } from './project';
@@ -91,6 +92,7 @@ interface IPCResponse<T = any> {
 }
 
 interface ElectronAPI {
+  preferences: PreferencesApi;
   // Generic invoke method. Daemon-owned channels route through the main-process
   // daemon bridge while adapter-only channels stay on direct Electron IPC.
   invoke: {

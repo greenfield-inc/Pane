@@ -3,6 +3,11 @@
 This is an index of how Pane fits together. It names the owning files; the code
 is the reference for details.
 
+## Renderer preference boundary
+
+Use `API.preferences.get(key)`, `getAll()`, and `set(key, value)` instead of generic IPC invokes. The preload's `preferences` methods validate host responses through `shared/types/preferences.ts` before returning values. A missing key returns `null`, an empty value remains `''`, and all preference values are strings. Failed or malformed responses reject; callers retain their existing loading/error handling. The frontend API forwards these typed values without parsing IPC envelopes again.
+
+
 ## Words
 
 - **Repository (project):** a saved base git repo.

@@ -67,6 +67,18 @@ const isElectron = () => {
 
 // Wrapper class for API calls that provides error handling and consistent interface
 export class API {
+  static preferences = {
+    async get(key: string): Promise<string | null> {
+      return window.electronAPI.preferences.get(key);
+    },
+    async getAll(): Promise<Record<string, string>> {
+      return window.electronAPI.preferences.getAll();
+    },
+    async set(key: string, value: string): Promise<void> {
+      return window.electronAPI.preferences.set(key, value);
+    },
+  };
+
   static paneChat = {
     async getOrCreate(): Promise<IPCResponse<PaneChatState<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
