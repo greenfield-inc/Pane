@@ -550,7 +550,19 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       const requestPath = await remote.write(`${notePath}.create.json`, JSON.stringify(request));
       create = [...runpane, 'panes', 'create', '--from-json', requestPath, '--no-associate', '--yes', '--json'];
     }
-    created = decodeBoundary(JSON.parse(await mustRun(remote, create, 'runpane panes create', REPORT_TIMEOUT_MS)), paneCreateSchema);
+    const response = await remote.run(create, REPORT_TIMEOUT_MS);
+    try {
+      // The CLI exits nonzero for a partial create, but its JSON still carries
+      // the created session and readiness error needed for safe recovery.
+      created = decodeBoundary(JSON.parse(response.stdout), paneCreateSchema);
+    } catch (error) {
+      if (response.exitCode === 0) throw error;
+      const detail = (response.stderr || response.stdout).trim().split('\n').slice(-3).join(' ');
+      throw new Error(`runpane panes create failed on ${remote.name}: ${detail || `exit ${response.exitCode}`}`);
+    }
+    if (response.exitCode !== 0 && created.items[0]?.ok) {
+      throw new Error(`runpane panes create failed on ${remote.name}: ${response.stderr.trim() || `exit ${response.exitCode}`}`);
+    }
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check runpane sessions list on ${remote.name} before retrying to avoid a duplicate Pane.`);
   }
