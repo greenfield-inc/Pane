@@ -90,6 +90,8 @@ interface WorkspaceConfigProvider {
 export class PaneWorkspaceHostController {
   private server: PaneRemoteHttpApiServer | null = null;
   private servedPort: number | null = null;
+  /** This Pane put a handler on 8443 that is not confirmed removed; it outlives the listener. */
+  private handlerInstalled = false;
   /** Serve's target path, new each launch; see WorkspaceIdentityOptions.pathSecret. */
   private readonly pathSecret = randomBytes(24).toString('hex');
   private readonly eventSink: PaneEventSink = {
@@ -138,10 +140,10 @@ export class PaneWorkspaceHostController {
     }
     this.clearRetry();
     await this.enqueue(async () => {
-      const wasServed = this.servedPort !== null;
       await this.stopServer();
       // A handler left behind would point tailnet traffic at a closed loopback port.
-      if (wasServed) await this.unserve();
+      const removal = await this.unserve();
+      if (removal) console.warn(`[Pane workspaces] ${removal}`);
     });
   }
 
@@ -149,9 +151,12 @@ export class PaneWorkspaceHostController {
     return this.enqueue(async () => {
       this.clearRetry();
       if (!this.isEnabled()) {
-        const wasServed = this.servedPort !== null;
         await this.stopServer();
-        if (wasServed) await this.unserve();
+        const removal = await this.unserve();
+        if (removal) {
+          this.setOff(removal, `Run "tailscale serve --https=${WORKSPACE_HTTPS_PORT} off"; Pane also retries every minute.`);
+          return;
+        }
         this.status = {
           state: 'off',
           reason: this.configManager.getConfig().workspaces?.enabled === false
@@ -187,6 +192,7 @@ export class PaneWorkspaceHostController {
           return;
         }
         this.servedPort = port;
+        this.handlerInstalled = true;
       }
       this.status = {
         state: 'on',
@@ -228,10 +234,20 @@ export class PaneWorkspaceHostController {
     await server?.stop();
   }
 
-  private async unserve(): Promise<void> {
+  /** Removes this Pane's 8443 handler; returns why it could not, or null when none is left. */
+  private async unserve(): Promise<string | null> {
+    if (!this.handlerInstalled) return null;
     const tailscale = await resolveTailscaleCommandAsync(this.run);
-    if (tailscale) await this.runServe(tailscale, [`--https=${WORKSPACE_HTTPS_PORT}`, 'off']);
+    const removal = tailscale
+      ? await this.runServe(tailscale, [`--https=${WORKSPACE_HTTPS_PORT}`, 'off'])
+      : { ok: false, stdout: '', stderr: 'the tailscale CLI was not found' };
+    if (!removal.ok) {
+      return `could not remove the tailscale serve handler on ${WORKSPACE_HTTPS_PORT}: ${firstLine(`${removal.stderr}\n${removal.stdout}`)}`;
+    }
+    this.handlerInstalled = false;
+    return null;
   }
+
 
   private runServe(tailscale: ResolvedCommand, args: string[]) {
     return this.run(tailscale.command, ['serve', ...args], { env: tailscale.env });

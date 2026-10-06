@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readTailnetSelf } from './workspaceHost';
+import { PaneCommandRegistry } from './commandRegistry';
+import { PaneWorkspaceHostController, readTailnetSelf } from './workspaceHost';
 
 const running = {
   BackendState: 'Running',
@@ -31,5 +32,45 @@ describe('readTailnetSelf', () => {
     expect(readTailnetSelf(JSON.stringify({ ...running, Self: { ...running.Self, Tags: ['tag:server'] } }))).toMatchObject({
       ok: false, reason: expect.stringContaining('tagged'),
     });
+  });
+});
+
+describe('PaneWorkspaceHostController', () => {
+  function setup() {
+    const config = { workspaces: { enabled: true } };
+    const serveCalls: string[][] = [];
+    let removalFails = false;
+    const run = async (_command: string, args: string[]) => {
+      if (args[0] === 'status') return { ok: true, stdout: JSON.stringify(running), stderr: '' };
+      if (args[0] === 'serve') {
+        serveCalls.push(args);
+        if (args.includes('off') && removalFails) return { ok: false, stdout: '', stderr: 'serve config denied' };
+      }
+      return { ok: true, stdout: '', stderr: '' };
+    };
+    const host = new PaneWorkspaceHostController(
+      new PaneCommandRegistry(),
+      { getConfig: () => config, on: () => ({}), off: () => ({}) },
+      true,
+      run,
+    );
+    return { host, config, serveCalls, failRemoval: (fails: boolean) => { removalFails = fails; } };
+  }
+
+  it('reports a handler it could not remove, and removes it on a later sync', async () => {
+    const { host, config, serveCalls, failRemoval } = setup();
+    await host.start();
+    expect(host.getStatus()).toMatchObject({ state: 'on', machineName: 'parsas-macbook-pro' });
+
+    config.workspaces.enabled = false;
+    failRemoval(true);
+    await host.sync();
+    expect(host.getStatus()).toMatchObject({ state: 'off', reason: expect.stringContaining('could not remove') });
+
+    failRemoval(false);
+    await host.sync();
+    expect(host.getStatus()).toMatchObject({ state: 'off', reason: 'turned off with runpane workspace disable' });
+    expect(serveCalls.filter(args => args.includes('off'))).toHaveLength(2);
+    await host.shutdown();
   });
 });
