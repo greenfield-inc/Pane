@@ -142,7 +142,6 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
   const [recoveryWarning, setRecoveryWarning] = useState('');
   const [drawing, setDrawing] = useState<Extract<NoteBlock, { type: 'drawing' }>>();
   const insertAfter = useRef<string | null | undefined>(undefined);
-  const [project, setProject] = useState('');
   const [captured, setCaptured] = useState(false);
   const [showDelivery, setShowDelivery] = useState(false);
   const change = (next: Note) => {
@@ -219,17 +218,14 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
           {failedExports.length > 0 && <span className="text-status-error">Export issue</span>}<Settings size={15} />
         </button>}
         items={[
-          ...((draft.scope.kind === 'feature' || draft.scope.kind === 'session') ? [{ id: 'project', label: 'Move to Project Notes', icon: ArrowUpRight, disabled: !projects.length || (projects.length > 1 && !project), onClick: () => { void mutate('move', { kind: 'project', id: projects.length === 1 ? projects[0].scope.id : project }); } }] : []),
+          ...((draft.scope.kind === 'feature' || draft.scope.kind === 'session') ? (projects.length > 1
+            ? projects.map(item => ({ id: `project-${item.scope.id}`, label: `Move to Project Notes · ${item.name}`, icon: ArrowUpRight, onClick: () => { void mutate('move', item.scope); } }))
+            : [{ id: 'project', label: 'Move to Project Notes', icon: ArrowUpRight, disabled: !projects.length, onClick: () => { if (projects[0]) void mutate('move', projects[0].scope); } }]) : []),
           ...(draft.scope.kind === 'project' ? [{ id: 'global', label: 'Move to Global Notes', icon: ArrowUpRight, onClick: () => { void mutate('move', { kind: 'global', id: 'user' }); } }] : []),
           { id: 'delete', label: 'Delete note', icon: Trash2, variant: 'danger', onClick: () => { if (window.confirm('Delete this note and all its references?')) void mutate('remove'); } },
         ]}
         footer={<div className="space-y-3 p-3 text-xs text-text-secondary">
           <p><strong className="font-medium">{scopeName || scopeLabels[draft.scope.kind]}</strong><br />{descriptions[draft.scope.kind]}</p>
-          {(draft.scope.kind === 'feature' || draft.scope.kind === 'session') && projects.length > 1 && <label className="block">Destination project
-            <select aria-label="Destination project" className="mt-1 w-full rounded border border-border-primary bg-bg-primary p-1.5" value={project} onKeyDown={event => { if (['ArrowUp', 'ArrowDown', 'Enter', ' '].includes(event.key)) event.stopPropagation(); }} onChange={event => setProject(event.target.value)}>
-              <option value="">Choose a project…</option>{projects.map(item => <option key={item.scope.id} value={item.scope.id}>{item.name}</option>)}
-            </select>
-          </label>}
           {failedExports.length > 0 && <div role="alert" className="space-y-2 text-status-error"><p>Note saved. Agent exports need attention.</p>
             {failedExports.map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
             <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(String(cause))); }}>Retry exports</button>
