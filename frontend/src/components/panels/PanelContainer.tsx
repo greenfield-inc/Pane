@@ -122,6 +122,14 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
 
   return (
     <ErrorBoundary
+      onError={(error, info) => {
+        window.electronAPI?.diagnostics?.rendererFatal({
+          kind: 'error-boundary',
+          message: error instanceof Error ? error.message : 'Panel render failed',
+          stack: error instanceof Error ? error.stack : undefined,
+          componentStack: info.componentStack ?? undefined,
+        }).catch(() => {});
+      }}
       fallbackRender={({ error, resetErrorBoundary }) => (
         <PanelErrorFallback
           // SAFETY: Panel children only throw Error instances.

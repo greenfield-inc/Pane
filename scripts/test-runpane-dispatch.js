@@ -19,6 +19,70 @@ function run(runtime, source) {
 }
 
 for (const runtime of ['npm', 'pip']) {
+  test(`${runtime}: wrapper failure reports are sanitized and respect local opt-out`, () => {
+    const result = run(runtime, runtime === 'npm' ? `
+      const fs = require('node:fs');
+      const os = require('node:os');
+      const path = require('node:path');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-telemetry-'));
+      process.env.PANE_DIR = dir;
+      delete process.env.CI;
+      delete process.env.RUNPANE_TELEMETRY_DISABLED;
+      const events = [];
+      global.fetch = async (_, options) => { events.push(JSON.parse(options.body)); return {}; };
+      let exit = 0;
+      const local = require('./packages/runpane/dist/localControl');
+      local.runPanesPin = async () => exit;
+      const { main } = require('./packages/runpane/dist/cli');
+      (async () => {
+        try {
+          await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']);
+          if (events.length !== 0) throw new Error('Successful command emitted telemetry');
+          exit = 7;
+          if (await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']) !== 7) throw new Error('Exit code changed');
+          fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ analytics: { enabled: false } }));
+          await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']);
+          console.log(JSON.stringify(events));
+        } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+      })().catch(error => { console.error(error); process.exitCode = 1; });
+    ` : `
+import json, os, tempfile
+import runpane.telemetry as telemetry
+import runpane.local_control as local
+events = []
+telemetry._post_telemetry = events.append
+exit_code = 0
+local.run_panes_pin = lambda parsed, pinned: exit_code
+from runpane.cli import main
+os.environ.pop('CI', None)
+os.environ.pop('RUNPANE_TELEMETRY_DISABLED', None)
+with tempfile.TemporaryDirectory(prefix='pane-telemetry-') as directory:
+    os.environ['PANE_DIR'] = directory
+    assert main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']) == 0
+    assert events == [], 'Successful command emitted telemetry'
+    exit_code = 7
+    assert main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']) == 7
+    with open(os.path.join(directory, 'config.json'), 'w') as target:
+        json.dump({'analytics': {'enabled': False}}, target)
+    main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes'])
+    print(json.dumps(events))
+`);
+    assert.equal(result.status, 0, result.stderr);
+    const events = JSON.parse(result.stdout);
+    assert.equal(events.length, 1);
+    const { install_id: installId, wrapper_version: wrapperVersion, invocation, wrapper, download_source, ...properties } = events[0].properties;
+    assert.equal(events[0].event, 'runpane_wrapper_command_failed');
+    assert.match(installId, /^install_[0-9a-f-]{36}$/);
+    assert.match(wrapperVersion, /^\d+\.\d+\.\d+$/);
+    assert.equal(wrapper, runtime);
+    assert.equal(download_source, runtime);
+    assert.deepEqual(properties, {
+      command: 'panes pin', target: 'client', pane_version: 'latest', channel: 'stable',
+      format: 'auto', dry_run: false, failure_stage: 'unknown', failure_category: 'process_exit', exit_code: 7,
+    });
+    assert.equal(JSON.stringify(events).includes('secret-repo-path'), false);
+  });
+
   test(`${runtime}: loading rejects a contract command without a handler`, () => {
     const result = run(runtime, runtime === 'npm' ? `
       const { RUNPANE_CONTRACT } = require('./packages/runpane/dist/generated/contract');

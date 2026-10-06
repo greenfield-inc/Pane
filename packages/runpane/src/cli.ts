@@ -413,13 +413,10 @@ async function runTrackedCommand(
   telemetryContext: WrapperTelemetryContext,
   execute: () => Promise<number>
 ): Promise<number> {
-  await trackWrapperEvent('runpane_wrapper_command_started', telemetryContext);
   try {
     const code = await execute();
     telemetryContext.exitCode = code;
-    if (code === 0) {
-      await trackWrapperEvent('runpane_wrapper_command_succeeded', telemetryContext);
-    } else {
+    if (code !== 0) {
       telemetryContext.failureStage ??= inferFailureStage(telemetryContext);
       telemetryContext.failureCategory ??= 'process_exit';
       await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);

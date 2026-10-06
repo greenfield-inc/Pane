@@ -179,6 +179,11 @@ export function initPostHog(config: PostHogConfig, options: PostHogInitOptions =
           'select',
         ],
       },
+      mask_all_text: true,
+      mask_all_element_attributes: true,
+      // Error boundaries report sanitized app exceptions through main. Never
+      // capture console errors (which can contain CLI output, code or prompts).
+      capture_exceptions: false,
       capture_pageview: true,
       persistence: 'localStorage',
       opt_out_capturing_by_default: true,

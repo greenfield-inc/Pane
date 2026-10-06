@@ -1,5 +1,6 @@
 import { paneCommandSignal } from '../daemon/commandRegistry';
 import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
+import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
@@ -4920,7 +4921,8 @@ async function withRunpaneAction<T extends { ok: boolean }>(
       Object.assign(actionMetadata, resultMetadata(result));
     }
     if (shouldTrackResult(result)) {
-      trackRunpaneAction(services, action, 'success', Date.now() - startedAt, actionMetadata);
+      const cause = !commandOk && 'error' in result ? result.error : undefined;
+      trackRunpaneAction(services, action, 'success', Date.now() - startedAt, actionMetadata, cause);
     }
     return result;
   } catch (error) {
@@ -5023,6 +5025,8 @@ function workspaceIdleCandidates(
   });
 }
 
+const runpaneFailureLimiters = new WeakMap<NonNullable<AppServices['analyticsManager']>, FailureLimiter>();
+
 function trackRunpaneAction(
   services: AppServices,
   action: string,
@@ -5034,26 +5038,31 @@ function trackRunpaneAction(
   const analyticsManager = services.analyticsManager;
   const paneIdHash = metadata.paneId && analyticsManager?.hashSessionId(metadata.paneId);
   const panelIdHash = metadata.panelId && analyticsManager?.hashSessionId(metadata.panelId);
-  const errorMessage = cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
-  const errorType = cause instanceof Error ? cause.name : cause ? 'Error' : undefined;
+  const errorMessage = status === 'failure'
+    ? cause instanceof Error ? cause.message : cause ? String(cause) : undefined
+    : undefined;
 
-  analyticsManager?.track('runpane_local_control', {
-    action,
-    status,
-    command_ok: metadata.ok,
-    duration_ms: durationMs,
-    repo_id: metadata.repoId,
-    pane_id_hash: paneIdHash,
-    panel_id_hash: panelIdHash,
-    result_count: metadata.resultCount,
-    input_bytes: metadata.inputBytes,
-    limit: metadata.limit,
-    condition: metadata.condition,
-    timed_out: metadata.timedOut,
-    available: metadata.available,
-    environment: metadata.environment,
-    error_type: errorType,
-  });
+  // Handled CLI failures are product events, never Error Tracking exceptions.
+  // Poll deadlines and optional agent availability are normal control flow.
+  const failed = status === 'failure' || metadata.ok === false;
+  if (analyticsManager && analyticsManager.isEnabled() && failed &&
+      !(status === 'success' && (metadata.timedOut || metadata.available === false))) {
+    let limiter = runpaneFailureLimiters.get(analyticsManager);
+    if (!limiter) {
+      limiter = new FailureLimiter();
+      runpaneFailureLimiters.set(analyticsManager, limiter);
+    }
+    const details = failureDetails(cause);
+    if (limiter.allow(`${action}:${details.failure_category}:${details.error_code}`)) {
+      analyticsManager.track('runpane_local_control_failed', {
+        action,
+        status: 'failure',
+        command_ok: false,
+        failure_kind: status === 'failure' ? 'thrown' : 'handled',
+        ...details,
+      });
+    }
+  }
 
   const logPayload = {
     action,

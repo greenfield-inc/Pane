@@ -243,6 +243,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     },
     analyticsManager: {
       track: vi.fn(),
+      isEnabled: vi.fn(() => true),
       hashSessionId: vi.fn((id: string) => `hash-${id}`),
     },
     spotlightManager: {},
@@ -383,6 +384,69 @@ describe('runpane IPC handlers', () => {
     expect(result).toMatchObject({ ok: true, session: { isPinned: true } });
     await expect(registry.invoke('runpane:sessions:create', [{ name: 'Invalid', isPinned: 'true' }]))
       .rejects.toThrow('expected boolean');
+  });
+
+  describe('local failure telemetry', () => {
+    it('reports sanitized thrown failures once while keeping command error behavior', async () => {
+      const services = createServices();
+      const registry = createRegistry(services);
+      const error = Object.assign(new Error('EACCES /Users/private/repo token=secret prompt'), { code: 'EACCES' });
+      error.name = 'private-secret';
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation(() => { throw error; });
+      for (let i = 0; i < 50; i++) {
+        await expect(registry.invoke('runpane:panels:input', [{ panelId: terminalPanel.id, input: 'secret prompt' }])).rejects.toThrow(error);
+      }
+      expect(services.analyticsManager?.track).toHaveBeenCalledTimes(1);
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', {
+        action: 'panels:input', status: 'failure', command_ok: false, failure_kind: 'thrown',
+        error_type: 'Error', error_code: 'EACCES', failure_category: 'permission',
+      });
+    });
+
+    it('keeps a handled submit failure observable without sending its screen or prompt', async () => {
+      const services = createServices();
+      const registry = createRegistry(services);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('private terminal contents', 'idle'));
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'private prompt' }]);
+      expect(result).toMatchObject({ ok: false, blocked: { kind: 'composer-unknown' } });
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', {
+        action: 'panels:submit', status: 'failure', command_ok: false, failure_kind: 'handled',
+        error_type: 'Error', error_code: 'unknown', failure_category: 'unknown',
+      });
+    });
+
+    it('does not report successful polling or normal wait deadlines as failures', async () => {
+      const services = createServices();
+      const registry = createRegistry(services);
+      for (let i = 0; i < 20; i++) await registry.invoke('runpane:panes:list', [{}]);
+      const result = await registry.invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, condition: 'ready', timeoutMs: 1, intervalMs: 1 }]);
+      expect(result).toMatchObject({ ok: false, timedOut: true });
+      expect(services.analyticsManager?.track).not.toHaveBeenCalled();
+    });
+
+    it('honors analytics opt-out for local failures', async () => {
+      const services = createServices();
+      vi.mocked(services.analyticsManager!.isEnabled).mockReturnValue(false);
+      await expect(createRegistry(services).invoke('runpane:panels:input', [{ panelId: 'missing', input: 'private' }])).rejects.toThrow();
+      expect(services.analyticsManager?.track).not.toHaveBeenCalled();
+    });
+
+    it('caps repeated local failures at 20 in an hour across operations', async () => {
+      vi.useFakeTimers();
+      const services = createServices();
+      const registry = createRegistry(services);
+      for (let minute = 0; minute < 55; minute += 5) {
+        for (const operation of ['input', 'screen', 'submit', 'output']) {
+          await expect(registry.invoke(`runpane:panels:${operation}`, [{ panelId: 'missing', input: 'private' }])).rejects.toThrow();
+        }
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+      }
+      expect(services.analyticsManager?.track).toHaveBeenCalledTimes(20);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await expect(registry.invoke('runpane:panels:input', [{ panelId: 'missing', input: 'private' }])).rejects.toThrow();
+      expect(services.analyticsManager?.track).toHaveBeenCalledTimes(21);
+      vi.useRealTimers();
+    });
   });
 
   describe('runpane:panes:adopt', () => {
@@ -1970,18 +2034,9 @@ describe('runpane IPC handlers', () => {
       }],
     });
     expect(panelManager.getPanelsForSession).toHaveBeenCalledWith(session.id);
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panes:list',
-        status: 'success',
-        repo_id: project.id,
-        result_count: 1,
-      }),
-    );
   });
 
-  it('reports pane costs with totals and analytics in the unscoped form', async () => {
+  it('reports pane costs with totals in the unscoped form', async () => {
     const services = createServices();
     const registry = createRegistry(services);
     const result = await registry.invoke('runpane:panes:cost', [{}]);
@@ -1992,10 +2047,6 @@ describe('runpane IPC handlers', () => {
       unattributed: expect.any(Object),
       totals: expect.any(Object),
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({ action: 'panes:cost', status: 'success', result_count: 2 }),
-    );
   });
 
   it('returns only the requested pane without workspace totals', async () => {
@@ -2402,22 +2453,6 @@ describe('runpane IPC handlers', () => {
       inputBytes: 8,
       nextCommand: `runpane panels output --panel ${terminalPanel.id} --limit 200 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:input',
-        status: 'success',
-        pane_id_hash: `hash-${session.id}`,
-        panel_id_hash: `hash-${terminalPanel.id}`,
-        input_bytes: 8,
-      }),
-    );
-    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        input: 'echo hi\r',
-      }),
-    );
   });
 
   it('arms the phone\'s finished alert only for input a person submitted', async () => {
@@ -2460,20 +2495,6 @@ describe('runpane IPC handlers', () => {
       enter: 'cr',
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:submit',
-        status: 'success',
-        input_bytes: 11,
-      }),
-    );
-    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        input: 'echo hello\n',
-      }),
-    );
   });
 
   it('stages text before submitting an idle Codex composer', async () => {
@@ -2902,14 +2923,6 @@ describe('runpane IPC handlers', () => {
       verifiedSubmitted: true,
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:submit-composer',
-        status: 'success',
-        input_bytes: 1,
-      }),
-    );
   });
 
   it('queues a working Codex composer with Tab and verifies it left the composer', async () => {
