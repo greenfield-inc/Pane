@@ -391,7 +391,7 @@ function receiverInstructions(origin: NoteOrigin, state: GitState, remote: strin
     '',
     '<!-- Added by runpane handoff. -->',
     '1. Read the repository\'s AGENTS.md or CLAUDE.md, then this whole note.',
-    `2. Check the git state: your worktree starts at ${remote}/${state.branch}; \`git log -1 --format=%H\` must print ${state.head}. If it does not, stop and report.`,
+    `2. Check the git state: your worktree starts at sender commit ${state.head}; \`git log -1 --format=%H\` must print ${state.head}. If it does not, stop and report.`,
     '3. Run the commands under "How to verify" to confirm the state the note describes, then continue from "Next steps".',
     `4. Push your commits to the original branch: \`git push ${remote} HEAD:${state.branch}\`. Never force-push.`,
     `5. When you finish or get blocked, report back to the sender: ${reportTarget}`,
@@ -491,12 +491,15 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const target = destination.machine ? machines.find((machine) => machine.name === destination.machine) : undefined;
   const remote = target ? remoteDestination(target, target.os === 'Windows') : localDestination(self);
   const installed = await remote.run('runpane --version', 30_000);
-  const runpane = installed.exitCode === 0 ? 'runpane' : 'npx --yes runpane@latest';
+  const executable = installed.exitCode === 0 ? 'runpane' : 'npx --yes runpane@latest';
+  const runpane = `${executable}${!target && parsed.paneDir ? ` --pane-dir ${quote(parsed.paneDir, remote.windows)}` : ''}`;
   // `runpane workspace` arrived in 2.4.164; an older runpane there reports back through npx.
   const reporter = installed.exitCode === 0 && versionAtLeast(installed.stdout, [2, 4, 164]) ? 'runpane' : 'npx --yes runpane@latest';
   const { repo, remote: repoRemote } = await findRepo(remote, runpane, state, parsed.repo);
   say(step('repo', `${repo.name} (${repo.path}), remote ${repoRemote}`));
   await mustRun(remote, `git -C ${quote(repo.path, remote.windows)} fetch ${quote(repoRemote, remote.windows)} ${quote(state.branch, remote.windows)}`, 'git fetch', 120_000);
+
+  await mustRun(remote, `git -C ${quote(repo.path, remote.windows)} cat-file -e ${quote(`${state.head}^{commit}`, remote.windows)}`, 'verify sender commit');
 
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
   const name = `handoff-${state.branch.replace(/^handoff[-/]/i, '')}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
@@ -509,7 +512,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const prompt = `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
   const q = (value: string): string => quote(value, remote.windows);
   const create = [
-    `${runpane} panes create --repo ${repo.id} --name ${q(name)} --base ${q(`${repoRemote}/${state.branch}`)} --agent ${destination.agent}`,
+    `${runpane} panes create --repo ${repo.id} --name ${q(name)} --base ${q(state.head)} --agent ${destination.agent}`,
     toolCommand ? `--tool-command ${q(toolCommand)}` : '',
     `--prompt ${q(prompt)} --source agent --no-focus --wait-ready --yes --json`,
   ].filter(Boolean).join(' ');

@@ -103,7 +103,8 @@ function fixture(t) {
   git('init', '--bare', path.join(root, 'remote.git'));
   fs.writeFileSync(path.join(root, '.git', 'info', 'exclude'), 'remote.git/\n');
   git('remote', 'add', 'origin', path.join(root, 'remote.git')); git('push', '-u', 'origin', 'task');
-  return { root, git, run: (...args) => spawnSync(process.execPath, [cli, 'handoff', 'codex here', '--note-file', 'note.md', '--json', ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' } }) };
+  const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' };
+  return { root, git, env, run: (...args) => spawnSync(process.execPath, [cli, 'handoff', 'codex here', '--note-file', 'note.md', '--json', ...args], { cwd: root, encoding: 'utf8', env }) };
 }
 for (const existing of [false, true]) test(`staged ${existing ? 'modified' : 'added'} note refuses push without changing index or HEAD`, (t) => {
   const f = fixture(t);
@@ -122,4 +123,31 @@ test('an unstaged note is excluded from dry-run dirty count', (t) => {
   fs.appendFileSync(path.join(f.root, 'note.md'), '\nprivate');
   const result = f.run('--dry-run'); assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).git.dirty, 0);
+});
+
+function receiver(f, options = {}) {
+  const bin = path.join(f.root, 'fake-bin'); fs.mkdirSync(bin);
+  const log = path.join(f.root, 'receiver-args.jsonl');
+  const file = path.join(bin, 'runpane');
+  fs.writeFileSync(file, `#!${process.execPath}
+const fs=require('node:fs'); const args=process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(args)+'\\n');
+if(args.includes('--version')) console.log('2.4.165');
+else if(args.includes('list')) console.log(JSON.stringify({repos:[{id:7,name:'receiver',path:${JSON.stringify(f.root)}}]}));
+else console.log(JSON.stringify({items:[{ok:true,sessionId:'test-pane',panelId:'test-panel'}]}));
+`, { mode: 0o700 });
+  f.env.PATH = `${bin}${path.delimiter}${f.env.PATH}`;
+  f.env.HOME = path.join(f.root, 'home');
+  fs.appendFileSync(path.join(f.root, '.git', 'info', 'exclude'), 'fake-bin/\nreceiver-args.jsonl\nhome/\n');
+  return () => fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+}
+test('receiver starts at immutable sender commit and uses selected local Pane directory', (t) => {
+  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled());
+  const head=f.git('rev-parse','HEAD');
+  fs.writeFileSync(path.join(f.root,'code.txt'),'remote advances'); f.git('add','code.txt'); f.git('commit','-m','advance'); f.git('push'); f.git('reset','--hard',head);
+  const args=receiver(f); const result=f.run('--pane-dir',path.join(f.root,'isolated pane'));
+  assert.equal(result.status,0,result.stderr);
+  const calls=args(); const create=calls.find(a=>a.includes('create')); const list=calls.find(a=>a.includes('list'));
+  assert.equal(create[create.indexOf('--base')+1],head);
+  for(const call of [create,list]) assert.equal(call[call.indexOf('--pane-dir')+1],path.join(f.root,'isolated pane'));
 });
