@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as processTree from '../utils/processTree';
 import { TerminalPanelManager } from './terminalPanelManager';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
@@ -67,6 +68,7 @@ async function pollAgentStatus() {
 }
 
 beforeEach(() => {
+  vi.spyOn(processTree, 'listDescendantPids').mockResolvedValue([]);
   // xterm writes need real timers; only the status clock is controlled.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(20_000);

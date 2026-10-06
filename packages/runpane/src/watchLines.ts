@@ -59,7 +59,7 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
   const name = sanitizeName(entry.paneName);
   const pane = `pane ${sanitizeName(entry.paneId)}`;
   const panel = entry.panelId ? ` panel ${sanitizeName(entry.panelId)}` : '';
-  if (entry.changedWhileAway) return `CHANGED ${name} ${pane}${panel}`;
+  if (entry.changedWhileAway && entry.kind !== 'panel.stopped') return `CHANGED ${name} ${pane}${panel}`;
   switch (entry.kind) {
     case 'agent.ready': return `READY ${name} ${pane}${panel}`;
     case 'agent.busy': return `BUSY ${name} ${pane}${panel}`;
@@ -73,6 +73,7 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'pane.gone': return `GONE ${name} ${pane}`;
     case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
+    case 'panel.stopped': return `STOPPED ${name} ${pane}${panel}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
     case 'pr.conflicted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CONFLICTED`;
     case 'pr.checks': return formatChecksLine(`PR ${name} ${pane} #${entry.pr?.number ?? '?'}`, entry);

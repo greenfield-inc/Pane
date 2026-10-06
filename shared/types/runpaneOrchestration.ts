@@ -136,6 +136,11 @@ export type RunpaneWorkspaceEntryKind =
   | 'pane.created'
   | 'pane.gone'
   | 'panel.exited'
+  /**
+   * An agent panel whose terminal process is not running (for example after a Pane restart).
+   * Opt-in like the Session kinds; other consumers get `agent.unknown` with `running: false`.
+   */
+  | 'panel.stopped'
   /** A worker report, delivered only when explicitly requested in kinds. */
   | 'agent.report'
   /** The Pane joined a Session (`sessions associate`). */
@@ -178,6 +183,8 @@ export interface RunpaneWorkspaceEntry {
   heldInput?: string;
   heldInputPresent?: boolean;
   exitCode?: number;
+  /** Set on baseline agent entries: whether the panel's terminal process is live. */
+  running?: boolean;
   baseline?: true;
   /**
    * Set on the baseline entries a wait delivers after a reset. A replayed entry restates current
@@ -204,6 +211,7 @@ export interface RunpaneWorkspacePanelSummary {
   title: string;
   agentType?: string;
   agentState?: AgentState;
+  running?: boolean;
 }
 
 export interface RunpaneWorkspaceWaitRequest {
@@ -428,6 +436,8 @@ export type RunpanePanelBlockerKind =
 
 export interface RunpanePanelStateSummary {
   initialized: boolean;
+  /** Whether the panel's terminal process is live. A stopped panel can be restarted with `panels resume`. */
+  running: boolean;
   isAlternateScreen?: boolean;
   /** @deprecated Derived from the authoritative agent status for wire compatibility. */
   activityStatus?: RunpanePanelActivityStatus;
@@ -781,6 +791,8 @@ export interface RunpanePanelSummary {
   title: string;
   active: boolean;
   initialized?: boolean;
+  /** Terminal panels only: whether the terminal process is live. */
+  running?: boolean;
   agentType?: RunpaneAgentId;
   agentDetection?: RunpaneAgentDetection;
   launchCommand?: string;
@@ -800,6 +812,68 @@ export interface RunpanePanelListResult {
   ok: true;
   paneId: string;
   panels: RunpanePanelSummary[];
+}
+
+export interface RunpanePanelResumeRequest {
+  panelId: string;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+}
+
+export type RunpanePanelResumeAction = 'resumed' | 'already-running';
+
+/** Resume every stopped agent panel in one scope: a Session's associated Panes, or every Pane. */
+export interface RunpanePanelResumeManyRequest {
+  sessionId?: string;
+  allStopped?: boolean;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+  concurrency?: number;
+}
+
+export interface RunpanePanelResumeManyItem {
+  ok: boolean;
+  panelId: string;
+  paneId: string;
+  paneName: string;
+  panelTitle?: string;
+  agentType?: string;
+  action?: RunpanePanelResumeAction;
+  message?: string;
+  agentSessionId?: string;
+  readiness?: RunpanePaneReadiness;
+  /** Why this panel could not be resumed; the others still were. */
+  error?: string;
+}
+
+export interface RunpanePanelResumeManyResult {
+  ok: boolean;
+  scope: { kind: 'session'; sessionId: string; sessionName: string } | { kind: 'all-stopped' };
+  resumed: number;
+  /** Agent panels in scope that were already running and were left alone. */
+  alreadyRunning: number;
+  /** Panels that could not be restarted (their item has `error`). */
+  failed: number;
+  /** With waitReady: resumed panels that were blocked or not ready in time. */
+  notReady: number;
+  /** Panels restarted at once. */
+  concurrency: number;
+  items: RunpanePanelResumeManyItem[];
+  nextCommand?: string;
+}
+
+export interface RunpanePanelResumeResult {
+  ok: boolean;
+  panelId: string;
+  paneId: string;
+  action: RunpanePanelResumeAction;
+  message: string;
+  agentType?: RunpaneAgentId;
+  /** The agent conversation the panel resumes, when Pane knows it. */
+  agentSessionId?: string;
+  panel: RunpanePanelSummary;
+  readiness?: RunpanePaneReadiness;
+  nextCommand: string;
 }
 
 export type RunpanePanelCreateSource = 'user' | 'agent';
@@ -1060,6 +1134,8 @@ export interface RunpanePanelWaitResult {
   elapsedMs: number;
   state: RunpanePanelStateSummary;
   blocked?: RunpanePanelBlockedState;
+  /** The panel's terminal is not running, so it cannot become ready until `panels resume`. */
+  stopped?: true;
   screen: Pick<RunpanePanelScreenResult, 'source' | 'text' | 'hasMore'>;
   nextCommand?: string;
 }

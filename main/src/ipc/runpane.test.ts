@@ -861,6 +861,127 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  describe('stopped panels after a restart', () => {
+    function stopPanel(): void {
+      // After a daemon restart the panel record survives but its terminal process does not.
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(null);
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue(undefined);
+    }
+
+    async function waitAfterRestart(request: { kinds?: string[]; idleAfterMs?: number }) {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-stopped-test-'));
+      tempDirs.push(directory);
+      const workspaceCursorStore = new WorkspaceCursorStore(path.join(directory, 'cursors.json'));
+      workspaceCursorStore.create('orchestrator', 0, 'epoch-before-restart');
+      const registry = createRegistry(createServices({ workspaceJournal: new WorkspaceJournal(), workspaceCursorStore }));
+      return registry.invoke('runpane:workspace:wait', [{ as: 'orchestrator', timeoutMs: 0, ...request }]);
+    }
+
+    it('never reports a stopped agent panel as ready in the workspace state', async () => {
+      stopPanel();
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:workspace:state');
+
+      expect(result.entries).toEqual([
+        expect.objectContaining({
+          kind: 'pane.created',
+          panels: [expect.objectContaining({ panelId: terminalPanel.id, running: false })],
+        }),
+        expect.objectContaining({ kind: 'agent.unknown', panelId: terminalPanel.id, running: false }),
+      ]);
+    });
+
+    it('emits panel.stopped to a watcher that asks for it after a restart', async () => {
+      stopPanel();
+
+      const result = await waitAfterRestart({ kinds: ['agent.ready', 'agent.blocked', 'panel.exited', 'panel.stopped'] });
+
+      expect(result).toMatchObject({ reset: { reason: 'epoch-changed' } });
+      expect(result.entries).toEqual([
+        expect.objectContaining({
+          kind: 'panel.stopped', panelId: terminalPanel.id, running: false, changedWhileAway: true,
+        }),
+      ]);
+    });
+
+    it('gives a watcher that did not ask for panel.stopped agent.unknown, not agent.ready', async () => {
+      stopPanel();
+
+      const filtered = await waitAfterRestart({ kinds: ['agent.ready', 'agent.blocked', 'agent.idle', 'panel.exited', 'pane.gone'] });
+      const unfiltered = await waitAfterRestart({});
+
+      expect(filtered.entries).toEqual([]);
+      expect(unfiltered.entries).toContainEqual(expect.objectContaining({ kind: 'agent.unknown', panelId: terminalPanel.id, running: false }));
+      expect(unfiltered.entries).not.toContainEqual(expect.objectContaining({ kind: 'agent.ready' }));
+      expect(unfiltered.entries).not.toContainEqual(expect.objectContaining({ kind: 'panel.stopped' }));
+    });
+
+    it('does not report a stopped panel as idle', async () => {
+      stopPanel();
+
+      const result = await waitAfterRestart({ idleAfterMs: 1, kinds: ['agent.idle'] });
+
+      expect(result.entries).toEqual([]);
+    });
+
+    it('shows running: false and the resume command in panels screen and list', async () => {
+      stopPanel();
+      const registry = createRegistry();
+
+      const screen = await registry.invoke('runpane:panels:screen', [{ panelId: terminalPanel.id }]);
+      const list = await registry.invoke('runpane:panels:list', [{ paneId: session.id }]);
+
+      expect(screen).toMatchObject({
+        state: { initialized: false, running: false },
+        nextCommand: `runpane panels resume --panel ${terminalPanel.id} --wait-ready --yes --json`,
+      });
+      expect(list).toMatchObject({ panels: [{ panelId: terminalPanel.id, running: false }] });
+    });
+
+    it('reports a stopped panel as stopped even when its saved screen shows a prompt', async () => {
+      stopPanel();
+      vi.mocked(panelDatabase.getPanelBuffers).mockReturnValue({
+        scrollback: 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n\nPress enter to continue\n',
+        serialized: null,
+        alternate: null,
+      });
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:wait', [{
+        panelId: terminalPanel.id, condition: 'ready', timeoutMs: 20_000, intervalMs: 50,
+      }]);
+
+      expect(result).toMatchObject({ ok: false, stopped: true, nextCommand: expect.stringContaining('panels resume') });
+      // SAFETY: The wait handler resolves to a panel wait result, whose optional `blocked` is checked here.
+      expect((result as { blocked?: unknown }).blocked).toBeUndefined();
+    });
+
+    it('stops waiting for readiness on a panel that is not running', async () => {
+      stopPanel();
+      const registry = createRegistry();
+
+      const startedAt = Date.now();
+      const result = await registry.invoke('runpane:panels:wait', [{
+        panelId: terminalPanel.id,
+        condition: 'ready',
+        timeoutMs: 20_000,
+        intervalMs: 50,
+      }]);
+
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+      expect(result).toMatchObject({
+        ok: false,
+        matched: false,
+        timedOut: false,
+        stopped: true,
+        state: { running: false },
+        nextCommand: `runpane panels resume --panel ${terminalPanel.id} --wait-ready --yes --json`,
+      });
+    });
+  });
+
   it('waits for filtered workspace journal entries after an explicit generation', async () => {
     const workspaceJournal = new WorkspaceJournal();
     const registry = createRegistry(createServices({ workspaceJournal }));
@@ -2997,6 +3118,301 @@ describe('runpane IPC handlers', () => {
         text: '› Ask Codex to do anything\n',
       },
       nextCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
+    });
+  });
+
+  describe('runpane:panels:resume-many', () => {
+    const otherPane: Session = { ...session, id: 'session-9', name: 'other-task', worktreePath: '/repo/pane-worktrees/other-task' };
+    const agentPanel = (id: string, sessionId: string, agentType: 'claude' | 'codex' = 'claude'): ToolPanel => ({
+      ...terminalPanel,
+      id,
+      sessionId,
+      title: agentType === 'claude' ? 'Claude Code' : 'Codex',
+      state: { isActive: false, customState: { agentType, isCliPanel: true, initialCommand: agentType } },
+    });
+    const stoppedClaude = agentPanel('panel-claude', session.id);
+    const runningCodex = agentPanel('panel-codex', session.id, 'codex');
+    const plainShell: ToolPanel = { ...terminalPanel, id: 'panel-shell', title: 'Terminal', state: { isActive: false, customState: {} } };
+    const otherClaude = agentPanel('panel-other', otherPane.id);
+    const panels = [stoppedClaude, runningCodex, plainShell, otherClaude];
+    let running: Set<string>;
+
+    function bulkServices(options: { limitedTo?: string[]; ownPanelIds?: string[]; archived?: boolean } = {}): AppServices {
+      const services = createServices({
+        // SAFETY: The fake implements the two Session manager members a Session-scoped resume uses.
+        orchestrationSessionManager: {
+          get: vi.fn(async () => ({ id: '__orchestration_session_s1__', name: 'Release', archived: options.archived ?? false })),
+          workspaceMembership: vi.fn(() => ({
+            panes: new Map([[session.id, options.limitedTo ?? []]]),
+            ownPaneIds: new Set<string>(),
+            ownPanelIds: new Set<string>(options.ownPanelIds ?? []),
+          })),
+        } as never,
+      });
+      vi.mocked(services.sessionManager.getAllSessions).mockReturnValue([session, otherPane]);
+      vi.mocked(services.sessionManager.getSession).mockImplementation((id: string) => [session, otherPane].find(pane => pane.id === id));
+      return services;
+    }
+
+    beforeEach(() => {
+      running = new Set([runningCodex.id]);
+      vi.mocked(panelManager.getPanel).mockImplementation((id: string) => panels.find(panel => panel.id === id));
+      vi.mocked(panelManager.getPanelsForSession).mockImplementation((id: string) => panels.filter(panel => panel.sessionId === id));
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockImplementation((id: string) => running.has(id));
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue(undefined);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async (panel: ToolPanel) => {
+        running.add(panel.id);
+      });
+    });
+
+    it('resumes every stopped agent panel with --all-stopped and skips running panels and plain shells', async () => {
+      const registry = createRegistry(bulkServices());
+
+      const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true }]);
+
+      expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls.map(([panel]) => panel.id).sort())
+        .toEqual(['panel-claude', 'panel-other']);
+      expect(result).toMatchObject({
+        ok: true,
+        scope: { kind: 'all-stopped' },
+        resumed: 2,
+        alreadyRunning: 1,
+        failed: 0,
+      });
+      expect(result.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ ok: true, panelId: 'panel-claude', paneId: session.id, action: 'resumed' }),
+        expect.objectContaining({ ok: true, panelId: 'panel-other', paneId: otherPane.id, action: 'resumed' }),
+      ]));
+      expect(result.items).toHaveLength(2);
+    });
+
+    it('limits --session to the Session\'s associated Panes', async () => {
+      const registry = createRegistry(bulkServices());
+
+      const result = await registry.invoke('runpane:panels:resume-many', [{ sessionId: 'Release' }]);
+
+      expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls.map(([panel]) => panel.id)).toEqual(['panel-claude']);
+      expect(result).toMatchObject({
+        scope: { kind: 'session', sessionId: '__orchestration_session_s1__', sessionName: 'Release' },
+        resumed: 1,
+        alreadyRunning: 1,
+        items: [expect.objectContaining({ panelId: 'panel-claude', action: 'resumed' })],
+      });
+    });
+
+    it('resumes only the panels a panel-limited association names, never the Session\'s own panels', async () => {
+      const secondClaude = agentPanel('panel-claude-2', session.id);
+      const ownPanel = agentPanel('panel-own', session.id);
+      panels.push(secondClaude, ownPanel);
+      try {
+        const registry = createRegistry(bulkServices({ limitedTo: ['panel-claude', 'panel-codex', 'panel-own'], ownPanelIds: ['panel-own'] }));
+
+        const result = await registry.invoke('runpane:panels:resume-many', [{ sessionId: 'Release' }]);
+
+        expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls.map(([panel]) => panel.id)).toEqual(['panel-claude']);
+        expect(result).toMatchObject({ resumed: 1, alreadyRunning: 1 });
+      } finally {
+        panels.splice(panels.indexOf(secondClaude), 2);
+      }
+    });
+
+    it('refuses an archived Session', async () => {
+      const registry = createRegistry(bulkServices({ archived: true }));
+
+      await expect(registry.invoke('runpane:panels:resume-many', [{ sessionId: 'Release' }])).rejects.toThrow(/archived/);
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+    });
+
+    it('waits on the resumed panels together, so the wait takes one ready timeout rather than one per panel', async () => {
+      const many = Array.from({ length: 4 }, (_, index) => agentPanel(`panel-wait-${index}`, session.id));
+      vi.mocked(panelManager.getPanelsForSession).mockImplementation((id: string) => id === session.id ? many : []);
+      vi.mocked(panelManager.getPanel).mockImplementation((id: string) => many.find(panel => panel.id === id));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation((id: string) =>
+        running.has(id) ? terminalSnapshot('starting...', 'active', 'claude') : null);
+      const registry = createRegistry(bulkServices());
+
+      const startedAt = Date.now();
+      const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, waitReady: true, readyTimeoutMs: 400, concurrency: 1 }]);
+
+      expect(Date.now() - startedAt).toBeLessThan(1_200);
+      expect(result).toMatchObject({ ok: false, resumed: 4, notReady: 4, failed: 0 });
+    });
+
+    it('waits on each resumed panel and reports a blocker on the panel it belongs to', async () => {
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation((id: string) => {
+        if (!running.has(id)) return null;
+        return id === 'panel-other'
+          ? terminalSnapshot('Update available! 0.136.0 -> 0.141.0\n2. Skip\nPress enter to continue\n', 'idle', 'codex')
+          : terminalSnapshot('› Ask Codex to do anything\n  gpt-5.6 high\n', 'idle', 'codex');
+      });
+      const registry = createRegistry(bulkServices());
+
+      const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, waitReady: true, readyTimeoutMs: 50 }]);
+
+      expect(result).toMatchObject({ ok: false, resumed: 2, notReady: 1, failed: 0 });
+      expect(result.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ panelId: 'panel-claude', ok: true, readiness: expect.objectContaining({ ok: true }) }),
+        expect.objectContaining({ panelId: 'panel-other', ok: false, readiness: expect.objectContaining({ blocked: expect.objectContaining({ kind: 'codex-update' }) }) }),
+      ]));
+    });
+
+    it('keeps resuming the other panels when one fails', async () => {
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async (panel: ToolPanel) => {
+        if (panel.id === 'panel-claude') throw new Error('spawn failed');
+        running.add(panel.id);
+      });
+      const registry = createRegistry(bulkServices());
+
+      const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true }]);
+
+      expect(result).toMatchObject({ ok: false, resumed: 1, failed: 1 });
+      expect(result.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ panelId: 'panel-claude', ok: false, error: 'spawn failed' }),
+        expect.objectContaining({ panelId: 'panel-other', ok: true, action: 'resumed' }),
+      ]));
+    });
+
+    it('resumes at most --concurrency panels at a time', async () => {
+      const many = Array.from({ length: 5 }, (_, index) => agentPanel(`panel-many-${index}`, session.id));
+      vi.mocked(panelManager.getPanelsForSession).mockImplementation((id: string) => id === session.id ? many : []);
+      vi.mocked(panelManager.getPanel).mockImplementation((id: string) => many.find(panel => panel.id === id));
+      let inFlight = 0;
+      let maxInFlight = 0;
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async (panel: ToolPanel) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        running.add(panel.id);
+        inFlight -= 1;
+      });
+      const registry = createRegistry(bulkServices());
+
+      const result = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, concurrency: 2 }]);
+
+      expect(result).toMatchObject({ resumed: 5, concurrency: 2 });
+      expect(maxInFlight).toBe(2);
+
+      running.clear();
+      const clamped = await registry.invoke('runpane:panels:resume-many', [{ allStopped: true, concurrency: 50 }]);
+      expect(clamped).toMatchObject({ concurrency: 10 });
+    });
+
+    it('requires exactly one scope', async () => {
+      const registry = createRegistry(bulkServices());
+
+      await expect(registry.invoke('runpane:panels:resume-many', [{}])).rejects.toThrow(/sessionId or allStopped/);
+      await expect(registry.invoke('runpane:panels:resume-many', [{ sessionId: 'Release', allStopped: true }]))
+        .rejects.toThrow(/sessionId or allStopped/);
+    });
+  });
+
+  describe('runpane:panels:resume', () => {
+    it('restarts a stopped panel in the same panel without focusing it', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
+        vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+      });
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id }]);
+
+      expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls[0][0]).toMatchObject({ id: terminalPanel.id });
+      expect(vi.mocked(terminalPanelManager.initializeTerminal).mock.calls[0][1]).toBe(session.worktreePath);
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+      expect(panelManager.setActivePanel).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: true,
+        panelId: terminalPanel.id,
+        paneId: session.id,
+        action: 'resumed',
+        panel: { panelId: terminalPanel.id, running: true },
+      });
+    });
+
+    it('refuses to resume a panel of an archived Pane', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      const services = createServices();
+      vi.mocked(services.sessionManager.getSession).mockReturnValue({ ...session, archived: true });
+      const registry = createRegistry(services);
+
+      await expect(registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id }]))
+        .rejects.toThrow(/archived/);
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+    });
+
+    it('still waits for readiness when asked and the panel is already running', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+        terminalSnapshot('› Ask Codex to do anything\n  gpt-5.6 high\n', 'idle'),
+      );
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id, waitReady: true, readyTimeoutMs: 50 }]);
+
+      expect(result).toMatchObject({ action: 'already-running', readiness: { ok: true, matched: true } });
+    });
+
+    it('is a no-op with a clear result when the panel is already running', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:resume', [{ panelId: terminalPanel.id }]);
+
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        ok: true,
+        panelId: terminalPanel.id,
+        action: 'already-running',
+        message: expect.stringContaining('already running'),
+        panel: { running: true },
+      });
+    });
+
+    it('waits for the resumed agent to be ready when asked', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
+        vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+        vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+          terminalSnapshot('› Ask Codex to do anything\n  gpt-5.6 high\n', 'idle'),
+        );
+      });
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:resume', [{
+        panelId: terminalPanel.id,
+        waitReady: true,
+        readyTimeoutMs: 50,
+      }]);
+
+      expect(result).toMatchObject({
+        ok: true,
+        action: 'resumed',
+        readiness: { ok: true, condition: 'ready', matched: true, state: { running: true } },
+      });
+    });
+
+    it('reports a startup prompt on the resumed panel as blocked', async () => {
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
+        vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
+        vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+          terminalSnapshot('Update available! 0.136.0 -> 0.141.0\n2. Skip\nPress enter to continue\n', 'idle'),
+        );
+      });
+      const registry = createRegistry();
+
+      const result = await registry.invoke('runpane:panels:resume', [{
+        panelId: terminalPanel.id,
+        waitReady: true,
+        readyTimeoutMs: 50,
+      }]);
+
+      expect(result).toMatchObject({
+        ok: false,
+        action: 'resumed',
+        readiness: { ok: false, blocked: { kind: 'codex-update' } },
+      });
     });
   });
 

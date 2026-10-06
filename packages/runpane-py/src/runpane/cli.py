@@ -40,6 +40,7 @@ from .local_control import (
     run_panels_submit_composer,
     run_panels_wait,
     run_panes_adopt,
+    run_panels_resume,
     run_panes_archive,
     run_panes_create,
     run_panes_focus,
@@ -185,6 +186,7 @@ class ParsedArgs:
     min_interval_ms: Optional[int] = None
     idle_backoff: bool = False
     all_managed: bool = False
+    all_stopped: bool = False
     include_shells: bool = False
     no_held_input: bool = False
     self_test: bool = False
@@ -648,6 +650,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--all-managed":
         parsed.all_managed = True
+        return
+    if flag == "--all-stopped":
+        parsed.all_stopped = True
         return
     if flag == "--include-shells":
         parsed.include_shells = True
@@ -1185,6 +1190,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels submit": lambda parsed, context: run_panels_submit(parsed),
     "panels submit-composer": lambda parsed, context: run_panels_submit_composer(parsed),
     "panels wait": lambda parsed, context: run_panels_wait(parsed),
+    "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
     "report": lambda parsed, context: run_report(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),

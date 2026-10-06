@@ -641,7 +641,7 @@ The daemon owns liveness. Never write or run an ad-hoc watcher.
 Arm at session start:
 
     runpane watch --self-test
-    runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+    runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,panel.stopped,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 
 Its named cursor defaults to \`session-<uuid>\`, where \`<uuid>\` is the UUID
 inside the Session ID: for the Session \`__orchestration_session_<uuid>__\`,
@@ -691,6 +691,15 @@ unattended, then user present):
   makes while it waits on subagents or Codex dispatches. A READY with no REPORT means look, and maybe nudge: read
   \`runpane panels last-message --panel <panel-id> --json\`, then ask the
   worker to run \`runpane report\` if it finished.
+- STOPPED (\`panel.stopped\`): the panel's agent is not running, usually
+  after a Pane restart. Its panel and conversation are intact. If its work
+  is not finished, restart it in place with \`runpane panels resume --panel
+  <panel-id> --wait-ready --yes --json\` (same panel ID, no focus change).
+  When every stopped worker should come back (a restart stranded workers
+  that were mid-task), \`runpane panels resume --session
+  "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts them
+  all and reports each one's readiness or blocker. It relaunches finished
+  workers too, so resume single panels when only some should continue.
 - BLOCKED (\`agent.blocked\`): the agent is waiting on a human. It arrives
   within 30 seconds (15 seconds) and skips the batch.
 - IDLE (\`agent.idle\`): nothing is dispatched. It repeats after 10 minutes,

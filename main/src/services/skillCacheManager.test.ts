@@ -326,7 +326,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     expect(canonicalSkill).toContain('runpane watch --session "$PANE_ORCHESTRATION_SESSION_ID" --follow --quiet --json');
     expect(canonicalSkill).toContain('the cursor is `session-<uuid>`');
     expect(canonicalSkill).not.toContain('session-<session-id>');
-    expect(canonicalSkill).toContain('--kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff');
+    expect(canonicalSkill).toContain('--kinds agent.ready,agent.blocked,agent.idle,panel.exited,panel.stopped,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff');
     // One Session watcher follows membership; the skill no longer asks for one --pane each or a re-arm.
     expect(canonicalSkill).not.toContain('--pane <pane-id> --kinds');
     expect(canonicalSkill).not.toContain('re-arm this\n  same named cursor with the current Pane set');

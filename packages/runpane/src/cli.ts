@@ -34,6 +34,7 @@ import {
   runPanelsSubmit,
   runPanelsSubmitComposer,
   runPanelsWait,
+  runPanelsResume,
   runPanesArchive,
   runPanesAdopt,
   runPanesCreate,
@@ -309,6 +310,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   },
   'panels wait': async (parsed, telemetryContext) => {
     return runPanelsWait(parsed);
+  },
+  'panels resume': async (parsed, telemetryContext) => {
+    return runPanelsResume(parsed);
   },
   'panels last-message': async (parsed, telemetryContext) => {
     return runPanelsLastMessage(parsed);
