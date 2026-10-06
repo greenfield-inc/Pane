@@ -81,3 +81,26 @@ describe('window background color IPC', () => {
     })).toEqual({ success: false, error: 'background apply failed' });
   });
 });
+
+describe('external URL IPC', () => {
+  it.each([
+    ['https://example.test/path?q=1', true],
+    ['http://localhost:3000/', true],
+    ['mailto:team@example.test', true],
+    ['file:///tmp/program.app', false],
+    ['javascript:alert(1)', false],
+    ['data:text/html,hello', false],
+    ['vscode://file/tmp/project', false],
+    ['/tmp/program.app', false],
+  ])('checks %s before handing it to the OS', async (url, allowed) => {
+    const handlers = new Map<string, Handler>();
+    const openExternal = vi.fn(async () => {});
+    // SAFETY: Registering this handler needs only IpcMain.handle and no application service calls.
+    const ipc = { handle: (channel: string, handler: Handler) => handlers.set(channel, handler) } as IpcMain;
+    // SAFETY: openExternal uses its injected OS boundary and reads no application services.
+    const services = {} as AppServices;
+    registerAppHandlers(ipc, services, openExternal);
+    expect(await handlers.get('openExternal')?.({}, url)).toMatchObject({ success: allowed });
+    expect(openExternal.mock.calls).toEqual(allowed ? [[url]] : []);
+  });
+});

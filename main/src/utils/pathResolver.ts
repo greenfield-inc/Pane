@@ -91,21 +91,37 @@ export class PathResolver {
 
   /** Check if targetPath is within basePath — resolves symlinks. Both must be filesystem-format paths (UNC for WSL, native for other platforms). */
   async isWithin(basePath: string, targetPath: string): Promise<boolean> {
-    // Resolve symlinks to prevent escape via symlinked paths
-    const resolvedBase = await fs.realpath(basePath).catch(() => basePath);
-    // For existing paths, resolve fully. For non-existent paths (new files),
-    // resolve the parent directory to catch symlink traversal, then re-append the filename.
-    let resolvedTarget: string;
+    let resolvedBase: string;
     try {
-      resolvedTarget = await fs.realpath(targetPath);
+      resolvedBase = await fs.realpath(basePath);
     } catch {
-      const parentDir = path.dirname(targetPath);
-      const fileName = path.basename(targetPath);
-      const resolvedParent = await fs.realpath(parentDir).catch(() => parentDir);
-      resolvedTarget = path.join(resolvedParent, fileName);
+      return false;
+    }
+    // New nested paths must resolve their nearest existing ancestor, not just
+    // their immediate parent, which may itself not exist yet.
+    let candidate = path.resolve(targetPath);
+    const suffix: string[] = [];
+    let resolvedTarget: string;
+    while (true) {
+      try {
+        resolvedTarget = path.join(await fs.realpath(candidate), ...suffix);
+        break;
+      } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') return false;
+        try {
+          // A dangling symlink is not a safe nonexistent destination.
+          if ((await fs.lstat(candidate)).isSymbolicLink()) return false;
+        } catch (statError) {
+          if (!(statError instanceof Error) || !('code' in statError) || statError.code !== 'ENOENT') return false;
+        }
+        const parent = path.dirname(candidate);
+        if (parent === candidate) return false;
+        suffix.unshift(path.basename(candidate));
+        candidate = parent;
+      }
     }
     const rel = path.relative(resolvedBase, resolvedTarget);
     // rel === '' means paths are equal (base is within itself) — that's valid
-    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
   }
 }
