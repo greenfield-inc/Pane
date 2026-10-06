@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Real Electron journey: no renderer mock, agent process, or provider credentials.
-const { chromium } = require('playwright');
+const { _electron: electron } = require('playwright');
 const { expect } = require('@playwright/test');
-const { spawn, execFileSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -34,7 +34,7 @@ fs.writeFileSync(path.join(repo, '.gitignore'), 'worktrees/\n');
 for (const [file, content] of Object.entries(authored)) fs.writeFileSync(path.join(repo, file), content);
 git(['add', '.']);
 git(['-c', 'user.name=Pane QA', '-c', 'user.email=qa@example.invalid', 'commit', '-m', 'Create isolated fixture']);
-let child, browser, page;
+let child, application, page;
 let launchNumber = 0;
 const results = { platform: process.platform, arch: process.arch, osRelease: os.release(), head: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), root, steps: [] };
 results.sourceHashes = Object.fromEntries(['frontend/src/components/panels/notes/NotesPanel.tsx', 'frontend/src/components/panels/notes/notesEditor.css', 'main/src/ipc/notes.ts', 'scripts/notes-native-qa.cjs'].map(file => [file, createHash('sha256').update(fs.readFileSync(file)).digest('hex')]));
@@ -42,23 +42,12 @@ function pass(step) { results.steps.push(step); console.log('PASS', step); }
 async function shot(name) { await page.screenshot({ path: path.join(evidence, name + '.png') }); }
 async function launch() {
   const log = fs.createWriteStream(path.join(evidence, `electron-${++launchNumber}.log`));
-  child = spawn(require('electron'), ['.', '--user-data-dir=' + path.join(root, 'browser'), '--remote-debugging-port=0'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  application = await electron.launch({ executablePath: require('electron'), args: ['.', '--user-data-dir=' + path.join(root, 'browser')], env, timeout: 60000 });
+  child = application.process();
   child.stdout.pipe(log); child.stderr.pipe(log);
-  const endpoint = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Electron did not expose CDP within 60 seconds')), 60000);
-    let stderr = '';
-    child.stderr.on('data', bytes => {
-      stderr += bytes.toString();
-      const match = stderr.match(/DevTools listening on (ws:\/\/\S+)/);
-      if (match) { clearTimeout(timer); resolve(match[1]); }
-    });
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('exit', code => { clearTimeout(timer); reject(new Error('Electron exited: ' + code)); });
-  });
-  browser = await chromium.connectOverCDP(endpoint);
-  const context = browser.contexts()[0];
+  const context = application.context();
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-  page = context.pages()[0] || await context.waitForEvent('page');
+  page = await application.firstWindow();
   page.setDefaultTimeout(20000);
   // Startup update announcements can arrive during any journey in a dev build.
   const update = page.getByRole('dialog').filter({ hasText: 'Software Update' });
@@ -69,15 +58,21 @@ async function launch() {
   await page.waitForFunction(() => Boolean(window.electronAPI));
 }
 async function stop() {
-  if (browser) {
-    await browser.contexts()[0].tracing.stop({ path: path.join(evidence, `trace-${launchNumber}.zip`) }).catch(() => {});
-    await browser.close().catch(() => {});
-    browser = undefined;
-  }
-  if (child && child.exitCode === null) {
-    const exited = new Promise(resolve => child.once('exit', resolve));
-    child.kill();
-    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))]);
+  if (application) {
+    const running = application;
+    application = undefined;
+    await running.context().tracing.stop({ path: path.join(evidence, `trace-${launchNumber}.zip`) }).catch(() => {});
+    // Exercise the real app quit lifecycle. child.kill() is an unconditional
+    // termination on Windows and can resurrect unflushed DOMStorage drafts.
+    let timer;
+    try {
+      await Promise.race([running.close(), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Electron did not quit within 30 seconds')), 30000);
+      })]);
+    } finally {
+      clearTimeout(timer);
+      if (child && child.exitCode === null) child.kill();
+    }
   }
 }
 async function list(pane, scope) { return page.evaluate(({ pane, scope }) => window.electronAPI.invoke('notes:list', pane, scope), { pane, scope }); }
@@ -187,6 +182,9 @@ async function addCanvasText(text, x, y) {
   assert(JSON.parse(hookOutput).additional_context.includes('Cart → Payment'));
   pass('Native memory paths, resolvable drawing exports, executable Cursor hook');
 
+  const drafts = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('pane-note-draft:')));
+  fs.writeFileSync(path.join(evidence, 'drafts-before-quit.json'), JSON.stringify(drafts));
+  assert.deepEqual(drafts, [], 'Successful saves clear renderer recovery drafts before quit');
   await stop();
   await launch();
   await page.getByRole('button', { name: 'notes-qa', exact: true }).click();
@@ -237,6 +235,7 @@ async function addCanvasText(text, x, y) {
   if (page) await shot('failure').catch(() => {});
   process.exitCode = 1;
 }).finally(async () => {
-  await stop();
+  try { await stop(); }
+  catch (error) { results.success = false; results.shutdownError = error.stack; process.exitCode = 1; }
   fs.writeFileSync(path.join(evidence, 'results.json'), JSON.stringify(results, null, 2));
 });
