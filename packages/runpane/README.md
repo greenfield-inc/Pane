@@ -212,8 +212,8 @@ plain words. The CLI checks every section is filled in, needs the branch pushed
 the agent in a new Pane there, branched from yours. It reports back to you.
 
 ```bash
-runpane handoff --template > handoff.md
-runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --push
+runpane handoff --template > ~/handoff.md
+runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --push
 ```
 
 `runpane handoff --help` lists every option.

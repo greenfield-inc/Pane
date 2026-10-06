@@ -24,23 +24,20 @@ You are the outgoing collaborator. Give the next person or agent the verified co
 
 ## Write the note
 
-Write the brief as the handoff note in [references/note-template.md](references/note-template.md): a compaction of your session, in the nine required sections, for a reader with none of your context. Start from `runpane handoff --template > handoff.md`.
+Write the brief as the handoff note in [references/note-template.md](references/note-template.md): a compaction of your session, in nine required `##` sections, for a reader with none of your context.
 
 ## Start the receiving agent
 
-When the person asks for another agent to continue (on this machine or another of theirs), send the note with `runpane handoff`. It works the same from any harness:
+When the person asks for another agent to continue, on this machine or another of theirs, use `runpane handoff`. It works the same from any harness. "Hand this to Claude on my Mac" authorizes starting that agent; it does not authorize pushing.
 
-```bash
-runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --dry-run
-runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --push
-```
+1. Find the machine's name: `runpane workspace list` lists the person's machines (a unique prefix such as `macbook-pro` works). Ask when more than one fits.
+2. Get the template outside the checkout, so it is never committed: `runpane handoff --template > ~/handoff.md`. Fill in every section; write "None" where one does not apply. Leave the front matter alone, and don't add instructions for the receiver: the CLI rewrites the front matter and appends them when it sends.
+3. Make the work reachable. Commit the task's files yourself; leave unrelated edits uncommitted. If the branch is not pushed, ask before pushing, then push it or pass `--push` (it commits every remaining change except the note as WIP and pushes; it never forces).
+4. Check the destination: `runpane handoff "claude opus on <machine>" --note-file ~/handoff.md --dry-run`. The destination is freeform: the agent (claude, codex, cursor), and optionally the model, the effort and the machine, such as `"codex gpt-5 high on parsa-devbox wsl"` or `"cursor on this machine"`. `--machine`, `--agent`, `--model` and `--effort` override the text.
+5. Send it: the same command without `--dry-run`. It finds the destination's saved repository with the same remote, writes the note to that machine's `~/.pane/handoffs/`, and starts the agent in a new Pane branched from yours. If it fails, relay its message; it names the fix (Pane not running there, repository not saved there, branch not pushed).
+6. Tell the person which Pane started on which machine, and give them the `agents status` command it printed. The receiver pushes to your branch and reports back to your panel, so stop changing that branch.
 
-- The destination is freeform: the agent (claude, codex, cursor), and optionally the model, the effort and the machine, such as `"codex gpt-5 high on parsa-devbox wsl"` or `"cursor on this machine"`. `--machine`, `--agent`, `--model` and `--effort` override the text. Check what it resolved with `--dry-run`.
-- It refuses a note with a missing or empty section, and a branch the receiver cannot fetch. `--push` commits uncommitted work as WIP and pushes the branch; it never forces. Push only when the person authorized it.
-- It finds the destination's saved repository with the same remote, writes the note to that machine's `~/.pane/handoffs/`, and starts the agent in a new Pane branched from yours. The receiver reports back to your panel, so stop changing the branch yourself.
-- Return the Pane it printed and the `agents status` command for checking on it.
-
-The note is the handoff. Save a copy as below only when the person also wants a page, a Grain workspace, or a PR comment.
+The note is the handoff. Skip the two sections below unless the person also wants a saved page, a Grain workspace or a PR comment, or there is no receiving agent to start.
 
 ## Save one authoritative brief
 

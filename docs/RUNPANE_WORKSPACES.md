@@ -66,8 +66,8 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 `runpane handoff` uses workspaces to move a task to a fresh agent on another of your machines. The sending agent writes a handoff note; the CLI checks it, makes sure the branch is pushed, and starts the agent there:
 
 ```
-runpane handoff --template > handoff.md                      # fill in every section
-runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md --push
+runpane handoff --template > ~/handoff.md                      # fill in every section
+runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --push
 ```
 
 The destination machine needs Pane running, the repository saved in Pane with a remote for the same GitHub repository, and its own `runpane` on PATH (otherwise it uses `npx runpane@latest`). The note lands in that machine's `~/.pane/handoffs/`, the agent starts in a new Pane branched from your branch, and it reports back to your panel with `runpane workspace <your machine> panels submit`. The note's sections are in the `handoff` skill's [note template](../main/src/services/paneChatBundle/skills/handoff/references/note-template.md).

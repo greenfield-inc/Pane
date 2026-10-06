@@ -3087,14 +3087,14 @@
         "  --model <model>                 Model for the receiving agent; overrides the text.",
         "  --effort <level>                minimal, low, medium, high, xhigh, or max; overrides the text.",
         "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
-        "  --push                          Commit uncommitted work as WIP and push the branch first (never forces).",
+        "  --push                          Commit uncommitted work (not the note) as WIP and push the branch first (never forces).",
         "  --dry-run                       Print what the destination resolved to, the note check, and git state; send nothing.",
         "  --json                          Print machine-readable output.",
         "",
         "Examples:",
-        "  runpane handoff --template > handoff.md",
-        "  runpane handoff \"claude opus on parsas-macbook-pro\" --note-file handoff.md --push",
-        "  runpane handoff \"codex gpt-5 high on parsa-devbox wsl\" --note-file handoff.md --dry-run"
+        "  runpane handoff --template > ~/handoff.md",
+        "  runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
+        "  runpane handoff \"codex gpt-5 high on parsa-devbox wsl\" --note-file ~/handoff.md --dry-run"
       ]
     },
     "pip": {
@@ -4363,7 +4363,7 @@
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
-      "`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel."
+      "`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
     "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.",
@@ -13609,14 +13609,14 @@
       "handoff": {
         "name": "handoff",
         "summary": "Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.",
-        "details": "Two steps. The agent writes the note, because only it has the context: run `runpane handoff --template > handoff.md` and fill in every section (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state), writing \"None\" where one does not apply. Then `runpane handoff \"<destination>\" --note-file handoff.md` moves it: it rejects a note with a missing or empty section, refuses an unpushed branch unless --push, finds the destination's saved repository with the same remote, fetches the branch there, writes the note to `~/.pane/handoffs/` on that machine with its origin in the front matter and receiver instructions appended, and starts the agent in a new Pane branched from your branch. The receiver verifies the head commit, continues from Next steps, pushes to your branch, and reports back to your panel with `runpane workspace <your machine> panels submit`.",
+        "details": "Two steps. The agent writes the note, because only it has the context: run `runpane handoff --template > ~/handoff.md` (outside the checkout) and fill in every section (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state), writing \"None\" where one does not apply. Then `runpane handoff \"<destination>\" --note-file ~/handoff.md` moves it: it rejects a note with a missing or empty section, refuses an unpushed branch unless --push, finds the destination's saved repository with the same remote, fetches the branch there, writes the note to `~/.pane/handoffs/` on that machine with its origin in the front matter and receiver instructions appended, and starts the agent in a new Pane branched from your branch. The receiver verifies the head commit, continues from Next steps, pushes to your branch, and reports back to your panel with `runpane workspace <your machine> panels submit`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
           {
             "name": "<destination>",
             "required": false,
-            "description": "Freeform text naming the agent (claude, codex, cursor), and optionally the model, the effort, and the machine: a Tailscale machine name or unique prefix, or \"this machine\". Examples: \"codex gpt-5 high on parsas-macbook-pro\", \"claude opus on parsa-devbox wsl\", \"cursor on this machine\"."
+            "description": "Freeform text naming the agent (claude, codex, cursor), and optionally the model, the effort, and the machine: a Tailscale machine name or unique prefix (list them with `runpane workspace list`), or \"this machine\". Required unless --agent is given. Examples: \"codex gpt-5 high on parsas-macbook-pro\", \"claude opus on parsa-devbox wsl\", \"cursor on this machine\"."
           },
           {
             "name": "--template",
@@ -13627,7 +13627,7 @@
             "name": "--note-file",
             "value": "<path|->",
             "required": false,
-            "description": "The note to check and send; required unless --template or --dry-run."
+            "description": "The note to check and send; required unless --template or --dry-run. Without it, --dry-run checks only the destination and git state."
           },
           {
             "name": "--machine",
@@ -13662,7 +13662,7 @@
           {
             "name": "--push",
             "required": false,
-            "description": "Commit uncommitted work as WIP and push the branch before sending (never forces). Without it, an unpushed branch stops the handoff."
+            "description": "Commit uncommitted work (except the note) as WIP and push the branch before sending; never forces. Without it, an unpushed branch stops the handoff."
           },
           {
             "name": "--dry-run",
@@ -13676,14 +13676,14 @@
           }
         ],
         "examples": [
-          "runpane handoff --template > handoff.md",
-          "runpane handoff \"claude opus on parsas-macbook-pro\" --note-file handoff.md --push",
-          "runpane handoff \"codex gpt-5 high on parsa-devbox wsl\" --note-file handoff.md --dry-run --json",
-          "runpane handoff --machine build-server --agent cursor --note-file handoff.md"
+          "runpane handoff --template > ~/handoff.md",
+          "runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
+          "runpane handoff \"codex gpt-5 high on parsa-devbox wsl\" --note-file ~/handoff.md --dry-run --json",
+          "runpane handoff --machine build-server --agent cursor --note-file ~/handoff.md"
         ],
         "notes": [
           "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with the repository saved, and its own runpane on PATH (otherwise npx runpane@latest is used).",
-          "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. The sections extend Codex's compaction prompt (openai/codex, codex-rs/prompts/templates/compact/prompt.md).",
+          "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
           "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model.",
           "Run it from the checkout being handed off. The receiver works in a new Pane on the destination and pushes back to your branch, so stop changing that branch yourself."
         ]

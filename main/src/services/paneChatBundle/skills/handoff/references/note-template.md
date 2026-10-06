@@ -12,7 +12,7 @@ verified, how to check it, and where the code is.
 Get the exact template, with this checkout's origin and git state already in its front matter:
 
 ```bash
-runpane handoff --template > handoff.md
+runpane handoff --template > ~/handoff.md
 ```
 
 Every section is required. `runpane handoff` rejects a note with a missing or empty section; write

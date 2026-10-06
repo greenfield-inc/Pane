@@ -78,7 +78,7 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
     if (found.length > 1) throw new Error(`"${text}" names two ${label}: ${found.join(' and ')}. Name one.`);
   }
   const agent = overrides.agent ?? agents[0];
-  if (!agent) throw new Error(`Name the agent: claude, codex, or cursor. For example: runpane handoff "claude opus on parsas-macbook-pro" --note-file note.md`);
+  if (!agent) throw new Error(`Name the agent: claude, codex, or cursor. For example: runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md`);
 
   let machine: string | null = null;
   if (overrides.machine) {
@@ -236,14 +236,22 @@ function readGitState(cwd: string): GitState {
 }
 
 /** --push: commit uncommitted work as WIP and push the branch; never forces. */
-function pushWork(state: GitState, destination: string): GitState {
+/** The note is not part of the work: leave it out of the uncommitted count and the WIP commit. */
+function withoutNote(state: GitState, notePath: string | undefined): GitState {
+  const relative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)).split(path.sep).join('/') : '';
+  if (!relative || relative.startsWith('..')) return state;
+  return { ...state, dirty: state.dirty.filter((line) => line.slice(3) !== relative) };
+}
+
+function pushWork(state: GitState, destination: string, notePath: string | undefined): GitState {
   if (state.dirty.length) {
-    git(['add', '-A'], state.root);
+    const relative = notePath && notePath !== '-' ? path.relative(state.root, path.resolve(notePath)) : '';
+    git(['add', '-A', '--', '.', ...(relative && !relative.startsWith('..') ? [`:(exclude)${relative}`] : [])], state.root);
     git(['commit', '-m', `WIP: hand off to ${destination}`], state.root);
   }
   git(['push', '-u', state.remote, `HEAD:refs/heads/${state.branch}`], state.root);
   git(['fetch', state.remote, state.branch], state.root);
-  return readGitState(state.root);
+  return withoutNote(readGitState(state.root), notePath);
 }
 
 /** owner/name for a GitHub-style remote URL. */
@@ -422,7 +430,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
 
   const text = parsed.handoffDestination ?? '';
   if (!text && !parsed.handoffMachine && !parsed.agent) {
-    throw new Error('runpane handoff needs a destination, for example: runpane handoff "claude opus on parsas-macbook-pro" --note-file note.md. Start the note with: runpane handoff --template > note.md');
+    throw new Error('runpane handoff needs a destination, for example: runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md. Start the note with: runpane handoff --template > ~/handoff.md');
   }
   const machines = tailnet.ok ? [tailnet.self, ...tailnet.machines] : [];
   const destination = parseDestination(text, machines, {
@@ -446,12 +454,12 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     noteInfo = { path: path.resolve(parsed.handoffNoteFile), sections: HANDOFF_SECTIONS.length, bytes: Buffer.byteLength(noteText) };
     say(step('note', `${noteInfo.sections} sections, ${formatBytes(noteInfo.bytes)}`));
   } else if (!parsed.dryRun) {
-    throw new Error('runpane handoff needs --note-file <path>. Write it from: runpane handoff --template > note.md');
+    throw new Error('runpane handoff needs --note-file <path>. Write it from: runpane handoff --template > ~/handoff.md');
   }
 
-  let state = readGitState(cwd);
+  let state = withoutNote(readGitState(cwd), parsed.handoffNoteFile);
   if (parsed.handoffPush && !parsed.dryRun && (!state.pushed || state.dirty.length)) {
-    state = pushWork(state, machineLabel);
+    state = pushWork(state, machineLabel, parsed.handoffNoteFile);
   }
   if (state.dirty.length) warnings.push(`${state.dirty.length} uncommitted file${state.dirty.length === 1 ? '' : 's'} will not reach the receiver. Commit them, or pass --push to commit them as WIP.`);
   if (!state.pushed) warnings.push(`${state.branch} at ${state.head.slice(0, 7)} is not on ${state.remote}. Push it, or pass --push.`);

@@ -233,7 +233,7 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
-`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel.
+`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel.
 
 ## Command reference
 
