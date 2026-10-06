@@ -151,3 +151,16 @@ test('receiver starts at immutable sender commit and uses selected local Pane di
   assert.equal(create[create.indexOf('--base')+1],head);
   for(const call of [create,list]) assert.equal(call[call.indexOf('--pane-dir')+1],path.join(f.root,'isolated pane'));
 });
+
+test('WSL is rejected before push, note transfer, or receiver launch', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); fs.writeFileSync(path.join(f.root,'code.txt'),'dirty');
+ const head=f.git('rev-parse','HEAD'); const result=spawnSync(process.execPath,[cli,'handoff','codex here wsl','--note-file','note.md','--push'],{cwd:f.root,encoding:'utf8',env:f.env});
+ assert.notEqual(result.status,0); assert.match(result.stderr,/WSL handoff is not supported/); assert.equal(f.git('rev-parse','HEAD'),head);
+});
+test('local receiver preserves shell metacharacters and multiword prompts as argv', (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); const calls=receiver(f);
+ const selected=path.join(f.root, "Jane Doe's pane & echo injected"); const result=f.run('--pane-dir',selected);
+ assert.equal(result.status,0,result.stderr); const create=calls().find(a=>a.includes('create'));
+ assert.equal(create[create.indexOf('--pane-dir')+1],selected);
+ assert.match(create[create.indexOf('--prompt')+1],/^Read the handoff note at .* and continue the work it describes/);
+});

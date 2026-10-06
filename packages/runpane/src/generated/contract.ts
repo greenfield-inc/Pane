@@ -3096,7 +3096,7 @@ export const RUNPANE_CONTRACT = {
         "Examples:",
         "  runpane handoff --template > ~/handoff.md",
         "  runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
-        "  runpane handoff \"codex gpt-5 high on parsa-devbox wsl\" --note-file ~/handoff.md --dry-run"
+        "  runpane handoff \"codex gpt-5 high on parsa-devbox\" --note-file ~/handoff.md --dry-run"
       ]
     },
     "pip": {
@@ -13618,7 +13618,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<destination>",
             "required": false,
-            "description": "Freeform text naming the agent (claude, codex, cursor), and optionally the model, the effort, and the machine: a Tailscale machine name or unique prefix (list them with `runpane workspace list`), or \"this machine\". Required unless --agent is given. Examples: \"codex gpt-5 high on parsas-macbook-pro\", \"claude opus on parsa-devbox wsl\", \"cursor on this machine\"."
+            "description": "Freeform text naming the agent (claude, codex, cursor), and optionally the model, the effort, and the machine: a Tailscale machine name or unique prefix (list them with `runpane workspace list`), or \"this machine\". Required unless --agent is given. Examples: \"codex gpt-5 high on parsas-macbook-pro\", \"claude opus on parsa-devbox\", \"cursor on this machine\"."
           },
           {
             "name": "--template",
@@ -13680,7 +13680,7 @@ export const RUNPANE_CONTRACT = {
         "examples": [
           "runpane handoff --template > ~/handoff.md",
           "runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
-          "runpane handoff \"codex gpt-5 high on parsa-devbox wsl\" --note-file ~/handoff.md --dry-run --json",
+          "runpane handoff \"codex gpt-5 high on parsa-devbox\" --note-file ~/handoff.md --dry-run --json",
           "runpane handoff --machine build-server --agent cursor --note-file ~/handoff.md"
         ],
         "notes": [

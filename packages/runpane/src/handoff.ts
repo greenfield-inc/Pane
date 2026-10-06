@@ -39,7 +39,7 @@ export interface HandoffDestination {
   agent: RunpaneAgent;
   model?: string;
   effort?: string;
-  /** "on <windows machine> wsl": prefer that machine's WSL copy of the repository. */
+  /** Explicit WSL selection is recognized and rejected until supported. */
   wsl?: true;
 }
 
@@ -294,18 +294,24 @@ const paneCreateSchema = boundary.object({
 /** A shell on the destination: another machine through `runpane workspace exec`, or this one. */
 interface Destination {
   name: string;
-  windows: boolean;
-  run(command: string, timeoutMs?: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }>;
+  shell: string;
+  run(command: string[], timeoutMs?: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }>;
   write(target: string, content: string): Promise<string>;
 }
 
-function remoteDestination(machine: TailnetMachine, windows: boolean): Destination {
+async function remoteDestination(machine: TailnetMachine): Promise<Destination> {
   const target = workspaceTarget(machine);
+  const probe = await invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command: 'echo runpane-handoff', timeoutMs: 20_000 }], execResultSchema);
+  const shell = probe.shell;
+  // cmd has expansion rules that cannot safely represent arbitrary terminal prompts.
+  if (!/^(bash|zsh|sh|fish|pwsh|powershell)(?:\.exe)?$/i.test(path.posix.basename(shell.replace(/\\/g, '/')))) {
+    throw new Error(`Handoff does not support the destination shell "${shell}". Select Bash or PowerShell in Pane and retry.`);
+  }
   return {
     name: machine.name,
-    windows,
-    run: (command, timeoutMs = 120_000) =>
-      invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command, timeoutMs }], execResultSchema, timeoutMs + 30_000),
+    shell,
+    run: (argv, timeoutMs = 120_000) =>
+      invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command: argv.map((arg) => quote(arg, shell)).join(' '), timeoutMs }], execResultSchema, timeoutMs + 30_000),
     write: async (file, content) =>
       (await invokeRemoteDaemon(target, 'runpane:machine:write', [{ path: file, content, encoding: 'utf8' }], writeResultSchema)).path,
   };
@@ -314,9 +320,9 @@ function remoteDestination(machine: TailnetMachine, windows: boolean): Destinati
 function localDestination(name: string): Destination {
   return {
     name,
-    windows: process.platform === 'win32',
+    shell: process.platform === 'win32' ? 'powershell' : (process.env.SHELL ?? 'sh'),
     run: (command, timeoutMs = 120_000) => new Promise((resolve) => {
-      const child = spawn(command, { shell: true, timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(command[0], command.slice(1), { shell: false, timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
@@ -333,12 +339,12 @@ function localDestination(name: string): Destination {
   };
 }
 
-function quote(value: string, windows: boolean): string {
+function quote(value: string, shell: string): string {
   if (/^[\w./:@=+-]+$/.test(value)) return value;
-  return windows ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, `'\\''`)}'`;
+  return /(?:powershell|pwsh)(?:\.exe)?$/i.test(shell) ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-async function mustRun(destination: Destination, command: string, what: string, timeoutMs?: number): Promise<string> {
+async function mustRun(destination: Destination, command: string[], what: string, timeoutMs?: number): Promise<string> {
   const result = await destination.run(command, timeoutMs);
   if (result.exitCode !== 0) {
     const detail = (result.stderr || result.stdout).trim().split('\n').slice(-3).join(' ');
@@ -348,15 +354,15 @@ async function mustRun(destination: Destination, command: string, what: string, 
 }
 
 /** The saved repository on the destination whose remotes include ours; returns it and that remote's name. */
-async function findRepo(destination: Destination, runpane: string, state: GitState, selector?: string): Promise<{ repo: SavedRepo; remote: string }> {
-  const listed = decodeBoundary(JSON.parse(await mustRun(destination, `${runpane} repos list --json`, 'runpane repos list')), repoListSchema);
+async function findRepo(destination: Destination, runpane: string[], state: GitState, selector?: string): Promise<{ repo: SavedRepo; remote: string }> {
+  const listed = decodeBoundary(JSON.parse(await mustRun(destination, [...runpane, 'repos', 'list', '--json'], 'runpane repos list')), repoListSchema);
   const candidates = selector
     ? listed.repos.filter((repo) => String(repo.id) === selector || repo.name === selector || repo.path === selector)
     : listed.repos;
   if (selector && !candidates.length) throw new Error(`${destination.name} has no saved repository "${selector}". Its repositories: ${listed.repos.map((repo) => repo.name).join(', ')}.`);
   const wanted = repositorySlug(state.remoteUrl)?.toLowerCase();
   for (const repo of candidates) {
-    const remotes = await destination.run(`git -C ${quote(repo.path, destination.windows)} remote -v`, 20_000);
+    const remotes = await destination.run(['git', '-C', repo.path, 'remote', '-v'], 20_000);
     if (remotes.exitCode !== 0) continue;
     const match = remotes.stdout.split('\n').map((line) => line.split(/\s+/))
       .find(([, url]) => url && repositorySlug(url)?.toLowerCase() === wanted);
@@ -365,15 +371,15 @@ async function findRepo(destination: Destination, runpane: string, state: GitSta
   throw new Error(`No saved repository on ${destination.name} has a remote for ${wanted}. Add it there with: runpane workspace ${destination.name} exec -- runpane repos add --path <clone> --yes, or pass --repo <selector>.`);
 }
 
-function agentCommand(destination: HandoffDestination): string | undefined {
+function agentCommand(destination: HandoffDestination, shell: string): string | undefined {
   if (!destination.model && !destination.effort) return undefined;
   const base = RUNPANE_CONTRACT.agentTemplates[destination.agent].command;
   const { model, effort } = destination;
   const flags = destination.agent === 'codex'
-    ? [model && `-m ${quote(model, false)}`, effort && `-c ${quote(`model_reasoning_effort=${effort}`, false)}`]
+    ? [model && `-m ${quote(model, shell)}`, effort && `-c ${quote(`model_reasoning_effort=${effort}`, shell)}`]
     : destination.agent === 'claude'
-      ? [model && `--model ${quote(model, false)}`, effort && `--effort ${quote(effort, false)}`]
-      : [model && `--model ${quote(model, false)}`];
+      ? [model && `--model ${quote(model, shell)}`, effort && `--effort ${quote(effort, shell)}`]
+      : [model && `--model ${quote(model, shell)}`];
   return [base, ...flags].filter(Boolean).join(' ');
 }
 
@@ -442,6 +448,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const destination = parseDestination(text, machines, {
     machine: parsed.handoffMachine, agent: parsed.agent, model: parsed.handoffModel, effort: parsed.handoffEffort,
   });
+  if (destination.wsl) throw new Error('WSL handoff is not supported yet. Choose a native destination without wsl; nothing was committed or sent.');
   if (destination.machine && !tailnet.ok) throw new Error(`Handing off to another machine needs Tailscale: ${tailnet.reason}. ${tailnet.fix}`);
   const machineLabel = destination.machine ?? `${self} (this machine)`;
   const say = (line: string): void => { if (!parsed.json) console.log(line); };
@@ -489,17 +496,19 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   for (const warning of warnings) say(`  ! ${warning}`);
 
   const target = destination.machine ? machines.find((machine) => machine.name === destination.machine) : undefined;
-  const remote = target ? remoteDestination(target, target.os === 'Windows') : localDestination(self);
-  const installed = await remote.run('runpane --version', 30_000);
-  const executable = installed.exitCode === 0 ? 'runpane' : 'npx --yes runpane@latest';
-  const runpane = `${executable}${!target && parsed.paneDir ? ` --pane-dir ${quote(parsed.paneDir, remote.windows)}` : ''}`;
+  const remote = target ? await remoteDestination(target) : localDestination(self);
+  const installed = await remote.run(['runpane', '--version'], 30_000);
+  const runpane = target
+    ? (installed.exitCode === 0 ? ['runpane'] : ['npx', '--yes', 'runpane@latest'])
+    : (process.platform === 'win32' || installed.exitCode !== 0 ? [process.execPath, path.join(__dirname, 'cli.js')] : ['runpane']);
+  if (!target && parsed.paneDir) runpane.push('--pane-dir', parsed.paneDir);
   // `runpane workspace` arrived in 2.4.164; an older runpane there reports back through npx.
   const reporter = installed.exitCode === 0 && versionAtLeast(installed.stdout, [2, 4, 164]) ? 'runpane' : 'npx --yes runpane@latest';
   const { repo, remote: repoRemote } = await findRepo(remote, runpane, state, parsed.repo);
   say(step('repo', `${repo.name} (${repo.path}), remote ${repoRemote}`));
-  await mustRun(remote, `git -C ${quote(repo.path, remote.windows)} fetch ${quote(repoRemote, remote.windows)} ${quote(state.branch, remote.windows)}`, 'git fetch', 120_000);
+  await mustRun(remote, ['git', '-C', repo.path, 'fetch', repoRemote, state.branch], 'git fetch', 120_000);
 
-  await mustRun(remote, `git -C ${quote(repo.path, remote.windows)} cat-file -e ${quote(`${state.head}^{commit}`, remote.windows)}`, 'verify sender commit');
+  await mustRun(remote, ['git', '-C', repo.path, 'cat-file', '-e', `${state.head}^{commit}`], 'verify sender commit');
 
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
   const name = `handoff-${state.branch.replace(/^handoff[-/]/i, '')}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
@@ -508,14 +517,13 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const notePath = await remote.write(`~/.pane/handoffs/${stamp}-${name}.md`, stamped);
   say(step('note sent', notePath));
 
-  const toolCommand = agentCommand(destination);
+  const toolCommand = agentCommand(destination, remote.shell);
   const prompt = `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
-  const q = (value: string): string => quote(value, remote.windows);
   const create = [
-    `${runpane} panes create --repo ${repo.id} --name ${q(name)} --base ${q(state.head)} --agent ${destination.agent}`,
-    toolCommand ? `--tool-command ${q(toolCommand)}` : '',
-    `--prompt ${q(prompt)} --source agent --no-focus --wait-ready --yes --json`,
-  ].filter(Boolean).join(' ');
+    ...runpane, 'panes', 'create', '--repo', String(repo.id), '--name', name, '--base', state.head, '--agent', destination.agent,
+    ...(toolCommand ? ['--tool-command', toolCommand] : []),
+    '--prompt', prompt, '--source', 'agent', '--no-focus', '--wait-ready', '--yes', '--json',
+  ];
   const created = decodeBoundary(JSON.parse(await mustRun(remote, create, 'runpane panes create', REPORT_TIMEOUT_MS)), paneCreateSchema);
   const item = created.items[0];
   if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item?.error?.message ?? 'no pane was created'}`);
