@@ -927,7 +927,7 @@ def run_panels_submit(parsed: Any) -> int:
     else:
         input_bytes = result.get("inputBytes", 0)
         suffix = "" if input_bytes == 1 else "s"
-        verb = "Submitted" if result.get("ok") else "Could not verify"
+        verb = "Queued" if (result.get("delivery") or {}).get("state") == "queued" else "Submitted" if result.get("ok") else "Could not verify"
         verified = " verified" if result.get("verifiedSubmitted") else " unverified"
         print(
             f"{verb} {input_bytes} byte{suffix} via {result.get('sequenceName')} "
@@ -945,7 +945,9 @@ def run_panels_submit(parsed: Any) -> int:
 def print_delivery(delivery: Optional[Dict[str, Any]], prefix: str = "") -> None:
     """Where the prompt went, for human output: `Delivery: queued (transcript)`."""
     if delivery:
-        print(f"{prefix}Delivery: {delivery.get('state')} ({delivery.get('evidence')})")
+        message = delivery.get("message") or ("The agent sees this only after its current turn ends. Do not resend." if delivery.get("state") == "queued" else None)
+        suffix = f" — {message}" if message else ""
+        print(f"{prefix}Delivery: {delivery.get('state')} ({delivery.get('evidence')}){suffix}")
 
 
 def mark_suggestion_line(text: str, ghost_text: Optional[str]) -> str:
@@ -983,7 +985,7 @@ def run_panels_submit_composer(parsed: Any) -> int:
     if parsed.json:
         print_json(result)
     else:
-        verb = "Submitted" if result.get("ok") else "Could not verify"
+        verb = "Queued" if (result.get("delivery") or {}).get("state") == "queued" else "Submitted" if result.get("ok") else "Could not verify"
         verified = " verified" if result.get("verifiedSubmitted") else " unverified"
         print(f"{verb} composer with {result.get('sequenceName')} to panel {result.get('panelId')}.{verified}")
         print_delivery(result.get("delivery"))
@@ -1051,6 +1053,8 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         raise ValueError(f"runpane panels {command} requires --text, --keys, or --input-file.")
     if parsed.keys is not None and command != "input":
         raise ValueError("--keys is for panels input; panels submit sends text followed by Enter.")
+    if parsed.interrupt and command != "submit":
+        raise ValueError("--interrupt is for panels submit.")
     if parsed.as_file_pointer and command != "submit":
         raise ValueError("--as-file-pointer is for panels submit; panels input sends exact bytes.")
 
@@ -1064,6 +1068,7 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         "panelId": parsed.panel_id,
         "input": text,
         **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("interrupt", True if parsed.interrupt else None),
         **optional_value("source", parsed.source),
     }
 

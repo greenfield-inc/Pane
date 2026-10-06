@@ -361,7 +361,7 @@ runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panels output --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels screen --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) [--source user|agent] --yes [--json] [--pane-dir <path>]
-runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--source user|agent] --yes [--json] [--pane-dir <path>]
+runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]
 runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json] [--pane-dir <path>]
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
@@ -577,6 +577,7 @@ These flags are consumed by local daemon-control commands:
 --read-only
 --template
 --push
+--interrupt
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

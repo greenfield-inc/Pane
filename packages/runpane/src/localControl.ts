@@ -690,6 +690,7 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  interrupt?: boolean;
   source?: 'user' | 'agent';
 }
 
@@ -717,6 +718,7 @@ interface PanelStateSummary {
 interface Delivery {
   state: 'taken' | 'queued' | 'in-composer' | 'unknown';
   evidence: 'transcript' | 'screen' | 'argv';
+  message?: string;
 }
 
 interface PanelBlockedState {
@@ -985,6 +987,7 @@ const verificationSchema = boundary.optional(boundary.enumeration('observed', 'u
 const deliverySchema: BoundarySchema<Delivery | undefined> = boundary.optional(boundary.object({
   state: boundary.enumeration('taken', 'queued', 'in-composer', 'unknown'),
   evidence: boundary.enumeration('transcript', 'screen', 'argv'),
+  message: boundary.optional(boundary.string),
 }));
 const promptWarningsSchema = boundary.optional(boundary.array(boundary.object({
   code: boundary.enumeration('leading-bang-runs-shell', 'leading-hash-memory', 'leading-slash-command', 'leading-at-mention'),
@@ -2702,7 +2705,7 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   if (parsed.json) {
     printJson(result);
   } else {
-    const verb = result.ok ? 'Submitted' : 'Could not verify';
+    const verb = result.delivery?.state === 'queued' ? 'Queued' : result.ok ? 'Submitted' : 'Could not verify';
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${verb} ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} via ${result.sequenceName} to panel ${result.panelId}.${verified}`);
     printDelivery(result.delivery);
@@ -2721,7 +2724,9 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
 /** Where the prompt went, for human output: `Delivery: queued (transcript)`. */
 function printDelivery(delivery: Delivery | undefined, prefix = ''): void {
   if (delivery) {
-    console.log(`${prefix}Delivery: ${delivery.state} (${delivery.evidence})`);
+    const message = delivery.message ?? (delivery.state === 'queued'
+      ? 'The agent sees this only after its current turn ends. Do not resend.' : undefined);
+    console.log(`${prefix}Delivery: ${delivery.state} (${delivery.evidence})${message ? ` — ${message}` : ''}`);
   }
 }
 
@@ -2855,6 +2860,9 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
   if (parsed.keys !== undefined && command !== 'input') {
     throw new Error('--keys is for panels input; panels submit sends text followed by the agent submit key.');
   }
+  if (parsed.interrupt && command !== 'submit') {
+    throw new Error('--interrupt is for panels submit.');
+  }
   if (parsed.asFilePointer && command !== 'submit') {
     throw new Error('--as-file-pointer is for panels submit; panels input sends exact bytes.');
   }
@@ -2863,6 +2871,7 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    interrupt: parsed.interrupt || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
   };
 }

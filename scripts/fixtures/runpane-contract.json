@@ -821,6 +821,17 @@
       "--tab",
       "--yes",
       "--json"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel",
+      "panel-1",
+      "--text",
+      "correction",
+      "--interrupt",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

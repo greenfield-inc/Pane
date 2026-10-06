@@ -156,7 +156,7 @@ const terminalPanel: ToolPanel = {
 function terminalSnapshot(
   text: string,
   activityStatus: 'active' | 'idle',
-  agentType: 'claude' | 'codex' = 'codex',
+  agentType: 'claude' | 'codex' | 'cursor' = 'codex',
   lastActivityTime = '2026-01-01T00:02:00.000Z',
 ) {
   return {
@@ -2238,6 +2238,93 @@ describe('runpane IPC handlers', () => {
     expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, 'ping-busy');
     expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\t');
     expect(result).toMatchObject({ ok: true, enter: 'tab', sequenceName: 'tab', verifiedSubmitted: true });
+  });
+
+  it('interrupts busy Codex and waits for idle before delivering the replacement turn', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot('• Working (esc to interrupt)\n› Ask Codex to do anything\n', 'active'))
+      .mockReturnValueOnce(terminalSnapshot('• Working (esc to interrupt)\n› Ask Codex to do anything\n', 'active'))
+      .mockReturnValueOnce(terminalSnapshot('› Ask Codex to do anything\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› replacement\n', 'idle'))
+      .mockReturnValue(terminalSnapshot('Working\n', 'active'));
+    const registry = createRegistry();
+    const pendingResult = registry.invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([[terminalPanel.id, '\x1b']]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pendingResult).toMatchObject({ ok: true, delivery: { state: 'taken' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+      [terminalPanel.id, '\x1b'], [terminalPanel.id, 'replacement'], [terminalPanel.id, '\r'],
+    ]);
+  });
+
+  it('does not send replacement text when interruption never reaches idle', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+      terminalSnapshot('• Working\n› Ask Codex to do anything', 'active'),
+    );
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(await pending).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'agent-prompt' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([[terminalPanel.id, '\x1b']]);
+  });
+
+  it('rejects an empty interrupt submission without cancelling work', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› Ask Codex to do anything', 'idle'));
+    expect(await createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: '\n', interrupt: true,
+    }])).toMatchObject({ ok: false, inputBytes: 0 });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it('preserves occupied composers on interrupt', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'idle'));
+    expect(await createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }])).toMatchObject({ ok: false, inputBytes: 0 });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it('interrupts Claude with Escape before staging the replacement', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValueOnce(0).mockReturnValue(1);
+    const rule = '─'.repeat(40);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ \n${rule}`, 'active', 'claude'))
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ \n${rule}`, 'idle', 'claude'))
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ replacement\n${rule}`, 'idle', 'claude'))
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ replacement\n${rule}`, 'idle', 'claude'))
+      .mockReturnValue(terminalSnapshot(`${rule}\n❯ \n${rule}`, 'active', 'claude'));
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ ok: true, delivery: { state: 'taken' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+      [terminalPanel.id, '\x1b'], [terminalPanel.id, 'replacement'], [terminalPanel.id, '\r'],
+    ]);
+  });
+
+  it('interrupts Cursor with Ctrl+C and verifies its replacement starts working', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot('→ Add a follow-up    ctrl+c to stop', 'active', 'cursor'))
+      .mockReturnValueOnce(terminalSnapshot('→ Add a follow-up', 'idle', 'cursor'))
+      .mockReturnValue(terminalSnapshot('⠘ Working\n→ Add a follow-up    ctrl+c to stop', 'active', 'cursor'));
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValueOnce(0).mockReturnValue(1);
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ ok: true, delivery: { state: 'taken', evidence: 'screen' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+      [terminalPanel.id, '\x03'], [terminalPanel.id, 'replacement\r'],
+    ]);
   });
 
   it('stages text before submitting a Claude composer', async () => {
@@ -4955,7 +5042,7 @@ describe('runpane IPC handlers', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       const result = await pending;
 
-      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'transcript' } });
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'transcript', message: expect.stringContaining('only after its current turn ends') } });
     });
 
     it('reports a message Claude queued from its queue hint when there is no transcript', async () => {

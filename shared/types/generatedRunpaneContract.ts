@@ -612,7 +612,7 @@ export const RUNPANE_CONTRACT = {
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--source user|agent] --yes [--json] [--pane-dir <path>]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -1875,6 +1875,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--push",
         "description": "Before a handoff, commit uncommitted work as WIP and push the branch (never forces)."
+      },
+      {
+        "name": "--interrupt",
+        "description": "Stop the current agent turn, wait for an empty idle composer, then submit and verify the replacement."
       }
     ]
   },
@@ -2448,7 +2452,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -2465,7 +2469,8 @@ export const RUNPANE_CONTRACT = {
         "  --as-file-pointer              Write the text to a prompt file and submit `Read and follow <path>`",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
-        "  --yes                          Skip confirmation for this mutating command"
+        "  --yes                          Skip confirmation for this mutating command",
+        "  --interrupt                   Stop the current turn, wait for idle, then submit the replacement"
       ],
       "panels wait": [
         "Usage:",
@@ -3631,7 +3636,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -3648,7 +3653,8 @@ export const RUNPANE_CONTRACT = {
         "  --as-file-pointer              Write the text to a prompt file and submit `Read and follow <path>`",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
-        "  --yes                          Skip confirmation for this mutating command"
+        "  --yes                          Skip confirmation for this mutating command",
+        "  --interrupt                   Stop the current turn, wait for idle, then submit the replacement"
       ],
       "panels wait": [
         "Usage:",
@@ -5205,6 +5211,17 @@ export const RUNPANE_CONTRACT = {
         "--url",
         "http://localhost:3000",
         "--tab",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel",
+        "panel-1",
+        "--text",
+        "correction",
+        "--interrupt",
         "--yes",
         "--json"
       ]
@@ -8145,6 +8162,9 @@ export const RUNPANE_CONTRACT = {
             "user",
             "agent"
           ]
+        },
+        "interrupt": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -8213,6 +8233,10 @@ export const RUNPANE_CONTRACT = {
                 "screen",
                 "argv"
               ]
+            },
+            "message": {
+              "type": "string",
+              "description": "Human explanation of delivery; queued means the agent has not read the message yet."
             }
           },
           "additionalProperties": false
@@ -11391,6 +11415,11 @@ export const RUNPANE_CONTRACT = {
             "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
           },
           {
+            "name": "--interrupt",
+            "required": false,
+            "description": "Interrupt the current turn and wait up to 10 seconds for an empty idle composer before delivering. Escape for Codex/Claude; Ctrl+C for Cursor."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for this mutating command."
@@ -11410,7 +11439,8 @@ export const RUNPANE_CONTRACT = {
         "examples": [
           "runpane panels submit --panel <panel-id> --text \"2\" --yes --json",
           "printf \"echo hello\" | runpane panels submit --panel <panel-id> --input-file - --yes --json",
-          "runpane panels submit --panel <panel-id> --input-file brief.md --as-file-pointer --yes --json"
+          "runpane panels submit --panel <panel-id> --input-file brief.md --as-file-pointer --yes --json",
+          "runpane panels submit --panel <panel-id> --text \"Stop that approach and follow this correction\" --interrupt --yes --json"
         ],
         "jsonSchemas": [
           "panelSubmitRequest",
@@ -11422,7 +11452,8 @@ export const RUNPANE_CONTRACT = {
           "Use `panels input` for Ctrl-C, escape sequences, or any workflow requiring exact bytes.",
           "On `blocked.kind: composer-unknown`, nothing was typed. Check `panels screen`; if the agent is at a prompt Pane does not recognise, use `panels input`.",
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
-          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts."
+          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts.",
+          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing."
         ]
       },
       "panels wait": {

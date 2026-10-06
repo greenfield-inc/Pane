@@ -978,6 +978,8 @@ export interface RunpanePanelInputResult {
 export interface RunpanePanelSubmitRequest {
   panelId: string;
   input: string;
+  /** Stop the current turn and wait for an empty idle composer before sending. */
+  interrupt?: boolean;
   /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
   asFilePointer?: boolean;
   /** `user` when a person typed it; their next finished turn notifies the phone. */
@@ -996,6 +998,7 @@ export type RunpanePanelVerification = 'observed' | 'unverifiable';
 export interface RunpaneDelivery {
   state: 'taken' | 'queued' | 'in-composer' | 'unknown';
   evidence: 'transcript' | 'screen' | 'argv';
+  message?: string;
 }
 
 export interface RunpanePanelSubmitResult {

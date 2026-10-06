@@ -45,6 +45,7 @@ export interface ParsedArgs {
   initialInput?: string;
   initialInputFile?: string;
   asFilePointer?: boolean;
+  interrupt?: boolean;
   panelInput?: string;
   panelInputFile?: string;
   fromJson?: string;
@@ -497,6 +498,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--launch') {
     parsed.launch = true;
+    return;
+  }
+  if (flag === '--interrupt') {
+    parsed.interrupt = true;
     return;
   }
   if (flag === '--as-file-pointer') {

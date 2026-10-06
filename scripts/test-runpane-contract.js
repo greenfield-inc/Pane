@@ -766,7 +766,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   includeHeldInput: false, idleBackoff: false, allManaged: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
-  asFilePointer: false, noAssociate: false, removeWorktree: false, merged: false,
+  asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
   quiet: false, readOnly: false, launch: false,
 };
 
@@ -2269,7 +2269,7 @@ async function checkDeliveryParity() {
   assert.strictEqual(printed[2].composer.ghostText, 'merge it');
   assert.deepStrictEqual(printed[3].delivery, queued);
   assert.strictEqual(printed[3].delivered, true);
-  assert.ok(stdout.includes('Delivery: queued (transcript)'), stdout.join('\n'));
+  assert.ok(stdout.includes('Delivery: queued (transcript) — The agent sees this only after its current turn ends. Do not resend.'), stdout.join('\n'));
   assert.ok(stdout.includes('Delivered to panel-1 (queued, from the transcript).'), stdout.join('\n'));
   assert.ok(stdout.includes('  Delivery: taken (argv)'), stdout.join('\n'));
   const screenOut = written.join('');
@@ -2298,7 +2298,7 @@ with contextlib.redirect_stdout(stdout):
 print(json.dumps({"stdout": stdout.getvalue().splitlines()}))
 `);
   const python = JSON.parse(pythonOutput);
-  assert.ok(python.stdout.includes('Delivery: queued (transcript)'), python.stdout.join('\n'));
+  assert.ok(python.stdout.includes('Delivery: queued (transcript) — The agent sees this only after its current turn ends. Do not resend.'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Delivery: in-composer (screen)'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('❯ merge it  ⟨suggestion⟩'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('  Delivery: taken (argv)'), python.stdout.join('\n'));

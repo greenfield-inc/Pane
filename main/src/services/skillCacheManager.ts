@@ -176,7 +176,10 @@ Auto-resume:
   your durable state and continue from where the work stopped."
 - Check the result. \`verifiedSubmitted: true\` means the agent took the
   message, or queued it behind its current turn (\`delivery.state\` says
-  which). Otherwise read \`runpane panels screen\`: if the message is still in
+  which). Queued messages have not been read yet; never resend them. For an
+  urgent correction to a busy agent, use \`panels submit --interrupt\` to stop
+  the turn, wait for an idle composer, and deliver the replacement.
+  Otherwise read \`runpane panels screen\`: if the message is still in
   the composer (\`delivery.state: "in-composer"\`), run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
   once, and if it is still held after that, report to the user. If
   \`blocked.kind\` is \`composer-unknown\`, Pane found no composer and typed
