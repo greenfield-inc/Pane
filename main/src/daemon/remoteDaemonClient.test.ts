@@ -340,7 +340,7 @@ describe('RemoteDaemonClient invoke errors', () => {
     expect(host.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('retries a safe read after 2, 4 and 6 s', async () => {
+  it.each(['panels:list', 'runpane:workspaces:machines'])('retries the safe read %s after 2, 4 and 6 s', async channel => {
     const host = createFakeHost();
     let calls = 0;
     host.onInvoke(() => {
@@ -348,7 +348,7 @@ describe('RemoteDaemonClient invoke errors', () => {
       return calls < 4 ? Response.json({ ok: false }, { status: 503 }) : Response.json({ ok: true, result: ['panel'] });
     });
 
-    const result = createClient(host).invoke('panels:list');
+    const result = createClient(host).invoke(channel);
     await vi.advanceTimersByTimeAsync(2_000 + 4_000 + 5_999);
     expect(calls).toBe(3);
     await vi.advanceTimersByTimeAsync(1);

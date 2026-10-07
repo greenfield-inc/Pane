@@ -7,6 +7,7 @@ import type { TailnetMachine } from '@shared/types/workspaceAccess';
 import { codelessProfile, decodeMachineList } from '@/auth/computers';
 import { useHostsStore } from '@/auth/hostsStore';
 import { createDaemonClient } from '@/daemon/createClient';
+import { invokeChannel } from '@/daemon/invoke';
 
 /** Computers come and go, and a tailnet switch changes the whole list; refresh while it is on screen. */
 const REFRESH_MS = 30_000;
@@ -17,7 +18,7 @@ const REFRESH_MS = 30_000;
  */
 export function useComputers(directory: RemotePaneConnectionProfile | null) {
   return useQuery({
-    queryKey: ['computers', directory?.baseUrl ?? null, directory?.token ?? ''],
+    queryKey: [directory?.id ?? null, 'runpane:workspaces:machines', directory?.baseUrl ?? null, directory?.token ?? ''],
     enabled: directory !== null,
     refetchInterval: REFRESH_MS,
     retry: false,
@@ -25,7 +26,7 @@ export function useComputers(directory: RemotePaneConnectionProfile | null) {
       if (!directory) throw new Error('No computer to ask');
       const client = createDaemonClient(directory);
       try {
-        return decodeMachineList(await client.invoke('runpane:workspaces:machines'));
+        return decodeMachineList(await invokeChannel(client, 'runpane:workspaces:machines'));
       } finally {
         client.disconnect();
       }
@@ -41,7 +42,7 @@ export function useConnectComputer(onConnected?: () => void) {
       const profile = codelessProfile(machine, domain, password);
       const client = createDaemonClient(profile);
       try {
-        await client.invoke('sessions:get-all-with-projects');
+        await invokeChannel(client, 'sessions:get-all-with-projects');
       } finally {
         client.disconnect();
       }

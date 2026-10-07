@@ -145,6 +145,7 @@ const RETRYABLE_READ_CHANNELS = new Set([
   'remote:pwa-affordances',
   'mobile:push-status',
   'runpane:workspace:state',
+  'runpane:workspaces:machines',
   'permission:getPending',
   'sessions:get-archived-with-projects',
   'terminal:getState',
