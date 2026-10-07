@@ -60,6 +60,8 @@ export type TailnetMachineState =
 export interface TailnetMachine {
   name: string;
   dnsName: string;
+  /** Where its Pane answers, such as `https://studio-mac.tail1234.ts.net:8443`. */
+  url: string;
   os: 'macOS' | 'Windows' | 'Linux';
   ownerLogin: string;
   /** Signed into the same Tailscale login as this machine. */

@@ -51,6 +51,7 @@ export type SettingsSettingId =
   | 'remote-machines'
   | 'remote-visibility'
   | 'remote-password'
+  | 'remote-address'
   | 'remote-host-setup'
   | 'remote-host-mode'
   | 'remote-advanced-host'

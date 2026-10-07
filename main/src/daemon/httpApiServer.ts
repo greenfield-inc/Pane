@@ -26,7 +26,7 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getRemotePwaAssetResponse } from './pwaStaticAssets';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
 
@@ -581,6 +581,23 @@ export class PaneRemoteHttpApiServer {
         },
       } satisfies RemoteInvokeErrorPayload);
       return;
+    }
+
+    // Discovery probes peers as this computer's owner, so only that same identity may
+    // request its view. A paired client or another tailnet user must use their own computer.
+    if (invokeRequest.channel === 'runpane:workspaces:machines') {
+      const login = decodeOptionalBoundary(request.headers['tailscale-user-login'], boundary.string);
+      const owner = this.workspace?.access()?.ownerLogin;
+      if (!owner || login === undefined || login.trim().toLowerCase() !== owner.toLowerCase()) {
+        this.writeJson(response, 403, {
+          ok: false,
+          error: {
+            message: 'Find computers using an address on your own Tailscale login.',
+            code: 'ERR_WORKSPACE_DISCOVERY_OWNER_REQUIRED',
+          },
+        } satisfies RemoteInvokeErrorPayload);
+        return;
+      }
     }
 
     try {

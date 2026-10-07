@@ -63,4 +63,25 @@ describe('workspace access commands', () => {
     expect(config()).toEqual({});
     await host.shutdown();
   });
+
+  it('hands a phone the list of computers it can see, so the phone needs no Tailscale CLI', async () => {
+    const { host } = setup();
+    const registry = new PaneCommandRegistry();
+    const status = {
+      BackendState: 'Running', MagicDNSSuffix: 'tail1.ts.net',
+      Self: { DNSName: 'devbox.tail1.ts.net.', UserID: 1, OS: 'windows' },
+      Peer: { a: { DNSName: 'studio-mac.tail1.ts.net.', UserID: 1, OS: 'macOS', Online: true, TailscaleIPs: ['100.64.0.2'] } },
+      User: { 1: { LoginName: 'me@example.com' } },
+    };
+    registerWorkspaceCommands(registry, host, { getConfig: () => ({}), updateConfigWith: async () => ({}) }, '2.5.0', {
+      readStatus: async () => JSON.stringify(status),
+      probe: async () => ({ kind: 'outdated' }),
+    });
+    await expect(registry.invoke('runpane:workspaces:machines')).resolves.toMatchObject({
+      ok: true,
+      domain: 'tail1.ts.net',
+      machines: [{ name: 'studio-mac', url: 'https://studio-mac.tail1.ts.net:8443', state: 'outdated' }],
+    });
+    await host.shutdown();
+  });
 });

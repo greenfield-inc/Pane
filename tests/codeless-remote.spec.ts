@@ -7,10 +7,10 @@ const tailnetMachines: TailnetMachineList = {
   tailnet: 'parsa.github',
   domain: 'tail1234.ts.net',
   machines: [
-    { name: 'studio-mac', dnsName: 'studio-mac.tail1234.ts.net', os: 'macOS', ownerLogin: 'parsa@github', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0' },
-    { name: 'old-laptop', dnsName: 'old-laptop.tail1234.ts.net', os: 'macOS', ownerLogin: 'parsa@github', mine: true, state: 'outdated' },
-    { name: 'linux-box', dnsName: 'linux-box.tail1234.ts.net', os: 'Linux', ownerLogin: 'parsa@github', mine: true, state: 'offline' },
-    { name: 'team-builder', dnsName: 'team-builder.tail1234.ts.net', os: 'Windows', ownerLogin: 'teammate@github', mine: false, state: 'password-required' },
+    { name: 'studio-mac', dnsName: 'studio-mac.tail1234.ts.net', url: 'https://studio-mac.tail1234.ts.net:8443', os: 'macOS', ownerLogin: 'parsa@github', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0' },
+    { name: 'old-laptop', dnsName: 'old-laptop.tail1234.ts.net', url: 'https://old-laptop.tail1234.ts.net:8443', os: 'macOS', ownerLogin: 'parsa@github', mine: true, state: 'outdated' },
+    { name: 'linux-box', dnsName: 'linux-box.tail1234.ts.net', url: 'https://linux-box.tail1234.ts.net:8443', os: 'Linux', ownerLogin: 'parsa@github', mine: true, state: 'offline' },
+    { name: 'team-builder', dnsName: 'team-builder.tail1234.ts.net', url: 'https://team-builder.tail1234.ts.net:8443', os: 'Windows', ownerLogin: 'teammate@github', mine: false, state: 'password-required' },
   ],
 };
 
@@ -69,6 +69,7 @@ test.describe('Codeless remote access', () => {
     await openRemoteAccess(page);
     const visibility = page.getByRole('radiogroup', { name: 'Who can connect to this computer' });
     await expect(visibility.getByRole('radio', { name: 'Only me' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText('devbox.tail1234.ts.net', { exact: true })).toBeVisible();
 
     await visibility.getByRole('radio', { name: 'Everyone on tailnet' }).click();
     const warning = page.getByRole('alert').filter({ hasText: 'Anyone on parsa.github can connect' });

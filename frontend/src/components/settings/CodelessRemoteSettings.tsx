@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Check, Copy, RefreshCw } from 'lucide-react';
 import { AppleIcon, LinuxIcon, WindowsIcon } from '../ui/BrandIcons';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -65,6 +65,17 @@ export function CodelessRemoteSettings({ connectionState, otherHosts, accessFoot
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
   const [connectPassword, setConnectPassword] = useState<{ name: string; value: string } | null>(null);
   const mounted = useRef(true);
+  const [copied, setCopied] = useState(false);
+
+  const copyAddress = async (address: string) => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      window.setTimeout(() => { if (mounted.current) setCopied(false); }, 2_000);
+    } catch (cause) {
+      setError(errorMessage(cause, 'Could not copy the address.'));
+    }
+  };
 
   const refreshMachines = useCallback(async () => {
     setRefreshing(true);
@@ -296,6 +307,26 @@ export function CodelessRemoteSettings({ connectionState, otherHosts, accessFoot
             )}
           </div>
         </SettingRow>
+        {access?.state === 'on' && access.url && access.visibility !== 'off' && (
+          <SettingRow
+            settingId="remote-address"
+            label="Address"
+            description="Enter it in Pane on your phone to find your computers."
+          >
+            <div className="flex items-center justify-end gap-2">
+              <code className="truncate text-xs text-text-secondary">{phoneAddress(access.url)}</code>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon={copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                onClick={() => void copyAddress(phoneAddress(access.url ?? ''))}
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+          </SettingRow>
+        )}
         <SettingRow
           settingId="remote-password"
           label="Password"
@@ -351,6 +382,11 @@ function describeAccess(access: WorkspaceAccessSummary | null): string {
   if (access.state === 'off' && access.visibility !== 'off') return `${access.reason ?? 'Not running'}. ${access.fix ?? ''}`.trim();
   if (access.visibility === 'off') return 'Connection codes only.';
   return access.visibility === 'tailnet' ? 'Anyone on this tailnet.' : 'Your devices on Tailscale.';
+}
+
+/** What a phone needs to reach this computer: its Tailscale name, plus the port when not 8443. */
+function phoneAddress(url: string): string {
+  return url.replace(/^https:\/\//, '').replace(/:8443\/?$/, '');
 }
 
 function errorMessage(cause: unknown, fallback: string): string {

@@ -55,13 +55,24 @@ describe('discoverTailnetMachines', () => {
       tailnet: 'example.org',
       domain: 'tail1.ts.net',
       machines: [
-        { name: 'my-mac', dnsName: 'my-mac.tail1.ts.net', os: 'macOS', ownerLogin: 'me@example.org', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0' },
-        { name: 'my-old-mac', dnsName: 'my-old-mac.tail1.ts.net', os: 'macOS', ownerLogin: 'me@example.org', mine: true, state: 'outdated' },
-        { name: 'my-pc', dnsName: 'my-pc.tail1.ts.net', os: 'Windows', ownerLogin: 'me@example.org', mine: true, state: 'unreachable' },
-        { name: 'my-linux', dnsName: 'my-linux.tail1.ts.net', os: 'Linux', ownerLogin: 'me@example.org', mine: true, state: 'offline' },
-        { name: 'shared-box', dnsName: 'shared-box.tail1.ts.net', os: 'Linux', ownerLogin: 'teammate@example.org', mine: false, state: 'available', visibility: 'tailnet', paneVersion: '2.5.0' },
-        { name: 'locked-box', dnsName: 'locked-box.tail1.ts.net', os: 'Windows', ownerLogin: 'teammate@example.org', mine: false, state: 'password-required' },
+        { name: 'my-mac', dnsName: 'my-mac.tail1.ts.net', url: 'https://my-mac.tail1.ts.net:8443', os: 'macOS', ownerLogin: 'me@example.org', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0' },
+        { name: 'my-old-mac', dnsName: 'my-old-mac.tail1.ts.net', url: 'https://my-old-mac.tail1.ts.net:8443', os: 'macOS', ownerLogin: 'me@example.org', mine: true, state: 'outdated' },
+        { name: 'my-pc', dnsName: 'my-pc.tail1.ts.net', url: 'https://my-pc.tail1.ts.net:8443', os: 'Windows', ownerLogin: 'me@example.org', mine: true, state: 'unreachable' },
+        { name: 'my-linux', dnsName: 'my-linux.tail1.ts.net', url: 'https://my-linux.tail1.ts.net:8443', os: 'Linux', ownerLogin: 'me@example.org', mine: true, state: 'offline' },
+        { name: 'shared-box', dnsName: 'shared-box.tail1.ts.net', url: 'https://shared-box.tail1.ts.net:8443', os: 'Linux', ownerLogin: 'teammate@example.org', mine: false, state: 'available', visibility: 'tailnet', paneVersion: '2.5.0' },
+        { name: 'locked-box', dnsName: 'locked-box.tail1.ts.net', url: 'https://locked-box.tail1.ts.net:8443', os: 'Windows', ownerLogin: 'teammate@example.org', mine: false, state: 'password-required' },
       ],
+    });
+  });
+
+  it('lists the computer it runs on first when asked on behalf of a phone', async () => {
+    const list = await discoverTailnetMachines({
+      readStatus: async () => JSON.stringify(status),
+      probe: fakeProbe(),
+      self: { url: 'https://devbox.tail1.ts.net:8444', description: { machineName: 'devbox', visibility: 'owner', passwordProtected: false, paneVersion: '2.5.0' } },
+    });
+    expect(list.ok && list.machines[0]).toEqual({
+      name: 'devbox', dnsName: 'devbox.tail1.ts.net', url: 'https://devbox.tail1.ts.net:8444', os: 'Windows', ownerLogin: 'me@example.org', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0',
     });
   });
 

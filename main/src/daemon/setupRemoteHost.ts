@@ -204,7 +204,7 @@ export function formatSetupRemoteHostResult(result: SetupRemoteHostResult): stri
     lines.push('');
   }
 
-  lines.push('Paste the full pane-remote:// code into Settings > Remote Pane in desktop Pane, or into https://runpane.com/app/.');
+  lines.push('Paste the full pane-remote:// code into Settings > Remote Access > Add with a Code in desktop Pane, or into https://runpane.com/app/.');
   return lines.join('\n');
 }
 

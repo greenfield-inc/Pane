@@ -1,7 +1,7 @@
 import http from 'http';
 import { describe, expect, it, vi } from 'vitest';
 import { PaneCommandRegistry } from './commandRegistry';
-import { PaneWorkspaceHostController, readTailnetSelf } from './workspaceHost';
+import { PaneWorkspaceHostController, readTailnetSelf, readWorkspacePort } from './workspaceHost';
 import { hashWorkspacePassword } from './workspacePassword';
 import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import { createFakeTailscale, TAILNET_A, TAILNET_B } from './__fixtures__/fakeTailscale';
@@ -224,5 +224,14 @@ describe('PaneWorkspaceHostController', () => {
     expect(host.getStatus()).toMatchObject({ state: 'off', reason: 'turned off with runpane workspace disable' });
     expect(serveCalls.filter(args => args.includes('off'))).toHaveLength(2);
     await host.shutdown();
+  });
+});
+
+describe('readWorkspacePort', () => {
+  it('uses 8443 unless a valid port is set for development', () => {
+    expect(readWorkspacePort(undefined)).toBe(8443);
+    expect(readWorkspacePort('8444')).toBe(8444);
+    expect(readWorkspacePort('not a port')).toBe(8443);
+    expect(readWorkspacePort('70000')).toBe(8443);
   });
 });

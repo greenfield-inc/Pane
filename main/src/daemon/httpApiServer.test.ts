@@ -784,6 +784,7 @@ describe('workspace identity mode', () => {
   async function startWorkspaceServer(access: () => WorkspaceAccessPolicy | null) {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
+    registry.register('runpane:workspaces:machines', () => ({ machines: ['private-laptop'] }));
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
       workspace: { listenPort: 0, pathSecret: 'serve-secret', access },
     });
@@ -815,6 +816,16 @@ describe('workspace identity mode', () => {
     const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet' }));
     const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate));
     expect(response).toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'devbox' } } });
+  });
+
+  it('exposes discovery only to the signed owner even when teammates can connect', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet' }));
+    const discovery = { channel: 'runpane:workspaces:machines', args: [] };
+    const refused = await requestJson(server, 'POST', invokePath, discovery, undefined, as(teammate));
+    expect(refused.statusCode).toBe(403);
+    expect(refused.body).toMatchObject({ error: { code: 'ERR_WORKSPACE_DISCOVERY_OWNER_REQUIRED' } });
+    const allowed = await requestJson(server, 'POST', invokePath, discovery, undefined, as(owner.toUpperCase()));
+    expect(allowed).toEqual({ statusCode: 200, body: { ok: true, result: { machines: ['private-laptop'] } } });
   });
 
   it('under "Everyone on this tailnet", still refuses a login from outside the tailnet, such as a user a device was shared with', async () => {
@@ -941,10 +952,14 @@ describe('workspace identity mode', () => {
   it('keeps machine commands off the pairing-token transport', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
+    registry.register('runpane:workspaces:machines', () => ({ machines: ['private-laptop'] }));
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
     activeServers.push(server);
     await server.start();
     const response = await requestJson(server, 'POST', '/invoke', invoke, 'secret-token');
     expect(response.statusCode).toBe(403);
+    const discovery = await requestJson(server, 'POST', '/invoke', { channel: 'runpane:workspaces:machines', args: [] }, 'secret-token', as(owner));
+    expect(discovery.statusCode).toBe(403);
+    expect(discovery.body).toMatchObject({ error: { code: 'ERR_WORKSPACE_DISCOVERY_OWNER_REQUIRED' } });
   });
 });
