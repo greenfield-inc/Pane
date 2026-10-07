@@ -98,9 +98,10 @@ export function registerWorkspaceCommands(
       paneVersion,
     };
   };
-  // Both answer only clients the listener already let in, so they never reveal a machine to others.
+  // Describe answers clients admitted by visibility and password checks.
   registry.register('runpane:workspaces:describe', describe);
-  // A phone cannot read `tailscale status`; it asks a computer it can reach for the list instead.
+  // A phone cannot read `tailscale status`; it asks a computer on its own login.
+  // The HTTP transport restricts discovery to the signed owner identity before invoking this.
   registry.register('runpane:workspaces:machines', (): Promise<TailnetMachineList> => {
     const url = host.getAccess().url;
     return discoverTailnetMachines({ ...discovery, self: url ? { url, description: describe() } : undefined });

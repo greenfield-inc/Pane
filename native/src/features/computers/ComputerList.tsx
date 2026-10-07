@@ -99,7 +99,7 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
               onSubmitEditing={() => start(machine, password?.value)}
             />
             <View style={styles.actions}>
-              <Button title="Cancel" variant="plain" onPress={() => { setPassword(null); connect.reset(); }} />
+              <Button testID={`computer-password-cancel-${machine.name}`} title="Cancel" variant="plain" onPress={() => { setPassword(null); connect.reset(); }} />
               <Button
                 testID={`computer-password-connect-${machine.name}`}
                 title="Connect"
