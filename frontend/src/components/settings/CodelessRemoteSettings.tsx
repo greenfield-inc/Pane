@@ -61,8 +61,10 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
       if (!mounted.current) return;
       if (response.success && response.data) setMachines(response.data);
       else setError(response.error ?? 'Could not list your machines.');
+    } catch (cause) {
+      if (mounted.current) setError(errorMessage(cause, 'Could not list your machines.'));
     } finally {
-      if (mounted.current) setRefreshing(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -72,6 +74,8 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
       if (!mounted.current) return;
       if (response.success && response.data) setAccess(response.data);
       else setError(response.error ?? 'Could not read who can connect to this machine.');
+    }).catch((cause: unknown) => {
+      if (mounted.current) setError(errorMessage(cause, 'Could not read who can connect to this machine.'));
     });
     void refreshMachines();
     const timer = window.setInterval(() => void refreshMachines(), MACHINE_REFRESH_MS);
@@ -92,6 +96,9 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
       }
       setAccess(response.data);
       return true;
+    } catch (cause) {
+      setError(errorMessage(cause, 'Could not change who can connect to this machine.'));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -125,9 +132,19 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
       setConnectPassword(null);
       await fetchConfig().catch(() => undefined);
       void refreshMachines();
+    } catch (cause) {
+      setError(errorMessage(cause, `Could not connect to ${machine.name}.`));
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmTailnetVisibility = async () => {
+    if (await updateAccess({ visibility: 'tailnet' })) setPendingVisibility(null);
+  };
+
+  const savePassword = async () => {
+    if (passwordDraft !== null && await updateAccess({ password: passwordDraft })) setPasswordDraft(null);
   };
 
   const tailnetName = machines?.ok ? machines.tailnet : null;
@@ -257,7 +274,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
                     variant="danger"
                     size="sm"
                     loading={busy}
-                    onClick={() => void updateAccess({ visibility: 'tailnet' }).then((saved) => { if (saved) setPendingVisibility(null); })}
+                    onClick={() => void confirmTailnetVisibility()}
                   >
                     Make Visible to Everyone
                   </Button>
@@ -290,7 +307,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
               className="w-full space-y-2 sm:w-[320px]"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (passwordValid) void updateAccess({ password: passwordDraft }).then((saved) => { if (saved) setPasswordDraft(null); });
+                if (passwordValid) void savePassword();
               }}
             >
               <Input
@@ -323,4 +340,8 @@ function describeAccess(access: WorkspaceAccessSummary | null): string {
     : 'Only machines signed into your Tailscale login can connect';
   if (access.state === 'off') return `${who} once this works: ${access.reason ?? 'not running'}. ${access.fix ?? ''}`.trim();
   return `${who}${access.machineName ? ` to ${access.machineName}` : ''}.`;
+}
+
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message ? cause.message : fallback;
 }
