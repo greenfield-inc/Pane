@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 
+import { useDaemon } from '@/daemon';
 import { ComputersScreen } from '@/features/computers/ComputersScreen';
 
 export default function ComputersRoute() {
-  return <ComputersScreen onConnected={() => router.back()} />;
+  const { connection } = useDaemon();
+  return <ComputersScreen connected={connection.status === 'connected'} onConnected={() => router.back()} />;
 }

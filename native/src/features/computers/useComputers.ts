@@ -45,8 +45,8 @@ export function useConnectComputer(onConnected?: () => void) {
       } finally {
         client.disconnect();
       }
-      onConnected?.();
       await addHost(profile);
+      onConnected?.();
       return profile;
     },
     onSuccess: () => void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),

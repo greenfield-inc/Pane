@@ -28,16 +28,20 @@ interface ComputerListProps {
   /** Above the list, such as the "Find your computers" form. */
   header?: ReactElement;
   onConnected?: () => void;
+  connected: boolean;
+  onDirectoryChange: (profile: RemotePaneConnectionProfile) => void;
 }
 
 /** Your computers on Tailscale, as desktop Pane lists them: tap Connect, no code. */
-export function ComputerList({ directory, header, onConnected }: ComputerListProps) {
+export function ComputerList({ directory, header, onConnected, connected: isConnected, onDirectoryChange }: ComputerListProps) {
   const theme = useTheme();
   const computers = useComputers(directory);
   const connect = useConnectComputer(onConnected);
   const active = useActiveHost();
   const [password, setPassword] = useState<{ name: string; value: string } | null>(null);
 
+  const [directoryPassword, setDirectoryPassword] = useState('');
+  const directoryProblem = passwordProblem(computers.error);
   const list = computers.data;
   const machines = list?.ok ? list.machines : [];
   const domain = list?.ok ? list.domain : null;
@@ -45,11 +49,11 @@ export function ComputerList({ directory, header, onConnected }: ComputerListPro
 
   const start = (machine: TailnetMachine, value?: string) => {
     if (!domain) return;
-    connect.mutate({ machine, domain, password: value });
+    connect.mutate({ machine, domain, password: value ?? (directory?.tailnetMachine === machine.name && directory.tailnetDomain === domain ? directory.token : undefined) });
   };
 
   const renderItem = ({ item: machine }: { item: TailnetMachine }) => {
-    const connected = active?.tailnetMachine === machine.name && active.tailnetDomain === domain;
+    const connected = isConnected && active?.tailnetMachine === machine.name && active.tailnetDomain === domain;
     const connectable = machine.state !== 'offline' && machine.state !== 'unreachable';
     const pending = connect.isPending && connect.variables?.machine.name === machine.name;
     // Ask for the password when the computer says it needs one, or rejected the last one.
@@ -129,7 +133,27 @@ export function ComputerList({ directory, header, onConnected }: ComputerListPro
           {list?.ok ? <Text variant="footnote" tone="muted">On {list.tailnet}</Text> : null}
           {computers.isLoading ? <Text variant="subhead" tone="secondary">Looking for your computers…</Text> : null}
           {list && !list.ok ? <Text variant="subhead" tone="danger">{list.reason}. {list.fix}</Text> : null}
-          {computers.error ? <Text variant="subhead" tone="danger">{computers.error.message}</Text> : null}
+          {directoryProblem && directory ? (
+            <View style={styles.password}>
+              <Text variant="subhead">Password for {directory.label}</Text>
+              <TextField
+                testID="computers-directory-password"
+                placeholder="Password"
+                value={directoryPassword}
+                onChangeText={setDirectoryPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                error={directoryProblem === 'invalid' ? 'That password is wrong.' : undefined}
+              />
+              <Button
+                testID="computers-directory-unlock"
+                title="Find Computers"
+                disabled={!directoryPassword || computers.isFetching}
+                onPress={() => onDirectoryChange({ ...directory, token: directoryPassword })}
+              />
+            </View>
+          ) : computers.error ? <Text variant="subhead" tone="danger">{computers.error.message}</Text> : null}
         </View>
       )}
       ListEmptyComponent={list?.ok ? (

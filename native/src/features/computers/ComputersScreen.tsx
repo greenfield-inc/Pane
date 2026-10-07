@@ -14,18 +14,23 @@ import { ComputerList } from './ComputerList';
  * The list comes from a computer this phone already knows; the first time, from the address you
  * type in, as shown in Pane on that computer.
  */
-export function ComputersScreen({ onConnected }: { onConnected?: () => void }) {
+export function ComputersScreen({ onConnected, connected = false }: { onConnected?: () => void; connected?: boolean }) {
   const active = useActiveHost();
   const profiles = useHostsStore(state => state.profiles);
   const known = active?.tailnetMachine ? active : profiles.find(profile => profile.tailnetMachine) ?? null;
-  const [typed, setTyped] = useState<RemotePaneConnectionProfile | null>(null);
-  const directory = typed ?? known;
+  const [typed, setTyped] = useState<RemotePaneConnectionProfile | null | undefined>(undefined);
+  const directory = typed === undefined ? known : typed;
 
   return (
     <ComputerList
+      key={directory?.baseUrl ?? 'find'}
       directory={directory}
+      connected={connected}
+      onDirectoryChange={setTyped}
       onConnected={onConnected}
-      header={directory ? undefined : <FindComputersForm onFind={setTyped} />}
+      header={directory
+        ? <Button testID="computers-change-address" title="Use another computer" variant="plain" onPress={() => setTyped(null)} />
+        : <FindComputersForm onFind={setTyped} />}
     />
   );
 }

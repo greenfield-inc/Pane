@@ -22,7 +22,11 @@ iOS builds use Expo's scene lifecycle through `expo-build-properties` with `ios.
 
 ## Point it at a host
 
-The app pairs with a host through a one-time `pane-remote://` connection code, pasted or scanned from a QR code. For development, run an isolated host with its own data directory and port, so you never touch the Pane you use day to day:
+For your computers, sign in to Tailscale on the phone and computer, then open **Your computers** on the welcome screen (or **Settings → Your Computers** after connecting). Enter the **Address** shown in desktop **Settings → Remote Access → Access to this computer**, tap **Find Computers**, then **Connect**. Enter the computer's password when asked. **Use another computer** lets you change the address if that computer is unavailable or you switch tailnets. Saved profiles stay bound to their original tailnet.
+
+The phone asks that computer for its tailnet list because it cannot run `tailscale status` itself. Native requests use the Workspaces listener on port 8443. Browsers and the PWA keep using connection codes: the Workspaces listener refuses requests with an `Origin` header.
+
+You can also pair with a host through a one-time `pane-remote://` connection code, pasted or scanned from a QR code. For development, run an isolated host with its own data directory and port, so you never touch the Pane you use day to day:
 
 ```bash
 # from the repo root

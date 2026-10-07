@@ -25,7 +25,12 @@ const OFFLINE_RETRY_MS = 15_000;
  */
 export function DaemonProvider({ profile, children }: { profile: RemotePaneConnectionProfile; children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [client] = useState(() => createDaemonClient(profile));
+  const [binding, setBinding] = useState(() => ({ profile, client: createDaemonClient(profile) }));
+  // Updating a saved host's password must replace its authenticated connection too.
+  if (binding.profile.baseUrl !== profile.baseUrl || binding.profile.token !== profile.token) {
+    setBinding({ profile, client: createDaemonClient(profile) });
+  }
+  const { client } = binding;
   const [connection, setConnection] = useState<RemoteDaemonConnectionState>(() => client.getState());
 
   useEffect(() => {
