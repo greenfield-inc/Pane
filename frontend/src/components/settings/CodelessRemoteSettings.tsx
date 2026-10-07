@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Monitor, RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AppleIcon, LinuxIcon, WindowsIcon } from '../ui/BrandIcons';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { SettingsSection } from '../ui/SettingsSection';
 import { SettingRow } from './SettingRow';
+import { settingDomId } from './catalog';
 import { SegmentedControl } from './SettingsControls';
 import { API } from '../../utils/api';
 import { useConfigStore } from '../../stores/configStore';
@@ -23,14 +25,20 @@ const MACHINE_REFRESH_MS = 30_000;
 const VISIBILITY_OPTIONS: ReadonlyArray<{ id: WorkspaceVisibility; label: string }> = [
   { id: 'off', label: 'Off' },
   { id: 'owner', label: 'Only me' },
-  { id: 'tailnet', label: 'Everyone on this tailnet' },
+  { id: 'tailnet', label: 'Everyone on tailnet' },
 ];
+
+const OS_ICONS = {
+  macOS: AppleIcon,
+  Windows: WindowsIcon,
+  Linux: LinuxIcon,
+} satisfies Record<TailnetMachine['os'], typeof AppleIcon>;
 
 const STATE_TEXT = {
   available: 'Ready',
-  'password-required': 'Password required',
-  outdated: 'Older Pane: update it there to see who it is visible to',
-  unreachable: 'Pane is not open there, or remote access is off',
+  'password-required': 'Needs password',
+  outdated: 'Older Pane',
+  unreachable: 'Pane not open',
   offline: 'Offline',
 } satisfies Record<TailnetMachine['state'], string>;
 
@@ -160,12 +168,9 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
         </div>
       )}
 
-      <SettingsSection title="Your machines">
-        <SettingRow
-          settingId="remote-machines"
-          label={tailnetName ? `Machines on ${tailnetName}` : 'Machines on Tailscale'}
-          description="Machines on your Tailscale login with Pane open appear here, plus anyone else's that lets you in. No connection code needed."
-        >
+      <SettingsSection title="Your computers">
+        <div id={settingDomId('remote-machines')} data-setting-id="remote-machines" tabIndex={-1} className="flex items-center justify-between gap-3 py-2 outline-none">
+          <p className="text-xs text-text-tertiary">{tailnetName ? `On ${tailnetName}` : 'On Tailscale'}</p>
           <Button
             type="button"
             variant="ghost"
@@ -176,12 +181,12 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
           >
             Refresh
           </Button>
-        </SettingRow>
+        </div>
         {machines && !machines.ok && (
           <p className="py-3 text-sm text-text-secondary">{machines.reason}. {machines.fix}</p>
         )}
         {machines?.ok && machines.machines.length === 0 && (
-          <p className="py-3 text-sm text-text-tertiary">No other machines found. Open Pane on another machine signed into the same Tailscale login.</p>
+          <p className="py-3 text-sm text-text-tertiary">Open Pane on another computer on your Tailscale login to see it here.</p>
         )}
         {machines?.ok && machines.machines.map((machine) => {
           const active = connectionState.mode === 'remote'
@@ -189,18 +194,21 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
             && machine.profileId !== undefined;
           const connectable = machine.state === 'available' || machine.state === 'outdated';
           const askingPassword = connectPassword?.name === machine.name;
+          const OsIcon = OS_ICONS[machine.os];
           return (
             <div key={machine.dnsName} className="flex flex-wrap items-center justify-between gap-3 py-3" data-testid={`tailnet-machine-${machine.name}`}>
               <div className="flex min-w-0 items-start gap-3">
-                <Monitor className="mt-0.5 h-4 w-4 flex-none text-text-tertiary" />
+                <span role="img" aria-label={machine.os} title={machine.os} className="mt-0.5 flex-none text-text-tertiary">
+                  <OsIcon className="h-4 w-4" />
+                </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-text-primary">
-                    {machine.name} <span className="font-normal text-text-tertiary">· {machine.os}</span>
-                  </p>
+                  <p className="truncate text-sm font-medium text-text-primary">{machine.name}</p>
                   <p className="text-xs text-text-tertiary">
-                    {active ? `Connected · ${connectionState.status}` : STATE_TEXT[machine.state]}
-                    {machine.visibility && ` · Visible to ${machine.visibility === 'tailnet' ? 'everyone on the tailnet' : 'its owner only'}`}
-                    {!machine.mine && ` · ${machine.ownerLogin}'s machine`}
+                    {[
+                      active ? 'Connected' : STATE_TEXT[machine.state],
+                      machine.visibility === 'tailnet' && 'Shared with tailnet',
+                      !machine.mine && machine.ownerLogin,
+                    ].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               </div>
@@ -242,16 +250,16 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
         })}
       </SettingsSection>
 
-      <SettingsSection title="Who can connect to this machine">
+      <SettingsSection title="Access to this computer">
         <SettingRow
           settingId="remote-visibility"
-          label="Visibility"
+          label="Who can connect"
           description={describeAccess(access)}
           align="start"
         >
           <div className="w-full space-y-3 sm:w-[420px]">
             <SegmentedControl<WorkspaceVisibility>
-              label="Who can connect to this machine"
+              label="Who can connect to this computer"
               columns={3}
               value={visibility}
               options={VISIBILITY_OPTIONS}
@@ -261,11 +269,10 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
               <div className="rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-text-primary" role="alert">
                 <p className="flex items-start gap-2 font-medium">
                   <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-status-warning" />
-                  Everyone on {tailnetName ?? 'this tailnet'} will be able to connect
+                  Anyone on {tailnetName ?? 'this tailnet'} can connect
                 </p>
                 <p className="mt-1 text-xs text-text-secondary">
-                  Anyone with a device on this tailnet, not just you, could open this machine in Pane and run agents and shell commands here.
-                  Shared tailnets often include other people. Consider turning on password protection too.
+                  They can run agents and commands on this computer. Add a password to limit who gets in.
                 </p>
                 <div className="mt-3 flex justify-end gap-2">
                   <Button type="button" variant="ghost" size="sm" onClick={() => setPendingVisibility(null)}>Cancel</Button>
@@ -276,7 +283,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
                     loading={busy}
                     onClick={() => void confirmTailnetVisibility()}
                   >
-                    Make Visible to Everyone
+                    Allow Everyone
                   </Button>
                 </div>
               </div>
@@ -285,20 +292,20 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
         </SettingRow>
         <SettingRow
           settingId="remote-password"
-          label={access?.passwordProtected ? 'Password protection is on' : 'Password protection'}
+          label="Password"
           description={access?.passwordProtected
-            ? 'Every client must enter the password, including your own machines.'
-            : 'Off. When on, every client must also enter a password, on top of visibility.'}
+            ? 'On. Every device enters it to connect.'
+            : 'Ask every device for a password.'}
           align="start"
         >
           {passwordDraft === null ? (
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" size="sm" disabled={busy || access === null} onClick={() => setPasswordDraft('')}>
-                {access?.passwordProtected ? 'Change Password' : 'Set Password'}
+                {access?.passwordProtected ? 'Change' : 'Set Password'}
               </Button>
               {access?.passwordProtected && (
                 <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void updateAccess({ password: null })}>
-                  Turn Off
+                  Remove
                 </Button>
               )}
             </div>
@@ -312,7 +319,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
             >
               <Input
                 type="password"
-                label="New password"
+                label="Password"
                 value={passwordDraft}
                 onChange={(event) => setPasswordDraft(event.target.value)}
                 error={passwordDraft && !passwordValid ? `At least ${WORKSPACE_PASSWORD_MIN_LENGTH} characters` : undefined}
@@ -322,7 +329,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
               />
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={() => setPasswordDraft(null)}>Cancel</Button>
-                <Button type="submit" size="sm" loading={busy} disabled={!passwordValid}>Save Password</Button>
+                <Button type="submit" size="sm" loading={busy} disabled={!passwordValid}>Save</Button>
               </div>
             </form>
           )}
@@ -333,13 +340,10 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
 }
 
 function describeAccess(access: WorkspaceAccessSummary | null): string {
-  if (!access) return 'Checking Tailscale...';
-  if (access.visibility === 'off') return 'Nobody can connect to this machine without a connection code.';
-  const who = access.visibility === 'tailnet'
-    ? 'Everyone on this tailnet can connect'
-    : 'Only machines signed into your Tailscale login can connect';
-  if (access.state === 'off') return `${who} once this works: ${access.reason ?? 'not running'}. ${access.fix ?? ''}`.trim();
-  return `${who}${access.machineName ? ` to ${access.machineName}` : ''}.`;
+  if (!access) return 'Checking Tailscale…';
+  if (access.state === 'off' && access.visibility !== 'off') return `${access.reason ?? 'Not running'}. ${access.fix ?? ''}`.trim();
+  if (access.visibility === 'off') return 'Connection codes only.';
+  return access.visibility === 'tailnet' ? 'Anyone on this tailnet.' : 'Your devices on Tailscale.';
 }
 
 function errorMessage(cause: unknown, fallback: string): string {

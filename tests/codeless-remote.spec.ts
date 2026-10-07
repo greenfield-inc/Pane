@@ -25,11 +25,13 @@ async function openRemoteAccess(page: Page) {
 test.describe('Codeless remote access', () => {
   test('lists my machines and connects to one without a code', async ({ page }) => {
     await openRemoteAccess(page);
-    await expect(page.getByText('Machines on parsa.github')).toBeVisible();
+    await expect(page.getByText('On parsa.github')).toBeVisible();
     const studio = page.getByTestId('tailnet-machine-studio-mac');
-    await expect(studio).toContainText('Visible to its owner only');
+    await expect(studio).toContainText('Ready');
+    await expect(studio.getByRole('img', { name: 'macOS' })).toBeVisible();
+    await expect(page.getByTestId('tailnet-machine-team-builder').getByRole('img', { name: 'Windows' })).toBeVisible();
     await expect(page.getByTestId('tailnet-machine-linux-box').getByRole('button', { name: 'Connect' })).toBeDisabled();
-    await expect(page.getByTestId('tailnet-machine-team-builder')).toContainText("teammate@github's machine");
+    await expect(page.getByTestId('tailnet-machine-team-builder')).toContainText('Needs password · teammate@github');
     await page.screenshot({ path: 'test-results/codeless-remote/01-machines.png', fullPage: true });
 
     await studio.getByRole('button', { name: 'Connect' }).click();
@@ -49,11 +51,11 @@ test.describe('Codeless remote access', () => {
 
   test('defaults to "Only me" and warns before widening to the whole tailnet', async ({ page }) => {
     await openRemoteAccess(page);
-    const visibility = page.getByRole('radiogroup', { name: 'Who can connect to this machine' });
+    const visibility = page.getByRole('radiogroup', { name: 'Who can connect to this computer' });
     await expect(visibility.getByRole('radio', { name: 'Only me' })).toHaveAttribute('aria-checked', 'true');
 
-    await visibility.getByRole('radio', { name: 'Everyone on this tailnet' }).click();
-    const warning = page.getByRole('alert').filter({ hasText: 'Everyone on parsa.github will be able to connect' });
+    await visibility.getByRole('radio', { name: 'Everyone on tailnet' }).click();
+    const warning = page.getByRole('alert').filter({ hasText: 'Anyone on parsa.github can connect' });
     await expect(warning).toBeVisible();
     await warning.scrollIntoViewIfNeeded();
     await page.screenshot({ path: 'test-results/codeless-remote/04-visibility-warning.png', fullPage: true });
@@ -61,24 +63,24 @@ test.describe('Codeless remote access', () => {
     await warning.getByRole('button', { name: 'Cancel' }).click();
     await expect(visibility.getByRole('radio', { name: 'Only me' })).toHaveAttribute('aria-checked', 'true');
 
-    await visibility.getByRole('radio', { name: 'Everyone on this tailnet' }).click();
-    await page.getByRole('button', { name: 'Make Visible to Everyone' }).click();
-    await expect(visibility.getByRole('radio', { name: 'Everyone on this tailnet' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByText('Everyone on this tailnet can connect to devbox.')).toBeVisible();
+    await visibility.getByRole('radio', { name: 'Everyone on tailnet' }).click();
+    await page.getByRole('button', { name: 'Allow Everyone' }).click();
+    await expect(visibility.getByRole('radio', { name: 'Everyone on tailnet' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByText('Anyone on this tailnet.')).toBeVisible();
   });
 
   test('turns password protection on and off', async ({ page }) => {
     await openRemoteAccess(page);
     await page.getByRole('button', { name: 'Set Password' }).click();
-    await page.getByLabel('New password').fill('short');
-    await expect(page.getByRole('button', { name: 'Save Password' })).toBeDisabled();
-    await page.getByLabel('New password').fill('correct horse battery');
+    await page.getByLabel('Password', { exact: true }).fill('short');
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await page.getByLabel('Password', { exact: true }).fill('correct horse battery');
     await page.screenshot({ path: 'test-results/codeless-remote/05-set-password.png', fullPage: true });
-    await page.getByRole('button', { name: 'Save Password' }).click();
-    await expect(page.getByText('Password protection is on')).toBeVisible();
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('On. Every device enters it to connect.')).toBeVisible();
     await page.screenshot({ path: 'test-results/codeless-remote/06-password-on.png', fullPage: true });
 
-    await page.getByRole('button', { name: 'Turn Off' }).click();
-    await expect(page.getByText('Password protection is on')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Remove' }).click();
+    await expect(page.getByText('Ask every device for a password.')).toBeVisible();
   });
 });

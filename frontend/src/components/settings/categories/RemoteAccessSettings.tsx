@@ -18,10 +18,10 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
     ? `Connected to ${controller.connectionState.activeProfileLabel ?? 'remote Pane'}`
     : controller.connectionState.mode === 'remote'
       ? `Remote mode: ${controller.connectionState.status}`
-      : 'Using local runtime';
+      : 'For browsers, phones, and other Tailscale accounts';
 
   return (
-    <SettingsPage title="Remote Access" description="Connect Pane to another machine.">
+    <SettingsPage title="Remote Access" description="Use Pane on your other computers.">
       {controller.loading && (
         <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
       )}
@@ -32,11 +32,11 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
         </div>
       )}
       <CodelessRemoteSettings connectionState={controller.connectionState} />
-      <SettingsSection title="Remote Pane">
+      <SettingsSection title="Connection codes">
         <SettingRow
           settingId="remote-pane"
           label={remoteStatus}
-          description={controller.connectionState.activeBaseUrl ?? 'Worktrees, terminals, and agent commands can run on a remote host.'}
+          description={controller.connectionState.activeBaseUrl ?? 'A host creates a code; the device pastes it.'}
           align="start"
         >
           <div className="flex max-w-md flex-wrap justify-end gap-2">

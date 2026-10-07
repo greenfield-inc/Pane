@@ -66,7 +66,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
   const activeCode = controller.setupResult?.connectionCode;
   const executableHealth = getRemoteExecutableHealthPresentation(controller.hostState.executableHealth);
   return (
-    <SettingsPage title="Set Up This Machine" description="Configure this Pane install as a remote host and create a cross-device connection code.">
+    <SettingsPage title="Set Up This Machine" description="Host Pane here and create a connection code.">
       <SettingsSection title="Host status">
         {executableHealth && (
           <div
@@ -80,8 +80,8 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
         )}
         <SettingRow
           settingId="remote-host-setup"
-          label={controller.hostState.status === 'live' ? 'Remote host is live' : 'Remote host is not running'}
-          description={controller.hostState.lastError ?? `${controller.hostState.connectedClients.length} connected client(s)`}
+          label={controller.hostState.status === 'live' ? 'Host is on' : 'Host is off'}
+          description={controller.hostState.lastError ?? `${controller.hostState.connectedClients.length} connected`}
         >
           <div className="flex flex-wrap justify-end gap-2">
             {(controller.hostState.status === 'live' || controller.config.host.config.enabled) && (
@@ -113,7 +113,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
       </SettingsSection>
 
       <SettingsSection title="Setup">
-        <SettingRow settingId="remote-host-mode" label="Data and service mode" description="Use current Pane data while this app is open, or isolated daemon data with an optional background service." align="start">
+        <SettingRow settingId="remote-host-mode" label="Data" description="Current data runs while Pane is open. Isolated data can run as a background service." align="start">
           <div className="w-full space-y-4 sm:w-[460px]">
             <SegmentedControl
               label="Remote host data mode"
@@ -180,18 +180,18 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
 
 function Connections({ controller }: { controller: RemoteAccessController }) {
   return (
-    <SettingsPage title="Connections" description="Connect this desktop app to a remote Pane host and manage saved profiles.">
+    <SettingsPage title="Connections" description="Connect this app to a host.">
       <SettingsSection title="Runtime">
         <SettingRow
           settingId="remote-connections"
           label={controller.connectionState.status === 'connected' ? `Connected to ${controller.connectionState.activeProfileLabel ?? 'remote Pane'}` : 'Using local runtime'}
-          description={controller.connectionState.lastError ?? controller.connectionState.activeBaseUrl ?? 'Choose where worktrees, terminals, and agent commands run.'}
+          description={controller.connectionState.lastError ?? controller.connectionState.activeBaseUrl ?? 'Where agents and terminals run.'}
         >
           <Button type="button" variant="secondary" size="sm" onClick={controller.useLocal} disabled={controller.busy || controller.connectionState.mode === 'local'}>Use Local Runtime</Button>
         </SettingRow>
       </SettingsSection>
       <SettingsSection title="Add connection">
-        <SettingRow settingId="remote-connection-code" label="Connection code" description="Paste a pane-remote:// code created by the host." align="start">
+        <SettingRow settingId="remote-connection-code" label="Connection code" description="Paste the host's pane-remote:// code." align="start">
           <div className="w-full space-y-2 sm:w-[460px]">
             <Textarea label="Connection Code" value={controller.connectionCode} onChange={(event) => controller.setConnectionCode(event.target.value)} placeholder="pane-remote://..." rows={3} fullWidth className="ph-no-capture" />
             <div className="flex justify-end">
@@ -200,8 +200,8 @@ function Connections({ controller }: { controller: RemoteAccessController }) {
           </div>
         </SettingRow>
       </SettingsSection>
-      <SettingsSection title="Saved profiles">
-        {controller.config.client.profiles.length === 0 ? <p className="py-4 text-sm text-text-tertiary">No remote profiles saved.</p> : controller.config.client.profiles.map((profile) => {
+      <SettingsSection title="Saved connections">
+        {controller.config.client.profiles.length === 0 ? <p className="py-4 text-sm text-text-tertiary">Saved connections appear here.</p> : controller.config.client.profiles.map((profile) => {
           const active = controller.connectionState.activeProfileId === profile.id && controller.connectionState.status === 'connected';
           return (
             <div key={profile.id} className="flex items-center justify-between gap-3 py-3">
@@ -229,9 +229,9 @@ function Connections({ controller }: { controller: RemoteAccessController }) {
 
 function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
   return (
-    <SettingsPage title="Advanced Remote Host" description="Listener settings and manual pairing tools for experienced operators.">
+    <SettingsPage title="Advanced Remote Host" description="Listener and manual pairing.">
       <SettingsSection title="Listener">
-        <SettingRow settingId="remote-advanced-host" label="Host listener" description="Controls the HTTP/SSE listener for this machine." align="start">
+        <SettingRow settingId="remote-advanced-host" label="Host listener" description="What other devices connect to." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Checkbox label="Enable remote daemon listener" checked={controller.hostDraft.enabled} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, enabled: event.target.checked })} />
             <div className="grid gap-3 sm:grid-cols-2">
@@ -246,7 +246,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
       </SettingsSection>
 
       <SettingsSection title="Pairing tools">
-        <SettingRow settingId="remote-paired-connection" label="Create paired connection" description="Mint a host token and save a matching local client profile." align="start">
+        <SettingRow settingId="remote-paired-connection" label="Create paired connection" description="Create a token and a matching saved connection." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Connection Label" value={controller.pairLabel} onChange={(event) => controller.setPairLabel(event.target.value)} placeholder="Office Mac mini" fullWidth />
             <Input label="Remote Base URL" value={controller.pairBaseUrl} onChange={(event) => controller.setPairBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" error={controller.pairBaseUrl && !controller.validation.pair ? 'Enter a label and valid HTTP(S) URL' : undefined} fullWidth />
@@ -256,7 +256,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
             )}
           </div>
         </SettingRow>
-        <SettingRow settingId="remote-existing-profile" label="Save existing remote profile" description="Save a bearer token that was created on another host." align="start">
+        <SettingRow settingId="remote-existing-profile" label="Save existing remote profile" description="Save a token from another host." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Existing Profile Label" value={controller.profileLabel} onChange={(event) => controller.setProfileLabel(event.target.value)} placeholder="Office Mac mini tunnel" fullWidth />
             <Input label="Existing Remote Base URL" value={controller.profileBaseUrl} onChange={(event) => controller.setProfileBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" fullWidth />
