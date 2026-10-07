@@ -12,7 +12,7 @@ Pane saves the profile and attempts to connect immediately. Local desktop mode i
 
 ## Workspaces or pairing codes?
 
-To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines. Use the remote daemon and pairing codes in this guide for browsers and phones, for the desktop app's remote mode, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
+To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your machines. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
 
 ## Guided quick start
 
