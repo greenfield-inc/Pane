@@ -49,7 +49,7 @@ export default function RootLayout() {
             <>
               <DaemonProvider key={activeHost.id} profile={activeHost}>
                 <RootStack signedIn />
-                <PushRegistration />
+                {activeHost.tailnetMachine ? null : <PushRegistration />}
               </DaemonProvider>
               <SharedCredentialSync />
             </>

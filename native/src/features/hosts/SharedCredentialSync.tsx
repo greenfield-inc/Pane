@@ -31,7 +31,7 @@ async function run(): Promise<void> {
   }
   running = true;
   try {
-    const { profiles } = useHostsStore.getState();
+    const profiles = useHostsStore.getState().profiles.filter(profile => !profile.tailnetMachine);
     if (profiles.length < 2) return;
     const hosts = profiles.map((profile): SharedCredentialHost => {
       const client = createDaemonClient(profile);

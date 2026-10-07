@@ -22,7 +22,7 @@ export default function SettingsScreen() {
       'Pane forgets this computer on this phone. Connect again to use it.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => void revokePush(client, profile.id).then(() => remove(profile.id)) },
+        { text: 'Sign Out', style: 'destructive', onPress: () => void (profile.tailnetMachine ? remove(profile.id) : revokePush(client, profile.id).then(() => remove(profile.id))) },
       ],
     );
   };
@@ -44,7 +44,11 @@ export default function SettingsScreen() {
         <ListRow testID="settings-voice" title="Voice" subtitle="Keys for dictation" trailing="chevron" onPress={() => router.push('/settings/voice')} />
       </ListSection>
 
-      <NotificationSettings />
+      {profile.tailnetMachine ? (
+        <ListSection title="Notifications">
+          <ListRow testID="notifications-code-required" title="Connect with a Code" subtitle="Pair this phone to receive alerts" trailing="chevron" onPress={() => router.push('/hosts/add')} />
+        </ListSection>
+      ) : <NotificationSettings />}
 
       <ListSection title="Hosts" footer="Saved in the iOS Keychain or Android Keystore.">
         {profiles.map(host => (
