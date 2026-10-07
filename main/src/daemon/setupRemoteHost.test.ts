@@ -7,9 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { decodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
+  readConfiguredTailscaleServeAccess,
   setupRemoteHost as setupRemoteHostImpl,
   type SetupRemoteHostOptions,
 } from './setupRemoteHost';
+import { createFakeTailscale, TAILNET_A, TAILNET_B } from './__fixtures__/fakeTailscale';
 
 const spawnSyncMock = vi.fn<typeof childProcess.spawnSync>();
 
@@ -370,5 +372,99 @@ describe('setupRemoteHost', () => {
       preferTunnel: 'manual',
       installService: false,
     })).rejects.toThrow('Manual HTTPS remote setup requires a base URL.');
+  });
+});
+
+describe('readConfiguredTailscaleServeAccess', () => {
+  it('reports a missing 443 forward instead of returning the Workspaces 8443 URL', async () => {
+    const tailscale = createFakeTailscale();
+    tailscale.serveWorkspaceOnly();
+
+    const result = await readConfiguredTailscaleServeAccess(42137, { run: tailscale.run });
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining('no Tailscale Serve forward from :443 to 127.0.0.1:42137'),
+    });
+    expect(JSON.stringify(result)).not.toContain(':8443');
+    expect(tailscale.serveCalls()).toEqual([]);
+  });
+
+  it('builds access from live tailnet status when the 443 forward targets the listen port', async () => {
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_B });
+    tailscale.serveWorkspaceOnly();
+    tailscale.serveRemoteForward(42137);
+
+    const result = await readConfiguredTailscaleServeAccess(42137, { run: tailscale.run });
+
+    expect(result).toMatchObject({
+      ok: true,
+      tailnet: TAILNET_B.name,
+      access: {
+        baseUrl: 'https://parsa-devbox.tail3c2c57.ts.net',
+        tunnel: { kind: 'tailscale', tailscaleIp: TAILNET_B.ip, command: 'tailscale serve --bg --tls-terminated-tcp=443 42137' },
+      },
+    });
+  });
+
+  it('ignores a 443 forward that targets another port', async () => {
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
+    tailscale.serveRemoteForward(9999);
+
+    await expect(readConfiguredTailscaleServeAccess(42137, { run: tailscale.run }))
+      .resolves.toMatchObject({ ok: false });
+  });
+});
+
+describe('readConfiguredTailscaleServeAccess after a tailnet switch', () => {
+  const macCli = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
+
+  afterEach(() => {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', originalPlatformDescriptor);
+    }
+  });
+
+  it.each([
+    { platform: 'darwin', cli: macCli, env: { TAILSCALE_BE_CLI: '1' }, display: `TAILSCALE_BE_CLI=1 '${macCli}'` },
+    { platform: 'win32', cli: 'tailscale', env: undefined, display: 'tailscale' },
+    { platform: 'linux', cli: 'tailscale', env: undefined, display: 'tailscale' },
+  ])('re-applies the 443 forward on the new tailnet with the $platform CLI', async ({ platform, cli, env, display }) => {
+    Object.defineProperty(process, 'platform', { value: platform });
+    const tailscale = createFakeTailscale({ cli, tailnet: TAILNET_A });
+    tailscale.serveRemoteForward(42137);
+    tailscale.switchTailnet(TAILNET_B);
+    tailscale.serveWorkspaceOnly();
+
+    const result = await readConfiguredTailscaleServeAccess(42137, {
+      run: tailscale.run, reapply: true, pathExists: candidate => candidate === macCli,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      reapplied: true,
+      tailnet: TAILNET_B.name,
+      access: {
+        baseUrl: 'https://parsa-devbox.tail3c2c57.ts.net',
+        tunnel: { tailscaleIp: TAILNET_B.ip, command: `${display} serve --bg --tls-terminated-tcp=443 42137` },
+      },
+    });
+    expect(tailscale.serveCalls()).toEqual([{
+      command: cli,
+      args: ['serve', '--bg', '--tls-terminated-tcp=443', '42137'],
+      env: env ? expect.objectContaining(env) : undefined,
+    }]);
+  });
+
+  it('surfaces the Serve error when the forward cannot be re-applied', async () => {
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_B });
+    tailscale.failServe('serve config denied');
+
+    const result = await readConfiguredTailscaleServeAccess(42137, { run: tailscale.run, reapply: true });
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining(`could not forward :443 to 127.0.0.1:42137 on tailnet ${TAILNET_B.name}: serve config denied`),
+    });
   });
 });

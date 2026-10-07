@@ -38,6 +38,19 @@ function registerTestRemoteDaemonHandlers(
 
 const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
 
+function tailscaleAccess(baseUrl: string, tailscaleIp: string, listenPort = 42137): NonNullable<RemoteDaemonConfig['host']['access']> {
+  return {
+    baseUrl,
+    tunnel: {
+      kind: 'tailscale',
+      selected: true,
+      command: `tailscale serve --bg --tls-terminated-tcp=443 ${listenPort}`,
+      tailscaleIp,
+    },
+    updatedAt: '2026-05-18T20:00:00.000Z',
+  };
+}
+
 interface IpcMainStub {
   handlers: Map<string, (_event: { readonly sender: object }, ...args: PaneCommandValue[]) => Promise<PaneCommandValue>>;
   handle(channel: string, listener: (_event: { readonly sender: object }, ...args: PaneCommandValue[]) => Promise<PaneCommandValue>): void;
@@ -833,19 +846,14 @@ describe('remote daemon IPC', () => {
     expect(response?.data?.token).toMatch(/^[0-9a-f]{48}$/);
   });
 
-  it('creates a host connection code from cached host access without running setup', async () => {
+  it('creates a host connection code for the tailnet this host is on now, not the saved one', async () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config.enabled = true;
-    initialConfig.host.access = {
-      baseUrl: 'https://office-mac.tailnet.ts.net',
-      tunnel: {
-        kind: 'tailscale',
-        selected: true,
-        command: 'tailscale serve --bg --tls-terminated-tcp=443 42137',
-        tailscaleIp: '100.127.116.52',
-      },
-      updatedAt: '2026-05-18T20:00:00.000Z',
-    };
+    initialConfig.host.access = tailscaleAccess('https://parsa-devbox.taila5e94c.ts.net', '100.115.232.35');
+    const liveAccess = tailscaleAccess('https://parsa-devbox.tail3c2c57.ts.net', '100.65.125.102');
+    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
+      ok: true, access: liveAccess, tailnet: 'bloomapi.org.github', reapplied: true,
+    });
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub(initialConfig);
 
@@ -860,21 +868,62 @@ describe('remote daemon IPC', () => {
 
     expect(response.success).toBe(true);
     expect(setupRemoteHost).not.toHaveBeenCalled();
-    expect(readConfiguredTailscaleServeAccess).not.toHaveBeenCalled();
+    expect(readConfiguredTailscaleServeAccess).toHaveBeenCalledWith(42137, { reapply: true });
     expect(response.data?.connectionCode).toContain('pane-remote://');
 
     const payload = decodePaneRemoteConnection(response.data?.connectionCode ?? '');
     expect(payload).toMatchObject({
       label: 'Office Mac mini',
-      baseUrl: 'https://office-mac.tailnet.ts.net',
+      baseUrl: 'https://parsa-devbox.tail3c2c57.ts.net',
       tunnel: {
         kind: 'tailscale',
-        tailscaleIp: '100.127.116.52',
+        tailscaleIp: '100.65.125.102',
       },
     });
+    expect(configManager.getConfig().remoteDaemon?.host.access).toEqual(liveAccess);
     expect(configManager.getConfig().remoteDaemon?.host.clients).toHaveLength(1);
     expectConnectionCodeAuthenticates(configManager, response.data?.connectionCode);
     expect(configManager.getConfig().remoteDaemon?.client.profiles).toHaveLength(0);
+  });
+
+  it('refuses to hand out a code when the 443 forward cannot be confirmed', async () => {
+    const initialConfig = createDefaultRemoteDaemonConfig();
+    initialConfig.host.config.enabled = true;
+    initialConfig.host.access = tailscaleAccess('https://parsa-devbox.taila5e94c.ts.net', '100.115.232.35');
+    const error = 'Tailscale Serve could not forward :443 to 127.0.0.1:42137 on tailnet bloomapi.org.github: serve config denied';
+    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({ ok: false, error });
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub(initialConfig);
+
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+
+    await expect(ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, {}))
+      .resolves.toEqual({ success: false, error });
+    expect(configManager.getConfig().remoteDaemon?.host.clients).toHaveLength(0);
+    expect(configManager.getConfig().remoteDaemon?.host.access?.baseUrl).toBe('https://parsa-devbox.taila5e94c.ts.net');
+  });
+
+  it('keeps manually configured host access without reading Tailscale', async () => {
+    const initialConfig = createDefaultRemoteDaemonConfig();
+    initialConfig.host.config.enabled = true;
+    initialConfig.host.access = {
+      baseUrl: 'https://pane.example.com',
+      tunnel: { kind: 'manual', selected: true },
+      updatedAt: '2026-05-18T20:00:00.000Z',
+    };
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub(initialConfig);
+
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager });
+
+    // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+    const response = await ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, {}) as {
+      success?: boolean;
+      data?: { connectionCode?: string };
+    };
+    expect(response.success).toBe(true);
+    expect(readConfiguredTailscaleServeAccess).not.toHaveBeenCalled();
+    expect(decodePaneRemoteConnection(response.data?.connectionCode ?? '').baseUrl).toBe('https://pane.example.com');
   });
 
   it('discovers existing Tailscale Serve access when cached host access is missing', async () => {
@@ -882,14 +931,7 @@ describe('remote daemon IPC', () => {
     initialConfig.host.config.enabled = true;
     initialConfig.host.config.listenPort = 42138;
     vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
-      baseUrl: 'https://wsl.tailnet.ts.net',
-      tunnel: {
-        kind: 'tailscale',
-        selected: true,
-        command: 'tailscale serve --bg --tls-terminated-tcp=443 42138',
-        tailscaleIp: '100.75.154.34',
-      },
-      updatedAt: '2026-05-18T20:01:00.000Z',
+      ok: true, access: tailscaleAccess('https://wsl.tailnet.ts.net', '100.75.154.34', 42138), tailnet: 'tailnet.ts.net', reapplied: false,
     });
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub(initialConfig);
@@ -904,7 +946,7 @@ describe('remote daemon IPC', () => {
     };
 
     expect(response.success).toBe(true);
-    expect(readConfiguredTailscaleServeAccess).toHaveBeenCalledWith(42138);
+    expect(readConfiguredTailscaleServeAccess).toHaveBeenCalledWith(42138, { reapply: false });
     const payload = decodePaneRemoteConnection(response.data?.connectionCode ?? '');
     expect(payload.baseUrl).toBe('https://wsl.tailnet.ts.net');
     expect(configManager.getConfig().remoteDaemon?.host.access?.baseUrl).toBe('https://wsl.tailnet.ts.net');
@@ -915,14 +957,7 @@ describe('remote daemon IPC', () => {
     initialConfig.host.config.enabled = true;
     initialConfig.host.config.listenPort = 42138;
     vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
-      baseUrl: 'https://wsl.tailnet.ts.net',
-      tunnel: {
-        kind: 'tailscale',
-        selected: true,
-        command: 'tailscale serve --bg --tls-terminated-tcp=443 42138',
-        tailscaleIp: '100.75.154.34',
-      },
-      updatedAt: '2026-05-18T20:01:00.000Z',
+      ok: true, access: tailscaleAccess('https://wsl.tailnet.ts.net', '100.75.154.34', 42138), tailnet: 'tailnet.ts.net', reapplied: false,
     });
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub(initialConfig);
@@ -968,16 +1003,10 @@ describe('remote daemon IPC', () => {
   it('fails host connection code creation when the generated client is not persisted', async () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config.enabled = true;
-    initialConfig.host.access = {
-      baseUrl: 'https://office-mac.tailnet.ts.net',
-      tunnel: {
-        kind: 'tailscale',
-        selected: true,
-        command: 'tailscale serve --bg --tls-terminated-tcp=443 42137',
-        tailscaleIp: '100.127.116.52',
-      },
-      updatedAt: '2026-05-18T20:00:00.000Z',
-    };
+    initialConfig.host.access = tailscaleAccess('https://office-mac.tailnet.ts.net', '100.127.116.52');
+    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
+      ok: true, access: initialConfig.host.access, tailnet: 'tailnet.ts.net', reapplied: false,
+    });
     const ipcMain = createIpcMainStub();
     const configManager = createClientDroppingConfigManagerStub(initialConfig);
 

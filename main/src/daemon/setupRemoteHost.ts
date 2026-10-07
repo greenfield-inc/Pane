@@ -24,6 +24,9 @@ import {
   getTailscaleServeSetupInstructions,
   getTailscaleSetupInstructions,
   installTailscaleCommandOrThrow,
+  isIpv4Address,
+  readTailnetIdentity,
+  readTailscaleServeHandlers,
   resolveTailscaleCommand,
   resolveTailscaleCommandAsync,
   runCommand as runTailscaleCommand,
@@ -215,27 +218,55 @@ function createRemoteHostAccess(
   return access;
 }
 
+export type TailscaleServeAccessResult =
+  | { ok: true; access: RemoteDaemonHostAccess; tailnet: string; reapplied: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Remote daemon access on the tailnet this machine is on now. Only the TLS-terminated
+ * `:443 -> 127.0.0.1:<listenPort>` forward counts, never the Workspaces `:8443` proxy.
+ * Serve config belongs to one tailnet profile, so `reapply` re-creates a forward that a
+ * tailnet switch dropped.
+ */
 export async function readConfiguredTailscaleServeAccess(
   listenPort: number,
-  run: RemoteSetupCommandRunner = runRemoteSetupCommand,
-): Promise<RemoteDaemonHostAccess | null> {
-  const tailscaleCli = await resolveTailscaleCommandAsync(run);
+  options: { run?: RemoteSetupCommandRunner; reapply?: boolean; pathExists?: (candidate: string) => boolean } = {},
+): Promise<TailscaleServeAccessResult> {
+  const run = options.run ?? runRemoteSetupCommand;
+  const tailscaleCli = await resolveTailscaleCommandAsync(run, options.pathExists);
   if (!tailscaleCli) {
-    return null;
+    return { ok: false, error: 'Tailscale is not installed. Install it from https://tailscale.com/download and sign in, then try again.' };
   }
+  const tailscale = (args: string[]) => run(tailscaleCli.command, args, { env: tailscaleCli.env });
 
-  const serveStatus = await run(tailscaleCli.command, ['serve', 'status'], { env: tailscaleCli.env });
-  if (!serveStatus.ok) {
-    return null;
-  }
-
-  const serveUrl = extractFirstHttpsUrl([serveStatus.stdout, serveStatus.stderr].join('\n'));
-  if (!serveUrl) {
-    return null;
+  const identity = readTailnetIdentity((await tailscale(['status', '--json'])).stdout);
+  if (!identity.ok) {
+    return { ok: false, error: identity.reason };
   }
 
   const tailscaleCommand = buildTailscaleServeCommand(tailscaleCli, listenPort);
-  const tailscaleIp = await readTailscaleIpv4(tailscaleCli, undefined, run);
+  const hasForward = async () => readTailscaleServeHandlers((await tailscale(['serve', 'status', '--json'])).stdout)
+    .hasTlsTerminatedForward(listenPort);
+  let reapplied = false;
+  let confirmed = await hasForward();
+  if (!confirmed && options.reapply) {
+    const serve = await tailscale(['serve', '--bg', '--tls-terminated-tcp=443', String(listenPort)]);
+    if (!serve.ok) {
+      const output = firstNonEmpty(serve.stderr, serve.stdout, 'unknown error');
+      return {
+        ok: false,
+        error: `Tailscale Serve could not forward :443 to 127.0.0.1:${listenPort} on tailnet ${identity.tailnetName}: ${output}\n\n${getTailscaleServeSetupInstructions(listenPort)}`,
+      };
+    }
+    reapplied = true;
+    confirmed = await hasForward();
+  }
+  if (!confirmed) {
+    return {
+      ok: false,
+      error: `This machine is on tailnet ${identity.tailnetName}, but it has no Tailscale Serve forward from :443 to 127.0.0.1:${listenPort}, so a connection code would not connect. Run "${tailscaleCommand}" on this machine, then try again.`,
+    };
+  }
 
   const tunnel: NonNullable<PaneRemoteConnectionImportPayload['tunnel']> = {
     kind: 'tailscale',
@@ -243,10 +274,15 @@ export async function readConfiguredTailscaleServeAccess(
     command: tailscaleCommand,
     note: 'Tailscale Serve is configured for this tailnet. Keep Pane running on this host when using current data mode. If another device cannot connect immediately, wait a few minutes for Tailscale Serve to finish provisioning, then retry.',
   };
-  if (tailscaleIp) {
-    tunnel.tailscaleIp = tailscaleIp;
+  if (identity.tailscaleIp) {
+    tunnel.tailscaleIp = identity.tailscaleIp;
   }
-  return createRemoteHostAccess(serveUrl, tunnel);
+  return {
+    ok: true,
+    access: createRemoteHostAccess(`https://${identity.dnsName}`, tunnel),
+    tailnet: identity.tailnetName,
+    reapplied,
+  };
 }
 
 function buildNextRemoteDaemonConfig<Value>(
@@ -407,7 +443,7 @@ async function selectTailscaleTunnel(options: {
   }
 
   const serveStatus = await run(['serve', 'status']);
-  const serveUrl = extractFirstHttpsUrl([
+  const serveUrl = extractRemoteDaemonServeUrl([
     tailscaleServe.stdout,
     tailscaleServe.stderr,
     serveStatus.ok ? serveStatus.stdout : '',
@@ -523,13 +559,21 @@ function isLoopbackPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-function extractFirstHttpsUrl(output: string): string | null {
-  const httpsMatch = output.match(/https:\/\/[^\s|"'<>]+/);
-  if (httpsMatch) {
-    return httpsMatch[0].replace(/[),.]+$/g, '');
+/** The remote daemon's URL in `tailscale serve` output: the :443 forward, never another port such as Workspaces' 8443. */
+function extractRemoteDaemonServeUrl(output: string): string | null {
+  const tlsForwardMatch = output.match(/tcp:\/\/([^/\s|"'<>:]+):443\s+\(TLS terminated\)/);
+  if (tlsForwardMatch) {
+    return `https://${tlsForwardMatch[1]}`;
   }
 
-  const tailscaleTcpMatch = output.match(/tcp:\/\/([^/\s|"'<>:]+)(?::443)?(?:\s+\(TLS terminated\))?/);
+  for (const httpsMatch of output.matchAll(/https:\/\/[^\s|"'<>]+/g)) {
+    const url = httpsMatch[0].replace(/[),.]+$/g, '');
+    if (!/^https:\/\/[^/]+:(?!443(?:\/|$))\d+/.test(url)) {
+      return url;
+    }
+  }
+
+  const tailscaleTcpMatch = output.match(/tcp:\/\/([^/\s|"'<>:]+)(?::443)?(?:\s+\(TLS terminated\))?(?=[\s|"'<>]|$)/);
   if (!tailscaleTcpMatch) {
     return null;
   }
@@ -554,18 +598,6 @@ async function readTailscaleIpv4(
     .map((value) => value.trim())
     .find(isIpv4Address)
     ?? null;
-}
-
-function isIpv4Address(value: string): boolean {
-  const parts = value.split('.');
-  return parts.length === 4 && parts.every((part) => {
-    if (!/^\d{1,3}$/.test(part)) {
-      return false;
-    }
-
-    const numericPart = Number(part);
-    return numericPart >= 0 && numericPart <= 255;
-  });
 }
 
 function upsertById<T extends { id: string }>(items: T[], nextItem: T): T[] {

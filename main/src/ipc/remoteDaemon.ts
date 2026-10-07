@@ -674,18 +674,22 @@ async function resolveCurrentHostAccess(
   current: RemoteDaemonConfig,
   readTailscaleAccess: typeof readConfiguredTailscaleServeAccess,
 ): Promise<RemoteDaemonHostAccess> {
-  if (current.host.access) {
-    return current.host.access;
+  const saved = current.host.access;
+  if (saved && saved.tunnel?.kind !== 'tailscale') {
+    return saved;
   }
 
-  const discoveredTailscaleAccess = await readTailscaleAccess(current.host.config.listenPort);
-  if (discoveredTailscaleAccess) {
-    return discoveredTailscaleAccess;
+  // Tailscale access belongs to whichever tailnet this host is on now; the saved URL may be stale.
+  const live = await readTailscaleAccess(current.host.config.listenPort, { reapply: saved !== undefined });
+  if (!live.ok) {
+    throw new Error(saved
+      ? live.error
+      : `Pane does not have remote host access for this setup yet. ${live.error} Or run the remote setup terminal once to configure Tailscale Serve.`);
   }
-
-  throw new Error(
-    'Pane does not have the remote host access URL for this setup yet. Run the remote setup terminal once to configure Tailscale Serve, then create a connection code again.',
-  );
+  if (saved && saved.baseUrl !== live.access.baseUrl) {
+    console.log(`[Pane remote daemon] Host moved to tailnet ${live.tailnet}; connection codes now use ${live.access.baseUrl}`);
+  }
+  return live.access;
 }
 
 function buildNextClientState(

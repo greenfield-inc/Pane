@@ -3,6 +3,7 @@ import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_proces
 import { existsSync, readSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 
 export interface CommandResult {
   ok: boolean;
@@ -30,6 +31,95 @@ interface InstallAttempt {
   reason?: string;
 }
 
+/** The tailnet this machine is on right now, from `tailscale status --json`. */
+export type TailnetIdentity =
+  | { ok: true; tailnetName: string; dnsName: string; tailscaleIp: string | null }
+  | { ok: false; reason: string };
+
+const tailnetIdentitySchema = boundary.object({
+  BackendState: boundary.string,
+  Self: boundary.optional(boundary.nullable(boundary.object({
+    DNSName: boundary.string,
+    TailscaleIPs: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
+  }))),
+  CurrentTailnet: boundary.optional(boundary.nullable(boundary.object({
+    Name: boundary.optional(boundary.string),
+    MagicDNSSuffix: boundary.optional(boundary.string),
+  }))),
+});
+
+export function readTailnetIdentity(statusJson: string): TailnetIdentity {
+  let parsed: ReturnType<typeof tailnetIdentitySchema.decode> | undefined;
+  try {
+    parsed = decodeOptionalBoundary(JSON.parse(statusJson), tailnetIdentitySchema);
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed) {
+    return { ok: false, reason: 'Tailscale status could not be read. Update Tailscale, then try again.' };
+  }
+  const dnsName = parsed.Self?.DNSName.replace(/\.$/, '') ?? '';
+  if (parsed.BackendState !== 'Running' || !dnsName) {
+    return { ok: false, reason: 'Tailscale is signed out. Open Tailscale and sign in, then try again.' };
+  }
+  const tailnetName = parsed.CurrentTailnet?.Name
+    || parsed.CurrentTailnet?.MagicDNSSuffix
+    || dnsName.split('.').slice(1).join('.');
+  const tailscaleIp = parsed.Self?.TailscaleIPs?.find(isIpv4Address) ?? null;
+  return { ok: true, tailnetName, dnsName, tailscaleIp };
+}
+
+const serveConfigSchema = boundary.object({
+  TCP: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  Web: boundary.optional(boundary.nullable(boundary.jsonObject)),
+});
+const tcpHandlerSchema = boundary.object({
+  TCPForward: boundary.optional(boundary.string),
+  TerminateTLS: boundary.optional(boundary.string),
+});
+
+/** The Serve handlers on the current tailnet profile, from `tailscale serve status --json`. */
+export interface TailscaleServeHandlers {
+  /** Whether `:443` terminates TLS and forwards raw TCP to `127.0.0.1:<listenPort>`. */
+  hasTlsTerminatedForward(listenPort: number): boolean;
+  /** Whether an HTTPS web handler exists for `<dnsName>:<port>`. */
+  hasHttpsHandler(dnsName: string, port: number): boolean;
+}
+
+export function readTailscaleServeHandlers(serveStatusJson: string): TailscaleServeHandlers {
+  let parsed: ReturnType<typeof serveConfigSchema.decode> | undefined;
+  try {
+    parsed = decodeOptionalBoundary(JSON.parse(serveStatusJson), serveConfigSchema);
+  } catch {
+    parsed = undefined;
+  }
+  const tcp = parsed?.TCP ?? {};
+  const web = parsed?.Web ?? {};
+  return {
+    hasTlsTerminatedForward(listenPort) {
+      const handler = decodeOptionalBoundary(tcp['443'], tcpHandlerSchema);
+      const forward = handler?.TCPForward ?? '';
+      return Boolean(handler?.TerminateTLS)
+        && [`127.0.0.1:${listenPort}`, `localhost:${listenPort}`].includes(forward);
+    },
+    hasHttpsHandler(dnsName, port) {
+      return Object.prototype.hasOwnProperty.call(web, `${dnsName}:${port}`);
+    },
+  };
+}
+
+export function isIpv4Address(value: string): boolean {
+  const parts = value.split('.');
+  return parts.length === 4 && parts.every((part) => {
+    if (!/^\d{1,3}$/.test(part)) {
+      return false;
+    }
+
+    const numericPart = Number(part);
+    return numericPart >= 0 && numericPart <= 255;
+  });
+}
+
 export function buildTailscaleServeCommand(command: ResolvedCommand | null, port: number): string {
   return `${command?.displayCommand ?? 'tailscale'} serve --bg --tls-terminated-tcp=443 ${port}`;
 }
@@ -54,8 +144,9 @@ export function resolveTailscaleCommand(
 
 export async function resolveTailscaleCommandAsync(
   run: RemoteSetupCommandRunner = runRemoteSetupCommand,
+  pathExists: (candidate: string) => boolean = existsSync,
 ): Promise<ResolvedCommand | null> {
-  for (const command of tailscaleCandidates()) {
+  for (const command of tailscaleCandidates(pathExists)) {
     if ((await run(command.command, ['version'], { env: command.env })).ok) return command;
   }
   return null;
@@ -253,14 +344,14 @@ export function getTailscaleServeSetupInstructions(port?: number): string {
   ].join(' ');
 }
 
-function tailscaleCandidates(): ResolvedCommand[] {
+function tailscaleCandidates(pathExists: (candidate: string) => boolean = existsSync): ResolvedCommand[] {
   const commands: ResolvedCommand[] = [{ command: 'tailscale', displayCommand: 'tailscale' }];
   if (process.platform === 'darwin') {
     for (const candidate of [
       '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
       path.join(os.homedir(), 'Applications', 'Tailscale.app', 'Contents', 'MacOS', 'Tailscale'),
     ]) {
-      if (existsSync(candidate)) commands.push({
+      if (pathExists(candidate)) commands.push({
         command: candidate,
         displayCommand: `TAILSCALE_BE_CLI=1 ${quoteForPosix(candidate)}`,
         env: { ...process.env, TAILSCALE_BE_CLI: '1' },
@@ -271,7 +362,7 @@ function tailscaleCandidates(): ResolvedCommand[] {
     for (const directory of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA]) {
       if (!directory) continue;
       const candidate = path.join(directory, 'Tailscale', 'tailscale.exe');
-      if (existsSync(candidate)) commands.push({ command: candidate, displayCommand: quoteForWindows(candidate) });
+      if (pathExists(candidate)) commands.push({ command: candidate, displayCommand: quoteForWindows(candidate) });
     }
   }
   return commands;
