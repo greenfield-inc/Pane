@@ -82,6 +82,8 @@ const tcpHandlerSchema = boundary.object({
 export interface TailscaleServeHandlers {
   /** Whether `:443` terminates TLS and forwards raw TCP to `127.0.0.1:<listenPort>`. */
   hasTlsTerminatedForward(listenPort: number): boolean;
+  /** Where `:443` sends traffic now (`TCPForward`, or `'another handler'`), or null when nothing serves it. */
+  port443Target(): string | null;
   /** Whether an HTTPS web handler exists for `<dnsName>:<port>`. */
   hasHttpsHandler(dnsName: string, port: number): boolean;
 }
@@ -101,6 +103,10 @@ export function readTailscaleServeHandlers(serveStatusJson: string): TailscaleSe
       const forward = handler?.TCPForward ?? '';
       return Boolean(handler?.TerminateTLS)
         && [`127.0.0.1:${listenPort}`, `localhost:${listenPort}`].includes(forward);
+    },
+    port443Target() {
+      if (tcp['443'] === undefined) return null;
+      return decodeOptionalBoundary(tcp['443'], tcpHandlerSchema)?.TCPForward || 'another handler';
     },
     hasHttpsHandler(dnsName, port) {
       return Object.prototype.hasOwnProperty.call(web, `${dnsName}:${port}`);

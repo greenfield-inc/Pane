@@ -245,10 +245,18 @@ export async function readConfiguredTailscaleServeAccess(
   }
 
   const tailscaleCommand = buildTailscaleServeCommand(tailscaleCli, listenPort);
-  const hasForward = async () => readTailscaleServeHandlers((await tailscale(['serve', 'status', '--json'])).stdout)
-    .hasTlsTerminatedForward(listenPort);
+  const readHandlers = async () => readTailscaleServeHandlers((await tailscale(['serve', 'status', '--json'])).stdout);
+  const handlers = await readHandlers();
   let reapplied = false;
-  let confirmed = await hasForward();
+  let confirmed = handlers.hasTlsTerminatedForward(listenPort);
+  const otherTarget = confirmed ? null : handlers.port443Target();
+  if (otherTarget) {
+    // Another Pane data directory, or something outside Pane, owns :443; taking it over would break that.
+    return {
+      ok: false,
+      error: `On tailnet ${identity.tailnetName}, Tailscale Serve :443 already forwards to ${otherTarget}, not to this host's port 127.0.0.1:${listenPort}. Run "${tailscaleCommand}" to point it here, then try again.`,
+    };
+  }
   if (!confirmed && options.reapply) {
     const serve = await tailscale(['serve', '--bg', '--tls-terminated-tcp=443', String(listenPort)]);
     if (!serve.ok) {
@@ -259,7 +267,7 @@ export async function readConfiguredTailscaleServeAccess(
       };
     }
     reapplied = true;
-    confirmed = await hasForward();
+    confirmed = (await readHandlers()).hasTlsTerminatedForward(listenPort);
   }
   if (!confirmed) {
     return {

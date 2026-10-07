@@ -407,12 +407,15 @@ describe('readConfiguredTailscaleServeAccess', () => {
     });
   });
 
-  it('ignores a 443 forward that targets another port', async () => {
+  it('leaves a 443 forward to another port alone instead of taking it over', async () => {
     const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
     tailscale.serveRemoteForward(9999);
 
-    await expect(readConfiguredTailscaleServeAccess(42137, { run: tailscale.run }))
-      .resolves.toMatchObject({ ok: false });
+    await expect(readConfiguredTailscaleServeAccess(42137, { run: tailscale.run, reapply: true })).resolves.toEqual({
+      ok: false,
+      error: expect.stringContaining(':443 already forwards to 127.0.0.1:9999'),
+    });
+    expect(tailscale.serveCalls()).toEqual([]);
   });
 });
 
