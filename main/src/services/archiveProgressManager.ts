@@ -165,7 +165,10 @@ export class ArchiveProgressManager extends EventEmitter {
       error: task.error,
       trashDeletion: task.trashDeletion,
     }));
-    return [...transient, ...(this.durableTasks?.() ?? [])];
+    // Newest first by start time: running work sits above finished history, and a
+    // row moves only when a newer archive starts above it, never on a status change.
+    return [...transient, ...(this.durableTasks?.() ?? [])]
+      .sort((a, b) => Date.parse(b.startTime) - Date.parse(a.startTime));
   }
 
   hasActiveTasks(): boolean {
