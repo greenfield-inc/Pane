@@ -304,5 +304,5 @@ function sentence(fix: string): string {
 
 /** The one step that fixes a failed `tailscale serve`; Pane retries on its own after it. */
 function serveFix(output: string, command: string): string {
-  return sentence(tailscaleServeFailureFix(output, command, RETRIES).fix);
+  return sentence(tailscaleServeFailureFix(output, command).fix);
 }

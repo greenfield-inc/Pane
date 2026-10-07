@@ -71,21 +71,16 @@ export function tailscaleStatusFailureIssue(output: string, cli: ResolvedCommand
 }
 
 /** The step that fixes a refused `tailscale serve` change. */
-export function tailscaleServeFailureFix(
-  output: string,
-  command: string,
-  /** What happens after the fix: the person retries, or Pane does on its own. */
-  then = 'then try again',
-): Pick<TailscaleIssue, 'fix' | 'command'> {
+export function tailscaleServeFailureFix(output: string, command: string): Pick<TailscaleIssue, 'fix' | 'command'> {
   if (isTailscaleServeDisabled(output)) {
     const url = /https:\/\/login\.tailscale\.com\/\S+/.exec(output)?.[0] ?? 'https://login.tailscale.com/admin';
-    return { fix: `turn on Tailscale Serve for your tailnet at ${url}, ${then}.` };
+    return { fix: `turn on Tailscale Serve for your tailnet at ${url}, then try again.` };
   }
   if (process.platform === 'linux' && isTailscaleServePermissionDenied(output)) {
     const operator = 'sudo tailscale set --operator=$USER';
-    return { fix: `let Pane change Serve settings by running "${operator}" once, ${then}.`, command: operator };
+    return { fix: `let Pane change Serve settings by running "${operator}" once, then try again.`, command: operator };
   }
-  return { fix: `run "${command}" in a terminal to see the full error, fix what it reports, ${then}.`, command };
+  return { fix: `run "${command}" in a terminal to see the full error, fix what it reports, then try again.`, command };
 }
 
 /** The tailnet this machine is on right now, from `tailscale status --json`. */
