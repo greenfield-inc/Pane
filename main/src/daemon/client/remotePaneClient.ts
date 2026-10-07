@@ -163,10 +163,18 @@ export class RemotePaneClient {
     this.onResyncRequired = options.onResyncRequired;
   }
 
+  /** A codeless profile without a password relies on Tailscale identity alone. */
+  private authorizationHeader(): { Authorization?: string } {
+    return this.profile.token ? { Authorization: `Bearer ${this.profile.token}` } : {};
+  }
+
   isSameProfile(profile: RemotePaneConnectionProfile): boolean {
     return (
       this.profile.id === profile.id &&
-      this.profile.baseUrl === profile.baseUrl &&
+      // A codeless profile's address is looked up at connect, so the saved one may differ.
+      (profile.tailnetMachine
+        ? this.profile.tailnetMachine === profile.tailnetMachine
+        : this.profile.baseUrl === profile.baseUrl) &&
       this.profile.token === profile.token
     );
   }
@@ -241,7 +249,7 @@ export class RemotePaneClient {
         method: 'POST',
         signal,
         headers: {
-          Authorization: `Bearer ${this.profile.token}`,
+          ...this.authorizationHeader(),
           'Content-Type': 'application/json; charset=utf-8',
           'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
         },
@@ -331,7 +339,7 @@ export class RemotePaneClient {
       request = createRequest(endpoint, this.buildRequestOptions(endpoint, {
         method: 'GET',
         headers: {
-          Authorization: `Bearer ${this.profile.token}`,
+          ...this.authorizationHeader(),
           Accept: 'text/event-stream',
           'X-Pane-Client-Label': this.profile.label,
           'X-Pane-Client-Device-Label': getRemoteClientDeviceLabel(),
@@ -546,12 +554,15 @@ interface RemotePaneClientControllerOptions {
   configManager: ConfigManager;
   rendererEventSink: PaneEventSink;
   analyticsManager?: Pick<AnalyticsManager, 'track'>;
+  /** Looks up a codeless profile's machine on the current tailnet; see `tailnetMachine`. */
+  resolveTailnetMachineUrl?: (name: string) => Promise<string>;
 }
 
 export class RemotePaneClientController extends EventEmitter {
   private configManager: ConfigManager | null = null;
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
+  private resolveTailnetMachineUrl: ((name: string) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
@@ -577,6 +588,7 @@ export class RemotePaneClientController extends EventEmitter {
     this.configManager = options.configManager;
     this.rendererEventSink = options.rendererEventSink;
     this.analyticsManager = options.analyticsManager;
+    this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
     this.configManager.on('config-updated', this.configUpdatedListener);
     this.configListenerAttached = true;
 
@@ -693,7 +705,7 @@ export class RemotePaneClientController extends EventEmitter {
         mode: 'remote',
         activeProfileId: activeProfile.id,
         activeProfileLabel: activeProfile.label,
-        activeBaseUrl: activeProfile.baseUrl,
+        activeBaseUrl: this.activeClient.profile.baseUrl,
       });
       return;
     }
@@ -702,10 +714,13 @@ export class RemotePaneClientController extends EventEmitter {
   }
 
   private async connectProfile(
-    profile: RemotePaneConnectionProfile,
+    savedProfile: RemotePaneConnectionProfile,
     options: RemotePaneClientConnectOptions,
   ): Promise<void> {
     await this.disconnectActiveClient();
+    const profile = savedProfile.tailnetMachine && this.resolveTailnetMachineUrl
+      ? { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(savedProfile.tailnetMachine) }
+      : savedProfile;
     trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connect_started', {
       surface: 'desktop',
       role: 'client',

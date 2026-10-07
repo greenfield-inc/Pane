@@ -76,9 +76,15 @@ export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
   baseUrl: string;
+  /** The pairing token, or for a codeless profile the machine's password; empty when it has none. */
   token: string;
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
+  /**
+   * Set for a codeless connection over Tailscale: the machine's Tailscale name. Its address is
+   * looked up on the current tailnet at each connect, so it never goes stale.
+   */
+  tailnetMachine?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -445,14 +451,25 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
-const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
+const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
   baseUrl: boundary.nonEmptyString,
-  token: boundary.nonEmptyString,
+  token: boundary.string,
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
+  tailnetMachine: boundary.optional(boundary.nonEmptyString),
 });
+/** Only a codeless profile may have no token; Tailscale identity stands in for it. */
+const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
+  decode(cursor) {
+    const profile = remoteProfileFieldsSchema.decode(cursor);
+    if (!profile.token && !profile.tailnetMachine) {
+      return cursor.child('token', profile.token).fail('expected a non-empty string');
+    }
+    return profile;
+  },
+};
 const remoteImportSchema = boundary.object({
   v: boundary.literal(1),
   label: boundary.nonEmptyString,

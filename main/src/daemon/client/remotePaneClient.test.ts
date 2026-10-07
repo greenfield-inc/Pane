@@ -359,6 +359,43 @@ describe('RemotePaneClientController', () => {
     expect(controller.shouldForwardLocalRendererEvent('window:focus-changed')).toBe(true);
   });
 
+  it('connects a codeless profile at its address on the current tailnet, relying on Tailscale identity alone', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client = {
+      profiles: [{
+        id: 'tailnet-my-mac',
+        label: 'my-mac',
+        // Saved before a tailnet switch; nothing listens here any more.
+        baseUrl: 'https://my-mac.old-tailnet.ts.net:8443',
+        token: '',
+        transport: 'http+sse',
+        tailnetMachine: 'my-mac',
+      }],
+      activeProfileId: 'tailnet-my-mac',
+      mode: 'remote',
+    };
+    const resolved: string[] = [];
+    const controller = new RemotePaneClientController();
+    controller.initialize({
+      configManager: createConfigManagerStub(remoteConfig),
+      rendererEventSink: { send() {} },
+      resolveTailnetMachineUrl: async (name) => {
+        resolved.push(name);
+        return server.baseUrl;
+      },
+    });
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(resolved).toEqual(['my-mac']);
+    expect(controller.getConnectionState()).toMatchObject({ activeProfileId: 'tailnet-my-mac', activeBaseUrl: server.baseUrl });
+    await controller.invoke('sessions:get-all', [], async () => undefined);
+    expect(server.getLastInvokeAuth()).toBeUndefined();
+    await controller.switchToLocalMode();
+  });
+
   it('keeps retrying after an initial remote connection failure', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

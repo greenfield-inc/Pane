@@ -41,6 +41,8 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
+import { registerWorkspaceAccessHandlers } from './workspaceAccess';
+import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
 
 
 export function registerIpcHandlers(services: AppServices): PaneCommandRegistry {
@@ -59,6 +61,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     configManager: services.configManager,
     rendererEventSink,
     analyticsManager: services.analyticsManager,
+    resolveTailnetMachineUrl: (name) => resolveTailnetMachineUrl(name, readTailscaleStatus),
   });
   // Pause the remote connection while the system sleeps and reconnect on wake.
   powerMonitor.on('suspend', () => remotePaneClientController.suspend());
@@ -92,6 +95,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSpotlightHandlers(ipcMain, services);
   registerJourneyTimingHandlers(ipcMain, services);
   registerRemoteDaemonHandlers(ipcMain, services);
+  registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
