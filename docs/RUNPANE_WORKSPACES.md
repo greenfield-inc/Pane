@@ -2,6 +2,8 @@
 
 `runpane workspace` lets your own Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use. There is no SSH, no keys, and no pairing code: each request is trusted because Tailscale says it comes from your own login.
 
+The same listener powers codeless desktop remote mode: Settings → Remote Access → **Your machines** lists every machine on your Tailscale login with Pane open, and **Connect** switches the desktop app to that machine with no `pane-remote://` code. Who may connect is set under **Who can connect to this machine** (see [Who is trusted](#who-is-trusted)).
+
 ```
 runpane workspace list
 runpane workspace <machine> read  <path>
@@ -48,9 +50,19 @@ Pane must be running on a machine for others to reach it. Pane checks Tailscale 
 
 ## Who is trusted
 
-Only the machine owner's own Tailscale login is accepted. Pane learns the owner from the `Self` entry in `tailscale status --json`, and Serve adds a `Tailscale-User-Login` header to every request after removing any copy the caller sent.
+Two settings decide, in Settings → Remote Access → **Who can connect to this machine**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
 
-- A device signed in as another Tailscale user, including a teammate's Mac shared into your tailnet, is refused.
+| Visibility | Who can connect | |
+|---|---|---|
+| Off | Nobody without a pairing code. Same as `runpane workspace disable`. | |
+| Only me | Devices signed into this machine's own Tailscale login. | Default |
+| Everyone on this tailnet | Anyone with an untagged device in the current tailnet. Pane warns before turning it on. | |
+
+Pane learns the owner from the `Self` entry in `tailscale status --json`, and Serve adds a `Tailscale-User-Login` header to every request after removing any copy the caller sent. Under "Everyone on this tailnet", the people on the tailnet are the owners of its untagged devices, re-read every minute; people a device was shared with from another tailnet (Tailscale's sharee nodes) are not among them, even though Serve signs their requests too.
+
+Password protection is off by default. When it is on, every client must send the password, your own machines included; the desktop app asks for it once and saves it with that machine's connection. Pane stores only a scrypt hash of it, and only someone at the machine itself can change visibility or the password: remote clients are refused. The `runpane workspace` CLI does not send a password yet, so it cannot reach a password-protected machine.
+
+- Under "Only me", a device signed in as another Tailscale user, including a teammate's Mac shared into your tailnet, is refused.
 - A tagged device is refused: Serve sends no identity for it.
 - Pane answers only requests that arrive through Serve: Serve's target path carries a secret that changes every launch, and requests straight to the loopback port are refused. Another OS user on the same machine who can read `tailscale serve status` could learn it, so give other accounts on a joined machine only the trust you would give the owner.
 - Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login.
@@ -59,7 +71,7 @@ Only the machine owner's own Tailscale login is accepted. Pane learns the owner 
 
 ## What `write` and `exec` can do
 
-`write` and `exec` give your agents SSH-level control of every joined machine. A local agent's permission prompts and sandbox see only `runpane workspace ... exec`, not what runs on the other machine. Turn workspaces off on any machine that should not accept this.
+`write` and `exec` give your agents SSH-level control of every joined machine, and so does anyone the machine's visibility lets in: under "Everyone on this tailnet" that includes the other people on the tailnet. A local agent's permission prompts and sandbox see only `runpane workspace ... exec`, not what runs on the other machine. Turn workspaces off on any machine that should not accept this.
 
 ## Hand a task to another machine
 
@@ -95,8 +107,8 @@ Workspaces and the [self-hosted remote daemon](SELF_HOSTED_REMOTE_DAEMON.md) bot
 
 | | Workspaces | Pairing codes (remote daemon) |
 |---|---|---|
-| For | Your own machines, from the runpane CLI | Browsers, phones, desktop Pane, and other people's devices |
-| Trust | Your Tailscale login | A `pane-remote://` code per device |
+| For | Your own machines (runpane CLI and desktop remote mode), or your tailnet when you choose | Browsers, phones, and devices on another Tailscale account |
+| Trust | Tailscale login, by visibility, plus an optional password | A `pane-remote://` code per device |
 | Serves | The desktop Pane's `~/.pane` | The remote daemon's data directory, usually `~/.pane_remote` |
 | Port | 8443 | 443 |
 | Setup | None | `runpane setup` on the host, then paste the code |

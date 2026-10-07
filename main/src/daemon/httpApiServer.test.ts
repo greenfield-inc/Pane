@@ -6,7 +6,7 @@ import { PaneCommandRegistry } from './commandRegistry';
 import { hashRemoteDaemonToken } from './auth';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
-import { PaneRemoteHttpApiServer } from './httpApiServer';
+import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
@@ -768,22 +768,131 @@ describe('PaneRemoteHttpApiServer', () => {
 });
 
 describe('workspace identity mode', () => {
-  async function startWorkspaceServer(ownerLogin: string | null) {
+  const owner = 'owner@example.com';
+  const teammate = 'teammate@example.com';
+
+  function ownerOnly(overrides: Partial<WorkspaceAccessPolicy> = {}): WorkspaceAccessPolicy {
+    return {
+      ownerLogin: owner,
+      visibility: 'owner',
+      tailnetLogins: new Set([owner, teammate]),
+      verifySecret: null,
+      ...overrides,
+    };
+  }
+
+  async function startWorkspaceServer(access: () => WorkspaceAccessPolicy | null) {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
-      workspace: { listenPort: 0, pathSecret: 'serve-secret', ownerLogin: () => ownerLogin },
+      workspace: { listenPort: 0, pathSecret: 'serve-secret', access },
     });
     activeServers.push(server);
     await server.start();
     return server;
   }
+  async function startOwnerServer(ownerLogin: string | null) {
+    return startWorkspaceServer(() => (ownerLogin ? ownerOnly({ ownerLogin }) : null));
+  }
   const invoke = { channel: 'runpane:machine:info', args: [] };
   // Tailscale Serve forwards /invoke to the target path, /serve-secret/invoke.
   const invokePath = '/serve-secret/invoke';
+  const as = (login: string, password?: string) => {
+    const headers: RequestHeaders = { 'Tailscale-User-Login': login };
+    if (password !== undefined) headers.Authorization = `Bearer ${password}`;
+    return headers;
+  };
+  const passwordIs = (expected: string) => (secret: string) => (secret === expected ? 'valid' as const : 'invalid' as const);
+
+  it('under "Only me", refuses a different Tailscale login on the same tailnet', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly());
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate));
+    expect(response.statusCode).toBe(403);
+    expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_IDENTITY_REFUSED');
+  });
+
+  it('under "Everyone on this tailnet", lets a different login on the tailnet in', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet' }));
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate));
+    expect(response).toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'devbox' } } });
+  });
+
+  it('under "Everyone on this tailnet", still refuses a login from outside the tailnet, such as a user a device was shared with', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet' }));
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as('stranger@other.example'));
+    expect(response.statusCode).toBe(403);
+    expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_IDENTITY_REFUSED');
+  });
+
+  it('with password protection on, makes every allowed client present the password, the owner included', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet', verifySecret: passwordIs('correct horse') }));
+    for (const login of [owner, teammate]) {
+      const missing = await requestJson(server, 'POST', invokePath, invoke, undefined, as(login));
+      expect(missing.statusCode).toBe(401);
+      expect(JSON.stringify(missing.body)).toContain('ERR_WORKSPACE_PASSWORD_REQUIRED');
+
+      const wrong = await requestJson(server, 'POST', invokePath, invoke, undefined, as(login, 'guess'));
+      expect(wrong.statusCode).toBe(401);
+      expect(JSON.stringify(wrong.body)).toContain('ERR_WORKSPACE_PASSWORD_INVALID');
+
+      const right = await requestJson(server, 'POST', invokePath, invoke, undefined, as(login, 'correct horse'));
+      expect(right.statusCode).toBe(200);
+    }
+  });
+
+  it('answers 429 once the password check is throttled for a login', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: () => 'throttled' }));
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner, 'any guess'));
+    expect(response.statusCode).toBe(429);
+    expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_PASSWORD_THROTTLED');
+  });
+
+  it('checks visibility before the password, so a refused login learns nothing about it', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: passwordIs('correct horse') }));
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate, 'correct horse'));
+    expect(response.statusCode).toBe(403);
+    expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_IDENTITY_REFUSED');
+  });
+
+  it('gates the event stream the same way', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: passwordIs('correct horse') }));
+    const refused = await requestRaw(server, 'GET', '/serve-secret/events', as(teammate));
+    expect(refused.statusCode).toBe(403);
+    const noPassword = await requestRaw(server, 'GET', '/serve-secret/events', as(owner));
+    expect(noPassword.statusCode).toBe(401);
+    const stream = await openEventStream(server, 'correct horse', as(owner), '/serve-secret/events');
+    await expect(stream.nextEvent()).resolves.toMatchObject({ event: 'ready' });
+    stream.close();
+  });
+
+  it('drops a connected client when the access it came in with no longer holds', async () => {
+    let policy = ownerOnly({ visibility: 'tailnet' });
+    const server = await startWorkspaceServer(() => policy);
+    const stream = await openEventStream(server, undefined, as(teammate), '/serve-secret/events');
+    await stream.nextEvent();
+    await stream.nextEvent();
+
+    policy = ownerOnly({ visibility: 'owner' });
+    server.getEventSink().send('session:created', { id: 'session-1' });
+    await expect(stream.nextEvent(100)).rejects.toThrow('Timed out waiting for SSE event');
+    stream.close();
+  });
+
+  it('drops a connected client when password protection is turned on', async () => {
+    let policy = ownerOnly();
+    const server = await startWorkspaceServer(() => policy);
+    const stream = await openEventStream(server, undefined, as(owner), '/serve-secret/events');
+    await stream.nextEvent();
+    await stream.nextEvent();
+
+    policy = ownerOnly({ verifySecret: passwordIs('correct horse') });
+    server.getEventSink().send('session:created', { id: 'session-1' });
+    await expect(stream.nextEvent(100)).rejects.toThrow('Timed out waiting for SSE event');
+    stream.close();
+  });
 
   it('serves the owner\'s own Tailscale login without a pairing token', async () => {
-    const server = await startWorkspaceServer('owner@example.com');
+    const server = await startOwnerServer('owner@example.com');
     const response = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'owner@example.com',
     });
@@ -791,7 +900,7 @@ describe('workspace identity mode', () => {
   });
 
   it('refuses another Tailscale user and requests without an identity, such as tagged devices', async () => {
-    const server = await startWorkspaceServer('owner@example.com');
+    const server = await startOwnerServer('owner@example.com');
     const otherUser = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'teammate@example.com',
     });
@@ -804,7 +913,7 @@ describe('workspace identity mode', () => {
   });
 
   it('refuses everyone while the owner is unknown', async () => {
-    const server = await startWorkspaceServer(null);
+    const server = await startOwnerServer(null);
     const response = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'owner@example.com',
     });
@@ -812,7 +921,7 @@ describe('workspace identity mode', () => {
   });
 
   it('answers only requests that came through Tailscale Serve with the per-launch path', async () => {
-    const server = await startWorkspaceServer('owner@example.com');
+    const server = await startOwnerServer('owner@example.com');
     const direct = await requestJson(server, 'POST', '/invoke', invoke, undefined, {
       'Tailscale-User-Login': 'owner@example.com',
     });
@@ -820,7 +929,7 @@ describe('workspace identity mode', () => {
   });
 
   it('refuses browsers, so a web page cannot drive the owner\'s machines', async () => {
-    const server = await startWorkspaceServer('owner@example.com');
+    const server = await startOwnerServer('owner@example.com');
     const fromPage = await requestJson(server, 'POST', invokePath, invoke, undefined, {
       'Tailscale-User-Login': 'owner@example.com',
       Origin: 'https://attacker.example',

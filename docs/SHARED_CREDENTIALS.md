@@ -17,7 +17,7 @@ A key that exists only in a host's environment (for example `FAL_KEY` or the `PA
 Hosts never contact each other on their own. A device that is paired with more than one host carries the keys between them:
 
 - **The iPhone app** syncs whenever it opens or returns to the foreground, after you save a key from the phone, and when a host reports that its settings changed. It relays the keys and keeps no copy.
-- **A desktop paired with another host** syncs when it starts, when a key changes on it, and when a paired host reports a change. To pair, create a connection code on the other host (Settings → Remote Access → Set Up This Machine) and paste it under Settings → Remote Access → Connections → Add connection.
+- **A desktop paired with another host** syncs when it starts, when a key changes on it, and when a paired host reports a change. To pair, create a connection code on the other host (Settings → Remote Access → Set Up This Machine) and paste it under Settings → Remote Access → Your computers → Add with a Code.
 
 Sharing chains: if your Mac is paired with your Windows PC and the Windows PC with a Linux server, a key set on the Mac reaches the Linux server once both syncs have run.
 

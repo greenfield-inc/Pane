@@ -12,7 +12,7 @@ Pane saves the profile and attempts to connect immediately. Local desktop mode i
 
 ## Workspaces or pairing codes?
 
-To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines. Use the remote daemon and pairing codes in this guide for browsers and phones, for the desktop app's remote mode, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
+To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your machines. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
 
 ## Guided quick start
 
@@ -184,11 +184,11 @@ check [Troubleshooting](#troubleshooting).
 On your local desktop machine:
 
 1. Open Pane.
-2. Go to `Settings > Remote Access > Connections`.
-3. Paste the full `pane-remote://...` code into `Connection code` under `Add connection`.
-4. Click `Import & Connect`.
+2. Go to `Settings > Remote Access` and click `Add with a Code` under `Your computers`.
+3. Paste the full `pane-remote://...` code into `Connection Code`.
+4. Click `Connect`.
 
-If the tunnel is not reachable yet, Pane still saves the profile and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` on the saved profile.
+If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` next to the saved host.
 
 ## Use the Mobile / Browser App
 

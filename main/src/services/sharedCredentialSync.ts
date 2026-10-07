@@ -82,7 +82,9 @@ export class SharedCredentialSync {
 
   /** One event stream per paired host, so its settings changes reach this desktop. */
   private refreshPeers(): void {
-    const profiles = this.configManager.getConfig().remoteDaemon?.client.profiles ?? [];
+    // Sharing keys needs a paired device; codeless profiles carry no pairing token.
+    const profiles = (this.configManager.getConfig().remoteDaemon?.client.profiles ?? [])
+      .filter(profile => !profile.tailnetMachine);
     const wanted = new Map(profiles.map(profile => [peerKey(profile), profile]));
     for (const [key, peer] of this.peers) {
       if (wanted.has(key)) continue;

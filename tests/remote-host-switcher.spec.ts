@@ -41,7 +41,7 @@ test('the collapsed rail dot opens the switcher once a host is saved', async ({ 
   await page.screenshot({ path: testInfo.outputPath('rail-open.png') });
 
   await page.getByRole('button', { name: 'Manage connections…' }).click();
-  await expect(page.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Remote Access', exact: true })).toBeVisible();
 });
 
 const repositories = [

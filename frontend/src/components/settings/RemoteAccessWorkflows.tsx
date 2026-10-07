@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { ArrowLeft, Copy, ExternalLink, Plus, Terminal, Trash2 } from 'lucide-react';
+import { ArrowLeft, Copy, Plus, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/Button';
-import { Checkbox, Input, Textarea } from '../ui/Input';
+import { Checkbox, Input } from '../ui/Input';
 import { SettingsSection } from '../ui/SettingsSection';
 import { SettingRow, SettingsPage } from './SettingRow';
 import { SegmentedControl } from './SettingsControls';
@@ -27,12 +27,10 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
   );
   const dirty = subview === 'host-setup'
     ? controller.setupDirty
-    : subview === 'connections'
-      ? Boolean(controller.connectionCode)
-      : JSON.stringify(controller.hostDraft) !== JSON.stringify(controller.config.host.config)
-        || Boolean(controller.pairLabel || controller.profileLabel || controller.profileToken)
-        || controller.pairBaseUrl !== configuredBaseUrl
-        || controller.profileBaseUrl !== configuredBaseUrl;
+    : JSON.stringify(controller.hostDraft) !== JSON.stringify(controller.config.host.config)
+      || Boolean(controller.pairLabel || controller.profileLabel || controller.profileToken)
+      || controller.pairBaseUrl !== configuredBaseUrl
+      || controller.profileBaseUrl !== configuredBaseUrl;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => {
@@ -49,7 +47,6 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
         {controller.error && <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">{controller.error}</div>}
         {controller.result && <div className="mb-4 rounded-md border border-status-success/30 bg-status-success/10 p-3 text-sm text-status-success" aria-live="polite">{controller.result}</div>}
         {subview === 'host-setup' && <HostSetup controller={controller} />}
-        {subview === 'connections' && <Connections controller={controller} />}
         {subview === 'advanced-host' && <AdvancedHost controller={controller} />}
       </div>
     </div>
@@ -67,7 +64,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
   const executableHealth = getRemoteExecutableHealthPresentation(controller.hostState.executableHealth);
   const tailnetNotice = controller.hostState.tailnetNotice;
   return (
-    <SettingsPage title="Set Up This Machine" description="Configure this Pane install as a remote host and create a cross-device connection code.">
+    <SettingsPage title="Set Up This Machine" description="Host Pane here and create a connection code.">
       <SettingsSection title="Host status">
         {executableHealth && (
           <div
@@ -91,8 +88,8 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
         )}
         <SettingRow
           settingId="remote-host-setup"
-          label={controller.hostState.status === 'live' ? 'Remote host is live' : 'Remote host is not running'}
-          description={controller.hostState.lastError ?? `${controller.hostState.connectedClients.length} connected client(s)`}
+          label={controller.hostState.status === 'live' ? 'Host is on' : 'Host is off'}
+          description={controller.hostState.lastError ?? `${controller.hostState.connectedClients.length} connected`}
         >
           <div className="flex flex-wrap justify-end gap-2">
             {(controller.hostState.status === 'live' || controller.config.host.config.enabled) && (
@@ -124,7 +121,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
       </SettingsSection>
 
       <SettingsSection title="Setup">
-        <SettingRow settingId="remote-host-mode" label="Data and service mode" description="Use current Pane data while this app is open, or isolated daemon data with an optional background service." align="start">
+        <SettingRow settingId="remote-host-mode" label="Data" description="Current data runs while Pane is open. Isolated data can run as a background service." align="start">
           <div className="w-full space-y-4 sm:w-[460px]">
             <SegmentedControl
               label="Remote host data mode"
@@ -189,60 +186,11 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
   );
 }
 
-function Connections({ controller }: { controller: RemoteAccessController }) {
-  return (
-    <SettingsPage title="Connections" description="Connect this desktop app to a remote Pane host and manage saved profiles.">
-      <SettingsSection title="Runtime">
-        <SettingRow
-          settingId="remote-connections"
-          label={controller.connectionState.status === 'connected' ? `Connected to ${controller.connectionState.activeProfileLabel ?? 'remote Pane'}` : 'Using local runtime'}
-          description={controller.connectionState.lastError ?? controller.connectionState.activeBaseUrl ?? 'Choose where worktrees, terminals, and agent commands run.'}
-        >
-          <Button type="button" variant="secondary" size="sm" onClick={controller.useLocal} disabled={controller.busy || controller.connectionState.mode === 'local'}>Use Local Runtime</Button>
-        </SettingRow>
-      </SettingsSection>
-      <SettingsSection title="Add connection">
-        <SettingRow settingId="remote-connection-code" label="Connection code" description="Paste a pane-remote:// code created by the host." align="start">
-          <div className="w-full space-y-2 sm:w-[460px]">
-            <Textarea label="Connection Code" value={controller.connectionCode} onChange={(event) => controller.setConnectionCode(event.target.value)} placeholder="pane-remote://..." rows={3} fullWidth className="ph-no-capture" />
-            <div className="flex justify-end">
-              <Button type="button" size="sm" onClick={controller.importConnection} loading={controller.busy} disabled={!controller.connectionCode.trim()}>Import & Connect</Button>
-            </div>
-          </div>
-        </SettingRow>
-      </SettingsSection>
-      <SettingsSection title="Saved profiles">
-        {controller.config.client.profiles.length === 0 ? <p className="py-4 text-sm text-text-tertiary">No remote profiles saved.</p> : controller.config.client.profiles.map((profile) => {
-          const active = controller.connectionState.activeProfileId === profile.id && controller.connectionState.status === 'connected';
-          return (
-            <div key={profile.id} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-text-primary">{profile.label}</p>
-                <p className="truncate text-xs text-text-tertiary">{profile.baseUrl}</p>
-              </div>
-              <div className="flex gap-1">
-                <Button type="button" size="sm" variant={active ? 'secondary' : 'primary'} disabled={active || controller.busy} onClick={() => controller.useProfile(profile.id)}>{active ? 'Connected' : 'Connect'}</Button>
-                <IconButton type="button" size="sm" variant="danger" aria-label={`Delete ${profile.label}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => controller.deleteProfile(profile.id)} />
-              </div>
-            </div>
-          );
-        })}
-      </SettingsSection>
-      {controller.connectionState.lastError?.toLowerCase().includes('tailscale') && (
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" icon={<Terminal className="h-4 w-4" />} onClick={() => controller.openSetupTerminal(true)}>Open Tailscale Setup</Button>
-          <Button type="button" variant="ghost" size="sm" icon={<ExternalLink className="h-4 w-4" />} onClick={() => window.electronAPI.openExternal('https://tailscale.com/download')}>Download Tailscale</Button>
-        </div>
-      )}
-    </SettingsPage>
-  );
-}
-
 function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
   return (
-    <SettingsPage title="Advanced Remote Host" description="Listener settings and manual pairing tools for experienced operators.">
+    <SettingsPage title="Advanced Remote Host" description="Listener and manual pairing.">
       <SettingsSection title="Listener">
-        <SettingRow settingId="remote-advanced-host" label="Host listener" description="Controls the HTTP/SSE listener for this machine." align="start">
+        <SettingRow settingId="remote-advanced-host" label="Host listener" description="What other devices connect to." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Checkbox label="Enable remote daemon listener" checked={controller.hostDraft.enabled} onChange={(event) => controller.setHostDraft({ ...controller.hostDraft, enabled: event.target.checked })} />
             <div className="grid gap-3 sm:grid-cols-2">
@@ -257,7 +205,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
       </SettingsSection>
 
       <SettingsSection title="Pairing tools">
-        <SettingRow settingId="remote-paired-connection" label="Create paired connection" description="Mint a host token and save a matching local client profile." align="start">
+        <SettingRow settingId="remote-paired-connection" label="Create paired connection" description="Create a token and a matching saved connection." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Connection Label" value={controller.pairLabel} onChange={(event) => controller.setPairLabel(event.target.value)} placeholder="Office Mac mini" fullWidth />
             <Input label="Remote Base URL" value={controller.pairBaseUrl} onChange={(event) => controller.setPairBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" error={controller.pairBaseUrl && !controller.validation.pair ? 'Enter a label and valid HTTP(S) URL' : undefined} fullWidth />
@@ -267,7 +215,7 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
             )}
           </div>
         </SettingRow>
-        <SettingRow settingId="remote-existing-profile" label="Save existing remote profile" description="Save a bearer token that was created on another host." align="start">
+        <SettingRow settingId="remote-existing-profile" label="Save existing remote profile" description="Save a token from another host." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Existing Profile Label" value={controller.profileLabel} onChange={(event) => controller.setProfileLabel(event.target.value)} placeholder="Office Mac mini tunnel" fullWidth />
             <Input label="Existing Remote Base URL" value={controller.profileBaseUrl} onChange={(event) => controller.setProfileBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" fullWidth />
