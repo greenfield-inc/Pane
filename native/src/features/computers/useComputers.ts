@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
+import { useEffect, useRef } from 'react';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
@@ -14,11 +15,12 @@ const REFRESH_MS = 30_000;
 
 /**
  * The computers `directory` can see on its tailnet. A phone can't read `tailscale status`, so it
- * asks a computer it can reach, which answers only if its visibility lets this phone in.
+ * asks a computer on its own Tailscale login after passing its visibility and password checks.
  */
 export function useComputers(directory: RemotePaneConnectionProfile | null) {
-  return useQuery({
-    queryKey: [directory?.id ?? null, 'runpane:workspaces:machines', directory?.baseUrl ?? null, directory?.token ?? ''],
+  const previousToken = useRef(directory?.token);
+  const query = useQuery({
+    queryKey: [directory?.id ?? null, 'runpane:workspaces:machines', directory?.baseUrl ?? null],
     enabled: directory !== null,
     refetchInterval: REFRESH_MS,
     retry: false,
@@ -32,6 +34,14 @@ export function useComputers(directory: RemotePaneConnectionProfile | null) {
       }
     },
   });
+  const { refetch } = query;
+  // Credentials affect the request, but never belong in inspectable cache keys.
+  useEffect(() => {
+    if (previousToken.current === directory?.token) return;
+    previousToken.current = directory?.token;
+    if (directory) void refetch();
+  }, [directory, refetch]);
+  return query;
 }
 
 /** Proves a computer lets this phone in (with the password, when it has one), then switches to it. */
