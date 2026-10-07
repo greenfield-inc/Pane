@@ -193,7 +193,8 @@ export function CodelessRemoteSettings({ connectionState, otherHosts, accessFoot
           <p className="py-3 text-sm text-text-tertiary">Open Pane on another computer on your Tailscale login to see it here.</p>
         )}
         {machines?.ok && machines.machines.map((machine) => {
-          const active = connectionState.mode === 'remote'
+          // A failed or reconnecting connection is not "Connected": Connect stays available to retry.
+          const active = connectionState.status === 'connected'
             && connectionState.activeProfileId === machine.profileId
             && machine.profileId !== undefined;
           const connectable = machine.state === 'available' || machine.state === 'outdated';

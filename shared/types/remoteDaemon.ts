@@ -81,10 +81,12 @@ export interface RemotePaneConnectionProfile {
   transport: RemoteDaemonTransport;
   tunnel?: PaneRemoteConnectionImportPayload['tunnel'];
   /**
-   * Set for a codeless connection over Tailscale: the machine's Tailscale name. Its address is
-   * looked up on the current tailnet at each connect, so it never goes stale.
+   * Set for a codeless connection over Tailscale: the machine's Tailscale name, looked up at each
+   * connect. Names are unique only within a tailnet, so `tailnetDomain` (its MagicDNS domain,
+   * such as `tail1234.ts.net`) pins the profile, and its password, to the tailnet it was saved on.
    */
   tailnetMachine?: string;
+  tailnetDomain?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -459,6 +461,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   transport: boundary.literal('http+sse'),
   tunnel: boundary.optional(remoteTunnelSchema),
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
+  tailnetDomain: boundary.optional(boundary.nonEmptyString),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
@@ -466,6 +469,9 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
     const profile = remoteProfileFieldsSchema.decode(cursor);
     if (!profile.token && !profile.tailnetMachine) {
       return cursor.child('token', profile.token).fail('expected a non-empty string');
+    }
+    if (profile.tailnetMachine && !profile.tailnetDomain) {
+      return cursor.child('tailnetDomain', profile.tailnetDomain).fail('a codeless profile needs its tailnet');
     }
     return profile;
   },

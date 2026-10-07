@@ -554,15 +554,15 @@ interface RemotePaneClientControllerOptions {
   configManager: ConfigManager;
   rendererEventSink: PaneEventSink;
   analyticsManager?: Pick<AnalyticsManager, 'track'>;
-  /** Looks up a codeless profile's machine on the current tailnet; see `tailnetMachine`. */
-  resolveTailnetMachineUrl?: (name: string) => Promise<string>;
+  /** Looks up a codeless profile's machine on its tailnet; see `tailnetMachine`. */
+  resolveTailnetMachineUrl?: (machine: TailnetMachineRef) => Promise<string>;
 }
 
 export class RemotePaneClientController extends EventEmitter {
   private configManager: ConfigManager | null = null;
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
-  private resolveTailnetMachineUrl: ((name: string) => Promise<string>) | undefined;
+  private resolveTailnetMachineUrl: ((machine: TailnetMachineRef) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
@@ -713,13 +713,34 @@ export class RemotePaneClientController extends EventEmitter {
     await this.connectProfile(activeProfile, { retryOnInitialFailure: true });
   }
 
+  /**
+   * A codeless connection that fails may have lost its machine to a tailnet switch: look it up
+   * again, reconnect if it moved within its tailnet, or say why it is gone.
+   */
+  private async reresolveTailnetMachine(
+    savedProfile: RemotePaneConnectionProfile,
+    machine: TailnetMachineRef,
+    client: RemotePaneClient,
+  ): Promise<void> {
+    if (!this.resolveTailnetMachineUrl) return;
+    try {
+      const baseUrl = await this.resolveTailnetMachineUrl(machine);
+      if (this.activeClient !== client || baseUrl === client.profile.baseUrl) return;
+      await this.connectProfile(savedProfile, { retryOnInitialFailure: true });
+    } catch (error) {
+      if (this.activeClient !== client) return;
+      this.setConnectionState({ ...this.state, status: 'error', lastError: getErrorMessage(error, `Could not find ${machine.name}`) });
+    }
+  }
+
   private async connectProfile(
     savedProfile: RemotePaneConnectionProfile,
     options: RemotePaneClientConnectOptions,
   ): Promise<void> {
     await this.disconnectActiveClient();
-    const profile = savedProfile.tailnetMachine && this.resolveTailnetMachineUrl
-      ? { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(savedProfile.tailnetMachine) }
+    const machine = tailnetMachineRef(savedProfile);
+    const profile = machine && this.resolveTailnetMachineUrl
+      ? { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(machine) }
       : savedProfile;
     trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connect_started', {
       surface: 'desktop',
@@ -764,6 +785,7 @@ export class RemotePaneClientController extends EventEmitter {
           lastError: errorMessage ?? null,
           lastSeenAt: metadata?.lastSeenAt ?? this.getLastSeenAtForProfile(profile.id, status),
         });
+        if (status === 'error' && machine) void this.reresolveTailnetMachine(savedProfile, machine, client);
       },
       onResyncRequired: () => {
         this.rendererEventSink.send('remote-daemon:resync-required');
@@ -871,6 +893,18 @@ export class RemotePaneClientController extends EventEmitter {
 }
 
 export const remotePaneClientController = new RemotePaneClientController();
+
+/** A codeless profile's machine: its Tailscale name on the tailnet it was saved on. */
+export interface TailnetMachineRef {
+  name: string;
+  domain: string;
+}
+
+function tailnetMachineRef(profile: RemotePaneConnectionProfile): TailnetMachineRef | null {
+  return profile.tailnetMachine && profile.tailnetDomain
+    ? { name: profile.tailnetMachine, domain: profile.tailnetDomain }
+    : null;
+}
 
 function normalizeBaseUrl(baseUrl: string): URL {
   const normalized = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;

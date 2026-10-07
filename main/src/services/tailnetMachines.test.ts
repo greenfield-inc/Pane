@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverTailnetMachines, resolveTailnetMachineUrl, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
+import { discoverTailnetMachines, resolveTailnetMachineUrl, savedSecretKey, type WorkspaceProbe, type WorkspaceProbeResult } from './tailnetMachines';
 
 const status = {
   BackendState: 'Running',
@@ -53,6 +53,7 @@ describe('discoverTailnetMachines', () => {
     expect(list).toEqual({
       ok: true,
       tailnet: 'example.org',
+      domain: 'tail1.ts.net',
       machines: [
         { name: 'my-mac', dnsName: 'my-mac.tail1.ts.net', os: 'macOS', ownerLogin: 'me@example.org', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0' },
         { name: 'my-old-mac', dnsName: 'my-old-mac.tail1.ts.net', os: 'macOS', ownerLogin: 'me@example.org', mine: true, state: 'outdated' },
@@ -76,10 +77,25 @@ describe('discoverTailnetMachines', () => {
     await discoverTailnetMachines({
       readStatus: async () => JSON.stringify(status),
       probe: fakeProbe(seen),
-      savedSecrets: new Map([['locked-box', 'correct horse']]),
+      savedSecrets: new Map([[savedSecretKey('tail1.ts.net', 'locked-box'), 'correct horse']]),
     });
     expect(seen.find(probe => probe.name === 'locked-box')?.secret).toBe('correct horse');
     expect(seen.find(probe => probe.name === 'my-mac')?.secret).toBeUndefined();
+  });
+
+  it('never sends a password saved on one tailnet to a machine with the same name on another', async () => {
+    const seen: Array<{ name: string; ip: string; secret?: string }> = [];
+    const otherTailnet = {
+      ...status,
+      MagicDNSSuffix: 'tail9.ts.net',
+      Peer: { g: { ...status.Peer.g, DNSName: 'locked-box.tail9.ts.net.' } },
+    };
+    await discoverTailnetMachines({
+      readStatus: async () => JSON.stringify(otherTailnet),
+      probe: fakeProbe(seen),
+      savedSecrets: new Map([[savedSecretKey('tail1.ts.net', 'locked-box'), 'correct horse']]),
+    });
+    expect(seen).toEqual([{ name: 'locked-box', ip: '100.64.0.8', secret: undefined }]);
   });
 
   it('follows the current tailnet, so machines from a previous one are gone', async () => {
@@ -103,14 +119,19 @@ describe('discoverTailnetMachines', () => {
 });
 
 describe('resolveTailnetMachineUrl', () => {
-  it('finds a saved machine at its address on the current tailnet, not the one it had when saved', async () => {
-    const switched = { ...status, MagicDNSSuffix: 'tail2.ts.net', Peer: { a: { ...status.Peer.a, DNSName: 'my-mac.tail2.ts.net.' } } };
-    await expect(resolveTailnetMachineUrl('my-mac', async () => JSON.stringify(status))).resolves.toBe('https://my-mac.tail1.ts.net:8443');
-    await expect(resolveTailnetMachineUrl('my-mac', async () => JSON.stringify(switched))).resolves.toBe('https://my-mac.tail2.ts.net:8443');
+  it('finds a saved machine on the tailnet it was saved on', async () => {
+    await expect(resolveTailnetMachineUrl({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => JSON.stringify(status)))
+      .resolves.toBe('https://my-mac.tail1.ts.net:8443');
   });
 
-  it('says so when the machine is not on the current tailnet', async () => {
-    await expect(resolveTailnetMachineUrl('gone', async () => JSON.stringify(status)))
+  it('refuses to follow a name onto another tailnet, where it is a different machine', async () => {
+    const switched = { ...status, MagicDNSSuffix: 'tail2.ts.net', CurrentTailnet: { Name: 'me.github' }, Peer: { a: { ...status.Peer.a, DNSName: 'my-mac.tail2.ts.net.' } } };
+    await expect(resolveTailnetMachineUrl({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => JSON.stringify(switched)))
+      .rejects.toThrow('my-mac was saved on another tailnet (tail1.ts.net). This computer is now on me.github; connect again from Your computers.');
+  });
+
+  it('says so when the machine is not on its tailnet any more', async () => {
+    await expect(resolveTailnetMachineUrl({ name: 'gone', domain: 'tail1.ts.net' }, async () => JSON.stringify(status)))
       .rejects.toThrow('gone is not on your current tailnet (example.org).');
   });
 });

@@ -5,6 +5,7 @@ import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 const tailnetMachines: TailnetMachineList = {
   ok: true,
   tailnet: 'parsa.github',
+  domain: 'tail1234.ts.net',
   machines: [
     { name: 'studio-mac', dnsName: 'studio-mac.tail1234.ts.net', os: 'macOS', ownerLogin: 'parsa@github', mine: true, state: 'available', visibility: 'owner', paneVersion: '2.5.0' },
     { name: 'old-laptop', dnsName: 'old-laptop.tail1234.ts.net', os: 'macOS', ownerLogin: 'parsa@github', mine: true, state: 'outdated' },
@@ -13,8 +14,8 @@ const tailnetMachines: TailnetMachineList = {
   ],
 };
 
-async function openRemoteAccess(page: Page) {
-  await installElectronApiMock(page, { tailnetMachines });
+async function openRemoteAccess(page: Page, options: { remoteConnectError?: string } = {}) {
+  await installElectronApiMock(page, { tailnetMachines, ...options });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Settings' }).first().click();
@@ -43,6 +44,15 @@ test.describe('Codeless remote access', () => {
     await expect(studio.getByRole('button', { name: 'Connected' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Use This Computer' })).toBeVisible();
     await page.screenshot({ path: 'test-results/codeless-remote/02-connected.png', fullPage: true });
+  });
+
+  test('keeps Connect available when a connection fails, so it can be retried', async ({ page }) => {
+    await openRemoteAccess(page, { remoteConnectError: 'studio-mac did not answer.' });
+    const studio = page.getByTestId('tailnet-machine-studio-mac');
+    await studio.getByRole('button', { name: 'Connect' }).click();
+    await expect(page.getByText('studio-mac did not answer.')).toBeVisible();
+    await expect(studio.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Use This Computer' })).toBeVisible();
   });
 
   test('asks for the password of a protected machine', async ({ page }) => {

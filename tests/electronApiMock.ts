@@ -42,6 +42,8 @@ export type ElectronApiMockOptions = {
   initialSessions?: JsonObject[];
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
+  /** Remote connections end in `error` with this message instead of connecting. */
+  remoteConnectError?: string;
   initialArchiveProgress?: ArchiveProgressSnapshot;
   archiveRetryError?: string;
   /** git:identity answer; git:set-identity marks it configured. */
@@ -1063,13 +1065,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const activeProfile = remoteDaemonConfig.client.profiles.find(
               (profile) => profile.id === remoteDaemonConfig.client.activeProfileId
             );
+            const failure = activeProfile ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
             setRemoteConnectionState({
               mode: 'remote',
-              status: activeProfile ? 'connected' : 'error',
+              status: failure ? 'error' : 'connected',
               activeProfileId: remoteDaemonConfig.client.activeProfileId,
               activeProfileLabel: activeProfile?.label ?? null,
               activeBaseUrl: activeProfile?.baseUrl ?? null,
-              lastError: activeProfile ? null : 'Missing remote profile',
+              lastError: failure,
             });
           } else {
             setRemoteConnectionState({
@@ -1092,7 +1095,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(clone(workspaceAccess));
         },
         listTailnetMachines: () => {
-          const list: TailnetMachineList = clone(mockOptions.tailnetMachines ?? { ok: true, tailnet: 'example.github', machines: [] });
+          const list: TailnetMachineList = clone(mockOptions.tailnetMachines ?? { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [] });
           if (list.ok) {
             for (const machine of list.machines) {
               const profile = remoteDaemonConfig.client.profiles.find((candidate) => candidate.tailnetMachine === machine.name);
@@ -1103,12 +1106,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         saveTailnetMachine: (input: { name: string; password?: string }) => {
           const profile = {
-            id: `tailnet-${input.name}`,
+            id: `tailnet-tail1234.ts.net-${input.name}`,
             label: input.name,
             baseUrl: `https://${input.name}.tail1234.ts.net:8443`,
             token: input.password ?? '',
             transport: 'http+sse' as const,
             tailnetMachine: input.name,
+            tailnetDomain: 'tail1234.ts.net',
           };
           remoteDaemonConfig.client.profiles = [
             ...remoteDaemonConfig.client.profiles.filter((candidate) => candidate.id !== profile.id),

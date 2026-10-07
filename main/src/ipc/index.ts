@@ -61,7 +61,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     configManager: services.configManager,
     rendererEventSink,
     analyticsManager: services.analyticsManager,
-    resolveTailnetMachineUrl: (name) => resolveTailnetMachineUrl(name, readTailscaleStatus),
+    resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
   });
   // Pause the remote connection while the system sleeps and reconnect on wake.
   powerMonitor.on('suspend', () => remotePaneClientController.suspend());

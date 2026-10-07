@@ -72,5 +72,6 @@ export interface TailnetMachine {
 }
 
 export type TailnetMachineList =
-  | { ok: true; tailnet: string; machines: TailnetMachine[] }
+  /** `domain` is the tailnet's MagicDNS domain, such as `tail1234.ts.net`. */
+  | { ok: true; tailnet: string; domain: string; machines: TailnetMachine[] }
   | { ok: false; reason: string; fix: string };

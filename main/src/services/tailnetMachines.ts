@@ -15,6 +15,7 @@ import { resolveTailscaleCommandAsync } from '../daemon/tailscaleSetup';
 /** Tailnet port where each machine's Pane serves codeless connections (the Workspaces listener). */
 const WORKSPACE_HTTPS_PORT = 8443;
 const PROBE_TIMEOUT_MS = 4_000;
+const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
 const PROBE_CONCURRENCY = 8;
 /** Probing reaches other people's machines too; cap it on large tailnets. */
 const MAX_PROBED_MACHINES = 64;
@@ -41,7 +42,7 @@ interface DiscoveryDependencies {
   /** `tailscale status --json`, or null when Tailscale is not installed. */
   readStatus: () => Promise<string | null>;
   probe: WorkspaceProbe;
-  /** Saved passwords by machine name. */
+  /** Saved passwords, keyed by `savedSecretKey`, so one is sent only on the tailnet it was saved for. */
   savedSecrets?: ReadonlyMap<string, string>;
 }
 
@@ -78,7 +79,7 @@ interface TailnetPeer {
 }
 
 type TailnetPeers =
-  | { ok: true; tailnet: string; peers: TailnetPeer[] }
+  | { ok: true; tailnet: string; domain: string; peers: TailnetPeer[] }
   | { ok: false; reason: string; fix: string };
 
 /** Desktop machines of people in the current tailnet; no tagged devices, phones, or sharee nodes. */
@@ -117,7 +118,7 @@ function readTailnetPeers(output: string | null): TailnetPeers {
       ip: (peer.TailscaleIPs ?? []).find((address) => isIP(address) === 4) ?? peer.TailscaleIPs?.[0],
     }];
   });
-  return { ok: true, tailnet: status.CurrentTailnet?.Name ?? suffix.slice(1), peers };
+  return { ok: true, tailnet: status.CurrentTailnet?.Name ?? suffix.slice(1), domain: suffix.slice(1), peers };
 }
 
 /**
@@ -127,7 +128,7 @@ function readTailnetPeers(output: string | null): TailnetPeers {
 export async function discoverTailnetMachines({ readStatus, probe, savedSecrets }: DiscoveryDependencies): Promise<TailnetMachineList> {
   const tailnet = readTailnetPeers(await readStatus());
   if (!tailnet.ok) return tailnet;
-  const { peers } = tailnet;
+  const { peers, domain } = tailnet;
 
   // My machines first, so a large tailnet never pushes them past the cap.
   const probed = [...peers.filter((peer) => peer.mine), ...peers.filter((peer) => !peer.mine)]
@@ -136,7 +137,7 @@ export async function discoverTailnetMachines({ readStatus, probe, savedSecrets 
   const results = new Map<string, WorkspaceProbeResult>();
   await forEachLimited(probed, PROBE_CONCURRENCY, async ({ name, dnsName, ip }) => {
     if (!ip) return;
-    results.set(dnsName, await probe({ name, dnsName, ip }, savedSecrets?.get(name)));
+    results.set(dnsName, await probe({ name, dnsName, ip }, savedSecrets?.get(savedSecretKey(domain, name))));
   });
 
   const machines = peers.flatMap(({ name, dnsName, os, ownerLogin, mine: isMine, online }): TailnetMachine[] => {
@@ -161,16 +162,39 @@ export async function discoverTailnetMachines({ readStatus, probe, savedSecrets 
     || STATE_ORDER.indexOf(left.state) - STATE_ORDER.indexOf(right.state)
     || left.name.localeCompare(right.name));
 
-  return { ok: true, tailnet: tailnet.tailnet, machines };
+  return { ok: true, tailnet: tailnet.tailnet, domain, machines };
+}
+
+/** Machine names are unique only within a tailnet, so a saved password is keyed by both. */
+export function savedSecretKey(domain: string, name: string): string {
+  return `${domain.toLowerCase()}/${name.toLowerCase()}`;
 }
 
 /**
- * The address of a machine on the current tailnet, looked up at each connect so a saved
- * codeless profile follows tailnet switches instead of pointing at an old address.
+ * The address of a saved machine, looked up at each connect. A profile belongs to the tailnet it
+ * was saved on: after a switch, a machine with the same name is a different machine, so it is
+ * never connected to (or sent the saved password) in its place.
  */
-export async function resolveTailnetMachineUrl(name: string, readStatus: () => Promise<string | null>): Promise<string> {
+export async function resolveTailnetMachineUrl(
+  machine: { name: string; domain: string },
+  readStatus: () => Promise<string | null>,
+): Promise<string> {
   const tailnet = readTailnetPeers(await readStatus());
   if (!tailnet.ok) throw new Error(`${tailnet.reason}. ${tailnet.fix}`);
+  if (tailnet.domain.toLowerCase() !== machine.domain.toLowerCase()) {
+    throw new Error(`${machine.name} was saved on another tailnet (${machine.domain}). This computer is now on ${tailnet.tailnet}; connect again from Your computers.`);
+  }
+  return findMachineUrl(tailnet, machine.name);
+}
+
+/** The address of a machine by name on the current tailnet, and that tailnet's domain. */
+export async function locateTailnetMachine(name: string, readStatus: () => Promise<string | null>): Promise<{ url: string; domain: string }> {
+  const tailnet = readTailnetPeers(await readStatus());
+  if (!tailnet.ok) throw new Error(`${tailnet.reason}. ${tailnet.fix}`);
+  return { url: findMachineUrl(tailnet, name), domain: tailnet.domain };
+}
+
+function findMachineUrl(tailnet: Extract<TailnetPeers, { ok: true }>, name: string): string {
   const machine = tailnet.peers.find((peer) => peer.name.toLowerCase() === name.toLowerCase());
   if (!machine) throw new Error(`${name} is not on your current tailnet (${tailnet.tailnet}).`);
   return workspaceBaseUrl(machine.dnsName);
@@ -205,6 +229,13 @@ const descriptionSchema = boundary.object({
  * so it works where the system resolver does not know MagicDNS, while TLS still checks the name.
  */
 export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((resolve) => {
+  let settled = false;
+  const finish = (result: WorkspaceProbeResult) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(deadline);
+    resolve(result);
+  };
   const lookup: LookupFunction = (_hostname, options, callback) => {
     const family = isIP(machine.ip);
     if (options.all) callback(null, [{ address: machine.ip, family }]);
@@ -218,16 +249,29 @@ export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((
     path: '/invoke',
     method: 'POST',
     lookup,
-    timeout: PROBE_TIMEOUT_MS,
     headers: probeHeaders(body, secret),
   }, (response) => {
     const chunks: Buffer[] = [];
-    response.on('data', (chunk: Buffer) => chunks.push(chunk));
-    response.on('end', () => resolve(readProbeResponse(response.statusCode ?? 0, Buffer.concat(chunks).toString('utf8'))));
-    response.on('error', (error) => resolve({ kind: 'unreachable', detail: error.message }));
+    let size = 0;
+    response.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      // A describe answer is a few hundred bytes; anything this large is not Pane.
+      if (size > MAX_PROBE_RESPONSE_BYTES) {
+        request.destroy();
+        finish({ kind: 'unreachable', detail: 'response too large' });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    response.on('end', () => finish(readProbeResponse(response.statusCode ?? 0, Buffer.concat(chunks).toString('utf8'))));
+    response.on('error', (error) => finish({ kind: 'unreachable', detail: error.message }));
   });
-  request.on('timeout', () => request.destroy(new Error('timed out')));
-  request.on('error', (error) => resolve({ kind: 'unreachable', detail: error.message }));
+  // An absolute deadline: a socket timeout alone would let a peer that trickles bytes hang the list.
+  const deadline = setTimeout(() => {
+    request.destroy();
+    finish({ kind: 'unreachable', detail: 'timed out' });
+  }, PROBE_TIMEOUT_MS);
+  request.on('error', (error) => finish({ kind: 'unreachable', detail: error.message }));
   request.end(body);
 });
 
@@ -252,7 +296,8 @@ function readProbeResponse(statusCode: number, text: string): WorkspaceProbeResu
     const description = decodeOptionalBoundary(parsed.result, descriptionSchema);
     return description ? { kind: 'described', description } : { kind: 'outdated' };
   }
-  if (statusCode === 401) return { kind: 'password-required' };
+  // 429: too many wrong passwords from this login; it still needs the right one.
+  if (statusCode === 401 || statusCode === 429) return { kind: 'password-required' };
   if (statusCode === 403 && code?.startsWith('ERR_WORKSPACE_IDENTITY')) return { kind: 'refused' };
   if (statusCode === 404 && code === 'ERR_UNKNOWN_CHANNEL') return { kind: 'outdated' };
   return { kind: 'unreachable', detail: parsed?.error?.message ?? `HTTP ${statusCode}` };

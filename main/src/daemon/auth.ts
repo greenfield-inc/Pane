@@ -104,8 +104,8 @@ export interface WorkspaceAccessPolicy {
   visibility: 'owner' | 'tailnet';
   /** Lowercased logins of the people with untagged devices in the current tailnet. */
   tailnetLogins: ReadonlySet<string>;
-  /** Checks a presented password or token; null when password protection is off. */
-  verifySecret: ((secret: string) => boolean) | null;
+  /** Checks a presented password for a login; null when password protection is off. */
+  verifySecret: ((secret: string, login: string) => 'valid' | 'invalid' | 'throttled') | null;
 }
 
 /**
@@ -148,7 +148,11 @@ export function authenticateWorkspaceRequest(
     if (!secret) {
       return workspaceAuthFailure(401, 'ERR_WORKSPACE_PASSWORD_REQUIRED', 'This machine is password protected; enter its password to connect.');
     }
-    if (!policy.verifySecret(secret)) {
+    const check = policy.verifySecret(secret, login);
+    if (check === 'throttled') {
+      return workspaceAuthFailure(429, 'ERR_WORKSPACE_PASSWORD_THROTTLED', 'Too many wrong passwords for this machine; try again in a minute.');
+    }
+    if (check === 'invalid') {
       return workspaceAuthFailure(401, 'ERR_WORKSPACE_PASSWORD_INVALID', 'The password for this machine is wrong.');
     }
   }

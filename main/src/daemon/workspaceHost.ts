@@ -6,7 +6,7 @@ import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-s
 import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import type { WorkspaceAccessPolicy } from './auth';
-import { createWorkspacePasswordVerifier } from './workspacePassword';
+import { createWorkspacePasswordVerifier, type SecretCheck } from './workspacePassword';
 import type { WorkspaceAccessSummary, WorkspacePasswordHash } from '../../../shared/types/workspaceAccess';
 import {
   isTailscaleServeDisabled,
@@ -134,7 +134,7 @@ export class PaneWorkspaceHostController {
   };
   private ownerLogin: string | null = null;
   private tailnetLogins: ReadonlySet<string> = new Set();
-  private passwordVerifier: { stored: WorkspacePasswordHash; verify: (secret: string) => boolean } | null = null;
+  private passwordVerifier: { stored: WorkspacePasswordHash; verify: (secret: string, login: string) => SecretCheck } | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
   private syncQueue: Promise<void> = Promise.resolve();
   private retryTimer: NodeJS.Timeout | null = null;
@@ -183,7 +183,7 @@ export class PaneWorkspaceHostController {
     };
   }
 
-  private verifierFor(stored: WorkspacePasswordHash): (secret: string) => boolean {
+  private verifierFor(stored: WorkspacePasswordHash): (secret: string, login: string) => SecretCheck {
     if (this.passwordVerifier?.stored !== stored) {
       this.passwordVerifier = { stored, verify: createWorkspacePasswordVerifier(stored) };
     }

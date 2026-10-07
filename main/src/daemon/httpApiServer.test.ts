@@ -802,7 +802,7 @@ describe('workspace identity mode', () => {
     if (password !== undefined) headers.Authorization = `Bearer ${password}`;
     return headers;
   };
-  const passwordIs = (expected: string) => (secret: string) => secret === expected;
+  const passwordIs = (expected: string) => (secret: string) => (secret === expected ? 'valid' as const : 'invalid' as const);
 
   it('under "Only me", refuses a different Tailscale login on the same tailnet', async () => {
     const server = await startWorkspaceServer(() => ownerOnly());
@@ -838,6 +838,13 @@ describe('workspace identity mode', () => {
       const right = await requestJson(server, 'POST', invokePath, invoke, undefined, as(login, 'correct horse'));
       expect(right.statusCode).toBe(200);
     }
+  });
+
+  it('answers 429 once the password check is throttled for a login', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: () => 'throttled' }));
+    const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner, 'any guess'));
+    expect(response.statusCode).toBe(429);
+    expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_PASSWORD_THROTTLED');
   });
 
   it('checks visibility before the password, so a refused login learns nothing about it', async () => {

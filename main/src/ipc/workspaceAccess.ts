@@ -7,7 +7,8 @@ import {
   discoverTailnetMachines,
   probeWorkspace,
   readTailscaleStatus,
-  resolveTailnetMachineUrl,
+  locateTailnetMachine,
+  savedSecretKey,
   type WorkspaceProbe,
 } from '../services/tailnetMachines';
 
@@ -35,9 +36,9 @@ const saveMachineSchema = boundary.object({
   password: boundary.optional(boundary.string),
 });
 
-/** The profile id of a machine's codeless connection; one per machine name. */
-function tailnetProfileId(name: string): string {
-  return `tailnet-${name.toLowerCase()}`;
+/** The profile id of a machine's codeless connection; one per machine on each tailnet. */
+function tailnetProfileId(domain: string, name: string): string {
+  return `tailnet-${domain.toLowerCase()}-${name.toLowerCase()}`;
 }
 
 /**
@@ -60,18 +61,19 @@ export function registerWorkspaceAccessHandlers(
     commandRegistry.invoke('runpane:workspaces:set-access', [update])));
 
   ipcMain.handle('remote-daemon:list-tailnet-machines', () => respond('list your machines', async (): Promise<TailnetMachineList> => {
-    const codeless = profiles().filter((profile) => profile.tailnetMachine);
+    const codeless = profiles().flatMap((profile) => (profile.tailnetMachine && profile.tailnetDomain
+      ? [{ id: profile.id, token: profile.token, key: savedSecretKey(profile.tailnetDomain, profile.tailnetMachine) }]
+      : []));
     const list = await discoverTailnetMachines({
       ...dependencies,
-      savedSecrets: new Map(codeless.flatMap((profile) =>
-        profile.tailnetMachine && profile.token ? [[profile.tailnetMachine, profile.token]] : [])),
+      savedSecrets: new Map(codeless.flatMap((profile) => (profile.token ? [[profile.key, profile.token]] : []))),
     });
     if (!list.ok) return list;
-    const saved = new Map(codeless.map((profile) => [profile.tailnetMachine?.toLowerCase(), profile.id]));
+    const saved = new Map(codeless.map((profile) => [profile.key, profile.id]));
     return {
       ...list,
       machines: list.machines.map((machine) => {
-        const profileId = saved.get(machine.name.toLowerCase());
+        const profileId = saved.get(savedSecretKey(list.domain, machine.name));
         return profileId ? { ...machine, profileId } : machine;
       }),
     };
@@ -80,16 +82,18 @@ export function registerWorkspaceAccessHandlers(
   // Saves the codeless profile; the caller then activates it like any saved profile.
   ipcMain.handle('remote-daemon:save-tailnet-machine', (_event, input) => respond('save the machine', async (): Promise<RemotePaneConnectionProfile> => {
     const { name, password } = decodeBoundary(input, saveMachineSchema);
-    const id = tailnetProfileId(name);
+    const located = await locateTailnetMachine(name, dependencies.readStatus);
+    const id = tailnetProfileId(located.domain, name);
     const current = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
     const existing = current.client.profiles.find((profile) => profile.id === id);
     const profile: RemotePaneConnectionProfile = {
       id,
       label: name,
-      baseUrl: await resolveTailnetMachineUrl(name, dependencies.readStatus),
+      baseUrl: located.url,
       token: password ?? existing?.token ?? '',
       transport: 'http+sse',
       tailnetMachine: name,
+      tailnetDomain: located.domain,
     };
     await configManager.updateConfig({
       remoteDaemon: normalizeRemoteDaemonConfig({

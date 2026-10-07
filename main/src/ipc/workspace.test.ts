@@ -40,7 +40,7 @@ describe('workspace access commands', () => {
       .resolves.toMatchObject({ visibility: 'tailnet', passwordProtected: true });
     const stored = config()?.password;
     expect(stored && JSON.stringify(stored)).not.toContain('correct horse');
-    expect(stored && createWorkspacePasswordVerifier(stored)('correct horse')).toBe(true);
+    expect(stored && createWorkspacePasswordVerifier(stored)('correct horse', 'me@example.com')).toBe('valid');
 
     await expect(registry.invoke('runpane:workspaces:set-access', [{ password: null }]))
       .resolves.toMatchObject({ visibility: 'tailnet', passwordProtected: false });

@@ -93,7 +93,7 @@ function CodeHosts({ controller }: { controller: RemoteAccessController }) {
   return (
     <>
       {hosts.map((profile) => {
-        const active = connectionState.mode === 'remote' && connectionState.activeProfileId === profile.id;
+        const active = connectionState.status === 'connected' && connectionState.activeProfileId === profile.id;
         return (
           <div key={profile.id} className="flex flex-wrap items-center justify-between gap-3 py-3" data-testid={`code-host-${profile.id}`}>
             <div className="flex min-w-0 items-start gap-3">

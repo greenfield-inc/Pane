@@ -368,11 +368,12 @@ describe('RemotePaneClientController', () => {
       profiles: [{
         id: 'tailnet-my-mac',
         label: 'my-mac',
-        // Saved before a tailnet switch; nothing listens here any more.
+        // A stale saved address; nothing listens here any more.
         baseUrl: 'https://my-mac.old-tailnet.ts.net:8443',
         token: '',
         transport: 'http+sse',
         tailnetMachine: 'my-mac',
+        tailnetDomain: 'tail1234.ts.net',
       }],
       activeProfileId: 'tailnet-my-mac',
       mode: 'remote',
@@ -382,14 +383,14 @@ describe('RemotePaneClientController', () => {
     controller.initialize({
       configManager: createConfigManagerStub(remoteConfig),
       rendererEventSink: { send() {} },
-      resolveTailnetMachineUrl: async (name) => {
-        resolved.push(name);
+      resolveTailnetMachineUrl: async (machine) => {
+        resolved.push(`${machine.name}@${machine.domain}`);
         return server.baseUrl;
       },
     });
 
     await waitFor(() => controller.getConnectionState().status === 'connected');
-    expect(resolved).toEqual(['my-mac']);
+    expect(resolved).toEqual(['my-mac@tail1234.ts.net']);
     expect(controller.getConnectionState()).toMatchObject({ activeProfileId: 'tailnet-my-mac', activeBaseUrl: server.baseUrl });
     await controller.invoke('sessions:get-all', [], async () => undefined);
     expect(server.getLastInvokeAuth()).toBeUndefined();
