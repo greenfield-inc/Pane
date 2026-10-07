@@ -89,6 +89,11 @@ export interface RemoteDaemonClientOptions {
 /** The host rejected the connection code. Retrying cannot help. */
 export class RemoteAuthError extends Error {
   override name = 'RemoteAuthError';
+
+  /** The host's error code, such as `ERR_WORKSPACE_PASSWORD_REQUIRED`, when it sent one. */
+  constructor(message: string, readonly code: string | null = null) {
+    super(message);
+  }
 }
 
 /** The host answered with an error that retrying cannot fix. */
@@ -250,7 +255,7 @@ export class RemoteDaemonClient {
         }));
         const failure = payload?.ok === false ? payload.error : undefined;
         if (isAuthFailureResponse(response.status)) {
-          throw new RemoteAuthError(getRemoteAuthFailureMessage(failure?.message));
+          throw new RemoteAuthError(getRemoteAuthFailureMessage(failure?.message, failure?.code), failure?.code ?? null);
         }
         if (response.ok && payload?.ok) {
           // SAFETY: The named IPC/API channel contract establishes this response payload type.
@@ -450,11 +455,13 @@ export function isAuthFailureResponse(status: number): boolean {
   return status === 401 || status === 403;
 }
 
-export function getRemoteAuthFailureMessage(serverMessage?: string): string {
+export function getRemoteAuthFailureMessage(serverMessage?: string, code?: string | null): string {
+  // A codeless host explains itself (wrong login, password needed); no code is involved.
+  if (code?.startsWith('ERR_WORKSPACE_') && serverMessage) return serverMessage;
   const detail = serverMessage && serverMessage !== 'Remote request failed'
     ? ` (${serverMessage})`
     : '';
-  return `This connection code is not accepted by the remote host${detail}. Create and copy a new code from Pane Settings > Remote Pane, then reconnect.`;
+  return `This connection code is not accepted by the remote host${detail}. Create a new code in Pane Settings > Remote Access > Set Up Host, then reconnect.`;
 }
 
 /** Returns null for a body that is not an invoke envelope, such as a proxy's error page JSON. */

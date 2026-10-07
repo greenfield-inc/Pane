@@ -73,9 +73,10 @@ export async function readEventStreamResponse(
 }
 
 function authHeaders(context: RemoteRequestContext) {
-  return {
-    Authorization: `Bearer ${context.token}`,
+  const identity = {
     'X-Pane-Remote-Runtime-Id': context.runtimeId,
     'X-Pane-Client-Label': context.clientLabel,
   };
+  // A codeless host without a password trusts the Tailscale login alone; send no empty bearer.
+  return context.token ? { ...identity, Authorization: `Bearer ${context.token}` } : identity;
 }
