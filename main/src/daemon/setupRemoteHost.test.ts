@@ -486,6 +486,7 @@ describe('Tailscale problems name what is wrong and the step that fixes it', () 
     },
     {
       name: 'tailscaled is not running',
+      platform: 'darwin',
       arrange: tailscale => tailscale.failStatus('failed to connect to local tailscaled; it doesn\'t appear to be running'),
       summary: 'Tailscale is installed but not running',
       fix: 'open the Tailscale app',
