@@ -96,7 +96,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           name="pane/new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
         />
-        <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add host' }} />
+        <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
+        <Stack.Screen name="computers" options={{ title: 'Your computers' }} />
       </Stack.Protected>
       <Stack.Screen name="scan" options={{ presentation: 'fullScreenModal', headerShown: false }} />
       <Stack.Screen name="pair" options={{ presentation: 'modal', title: 'Connect to host' }} />

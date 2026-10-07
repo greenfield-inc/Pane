@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ComputersScreen } from '@/features/computers/ComputersScreen';
 import { ConnectForm } from '@/features/pairing/ConnectForm';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -10,10 +11,22 @@ import type { IconProps } from '@/ui/Icon';
 
 const SETUP_GUIDE_URL = 'https://runpane.com/docs/remote-daemon';
 
-/** First launch, as in the PWA: pick "Connect with a code" or the setup guide, then the form. */
+/** First launch: find your computers over Tailscale, connect with a code, or read the setup guide. */
 export default function ConnectScreen() {
   const theme = useTheme();
-  const [mode, setMode] = useState<'menu' | 'connect'>('menu');
+  const [mode, setMode] = useState<'menu' | 'connect' | 'computers'>('menu');
+
+  if (mode === 'computers') {
+    return (
+      <SafeAreaView style={[styles.fill, { backgroundColor: theme.colors.background }]}>
+        <Pressable testID="computers-back" accessibilityRole="button" onPress={() => setMode('menu')} style={[styles.back, styles.backBar]} hitSlop={8}>
+          <Icon ios="arrow.left" android="arrow_back" size={16} color={theme.colors.textSecondary} />
+          <Text variant="callout" tone="secondary">Back</Text>
+        </Pressable>
+        <ComputersScreen />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.fill, { backgroundColor: theme.colors.background }]}>
@@ -24,17 +37,25 @@ export default function ConnectScreen() {
             <IconTile ios="desktopcomputer" android="desktop_windows" />
             <View style={styles.headerText}>
               <Text variant="title">Remote Pane</Text>
-              <Text variant="subhead" tone="secondary">Connect to a Pane host from desktop or mobile.</Text>
+              <Text variant="subhead" tone="secondary">Use Pane on your computers.</Text>
             </View>
           </View>
 
           {mode === 'menu' ? (
             <View style={styles.cards}>
               <MenuCard
+                testID="connect-computers"
+                icon={<IconTile ios="desktopcomputer" android="desktop_windows" />}
+                title="Your computers"
+                description="Connect to Pane on your computers over Tailscale."
+                action="Find computers"
+                onPress={() => setMode('computers')}
+              />
+              <MenuCard
                 testID="connect-open-form"
                 icon={<IconTile ios="doc.on.clipboard" android="content_paste" />}
                 title="Connect with a code"
-                description="Paste a pane-remote:// code from an existing remote host."
+                description="Paste a pane-remote:// code from a host."
                 action="Open connection form"
                 onPress={() => setMode('connect')}
               />
@@ -42,7 +63,7 @@ export default function ConnectScreen() {
                 testID="connect-setup-guide"
                 icon={<IconTile ios="book" android="menu_book" />}
                 title="Set up a remote host"
-                description="Run Pane on a VM, WSL box, server, or desktop and create a connection code."
+                description="Run Pane on a server or VM and create a code."
                 action="Open setup guide"
                 onPress={() => void Linking.openURL(SETUP_GUIDE_URL)}
               />
@@ -122,4 +143,5 @@ const styles = StyleSheet.create({
   action: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
   actionText: { fontWeight: '600' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
+  backBar: { paddingHorizontal: 16, paddingTop: 8 },
 });

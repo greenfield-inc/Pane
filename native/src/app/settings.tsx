@@ -19,7 +19,7 @@ export default function SettingsScreen() {
   const confirmSignOut = () => {
     Alert.alert(
       `Sign out of ${profile.label}?`,
-      'The connection code is deleted from this phone. Pair again to reconnect.',
+      'Pane forgets this computer on this phone. Connect again to use it.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign Out', style: 'destructive', onPress: () => void revokePush(client, profile.id).then(() => remove(profile.id)) },
@@ -46,7 +46,7 @@ export default function SettingsScreen() {
 
       <NotificationSettings />
 
-      <ListSection title="Hosts" footer="Pane keeps each host's connection code in the iOS Keychain or Android Keystore.">
+      <ListSection title="Hosts" footer="Saved in the iOS Keychain or Android Keystore.">
         {profiles.map(host => (
           <ListRow
             key={host.id}
@@ -60,8 +60,16 @@ export default function SettingsScreen() {
           />
         ))}
         <ListRow
+          testID="settings-computers"
+          title="Your Computers"
+          subtitle="Connect over Tailscale"
+          leading={<Icon ios="desktopcomputer" android="desktop_windows" size={20} color={theme.colors.accentText} />}
+          trailing="chevron"
+          onPress={() => router.push('/computers')}
+        />
+        <ListRow
           testID="settings-add-host"
-          title="Add Host"
+          title="Add with a Code"
           leading={<Icon ios="plus.circle.fill" android="add_circle" size={20} color={theme.colors.accentText} />}
           onPress={() => router.push('/hosts/add')}
         />
