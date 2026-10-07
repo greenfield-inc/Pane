@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import { decodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { setupRemoteHost } from './setupRemoteHost';
 import type { RemoteSetupCommandRunner } from './remote-setup-command';
 import type { TailscaleSetupDependencies } from './tailscaleSetup';
@@ -40,4 +41,23 @@ it('lets the event loop run while Serve is pending and returns the configured co
   const result = await setup;
   expect(result.tunnel).toMatchObject({ kind: 'tailscale', selected: true, tailscaleIp: '100.100.10.1' });
   expect(writeConfig).toHaveBeenCalledOnce();
+});
+
+it('uses the 443 forward, not the Workspaces 8443 proxy, for the connection code', async () => {
+  const serveStatus = [
+    'https://office-mac.tailnet.ts.net:8443 (tailnet only)',
+    '|-- / proxy http://127.0.0.1:55555/secret',
+    '',
+    '|-- tcp://office-mac.tailnet.ts.net:443 (TLS terminated)',
+    '|--> tcp://127.0.0.1:42137',
+  ].join('\n');
+  const run: RemoteSetupCommandRunner = async (_command, args) => ({
+    ok: true,
+    stdout: args[0] === 'ip' ? '100.100.10.1\n' : args.join(' ') === 'serve status' ? serveStatus : '',
+    stderr: '',
+  });
+  const result = await setupRemoteHost({
+    installService: false, asyncCommandRunner: run, tailscaleDependencies: forbidSync, existingConfig: {}, writeConfig: async () => {},
+  });
+  expect(decodePaneRemoteConnection(result.connectionCode).baseUrl).toBe('https://office-mac.tailnet.ts.net');
 });

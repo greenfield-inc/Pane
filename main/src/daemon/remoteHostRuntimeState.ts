@@ -4,6 +4,7 @@ import {
   type RemoteDaemonConnectedClient,
   type RemoteDaemonHostConfig,
   type RemoteDaemonHostRuntimeState,
+  type RemoteHostTailnetNotice,
 } from '../../../shared/types/remoteDaemon';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { getAppDirectory } from '../utils/appDirectory';
@@ -53,6 +54,7 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
       lastError: null,
       connectedClients: [],
       executableHealth: this.state.executableHealth,
+      tailnetNotice: this.state.tailnetNotice,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -66,6 +68,7 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
       lastError: null,
       connectedClients: this.state.status === 'live' ? this.state.connectedClients : [],
       executableHealth: this.state.executableHealth,
+      tailnetNotice: this.state.tailnetNotice,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -79,8 +82,21 @@ export class RemoteHostRuntimeStateStore extends EventEmitter {
       lastError: getErrorMessage(error, 'Remote listener failed'),
       connectedClients: [],
       executableHealth: this.state.executableHealth,
+      tailnetNotice: this.state.tailnetNotice,
       updatedAt: new Date().toISOString(),
     });
+  }
+
+  getTailnetNotice(): RemoteHostTailnetNotice | null {
+    return this.state.tailnetNotice;
+  }
+
+  setTailnetNotice(tailnetNotice: RemoteHostTailnetNotice | null): void {
+    if (JSON.stringify(tailnetNotice) === JSON.stringify(this.state.tailnetNotice)) {
+      return;
+    }
+    this.state = { ...this.state, tailnetNotice, updatedAt: new Date().toISOString() };
+    this.emit('state-changed', this.getState());
   }
 
   setConnectedClients(connectedClients: RemoteDaemonConnectedClient[]): void {

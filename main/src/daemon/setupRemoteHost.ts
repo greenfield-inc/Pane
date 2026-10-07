@@ -24,11 +24,18 @@ import {
   getTailscaleServeSetupInstructions,
   getTailscaleSetupInstructions,
   installTailscaleCommandOrThrow,
+  isIpv4Address,
+  readTailnetIdentity,
+  readTailscaleServeHandlers,
+  tailscaleNotInstalledIssue,
+  tailscaleServeFailureFix,
+  tailscaleStatusFailureIssue,
   resolveTailscaleCommand,
   resolveTailscaleCommandAsync,
   runCommand as runTailscaleCommand,
   runTailscaleServeInteractive,
   type ResolvedCommand,
+  type TailscaleIssue,
   type TailscaleSetupDependencies,
 } from './tailscaleSetup';
 import {
@@ -215,27 +222,91 @@ function createRemoteHostAccess(
   return access;
 }
 
+export type TailscaleServeAccessResult =
+  | { ok: true; access: RemoteDaemonHostAccess; tailnet: string; reapplied: boolean }
+  | { ok: false; issue: TailscaleIssue };
+
+/**
+ * Remote daemon access on the tailnet this machine is on now. Only the TLS-terminated
+ * `:443 -> 127.0.0.1:<listenPort>` forward counts, never the Workspaces `:8443` proxy.
+ * Serve config belongs to one tailnet profile, so `reapply` re-creates a forward that a
+ * tailnet switch dropped.
+ */
 export async function readConfiguredTailscaleServeAccess(
   listenPort: number,
-  run: RemoteSetupCommandRunner = runRemoteSetupCommand,
-): Promise<RemoteDaemonHostAccess | null> {
-  const tailscaleCli = await resolveTailscaleCommandAsync(run);
+  options: { run?: RemoteSetupCommandRunner; reapply?: boolean; pathExists?: (candidate: string) => boolean } = {},
+): Promise<TailscaleServeAccessResult> {
+  const run = options.run ?? runRemoteSetupCommand;
+  const tailscaleCli = await resolveTailscaleCommandAsync(run, options.pathExists);
   if (!tailscaleCli) {
-    return null;
+    return { ok: false, issue: tailscaleNotInstalledIssue() };
+  }
+  const tailscale = (args: string[]) => run(tailscaleCli.command, args, { env: tailscaleCli.env });
+
+  const status = await tailscale(['status', '--json']);
+  if (!status.ok) {
+    return { ok: false, issue: tailscaleStatusFailureIssue(firstNonEmpty(status.stderr, status.stdout), tailscaleCli) };
+  }
+  const identity = readTailnetIdentity(status.stdout);
+  if (!identity.ok) {
+    return { ok: false, issue: identity.issue };
   }
 
-  const serveStatus = await run(tailscaleCli.command, ['serve', 'status'], { env: tailscaleCli.env });
-  if (!serveStatus.ok) {
-    return null;
-  }
-
-  const serveUrl = extractFirstHttpsUrl([serveStatus.stdout, serveStatus.stderr].join('\n'));
-  if (!serveUrl) {
-    return null;
-  }
-
+  const tailnet = identity.tailnetName;
+  const thisPane = `this Pane (127.0.0.1:${listenPort})`;
   const tailscaleCommand = buildTailscaleServeCommand(tailscaleCli, listenPort);
-  const tailscaleIp = await readTailscaleIpv4(tailscaleCli, undefined, run);
+  const readHandlers = async () => readTailscaleServeHandlers((await tailscale(['serve', 'status', '--json'])).stdout);
+  const handlers = await readHandlers();
+  let reapplied = false;
+  let confirmed = handlers.hasTlsTerminatedForward(listenPort);
+  const otherTarget = confirmed ? null : handlers.port443Target();
+  if (otherTarget) {
+    // Another Pane data directory, or something outside Pane, owns :443; taking it over would break that.
+    return {
+      ok: false,
+      issue: {
+        summary: `Port 443 on tailnet ${tailnet} already forwards to ${otherTarget}, not to ${thisPane}, so Pane left it alone.`,
+        fix: `if another Pane or app on this machine still uses it, keep it and share that Pane's code instead; to move it to this Pane, run "${tailscaleCommand}", then try again.`,
+        command: tailscaleCommand,
+      },
+    };
+  }
+  if (!confirmed && options.reapply) {
+    const serve = await tailscale(['serve', '--bg', '--tls-terminated-tcp=443', String(listenPort)]);
+    if (!serve.ok) {
+      const output = firstNonEmpty(serve.stderr, serve.stdout, 'no output');
+      return {
+        ok: false,
+        issue: {
+          summary: `Tailscale Serve couldn't forward port 443 to this Pane on tailnet ${tailnet}, so other devices can't connect. Tailscale said: ${firstLine(output)}.`,
+          ...tailscaleServeFailureFix(output, tailscaleCommand),
+        },
+      };
+    }
+    reapplied = true;
+    confirmed = (await readHandlers()).hasTlsTerminatedForward(listenPort);
+    if (!confirmed) {
+      const statusCommand = `${tailscaleCli.displayCommand} serve status`;
+      return {
+        ok: false,
+        issue: {
+          summary: `Pane ran "${tailscaleCommand}", but Tailscale still doesn't list a port 443 forward to ${thisPane} on tailnet ${tailnet}.`,
+          fix: `run "${statusCommand}" to see what Tailscale has, compare it with "${tailscaleCommand}", then try again.`,
+          command: statusCommand,
+        },
+      };
+    }
+  }
+  if (!confirmed) {
+    return {
+      ok: false,
+      issue: {
+        summary: `Nothing on tailnet ${tailnet} forwards port 443 to ${thisPane} yet, so a connection code wouldn't connect.`,
+        fix: `run "${tailscaleCommand}" on this machine, or run remote setup again, then try again.`,
+        command: tailscaleCommand,
+      },
+    };
+  }
 
   const tunnel: NonNullable<PaneRemoteConnectionImportPayload['tunnel']> = {
     kind: 'tailscale',
@@ -243,10 +314,15 @@ export async function readConfiguredTailscaleServeAccess(
     command: tailscaleCommand,
     note: 'Tailscale Serve is configured for this tailnet. Keep Pane running on this host when using current data mode. If another device cannot connect immediately, wait a few minutes for Tailscale Serve to finish provisioning, then retry.',
   };
-  if (tailscaleIp) {
-    tunnel.tailscaleIp = tailscaleIp;
+  if (identity.tailscaleIp) {
+    tunnel.tailscaleIp = identity.tailscaleIp;
   }
-  return createRemoteHostAccess(serveUrl, tunnel);
+  return {
+    ok: true,
+    access: createRemoteHostAccess(`https://${identity.dnsName}`, tunnel),
+    tailnet: identity.tailnetName,
+    reapplied,
+  };
 }
 
 function buildNextRemoteDaemonConfig<Value>(
@@ -407,7 +483,7 @@ async function selectTailscaleTunnel(options: {
   }
 
   const serveStatus = await run(['serve', 'status']);
-  const serveUrl = extractFirstHttpsUrl([
+  const serveUrl = extractRemoteDaemonServeUrl([
     tailscaleServe.stdout,
     tailscaleServe.stderr,
     serveStatus.ok ? serveStatus.stdout : '',
@@ -523,13 +599,21 @@ function isLoopbackPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-function extractFirstHttpsUrl(output: string): string | null {
-  const httpsMatch = output.match(/https:\/\/[^\s|"'<>]+/);
-  if (httpsMatch) {
-    return httpsMatch[0].replace(/[),.]+$/g, '');
+/** The remote daemon's URL in `tailscale serve` output: the :443 forward, never another port such as Workspaces' 8443. */
+function extractRemoteDaemonServeUrl(output: string): string | null {
+  const tlsForwardMatch = output.match(/tcp:\/\/([^/\s|"'<>:]+):443\s+\(TLS terminated\)/);
+  if (tlsForwardMatch) {
+    return `https://${tlsForwardMatch[1]}`;
   }
 
-  const tailscaleTcpMatch = output.match(/tcp:\/\/([^/\s|"'<>:]+)(?::443)?(?:\s+\(TLS terminated\))?/);
+  for (const httpsMatch of output.matchAll(/https:\/\/[^\s|"'<>]+/g)) {
+    const url = httpsMatch[0].replace(/[),.]+$/g, '');
+    if (!/^https:\/\/[^/]+:(?!443(?:\/|$))\d+/.test(url)) {
+      return url;
+    }
+  }
+
+  const tailscaleTcpMatch = output.match(/tcp:\/\/([^/\s|"'<>:]+)(?::443)?(?:\s+\(TLS terminated\))?(?=[\s|"'<>]|$)/);
   if (!tailscaleTcpMatch) {
     return null;
   }
@@ -554,18 +638,6 @@ async function readTailscaleIpv4(
     .map((value) => value.trim())
     .find(isIpv4Address)
     ?? null;
-}
-
-function isIpv4Address(value: string): boolean {
-  const parts = value.split('.');
-  return parts.length === 4 && parts.every((part) => {
-    if (!/^\d{1,3}$/.test(part)) {
-      return false;
-    }
-
-    const numericPart = Number(part);
-    return numericPart >= 0 && numericPart <= 255;
-  });
 }
 
 function upsertById<T extends { id: string }>(items: T[], nextItem: T): T[] {
@@ -598,6 +670,10 @@ function isNodeErrorWithCode<ErrorValue>(error: ErrorValue, code: string): boole
   }
 }
 
+
+function firstLine(text: string): string {
+  return text.trim().split(/\r?\n/)[0]?.trim() ?? '';
+}
 
 function firstNonEmpty(...values: string[]): string {
   return values.find((value) => value.trim().length > 0)?.trim() ?? '';

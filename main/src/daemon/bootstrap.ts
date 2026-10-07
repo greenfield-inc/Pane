@@ -32,6 +32,7 @@ import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { PaneWorkspaceHostController } from './workspaceHost';
+import { RemoteHostTailnetMonitor } from './remoteHostTailnet';
 import { registerWorkspaceCommands } from '../ipc/workspace';
 import { getMobilePushSender } from './mobilePushSender';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
@@ -367,6 +368,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
+  const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
     const endpoint = paneDaemonServer.getEndpoint();
@@ -389,6 +391,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
 
   void workspaceHost.start();
+  if (startRemoteTransport) {
+    void remoteHostTailnetMonitor.start();
+  }
 
   const daemonSinks: PaneEventSink[] = [workspaceJournal, namedLockService];
   if (paneDaemonServer) {
@@ -461,6 +466,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await taskQueue.close();
       workspaceJournal.dispose();
       await permissionIpcServer?.stop();
+      remoteHostTailnetMonitor.stop();
       await remoteTransportController.stopWatchingAndShutdown();
       await workspaceHost.shutdown();
       if (paneDaemonServer) {

@@ -62,6 +62,7 @@ function formatRemoteBaseUrl(host: string, port: number): string {
 function HostSetup({ controller }: { controller: RemoteAccessController }) {
   const activeCode = controller.setupResult?.connectionCode;
   const executableHealth = getRemoteExecutableHealthPresentation(controller.hostState.executableHealth);
+  const tailnetNotice = controller.hostState.tailnetNotice;
   return (
     <SettingsPage title="Set Up This Machine" description="Host Pane here and create a connection code.">
       <SettingsSection title="Host status">
@@ -73,6 +74,16 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
             <p className="font-medium">{executableHealth.code}</p>
             <p className="mt-1">{executableHealth.message}</p>
             {executableHealth.recoveryCommand && <code className="mt-2 block select-all text-xs">{executableHealth.recoveryCommand}</code>}
+          </div>
+        )}
+        {tailnetNotice && (
+          <div
+            className={`mb-3 rounded-md border p-3 text-sm text-text-primary ${tailnetNotice.tone === 'warning' ? 'border-status-warning/30 bg-status-warning/10' : 'border-interactive/30 bg-interactive/10'}`}
+            role={tailnetNotice.tone === 'warning' ? 'alert' : 'status'}
+          >
+            <p className="font-medium">{tailnetNotice.title}</p>
+            <p className="mt-1">{tailnetNotice.message}</p>
+            {tailnetNotice.command && <code className="mt-2 block select-all text-xs">{tailnetNotice.command}</code>}
           </div>
         )}
         <SettingRow
