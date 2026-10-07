@@ -209,18 +209,19 @@ test.describe('Smoke Tests', () => {
 
     await expect(page.getByText('Latest generated remote token')).toBeVisible();
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
-    await clickDomNode(page.getByRole('button', { name: 'Connections', exact: true }));
-    await expect(page.getByText('Office Mac mini').first()).toBeVisible();
+    const host = page.locator('[data-testid^="code-host-"]').filter({ hasText: 'Office Mac mini' });
+    await expect(host).toBeVisible();
 
-    await clickDomNode(page.getByRole('button', { name: 'Connect', exact: true }).first());
+    await clickDomNode(host.getByRole('button', { name: 'Connect', exact: true }));
 
     await expect(page.getByText('Connected to Office Mac mini').first()).toBeVisible();
 
-    const useLocalRuntimeButton = page.getByRole('button', { name: 'Use Local Runtime' }).first();
-    await expect(useLocalRuntimeButton).toBeEnabled();
-    await clickDomNode(useLocalRuntimeButton);
+    const useThisComputerButton = page.getByRole('button', { name: 'Use This Computer' }).first();
+    await expect(useThisComputerButton).toBeEnabled();
+    await clickDomNode(useThisComputerButton);
 
-    await expect(page.getByText('Using local runtime').first()).toBeVisible();
+    await expect(page.getByText('Connected to Office Mac mini')).toHaveCount(0);
+    await expect(host.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled();
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
 
@@ -239,7 +240,6 @@ test.describe('Smoke Tests', () => {
     await clickDomNode(page.getByRole('button', { name: 'Save Remote Profile' }));
 
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
-    await clickDomNode(page.getByRole('button', { name: 'Connections', exact: true }));
     await expect(page.getByText('Tunnel from laptop').first()).toBeVisible();
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });

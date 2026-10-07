@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import { ArrowLeft, Copy, ExternalLink, Plus, Terminal, Trash2 } from 'lucide-react';
+import { ArrowLeft, Copy, Plus, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/Button';
-import { Checkbox, Input, Textarea } from '../ui/Input';
+import { Checkbox, Input } from '../ui/Input';
 import { SettingsSection } from '../ui/SettingsSection';
 import { SettingRow, SettingsPage } from './SettingRow';
 import { SegmentedControl } from './SettingsControls';
@@ -27,12 +27,10 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
   );
   const dirty = subview === 'host-setup'
     ? controller.setupDirty
-    : subview === 'connections'
-      ? Boolean(controller.connectionCode)
-      : JSON.stringify(controller.hostDraft) !== JSON.stringify(controller.config.host.config)
-        || Boolean(controller.pairLabel || controller.profileLabel || controller.profileToken)
-        || controller.pairBaseUrl !== configuredBaseUrl
-        || controller.profileBaseUrl !== configuredBaseUrl;
+    : JSON.stringify(controller.hostDraft) !== JSON.stringify(controller.config.host.config)
+      || Boolean(controller.pairLabel || controller.profileLabel || controller.profileToken)
+      || controller.pairBaseUrl !== configuredBaseUrl
+      || controller.profileBaseUrl !== configuredBaseUrl;
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => {
@@ -49,7 +47,6 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
         {controller.error && <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">{controller.error}</div>}
         {controller.result && <div className="mb-4 rounded-md border border-status-success/30 bg-status-success/10 p-3 text-sm text-status-success" aria-live="polite">{controller.result}</div>}
         {subview === 'host-setup' && <HostSetup controller={controller} />}
-        {subview === 'connections' && <Connections controller={controller} />}
         {subview === 'advanced-host' && <AdvancedHost controller={controller} />}
       </div>
     </div>
@@ -174,55 +171,6 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
           </div>
         </SettingRow>
       </SettingsSection>
-    </SettingsPage>
-  );
-}
-
-function Connections({ controller }: { controller: RemoteAccessController }) {
-  return (
-    <SettingsPage title="Connections" description="Connect this app to a host.">
-      <SettingsSection title="Runtime">
-        <SettingRow
-          settingId="remote-connections"
-          label={controller.connectionState.status === 'connected' ? `Connected to ${controller.connectionState.activeProfileLabel ?? 'remote Pane'}` : 'Using local runtime'}
-          description={controller.connectionState.lastError ?? controller.connectionState.activeBaseUrl ?? 'Where agents and terminals run.'}
-        >
-          <Button type="button" variant="secondary" size="sm" onClick={controller.useLocal} disabled={controller.busy || controller.connectionState.mode === 'local'}>Use Local Runtime</Button>
-        </SettingRow>
-      </SettingsSection>
-      <SettingsSection title="Add connection">
-        <SettingRow settingId="remote-connection-code" label="Connection code" description="Paste the host's pane-remote:// code." align="start">
-          <div className="w-full space-y-2 sm:w-[460px]">
-            <Textarea label="Connection Code" value={controller.connectionCode} onChange={(event) => controller.setConnectionCode(event.target.value)} placeholder="pane-remote://..." rows={3} fullWidth className="ph-no-capture" />
-            <div className="flex justify-end">
-              <Button type="button" size="sm" onClick={controller.importConnection} loading={controller.busy} disabled={!controller.connectionCode.trim()}>Import & Connect</Button>
-            </div>
-          </div>
-        </SettingRow>
-      </SettingsSection>
-      <SettingsSection title="Saved connections">
-        {controller.config.client.profiles.length === 0 ? <p className="py-4 text-sm text-text-tertiary">Saved connections appear here.</p> : controller.config.client.profiles.map((profile) => {
-          const active = controller.connectionState.activeProfileId === profile.id && controller.connectionState.status === 'connected';
-          return (
-            <div key={profile.id} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-text-primary">{profile.label}</p>
-                <p className="truncate text-xs text-text-tertiary">{profile.baseUrl}</p>
-              </div>
-              <div className="flex gap-1">
-                <Button type="button" size="sm" variant={active ? 'secondary' : 'primary'} disabled={active || controller.busy} onClick={() => controller.useProfile(profile.id)}>{active ? 'Connected' : 'Connect'}</Button>
-                <IconButton type="button" size="sm" variant="danger" aria-label={`Delete ${profile.label}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => controller.deleteProfile(profile.id)} />
-              </div>
-            </div>
-          );
-        })}
-      </SettingsSection>
-      {controller.connectionState.lastError?.toLowerCase().includes('tailscale') && (
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" icon={<Terminal className="h-4 w-4" />} onClick={() => controller.openSetupTerminal(true)}>Open Tailscale Setup</Button>
-          <Button type="button" variant="ghost" size="sm" icon={<ExternalLink className="h-4 w-4" />} onClick={() => window.electronAPI.openExternal('https://tailscale.com/download')}>Download Tailscale</Button>
-        </div>
-      )}
     </SettingsPage>
   );
 }

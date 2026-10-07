@@ -178,11 +178,11 @@ check [Troubleshooting](#troubleshooting).
 On your local desktop machine:
 
 1. Open Pane.
-2. Go to `Settings > Remote Access > Connections`.
-3. Paste the full `pane-remote://...` code into `Connection code` under `Add connection`.
-4. Click `Import & Connect`.
+2. Go to `Settings > Remote Access` and click `Add with a Code` under `Your computers`.
+3. Paste the full `pane-remote://...` code into `Connection Code`.
+4. Click `Connect`.
 
-If the tunnel is not reachable yet, Pane still saves the profile and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` on the saved profile.
+If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` next to the saved host.
 
 ## Use the Mobile / Browser App
 

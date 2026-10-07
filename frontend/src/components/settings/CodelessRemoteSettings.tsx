@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { AppleIcon, LinuxIcon, WindowsIcon } from '../ui/BrandIcons';
 import { Button } from '../ui/Button';
@@ -44,13 +44,17 @@ const STATE_TEXT = {
 
 interface CodelessRemoteSettingsProps {
   connectionState: RemotePaneConnectionState;
+  /** Hosts saved from connection codes, listed with the Tailscale machines. */
+  otherHosts?: ReactNode;
+  /** The last row of the access section. */
+  accessFooter?: ReactNode;
 }
 
 /**
  * Codeless remote access over Tailscale: the machines this app can connect to with one click,
  * and who may connect to this machine (visibility, plus an optional password).
  */
-export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettingsProps) {
+export function CodelessRemoteSettings({ connectionState, otherHosts, accessFooter }: CodelessRemoteSettingsProps) {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const [access, setAccess] = useState<WorkspaceAccessSummary | null>(null);
   const [machines, setMachines] = useState<TailnetMachineList | null>(null);
@@ -205,7 +209,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
                   <p className="truncate text-sm font-medium text-text-primary">{machine.name}</p>
                   <p className="text-xs text-text-tertiary">
                     {[
-                      active ? 'Connected' : STATE_TEXT[machine.state],
+                      STATE_TEXT[machine.state],
                       machine.visibility === 'tailnet' && 'Shared with tailnet',
                       !machine.mine && machine.ownerLogin,
                     ].filter(Boolean).join(' · ')}
@@ -248,6 +252,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
             </div>
           );
         })}
+        {otherHosts}
       </SettingsSection>
 
       <SettingsSection title="Access to this computer">
@@ -334,6 +339,7 @@ export function CodelessRemoteSettings({ connectionState }: CodelessRemoteSettin
             </form>
           )}
         </SettingRow>
+        {accessFooter}
       </SettingsSection>
     </>
   );

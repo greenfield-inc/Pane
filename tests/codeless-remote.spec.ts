@@ -34,8 +34,14 @@ test.describe('Codeless remote access', () => {
     await expect(page.getByTestId('tailnet-machine-team-builder')).toContainText('Needs password · teammate@github');
     await page.screenshot({ path: 'test-results/codeless-remote/01-machines.png', fullPage: true });
 
+    await page.getByRole('button', { name: 'Add with a Code' }).click();
+    await expect(page.getByLabel('Connection Code')).toBeVisible();
+    await page.screenshot({ path: 'test-results/codeless-remote/07-add-with-code.png', fullPage: true });
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
     await studio.getByRole('button', { name: 'Connect' }).click();
     await expect(studio.getByRole('button', { name: 'Connected' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Use This Computer' })).toBeVisible();
     await page.screenshot({ path: 'test-results/codeless-remote/02-connected.png', fullPage: true });
   });
 

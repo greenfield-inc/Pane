@@ -18,6 +18,7 @@ import { panelApi } from '../../services/panelApi';
 import { useConfigStore } from '../../stores/configStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import type { RemoteAccessSubviewId } from '../../types/settings';
 
 interface RemoteHostSetupDraft {
   dataMode: RemoteSetupDataDirectoryMode;
@@ -346,7 +347,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
 
   const setupDirty = JSON.stringify(getSetupDraft()) !== JSON.stringify(setupBaseline);
 
-  const resetSubviewDraft = (subview: 'host-setup' | 'connections' | 'advanced-host') => {
+  const resetSubviewDraft = (subview: RemoteAccessSubviewId) => {
     if (subview === 'host-setup') {
       setSetupDataMode(setupBaseline.dataMode);
       setSetupLabel(setupBaseline.label);
@@ -356,10 +357,6 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
       setSetupManualBaseUrl(setupBaseline.manualBaseUrl);
       setSetupInstallService(setupBaseline.installService);
       setSetupResult(null);
-      return;
-    }
-    if (subview === 'connections') {
-      setConnectionCode('');
       return;
     }
     const baseUrl = formatRemoteBaseUrl(config.host.config.listenHost, config.host.config.listenPort);
