@@ -17,11 +17,19 @@ import {
   type ResolvedCommand,
 } from './tailscaleSetup';
 
-/** Tailnet port for workspaces; the remote daemon keeps 443. */
-const WORKSPACE_HTTPS_PORT = 8443;
+/**
+ * Tailnet port for workspaces; the remote daemon keeps 443. `PANE_WORKSPACES_PORT` moves it for
+ * development, so a test host never takes over the 8443 handler of the Pane in daily use.
+ */
+const WORKSPACE_HTTPS_PORT = readWorkspacePort(process.env.PANE_WORKSPACES_PORT);
 /** How often Pane re-reads the tailnet: Tailscale may start after Pane, or switch tailnets under it. */
 const CHECK_INTERVAL_MS = 60_000;
 const RETRIES = 'Pane retries within a minute';
+
+export function readWorkspacePort(value: string | undefined): number {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : 8443;
+}
 
 export type TailnetSelf =
   | {

@@ -4,9 +4,11 @@ import type { PaneWorkspaceHostController, WorkspaceHostStatus } from '../daemon
 import { describeMachine, execOnMachine, readMachineFile, writeMachineFile } from '../services/workspaceMachine';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { hashWorkspacePassword } from '../daemon/workspacePassword';
+import { discoverTailnetMachines, probeWorkspace, readTailscaleStatus, type WorkspaceProbe } from '../services/tailnetMachines';
 import {
   WORKSPACE_PASSWORD_MIN_LENGTH,
   type WorkspaceAccessSummary,
+  type TailnetMachineList,
   type WorkspaceAccessUpdate,
   type WorkspaceMachineDescription,
 } from '../../../shared/types/workspaceAccess';
@@ -47,6 +49,7 @@ export function registerWorkspaceCommands(
   host: PaneWorkspaceHostController,
   configManager: WorkspaceCommandConfig,
   paneVersion: string,
+  discovery: { readStatus: () => Promise<string | null>; probe: WorkspaceProbe } = { readStatus: readTailscaleStatus, probe: probeWorkspace },
 ): void {
   const preferredShell = () => configManager.getConfig().preferredShell;
   const status = (): WorkspaceStatusResult => ({ enabled: host.isEnabled(), ...host.getStatus() });
@@ -86,8 +89,7 @@ export function registerWorkspaceCommands(
     await host.sync();
     return host.getAccess();
   });
-  // Answers only clients the listener already let in, so it never reveals a machine to others.
-  registry.register('runpane:workspaces:describe', (): WorkspaceMachineDescription => {
+  const describe = (): WorkspaceMachineDescription => {
     const access = host.getAccess();
     return {
       machineName: access.machineName ?? '',
@@ -95,6 +97,13 @@ export function registerWorkspaceCommands(
       passwordProtected: access.passwordProtected,
       paneVersion,
     };
+  };
+  // Both answer only clients the listener already let in, so they never reveal a machine to others.
+  registry.register('runpane:workspaces:describe', describe);
+  // A phone cannot read `tailscale status`; it asks a computer it can reach for the list instead.
+  registry.register('runpane:workspaces:machines', (): Promise<TailnetMachineList> => {
+    const url = host.getAccess().url;
+    return discoverTailnetMachines({ ...discovery, self: url ? { url, description: describe() } : undefined });
   });
 }
 

@@ -44,6 +44,8 @@ interface DiscoveryDependencies {
   probe: WorkspaceProbe;
   /** Saved passwords, keyed by `savedSecretKey`, so one is sent only on the tailnet it was saved for. */
   savedSecrets?: ReadonlyMap<string, string>;
+  /** List this machine first, as described by its own listener (for a phone asking a host). */
+  self?: { url: string; description: WorkspaceMachineDescription };
 }
 
 const OS_NAMES = new Map<string, TailnetMachine['os']>([['macos', 'macOS'], ['windows', 'Windows'], ['linux', 'Linux']]);
@@ -79,7 +81,7 @@ interface TailnetPeer {
 }
 
 type TailnetPeers =
-  | { ok: true; tailnet: string; domain: string; peers: TailnetPeer[] }
+  | { ok: true; tailnet: string; domain: string; self: Omit<TailnetPeer, 'ip' | 'online'> | null; peers: TailnetPeer[] }
   | { ok: false; reason: string; fix: string };
 
 /** Desktop machines of people in the current tailnet; no tagged devices, phones, or sharee nodes. */
@@ -118,14 +120,28 @@ function readTailnetPeers(output: string | null): TailnetPeers {
       ip: (peer.TailscaleIPs ?? []).find((address) => isIP(address) === 4) ?? peer.TailscaleIPs?.[0],
     }];
   });
-  return { ok: true, tailnet: status.CurrentTailnet?.Name ?? suffix.slice(1), domain: suffix.slice(1), peers };
+  const selfOs = OS_NAMES.get(self.OS.toLowerCase());
+  const selfDnsName = trimDot(self.DNSName);
+  return {
+    ok: true,
+    tailnet: status.CurrentTailnet?.Name ?? suffix.slice(1),
+    domain: suffix.slice(1),
+    self: selfOs ? {
+      name: selfDnsName.split('.')[0],
+      dnsName: selfDnsName,
+      os: selfOs,
+      ownerLogin: decodeOptionalBoundary(users?.[String(self.UserID)], userSchema)?.LoginName ?? `user ${self.UserID}`,
+      mine: true,
+    } : null,
+    peers,
+  };
 }
 
 /**
  * The machines this one can connect to without a code, from the current tailnet: every desktop
  * machine on my own Tailscale login, and other people's machines only when they let me in.
  */
-export async function discoverTailnetMachines({ readStatus, probe, savedSecrets }: DiscoveryDependencies): Promise<TailnetMachineList> {
+export async function discoverTailnetMachines({ readStatus, probe, savedSecrets, self }: DiscoveryDependencies): Promise<TailnetMachineList> {
   const tailnet = readTailnetPeers(await readStatus());
   if (!tailnet.ok) return tailnet;
   const { peers, domain } = tailnet;
@@ -141,7 +157,7 @@ export async function discoverTailnetMachines({ readStatus, probe, savedSecrets 
   });
 
   const machines = peers.flatMap(({ name, dnsName, os, ownerLogin, mine: isMine, online }): TailnetMachine[] => {
-    const base = { name, dnsName, os, ownerLogin, mine: isMine };
+    const base = { name, dnsName, url: workspaceBaseUrl(dnsName), os, ownerLogin, mine: isMine };
     if (isMine && !online) return [{ ...base, state: 'offline' }];
     const result = results.get(dnsName);
     if (!result) return isMine ? [{ ...base, state: 'unreachable' }] : [];
@@ -162,6 +178,15 @@ export async function discoverTailnetMachines({ readStatus, probe, savedSecrets 
     || STATE_ORDER.indexOf(left.state) - STATE_ORDER.indexOf(right.state)
     || left.name.localeCompare(right.name));
 
+  if (self && tailnet.self) {
+    machines.unshift({
+      ...tailnet.self,
+      url: self.url,
+      state: 'available',
+      visibility: self.description.visibility,
+      paneVersion: self.description.paneVersion,
+    });
+  }
   return { ok: true, tailnet: tailnet.tailnet, domain, machines };
 }
 
