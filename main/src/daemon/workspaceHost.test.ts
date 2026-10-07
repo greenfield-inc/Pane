@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PaneCommandRegistry } from './commandRegistry';
 import { PaneWorkspaceHostController, readTailnetSelf } from './workspaceHost';
+import { createFakeTailscale, TAILNET_A, TAILNET_B } from './__fixtures__/fakeTailscale';
 
 const running = {
   BackendState: 'Running',
@@ -56,6 +57,35 @@ describe('PaneWorkspaceHostController', () => {
     );
     return { host, config, serveCalls, failRemoval: (fails: boolean) => { removalFails = fails; } };
   }
+
+  it('moves its 8443 handler and URL to the new tailnet within a minute of a switch', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
+    const host = new PaneWorkspaceHostController(
+      new PaneCommandRegistry(),
+      { getConfig: () => ({ workspaces: { enabled: true } }), on: () => ({}), off: () => ({}) },
+      true,
+      tailscale.run,
+    );
+    try {
+      await host.start();
+      expect(host.getStatus()).toMatchObject({ state: 'on', url: 'https://parsa-devbox.taila5e94c.ts.net:8443' });
+
+      tailscale.switchTailnet(TAILNET_B);
+      const servesBefore = tailscale.serveCalls().length;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(host.getStatus()).toMatchObject({ state: 'on', url: 'https://parsa-devbox.tail3c2c57.ts.net:8443' });
+      expect(tailscale.serveCalls().slice(servesBefore).map(call => call.args.slice(0, 3)))
+        .toEqual([['serve', '--bg', '--https=8443']]);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(tailscale.serveCalls().slice(servesBefore)).toHaveLength(1);
+    } finally {
+      await host.shutdown();
+      vi.useRealTimers();
+    }
+  });
 
   it('reports a handler it could not remove, and removes it on a later sync', async () => {
     const { host, config, serveCalls, failRemoval } = setup();

@@ -22,6 +22,12 @@ and follow the Tailscale installation/login prompts. The wizard picks an availab
 port and prints a connection code. Sign your other device into the same Tailscale
 network, then paste the code into Pane or [runpane.com/app](https://runpane.com/app/).
 
+If the host later switches to another tailnet, Pane notices while it runs: within
+a minute it re-creates the `:443` Serve forward on the new tailnet, and new codes
+use the new address. Codes created before the switch still point at the old
+tailnet, so create a new one. If Pane cannot confirm the forward, it shows the
+error and the `tailscale serve` command to run instead of creating a code.
+
 SSH and manual URL setups remain available through the explicit commands below.
 The no-argument and `setup` commands print help in non-interactive shells; they
 do not start a login prompt.

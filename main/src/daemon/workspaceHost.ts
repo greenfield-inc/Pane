@@ -8,13 +8,15 @@ import type { PaneEventSink } from '../core/eventSink';
 import {
   isTailscaleServeDisabled,
   isTailscaleServePermissionDenied,
+  readTailscaleServeHandlers,
   resolveTailscaleCommandAsync,
   type ResolvedCommand,
 } from './tailscaleSetup';
 
 /** Tailnet port for workspaces; the remote daemon keeps 443. */
 const WORKSPACE_HTTPS_PORT = 8443;
-const RETRY_INTERVAL_MS = 60_000;
+/** How often Pane re-reads the tailnet: Tailscale may start after Pane, or switch tailnets under it. */
+const CHECK_INTERVAL_MS = 60_000;
 
 export type TailnetSelf =
   | { ok: true; ownerLogin: string; machineName: string; dnsName: string }
@@ -100,7 +102,7 @@ export class PaneWorkspaceHostController {
   private ownerLogin: string | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
   private syncQueue: Promise<void> = Promise.resolve();
-  private retryTimer: NodeJS.Timeout | null = null;
+  private checkTimer: NodeJS.Timeout | null = null;
   private watching = false;
   private readonly configUpdatedListener = () => {
     void this.sync();
@@ -138,8 +140,9 @@ export class PaneWorkspaceHostController {
       this.configManager.off('config-updated', this.configUpdatedListener);
       this.watching = false;
     }
-    this.clearRetry();
+    this.clearCheck();
     await this.enqueue(async () => {
+      this.clearCheck();
       await this.stopServer();
       // A handler left behind would point tailnet traffic at a closed loopback port.
       const removal = await this.unserve();
@@ -149,7 +152,7 @@ export class PaneWorkspaceHostController {
 
   sync(): Promise<void> {
     return this.enqueue(async () => {
-      this.clearRetry();
+      this.clearCheck();
       if (!this.isEnabled()) {
         await this.stopServer();
         const removal = await this.unserve();
@@ -183,7 +186,8 @@ export class PaneWorkspaceHostController {
 
       this.ownerLogin = self.ownerLogin;
       const port = await this.ensureServer();
-      if (this.servedPort !== port) {
+      // Serve handlers belong to one tailnet profile, so a tailnet switch drops this one.
+      if (this.servedPort !== port || !(await this.hasHandler(tailscale, self.dnsName))) {
         const target = `http://127.0.0.1:${port}/${this.pathSecret}`;
         const serve = await this.runServe(tailscale, ['--bg', `--https=${WORKSPACE_HTTPS_PORT}`, target]);
         if (!serve.ok) {
@@ -199,19 +203,26 @@ export class PaneWorkspaceHostController {
         machineName: self.machineName,
         url: `https://${self.dnsName}:${WORKSPACE_HTTPS_PORT}`,
       };
+      this.scheduleCheck();
     });
   }
 
   private setOff(reason: string, fix: string): void {
     this.status = { state: 'off', reason, fix };
-    // Tailscale often starts after Pane at login; check again instead of waiting for a restart.
-    this.retryTimer = setTimeout(() => void this.sync(), RETRY_INTERVAL_MS);
-    this.retryTimer.unref?.();
+    this.scheduleCheck();
   }
 
-  private clearRetry(): void {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
+  private scheduleCheck(): void {
+    // A sync that finishes after shutdown must not start the next one.
+    if (!this.watching) return;
+    this.clearCheck();
+    this.checkTimer = setTimeout(() => void this.sync(), CHECK_INTERVAL_MS);
+    this.checkTimer.unref?.();
+  }
+
+  private clearCheck(): void {
+    if (this.checkTimer) clearTimeout(this.checkTimer);
+    this.checkTimer = null;
   }
 
   private async ensureServer(): Promise<number> {
@@ -248,6 +259,11 @@ export class PaneWorkspaceHostController {
     return null;
   }
 
+
+  private async hasHandler(tailscale: ResolvedCommand, dnsName: string): Promise<boolean> {
+    const status = await this.runServe(tailscale, ['status', '--json']);
+    return readTailscaleServeHandlers(status.stdout).hasHttpsHandler(dnsName, WORKSPACE_HTTPS_PORT);
+  }
 
   private runServe(tailscale: ResolvedCommand, args: string[]) {
     return this.run(tailscale.command, ['serve', ...args], { env: tailscale.env });

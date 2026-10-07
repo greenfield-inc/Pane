@@ -44,7 +44,7 @@ When workspaces are off, the first line says why and gives the one step that fix
 
 `runpane workspace disable` removes the 8443 handler and keeps this machine off until `runpane workspace enable`. This machine can still reach your other machines while it is off. A Pane started with a different data directory (`PANE_DIR` or `--pane-dir`) stays off unless you run `runpane workspace enable` against it.
 
-Pane must be running on a machine for others to reach it. Pane checks Tailscale again every minute while it is off, so signing in to Tailscale after Pane starts is enough.
+Pane must be running on a machine for others to reach it. Pane checks Tailscale again every minute, so signing in to Tailscale after Pane starts is enough. Serve handlers belong to one tailnet, so after you switch this machine to another tailnet Pane puts the 8443 handler back on the new one and reports the new URL within a minute.
 
 ## Who is trusted
 
