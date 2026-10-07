@@ -37,6 +37,8 @@ import {
 } from '../daemon/remotePairing';
 import { remoteHostRuntimeStateStore } from '../daemon/remoteHostRuntimeState';
 import { readConfiguredTailscaleServeAccess, setupRemoteHost } from '../daemon/setupRemoteHost';
+import { tailnetMovedNotice, tailnetProblemNotice } from '../daemon/remoteHostTailnet';
+import { formatTailscaleIssue } from '../daemon/tailscaleSetup';
 import { getAppDirectory } from '../utils/appDirectory';
 import { ShellDetector } from '../utils/shellDetector';
 import { disconnectActiveRemoteHostClients } from '../daemon/remoteTransportController';
@@ -674,18 +676,25 @@ async function resolveCurrentHostAccess(
   current: RemoteDaemonConfig,
   readTailscaleAccess: typeof readConfiguredTailscaleServeAccess,
 ): Promise<RemoteDaemonHostAccess> {
-  if (current.host.access) {
-    return current.host.access;
+  const saved = current.host.access;
+  if (saved && saved.tunnel?.kind !== 'tailscale') {
+    return saved;
   }
 
-  const discoveredTailscaleAccess = await readTailscaleAccess(current.host.config.listenPort);
-  if (discoveredTailscaleAccess) {
-    return discoveredTailscaleAccess;
+  // Tailscale access belongs to whichever tailnet this host is on now; the saved URL may be stale.
+  const live = await readTailscaleAccess(current.host.config.listenPort, { reapply: saved !== undefined });
+  if (!live.ok) {
+    // The notice keeps the fix and its copyable command in Settings after the error is dismissed.
+    remoteHostRuntimeStateStore.setTailnetNotice(tailnetProblemNotice(live.issue));
+    throw new Error(formatTailscaleIssue(live.issue));
   }
-
-  throw new Error(
-    'Pane does not have the remote host access URL for this setup yet. Run the remote setup terminal once to configure Tailscale Serve, then create a connection code again.',
-  );
+  if (saved && saved.baseUrl !== live.access.baseUrl) {
+    console.log(`[Pane remote daemon] Host moved to tailnet ${live.tailnet}; connection codes now use ${live.access.baseUrl}`);
+    remoteHostRuntimeStateStore.setTailnetNotice(tailnetMovedNotice(live.tailnet, live.access.baseUrl));
+  } else if (remoteHostRuntimeStateStore.getTailnetNotice()?.tone === 'warning') {
+    remoteHostRuntimeStateStore.setTailnetNotice(null);
+  }
+  return live.access;
 }
 
 function buildNextClientState(

@@ -6,15 +6,19 @@ import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-s
 import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import {
-  isTailscaleServeDisabled,
-  isTailscaleServePermissionDenied,
+  readTailnetIdentity,
+  readTailscaleServeHandlers,
+  tailscaleServeFailureFix,
+  tailscaleStatusFailureIssue,
   resolveTailscaleCommandAsync,
   type ResolvedCommand,
 } from './tailscaleSetup';
 
 /** Tailnet port for workspaces; the remote daemon keeps 443. */
 const WORKSPACE_HTTPS_PORT = 8443;
-const RETRY_INTERVAL_MS = 60_000;
+/** How often Pane re-reads the tailnet: Tailscale may start after Pane, or switch tailnets under it. */
+const CHECK_INTERVAL_MS = 60_000;
+const RETRIES = 'Pane retries within a minute';
 
 export type TailnetSelf =
   | { ok: true; ownerLogin: string; machineName: string; dnsName: string }
@@ -49,11 +53,10 @@ export function readTailnetSelf(statusJson: string): TailnetSelf {
   } catch {
     parsed = undefined;
   }
-  if (!parsed) {
+  if (!parsed || parsed.BackendState !== 'Running' || !parsed.Self) {
+    const identity = readTailnetIdentity(statusJson);
+    if (!identity.ok) return { ok: false, reason: fragment(identity.issue.summary), fix: sentence(identity.issue.fix) };
     return { ok: false, reason: 'Tailscale status could not be read', fix: 'Update Tailscale, then restart Pane.' };
-  }
-  if (parsed.BackendState !== 'Running' || !parsed.Self) {
-    return { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' };
   }
   if (parsed.Self.Tags?.length) {
     return {
@@ -100,7 +103,7 @@ export class PaneWorkspaceHostController {
   private ownerLogin: string | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
   private syncQueue: Promise<void> = Promise.resolve();
-  private retryTimer: NodeJS.Timeout | null = null;
+  private checkTimer: NodeJS.Timeout | null = null;
   private watching = false;
   private readonly configUpdatedListener = () => {
     void this.sync();
@@ -138,8 +141,9 @@ export class PaneWorkspaceHostController {
       this.configManager.off('config-updated', this.configUpdatedListener);
       this.watching = false;
     }
-    this.clearRetry();
+    this.clearCheck();
     await this.enqueue(async () => {
+      this.clearCheck();
       await this.stopServer();
       // A handler left behind would point tailnet traffic at a closed loopback port.
       const removal = await this.unserve();
@@ -149,12 +153,13 @@ export class PaneWorkspaceHostController {
 
   sync(): Promise<void> {
     return this.enqueue(async () => {
-      this.clearRetry();
+      this.clearCheck();
       if (!this.isEnabled()) {
         await this.stopServer();
         const removal = await this.unserve();
         if (removal) {
-          this.setOff(removal, `Run "tailscale serve --https=${WORKSPACE_HTTPS_PORT} off"; Pane also retries every minute.`);
+          const cli = (await resolveTailscaleCommandAsync(this.run))?.displayCommand ?? 'tailscale';
+          this.setOff(removal, `Run "${cli} serve --https=${WORKSPACE_HTTPS_PORT} off" in a terminal; ${RETRIES}.`);
           return;
         }
         this.status = {
@@ -170,10 +175,16 @@ export class PaneWorkspaceHostController {
       const tailscale = await resolveTailscaleCommandAsync(this.run);
       if (!tailscale) {
         await this.stopServer();
-        this.setOff('Tailscale is not installed', 'Install Tailscale from https://tailscale.com/download and sign in.');
+        this.setOff('Tailscale is not installed', `Install Tailscale from https://tailscale.com/download and sign in; ${RETRIES}.`);
         return;
       }
       const statusResult = await this.run(tailscale.command, ['status', '--json'], { env: tailscale.env });
+      if (!statusResult.ok) {
+        await this.stopServer();
+        const issue = tailscaleStatusFailureIssue(`${statusResult.stderr}\n${statusResult.stdout}`, tailscale);
+        this.setOff(fragment(issue.summary), sentence(issue.fix));
+        return;
+      }
       const self = readTailnetSelf(statusResult.stdout);
       if (!self.ok) {
         await this.stopServer();
@@ -183,12 +194,14 @@ export class PaneWorkspaceHostController {
 
       this.ownerLogin = self.ownerLogin;
       const port = await this.ensureServer();
-      if (this.servedPort !== port) {
+      // Serve handlers belong to one tailnet profile, so a tailnet switch drops this one.
+      if (this.servedPort !== port || !(await this.hasHandler(tailscale, self.dnsName))) {
         const target = `http://127.0.0.1:${port}/${this.pathSecret}`;
         const serve = await this.runServe(tailscale, ['--bg', `--https=${WORKSPACE_HTTPS_PORT}`, target]);
         if (!serve.ok) {
           const output = `${serve.stderr}\n${serve.stdout}`;
-          this.setOff(`tailscale serve failed: ${firstLine(output)}`, serveFix(output));
+          const command = `${tailscale.displayCommand} serve --bg --https=${WORKSPACE_HTTPS_PORT} ${target}`;
+          this.setOff(`tailscale serve couldn't publish this Pane on port ${WORKSPACE_HTTPS_PORT}: ${firstLine(output)}`, serveFix(output, command));
           return;
         }
         this.servedPort = port;
@@ -199,19 +212,26 @@ export class PaneWorkspaceHostController {
         machineName: self.machineName,
         url: `https://${self.dnsName}:${WORKSPACE_HTTPS_PORT}`,
       };
+      this.scheduleCheck();
     });
   }
 
   private setOff(reason: string, fix: string): void {
     this.status = { state: 'off', reason, fix };
-    // Tailscale often starts after Pane at login; check again instead of waiting for a restart.
-    this.retryTimer = setTimeout(() => void this.sync(), RETRY_INTERVAL_MS);
-    this.retryTimer.unref?.();
+    this.scheduleCheck();
   }
 
-  private clearRetry(): void {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
+  private scheduleCheck(): void {
+    // A sync that finishes after shutdown must not start the next one.
+    if (!this.watching) return;
+    this.clearCheck();
+    this.checkTimer = setTimeout(() => void this.sync(), CHECK_INTERVAL_MS);
+    this.checkTimer.unref?.();
+  }
+
+  private clearCheck(): void {
+    if (this.checkTimer) clearTimeout(this.checkTimer);
+    this.checkTimer = null;
   }
 
   private async ensureServer(): Promise<number> {
@@ -249,6 +269,11 @@ export class PaneWorkspaceHostController {
   }
 
 
+  private async hasHandler(tailscale: ResolvedCommand, dnsName: string): Promise<boolean> {
+    const status = await this.runServe(tailscale, ['status', '--json']);
+    return readTailscaleServeHandlers(status.stdout).hasHttpsHandler(dnsName, WORKSPACE_HTTPS_PORT);
+  }
+
   private runServe(tailscale: ResolvedCommand, args: string[]) {
     return this.run(tailscale.command, ['serve', ...args], { env: tailscale.env });
   }
@@ -267,14 +292,17 @@ function firstLine(text: string): string {
   return text.trim().split(/\r?\n/)[0] ?? '';
 }
 
+/** Workspace status shows the reason inside "off (...)", so it has no closing period. */
+function fragment(summary: string): string {
+  return summary.replace(/\.$/, '');
+}
+
+/** Workspace status shows the fix as a sentence of its own, and Pane retries without being asked. */
+function sentence(fix: string): string {
+  return `${fix.charAt(0).toUpperCase()}${fix.slice(1)}`.replace(/, then try again\.$/, `; ${RETRIES}.`);
+}
+
 /** The one step that fixes a failed `tailscale serve`; Pane retries on its own after it. */
-function serveFix(output: string): string {
-  if (isTailscaleServeDisabled(output)) {
-    const url = /https:\/\/login\.tailscale\.com\/\S+/.exec(output)?.[0];
-    return `Enable Tailscale Serve for your tailnet${url ? ` at ${url}` : ' in the Tailscale admin console'}.`;
-  }
-  if (isTailscaleServePermissionDenied(output)) {
-    return 'Allow Pane to configure Serve: run "sudo tailscale set --operator=$USER" once.';
-  }
-  return 'Run the same tailscale serve command in a terminal to see the full error.';
+function serveFix(output: string, command: string): string {
+  return sentence(tailscaleServeFailureFix(output, command).fix);
 }
