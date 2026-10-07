@@ -87,7 +87,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Remote Access',
     description: 'Remote Pane hosts and saved connections.',
     icon: Link2,
-    settingIds: ['remote-machines', 'remote-visibility', 'remote-password', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
+    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
     aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'workspaces'],
   },
   {
