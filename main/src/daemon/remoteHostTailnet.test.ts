@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig, type RemoteHostTailnetNotice } from '../../../shared/types/remoteDaemon';
 import { RemoteHostTailnetMonitor } from './remoteHostTailnet';
 import { createFakeTailscale, TAILNET_A, TAILNET_B } from './__fixtures__/fakeTailscale';
 
@@ -85,5 +85,65 @@ describe('RemoteHostTailnetMonitor', () => {
     monitor.stop();
 
     expect(store.getConfig().remoteDaemon.host.access).toBeUndefined();
+  });
+});
+
+describe('RemoteHostTailnetMonitor notices in Settings', () => {
+  function createNoticeSink() {
+    let notice: RemoteHostTailnetNotice | null = null;
+    return {
+      current: () => notice,
+      getTailnetNotice: () => notice,
+      setTailnetNotice: (next: RemoteHostTailnetNotice | null) => { notice = next; },
+    };
+  }
+
+  it('says where the host moved and that older codes need replacing', async () => {
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_B });
+    const notices = createNoticeSink();
+    const monitor = new RemoteHostTailnetMonitor(createConfigStore(hostConfig()), tailscale.run, notices);
+    await monitor.start();
+    monitor.stop();
+
+    expect(notices.current()).toEqual({
+      tone: 'info',
+      title: `Moved to tailnet ${TAILNET_B.name}`,
+      message: expect.stringContaining('New connection codes use https://parsa-devbox.tail3c2c57.ts.net'),
+    });
+    expect(notices.current()?.message).toContain('create a new code');
+  });
+
+  it('shows a problem with its fix and command, then clears it once fixed', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_B });
+    tailscale.serveRemoteForward(9999);
+    const notices = createNoticeSink();
+    const monitor = new RemoteHostTailnetMonitor(createConfigStore(hostConfig()), tailscale.run, notices);
+    try {
+      await monitor.start();
+      expect(notices.current()).toEqual({
+        tone: 'warning',
+        title: expect.stringContaining('already forwards to 127.0.0.1:9999'),
+        message: expect.stringMatching(/^To fix it: /),
+        command: 'tailscale serve --bg --tls-terminated-tcp=443 42137',
+      });
+
+      tailscale.serveRemoteForward(42137);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await monitor.idle();
+      expect(notices.current()).toMatchObject({ tone: 'info', title: `Moved to tailnet ${TAILNET_B.name}` });
+    } finally {
+      monitor.stop();
+    }
+  });
+
+  it('clears its notice when the remote host is turned off', async () => {
+    const notices = createNoticeSink();
+    notices.setTailnetNotice({ tone: 'warning', title: 'stale', message: 'To fix it: x' });
+    const monitor = new RemoteHostTailnetMonitor(createConfigStore(hostConfig({ enabled: false })), createFakeTailscale().run, notices);
+    await monitor.start();
+    monitor.stop();
+
+    expect(notices.current()).toBeNull();
   });
 });

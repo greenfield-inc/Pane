@@ -12,6 +12,7 @@ import {
   type SetupRemoteHostOptions,
 } from './setupRemoteHost';
 import { createFakeTailscale, TAILNET_A, TAILNET_B } from './__fixtures__/fakeTailscale';
+import { formatTailscaleIssue } from './tailscaleSetup';
 
 const spawnSyncMock = vi.fn<typeof childProcess.spawnSync>();
 
@@ -382,9 +383,9 @@ describe('readConfiguredTailscaleServeAccess', () => {
 
     const result = await readConfiguredTailscaleServeAccess(42137, { run: tailscale.run });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: false,
-      error: expect.stringContaining('no Tailscale Serve forward from :443 to 127.0.0.1:42137'),
+      issue: { summary: expect.stringContaining('forwards port 443 to this Pane (127.0.0.1:42137)') },
     });
     expect(JSON.stringify(result)).not.toContain(':8443');
     expect(tailscale.serveCalls()).toEqual([]);
@@ -411,9 +412,9 @@ describe('readConfiguredTailscaleServeAccess', () => {
     const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
     tailscale.serveRemoteForward(9999);
 
-    await expect(readConfiguredTailscaleServeAccess(42137, { run: tailscale.run, reapply: true })).resolves.toEqual({
+    await expect(readConfiguredTailscaleServeAccess(42137, { run: tailscale.run, reapply: true })).resolves.toMatchObject({
       ok: false,
-      error: expect.stringContaining(':443 already forwards to 127.0.0.1:9999'),
+      issue: { summary: expect.stringContaining('already forwards to 127.0.0.1:9999') },
     });
     expect(tailscale.serveCalls()).toEqual([]);
   });
@@ -458,16 +459,138 @@ describe('readConfiguredTailscaleServeAccess after a tailnet switch', () => {
       env: env ? expect.objectContaining(env) : undefined,
     }]);
   });
+});
 
-  it('surfaces the Serve error when the forward cannot be re-applied', async () => {
-    const tailscale = createFakeTailscale({ tailnet: TAILNET_B });
-    tailscale.failServe('serve config denied');
+describe('Tailscale problems name what is wrong and the step that fixes it', () => {
+  afterEach(() => {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', originalPlatformDescriptor);
+    }
+  });
 
-    const result = await readConfiguredTailscaleServeAccess(42137, { run: tailscale.run, reapply: true });
+  type FakeTailscale = ReturnType<typeof createFakeTailscale>;
+  const cases: Array<{
+    name: string;
+    platform?: NodeJS.Platform;
+    arrange: (tailscale: FakeTailscale) => FakeTailscale['run'] | void;
+    reapply?: boolean;
+    summary: string;
+    fix: string;
+    command?: string;
+  }> = [
+    {
+      name: 'Tailscale is not installed',
+      arrange: () => async () => ({ ok: false, stdout: '', stderr: 'spawn tailscale ENOENT' }),
+      summary: 'Tailscale isn\'t installed on this machine',
+      fix: 'https://tailscale.com/download',
+    },
+    {
+      name: 'tailscaled is not running',
+      arrange: tailscale => tailscale.failStatus('failed to connect to local tailscaled; it doesn\'t appear to be running'),
+      summary: 'Tailscale is installed but not running',
+      fix: 'open the Tailscale app',
+    },
+    {
+      name: 'status fails for another reason',
+      arrange: tailscale => tailscale.failStatus('unexpected EOF'),
+      summary: 'Pane couldn\'t read Tailscale\'s status: unexpected EOF',
+      fix: 'see the full error',
+      command: 'tailscale status',
+    },
+    {
+      name: 'status output is not JSON',
+      arrange: tailscale => async (command, args, options) => (args.join(' ') === 'status --json'
+        ? { ok: true, stdout: 'Logged out.', stderr: '' }
+        : tailscale.run(command, args, options)),
+      summary: 'Pane couldn\'t understand Tailscale\'s status',
+      fix: 'update Tailscale',
+    },
+    {
+      name: 'signed out',
+      arrange: tailscale => tailscale.setBackendState('NeedsLogin'),
+      summary: 'Tailscale is signed out',
+      fix: 'sign in',
+    },
+    {
+      name: 'disconnected',
+      arrange: tailscale => tailscale.setBackendState('Stopped'),
+      summary: 'Tailscale is disconnected',
+      fix: 'Connect',
+    },
+    {
+      name: 'still connecting',
+      arrange: tailscale => tailscale.setBackendState('Starting'),
+      summary: 'Tailscale is still connecting',
+      fix: 'wait a few seconds',
+    },
+    {
+      name: 'waiting for admin approval',
+      arrange: tailscale => tailscale.setBackendState('NeedsMachineAuth'),
+      summary: 'waiting for approval',
+      fix: 'https://login.tailscale.com/admin/machines',
+    },
+    {
+      name: 'no 443 forward and nothing re-applies it',
+      arrange: () => {},
+      summary: `Nothing on tailnet ${TAILNET_A.name} forwards port 443 to this Pane (127.0.0.1:42137)`,
+      fix: 'run remote setup again',
+      command: 'tailscale serve --bg --tls-terminated-tcp=443 42137',
+    },
+    {
+      name: '443 forwards to another port',
+      arrange: tailscale => tailscale.serveRemoteForward(9999),
+      reapply: true,
+      summary: 'Port 443 on tailnet example.github already forwards to 127.0.0.1:9999, not to this Pane (127.0.0.1:42137)',
+      fix: 'another Pane',
+      command: 'tailscale serve --bg --tls-terminated-tcp=443 42137',
+    },
+    {
+      name: 'Serve is turned off for the tailnet',
+      arrange: tailscale => tailscale.failServe('Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=n123\n'),
+      reapply: true,
+      summary: 'Tailscale Serve couldn\'t forward port 443 to this Pane on tailnet example.github',
+      fix: 'turn on Tailscale Serve for your tailnet at https://login.tailscale.com/f/serve?node=n123',
+    },
+    {
+      name: 'Linux denies Serve changes',
+      platform: 'linux',
+      arrange: tailscale => tailscale.failServe('serve config denied'),
+      reapply: true,
+      summary: 'Tailscale said: serve config denied',
+      fix: 'sudo tailscale set --operator=$USER',
+      command: 'sudo tailscale set --operator=$USER',
+    },
+    {
+      name: 'Serve fails for another reason',
+      platform: 'win32',
+      arrange: tailscale => tailscale.failServe('500 Internal Server Error: listener in use'),
+      reapply: true,
+      summary: 'Tailscale said: 500 Internal Server Error: listener in use',
+      fix: 'in a terminal to see the full error',
+      command: 'tailscale serve --bg --tls-terminated-tcp=443 42137',
+    },
+    {
+      name: 'Serve succeeds but the forward never appears',
+      arrange: tailscale => tailscale.ignoreServe(),
+      reapply: true,
+      summary: 'Tailscale still doesn\'t list a port 443 forward',
+      fix: 'compare it with',
+      command: 'tailscale serve status',
+    },
+  ];
 
-    expect(result).toEqual({
-      ok: false,
-      error: expect.stringContaining(`could not forward :443 to 127.0.0.1:42137 on tailnet ${TAILNET_B.name}: serve config denied`),
-    });
+  it.each(cases)('$name', async ({ platform, arrange, reapply, summary, fix, command }) => {
+    if (platform) Object.defineProperty(process, 'platform', { value: platform });
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
+    const run = arrange(tailscale) ?? tailscale.run;
+
+    const result = await readConfiguredTailscaleServeAccess(42137, { run, reapply, pathExists: () => false });
+
+    if (result.ok) throw new Error('expected a Tailscale problem');
+    expect(result.issue.summary).toContain(summary);
+    expect(result.issue.fix).toContain(fix);
+    expect(result.issue.command).toBe(command);
+    expect(formatTailscaleIssue(result.issue)).not.toMatch(/\n/);
+    expect(formatTailscaleIssue(result.issue)).toContain('To fix it:');
   });
 });

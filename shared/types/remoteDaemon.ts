@@ -53,6 +53,15 @@ export interface RemoteDaemonConnectedClient {
   lastSeenAt: string;
 }
 
+/** What Settings shows about this host's tailnet: a problem and its fix, or that the host moved. */
+export interface RemoteHostTailnetNotice {
+  tone: 'warning' | 'info';
+  title: string;
+  message: string;
+  /** A command the message asks for, shown on its own so it can be copied. */
+  command?: string;
+}
+
 export interface RemoteDaemonHostRuntimeState {
   enabled: boolean;
   status: RemoteDaemonHostRuntimeStatus;
@@ -61,6 +70,7 @@ export interface RemoteDaemonHostRuntimeState {
   lastError: string | null;
   connectedClients: RemoteDaemonConnectedClient[];
   executableHealth: RemoteDaemonExecutableHealth;
+  tailnetNotice: RemoteHostTailnetNotice | null;
   updatedAt: string;
 }
 
@@ -411,6 +421,7 @@ export function createDefaultRemoteDaemonHostRuntimeState(): RemoteDaemonHostRun
     lastError: null,
     connectedClients: [],
     executableHealth: createUnknownRemoteDaemonExecutableHealth(),
+    tailnetNotice: null,
     updatedAt: '1970-01-01T00:00:00.000Z',
   };
 }

@@ -881,6 +881,11 @@ describe('remote daemon IPC', () => {
       },
     });
     expect(configManager.getConfig().remoteDaemon?.host.access).toEqual(liveAccess);
+    expect(remoteHostRuntimeStateStore.getState().tailnetNotice).toMatchObject({
+      tone: 'info',
+      title: 'Moved to tailnet bloomapi.org.github',
+      message: expect.stringContaining('New connection codes use https://parsa-devbox.tail3c2c57.ts.net'),
+    });
     expect(configManager.getConfig().remoteDaemon?.host.clients).toHaveLength(1);
     expectConnectionCodeAuthenticates(configManager, response.data?.connectionCode);
     expect(configManager.getConfig().remoteDaemon?.client.profiles).toHaveLength(0);
@@ -890,17 +895,31 @@ describe('remote daemon IPC', () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config.enabled = true;
     initialConfig.host.access = tailscaleAccess('https://parsa-devbox.taila5e94c.ts.net', '100.115.232.35');
-    const error = 'Tailscale Serve could not forward :443 to 127.0.0.1:42137 on tailnet bloomapi.org.github: serve config denied';
-    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({ ok: false, error });
+    vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
+      ok: false,
+      issue: {
+        summary: 'Tailscale Serve couldn\'t forward port 443 to this Pane on tailnet bloomapi.org.github, so other devices can\'t connect. Tailscale said: serve config denied.',
+        fix: 'let Pane change Serve settings by running "sudo tailscale set --operator=$USER" once, then try again.',
+        command: 'sudo tailscale set --operator=$USER',
+      },
+    });
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub(initialConfig);
 
     registerTestRemoteDaemonHandlers(ipcMain, { configManager });
 
-    await expect(ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, {}))
-      .resolves.toEqual({ success: false, error });
+    await expect(ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, {})).resolves.toEqual({
+      success: false,
+      error: 'Tailscale Serve couldn\'t forward port 443 to this Pane on tailnet bloomapi.org.github, so other devices can\'t connect. Tailscale said: serve config denied. To fix it: let Pane change Serve settings by running "sudo tailscale set --operator=$USER" once, then try again.',
+    });
     expect(configManager.getConfig().remoteDaemon?.host.clients).toHaveLength(0);
     expect(configManager.getConfig().remoteDaemon?.host.access?.baseUrl).toBe('https://parsa-devbox.taila5e94c.ts.net');
+    expect(remoteHostRuntimeStateStore.getState().tailnetNotice).toEqual({
+      tone: 'warning',
+      title: expect.stringContaining('Tailscale said: serve config denied.'),
+      message: expect.stringMatching(/^To fix it: let Pane change Serve settings/),
+      command: 'sudo tailscale set --operator=$USER',
+    });
   });
 
   it('keeps manually configured host access without reading Tailscale', async () => {

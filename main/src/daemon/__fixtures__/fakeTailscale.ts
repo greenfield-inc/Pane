@@ -30,7 +30,7 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
   const cli = options.cli ?? 'tailscale';
   const serveByTailnet = new Map<string, ServeConfig>();
   const calls: FakeTailscaleCall[] = [];
-  const state = { tailnet: options.tailnet ?? TAILNET_A, serveFails: '' };
+  const state = { tailnet: options.tailnet ?? TAILNET_A, serveFails: '', statusFails: '', backend: 'Running', serveIgnored: false };
 
   const dnsName = () => `${machine}.${state.tailnet.suffix}`;
   const serveConfig = (): ServeConfig => {
@@ -48,8 +48,9 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
     if (args[0] === 'version') return ok('1.90.0\n');
     if (args[0] === 'ip') return ok(`${state.tailnet.ip}\nfd7a:115c:a1e0::1\n`);
     if (args.join(' ') === 'status --json') {
+      if (state.statusFails) return { ok: false, stdout: '', stderr: state.statusFails };
       return ok(JSON.stringify({
-        BackendState: 'Running',
+        BackendState: state.backend,
         CertDomains: [dnsName()],
         Self: { DNSName: `${dnsName()}.`, TailscaleIPs: [state.tailnet.ip, 'fd7a:115c:a1e0::1'], UserID: 31, Tags: null },
         User: { 31: { LoginName: 'owner@example.com' } },
@@ -62,6 +63,7 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
       return ok(Object.keys(config.TCP).length === 0 ? '{}\n' : JSON.stringify(config));
     }
     if (state.serveFails) return { ok: false, stdout: '', stderr: state.serveFails };
+    if (state.serveIgnored) return ok();
     const config = serveConfig();
     const tls = args.find(arg => arg.startsWith('--tls-terminated-tcp='));
     const https = args.find(arg => arg.startsWith('--https='));
@@ -87,6 +89,11 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
     serveCalls: () => calls.filter(call => call.args[0] === 'serve' && call.args[1] !== 'status'),
     switchTailnet: (tailnet: FakeTailnet) => { state.tailnet = tailnet; },
     failServe: (stderr: string) => { state.serveFails = stderr; },
+    /** Makes `status --json` fail, as it does when tailscaled is not running. */
+    failStatus: (stderr: string) => { state.statusFails = stderr; },
+    setBackendState: (backend: 'Running' | 'NeedsLogin' | 'Stopped' | 'Starting' | 'NeedsMachineAuth') => { state.backend = backend; },
+    /** `serve --bg` reports success but changes nothing. */
+    ignoreServe: () => { state.serveIgnored = true; },
     /** Sets a handler directly, as if `tailscale serve` was run outside Pane. */
     serveWorkspaceOnly: (port = 55555) => {
       const config = serveConfig();

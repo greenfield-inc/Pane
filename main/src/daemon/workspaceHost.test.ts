@@ -22,7 +22,10 @@ describe('readTailnetSelf', () => {
 
   it('names the one step that fixes a signed-out Tailscale or a tailnet without HTTPS certificates', () => {
     expect(readTailnetSelf(JSON.stringify({ ...running, BackendState: 'NeedsLogin' }))).toMatchObject({
-      ok: false, reason: 'Tailscale is signed out', fix: expect.stringContaining('sign in'),
+      ok: false, reason: expect.stringContaining('Tailscale is signed out'), fix: expect.stringContaining('sign in'),
+    });
+    expect(readTailnetSelf(JSON.stringify({ ...running, BackendState: 'Stopped' }))).toMatchObject({
+      ok: false, reason: expect.stringContaining('disconnected'), fix: 'Open Tailscale and click Connect (or run "tailscale up"); Pane retries within a minute.',
     });
     expect(readTailnetSelf(JSON.stringify({ ...running, CertDomains: null }))).toMatchObject({
       ok: false, reason: expect.stringContaining('HTTPS certificates'), fix: expect.stringContaining('https://login.tailscale.com/admin/dns'),
@@ -84,6 +87,39 @@ describe('PaneWorkspaceHostController', () => {
     } finally {
       await host.shutdown();
       vi.useRealTimers();
+    }
+  });
+
+  it('names the step that fixes a stopped Tailscale or a refused Serve change', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
+    const host = new PaneWorkspaceHostController(
+      new PaneCommandRegistry(),
+      { getConfig: () => ({ workspaces: { enabled: true } }), on: () => ({}), off: () => ({}) },
+      true,
+      tailscale.run,
+    );
+    try {
+      tailscale.failStatus('failed to connect to local tailscaled; it doesn\'t appear to be running');
+      await host.sync();
+      expect(host.getStatus()).toEqual({
+        state: 'off',
+        reason: 'Tailscale is installed but not running, so other devices can\'t reach this Pane',
+        fix: 'Open the Tailscale app and make sure it is connected; Pane retries within a minute.',
+      });
+
+      tailscale.failStatus('');
+      tailscale.failServe('serve config denied');
+      await host.sync();
+      expect(host.getStatus()).toMatchObject({
+        state: 'off',
+        reason: 'tailscale serve couldn\'t publish this Pane on port 8443: serve config denied',
+        fix: expect.stringMatching(/^Run "tailscale serve --bg --https=8443 http:\/\/127\.0\.0\.1:\d+\/\w+" in a terminal to see the full error, fix what it reports; Pane retries within a minute\.$/),
+      });
+    } finally {
+      await host.shutdown();
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
     }
   });
 

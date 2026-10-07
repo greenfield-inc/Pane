@@ -27,11 +27,15 @@ import {
   isIpv4Address,
   readTailnetIdentity,
   readTailscaleServeHandlers,
+  tailscaleNotInstalledIssue,
+  tailscaleServeFailureFix,
+  tailscaleStatusFailureIssue,
   resolveTailscaleCommand,
   resolveTailscaleCommandAsync,
   runCommand as runTailscaleCommand,
   runTailscaleServeInteractive,
   type ResolvedCommand,
+  type TailscaleIssue,
   type TailscaleSetupDependencies,
 } from './tailscaleSetup';
 import {
@@ -220,7 +224,7 @@ function createRemoteHostAccess(
 
 export type TailscaleServeAccessResult =
   | { ok: true; access: RemoteDaemonHostAccess; tailnet: string; reapplied: boolean }
-  | { ok: false; error: string };
+  | { ok: false; issue: TailscaleIssue };
 
 /**
  * Remote daemon access on the tailnet this machine is on now. Only the TLS-terminated
@@ -235,15 +239,21 @@ export async function readConfiguredTailscaleServeAccess(
   const run = options.run ?? runRemoteSetupCommand;
   const tailscaleCli = await resolveTailscaleCommandAsync(run, options.pathExists);
   if (!tailscaleCli) {
-    return { ok: false, error: 'Tailscale is not installed. Install it from https://tailscale.com/download and sign in, then try again.' };
+    return { ok: false, issue: tailscaleNotInstalledIssue() };
   }
   const tailscale = (args: string[]) => run(tailscaleCli.command, args, { env: tailscaleCli.env });
 
-  const identity = readTailnetIdentity((await tailscale(['status', '--json'])).stdout);
+  const status = await tailscale(['status', '--json']);
+  if (!status.ok) {
+    return { ok: false, issue: tailscaleStatusFailureIssue(firstNonEmpty(status.stderr, status.stdout), tailscaleCli) };
+  }
+  const identity = readTailnetIdentity(status.stdout);
   if (!identity.ok) {
-    return { ok: false, error: identity.reason };
+    return { ok: false, issue: identity.issue };
   }
 
+  const tailnet = identity.tailnetName;
+  const thisPane = `this Pane (127.0.0.1:${listenPort})`;
   const tailscaleCommand = buildTailscaleServeCommand(tailscaleCli, listenPort);
   const readHandlers = async () => readTailscaleServeHandlers((await tailscale(['serve', 'status', '--json'])).stdout);
   const handlers = await readHandlers();
@@ -254,25 +264,47 @@ export async function readConfiguredTailscaleServeAccess(
     // Another Pane data directory, or something outside Pane, owns :443; taking it over would break that.
     return {
       ok: false,
-      error: `On tailnet ${identity.tailnetName}, Tailscale Serve :443 already forwards to ${otherTarget}, not to this host's port 127.0.0.1:${listenPort}. Run "${tailscaleCommand}" to point it here, then try again.`,
+      issue: {
+        summary: `Port 443 on tailnet ${tailnet} already forwards to ${otherTarget}, not to ${thisPane}, so Pane left it alone.`,
+        fix: `if another Pane or app on this machine still uses it, keep it and share that Pane's code instead; to move it to this Pane, run "${tailscaleCommand}", then try again.`,
+        command: tailscaleCommand,
+      },
     };
   }
   if (!confirmed && options.reapply) {
     const serve = await tailscale(['serve', '--bg', '--tls-terminated-tcp=443', String(listenPort)]);
     if (!serve.ok) {
-      const output = firstNonEmpty(serve.stderr, serve.stdout, 'unknown error');
+      const output = firstNonEmpty(serve.stderr, serve.stdout, 'no output');
       return {
         ok: false,
-        error: `Tailscale Serve could not forward :443 to 127.0.0.1:${listenPort} on tailnet ${identity.tailnetName}: ${output}\n\n${getTailscaleServeSetupInstructions(listenPort)}`,
+        issue: {
+          summary: `Tailscale Serve couldn't forward port 443 to this Pane on tailnet ${tailnet}, so other devices can't connect. Tailscale said: ${firstLine(output)}.`,
+          ...tailscaleServeFailureFix(output, tailscaleCommand),
+        },
       };
     }
     reapplied = true;
     confirmed = (await readHandlers()).hasTlsTerminatedForward(listenPort);
+    if (!confirmed) {
+      const statusCommand = `${tailscaleCli.displayCommand} serve status`;
+      return {
+        ok: false,
+        issue: {
+          summary: `Pane ran "${tailscaleCommand}", but Tailscale still doesn't list a port 443 forward to ${thisPane} on tailnet ${tailnet}.`,
+          fix: `run "${statusCommand}" to see what Tailscale has, compare it with "${tailscaleCommand}", then try again.`,
+          command: statusCommand,
+        },
+      };
+    }
   }
   if (!confirmed) {
     return {
       ok: false,
-      error: `This machine is on tailnet ${identity.tailnetName}, but it has no Tailscale Serve forward from :443 to 127.0.0.1:${listenPort}, so a connection code would not connect. Run "${tailscaleCommand}" on this machine, then try again.`,
+      issue: {
+        summary: `Nothing on tailnet ${tailnet} forwards port 443 to ${thisPane} yet, so a connection code wouldn't connect.`,
+        fix: `run "${tailscaleCommand}" on this machine, or run remote setup again, then try again.`,
+        command: tailscaleCommand,
+      },
     };
   }
 
@@ -638,6 +670,10 @@ function isNodeErrorWithCode<ErrorValue>(error: ErrorValue, code: string): boole
   }
 }
 
+
+function firstLine(text: string): string {
+  return text.trim().split(/\r?\n/)[0]?.trim() ?? '';
+}
 
 function firstNonEmpty(...values: string[]): string {
   return values.find((value) => value.trim().length > 0)?.trim() ?? '';

@@ -37,6 +37,8 @@ import {
 } from '../daemon/remotePairing';
 import { remoteHostRuntimeStateStore } from '../daemon/remoteHostRuntimeState';
 import { readConfiguredTailscaleServeAccess, setupRemoteHost } from '../daemon/setupRemoteHost';
+import { tailnetMovedNotice, tailnetProblemNotice } from '../daemon/remoteHostTailnet';
+import { formatTailscaleIssue } from '../daemon/tailscaleSetup';
 import { getAppDirectory } from '../utils/appDirectory';
 import { ShellDetector } from '../utils/shellDetector';
 import { disconnectActiveRemoteHostClients } from '../daemon/remoteTransportController';
@@ -682,12 +684,15 @@ async function resolveCurrentHostAccess(
   // Tailscale access belongs to whichever tailnet this host is on now; the saved URL may be stale.
   const live = await readTailscaleAccess(current.host.config.listenPort, { reapply: saved !== undefined });
   if (!live.ok) {
-    throw new Error(saved
-      ? live.error
-      : `Pane does not have remote host access for this setup yet. ${live.error} Or run the remote setup terminal once to configure Tailscale Serve.`);
+    // The notice keeps the fix and its copyable command in Settings after the error is dismissed.
+    remoteHostRuntimeStateStore.setTailnetNotice(tailnetProblemNotice(live.issue));
+    throw new Error(formatTailscaleIssue(live.issue));
   }
   if (saved && saved.baseUrl !== live.access.baseUrl) {
     console.log(`[Pane remote daemon] Host moved to tailnet ${live.tailnet}; connection codes now use ${live.access.baseUrl}`);
+    remoteHostRuntimeStateStore.setTailnetNotice(tailnetMovedNotice(live.tailnet, live.access.baseUrl));
+  } else if (remoteHostRuntimeStateStore.getTailnetNotice()?.tone === 'warning') {
+    remoteHostRuntimeStateStore.setTailnetNotice(null);
   }
   return live.access;
 }

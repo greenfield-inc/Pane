@@ -31,10 +31,67 @@ interface InstallAttempt {
   reason?: string;
 }
 
+/** A Tailscale problem as a person sees it: what is wrong, and the one step that fixes it. */
+export interface TailscaleIssue {
+  summary: string;
+  /** Starts lowercase, because it follows "To fix it:". */
+  fix: string;
+  /** A command the fix asks for, shown on its own so it can be copied. */
+  command?: string;
+}
+
+/** One line, because Settings, logs and the CLI do not keep line breaks. */
+export function formatTailscaleIssue(issue: TailscaleIssue): string {
+  return `${issue.summary} To fix it: ${issue.fix}`;
+}
+
+const UNREACHABLE = 'so other devices can\'t reach this Pane';
+
+export function tailscaleNotInstalledIssue(): TailscaleIssue {
+  return {
+    summary: `Tailscale isn't installed on this machine, ${UNREACHABLE}.`,
+    fix: 'install it from https://tailscale.com/download, sign in, then try again.',
+  };
+}
+
+/** Why `tailscale status` itself failed. */
+export function tailscaleStatusFailureIssue(output: string, cli: ResolvedCommand): TailscaleIssue {
+  if (/doesn't appear to be running|failed to connect to local tailscale|is tailscaled running/i.test(output)) {
+    const summary = `Tailscale is installed but not running, ${UNREACHABLE}.`;
+    return process.platform === 'linux'
+      ? { summary, fix: 'start it with "sudo systemctl start tailscaled", then try again.', command: 'sudo systemctl start tailscaled' }
+      : { summary, fix: 'open the Tailscale app and make sure it is connected, then try again.' };
+  }
+  const command = `${cli.displayCommand} status`;
+  return {
+    summary: `Pane couldn't read Tailscale's status: ${firstLine(output) || 'no output'}.`,
+    fix: `run "${command}" in a terminal to see the full error, fix what it reports, then try again.`,
+    command,
+  };
+}
+
+/** The step that fixes a refused `tailscale serve` change. */
+export function tailscaleServeFailureFix(
+  output: string,
+  command: string,
+  /** What happens after the fix: the person retries, or Pane does on its own. */
+  then = 'then try again',
+): Pick<TailscaleIssue, 'fix' | 'command'> {
+  if (isTailscaleServeDisabled(output)) {
+    const url = /https:\/\/login\.tailscale\.com\/\S+/.exec(output)?.[0] ?? 'https://login.tailscale.com/admin';
+    return { fix: `turn on Tailscale Serve for your tailnet at ${url}, ${then}.` };
+  }
+  if (process.platform === 'linux' && isTailscaleServePermissionDenied(output)) {
+    const operator = 'sudo tailscale set --operator=$USER';
+    return { fix: `let Pane change Serve settings by running "${operator}" once, ${then}.`, command: operator };
+  }
+  return { fix: `run "${command}" in a terminal to see the full error, fix what it reports, ${then}.`, command };
+}
+
 /** The tailnet this machine is on right now, from `tailscale status --json`. */
 export type TailnetIdentity =
   | { ok: true; tailnetName: string; dnsName: string; tailscaleIp: string | null }
-  | { ok: false; reason: string };
+  | { ok: false; issue: TailscaleIssue };
 
 const tailnetIdentitySchema = boundary.object({
   BackendState: boundary.string,
@@ -56,17 +113,42 @@ export function readTailnetIdentity(statusJson: string): TailnetIdentity {
     parsed = undefined;
   }
   if (!parsed) {
-    return { ok: false, reason: 'Tailscale status could not be read. Update Tailscale, then try again.' };
+    return {
+      ok: false,
+      issue: {
+        summary: 'Pane couldn\'t understand Tailscale\'s status, which usually means this Tailscale version is too old.',
+        fix: 'update Tailscale from https://tailscale.com/download, then try again.',
+      },
+    };
   }
   const dnsName = parsed.Self?.DNSName.replace(/\.$/, '') ?? '';
   if (parsed.BackendState !== 'Running' || !dnsName) {
-    return { ok: false, reason: 'Tailscale is signed out. Open Tailscale and sign in, then try again.' };
+    return { ok: false, issue: backendStateIssue(parsed.BackendState) };
   }
   const tailnetName = parsed.CurrentTailnet?.Name
     || parsed.CurrentTailnet?.MagicDNSSuffix
     || dnsName.split('.').slice(1).join('.');
   const tailscaleIp = parsed.Self?.TailscaleIPs?.find(isIpv4Address) ?? null;
   return { ok: true, tailnetName, dnsName, tailscaleIp };
+}
+
+function backendStateIssue(backendState: string): TailscaleIssue {
+  switch (backendState) {
+    case 'Stopped':
+      return {
+        summary: `Tailscale is disconnected on this machine, ${UNREACHABLE}.`,
+        fix: 'open Tailscale and click Connect (or run "tailscale up"), then try again.',
+      };
+    case 'Starting':
+      return { summary: 'Tailscale is still connecting on this machine.', fix: 'wait a few seconds for it to connect, then try again.' };
+    case 'NeedsMachineAuth':
+      return {
+        summary: `This machine is waiting for approval from your tailnet admin, ${UNREACHABLE}.`,
+        fix: 'approve it at https://login.tailscale.com/admin/machines (or ask your admin to), then try again.',
+      };
+    default:
+      return { summary: `Tailscale is signed out on this machine, ${UNREACHABLE}.`, fix: 'open Tailscale and sign in, then try again.' };
+  }
 }
 
 const serveConfigSchema = boundary.object({
@@ -82,7 +164,7 @@ const tcpHandlerSchema = boundary.object({
 export interface TailscaleServeHandlers {
   /** Whether `:443` terminates TLS and forwards raw TCP to `127.0.0.1:<listenPort>`. */
   hasTlsTerminatedForward(listenPort: number): boolean;
-  /** Where `:443` sends traffic now (`TCPForward`, or `'another handler'`), or null when nothing serves it. */
+  /** Where `:443` sends traffic now (its `TCPForward`, or a description), or null when nothing serves it. */
   port443Target(): string | null;
   /** Whether an HTTPS web handler exists for `<dnsName>:<port>`. */
   hasHttpsHandler(dnsName: string, port: number): boolean;
@@ -106,7 +188,7 @@ export function readTailscaleServeHandlers(serveStatusJson: string): TailscaleSe
     },
     port443Target() {
       if (tcp['443'] === undefined) return null;
-      return decodeOptionalBoundary(tcp['443'], tcpHandlerSchema)?.TCPForward || 'another handler';
+      return decodeOptionalBoundary(tcp['443'], tcpHandlerSchema)?.TCPForward || 'a different Serve handler';
     },
     hasHttpsHandler(dnsName, port) {
       return Object.prototype.hasOwnProperty.call(web, `${dnsName}:${port}`);
@@ -537,11 +619,11 @@ function buildTailscaleInstallError(installAttempt: InstallAttempt): string {
   return lines.join('\n');
 }
 
-export function isTailscaleServeDisabled(output: string): boolean {
+function isTailscaleServeDisabled(output: string): boolean {
   return output.toLowerCase().includes('serve is not enabled on your tailnet');
 }
 
-export function isTailscaleServePermissionDenied(output: string): boolean {
+function isTailscaleServePermissionDenied(output: string): boolean {
   const normalized = output.toLowerCase();
   return normalized.includes('serve config denied')
     || normalized.includes('access denied');
@@ -584,6 +666,10 @@ function commandExistsWithArgs(
 
 function isWsl(): boolean {
   return Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
+}
+
+function firstLine(text: string): string {
+  return text.trim().split(/\r?\n/)[0]?.trim() ?? '';
 }
 
 function firstNonEmpty(...values: string[]): string {
