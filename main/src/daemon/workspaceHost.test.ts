@@ -1,12 +1,28 @@
+import http from 'http';
 import { describe, expect, it } from 'vitest';
 import { PaneCommandRegistry } from './commandRegistry';
 import { PaneWorkspaceHostController, readTailnetSelf } from './workspaceHost';
+import { hashWorkspacePassword } from './workspacePassword';
+import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 
 const running = {
   BackendState: 'Running',
+  MagicDNSSuffix: 'taila5e94c.ts.net',
   CertDomains: ['parsas-macbook-pro.taila5e94c.ts.net'],
   Self: { DNSName: 'parsas-macbook-pro.taila5e94c.ts.net.', UserID: 31, Tags: null },
-  User: { 31: { LoginName: 'owner@example.com' }, 99: { LoginName: 'teammate@example.com' } },
+  Peer: {
+    'nodekey:1': { DNSName: 'owner-laptop.taila5e94c.ts.net.', UserID: 31 },
+    'nodekey:2': { DNSName: 'teammate-mac.taila5e94c.ts.net.', UserID: 99 },
+    'nodekey:3': { DNSName: 'ci-runner.taila5e94c.ts.net.', UserID: 77, Tags: ['tag:ci'] },
+    // A user this machine was shared with: in the netmap only because they may connect to it.
+    'nodekey:4': { DNSName: 'guest-pc.other-tailnet.ts.net.', UserID: 55, ShareeNode: true },
+  },
+  User: {
+    31: { LoginName: 'owner@example.com' },
+    99: { LoginName: 'Teammate@Example.com' },
+    77: { LoginName: 'ci@example.com' },
+    55: { LoginName: 'guest@elsewhere.example' },
+  },
 };
 
 describe('readTailnetSelf', () => {
@@ -16,7 +32,13 @@ describe('readTailnetSelf', () => {
       ownerLogin: 'owner@example.com',
       machineName: 'parsas-macbook-pro',
       dnsName: 'parsas-macbook-pro.taila5e94c.ts.net',
+      tailnetLogins: ['owner@example.com', 'teammate@example.com'],
     });
+  });
+
+  it('counts as tailnet members only people with untagged devices in this tailnet, not users it was shared with', () => {
+    const self = readTailnetSelf(JSON.stringify(running));
+    expect(self.ok && self.tailnetLogins).toEqual(['owner@example.com', 'teammate@example.com']);
   });
 
   it('names the one step that fixes a signed-out Tailscale or a tailnet without HTTPS certificates', () => {
@@ -36,8 +58,8 @@ describe('readTailnetSelf', () => {
 });
 
 describe('PaneWorkspaceHostController', () => {
-  function setup() {
-    const config = { workspaces: { enabled: true } };
+  function setup(workspaces: WorkspaceAccessConfig = { enabled: true }) {
+    const config = { workspaces };
     const serveCalls: string[][] = [];
     let removalFails = false;
     const run = async (_command: string, args: string[]) => {
@@ -48,14 +70,78 @@ describe('PaneWorkspaceHostController', () => {
       }
       return { ok: true, stdout: '', stderr: '' };
     };
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
     const host = new PaneWorkspaceHostController(
-      new PaneCommandRegistry(),
+      registry,
       { getConfig: () => config, on: () => ({}), off: () => ({}) },
       true,
       run,
     );
-    return { host, config, serveCalls, failRemoval: (fails: boolean) => { removalFails = fails; } };
+    /** Sends a request the way Tailscale Serve forwards it to the target it was given. */
+    const request = (login: string, password?: string) => {
+      const target = serveCalls.find(args => args.includes('--bg'))?.at(-1);
+      if (!target) throw new Error('nothing was served');
+      return new Promise<number>((resolve, reject) => {
+        const body = JSON.stringify({ channel: 'runpane:machine:info', args: [] });
+        const headers: http.OutgoingHttpHeaders = { 'Content-Type': 'application/json', 'Tailscale-User-Login': login };
+        if (password) headers.Authorization = `Bearer ${password}`;
+        const req = http.request(`${target}/invoke`, { method: 'POST', headers }, (response) => {
+          response.resume();
+          response.on('end', () => resolve(response.statusCode ?? 0));
+        });
+        req.once('error', reject);
+        req.end(body);
+      });
+    };
+    return { host, config, serveCalls, request, failRemoval: (fails: boolean) => { removalFails = fails; } };
   }
+
+  it('is visible only to its owner unless told otherwise', async () => {
+    const { host, request } = setup();
+    await host.start();
+    await expect(request('owner@example.com')).resolves.toBe(200);
+    await expect(request('teammate@example.com')).resolves.toBe(403);
+    expect(host.getAccess()).toMatchObject({ visibility: 'owner', passwordProtected: false, state: 'on' });
+    await host.shutdown();
+  });
+
+  it('lets everyone on the tailnet in under "tailnet" visibility, and nobody from outside it', async () => {
+    const { host, request } = setup({ enabled: true, visibility: 'tailnet' });
+    await host.start();
+    await expect(request('teammate@example.com')).resolves.toBe(200);
+    await expect(request('guest@elsewhere.example')).resolves.toBe(403);
+    await expect(request('ci@example.com')).resolves.toBe(403);
+    await host.shutdown();
+  });
+
+  it('asks every client for the password once one is set', async () => {
+    const { host, request } = setup({ enabled: true, visibility: 'tailnet', password: hashWorkspacePassword('correct horse') });
+    await host.start();
+    await expect(request('owner@example.com')).resolves.toBe(401);
+    await expect(request('teammate@example.com', 'wrong password')).resolves.toBe(401);
+    await expect(request('owner@example.com', 'correct horse')).resolves.toBe(200);
+    await expect(request('teammate@example.com', 'correct horse')).resolves.toBe(200);
+    expect(host.getAccess()).toMatchObject({ visibility: 'tailnet', passwordProtected: true });
+    await host.shutdown();
+  });
+
+  it('applies a visibility change without restarting', async () => {
+    const { host, config, request } = setup();
+    await host.start();
+    await expect(request('teammate@example.com')).resolves.toBe(403);
+    config.workspaces = { ...config.workspaces, visibility: 'tailnet' };
+    await host.sync();
+    await expect(request('teammate@example.com')).resolves.toBe(200);
+    await host.shutdown();
+  });
+
+  it('reports visibility "off" when turned off', async () => {
+    const { host } = setup({ enabled: false, visibility: 'tailnet' });
+    await host.start();
+    expect(host.getAccess()).toMatchObject({ visibility: 'off', state: 'off' });
+    await host.shutdown();
+  });
 
   it('reports a handler it could not remove, and removes it on a later sync', async () => {
     const { host, config, serveCalls, failRemoval } = setup();

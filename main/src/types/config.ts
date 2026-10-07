@@ -1,6 +1,7 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
@@ -166,8 +167,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
-  // runpane workspace: unset means on for the desktop Pane that owns ~/.pane
-  workspaces?: { enabled?: boolean };
+  // Codeless remote access over Tailscale (runpane workspace and desktop remote mode)
+  workspaces?: WorkspaceAccessConfig;
   terminalFontFamily?: string;
   terminalFontSize?: number;
   // Leaderboard opt-in and cached state

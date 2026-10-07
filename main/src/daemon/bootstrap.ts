@@ -363,7 +363,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     configManager,
     mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
   );
-  registerWorkspaceCommands(commandRegistry, workspaceHost, configManager);
+  registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);

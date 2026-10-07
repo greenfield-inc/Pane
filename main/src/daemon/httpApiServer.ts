@@ -11,7 +11,9 @@ import {
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
-import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceIdentity } from './auth';
+import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type WorkspaceAccessPolicy } from './auth';
+
+export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import {
   createDefaultRemoteDaemonConfig,
@@ -54,6 +56,13 @@ interface ConnectedRemoteEventClient {
   connectedAt: string;
   lastSeenAt: string;
   heartbeatTimer: NodeJS.Timeout;
+  /** What a workspace client signed in with, checked again before each event it receives. */
+  workspaceCredentials: WorkspaceCredentials | null;
+}
+
+interface WorkspaceCredentials {
+  login: string | string[] | undefined;
+  authorization: string | string[] | undefined;
 }
 
 interface RemoteInvokeSuccessPayload {
@@ -167,7 +176,7 @@ const REMOTE_DAEMON_CORS_HEADERS = {
 interface PaneRemoteHttpApiServerOptions {
   heartbeatIntervalMs?: number;
   analyticsSink?: RemotePaneAnalyticsSink;
-  /** Serve workspaces on loopback behind Tailscale Serve, trusting only the owner's Tailscale login. */
+  /** Serve workspaces on loopback behind Tailscale Serve, trusting the Tailscale logins `access` allows. */
   workspace?: WorkspaceIdentityOptions;
 }
 
@@ -178,8 +187,8 @@ interface WorkspaceIdentityOptions {
    * another OS user who finds the loopback port cannot call it directly.
    */
   pathSecret: string;
-  /** The login of this machine's own Tailscale user; null refuses every request. */
-  ownerLogin(): string | null;
+  /** Who may connect right now; null refuses every request. */
+  access(): WorkspaceAccessPolicy | null;
 }
 
 /** Commands that act on the whole machine: workspace identity only, never pairing tokens. */
@@ -236,7 +245,7 @@ export class PaneRemoteHttpApiServer {
           };
 
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (!this.shouldKeepEventClient(client.remoteClientId, client.remoteClientTokenHash)) {
+            if (!this.shouldKeepEventClient(client)) {
               this.dropEventClient(clientConnectionId);
               continue;
             }
@@ -678,6 +687,12 @@ export class PaneRemoteHttpApiServer {
       connectedAt,
       lastSeenAt: connectedAt,
       heartbeatTimer,
+      workspaceCredentials: this.workspace
+        ? {
+          login: request.headers['tailscale-user-login'],
+          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
+        }
+        : null,
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     this.publishConnectedClients();
@@ -718,7 +733,11 @@ export class PaneRemoteHttpApiServer {
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
     if (this.workspace) {
-      return authenticateWorkspaceIdentity(request.headers['tailscale-user-login'], this.workspace.ownerLogin());
+      return authenticateWorkspaceRequest(
+        request.headers['tailscale-user-login'],
+        getAuthorizationHeaderForRequest(request, token),
+        this.workspace.access(),
+      );
     }
     const remoteConfig = this.getRemoteConfig();
     if (!remoteConfig.host.config.enabled) {
@@ -811,9 +830,15 @@ export class PaneRemoteHttpApiServer {
     }));
   }
 
-  private shouldKeepEventClient(remoteClientId: string | null, remoteClientTokenHash: string | null): boolean {
+  private shouldKeepEventClient(client: ConnectedRemoteEventClient): boolean {
+    const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
     if (this.workspace) {
-      return this.workspace.ownerLogin() !== null;
+      // Narrower visibility or a new password applies to clients that are already connected.
+      return workspaceCredentials !== null && authenticateWorkspaceRequest(
+        workspaceCredentials.login,
+        workspaceCredentials.authorization,
+        this.workspace.access(),
+      ).ok;
     }
     const remoteConfig = this.getRemoteConfig();
     if (!remoteConfig.host.config.enabled) {
@@ -875,6 +900,8 @@ export class PaneRemoteHttpApiServer {
   }
 
   private publishConnectedClients(): void {
+    // The host's connected-client list belongs to the paired transport; this one would replace it.
+    if (this.workspace) return;
     remoteHostRuntimeStateStore.setConnectedClients(this.getConnectedClientSnapshots());
   }
 

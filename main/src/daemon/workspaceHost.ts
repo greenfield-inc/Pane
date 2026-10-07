@@ -5,6 +5,9 @@ import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
 import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
+import type { WorkspaceAccessPolicy } from './auth';
+import { createWorkspacePasswordVerifier } from './workspacePassword';
+import type { WorkspaceAccessSummary, WorkspacePasswordHash } from '../../../shared/types/workspaceAccess';
 import {
   isTailscaleServeDisabled,
   isTailscaleServePermissionDenied,
@@ -17,7 +20,14 @@ const WORKSPACE_HTTPS_PORT = 8443;
 const RETRY_INTERVAL_MS = 60_000;
 
 export type TailnetSelf =
-  | { ok: true; ownerLogin: string; machineName: string; dnsName: string }
+  | {
+    ok: true;
+    ownerLogin: string;
+    machineName: string;
+    dnsName: string;
+    /** Lowercased logins of the people with untagged devices in this tailnet, the owner included. */
+    tailnetLogins: string[];
+  }
   | { ok: false; reason: string; fix: string };
 
 export interface WorkspaceHostStatus {
@@ -29,8 +39,16 @@ export interface WorkspaceHostStatus {
   url?: string;
 }
 
+const tailnetPeerSchema = boundary.object({
+  DNSName: boundary.string,
+  UserID: boundary.number,
+  Tags: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
+  ShareeNode: boundary.optional(boundary.boolean),
+});
 const tailnetStatusSchema = boundary.object({
   BackendState: boundary.string,
+  MagicDNSSuffix: boundary.optional(boundary.string),
+  Peer: boundary.optional(boundary.nullable(boundary.jsonObject)),
   CertDomains: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
   Self: boundary.optional(boundary.nullable(boundary.object({
     DNSName: boundary.string,
@@ -74,7 +92,23 @@ export function readTailnetSelf(statusJson: string): TailnetSelf {
     return { ok: false, reason: 'Tailscale did not report this machine\'s user', fix: 'Restart Tailscale, then restart Pane.' };
   }
   const dnsName = parsed.Self.DNSName.replace(/\.$/, '');
-  return { ok: true, ownerLogin: owner.LoginName, machineName: dnsName.split('.')[0], dnsName };
+  const suffix = `.${(parsed.MagicDNSSuffix ?? dnsName.split('.').slice(1).join('.')).toLowerCase()}`;
+  const tailnetLogins = new Set([owner.LoginName.toLowerCase()]);
+  for (const value of Object.values(parsed.Peer ?? {})) {
+    const peer = decodeOptionalBoundary(value, tailnetPeerSchema);
+    // Sharee nodes belong to people outside this tailnet whom a device was shared with.
+    if (!peer || peer.Tags?.length || peer.ShareeNode) continue;
+    if (!peer.DNSName.replace(/\.$/, '').toLowerCase().endsWith(suffix)) continue;
+    const login = decodeOptionalBoundary(parsed.User?.[String(peer.UserID)], tailnetUserSchema)?.LoginName;
+    if (login) tailnetLogins.add(login.toLowerCase());
+  }
+  return {
+    ok: true,
+    ownerLogin: owner.LoginName,
+    machineName: dnsName.split('.')[0],
+    dnsName,
+    tailnetLogins: [...tailnetLogins].sort(),
+  };
 }
 
 interface WorkspaceConfigProvider {
@@ -84,8 +118,9 @@ interface WorkspaceConfigProvider {
 }
 
 /**
- * Puts this Pane's own daemon on the owner's tailnet: a loopback listener that trusts only the
- * owner's Tailscale login, published with `tailscale serve --https=8443` in HTTP proxy mode.
+ * Puts this Pane's own daemon on the owner's tailnet: a loopback listener published with
+ * `tailscale serve --https=8443` in HTTP proxy mode. It trusts the owner's Tailscale login, or
+ * everyone on the tailnet under "tailnet" visibility, plus the password when one is set.
  */
 export class PaneWorkspaceHostController {
   private server: PaneRemoteHttpApiServer | null = null;
@@ -98,6 +133,8 @@ export class PaneWorkspaceHostController {
     send: (channel, ...args) => this.server?.getEventSink().send(channel, ...args),
   };
   private ownerLogin: string | null = null;
+  private tailnetLogins: ReadonlySet<string> = new Set();
+  private passwordVerifier: { stored: WorkspacePasswordHash; verify: (secret: string) => boolean } | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
   private syncQueue: Promise<void> = Promise.resolve();
   private retryTimer: NodeJS.Timeout | null = null;
@@ -123,6 +160,34 @@ export class PaneWorkspaceHostController {
 
   isEnabled(): boolean {
     return this.configManager.getConfig().workspaces?.enabled ?? this.defaultEnabled;
+  }
+
+  getAccess(): WorkspaceAccessSummary {
+    const workspaces = this.configManager.getConfig().workspaces;
+    return {
+      ...this.status,
+      visibility: this.isEnabled() ? workspaces?.visibility ?? 'owner' : 'off',
+      passwordProtected: Boolean(workspaces?.password),
+    };
+  }
+
+  /** Read on every request, so config changes apply to the next one. */
+  private access(): WorkspaceAccessPolicy | null {
+    if (!this.ownerLogin || !this.isEnabled()) return null;
+    const workspaces = this.configManager.getConfig().workspaces;
+    return {
+      ownerLogin: this.ownerLogin,
+      visibility: workspaces?.visibility ?? 'owner',
+      tailnetLogins: this.tailnetLogins,
+      verifySecret: workspaces?.password ? this.verifierFor(workspaces.password) : null,
+    };
+  }
+
+  private verifierFor(stored: WorkspacePasswordHash): (secret: string) => boolean {
+    if (this.passwordVerifier?.stored !== stored) {
+      this.passwordVerifier = { stored, verify: createWorkspacePasswordVerifier(stored) };
+    }
+    return this.passwordVerifier.verify;
   }
 
   async start(): Promise<void> {
@@ -182,6 +247,7 @@ export class PaneWorkspaceHostController {
       }
 
       this.ownerLogin = self.ownerLogin;
+      this.tailnetLogins = new Set(self.tailnetLogins);
       const port = await this.ensureServer();
       if (this.servedPort !== port) {
         const target = `http://127.0.0.1:${port}/${this.pathSecret}`;
@@ -199,12 +265,18 @@ export class PaneWorkspaceHostController {
         machineName: self.machineName,
         url: `https://${self.dnsName}:${WORKSPACE_HTTPS_PORT}`,
       };
+      // People join and leave the tailnet, and the owner can switch tailnets; re-read who is on it.
+      this.scheduleSync();
     });
   }
 
   private setOff(reason: string, fix: string): void {
     this.status = { state: 'off', reason, fix };
     // Tailscale often starts after Pane at login; check again instead of waiting for a restart.
+    this.scheduleSync();
+  }
+
+  private scheduleSync(): void {
     this.retryTimer = setTimeout(() => void this.sync(), RETRY_INTERVAL_MS);
     this.retryTimer.unref?.();
   }
@@ -218,7 +290,7 @@ export class PaneWorkspaceHostController {
     const address = this.server?.getAddress();
     if (address) return address.port;
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
-      workspace: { listenPort: 0, pathSecret: this.pathSecret, ownerLogin: () => this.ownerLogin },
+      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.access() },
     });
     await server.start();
     this.server = server;
