@@ -1215,6 +1215,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });
         },
+        setArchiveProgress(progress: ArchiveProgressSnapshot) {
+          archiveProgress = progress;
+        },
         emitArchiveProgress(progress: ArchiveProgressSnapshot) {
           archiveProgress = progress;
           emit('archive:progress', clone(progress));

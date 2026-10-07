@@ -8,6 +8,8 @@ declare global {
       getInvokeCalls(channel: string): Array<{ args: unknown[] }>;
       emitArchiveProgress(progress: ArchiveProgressSnapshot): void;
       getListenerCount(channel: string): number;
+      setArchiveProgress(progress: ArchiveProgressSnapshot): void;
+      emitRemoteDaemonResyncRequested(event: { hostChanged: boolean }): void;
     };
   }
 }
@@ -76,4 +78,22 @@ test('archive progress leaves the panel as the user set it and opens it only for
   await emit(snapshot(task('a', 'completed'), task('b', 'failed', 'Could not remove worktree')));
   await expect(header).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByText('Could not remove worktree', { exact: true })).toBeVisible();
+});
+
+test('a failure seen first after a reconnect opens the panel, one from another host does not', async ({ page }) => {
+  await installElectronApiMock(page, { initialArchiveProgress: snapshot(task('a', 'removing-worktree')) });
+  await page.goto('/');
+  const header = page.getByRole('button', { name: /Archive Tasks/ });
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  const resync = (progress: ArchiveProgressSnapshot, hostChanged: boolean) => page.evaluate(([value, changed]) => {
+    window.__paneTestElectronMock.setArchiveProgress(value);
+    window.__paneTestElectronMock.emitRemoteDaemonResyncRequested({ hostChanged: changed });
+  }, [progress, hostChanged] as const);
+
+  await resync(snapshot(task('other-host', 'failed', 'Old failure')), true);
+  await expect(header.getByText('1 active')).toBeHidden();
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+
+  await resync(snapshot(task('other-host', 'failed', 'Old failure'), task('b', 'failed', 'Failed while offline')), false);
+  await expect(header).toHaveAttribute('aria-expanded', 'true');
 });

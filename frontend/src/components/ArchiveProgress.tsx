@@ -48,7 +48,8 @@ export function ArchiveProgress() {
 
   // The panel stays as the user left it; only a failure that appears after a host's first snapshot opens it.
   const applyProgress = useCallback((data: ArchiveProgressSnapshot | null) => {
-    const failed = new Set(data?.tasks.filter(task => task.status === 'failed').map(task => task.sessionId));
+    const failed = new Set<string>();
+    for (const task of data?.tasks ?? []) if (task.status === 'failed') failed.add(task.sessionId);
     const seen = failedIds.current;
     if (seen && [...failed].some(id => !seen.has(id))) setIsExpanded(true);
     failedIds.current = failed;
@@ -84,8 +85,8 @@ export function ArchiveProgress() {
   useEffect(() => {
     void loadProgress();
     const unsubscribeProgress = window.electronAPI.events.onArchiveProgress(applyProgress);
-    const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(() => {
-      failedIds.current = null;
+    const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
+      if (hostChanged) failedIds.current = null;
       void loadProgress();
     });
     return () => {
