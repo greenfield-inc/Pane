@@ -22,6 +22,7 @@ import type {
   RemotePaneConnectionState,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
+import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -355,6 +356,10 @@ interface ElectronAPI {
     importConnectionCode: (code: string, options?: { connect?: boolean }) => Promise<IPCResponse<RemoteDaemonImportResult>>;
     deleteConnectionProfile: (profileId: string) => Promise<IPCResponse<RemoteDaemonClientSettings>>;
     updateClientState: (updates: Partial<Pick<RemoteDaemonClientSettings, 'activeProfileId' | 'mode'>>) => Promise<IPCResponse<RemoteDaemonClientSettings>>;
+    getWorkspaceAccess: () => Promise<IPCResponse<WorkspaceAccessSummary>>;
+    updateWorkspaceAccess: (update: WorkspaceAccessUpdate) => Promise<IPCResponse<WorkspaceAccessSummary>>;
+    listTailnetMachines: () => Promise<IPCResponse<TailnetMachineList>>;
+    saveTailnetMachine: (input: { name: string; password?: string }) => Promise<IPCResponse<RemotePaneConnectionProfile>>;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;
   };

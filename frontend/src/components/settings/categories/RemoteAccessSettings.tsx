@@ -4,6 +4,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import type { RemoteAccessSubviewId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
+import { CodelessRemoteSettings } from '../CodelessRemoteSettings';
 
 interface RemoteAccessSettingsProps {
   controller: RemoteAccessController;
@@ -30,6 +31,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
           <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
         </div>
       )}
+      <CodelessRemoteSettings connectionState={controller.connectionState} />
       <SettingsSection title="Remote Pane">
         <SettingRow
           settingId="remote-pane"

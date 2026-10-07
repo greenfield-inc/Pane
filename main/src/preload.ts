@@ -22,6 +22,7 @@ import type {
   RemotePaneConnectionState,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
+import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { ToolPanel } from '../../shared/types/panels';
@@ -632,6 +633,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('remote-daemon:delete-connection-profile', profileId),
     updateClientState: (updates: Partial<Pick<RemoteDaemonClientSettings, 'activeProfileId' | 'mode'>>): Promise<IPCResponse<RemoteDaemonClientSettings>> =>
       invokeIpc('remote-daemon:update-client-state', updates),
+    getWorkspaceAccess: (): Promise<IPCResponse<WorkspaceAccessSummary>> => invokeIpc('remote-daemon:get-workspace-access'),
+    updateWorkspaceAccess: (update: WorkspaceAccessUpdate): Promise<IPCResponse<WorkspaceAccessSummary>> =>
+      invokeIpc('remote-daemon:update-workspace-access', update),
+    listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
+    saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
+      invokeIpc('remote-daemon:save-tailnet-machine', input),
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => callback(state);
       ipcRenderer.on('remote-daemon:connection-state-changed', wrappedCallback);
