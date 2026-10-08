@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useCallback } from 'react';
+import { useState, useEffect, useId, useCallback, useRef } from 'react';
 import { Loader2, Archive, CheckCircle, AlertCircle } from 'lucide-react';
 import { LiveRegion } from './ui/LiveRegion';
 import type { ArchiveProgressSnapshot, ArchiveProgressTask } from '../../../shared/types/archiveProgress';
@@ -22,6 +22,8 @@ function getStatusText(status: ArchiveProgressTask['status']) {
       return 'Queued (waiting for other archives to complete)...';
     case 'pending':
       return 'Preparing...';
+    case 'running-archive-script':
+      return 'Running archive script...';
     case 'removing-worktree':
       return 'Removing worktree (this may take a while)...';
     case 'cleaning-artifacts':
@@ -41,19 +43,30 @@ export function ArchiveProgress() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const failedIds = useRef<Set<string> | null>(null);
   const hasActiveTasks = (progress?.activeCount ?? 0) > 0;
+
+  // The panel stays as the user left it; only a failure that appears after a host's first snapshot opens it.
+  const applyProgress = useCallback((data: ArchiveProgressSnapshot | null) => {
+    const failed = new Set<string>();
+    for (const task of data?.tasks ?? []) if (task.status === 'failed') failed.add(task.sessionId);
+    const seen = failedIds.current;
+    if (seen && [...failed].some(id => !seen.has(id))) setIsExpanded(true);
+    failedIds.current = failed;
+    setProgress(data);
+  }, []);
 
   // Archive jobs run on the active host, so read them through the daemon and reload on a host switch.
   const loadProgress = useCallback(async () => {
     try {
       const response = await window.electronAPI.invoke('archive:get-progress');
       if (response.success) {
-        setProgress(response.data);
+        applyProgress(response.data);
       }
     } catch (error) {
       console.error('Failed to load archive progress:', error);
     }
-  }, []);
+  }, [applyProgress]);
 
   const retryCleanup = async (task: ArchiveProgressTask) => {
     setRetrying(task.sessionId);
@@ -71,18 +84,16 @@ export function ArchiveProgress() {
 
   useEffect(() => {
     void loadProgress();
-    const unsubscribeProgress = window.electronAPI.events.onArchiveProgress((data) => {
-      setProgress(data);
-      if (data.activeCount > 0) {
-        setIsExpanded(true);
-      }
+    const unsubscribeProgress = window.electronAPI.events.onArchiveProgress(applyProgress);
+    const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(({ hostChanged }) => {
+      if (hostChanged) failedIds.current = null;
+      void loadProgress();
     });
-    const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(() => void loadProgress());
     return () => {
       unsubscribeProgress();
       unsubscribeResync?.();
     };
-  }, [loadProgress]);
+  }, [applyProgress, loadProgress]);
 
   // Refresh elapsed times while a job runs.
   useEffect(() => {
@@ -131,7 +142,7 @@ export function ArchiveProgress() {
         className="w-full px-4 py-2 flex items-center justify-between hover:bg-surface-hover transition-colors"
       >
         <div className="flex items-center gap-2">
-          <Archive className="w-3.5 h-3.5 text-text-tertiary" />
+          <Archive className={`w-3.5 h-3.5 ${hasActiveTasks ? 'text-status-info animate-pulse' : 'text-text-tertiary'}`} />
           <span className="text-xs text-text-tertiary">
             Archive Tasks
           </span>

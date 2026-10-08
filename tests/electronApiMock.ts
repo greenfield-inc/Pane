@@ -329,6 +329,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       };
     };
 
+    let archiveProgress = mockOptions.initialArchiveProgress ?? null;
+
     const emit = (channel: string, ...args: MockEventValue[]) => {
       const callbacks = listeners.get(channel);
       if (!callbacks) {
@@ -417,6 +419,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPanelAgentStatus') {
           return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
         }
+        if (prop === 'onArchiveProgress') {
+          return (callback: MockEventCallback) => subscribe('archive:progress', callback);
+        }
         return () => unsubscribe;
       },
     });
@@ -478,7 +483,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return success(clone(preferences));
       }
       if (channel === 'archive:get-progress') {
-        return success(mockOptions.initialArchiveProgress ?? null);
+        return success(clone(archiveProgress));
       }
       if (channel === 'archive:retry-cleanup' && mockOptions.archiveRetryError) {
         return Promise.resolve({ success: false, error: mockOptions.archiveRetryError });
@@ -1209,6 +1214,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });
+        },
+        setArchiveProgress(progress: ArchiveProgressSnapshot) {
+          archiveProgress = progress;
+        },
+        emitArchiveProgress(progress: ArchiveProgressSnapshot) {
+          archiveProgress = progress;
+          emit('archive:progress', clone(progress));
         },
         getListenerCount(channel: string) {
           return listeners.get(channel)?.size ?? 0;
