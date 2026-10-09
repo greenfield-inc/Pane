@@ -124,3 +124,53 @@ test('changes made on the host while the connection was down appear when it retu
   await expect(paneRow(page, 'server-side funnel events')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open Session Release prep' })).toHaveCount(0);
 });
+
+test('Back past a Session still opening keeps the Pane it lands on', async ({ page }) => {
+  await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
+  const paneTab = page.getByRole('tab', { name: 'shell', exact: true });
+  const sessionTab = page.getByRole('tab', { name: 'Claude', exact: true });
+  // SAFETY: the PWA writes its history entries as `{ paneRemote: { view } }`.
+  const historyView = () => page.evaluate(() => (window.history.state as { paneRemote?: { view: string | null } } | null)?.paneRemote?.view);
+  const back = () => page.evaluate(() => new Promise<void>(resolve => {
+    window.addEventListener('popstate', () => resolve(), { once: true });
+    window.history.back();
+  }));
+
+  // History: Pane A, Session S, Pane A.
+  await expect(paneTab).toBeVisible();
+  await page.getByRole('button', { name: 'Open Session Release prep' }).click();
+  await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('group', { name: 'Repositories' }).getByRole('button', { name: /^scrub Sentry request bodies/ }).click();
+  await expect(paneTab).toBeVisible();
+  await expect.poll(historyView).toBe('pane:anim-remote-0');
+
+  // Hold Session S's next open until both Backs have landed.
+  let release = () => {};
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('http://anim-pane.test/**', async (route) => {
+    if (route.request().postData()?.includes('"orchestration-sessions:get"')) await held;
+    await route.fallback();
+  });
+  const sessionOpened = page.waitForResponse(response => response.request().postData()?.includes('"orchestration-sessions:get"') ?? false);
+
+  await back();
+  await back();
+  release();
+  await sessionOpened;
+  await page.waitForTimeout(300);
+
+  await expect(paneTab).toBeVisible();
+  await expect(sessionTab).toHaveCount(0);
+  expect(await historyView()).toBe('pane:anim-remote-0');
+});
+
+test('a Session shows its recorded blockers on its row and above its chat', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
+  host.sessions[0].blockers = ['Waiting on the signing certificate'];
+  await page.getByRole('button', { name: 'Refresh remote sessions' }).click();
+
+  const row = page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' });
+  await expect(row).toContainText('Blocked');
+  await row.click();
+  await expect(page.getByRole('region', { name: 'Blockers' })).toContainText('Waiting on the signing certificate');
+});

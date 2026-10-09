@@ -199,6 +199,13 @@ async function installSessionsFixture(
     let selectCalls = 0;
     let overviewCalls = 0;
     let nextOrchestrationUpdateError: string | null = null;
+    let nextMembershipRejection: string | null = null;
+    const rejectPendingMembership = () => {
+      if (nextMembershipRejection === null) return;
+      const failure = nextMembershipRejection;
+      nextMembershipRejection = null;
+      throw new Error(failure);
+    };
     const viewRequests: Array<{ sessionId: string; agent: SessionRecord['agent']; panelId: string }> = [];
 
     const find = (selector: Selector): SessionRecord => {
@@ -365,6 +372,7 @@ async function installSessionsFixture(
         return success(view(record));
       },
       associate: async (selector: Selector, association: { paneId: string; panelIds?: string[] }) => {
+        rejectPendingMembership();
         const record = find(selector);
         if (!record.associations.some(candidate => candidate.paneId === association.paneId)) {
           record.associations.push({
@@ -378,6 +386,7 @@ async function installSessionsFixture(
         return success(clone(record));
       },
       detach: async (selector: Selector, paneId?: string) => {
+        rejectPendingMembership();
         const record = find(selector);
         record.associations = paneId
           ? record.associations.filter(association => association.paneId !== paneId)
@@ -415,6 +424,8 @@ async function installSessionsFixture(
       getOrchestrationSelectedSessionId: () => selectedSessionId,
       getOrchestrationRecord: (sessionId: string) => clone(sessions.find(session => session.id === sessionId) ?? null),
       failNextOrchestrationUpdate: (message: string) => { nextOrchestrationUpdateError = message; },
+      // Stands in for a lost transport: the next associate or detach rejects instead of answering.
+      rejectNextOrchestrationMembership: (message: string) => { nextMembershipRejection = message; },
       // Stands in for another host's Sessions: the list changes without an event.
       replaceOrchestrationSessions: (next: SessionRecord[]) => {
         sessions = clone(next);
@@ -1121,20 +1132,27 @@ test('switching hosts replaces the Sessions and pinned Sessions in the sidebar',
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-pinned-session-local-pinned')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('orchestration-session-local')).toBeVisible();
+  // An archive Undo belongs to the host that archived the Session.
+  await page.getByTestId('orchestration-session-local').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  const undoToast = page.getByRole('status').filter({ hasText: 'Archived Local' });
+  await expect(undoToast).toBeVisible();
 
   await page.evaluate((remoteSessions) => {
     // SAFETY: installSessionsFixture and installElectronApiMock add these controls before the app loads.
     const mock = (window as typeof window & { __paneTestElectronMock: {
       replaceOrchestrationSessions: (sessions: UiSessionFixture[]) => void;
-      emitRemoteDaemonResyncRequested: () => void;
+      emitRemoteDaemonResyncRequested: (event: { hostChanged: boolean }) => void;
     } }).__paneTestElectronMock;
     mock.replaceOrchestrationSessions(remoteSessions);
-    mock.emitRemoteDaemonResyncRequested();
+    mock.emitRemoteDaemonResyncRequested({ hostChanged: true });
   }, [
     sessionFixture('remote-pinned', 'Remote pinned', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z', [], false, true),
     sessionFixture('remote', 'Remote', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
   ]);
 
+  // Gone with the host, well before the toast's own timer would close it.
+  await expect(undoToast).toHaveCount(0, { timeout: 2_000 });
   await expect(page.getByTestId('orchestration-pinned-session-remote-pinned')).toBeVisible();
   await expect(page.getByTestId('orchestration-session-remote')).toBeVisible();
   await expect(page.getByTestId('orchestration-pinned-session-local-pinned')).toHaveCount(0);
@@ -1210,6 +1228,9 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('orchestration-session-alpha').click();
+  const alphaChat = page.getByRole('heading', { name: 'Alpha', exact: true });
+  await expect(alphaChat).toBeAttached({ timeout: 10_000 });
 
   const actions = page.getByRole('button', { name: 'Actions for Alpha', exact: true });
   await actions.focus();
@@ -1222,11 +1243,19 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(actions).toBeFocused();
+  // Tab leaves the menu closed behind it.
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menuitem', { name: 'Pin Session', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await actions.focus();
 
   await page.keyboard.press('Enter');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('orchestration-session-alpha')).toHaveCount(0);
+  // Archiving the open Session lands on Home.
+  await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   const toast = page.getByRole('status').filter({ hasText: 'Archived Alpha' });
@@ -1239,6 +1268,9 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null } };
     return mockWindow.__paneTestElectronMock.getOrchestrationRecord('alpha')?.archived;
   })).toBe(false);
+  // Undo reopens the Session that was open when it was archived.
+  await expect(alphaChat).toBeAttached();
+  await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toHaveCount(0);
 });
 
 test('a Pane row menu adds the Pane to a Session and removes it again', async ({ page }) => {
@@ -1253,6 +1285,20 @@ test('a Pane row menu adds the Pane to a Session and removes it again', async ({
   await expect(betaRow).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
   const paneRows = page.getByTestId('sidebar').getByRole('button', { name: 'Loose Pane', exact: true });
+  // A lost transport reports the failure instead of failing silently.
+  await page.evaluate(() => {
+    // SAFETY: installSessionsFixture adds this control before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { rejectNextOrchestrationMembership: (message: string) => void } };
+    mockWindow.__paneTestElectronMock.rejectNextOrchestrationMembership('Review transport disconnected');
+  });
+  await paneRows.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Add to Session', exact: true }).click();
+  await page.getByRole('menu', { name: 'Add Loose Pane to a Session' }).getByRole('menuitem', { name: 'Beta', exact: true }).click();
+  const failure = page.getByRole('dialog').filter({ hasText: 'Session update failed' });
+  await expect(failure).toContainText('Review transport disconnected');
+  await failure.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(paneRows).toHaveCount(1);
+
   await paneRows.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Add to Session', exact: true }).click();
   await page.getByRole('menu', { name: 'Add Loose Pane to a Session' }).getByRole('menuitem', { name: 'Beta', exact: true }).click();
@@ -1267,6 +1313,36 @@ test('a Pane row menu adds the Pane to a Session and removes it again', async ({
   await expect(page.getByRole('menuitem', { name: 'Add to Session', exact: true })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Remove from Beta', exact: true }).click();
   await expect(paneRows).toHaveCount(1);
+});
+
+test('the Add to Session picker fits the window when opened near its bottom', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  const names = Array.from({ length: 20 }, (_, index) => `Session ${String(index + 1).padStart(2, '0')}`);
+  await installSessionsFixture(
+    page,
+    names.map((name, index) => sessionFixture(`s${index}`, name, 'Goal.', 'Context.', `2026-09-16T12:${String(index).padStart(2, '0')}:00.000Z`)),
+    [paneFixture('pane-loose', 'Loose Pane')],
+  );
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  await expect(page.getByTestId('orchestration-session-s0')).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
+  // Right-click near the bottom of the window, where the short actions menu flips up.
+  const pane = page.getByTestId('sidebar').getByRole('button', { name: 'Loose Pane', exact: true });
+  await pane.evaluate(element => element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 740 })));
+  await page.getByRole('menuitem', { name: 'Add to Session', exact: true }).click();
+
+  const last = page.getByRole('menu', { name: 'Add Loose Pane to a Session' }).getByRole('menuitem', { name: 'Session 20', exact: true });
+  const box = await last.boundingBox();
+  if (!box) throw new Error('The last Session in the picker has no box');
+  expect(box.y + box.height).toBeLessThanOrEqual(800);
+  await last.click();
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: installSessionsFixture adds this control before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null } };
+    return mockWindow.__paneTestElectronMock.getOrchestrationRecord('s19')?.associations.map(association => association.paneId);
+  })).toEqual(['pane-loose']);
 });
 
 test('Archiving a Session during a delayed chat load cannot reinstall its view', async ({ page }) => {
