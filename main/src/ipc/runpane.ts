@@ -752,8 +752,9 @@ export function registerRunpaneHandlers(
         }
       }
 
+      // Last used only: pane:focus-requested moves the host's own desktop, and no other client.
       if (normalized.panelId) {
-        await panelManager.setActivePanel(pane.id, normalized.panelId);
+        await panelManager.rememberActivePanel(pane.id, normalized.panelId);
       }
 
       // A headless host has no window; its connected clients still follow the event.

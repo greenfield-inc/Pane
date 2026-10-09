@@ -46,6 +46,7 @@ vi.spyOn(panelManager, 'getPanel');
 vi.spyOn(panelManager, 'getPanelsForSession');
 vi.spyOn(panelManager, 'updatePanel');
 vi.spyOn(panelManager, 'setActivePanel');
+vi.spyOn(panelManager, 'rememberActivePanel');
 vi.spyOn(panelManager, 'ensureExplorerPanel');
 vi.spyOn(panelManager, 'ensureDiffPanel');
 vi.spyOn(terminalPanelManager, 'initializeTerminal');
@@ -320,6 +321,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.getPanelsForSession).mockReset();
     vi.mocked(panelManager.updatePanel).mockReset();
     vi.mocked(panelManager.setActivePanel).mockReset();
+    vi.mocked(panelManager.rememberActivePanel).mockReset().mockResolvedValue();
     vi.mocked(panelManager.ensureExplorerPanel).mockReset().mockResolvedValue(undefined);
     vi.mocked(panelManager.ensureDiffPanel).mockReset().mockResolvedValue(undefined);
     vi.mocked(terminalPanelManager.initializeTerminal).mockReset();
@@ -6907,7 +6909,7 @@ describe('runpane IPC handlers', () => {
       }]);
 
       expect(window.restore).toHaveBeenCalledTimes(1);
-      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, terminalPanel.id);
+      expect(panelManager.rememberActivePanel).toHaveBeenCalledWith(session.id, terminalPanel.id);
       expect(window.show).toHaveBeenCalledTimes(1);
       expect(window.focus).toHaveBeenCalledTimes(1);
       expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', {
