@@ -176,7 +176,11 @@ export async function restoreSessionSelection(): Promise<void> {
   await withHostNavigationWritesPaused(async () => {
     try {
       const config = useConfigStore.getState().config ?? await useConfigStore.getState().fetchConfig();
-      const memory = await readNavigationMemory(getActiveRemoteHostId(config.remoteDaemon));
+      const hostId = getActiveRemoteHostId(config.remoteDaemon);
+      // A Session picked while the memory was read, or a host switch, wins.
+      const revision = useOrchestrationSessionStore.getState().selectionRevision;
+      const memory = await readNavigationMemory(hostId);
+      if (activeHostIdFromConfig() !== hostId || useOrchestrationSessionStore.getState().selectionRevision !== revision) return;
       if (memory?.orchestrationSessionId) {
         useOrchestrationSessionStore.getState().preferSelection(memory.orchestrationSessionId);
       }
