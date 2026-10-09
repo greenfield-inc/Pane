@@ -6,6 +6,7 @@ import { connectAnotherRemoteClient, dropRemoteConnection, emitRemoteHostEvent, 
 // place across reloads.
 
 const P = 'anim-remote-0';
+const S = '__orchestration_session_mock-0__';
 const Q = 'anim-remote-1';
 const paneButton = (page: Page, name: string) => page.getByRole('button', { name: new RegExp(`^${name}`) });
 const shownPane = (page: Page) => page.locator('[aria-current="page"]');
@@ -53,8 +54,12 @@ test('remembers its Pane and tab across a reload and a dropped connection', asyn
   await expect(selectedTab(page)).toHaveText('shell');
 
   await dropRemoteConnection(page);
+  // The status bar is busy while the phone reconnects.
+  await expect(page.locator('[aria-busy="true"]')).toBeAttached();
+  // A change made while this phone was away shows that the reconnect resync has run.
+  host.panes[1].name = 'Pane Q renamed';
   await restoreRemoteConnection(page);
-  await expect(shownPane(page)).toHaveText(/^Pane Q/);
+  await expect(shownPane(page)).toHaveText(/^Pane Q renamed/);
   await expect(selectedTab(page)).toHaveText('shell');
 });
 
@@ -146,4 +151,54 @@ test('moves to a neighbouring tab when another client closes the one it shows, a
   await page.reload();
   await connect(page);
   await expect(selectedTab(page)).toHaveText('logs');
+});
+
+test('reopens a remembered Session even when a Pane loads first during startup', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { sessionNames: ['Pane P', 'Pane Q'], orchestrationSessionNames: ['Release prep'] });
+  await page.getByRole('button', { name: 'Open Session Release prep' }).click();
+  await expect(selectedTab(page)).toHaveText('Claude');
+
+  // The Session list answers last, after the Panes have loaded.
+  let release = () => {};
+  host.held['orchestration-sessions:list'] = new Promise<void>(resolve => { release = resolve; });
+  await page.reload();
+  await connect(page);
+  await page.waitForTimeout(1000);
+  release();
+  delete host.held['orchestration-sessions:list'];
+
+  await expect(selectedTab(page)).toHaveText('Claude');
+  await expect(shownPane(page)).toHaveCount(0);
+});
+
+test('keeps the tool tab it chose in a Session across reopening and reload', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { sessionNames: ['Pane P', 'Pane Q'], orchestrationSessionNames: ['Release prep'] });
+  host.sessionTools[S] = [{ id: `${S}tool-a`, title: 'Tool A' }, { id: `${S}tool-b`, title: 'Tool B' }];
+  await page.getByRole('button', { name: 'Open Session Release prep' }).click();
+  await page.getByRole('tab', { name: 'Tool A', exact: true }).click();
+
+  await paneButton(page, 'Pane P').click();
+  await expect(shownPane(page)).toHaveText(/^Pane P/);
+  await page.getByRole('button', { name: 'Open Session Release prep' }).click();
+  await expect(selectedTab(page)).toHaveText('Tool A');
+
+  await page.reload();
+  await connect(page);
+  await expect(selectedTab(page)).toHaveText('Tool A');
+});
+
+test('moves to the next visible Session tab when another client closes the one it shows', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { sessionNames: ['Pane P'], orchestrationSessionNames: ['Release prep'] });
+  host.sessionTools[S] = [{ id: `${S}tool-a`, title: 'Tool A' }, { id: `${S}tool-b`, title: 'Tool B' }];
+  await page.getByRole('button', { name: 'Open Session Release prep' }).click();
+  // The host keeps Codex's chat between Tool A and Tool B; the strip hides it.
+  await expect(page.getByRole('tab')).toHaveText(['Claude', 'Tool A', 'Tool B']);
+  await page.getByRole('tab', { name: 'Tool A', exact: true }).click();
+
+  await emitRemoteHostEvent(page, 'panel:deleted', { sessionId: `${S}terminal__`, panelId: `${S}tool-a` });
+  await expect(selectedTab(page)).toHaveText('Tool B');
+
+  await page.reload();
+  await connect(page);
+  await expect(selectedTab(page)).toHaveText('Tool B');
 });

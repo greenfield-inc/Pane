@@ -15,6 +15,11 @@ type RemoteOrchestrationAvailability = 'idle' | 'ready' | 'unavailable' | 'error
 interface RemoteHostState {
   /** The saved connection this state belongs to; this client's view memory is kept per host. */
   hostId: string | null;
+  /**
+   * The Session this client had open, read from its memory when connecting.
+   * While set, no Pane is selected in its place, so startup cannot overwrite it.
+   */
+  pendingSessionId: string | null;
   projects: RemoteProjectWithSessions[];
   /** The Pane whose panels are on screen. An open Session shows its own workspace Pane. */
   selectedSessionId: string | null;
@@ -32,9 +37,12 @@ interface RemoteHostState {
 interface RemoteSessionState extends RemoteHostState {
   /** Clears the previous host's state; `hostId` names the host about to connect. */
   reset: (hostId?: string | null) => void;
+  /** Ends a pending Session restore that did not happen, showing a Pane instead. */
+  cancelSessionRestore: () => void;
   setProjects: (projects: RemoteProjectWithSessions[]) => void;
   selectSession: (sessionId: string | null) => void;
-  openSession: (view: OrchestrationSessionView<Session>) => void;
+  /** Opens a Session on this client's remembered tab there, or on its chat with `showChat`. */
+  openSession: (view: OrchestrationSessionView<Session>, options?: { showChat?: boolean }) => void;
   setOrchestrationSessions: (sessions: OrchestrationSessionRecord[]) => void;
   setOrchestrationFailure: (availability: 'unavailable' | 'error', error: string | null) => void;
   setArchivedProjects: (projects: RemoteProjectWithSessions[]) => void;
@@ -46,6 +54,7 @@ interface RemoteSessionState extends RemoteHostState {
 
 const INITIAL_HOST_STATE: RemoteHostState = {
   hostId: null,
+  pendingSessionId: null,
   projects: [],
   selectedSessionId: null,
   selectedPanelId: null,
@@ -60,11 +69,21 @@ const INITIAL_HOST_STATE: RemoteHostState = {
 export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
   ...INITIAL_HOST_STATE,
 
-  reset: (hostId = null) => set({ ...INITIAL_HOST_STATE, hostId }),
+  reset: (hostId = null) => set({
+    ...INITIAL_HOST_STATE,
+    hostId,
+    pendingSessionId: hostId ? readRemoteView(hostId).sessionId : null,
+  }),
+
+  cancelSessionRestore: () => set((state) => ({
+    pendingSessionId: null,
+    selectedSessionId: state.selectedSessionId ?? findRememberedPaneId(state.hostId, state.projects) ?? findFirstSessionId(state.projects),
+  })),
 
   setProjects: (projects) => set((state) => ({
     projects,
-    selectedSessionId: state.selectedSessionId ?? findRememberedPaneId(state.hostId, projects) ?? findFirstSessionId(projects),
+    selectedSessionId: state.selectedSessionId
+      ?? (state.pendingSessionId ? null : findRememberedPaneId(state.hostId, projects) ?? findFirstSessionId(projects)),
   })),
 
   selectSession: (sessionId) => {
@@ -72,19 +91,24 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
       selectedSessionId: sessionId,
       selectedPanelId: null,
       openOrchestrationSession: null,
+      pendingSessionId: null,
     });
     const { hostId } = get();
     if (hostId && sessionId) rememberRemoteView(hostId, { paneId: sessionId, sessionId: null });
   },
 
-  openSession: (view) => {
-    set({
-      selectedSessionId: view.internalSession.id,
-      selectedPanelId: view.panel.id,
-      openOrchestrationSession: view,
-    });
+  openSession: (view, options = {}) => {
     const { hostId } = get();
-    if (hostId) rememberRemoteView(hostId, { paneId: view.internalSession.id, sessionId: view.session.id, panelId: view.panel.id });
+    const paneId = view.internalSession.id;
+    const rememberedPanelId = hostId && !options.showChat ? readRemoteView(hostId).panelIdByPaneId[paneId] : undefined;
+    set({
+      selectedSessionId: paneId,
+      // loadPanels checks the remembered tab against the workspace's visible tabs.
+      selectedPanelId: rememberedPanelId ?? view.panel.id,
+      openOrchestrationSession: view,
+      pendingSessionId: null,
+    });
+    if (hostId) rememberRemoteView(hostId, { paneId, sessionId: view.session.id, panelId: rememberedPanelId ? undefined : view.panel.id });
   },
 
   setOrchestrationSessions: (orchestrationSessions) => set({
@@ -135,11 +159,12 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
   removePanel: (sessionId, panelId) => {
     const state = get();
     const panels = state.panelsBySessionId[sessionId] ?? [];
-    const remaining = panels.filter(panel => panel.id !== panelId);
-    set({ panelsBySessionId: { ...state.panelsBySessionId, [sessionId]: remaining } });
+    set({ panelsBySessionId: { ...state.panelsBySessionId, [sessionId]: panels.filter(panel => panel.id !== panelId) } });
     if (state.selectedPanelId !== panelId) return;
-    // Closing the shown tab elsewhere moves this client to its neighbour, as closing a browser tab does.
-    const index = panels.findIndex(panel => panel.id === panelId);
+    // Closing the shown tab elsewhere moves this client to its neighbour in its own tab strip, as closing a browser tab does.
+    const strip = visibleTabs(state.openOrchestrationSession, sessionId, panels);
+    const index = strip.findIndex(panel => panel.id === panelId);
+    const remaining = strip.filter(panel => panel.id !== panelId);
     get().setSelectedPanel(remaining[Math.min(Math.max(index, 0), remaining.length - 1)]?.id ?? null);
   },
 }));
@@ -158,4 +183,16 @@ function findRememberedPaneId(hostId: string | null, projects: Array<{ sessions?
   if (!hostId) return null;
   const { paneId } = readRemoteView(hostId);
   return paneId && projects.some(project => project.sessions?.some(session => session.id === paneId)) ? paneId : null;
+}
+
+/** The tabs a client shows for a Pane: a Session's workspace hides other agents' chats. */
+export function visibleTabs(openSession: OrchestrationSessionView<Session> | null, paneId: string, panels: ToolPanel[]): ToolPanel[] {
+  return openSession?.internalSession.id === paneId ? sessionWorkspacePanels(openSession, panels) : panels;
+}
+
+/** A Session shows its current agent's chat first, then its own tools, like desktop; other agents' chats stay hidden. */
+function sessionWorkspacePanels(view: OrchestrationSessionView<Session>, panels: ToolPanel[]): ToolPanel[] {
+  const agentPanelIds = new Set(Object.values(view.session.panelIds));
+  const agentPanel = panels.find(panel => panel.id === view.panel.id) ?? view.panel;
+  return [agentPanel, ...panels.filter(panel => !agentPanelIds.has(panel.id))];
 }

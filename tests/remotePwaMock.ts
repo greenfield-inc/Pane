@@ -31,6 +31,10 @@ export interface RemotePwaMockHost {
   sessions: OrchestrationSessionRecord[];
   /** The host's last-used tab per Pane, as `panels:set-active` and host activations leave it. */
   activePanelIds: Record<string, string>;
+  /** Extra panels in each Session's workspace Pane (keyed by Session id), after its agent chats. */
+  sessionTools: Record<string, Array<{ id: string; title: string }>>;
+  /** While set, the host holds its reply on that channel until the promise settles. */
+  held: Record<string, Promise<void>>;
 }
 
 const PROFILE = {
@@ -149,6 +153,8 @@ function buildFixtures(options: RemotePwaMockOptions) {
     archivedPanes: [],
     sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
     activePanelIds: Object.fromEntries(sessions.map(pane => [pane.id, panelsByPane[pane.id][options.activePanelIndex ?? 0].id])),
+    sessionTools: {},
+    held: {},
   };
 
   return { project, panelsByPane, affordances, host };
@@ -179,20 +185,32 @@ function buildOrchestrationSession(name: string, index: number): OrchestrationSe
   };
 }
 
-/** The agent chat a mock Session opens on, shaped like the host's Session view. */
-function orchestrationSessionView(session: OrchestrationSessionRecord) {
-  const panel = {
-    id: session.panelIds[session.agent],
+function sessionPanel(session: OrchestrationSessionRecord, id: string, title: string, position: number) {
+  return {
+    id,
     sessionId: session.internalSessionId,
     type: 'terminal',
-    title: PANE_CHAT_AGENT_LABELS[session.agent],
-    state: { isActive: true, hasBeenViewed: true },
-    metadata: {
-      createdAt: session.createdAt,
-      lastActiveAt: session.createdAt,
-      position: 0,
-    },
+    title,
+    state: { isActive: position === 0, hasBeenViewed: true },
+    metadata: { createdAt: session.createdAt, lastActiveAt: session.createdAt, position },
   };
+}
+
+/**
+ * A Session's workspace Pane in host order: its agent chat, its tools, and the
+ * chats of agents it no longer uses (which the PWA hides) between them.
+ */
+function sessionWorkspace(session: OrchestrationSessionRecord, tools: Array<{ id: string; title: string }> = []) {
+  const chat = sessionPanel(session, session.panelIds[session.agent], PANE_CHAT_AGENT_LABELS[session.agent], 0);
+  if (tools.length === 0) return [chat];
+  const otherAgent = session.agent === 'codex' ? 'claude' : 'codex';
+  const [first, ...rest] = tools.map((tool, index) => sessionPanel(session, tool.id, tool.title, index + 1));
+  return [chat, first, sessionPanel(session, session.panelIds[otherAgent], PANE_CHAT_AGENT_LABELS[otherAgent], tools.length + 1), ...rest];
+}
+
+/** The agent chat a mock Session opens on, shaped like the host's Session view. */
+function orchestrationSessionView(session: OrchestrationSessionRecord) {
+  const panel = sessionPanel(session, session.panelIds[session.agent], PANE_CHAT_AGENT_LABELS[session.agent], 0);
   return {
     session,
     internalSession: {
@@ -384,6 +402,7 @@ async function installRemoteHostRoute(
     const session = host.sessions.find(candidate => candidate.id === sessionId);
     const ownerSession = host.sessions.find(candidate => candidate.internalSessionId === args[0]);
     let result: JsonValue = null;
+    if (body.channel) await host.held[body.channel];
 
     switch (body.channel) {
       case 'sessions:get-all-with-projects':
@@ -408,7 +427,7 @@ async function installRemoteHostRoute(
         host.archivedPanes = host.archivedPanes.filter(pane => pane.id !== args[0]);
         break;
       case 'panels:list':
-        result = ownerSession ? [orchestrationSessionView(ownerSession).panel] : fixtures.panelsByPane[String(args[0])] ?? [];
+        result = ownerSession ? sessionWorkspace(ownerSession, host.sessionTools[ownerSession.id]) : fixtures.panelsByPane[String(args[0])] ?? [];
         break;
       case 'panels:getActive':
         result = ownerSession

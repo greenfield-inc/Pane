@@ -24,7 +24,7 @@ import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
-import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
+import { findFirstSessionId, useRemoteSessionStore, visibleTabs } from './stores/remoteSessionStore';
 import { readRemoteView } from './stores/remoteViewMemory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ErrorDialog } from '../components/ErrorDialog';
@@ -223,10 +223,10 @@ export function RemotePwaApp() {
     return null;
   }, [openOrchestrationSession, projects, selectedSessionId]);
 
-  const selectedPanels = useMemo(() => {
-    const panels = selectedSessionId ? panelsBySessionId[selectedSessionId] ?? [] : [];
-    return openOrchestrationSession ? sessionWorkspacePanels(openOrchestrationSession, panels) : panels;
-  }, [openOrchestrationSession, panelsBySessionId, selectedSessionId]);
+  const selectedPanels = useMemo(
+    () => selectedSessionId ? visibleTabs(openOrchestrationSession, selectedSessionId, panelsBySessionId[selectedSessionId] ?? []) : [],
+    [openOrchestrationSession, panelsBySessionId, selectedSessionId],
+  );
   const terminalPanels = useMemo(
     () => selectedPanels.filter(panel => panel.type === 'terminal'),
     [selectedPanels],
@@ -252,8 +252,8 @@ export function RemotePwaApp() {
       const nextProjects = await runtime.getProjectsWithSessions();
       if (runtime !== activeRuntimeRef.current) return null;
       setProjects(nextProjects);
-      const { selectedSessionId: currentSessionId, openOrchestrationSession: openView } = useRemoteSessionStore.getState();
-      const hasSelectedSession = Boolean(currentSessionId && (
+      const { selectedSessionId: currentSessionId, openOrchestrationSession: openView, pendingSessionId } = useRemoteSessionStore.getState();
+      const hasSelectedSession = Boolean(pendingSessionId) || Boolean(currentSessionId && (
         openView?.internalSession.id === currentSessionId
         || nextProjects.some(project => project.sessions?.some(session => session.id === currentSessionId))
       ));
@@ -280,15 +280,16 @@ export function RemotePwaApp() {
       ]);
       if (runtime !== activeRuntimeRef.current || request !== panelLoadRequestRef.current || useRemoteSessionStore.getState().selectedSessionId !== sessionId) return;
       // Read before setPanels, which fills an empty selection with the first panel.
-      const { selectedPanelId: currentPanelId, hostId } = useRemoteSessionStore.getState();
+      const { selectedPanelId: currentPanelId, hostId, openOrchestrationSession: openView } = useRemoteSessionStore.getState();
       const rememberedPanelId = hostId ? readRemoteView(hostId).panelIdByPaneId[sessionId] : undefined;
       setPanels(sessionId, panels);
       const routedPanel = pushRoutePanelRef.current;
       const routeMatches = routedPanel?.sessionId === sessionId && panels.some(panel => panel.id === routedPanel.panelId);
       if (routedPanel?.sessionId === sessionId) pushRoutePanelRef.current = null;
-      const shown = (panelId: string | null | undefined) => panels.some(panel => panel.id === panelId) ? panelId : null;
+      const strip = visibleTabs(openView, sessionId, panels);
+      const shown = (panelId: string | null | undefined) => strip.some(panel => panel.id === panelId) ? panelId : null;
       // This client's own tab first; the host's last-used tab only for a Pane this client has not opened.
-      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? activePanel?.id ?? panels[0]?.id ?? null);
+      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? shown(activePanel?.id) ?? strip[0]?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
         setLastError('The notified panel is no longer available on this Pane host.');
       } else {
@@ -355,7 +356,7 @@ export function RemotePwaApp() {
         // Desktop switched the Session's agent; show the new agent's chat if the Session is still open.
         void runtime.openOrchestrationSession(record.id).then(view => {
           const stillOpen = useRemoteSessionStore.getState().openOrchestrationSession?.session.id === record.id;
-          if (runtime === activeRuntimeRef.current && stillOpen) openSession(view);
+          if (runtime === activeRuntimeRef.current && stillOpen) openSession(view, { showChat: true });
         }).catch(() => {});
       }
     } catch (error) {
@@ -409,10 +410,15 @@ export function RemotePwaApp() {
       updateConnection({ adapter: runtime, activeProfile: profile });
       saveProfile(profile, setSavedProfiles);
       await Promise.all([refreshProjects(runtime), refreshOrchestrationSessions(runtime), loadAffordances(runtime)]);
-      // Reopen the Session this client had open; refreshProjects already restored a remembered Pane.
-      const { sessionId } = readRemoteView(profile.id);
-      if (sessionId && useRemoteSessionStore.getState().orchestrationSessions.some(session => session.id === sessionId && session.archived !== true)) {
-        await openRemoteOrchestrationSession(sessionId, runtime);
+      // Reopen the Session this client had open, unless the person already went elsewhere.
+      const { pendingSessionId, orchestrationSessions } = useRemoteSessionStore.getState();
+      if (pendingSessionId && activeRuntimeRef.current === runtime) {
+        if (orchestrationSessions.some(session => session.id === pendingSessionId && session.archived !== true)) {
+          await openRemoteOrchestrationSession(pendingSessionId, runtime);
+        }
+        if (activeRuntimeRef.current === runtime && useRemoteSessionStore.getState().pendingSessionId === pendingSessionId) {
+          useRemoteSessionStore.getState().cancelSessionRestore();
+        }
       }
       return activeRuntimeRef.current === runtime ? runtime : null;
     } catch (error) {
@@ -539,7 +545,7 @@ export function RemotePwaApp() {
     // The create request can finish after a switch to another host.
     if (adapter !== activeRuntimeRef.current) return;
     navigationRequestRef.current += 1;
-    openSession(view);
+    openSession(view, { showChat: true });
     void refreshOrchestrationSessions(adapter);
   }, [adapter, openSession, refreshOrchestrationSessions]);
 
@@ -877,13 +883,6 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       </div>
     </div>
   );
-}
-
-/** A Session shows its current agent's chat first, then its own tools, like desktop; other agents' chats stay hidden. */
-function sessionWorkspacePanels(view: OrchestrationSessionView<Session>, panels: ToolPanel[]): ToolPanel[] {
-  const agentPanelIds = new Set(Object.values(view.session.panelIds));
-  const agentPanel = panels.find(panel => panel.id === view.panel.id) ?? view.panel;
-  return [agentPanel, ...panels.filter(panel => !agentPanelIds.has(panel.id))];
 }
 
 function findSessionName(projects: Array<{ sessions?: Session[] }>, sessionId: string): string | null {
