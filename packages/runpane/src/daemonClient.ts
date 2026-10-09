@@ -291,7 +291,7 @@ export async function invokeDaemon<T>(
     socket.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code ?? 'ERR_RUNPANE_DAEMON_CONNECT_FAILED';
       settle({ error: new PaneDaemonClientError(
-        `Could not connect to Pane daemon at ${endpoint.path}: ${error.message}. Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
+        `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
         code,
         true,
         'Open Pane on this machine, then check the connection with `runpane doctor`.',

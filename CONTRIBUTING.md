@@ -200,7 +200,7 @@ happened, why, what changed, and what to do next.
 - The renderer shows a reason without Electron's "Error invoking remote
   method" wrapper (`ipcErrorMessage`, `useErrorStore.showError`), and a user
   action that fails shows an error instead of only logging it.
-- Messages never include secrets or environment values.
+- Messages never include secrets, tokens or credentials. Paths and ids are fine.
 
 ## Making Changes
 
