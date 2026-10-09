@@ -9,7 +9,7 @@ const cli = path.join(dist, 'cli.js');
 const { parseDestination, validateNote, noteTemplate, HANDOFF_SECTIONS } = require(path.join(dist, 'handoff.js'));
 
 
-const machine = (name, self = false) => ({ name, dnsName: `${name}.tail.invalid`, os: 'macOS', online: true, ips: [], self });
+const machine = (name, self = false) => ({ name, dnsName: `${name}.tail.invalid`, os: 'macOS', online: true, ips: [], self, owner: 'parsa@github', mine: true });
 const machines = [machine('workstation', true), machine('parsa-devbox'), machine('parsas-macbook-pro'), machine('parsas-macbook-air'), machine('build-server')];
 
 test('freeform destinations name the harness, model, effort, and machine', () => {
@@ -40,7 +40,7 @@ test('unclear destinations fail with a message that says what to fix', () => {
   assert.throws(() => parseDestination('claude on parsas-macbook', machines), /matches several machines: parsas-macbook-pro, parsas-macbook-air/);
   assert.throws(() => parseDestination('opus on parsas-macbook-pro', machines), /Name the agent: claude, codex, or cursor/);
   assert.throws(() => parseDestination('claude codex on build-server', machines), /names two agents: claude and codex/);
-  assert.throws(() => parseDestination('claude on toaster', machines), /No machine of yours on Tailscale is called "toaster"/);
+  assert.throws(() => parseDestination('claude on toaster', machines), /No machine on your tailnet is called "toaster"/);
   assert.throws(() => parseDestination('claude high low on build-server', machines), /names two efforts: high and low/);
 });
 

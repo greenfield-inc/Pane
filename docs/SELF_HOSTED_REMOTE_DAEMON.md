@@ -12,7 +12,7 @@ Pane saves the profile and attempts to connect immediately. Local desktop mode i
 
 ## Workspaces or pairing codes?
 
-To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your machines. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
+To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your computers. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
 
 ## Guided quick start
 
@@ -221,13 +221,13 @@ How a host page reaches the phone:
 - HTML files opened in a browser tab (for example by `runpane panels open --url file://...`) load from one more Serve address, with the files beside them. Files outside the page's folder are refused.
 - A handler goes when its port stops listening, when Pane quits, and at the next launch after a crash. Quit spends at most 5 seconds removing them; a launch removes any it left. Pane changes only handlers it created: their targets start with `/pane-<hash of the Pane data directory>/`, so a dev build and the installed app never remove each other's.
 
-Who can open these pages: the devices that **Who can connect to this machine** admits (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)). Phone pages need that setting on, Tailscale running on the host, and the phone on the same tailnet. A page in a frame cannot send the machine's password, so phone pages are off while password protection is on. A refused device sees "This page runs on &lt;host&gt;. Open it from a device signed in as &lt;login&gt;." A pairing code or SSH tunnel does not grant access to these pages: they need the phone on this tailnet, signed in with a login that setting admits. Navigation inside a page stays on the phone; the tab saves only the addresses you enter or pick.
+Who can open these pages: the devices that **Who can connect** admits (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)). Phone pages need that setting on, Tailscale running on the host, and the phone on the same tailnet. A page in a frame cannot send the machine's password, so phone pages are off while password protection is on. A refused device sees "This page runs on &lt;host&gt;. Open it from a device signed in as &lt;login&gt;." A pairing code or SSH tunnel does not grant access to these pages: they need the phone on this tailnet, signed in with a login that setting admits. Navigation inside a page stays on the phone; the tab saves only the addresses you enter or pick.
 
 ### Files on the phone
 
 Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. Text files over 1 MB, and binary files that are not images, PDFs, video or audio, stay on the desktop. Images, PDFs, video and audio of any size preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
 
-Browsing and editing go through the PWA's own connection, so they work over every connection the PWA supports. Previews load from the same Serve address as HTML files in browser tabs, so they need what [browser tabs on the phone](#browser-tabs-on-the-phone) need: Tailscale on the host, password protection off, and a phone signed in to a login that **Who can connect to this machine** admits. Without that, a preview explains why it cannot load. Files outside the worktree are refused.
+Browsing and editing go through the PWA's own connection, so they work over every connection the PWA supports. Previews load from the same Serve address as HTML files in browser tabs, so they need what [browser tabs on the phone](#browser-tabs-on-the-phone) need: Tailscale on the host, password protection off, and a phone signed in to a login that **Who can connect** admits. Without that, a preview explains why it cannot load. Files outside the worktree are refused.
 
 ### Remote PWA Implementation Notes
 

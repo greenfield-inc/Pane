@@ -260,11 +260,11 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
-- `workspace list`: List your machines on Tailscale and whether each has joined workspaces.
+- `workspace list`: List the machines on your tailnet, each with its owner, and whether each answers workspaces.
 - `workspace enable`: Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).
 - `workspace disable`: Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.
-- `workspace read`: Print a file from one of your machines; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
-- `workspace write`: Write stdin to a file on one of your machines, creating parent folders.
+- `workspace read`: Print a file from a machine on your tailnet; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
+- `workspace write`: Write stdin to a file on a machine on your tailnet, creating parent folders.
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `handoff`: Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.

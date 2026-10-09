@@ -175,7 +175,13 @@ export async function invokeRemoteDaemon<T>(
   } catch {
     throw unreachable(response.status === 502 ? 'Pane is not running there' : `HTTP ${response.status}`);
   }
-  if (!payload.ok) throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}`, payload.error.code);
+  if (!payload.ok) {
+    // The machine's own visibility setting refused this login; only its owner can change that.
+    const fix = payload.error.code === 'ERR_WORKSPACE_IDENTITY_REFUSED'
+      ? ' Its owner can let you in from Pane on that machine: Settings → Remote Access → Access to this computer → Who can connect → Everyone on tailnet.'
+      : '';
+    throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}${fix}`, payload.error.code);
+  }
   return decodeBoundary(payload.result, resultSchema);
 }
 

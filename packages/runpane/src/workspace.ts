@@ -13,6 +13,8 @@ const TAILSCALE_TIMEOUT_MS = 3_000;
 const PROBE_TIMEOUT_MS = 4_000;
 const LOCAL_STATUS_TIMEOUT_MS = 1_500;
 const REACH_LINE = 'Reach them: runpane workspace <machine> read|write|exec|<command>';
+/** Listing probes other people's machines too; cap it on large tailnets, as the desktop app does. */
+const MAX_PROBED_MACHINES = 64;
 
 type MachineOs = 'macOS' | 'Windows' | 'Linux';
 
@@ -23,6 +25,10 @@ export interface TailnetMachine {
   online: boolean;
   ips: string[];
   self: boolean;
+  /** Tailscale login of the machine's owner. */
+  owner: string;
+  /** Signed in to this machine's own login. Other people's machines let in only who their visibility allows. */
+  mine: boolean;
 }
 
 export type Tailnet =
@@ -36,12 +42,16 @@ const peerSchema = boundary.object({
   Online: boundary.optional(boundary.boolean),
   TailscaleIPs: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
   Tags: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
+  ShareeNode: boundary.optional(boundary.boolean),
 });
 const statusSchema = boundary.object({
   BackendState: boundary.string,
+  MagicDNSSuffix: boundary.optional(boundary.string),
   Self: boundary.optional(boundary.nullable(peerSchema)),
   Peer: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  User: boundary.optional(boundary.nullable(boundary.jsonObject)),
 });
+const userSchema = boundary.object({ LoginName: boundary.string });
 
 const machineInfoSchema = boundary.object({
   hostname: boundary.string,
@@ -81,7 +91,10 @@ const localStatusSchema = boundary.object({
 
 // ---------------------------------------------------------------- tailnet
 
-/** This machine and the owner's other Mac, Windows, and Linux machines, from `tailscale status --json`. */
+/**
+ * This machine and the other Mac, Windows, and Linux machines in its tailnet, from `tailscale status --json`:
+ * the ones the desktop app's device switcher offers. Each machine decides who it lets in.
+ */
 export async function readTailnet(): Promise<Tailnet> {
   const output = await runTailscale(['status', '--json']);
   if (output === null) {
@@ -96,14 +109,28 @@ export async function readTailnet(): Promise<Tailnet> {
   if (status.BackendState !== 'Running' || !status.Self) {
     return { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' };
   }
-  const self = toMachine(status.Self, true);
   const ownerId = status.Self.UserID;
+  const users = status.User;
+  const ownerOf = (peer: ReturnType<typeof peerSchema.decode>) => {
+    const user = users?.[String(peer.UserID)];
+    try {
+      if (user !== undefined) return decodeBoundary(user, userSchema).LoginName;
+    } catch {
+      // Falls through to the numeric ID.
+    }
+    return `user ${peer.UserID}`;
+  };
+  const self = toMachine(status.Self, true, ownerOf(status.Self), true);
+  const suffix = `.${(status.MagicDNSSuffix ?? status.Self.DNSName.replace(/\.$/, '').split('.').slice(1).join('.')).toLowerCase()}`;
   const machines = Object.values(status.Peer ?? {})
     .map(decodePeer)
-    .filter((peer): peer is NonNullable<typeof peer> => Boolean(peer && peer.UserID === ownerId && !peer.Tags?.length))
-    .map((peer) => toMachine(peer, false))
+    // Sharee nodes belong to people outside this tailnet whom a device was shared with.
+    .filter((peer): peer is NonNullable<typeof peer> => Boolean(peer && !peer.Tags?.length && !peer.ShareeNode
+      && peer.DNSName.replace(/\.$/, '').toLowerCase().endsWith(suffix)))
+    .map((peer) => toMachine(peer, false, ownerOf(peer), peer.UserID === ownerId))
     .filter((machine): machine is TailnetMachine => machine !== null)
-    .sort((left, right) => Number(right.online) - Number(left.online) || left.name.localeCompare(right.name));
+    .sort((left, right) => Number(right.mine) - Number(left.mine) || Number(right.online) - Number(left.online)
+      || left.name.localeCompare(right.name));
   if (!self) return { ok: false, reason: `Tailscale reports an unsupported OS (${status.Self.OS})`, fix: 'Run Pane on macOS, Windows, or Linux.' };
   return { ok: true, self, machines };
 }
@@ -118,11 +145,11 @@ function decodePeer(value: JsonValue): ReturnType<typeof peerSchema.decode> | nu
   }
 }
 
-function toMachine(peer: ReturnType<typeof peerSchema.decode>, self: boolean): TailnetMachine | null {
+function toMachine(peer: ReturnType<typeof peerSchema.decode>, self: boolean, owner: string, mine: boolean): TailnetMachine | null {
   const osName = TAILSCALE_OS_NAMES.get(peer.OS.toLowerCase());
   if (!osName) return null;
   const dnsName = peer.DNSName.replace(/\.$/, '');
-  return { name: dnsName.split('.')[0], dnsName, os: osName, online: self || peer.Online === true, ips: peer.TailscaleIPs ?? [], self };
+  return { name: dnsName.split('.')[0], dnsName, os: osName, online: self || peer.Online === true, ips: peer.TailscaleIPs ?? [], self, owner, mine };
 }
 
 function runTailscale(args: string[]): Promise<string | null> {
@@ -158,17 +185,20 @@ export function resolveMachine(query: string, machines: readonly TailnetMachine[
   if (prefixed.length > 1) {
     throw new Error(`"${query}" matches several machines: ${prefixed.map((machine) => machine.name).join(', ')}. Use the full name.`);
   }
-  throw new Error(`No machine of yours on Tailscale is called "${query}". Your machines: ${describeMachines(machines) || 'none'}.`);
+  throw new Error(`No machine on your tailnet is called "${query}". Machines: ${describeMachines(machines) || 'none'}.`);
 }
 
-/** The machines whose OS fits a path that has the shape of another OS's paths; empty for local-shaped paths. */
+/**
+ * My machines whose OS fits a path that has the shape of another OS's paths; empty for local-shaped paths.
+ * Other people's machines are reached only by name.
+ */
 function machinesForPath(
   value: string,
   machines: readonly TailnetMachine[],
   platform: NodeJS.Platform = process.platform,
 ): TailnetMachine[] {
   const systems = foreignPathSystems(value, platform);
-  return machines.filter((machine) => !machine.self && systems.includes(machine.os));
+  return machines.filter((machine) => machine.mine && !machine.self && systems.includes(machine.os));
 }
 
 /** The systems a path belongs to when its shape cannot exist on this platform; empty otherwise. */
@@ -184,8 +214,12 @@ function foreignPathSystems(value: string, platform: NodeJS.Platform): MachineOs
 }
 
 function describeMachines(machines: readonly TailnetMachine[]): string {
-  return machines.filter((machine) => !machine.self)
-    .map((machine) => `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'})`).join(', ');
+  return machines.filter((machine) => !machine.self).map(describeMachine).join(', ');
+}
+
+/** "name (OS, online)", plus the owner's login for someone else's machine. */
+function describeMachine(machine: TailnetMachine): string {
+  return `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
 }
 
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
@@ -232,7 +266,14 @@ async function routePath(value: string, verb: string): Promise<TailnetMachine> {
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet();
   const local = await readLocalStatus(parsed.paneDir);
-  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({ machine, probe: await probeMachine(machine) })));
+  // Offline machines need no probe, so only online ones count toward the limit; mine come first.
+  const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
+  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
+    machine,
+    probe: probed.has(machine) || !machine.online
+      ? await probeMachine(machine)
+      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` },
+  })));
   if (parsed.json) {
     console.log(JSON.stringify({
       ok: true,
@@ -244,7 +285,7 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   console.log(`${tailnet.self.name} (this machine, ${tailnet.self.os}): ${local ? describeLocalStatus(local) : 'off (Pane is not running)'}`);
   for (const { machine, probe } of rows) {
     const state = probe.info ? `joined, shell ${probe.info.shell}` : `not reachable: ${probe.error}`;
-    console.log(`${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}): ${machine.online ? state : 'offline'}`);
+    console.log(`${describeMachine(machine)}: ${machine.online ? state : 'offline'}`);
   }
   console.log(REACH_LINE);
   return 0;
@@ -350,7 +391,7 @@ export interface WorkspaceSummary {
   machine: string | null;
   reason?: string;
   fix?: string;
-  otherMachines: Array<{ name: string; os: MachineOs; online: boolean }>;
+  otherMachines: Array<{ name: string; os: MachineOs; online: boolean; owner: string; mine: boolean }>;
   lines: string[];
 }
 
@@ -363,7 +404,7 @@ export async function readWorkspaceSummary(paneDir?: string): Promise<WorkspaceS
       lines: [`Workspaces: off (${tailnet.reason}). Fix: ${tailnet.fix}`],
     };
   }
-  const otherMachines = tailnet.machines.map(({ name, os: machineOs, online }) => ({ name, os: machineOs, online }));
+  const otherMachines = tailnet.machines.map(({ name, os: machineOs, online, owner, mine }) => ({ name, os: machineOs, online, owner, mine }));
   const state = local?.state ?? 'off';
   const reason = local ? local.reason : 'Pane is not running';
   const fix = local ? local.fix : 'Open Pane.';
@@ -404,7 +445,7 @@ export async function workspaceHintFor(error: NodeJS.ErrnoException, parsed: Par
   if (sessionId && /not found|no session|unknown session/i.test(error.message)) {
     const tailnet = await readTailnet();
     if (!tailnet.ok) return null;
-    const found = await Promise.all(tailnet.machines.filter((machine) => machine.online).map(async (machine) => {
+    const found = await Promise.all(tailnet.machines.filter((machine) => machine.mine && machine.online).map(async (machine) => {
       try {
         await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:sessions:get', [{ sessionId }], boundary.json, PROBE_TIMEOUT_MS);
         return machine;
