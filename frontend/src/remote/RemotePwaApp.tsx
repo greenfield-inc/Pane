@@ -27,7 +27,7 @@ import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
-import { findFirstSessionId, useRemoteSessionStore, visibleTabs } from './stores/remoteSessionStore';
+import { findFirstSessionId, phoneShows, useRemoteSessionStore, visibleTabs } from './stores/remoteSessionStore';
 import { readRemoteView } from './stores/remoteViewMemory';
 import { useRemoteBrowserHistory, type RemoteHistoryView } from './remoteBrowserHistory';
 import { subscribeRemotePanelStatus } from './runtime/remotePanelStatus';
@@ -1107,11 +1107,6 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       </div>
     </div>
   );
-}
-
-/** The phone shows terminal, browser and explorer panels; other types open a card pointing to desktop Pane. */
-function phoneShows(panel: ToolPanel): boolean {
-  return panel.type === 'terminal' || panel.type === 'browser' || panel.type === 'explorer';
 }
 
 function firstSupportedPanel(panels: ToolPanel[]): ToolPanel | null {

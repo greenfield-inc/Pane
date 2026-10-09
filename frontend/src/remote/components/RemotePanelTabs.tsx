@@ -8,6 +8,7 @@ import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
 import { getPanelIcon } from '../../components/panels/panelIcon';
 import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
 import { getRemotePanelTabId, getRemotePanelTabPanelId } from './remotePanelTabIds';
+import { phoneShows } from '../stores/remoteSessionStore';
 
 // The remote host executes these commands. Until its platform capabilities are
 // exposed here, the viewer's browser platform must not hide valid host tools.
@@ -43,9 +44,9 @@ export function RemotePanelTabs({
   const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addMenuId = useId();
-  // Tabs the phone can show (terminals) come first; desktop-only panels follow, each group in host order.
+  // Tabs the phone can show come first; desktop-only panels follow, each group in host order.
   const panels = useMemo(
-    () => [...hostPanels].sort((a, b) => Number(a.type !== 'terminal') - Number(b.type !== 'terminal')),
+    () => [...hostPanels].sort((a, b) => Number(!phoneShows(a)) - Number(!phoneShows(b))),
     [hostPanels],
   );
 
