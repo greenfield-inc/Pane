@@ -17,6 +17,7 @@ const DAEMON_EVENT_PREFIXES = [
   'archive:',
   'folder:',
   'panel:',
+  'ports:',
   'project:',
   'resource-monitor:',
   'orchestration-sessions:',

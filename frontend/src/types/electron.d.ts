@@ -59,6 +59,7 @@ import type { DetectedProjectConfig } from '../../../shared/types/projectConfig'
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
+import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type {
   ProjectDashboardData,
@@ -436,6 +437,7 @@ interface ElectronAPI {
     onSessionUpdated: (callback: (session: Session) => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
+    onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
     onRemoteSettingsChanged: (callback: () => void) => () => void;

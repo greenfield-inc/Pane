@@ -141,6 +141,7 @@ const RETRYABLE_READ_CHANNELS = new Set([
   'panels:agent-statuses',
   'panels:checkInitialized',
   'panels:get-output',
+  'ports:list',
   'projects:list-branches',
   'projects:detect-branch',
   'remote:pwa-affordances',

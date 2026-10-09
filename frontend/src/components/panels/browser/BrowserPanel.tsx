@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Globe, ArrowLeft, ArrowRight, RotateCw, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
@@ -8,6 +8,21 @@ import { useSessionStore } from '../../../stores/sessionStore';
 import { useResizable } from '../../../hooks/useResizable';
 import { normalizeUrl } from './browserUrl';
 import { hasFileProtocol } from '../../../../../shared/utils/browserUrl';
+import { useListeningPorts } from '../../../hooks/useListeningPorts';
+import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
+import { Dropdown } from '../../ui/Dropdown';
+import { PortsList } from './PortsList';
+
+/** The port a URL points at on this machine's loopback, if it does. */
+function localPortOf(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)) return null;
+    return Number.parseInt(parsed.port || (parsed.protocol === 'https:' ? '443' : '80'), 10);
+  } catch {
+    return null;
+  }
+}
 
 interface BrowserPanelProps {
   panel: ToolPanel;
@@ -24,6 +39,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
+  const ports = useListeningPorts();
+  const remoteRuntime = useRemoteRuntimeState();
+  const viewingRemoteHost = remoteRuntime.connectionState.mode === 'remote';
+  // Ports open on this computer's localhost, so only once local mode is confirmed.
+  const onHost = remoteRuntime.connectionKnown && !viewingRemoteHost;
   const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
@@ -261,6 +281,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => observer.disconnect();
   }, [devToolsOpen]);
 
+  const openPort = (port: number) => navigateTo(`http://localhost:${port}`);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     navigateTo(inputUrl);
@@ -470,6 +492,41 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             )}
           />
         </form>
+        {url && (
+          <Dropdown
+            className="flex-shrink-0"
+            position="bottom-right"
+            width="auto"
+            menuClassName="w-96"
+            items={[]}
+            footer={({ close }) => (
+              <PortsList
+                snapshot={ports}
+                currentPort={localPortOf(inputUrl)}
+                canOpen={onHost}
+                onOpen={port => {
+                  close();
+                  openPort(port);
+                }}
+              />
+            )}
+            trigger={
+              <button
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
+                  'transition-colors hover:bg-surface-hover hover:text-text-primary',
+                  'aria-expanded:bg-surface-hover aria-expanded:text-text-primary'
+                )}
+                title={`Listening ports on ${viewingRemoteHost ? ports?.host ?? 'the host' : 'this machine'}`}
+              >
+                Ports
+                <span className="tabular-nums text-text-tertiary">{ports?.ports.length ?? ''}</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            }
+          />
+        )}
       </div>
 
       {/* Error feedback */}
@@ -481,12 +538,20 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
       {/* Content area */}
       {!url ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-text-secondary p-8">
-          <Globe className="w-12 h-12 mb-4 opacity-20" />
-          <p className="text-sm">No URL loaded</p>
-          <p className="text-xs text-text-tertiary mt-1">
-            Enter a URL above or select one from terminal output
-          </p>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="mx-auto max-w-2xl px-4 py-6">
+            <h2 className="px-3 text-sm font-medium text-text-primary">
+              Ports on {ports?.host ?? 'this machine'}
+            </h2>
+            <p className="px-3 mt-0.5 text-xs text-text-tertiary">
+              {viewingRemoteHost
+                ? `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`
+                : 'Open a web port here, or enter a URL above.'}
+            </p>
+            <div className="mt-2">
+              <PortsList snapshot={ports} canOpen={onHost} onOpen={openPort} />
+            </div>
+          </div>
         </div>
       ) : (
         <div className="flex-1 flex flex-row min-h-0">

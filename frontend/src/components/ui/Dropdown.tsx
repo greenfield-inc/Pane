@@ -427,7 +427,7 @@ export function Dropdown({
 
               {footer && (
                 <>
-                  <div className="border-t border-border-secondary my-1.5" />
+                  {items.length > 0 && <div className="border-t border-border-secondary my-1.5" />}
                   {footer instanceof Function ? footer({ close: handleClose }) : footer}
                 </>
               )}

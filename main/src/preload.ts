@@ -40,6 +40,7 @@ import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
+import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -773,6 +774,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: ArchiveProgressSnapshot) => callback(progress);
       ipcRenderer.on('archive:progress', wrappedCallback);
       return () => ipcRenderer.removeListener('archive:progress', wrappedCallback);
+    },
+    onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: ListeningPortsSnapshot) => callback(snapshot);
+      ipcRenderer.on('ports:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('ports:changed', wrappedCallback);
     },
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
