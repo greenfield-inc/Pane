@@ -697,6 +697,20 @@ describe('TerminalPanelManager hidden output delivery', () => {
       disposeFlowControlRecord(terminal.flowControl);
     });
 
+    it('credits every viewer that is not a tile, so a viewer handoff cannot strand bytes', () => {
+      const { manager, terminal } = armed();
+      const remoteViewer = 'remote:client-1:viewer:phone';
+      manager.setVisibility(terminal.panelId, true, remoteViewer);
+      // The desktop panel appears while the phone's ack for earlier output is
+      // still in flight. That ack covers bytes the panel never received.
+      manager.setVisibility(terminal.panelId, true, panelViewer);
+
+      manager.acknowledgeBytes(terminal.panelId, 100, remoteViewer);
+      expect(terminal.flowControl.pendingBytes).toBe(900);
+
+      disposeFlowControlRecord(terminal.flowControl);
+    });
+
     it('resolves a bare ack id to the scoped id it registered under', () => {
       const { manager, terminal } = armed();
       // TerminalPanel mints a bare uuid. Registration used to be scoped by the

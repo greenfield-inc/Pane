@@ -1077,9 +1077,11 @@ export class TerminalPanelManager extends EventEmitter {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return;
 
-    // An unidentified caller is treated as the consumer: every ack path
-    // predates viewer ids, and refusing them would stall the PTY.
-    if (viewerId) {
+    // Only a Mission Control tile is ever refused, and only while another
+    // viewer is the designated consumer. Every other ack is credited as before:
+    // refusing a real panel or remote client risks stranding bytes it already
+    // received when the designation moves, which stalls the PTY.
+    if (viewerId && this.visibilityViewerMatchesPrefix(this.normalizeVisibilityViewerId(viewerId), MISSION_CONTROL_VIEWER_PREFIX)) {
       const designated = this.designatedViewer(panelId);
       if (designated && this.normalizeVisibilityViewerId(viewerId) !== designated) return;
     }
@@ -2108,7 +2110,9 @@ export class TerminalPanelManager extends EventEmitter {
       await emulator?.refresh();
       const screenText = emulator?.state.screenText;
       const panel = panelManager.getPanel(terminal.panelId);
-      if (!screenText || !panel) return;
+      // A replacement terminal may have started in this panel during the drain;
+      // its own state wins over this lifetime's last screen.
+      if (!screenText || !panel || this.terminals.has(terminal.panelId)) return;
       const state = panel.state;
       state.customState = { ...terminalCustomState(state), screenText };
       await panelManager.updatePanel(panel.id, { state });
