@@ -233,6 +233,16 @@ function App() {
     },
   });
 
+  // mod+shift+n is New Project, so New Session is palette-only.
+  // OrchestrationSessionNav owns the Create Session dialog and opens it on this event.
+  useHotkey({
+    id: 'new-orchestration-session',
+    label: 'New Session',
+    keys: '',
+    category: 'navigation',
+    action: () => window.dispatchEvent(new Event('open-create-orchestration-session')),
+  });
+
   useHotkey({
     id: 'new-project',
     label: 'New Project',

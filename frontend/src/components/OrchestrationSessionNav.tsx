@@ -1,6 +1,6 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ChevronDown, ChevronRight, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
+import { Archive, ChevronDown, ChevronRight, MoreHorizontal, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import {
@@ -15,6 +15,7 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Tooltip } from './ui/Tooltip';
+import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { cn } from '../utils/cn';
 import { useOrchestrationSessionActivity } from '../hooks/useAgentStatus';
@@ -42,6 +43,12 @@ interface SessionContextMenuState {
 }
 
 type SessionRowPlacement = 'pinned' | 'sessions';
+
+interface ArchivedSessionToast {
+  sessionId: string;
+  sessionName: string;
+  wasOpen: boolean;
+}
 
 function statusLabel(session: OrchestrationSessionRecord): string {
   if (session.blockers.length > 0) return 'Blocked';
@@ -98,6 +105,7 @@ export function OrchestrationSessionNav({
   const create = useOrchestrationSessionStore(state => state.create);
   const update = useOrchestrationSessionStore(state => state.update);
   const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
+  const navigateToSessions = useNavigationStore(state => state.navigateToSessions);
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const [showCreate, setShowCreate] = useState(false);
@@ -106,6 +114,7 @@ export function OrchestrationSessionNav({
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [archivedToast, setArchivedToast] = useState<ArchivedSessionToast | null>(null);
   const compactError = actionError ?? sessionError;
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
@@ -122,6 +131,13 @@ export function OrchestrationSessionNav({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The command palette's New Session. Sidebar mounts exactly one nav (rail or tree), so one dialog opens.
+  useEffect(() => {
+    const openCreate = () => setShowCreate(true);
+    window.addEventListener('open-create-orchestration-session', openCreate);
+    return () => window.removeEventListener('open-create-orchestration-session', openCreate);
+  }, []);
 
   useEffect(() => {
     const handleSessionsChanged = (event: Event) => {
@@ -187,7 +203,9 @@ export function OrchestrationSessionNav({
 
   const archiveSession = useCallback(async () => {
     if (!sessionMenu) return;
-    const { sessionId } = sessionMenu;
+    const { sessionId, sessionName } = sessionMenu;
+    const wasOpen = useNavigationStore.getState().activeView === 'pane-chat'
+      && useOrchestrationSessionStore.getState().selectedSessionId === sessionId;
     setSessionMenu(null);
     setActionError(null);
     try {
@@ -195,11 +213,42 @@ export function OrchestrationSessionNav({
         { sessionId },
         { archived: true } satisfies OrchestrationSessionUpdateInput,
       );
-      await refresh({ adoptServerSelection: true });
+      // Archiving the open Session lands on Home, never on a Session the server picked.
+      if (wasOpen) {
+        void setActiveSession(null);
+        navigateToSessions();
+      }
+      setArchivedToast({ sessionId, sessionName, wasOpen });
+      await refresh();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to archive Session');
     }
-  }, [refresh, sessionMenu, update]);
+  }, [navigateToSessions, refresh, sessionMenu, setActiveSession, update]);
+
+  const dismissArchivedToast = useCallback(() => setArchivedToast(null), []);
+
+  const undoArchive = useCallback(async () => {
+    if (!archivedToast) return;
+    const { sessionId, wasOpen } = archivedToast;
+    setArchivedToast(null);
+    setActionError(null);
+    try {
+      await update({ sessionId }, { archived: false } satisfies OrchestrationSessionUpdateInput);
+      await refresh();
+      if (wasOpen) await openSession(sessionId);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Failed to restore Session');
+    }
+  }, [archivedToast, openSession, refresh, update]);
+
+  const archivedToastElement = archivedToast && (
+    <UndoToast
+      key={archivedToast.sessionId}
+      message={`Archived ${archivedToast.sessionName}`}
+      onUndo={() => void undoArchive()}
+      onDismiss={dismissArchivedToast}
+    />
+  );
 
   const pinSession = useCallback(async () => {
     if (!sessionMenu) return;
@@ -234,15 +283,16 @@ export function OrchestrationSessionNav({
       ? placement === 'pinned' ? 'orchestration-pinned-pane-chat' : 'orchestration-pane-chat'
       : `${placement === 'pinned' ? 'orchestration-pinned-session' : 'orchestration-session'}-${session.id}`;
     const panesId = `orchestration-session-panes-${placement}-${session.id}`;
+    const isOpen = activeView === 'pane-chat' && session.id === selectedSessionId;
 
     return (
       <div key={`${placement}-${session.id}`} className="group/orchestration-session">
         <div className={cn(
-          'mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
-          activeView === 'pane-chat' && session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
+          'group/orchestration-row relative mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
+          isOpen ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
           {paneRows.length > 0 ? (
-            <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
+            <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} Panes`}
               aria-expanded={expanded} aria-controls={panesId}
               onClick={() => toggleSessionExpanded(session.id, expanded)}
               className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
@@ -267,6 +317,28 @@ export function OrchestrationSessionNav({
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
           </button>
+          {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
+          <div className={cn(
+            'absolute inset-y-0 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
+            isOpen
+              ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
+              : 'group-hover/orchestration-row:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]',
+          )}>
+            <button
+              type="button"
+              aria-label="Session actions"
+              aria-haspopup="menu"
+              title="Session actions"
+              onClick={event => {
+                event.stopPropagation();
+                const bounds = event.currentTarget.getBoundingClientRect();
+                openSessionMenu(session, bounds.left, bounds.bottom);
+              }}
+              className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         {paneRows.length > 0 && (
           <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>{paneRows}</div>
@@ -309,11 +381,13 @@ export function OrchestrationSessionNav({
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session)}
               className={cn(
-                'flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-interactive',
+                'flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-interactive',
                 session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary',
               )}
             >
-              {session.name.trim().charAt(0).toUpperCase() || <Terminal className="h-4 w-4" />}
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border-primary">
+                {session.name.trim().charAt(0).toUpperCase() || <Terminal className="h-3.5 w-3.5" />}
+              </span>
             </button>
           </Tooltip>
         ))}
@@ -346,6 +420,7 @@ export function OrchestrationSessionNav({
           onPin={() => void pinSession()}
         />
         <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
+        {archivedToastElement}
       </div>
     );
   }
@@ -449,6 +524,7 @@ export function OrchestrationSessionNav({
         onPin={() => void pinSession()}
       />
       <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
+      {archivedToastElement}
     </>
   );
 }
