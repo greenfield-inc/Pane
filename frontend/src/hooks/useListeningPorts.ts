@@ -7,16 +7,22 @@ export function useListeningPorts(): ListeningPortsSnapshot | null {
 
   useEffect(() => {
     let cancelled = false;
+    // Bumped by every read and every event, so a read applies only if nothing newer landed meanwhile.
+    let version = 0;
     const load = () => {
+      const requested = ++version;
       window.electronAPI.invoke('ports:list').then(
-        (next: ListeningPortsSnapshot) => { if (!cancelled) setSnapshot(next); },
+        (next: ListeningPortsSnapshot) => { if (!cancelled && requested === version) setSnapshot(next); },
         (error: Error) => console.error('[Ports] Failed to list ports:', error),
       );
     };
-    load();
-    const unsubscribeChanges = window.electronAPI.events.onListeningPortsChanged(setSnapshot);
+    const unsubscribeChanges = window.electronAPI.events.onListeningPortsChanged(next => {
+      version++;
+      setSnapshot(next);
+    });
     // Connecting to or leaving a remote host swaps whose ports these are.
     const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested?.(load);
+    load();
     return () => {
       cancelled = true;
       unsubscribeChanges();

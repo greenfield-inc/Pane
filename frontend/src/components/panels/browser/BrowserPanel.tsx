@@ -10,10 +10,8 @@ import { normalizeUrl } from './browserUrl';
 import { hasFileProtocol } from '../../../../../shared/utils/browserUrl';
 import { useListeningPorts } from '../../../hooks/useListeningPorts';
 import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
-import { TerminalPopover } from '../../terminal/TerminalPopover';
+import { Dropdown } from '../../ui/Dropdown';
 import { PortsList } from './PortsList';
-
-const PORTS_MENU_WIDTH = 384;
 
 /** The port a URL points at on this machine's loopback, if it does. */
 function localPortOf(url: string): number | null {
@@ -41,9 +39,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
-  const [portsMenuAt, setPortsMenuAt] = useState<{ x: number; y: number } | null>(null);
   const ports = useListeningPorts();
-  const onHost = useRemoteRuntimeState().connectionState.mode !== 'remote';
+  const remoteRuntime = useRemoteRuntimeState();
+  const viewingRemoteHost = remoteRuntime.connectionState.mode === 'remote';
+  // Ports open on this computer's localhost, so only once local mode is confirmed.
+  const onHost = remoteRuntime.connectionKnown && !viewingRemoteHost;
   const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
@@ -281,19 +281,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => observer.disconnect();
   }, [devToolsOpen]);
 
-  const openPort = (port: number) => {
-    setPortsMenuAt(null);
-    navigateTo(`http://localhost:${port}`);
-  };
-
-  const togglePortsMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (portsMenuAt) {
-      setPortsMenuAt(null);
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPortsMenuAt({ x: rect.right - PORTS_MENU_WIDTH, y: rect.bottom + 4 });
-  };
+  const openPort = (port: number) => navigateTo(`http://localhost:${port}`);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -505,35 +493,41 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           />
         </form>
         {url && (
-          <button
-            type="button"
-            // The popover closes on any mousedown outside it, which would let
-            // this click reopen it; the button toggles it instead.
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={togglePortsMenu}
-            aria-expanded={portsMenuAt !== null}
-            className={cn(
-              'flex flex-shrink-0 items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
-              'transition-colors hover:bg-surface-hover hover:text-text-primary',
-              portsMenuAt && 'bg-surface-hover text-text-primary'
+          <Dropdown
+            className="flex-shrink-0"
+            position="bottom-right"
+            width="auto"
+            menuClassName="w-96"
+            items={[]}
+            footer={({ close }) => (
+              <PortsList
+                snapshot={ports}
+                currentPort={localPortOf(inputUrl)}
+                canOpen={onHost}
+                onOpen={port => {
+                  close();
+                  openPort(port);
+                }}
+              />
             )}
-            title="Listening ports on this machine"
-          >
-            Ports
-            <span className="tabular-nums text-text-tertiary">{ports?.ports.length ?? ''}</span>
-            <ChevronDown className="h-3 w-3" />
-          </button>
+            trigger={
+              <button
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
+                  'transition-colors hover:bg-surface-hover hover:text-text-primary',
+                  'aria-expanded:bg-surface-hover aria-expanded:text-text-primary'
+                )}
+                title="Listening ports on this machine"
+              >
+                Ports
+                <span className="tabular-nums text-text-tertiary">{ports?.ports.length ?? ''}</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            }
+          />
         )}
       </div>
-      <TerminalPopover
-        visible={portsMenuAt !== null}
-        x={portsMenuAt?.x ?? 0}
-        y={portsMenuAt?.y ?? 0}
-        onClose={() => setPortsMenuAt(null)}
-        className="w-96 max-h-[min(28rem,calc(100vh-20px))] py-0"
-      >
-        <PortsList snapshot={ports} currentPort={localPortOf(inputUrl)} canOpen={onHost} onOpen={openPort} />
-      </TerminalPopover>
 
       {/* Error feedback */}
       {urlError && (
@@ -550,9 +544,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
               Ports on {ports?.host ?? 'this machine'}
             </h2>
             <p className="px-3 mt-0.5 text-xs text-text-tertiary">
-              {onHost
-                ? 'Open a web port here, or enter a URL above.'
-                : `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`}
+              {viewingRemoteHost
+                ? `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`
+                : 'Open a web port here, or enter a URL above.'}
             </p>
             <div className="mt-2">
               <PortsList snapshot={ports} canOpen={onHost} onOpen={openPort} />
