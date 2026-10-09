@@ -75,6 +75,8 @@ export interface CreateSessionRequest {
   isMainRepo?: boolean;
   baseBranch?: string;
   startPinned?: boolean;
+  /** Orchestration Session each new Pane joins once it exists. */
+  associateSessionId?: string;
   model?: string;
   toolType?: 'claude' | 'none';
   claudeConfig?: {

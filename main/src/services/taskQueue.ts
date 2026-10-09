@@ -50,7 +50,7 @@ interface CreateSessionJob {
   activateOnCreate?: boolean;
 }
 
-interface SessionCreationJob {
+export interface SessionCreationJob {
   id: string | number;
   data: CreateSessionJob;
   status?: string;
@@ -574,6 +574,11 @@ export class TaskQueue {
     } finally {
       this.sessionCreatedListeners.delete(jobId);
     }
+  }
+
+  /** Resolves with the created Pane once a queued creation job finishes. */
+  waitForCreatedSession(job: SessionCreationJob, timeoutMs = 120_000): Promise<CreateSessionQueueResult> {
+    return this.waitForSessionCreationJob(job, timeoutMs);
   }
 
   private async waitForSessionCreationJob(

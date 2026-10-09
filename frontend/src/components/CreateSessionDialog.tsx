@@ -40,27 +40,6 @@ interface CreateSessionDialogProps {
 }
 
 /** Adds each Pane this form creates to the Session as its creation event arrives; returns a function that stops listening. */
-function associateCreatedPanes(sessionId: string, projectId: number | undefined, paneName: string, count: number): () => void {
-  let remaining = count;
-  const stop = () => {
-    clearTimeout(timer);
-    unsubscribe?.();
-  };
-  const unsubscribe = window.electronAPI?.events?.onSessionCreated(session => {
-    if (session.projectId !== projectId || !session.name.startsWith(paneName)) return;
-    remaining -= 1;
-    if (remaining === 0) stop();
-    void API.orchestrationSessions.associate({ sessionId }, { paneId: session.id })
-      .then(result => {
-        if (!result.success) console.warn('[CreateSessionDialog] Could not add the Pane to the Session:', result.error);
-        return useOrchestrationSessionStore.getState().refresh();
-      })
-      .catch(error => console.warn('[CreateSessionDialog] Could not add the Pane to the Session:', error));
-  });
-  const timer = setTimeout(stop, 120_000);
-  return stop;
-}
-
 export function CreateSessionDialog(props: CreateSessionDialogProps) {
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   return <Modal isOpen={props.isOpen} onClose={props.onClose} size="lg" closeOnOverlayClick={false} closeOnEscape={!branchDropdownOpen}>
@@ -375,7 +354,6 @@ export function CreatePaneForm({
     setIsSubmitting(true);
     onSubmittingChange?.(true);
 
-    let stopAssociating: (() => void) | undefined;
     try {
       // Determine if we need to create a folder
       // Create folder when: multiple sessions (sessionCount > 1)
@@ -396,10 +374,6 @@ export function CreatePaneForm({
         }
       }
 
-      // Listen before creating so a fast creation event is not missed.
-      stopAssociating = addToSession && targetSession
-        ? associateCreatedPanes(targetSession.id, projectId, cleanedName, sessionCount)
-        : undefined;
       const response = await API.sessions.create({
         prompt: '',
         worktreeTemplate: cleanedName,
@@ -410,11 +384,11 @@ export function CreatePaneForm({
         folderId,
         isMainRepo: !useWorktree,
         baseBranch: formData.baseBranch,
-        startPinned
+        startPinned,
+        associateSessionId: addToSession && targetSession ? targetSession.id : undefined
       });
 
       if (!response.success) {
-        stopAssociating?.();
         showError({
           title: 'Failed to Create Pane',
           error: response.error || 'An error occurred while creating the pane.',
@@ -431,7 +405,6 @@ export function CreatePaneForm({
 
       onClose();
     } catch (error: unknown) {
-      stopAssociating?.();
       console.error('Error creating session:', error);
       const errorMessage = error instanceof Error ? error.message : 'An error occurred while creating the pane.';
       const errorDetails = error instanceof Error ? (error.stack || error.toString()) : String(error);
