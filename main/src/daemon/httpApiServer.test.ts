@@ -915,6 +915,51 @@ describe('workspace identity mode', () => {
     stream.close();
   });
 
+  it.each([
+    ['visibility narrows to "Only me"', ownerOnly({ visibility: 'owner' }), {}],
+    ['password protection turns on', ownerOnly({ visibility: 'tailnet', verifySecret: passwordIs('correct horse') }), {}],
+    [
+      'the password changes',
+      ownerOnly({ visibility: 'tailnet', verifySecret: passwordIs('new password') }),
+      { previous: ownerOnly({ visibility: 'tailnet', verifySecret: passwordIs('old password') }), password: 'old password' },
+    ],
+  ])('refuses an invoke whose body finishes uploading after %s', async (_change, revoked, { previous, password }: { previous?: WorkspaceAccessPolicy; password?: string }) => {
+    let policy = previous ?? ownerOnly({ visibility: 'tailnet' });
+    let checks = 0;
+    const server = await startWorkspaceServer(() => {
+      checks += 1;
+      return policy;
+    });
+    const address = server.getAddress();
+    if (!address) throw new Error('Remote HTTP API server is not listening');
+
+    const response = new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const request = http.request({
+        host: address.host,
+        port: address.port,
+        path: invokePath,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...as(teammate, password) },
+      }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body }));
+      });
+      activeRequests.add(request);
+      request.on('error', reject);
+      const body = JSON.stringify(invoke);
+      request.write(body.slice(0, 10));
+      void vi.waitFor(() => expect(checks).toBeGreaterThan(0)).then(() => {
+        policy = revoked;
+        request.end(body.slice(10));
+      });
+    });
+
+    const result = await response;
+    expect(result.statusCode).toBeGreaterThanOrEqual(400);
+    expect(result.body).not.toContain('devbox');
+  });
+
   it('drops a connected client when password protection is turned on', async () => {
     let policy = ownerOnly();
     const server = await startWorkspaceServer(() => policy);

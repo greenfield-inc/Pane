@@ -673,9 +673,8 @@ export class PaneRemoteHttpApiServer {
       throw error;
     }
 
-    const auth = headerAuth.ok
-      ? headerAuth
-      : this.authenticateRequest(request, invokeRequest.token);
+    // The header check only sizes the upload; access can change while the body arrives.
+    const auth = this.authenticateRequest(request, headerAuth.ok ? undefined : invokeRequest.token);
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
