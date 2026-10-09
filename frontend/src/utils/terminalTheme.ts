@@ -110,3 +110,34 @@ export const getScriptTerminalTheme = () => {
     background: surfaceBackground || (isLight ? '#f9fafb' : isForge ? '#1E1F22' : isDusk ? '#111827' : isOled ? '#080808' : '#1f2937'),
   };
 };
+
+/**
+ * Terminal typeface and contrast, shared by every xterm surface.
+ *
+ * These live here rather than in `TerminalPanel` because a secondary viewer
+ * (a Mission Control tile) has to render in the same typeface as the panel it
+ * mirrors: it measures character width to choose a font size that fits the
+ * PTY's columns, and measuring one font while rendering another puts the
+ * geometry maths on the wrong metrics.
+ */
+export const DEFAULT_TERMINAL_FONT_FAMILY = 'Geist Mono';
+
+export function buildTerminalFontFamily(userFont: string): string {
+  return `"${userFont}", "Symbols Nerd Font Mono", monospace`;
+}
+
+// xterm halves the configured ratio for dim (SGR 2) cells, so 9 is what gets dim
+// CLI output (Claude Code / Codex) to 4.5:1 AA. Off-state stays a modest safety
+// floor so the deliberate muted grays in the dark themes survive.
+const HIGH_CONTRAST_MIN_RATIO = 9;   // dim cells get ratio/2 = 4.5 (AA)
+const LIGHT_MIN_RATIO = 4.5;
+const DARK_MIN_RATIO = 3;
+
+// Takes highContrast as an argument rather than reading the `high-contrast`
+// class: that class is stamped by ThemeProvider's effect, and React flushes
+// passive effects child-first, so a caller's effect would observe the previous
+// value and leave the terminal one toggle behind.
+export function getMinimumContrastRatio(highContrast: boolean): number {
+  if (highContrast) return HIGH_CONTRAST_MIN_RATIO;
+  return document.documentElement.classList.contains('light') ? LIGHT_MIN_RATIO : DARK_MIN_RATIO;
+}

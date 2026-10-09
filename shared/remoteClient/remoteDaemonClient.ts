@@ -138,6 +138,7 @@ const RETRYABLE_READ_CHANNELS = new Set([
   'sessions:get',
   'panels:list',
   'panels:getActive',
+  'panels:agent-statuses',
   'panels:checkInitialized',
   'panels:get-output',
   'projects:list-branches',

@@ -19,6 +19,7 @@ import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectView } from './ProjectView';
+import { MissionControlView } from './missionControl/MissionControlView';
 import { API } from '../utils/api';
 import { markPaneViewShown } from '../utils/journeyTimings';
 import { useObservedContentBox } from '../hooks/useObservedContentBox';
@@ -62,7 +63,7 @@ import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
@@ -94,6 +95,13 @@ export const SessionView = memo(() => {
   // Config store for custom commands in terminal row pills
   const { config, fetchConfig } = useConfigStore();
   useEffect(() => { if (!config) { fetchConfig(); } }, [config, fetchConfig]);
+  const missionControlEnabled = isMissionControlEnabled(config);
+  const navigateToSessions = useNavigationStore(state => state.navigateToSessions);
+  // Mission Control is opt-in. Turning it off while it is open, or restoring a
+  // host's remembered Mission Control view with it off, lands on the sessions view.
+  useEffect(() => {
+    if (config && !missionControlEnabled && activeView === 'mission-control') navigateToSessions();
+  }, [activeView, config, missionControlEnabled, navigateToSessions]);
   const customCommands = useMemo(
     () => (config?.customCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
     [config?.customCommands]
@@ -1788,6 +1796,11 @@ export const SessionView = memo(() => {
   })();
   
   // Removed unused variables - now handled by panels
+
+  // Live grid of every agent pane — spans all projects.
+  if (activeView === 'mission-control' && missionControlEnabled) {
+    return <MissionControlView />;
+  }
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {

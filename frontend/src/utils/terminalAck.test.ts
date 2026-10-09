@@ -13,13 +13,20 @@ describe('terminal output acknowledgement', () => {
     const ack = vi.fn();
     const invoke = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('window', { electronAPI: { ptyHost: { ack }, invoke } });
-    acknowledgeTerminalOutput('panel-1', 5_000, ptyId, remote);
+    acknowledgeTerminalOutput('panel-1', 5_000, ptyId, remote, 'panel-viewer');
     if (usePort) {
       expect(ack).toHaveBeenCalledWith('local-pty', 5_000);
       expect(invoke).not.toHaveBeenCalled();
     } else {
-      expect(invoke).toHaveBeenCalledWith('terminal:ack', 'panel-1', 5_000);
+      expect(invoke).toHaveBeenCalledWith('terminal:ack', 'panel-1', 5_000, 'panel-viewer');
       expect(ack).not.toHaveBeenCalled();
     }
   });
+});
+
+it('preserves acknowledgements from legacy viewers without an id', () => {
+  const invoke = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal('window', { electronAPI: { ptyHost: { ack: vi.fn() }, invoke } });
+  acknowledgeTerminalOutput('panel-1', 5_000, null, true);
+  expect(invoke).toHaveBeenCalledWith('terminal:ack', 'panel-1', 5_000);
 });
