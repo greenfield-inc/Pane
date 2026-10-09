@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useConfigStore } from '../../../stores/configStore';
 import { usePreviewUrl } from './usePreviewUrl';
 
 interface FileLocation {
@@ -6,8 +7,11 @@ interface FileLocation {
   filePath: string;
 }
 
+/** System apps run on the host, so a remote desktop has none to offer. */
 export function FilePreviewActions({ sessionId, filePath }: FileLocation) {
+  const isRemoteMode = useConfigStore(state => state.config?.remoteDaemon?.client.mode === 'remote');
   const [actionError, setActionError] = useState<string | null>(null);
+  if (isRemoteMode) return null;
   const act = async (action: 'open' | 'reveal') => {
     try {
       await window.electronAPI.invoke('file:preview-action', { sessionId, filePath }, action);

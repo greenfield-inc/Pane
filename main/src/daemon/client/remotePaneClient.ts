@@ -4,6 +4,7 @@ import http, { type IncomingMessage, type RequestOptions } from 'http';
 import https from 'https';
 import { isIP, type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
+import { Readable } from 'stream';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
 import type { ConfigManager } from '../../services/configManager';
 import type { AnalyticsManager } from '../../services/analyticsManager';
@@ -18,7 +19,7 @@ import {
   type RemotePaneConnectionStatus,
 } from '../../../../shared/types/remoteDaemon';
 import type { RemoteDaemonEventEnvelope } from '../../../../shared/types/remoteDaemon';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { PaneSseParser } from './sseParser';
 import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
@@ -109,6 +110,12 @@ const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const TAILSCALE_MAGIC_DNS_SERVER = '100.100.100.100';
 const REMOTE_RUNTIME_ID = createRemoteRuntimeId();
+const MEDIA_RESPONSE_HEADERS = [
+  'content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control',
+  'x-content-type-options', 'content-security-policy',
+  'access-control-allow-origin', 'access-control-expose-headers',
+] as const;
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 type RemoteRequestOptions = RequestOptions & {
   servername?: string;
@@ -214,6 +221,42 @@ export class RemotePaneClient {
 
   async invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined> {
     return this.inputQueue.invoke(channel, args);
+  }
+
+  /** Streams a preview file from the host's /media route, passing the byte range through. */
+  async fetchMedia(file: { sessionId: string; filePath: string }, request: Request): Promise<Response> {
+    const endpoint = new URL('media', this.normalizedBaseUrl);
+    endpoint.searchParams.set('sessionId', file.sessionId);
+    endpoint.searchParams.set('filePath', file.filePath);
+    const requestHeaders: http.OutgoingHttpHeaders = {
+      ...this.authorizationHeader(),
+      'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
+    };
+    const range = request.headers.get('Range');
+    if (range) requestHeaders.Range = range;
+    return await new Promise<Response>((resolve, reject) => {
+      const outgoing = createRequest(endpoint, this.buildRequestOptions(endpoint, {
+        method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+        signal: request.signal,
+        headers: requestHeaders,
+      }), (response) => {
+        const status = response.statusCode ?? 502;
+        const headers = new Headers();
+        for (const name of MEDIA_RESPONSE_HEADERS) {
+          const value = decodeOptionalBoundary(response.headers[name], boundary.string);
+          if (value !== undefined) headers.set(name, value);
+        }
+        if (request.method === 'HEAD' || NULL_BODY_STATUSES.has(status)) {
+          response.resume();
+          resolve(new Response(null, { status, headers }));
+          return;
+        }
+        // SAFETY: Node's toWeb adapter produces a byte stream from the HTTP response.
+        resolve(new Response(Readable.toWeb(response) as ReadableStream<Uint8Array>, { status, headers }));
+      });
+      outgoing.on('error', reject);
+      outgoing.end();
+    });
   }
 
   /** Drops the event stream for system sleep so it neither times out nor retries. */
@@ -608,6 +651,10 @@ export class RemotePaneClientController extends EventEmitter {
 
   isRemoteModeActive(): boolean {
     return this.state.mode === 'remote';
+  }
+
+  getActiveRemoteClient(): RemotePaneClient | null {
+    return this.isRemoteModeActive() ? this.activeClient : null;
   }
 
   shouldForwardLocalRendererEvent(channel: string): boolean {

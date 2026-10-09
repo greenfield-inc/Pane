@@ -72,7 +72,11 @@ Images, PDFs, fonts, video and audio load through `pane-media`, registered in
 `main/src/services/mediaPreview.ts`. A revocable URL grants access to one file;
 each request rechecks the existing worktree/symlink boundary through
 `file:getPath`. `mediaStream.ts` streams byte ranges from disk. File bodies do
-not pass through text/base64 IPC. Remote-host previews show an unavailable notice.
+not pass through text/base64 IPC. On a remote desktop, the URL is bound to the
+connected host, and each request streams from the host's authenticated `/media`
+route with the same boundary check and byte ranges. Archive and SQLite listings
+(`file:preview-list`) run on the host. "Open with system app" and "Reveal in
+folder" appear only on the host.
 
 Markdown, HTML, CSV/TSV and structured text fetch at most 1 MiB. Markdown renders
 with a source toggle. HTML displays as read-only source, so markup, links and

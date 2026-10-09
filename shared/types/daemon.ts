@@ -124,6 +124,7 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'file:duplicate',
   'file:exists',
   'file:getPath',
+  'file:preview-list',
   'file:list',
   'file:move',
   'file:read',

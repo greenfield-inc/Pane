@@ -7,19 +7,23 @@ import { ipcMain } from 'electron';
 import type { AppServices } from '../ipc/types';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { registerFileHandlers } from '../ipc/file';
-import { registerMediaPreview, type MediaPreviewRuntime } from './mediaPreview';
+import { registerMediaPreview, type MediaPreviewRuntime, type RemoteMediaHost } from './mediaPreview';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { hashRemoteDaemonToken } from '../daemon/auth';
+import { PaneRemoteHttpApiServer } from '../daemon/httpApiServer';
+import { RemotePaneClient } from '../daemon/client/remotePaneClient';
 
 type PreviewHandler = Parameters<MediaPreviewRuntime['handleIpc']>[1];
 const adapters = {
   handlers: new Map<string, PreviewHandler>(),
   protocols: new Map<string, (request: Request) => Promise<Response>>(),
-  remote: false,
 };
+let remoteHost: RemoteMediaHost | null = null;
 const runtime: MediaPreviewRuntime = {
   handleIpc: (name, handler) => { adapters.handlers.set(name, handler); },
   handleProtocol: handler => { adapters.protocols.set('pane-media', handler); },
-  isRemote: () => adapters.remote,
+  remoteHost: () => remoteHost,
 };
 
 class Owner extends EventEmitter {
@@ -32,9 +36,10 @@ let directory: string;
 let worktree: string;
 let registry: PaneCommandRegistry;
 const sessionId = '__pane_chat_session__';
+const servers: PaneRemoteHttpApiServer[] = [];
 
 beforeEach(async () => {
-  adapters.handlers.clear(); adapters.protocols.clear(); adapters.remote = false;
+  adapters.handlers.clear(); adapters.protocols.clear(); remoteHost = null;
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-capabilities-'));
   worktree = path.join(directory, 'worktree');
   await fs.mkdir(worktree);
@@ -49,7 +54,11 @@ beforeEach(async () => {
   registerFileHandlers(ipcMain, services, registry);
   registerMediaPreview(registry, runtime);
 });
-afterEach(async () => { vi.restoreAllMocks(); await fs.rm(directory, { recursive: true, force: true }); });
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const server of servers.splice(0)) await server.stop();
+  await fs.rm(directory, { recursive: true, force: true });
+});
 
 async function invoke(channel: string, owner: Owner, ...args: PaneCommandValue[]) {
   const handler = adapters.handlers.get(channel);
@@ -60,21 +69,39 @@ async function acquire(owner: Owner, filePath = 'clip.mp4') {
   const result = await invoke('file:preview-url', owner, { sessionId, filePath });
   return decodeBoundary(result, boundary.string);
 }
-async function fetchPreview(url: string) {
+async function fetchPreview(url: string, range = 'bytes=2-5') {
   const handler = adapters.protocols.get('pane-media');
   if (!handler) throw new Error('Preview protocol not registered');
-  const response = await handler(new Request(url, { headers: { Range: 'bytes=2-5' } }));
-  return { status: response.status, body: await response.text() };
+  const response = await handler(new Request(url, { headers: { Range: range } }));
+  return { status: response.status, body: await response.text(), range: response.headers.get('Content-Range') };
+}
+
+/** The same process serves as host (HTTP API over the real file commands) and as remote client. */
+async function connectToHost(id = 'host-1'): Promise<{ host: RemoteMediaHost; baseUrl: string }> {
+  const config = createDefaultRemoteDaemonConfig();
+  config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
+  config.host.clients = [{ id: 'client-1', label: 'Laptop', createdAt: new Date(0).toISOString(), tokenHash: hashRemoteDaemonToken('secret-token') }];
+  const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) });
+  servers.push(server);
+  await server.start();
+  const address = server.getAddress();
+  if (!address) throw new Error('Host is not listening');
+  const baseUrl = `http://${address.host}:${address.port}`;
+  const client = new RemotePaneClient({ id, label: 'Host', baseUrl, token: 'secret-token', transport: 'http+sse' });
+  return {
+    baseUrl,
+    host: { id, invoke: (channel, args) => client.invoke(channel, args), fetchMedia: (file, request) => client.fetchMedia(file, request) },
+  };
 }
 
 it('issues a working range capability that only its owner can release', async () => {
   const owner = new Owner(1);
   const url = await acquire(owner);
-  expect(await fetchPreview(url)).toEqual({ status: 206, body: '2345' });
+  expect(await fetchPreview(url)).toMatchObject({ status: 206, body: '2345' });
   await invoke('file:release-preview', new Owner(2), url);
-  expect(await fetchPreview(url)).toEqual({ status: 206, body: '2345' });
+  expect(await fetchPreview(url)).toMatchObject({ status: 206, body: '2345' });
   await invoke('file:release-preview', owner, url);
-  expect(await fetchPreview(url)).toEqual({ status: 403, body: '' });
+  expect(await fetchPreview(url)).toMatchObject({ status: 403, body: '' });
 });
 
 it('revokes all grants for a destroyed owner without revoking another renderer', async () => {
@@ -88,11 +115,38 @@ it('revokes all grants for a destroyed owner without revoking another renderer',
   await expect(acquire(owner)).rejects.toThrow('Preview closed');
 });
 
-it('refuses remote issuance and blocks an existing capability after switching remote', async () => {
-  const owner = new Owner(1); const url = await acquire(owner);
-  adapters.remote = true;
-  await expect(acquire(owner)).rejects.toThrow('local host');
-  expect((await fetchPreview(url)).status).toBe(404);
+it('streams byte ranges of a remote host\'s file through the client\'s capability', async () => {
+  const { host } = await connectToHost();
+  remoteHost = host;
+  const url = await acquire(new Owner(1));
+  expect(await fetchPreview(url)).toEqual({ status: 206, body: '2345', range: 'bytes 2-5/10' });
+  expect(await fetchPreview(url, 'bytes=8-')).toEqual({ status: 206, body: '89', range: 'bytes 8-9/10' });
+});
+
+it('binds a capability to the host that issued it', async () => {
+  const owner = new Owner(1);
+  const local = await acquire(owner);
+  const first = await connectToHost('host-1');
+  remoteHost = first.host;
+  expect((await fetchPreview(local)).status).toBe(403);
+  const remote = await acquire(owner);
+  remoteHost = (await connectToHost('host-2')).host;
+  expect((await fetchPreview(remote)).status).toBe(403);
+  remoteHost = null;
+  expect((await fetchPreview(remote)).status).toBe(403);
+});
+
+it('keeps the host\'s worktree boundary for remote previews', async () => {
+  const { host, baseUrl } = await connectToHost();
+  remoteHost = host;
+  await expect(acquire(new Owner(1), '../outside.mp4')).rejects.toThrow();
+  const media = (filePath: string, headers: Record<string, string> = { Authorization: 'Bearer secret-token' }) =>
+    fetch(`${baseUrl}/media?sessionId=${sessionId}&filePath=${encodeURIComponent(filePath)}`, { headers }).then(response => response.status);
+  expect(await media('clip.mp4')).toBe(200);
+  expect(await media('clip.mp4', {})).toBe(401);
+  expect(await media('../outside.mp4')).toBe(404);
+  await fs.writeFile(path.join(worktree, 'notes.txt'), 'not a preview kind');
+  expect(await media('notes.txt')).toBe(404);
 });
 
 it('revalidates containment after the worktree path becomes an outside symlink', async () => {
@@ -100,7 +154,7 @@ it('revalidates containment after the worktree path becomes an outside symlink',
   expect((await fetchPreview(url)).status).toBe(206);
   await fs.rm(path.join(worktree, 'clip.mp4'));
   await fs.symlink(path.join(directory, 'outside.mp4'), path.join(worktree, 'clip.mp4'));
-  expect(await fetchPreview(url)).toEqual({ status: 404, body: '' });
+  expect(await fetchPreview(url)).toMatchObject({ status: 404, body: '' });
   await expect(acquire(owner, '../outside.mp4')).rejects.toThrow();
 });
 

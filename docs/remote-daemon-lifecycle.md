@@ -45,6 +45,10 @@ Desktop and browser clients send at most one terminal input request per panel at
 
 Input requests are not retried. On failure, disconnect, or a ten-second input timeout, queued input is discarded and outstanding callers are rejected. An interrupted request may already have reached the host, so its input must not be replayed after reconnecting. This uses the existing HTTP API and requires no host protocol upgrade.
 
+## Desktop media previews
+
+The explorer's previews (images, PDFs, fonts, video, audio and the text formats) work from a remote desktop. The renderer still gets a `pane-media://preview/<token>` URL from its own main process; the grant records which host issued it, and a request after a host switch, or after a switch to local mode, gets 403. Each request goes to the host's `GET /media?sessionId=&filePath=` with the connection's usual authentication on that door, and its `Range` header passes through, so video and audio seek without downloading the whole file. The host checks that the path has a preview kind and resolves it through `file:getPath`, the same worktree and symlink boundary the host uses for its own previews, and answers 404 otherwise. Archive and SQLite listings use the daemon-owned `file:preview-list` command, so they run on the host too. Opening a file with a system app or revealing it in a folder is available only on the host.
+
 ## Desktop browser file previews
 
 Before mounting a `file://` webview, the desktop renderer asks the local main process to prepare its session. In remote mode, an isolated in-memory Electron partition handles every file request through `panels:read-browser-file` on the existing authenticated remote connection. The original URL, including its filename, remains intact, so relative CSS, images, scripts and linked HTML pages resolve normally. Local-mode previews retain their ordinary project partition. This does not add browser panels to the Remote PWA.
