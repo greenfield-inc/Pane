@@ -126,7 +126,7 @@ test('reopens the Session it had open after a reload', async ({ page }) => {
   await expect(shownPane(page)).toHaveCount(0);
 });
 
-test('moves to a neighbouring tab when another client closes the one it shows, then stays there', async ({ page }) => {
+test('moves to a neighbouring tab when another client closes the one it shows, and remembers it', async ({ page }) => {
   await openConnectedRemotePwa(page, { sessionNames: ['Pane P', 'Pane Q'], panelTitles: ['claude', 'shell', 'logs'] });
   await page.getByRole('tab', { name: 'shell', exact: true }).click();
 
@@ -141,5 +141,9 @@ test('moves to a neighbouring tab when another client closes the one it shows, t
     });
   }
   await expect(page.getByRole('tab', { name: 'background', exact: true })).toBeVisible();
+  await expect(selectedTab(page)).toHaveText('logs');
+
+  await page.reload();
+  await connect(page);
   await expect(selectedTab(page)).toHaveText('logs');
 });

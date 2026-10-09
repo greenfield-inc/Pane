@@ -132,17 +132,16 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
     };
   }),
 
-  removePanel: (sessionId, panelId) => set((state) => {
+  removePanel: (sessionId, panelId) => {
+    const state = get();
     const panels = state.panelsBySessionId[sessionId] ?? [];
-    const index = panels.findIndex(panel => panel.id === panelId);
     const remaining = panels.filter(panel => panel.id !== panelId);
+    set({ panelsBySessionId: { ...state.panelsBySessionId, [sessionId]: remaining } });
+    if (state.selectedPanelId !== panelId) return;
     // Closing the shown tab elsewhere moves this client to its neighbour, as closing a browser tab does.
-    const neighbour = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]?.id ?? null;
-    return {
-      panelsBySessionId: { ...state.panelsBySessionId, [sessionId]: remaining },
-      selectedPanelId: state.selectedPanelId === panelId ? neighbour : state.selectedPanelId,
-    };
-  }),
+    const index = panels.findIndex(panel => panel.id === panelId);
+    get().setSelectedPanel(remaining[Math.min(Math.max(index, 0), remaining.length - 1)]?.id ?? null);
+  },
 }));
 
 export function findFirstSessionId(projects: Array<{ sessions?: Session[] }>): string | null {
