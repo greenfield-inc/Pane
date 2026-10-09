@@ -14,6 +14,7 @@ import { SpotlightManager } from '../services/spotlightManager';
 import { PermissionIpcServer } from '../services/permissionIpcServer';
 import { WorktreeManager } from '../services/worktreeManager';
 import { CliManagerFactory } from '../services/cliManagerFactory';
+import { CliToolRegistry } from '../services/cliToolRegistry';
 import type { AbstractCliManager } from '../services/panels/cli/AbstractCliManager';
 import { GitDiffManager } from '../services/gitDiffManager';
 import { GitStatusManager } from '../services/gitStatusManager';
@@ -368,10 +369,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
   registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
   const listeningPortMonitor = createListeningPortMonitor({
-    terminalPanes: () => [...terminalPanelManager.getSessionPids()].flatMap(([sessionId, pids]) => {
-      const paneName = sessionManager.getSession(sessionId)?.name ?? '';
-      return pids.map(pid => ({ pid, sessionId, paneName }));
-    }),
+    // Terminal panels and agent CLIs (Claude, Codex) both run PTYs inside a Pane.
+    terminalPanes: () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()].flatMap(manager =>
+      [...manager.getSessionPids()].flatMap(([sessionId, pids]) => {
+        const paneName = sessionManager.getSession(sessionId)?.name ?? '';
+        return pids.map(pid => ({ pid, sessionId, paneName }));
+      })),
     onChange: snapshot => getPaneEventSink().send('ports:changed', snapshot),
   });
   commandRegistry.register('ports:list', () => listeningPortMonitor.refresh());
