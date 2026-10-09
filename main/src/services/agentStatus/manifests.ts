@@ -91,7 +91,16 @@ export const CLAUDE_MANIFEST: AgentManifest = {
       ],
     },
     {
-      // Startup menus: folder trust and bypass-permissions warnings ("❯ No, exit"
+      // Folder-trust prompt; the Session view shows a banner while it is up.
+      id: 'workspace_trust_prompt',
+      state: 'blocked',
+      priority: 1050,
+      region: 'after_last_horizontal_rule',
+      visibleBlocker: true,
+      contains: ['accessing workspace:', 'yes, i trust this folder'],
+    },
+    {
+      // Startup menus: bypass-permissions warnings ("❯ No, exit"
       // above "Enter to confirm · Esc to cancel"), and first-run theme and login
       // pickers ("❯ 2. Dark mode").
       id: 'live_selection_menu',

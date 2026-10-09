@@ -8,9 +8,6 @@ import { vi } from 'vitest';
 // and runs the startup migrations at import time. Point that at a scratch
 // directory so a test run can never touch the developer's live ~/.pane.
 process.env.PANE_DIR = mkdtempSync(join(tmpdir(), 'pane-vitest-'));
-// Session launches pre-trust their folder in Claude Code's config; keep that
-// away from the developer's ~/.claude.json.
-process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'pane-vitest-claude-'));
 
 // Voice and model provider keys fall back to these variables when config has
 // none, so a key in the developer's shell would change what tests observe.

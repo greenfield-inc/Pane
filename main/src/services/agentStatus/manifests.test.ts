@@ -99,6 +99,7 @@ describe('CLAUDE_MANIFEST', () => {
     const r = detectAgentState(CLAUDE_MANIFEST, screen(s));
     expect(r.state).toBe('blocked');
     expect(r.visibleBlocker).toBe(true);
+    expect(r.matchedRuleId).toBe('workspace_trust_prompt');
   });
 
   // Real Claude Code 2.1.282 startup screens: bypass-permissions warning and first-run setup.
@@ -162,6 +163,7 @@ describe('CLAUDE_MANIFEST', () => {
   ])('classifies the %s as blocked', (_name, lines) => {
     const r = detectAgentState(CLAUDE_MANIFEST, screen(lines.join('\n')));
     expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).not.toBe('workspace_trust_prompt');
   });
 
   it('classifies the fresh prompt box after trusting the folder as idle', () => {
