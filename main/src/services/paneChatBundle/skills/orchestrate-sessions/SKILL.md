@@ -29,17 +29,25 @@ they win where the two differ:
 - Workers end with `runpane report`. Its REPORT event (`agent.report`) is the
   completion and blocker signal; a READY without one is only a cue to look.
   `runpane` has the prompt line and how to read a report.
-- **One Pane per feature.** A Pane is a git worktree: creating one checks out,
-  installs and often builds, so it is expensive. Create a Pane only for new,
-  independent work on its own branch. Every later agent for that work
-  (implementer, reviewer, follow-up reviewer, fix implementer, QA) opens as a
-  new agent tab in its Pane:
+- **1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA
+  for it are tabs in that Pane.** A feature means one branch and its PR. A new
+  Pane creates a worktree that checks out, installs and often builds, so it is
+  expensive. Create a Pane only when the work's branch has no Pane yet: new
+  work, or an existing PR with no Pane. Every later agent for that branch
+  (implementer, reviewer, follow-up reviewer, auditor, fix implementer, QA)
+  opens as a new agent tab in its Pane:
   `runpane panels create --pane <feature Pane id> --tool-command "<agent command>" --source agent --no-focus --wait-ready --yes --json`.
-  Never create a Pane to review, fix or QA work that already has one, and keep
-  the feature's Pane until its PR merges or closes.
+  Before any `runpane panes create`, find the feature's Pane in the ledger or
+  with `runpane panes list --repo <repo> --json`, matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`.
+  Tabs share one checkout: only the implementer changes the branch or HEAD,
+  one writer at a time, and a fix tab starts only after the previous writer
+  has stopped. Review, audit and QA tabs never run `git checkout`, `reset` or
+  `stash`. Never create a Pane on this machine to review, audit, fix or QA work
+  that already has one here, and keep the feature's Pane until its PR merges
+  or closes.
 - Review and QA run as `runpane` describes: fresh agent tabs in the feature's
-  Pane or the `reviewer` and `qa-and-verify` subagents, returning findings to
-  the implementation authority.
+  Pane, returning findings to the implementation authority. Use the `reviewer`
+  and `qa-and-verify` subagents only when the user asks for a private review.
 - Durable records live where `runpane` says. The status board is optional,
   on request.
 - A new feature's workspace on a named branch comes from

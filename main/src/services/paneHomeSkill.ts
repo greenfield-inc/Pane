@@ -278,9 +278,11 @@ of it through the \`runpane\` CLI.
 ## Common commands
 
 - Find a repository: \`runpane repos list --json\`
-- Start a new, independent feature in a new Pane (one Pane per feature; each Pane is a new worktree):
+- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane.
+- First check whether the work's branch already has a Pane: \`runpane panes list --repo <repo> --json\`, matching the PR's head branch against \`git -C <worktreePath> branch --show-current\`. If it does, use the tab command below.
+- Start work whose branch has no Pane yet in a new Pane:
   \`runpane panes create --repo <repo> --name <name> --agent <codex|claude|cursor> --prompt "<task>" --source agent --no-focus --wait-ready --yes --json\`
-- Review, fix or QA work that already has a Pane in a new agent tab there, never a new Pane:
+- For work that already has a Pane (review, audit, fixes, QA), open a new agent tab in that Pane, never a new Pane:
   \`runpane panels create --pane <pane-id> --agent <codex|claude|cursor> --initial-input "<task>" --source agent --no-focus --wait-ready --yes --json\`
 - When \`runpane agent-context --command "panels open" --json\` lists the
   command, show the user a page or file with

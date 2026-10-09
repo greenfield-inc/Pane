@@ -14,7 +14,7 @@ The tool panel system consists of several key components:
 
 ## Key Implementation Principles
 
-- One Pane per feature. A Pane owns one worktree and branch; panels (tabs) share it. Agents add review, QA and fix agents for existing work as new panels with `runpane panels create --pane <id>`, never as new Panes. See [Sessions](SESSIONS.md#one-pane-per-feature).
+- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. A Pane owns one worktree and branch; panels (tabs) share it. Agents add review, QA and fix agents for existing work as new panels with `runpane panels create --pane <id>`, never as new Panes. See [Sessions](SESSIONS.md#one-pane-per-feature).
 
 1. **Lazy Initialization**: Panels are created in the database immediately but background processes (like terminal PTY) only start when the panel is first viewed
 2. **State Persistence**: All panel state including terminal scrollback, working directories, and configurations persist across application restarts

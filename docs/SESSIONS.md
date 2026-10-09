@@ -231,20 +231,32 @@ sharing of other conversations.
 
 ## One Pane per feature
 
-A Pane is a git worktree. Creating one checks out the repository, installs
-dependencies and often builds, so it is expensive, and creating several at once
-can freeze the machine. An orchestrator creates one Pane per feature, with
-`runpane panes create`, and only for new, independent work on its own branch.
+**1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane.**
+
+A feature here means one branch and its PR. A new Pane creates a worktree that
+checks out the repository, installs dependencies and often builds, so it is
+expensive, and creating several at once can freeze the machine. An
+orchestrator creates a Pane with `runpane panes create` only when the work's
+branch has no Pane yet: new work, or an existing PR with no Pane.
 
 Every later agent for that feature runs inside its Pane as a new agent tab:
-implementer, reviewer, follow-up reviewer, fix implementer and QA. Each tab is a
+implementer, reviewer, follow-up reviewer, auditor, fix implementer and QA. Each tab is a
 fresh agent with its own context, sharing the Pane's worktree and branch:
 
 ```text
 runpane panels create --pane <feature-pane-id> --tool-command "<agent command>" --source agent --no-focus --wait-ready --yes --json
 ```
 
-Never create a Pane to review, fix or QA work that already has one. Keep the
+Before `runpane panes create`, find the work's Pane with
+`runpane panes list --repo <repo> --json`, matching the PR's head branch
+(`gh pr view <n> --json headRefName`) against
+`git -C <worktreePath> branch --show-current`, and use it when it exists.
+
+Tabs share one checkout. Only the implementer changes the branch or HEAD, one
+writer at a time, and a fix tab starts only after the previous writer has
+stopped. Review, audit and QA tabs never run `git checkout`, `reset` or
+`stash`. Never create a Pane to review, audit, fix or QA work that already has
+one. Keep the
 feature's Pane until its PR merges or closes, so later tabs still have the
 worktree; archive it then.
 
