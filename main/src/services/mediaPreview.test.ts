@@ -146,7 +146,8 @@ it('opens a remote host\'s file with a system app on the client from a local cop
   expect(opened).toHaveLength(1);
 });
 
-it('names the client copy so every desktop OS can open it', async () => {
+// These host names exist only on macOS and Linux hosts; Windows cannot create them.
+it.skipIf(process.platform === 'win32')('names the client copy so every desktop OS can open it', async () => {
   connection = (await connectToHost()).remote;
   for (const name of ['CON.pdf', 'report?.pdf', 'notes. .pdf']) await fs.writeFile(path.join(hostWorktree, name), 'pdf');
   for (const name of ['CON.pdf', 'report?.pdf', 'notes. .pdf', 'clip.mp4']) {
