@@ -153,8 +153,9 @@ context menus use compact widths.
 
 The experimental **Attention inbox** (Settings > Advanced > Experimental) turns
 the Projects list into an Inbox of the Panes that need you: an agent waiting on
-input or approval, an agent that finished a turn since Pane started, or a Pane
-that errored. Session child rows follow the same filter, and a Session row still
+input or approval, an agent that completed a real turn since Pane started (it
+worked on a prompt and went idle; a freshly started agent does not count), or a
+Pane that errored. Session child rows follow the same filter, and a Session row still
 counts all of its Panes. A row leaves when its agent works again; opening it
 does not remove it. Hover a row and choose **Dismiss** (check mark) to hide it
 until its agent works again. The row under the Inbox counts the hidden Panes

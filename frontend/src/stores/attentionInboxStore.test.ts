@@ -12,8 +12,11 @@ const pane = (id: string, status: Session['status'] = 'running'): Session => ({
 
 let emit: (event: PanelAgentStatusEvent) => void;
 /** A status event from the main process. Idle reports whether the agent showed working chrome since its last idle. */
-const agent = (sessionId: string, state: AgentState, { panel = `${sessionId}-panel`, workedVisibly = true } = {}) =>
-  emit({ panelId: panel, sessionId, state, reason: null, ...(state === 'idle' ? { workedVisibly } : {}) });
+const agent = (sessionId: string, state: AgentState, { panel = `${sessionId}-panel`, workedVisibly = true } = {}) => {
+  const event: PanelAgentStatusEvent = { panelId: panel, sessionId, state, reason: null };
+  if (state === 'idle') event.workedVisibly = workedVisibly;
+  emit(event);
+};
 const inbox = () => [...useAttentionInboxStore.getState().members].sort();
 const settle = () => vi.advanceTimersByTime(ATTENTION_INBOX_HOLD_MS);
 
