@@ -94,8 +94,10 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
       const target = table.length > 0 ? owners : provisional;
       for (const socket of unknownOwners) target.set(key(socket), classify(socket, table, terminals, panePid));
     }
+    // SAFETY: every live socket was classified above.
+    const ownerOf = (socket: ListeningSocket) => (owners.get(key(socket)) ?? provisional.get(key(socket)))!;
     await Promise.all(sockets.filter(socket => (kinds.get(key(socket))?.retriesLeft ?? 1) > 0).map(async socket => {
-      if (ONE_SHOT_LISTENERS.has(socket.process)) {
+      if (ONE_SHOT_LISTENERS.has(ownerOf(socket).process ?? socket.process)) {
         kinds.set(key(socket), { kind: 'tcp', retriesLeft: 0 });
         return;
       }
@@ -113,8 +115,8 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     // a Pane whose terminals are gone keeps the name it had.
     const paneNames = new Map(terminalPanes.map(terminal => [terminal.sessionId, terminal.paneName]));
     const ports = sockets.map((socket): ListeningPort => {
-      // SAFETY: every live socket was classified and probed above.
-      const owner = (owners.get(key(socket)) ?? provisional.get(key(socket)))!;
+      const owner = ownerOf(socket);
+      // SAFETY: every live socket was probed above.
       const port: ListeningPort = { ...socket, ...owner, kind: kinds.get(key(socket))!.kind };
       const currentName = owner.sessionId === undefined ? undefined : paneNames.get(owner.sessionId);
       if (currentName !== undefined) port.paneName = currentName;
@@ -203,15 +205,16 @@ function probe(port: number): Promise<ListeningPortKind | 'silent'> {
   return new Promise(resolve => {
     // `localhost` by name: a dev server may bind only IPv6 loopback, and
     // Node tries both address families.
-    const request = http.request({ method: 'HEAD', host: 'localhost', port, path: '/', timeout: WEB_PROBE_TIMEOUT_MS }, response => {
-      response.destroy();
-      resolve('web');
-    });
-    request.on('timeout', () => {
-      resolve('silent');
+    const request = http.request({ method: 'HEAD', host: 'localhost', port, path: '/' }, () => finish('web'));
+    // An absolute deadline: a socket timeout restarts on every byte, so a
+    // port that trickles bytes would hold the poll open forever.
+    const deadline = setTimeout(() => finish('silent'), WEB_PROBE_TIMEOUT_MS);
+    const finish = (answer: ListeningPortKind | 'silent') => {
+      clearTimeout(deadline);
+      resolve(answer);
       request.destroy();
-    });
-    request.on('error', () => resolve('tcp'));
+    };
+    request.on('error', () => finish('tcp'));
     request.end();
   });
 }
