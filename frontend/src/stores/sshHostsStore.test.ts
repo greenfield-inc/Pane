@@ -46,21 +46,34 @@ describe('opening an SSH host', () => {
     expect(stores.usePanelStore.getState().activePanels[SSH_HOSTS_SESSION_ID]).toBe('tab-a');
   });
 
-  it.each<[string, OpenReply]>([
-    ['success', { success: true, data: { sessionId: SSH_HOSTS_SESSION_ID, panelId: 'tab-a' } }],
-    ['failure', { success: false, error: 'That host is no longer in your SSH config' }],
-  ])('ignores a %s reply that arrives after the window switched to another Pane', async (_kind, reply) => {
+  const late: Array<[string, OpenReply]> = [
+    ['success', { success: true, data: { sessionId: SSH_HOSTS_SESSION_ID, panelId: 'old-tab' } }],
+    ['failure', { success: false, error: 'old-error' }],
+  ];
+
+  it.each(late.flatMap(([kind, reply]) => [
+    [kind, 'to another Pane', ['b'], reply] as const,
+    [kind, 'away and back', ['b', 'a'], reply] as const,
+  ]))('ignores a %s reply that arrives after the window switched %s', async (_kind, _route, route, reply) => {
     const pending = deferred<OpenReply>();
     const stores = await setup(() => pending.promise);
+    const { useSessionStore } = await import('./sessionStore');
 
     const opening = stores.useSshHostsStore.getState().open('mini');
-    // SAFETY: The store reads only remoteDaemon from config.
-    stores.useConfigStore.setState({ config: driving('b') as never });
+    for (const hostId of route) {
+      // SAFETY: The store reads only remoteDaemon from config.
+      stores.useConfigStore.setState({ config: driving(hostId) as never });
+    }
+    // What the user did on the Pane they ended on, before the old reply arrives.
+    useSessionStore.setState({ activeSessionId: 'incoming-session' });
+    stores.usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, 'incoming-tab');
+    stores.useSshHostsStore.setState({ error: 'current-error' });
     pending.resolve(reply);
     await opening;
 
     expect(stores.useNavigationStore.getState()).toMatchObject({ activeView: 'project', activeProjectId: 7 });
-    expect(stores.usePanelStore.getState().activePanels[SSH_HOSTS_SESSION_ID]).toBeUndefined();
-    expect(stores.useSshHostsStore.getState().error).toBeNull();
+    expect(useSessionStore.getState().activeSessionId).toBe('incoming-session');
+    expect(stores.usePanelStore.getState().activePanels[SSH_HOSTS_SESSION_ID]).toBe('incoming-tab');
+    expect(stores.useSshHostsStore.getState().error).toBe('current-error');
   });
 });

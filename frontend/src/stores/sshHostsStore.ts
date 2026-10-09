@@ -23,11 +23,20 @@ interface SshHostsState {
 
 let refreshGeneration = 0;
 
-/** The Pane this window controls: undefined before config loads, null for this computer. */
-function controlledHostId(): string | null | undefined {
-  const config = useConfigStore.getState().config;
+/** The Pane a config points this window at: undefined before config loads, null for this computer. */
+function controlledHostId(config: ReturnType<typeof useConfigStore.getState>['config']): string | null | undefined {
   return config ? getActiveRemoteHostId(config.remoteDaemon) : undefined;
 }
+
+/**
+ * Counts every switch of the Pane this window controls. An answer is only
+ * applied if no switch happened while it was in flight, so switching away and
+ * back still retires it.
+ */
+let hostSwitches = 0;
+useConfigStore.subscribe((state, previous) => {
+  if (controlledHostId(state.config) !== controlledHostId(previous.config)) hostSwitches += 1;
+});
 
 export const useSshHostsStore = create<SshHostsState>((set, get) => ({
   hosts: [],
@@ -49,16 +58,16 @@ export const useSshHostsStore = create<SshHostsState>((set, get) => ({
   },
 
   open: async (alias, newTab = false) => {
-    const hostId = controlledHostId();
+    const switches = hostSwitches;
     set({ error: null });
     const response = await window.electronAPI.sshHosts.open(alias, newTab).catch(() => null);
-    // The answer belongs to the Pane the click went to; after a switch it would move the new one.
-    if (controlledHostId() !== hostId) return;
+    // The answer belongs to the Pane the click went to; after any switch it would move another view.
+    if (hostSwitches !== switches) return;
     if (response?.success && response.data) {
       usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, response.data.panelId);
     } else {
       // The SSH view shows the message, so a failed click from anywhere still explains itself.
-      set({ error: response?.error ?? `Could not open ${alias}` });
+      set({ error: response?.error ?? `Could not open ${alias}. Try again, and if it keeps failing, check the connection to the machine this window controls.` });
       void get().refresh();
     }
     void useSessionStore.getState().setActiveSession(null);
