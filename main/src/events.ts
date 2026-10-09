@@ -239,6 +239,11 @@ export function setupEventListeners(services: AppServices): void {
     sendRendererEvent('project:updated', project);
   });
 
+  // Fires on every project create or delete: dialogs, onboarding, runpane CLI, MCP.
+  sessionManager.on('project:list-changed', () => {
+    sendRendererEvent('project:list-changed');
+  });
+
   // Listen to claudeCodeManager events
   claudeCodeManager.on('output', (output: {
     panelId: string;

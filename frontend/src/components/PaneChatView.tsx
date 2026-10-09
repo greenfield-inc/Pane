@@ -5,6 +5,7 @@ import { API } from '../utils/api';
 import type { Session } from '../types/session';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
 import type {
+  OrchestrationActivityKind,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionUpdateInput,
@@ -139,7 +140,7 @@ export function PaneChatView() {
           <>
             <h2 className="text-base font-semibold text-text-primary">Choose a Session</h2>
             <p className="mt-2 text-sm text-text-secondary">
-              Create a new Session or restore one from Archived to start a chat.
+              Create a new Session or restore one from Archived.
             </p>
           </>
         )}
@@ -882,6 +883,11 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
   );
 }
 
+// Agent state flips are shown by the status dot; the Activity list keeps Session events.
+const AGENT_STATE_ACTIVITY_KINDS = new Set<OrchestrationActivityKind>(['working', 'blocked', 'idle', 'unknown']);
+
+const OVERVIEW_HEADING = 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary';
+
 interface SessionOverviewPanelProps {
   record: OrchestrationSessionRecord;
   overview: OrchestrationSessionOverview | null;
@@ -940,18 +946,47 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
           </>
         ) : null}
 
+        {record.blockers.length > 0 && (
+          <div className="rounded-md border border-status-error/30 bg-status-error/10 px-2 py-2">
+            <h3 className={cn(OVERVIEW_HEADING, 'text-status-error')}>Blockers</h3>
+            <ul className="select-text list-disc space-y-1 pl-4 text-status-error">
+              {record.blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}
+            </ul>
+          </div>
+        )}
+        {record.goal && (
+          <div>
+            <h3 className={OVERVIEW_HEADING}>Goal</h3>
+            <p className="select-text whitespace-pre-wrap text-text-secondary">{record.goal}</p>
+          </div>
+        )}
+        {record.nextAction && (
+          <div>
+            <h3 className={OVERVIEW_HEADING}>Next step</h3>
+            <p className="select-text whitespace-pre-wrap text-text-secondary">{record.nextAction}</p>
+          </div>
+        )}
+        {record.decisions.length > 0 && (
+          <div>
+            <h3 className={OVERVIEW_HEADING}>Decisions</h3>
+            <ul className="select-text list-disc space-y-1 pl-4 text-text-secondary">
+              {record.decisions.map((decision, index) => <li key={index}>{decision}</li>)}
+            </ul>
+          </div>
+        )}
+
         <div>
-          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Associated Panes</h3>
+          <h3 className={OVERVIEW_HEADING}>Associated Panes</h3>
           {!overview && !error && <p className="text-text-muted">Loading live state…</p>}
           {error && <div className="space-y-1"><p role="alert" className="text-status-error">{error}</p><button type="button" className="underline text-text-secondary" onClick={onRetry}>Retry</button></div>}
-          {overview?.panes.length === 0 && <p className="text-text-muted">This Session has no associated Panes.</p>}
+          {overview?.panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
           {overview?.panes.map(pane => <PaneOverviewCard key={pane.paneId} pane={pane} />)}
         </div>
 
         <div className="border-t border-border-primary pt-3">
-          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Activity</h3>
+          <h3 className={OVERVIEW_HEADING}>Activity</h3>
           <div className="select-text space-y-2">
-            {(overview?.activity ?? record.activity).slice(0, 12).map(activity => (
+            {(overview?.activity ?? record.activity).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
               <div key={activity.id} className="border-l-2 border-border-primary pl-2">
                 <p className="text-text-secondary">{activity.message}</p>
                 <p className="mt-0.5 text-[10px] text-text-muted">{formatActivityTime(activity.at)} · {activity.source}</p>
@@ -976,8 +1011,8 @@ function SessionChangesPanel({ overview, error, onRetry }: {
   return (
     <div className="space-y-2 p-3 text-[12px] text-text-secondary">
       {error && <div role="alert" className="space-y-1"><p className="text-status-error">{error}</p><button type="button" className="underline" onClick={onRetry}>Retry</button></div>}
-      {!overview && !error && <p className="text-text-muted">Loading linked worktrees…</p>}
-      {overview && panes.length === 0 && <p className="text-text-muted">No linked worktrees.</p>}
+      {!overview && !error && <p className="text-text-muted">Loading Panes…</p>}
+      {overview && panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
       {panes.map(pane => (
         <div key={pane.paneId} className="rounded-md bg-surface-secondary px-2 py-2">
           <div className="flex items-center justify-between gap-2">
@@ -986,7 +1021,7 @@ function SessionChangesPanel({ overview, error, onRetry }: {
               onClick={() => { setActiveSession(pane.paneId); navigateToSessions(); }}>Open Pane</button>}
           </div>
           <p className="mt-1 text-[11px] text-text-tertiary">
-            {pane.missing ? 'Worktree unavailable' : pane.git?.hasUncommittedChanges || pane.git?.hasUntrackedFiles ? 'Uncommitted changes' : 'No uncommitted changes'}
+            {pane.missing ? 'Pane unavailable' : pane.git?.hasUncommittedChanges || pane.git?.hasUntrackedFiles ? 'Uncommitted changes' : 'No uncommitted changes'}
             {pane.branch ? ` · ${pane.branch}` : ''}
           </p>
           {pane.git && (pane.git.ahead || pane.git.behind) ? (

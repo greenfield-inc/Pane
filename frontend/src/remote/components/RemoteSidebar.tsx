@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, Pin, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, Pin, PinOff, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
@@ -12,7 +12,8 @@ import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../sto
 
 /** Sidebar actions. Panes are the PWA's "sessions"; Sessions are orchestration Sessions. */
 export interface RemoteSidebarActions {
-  selectPane: (paneId: string) => void;
+  /** `scope` names the sidebar row the tap came from, so only that copy of the Pane is highlighted. */
+  selectPane: (paneId: string, scope: string) => void;
   togglePanePinned: (paneId: string) => void;
   archivePane: (paneId: string) => void;
   restorePane: (paneId: string) => void;
@@ -32,18 +33,21 @@ interface RemoteSidebarProps {
   /** A Pane or Session id whose pin, archive or restore is in flight. */
   actionId?: string | null;
   actions: RemoteSidebarActions;
+  /** The row scope of the last Pane tap; ignored once another Pane is selected. */
+  selectedPane?: { paneId: string; scope: string } | null;
   onClose?: () => void;
   className?: string;
 }
 
-const SECTION_HEADER = 'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-text-tertiary hover:text-text-primary';
+const SECTION_HEADER = 'flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-text-tertiary hover:text-text-primary md:min-h-0';
 const CREATE_BUTTON = 'flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-interactive px-3 text-sm font-semibold text-text-on-interactive transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-50 md:min-h-9';
-const ROW_ACTION = 'inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50';
+const ROW_ACTION = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50 md:h-8 md:w-8';
 
 export function RemoteSidebar({
   loading,
   actionId = null,
   actions,
+  selectedPane = null,
   onClose,
   className = 'flex w-80 shrink-0',
 }: RemoteSidebarProps) {
@@ -74,18 +78,38 @@ export function RemoteSidebar({
     [sessions],
   );
 
+  // Loaded up front so the collapsed Archived header can show its count.
   useEffect(() => {
-    if (expanded.archived && archivedProjects === null) actions.loadArchived();
-  }, [actions, archivedProjects, expanded.archived]);
+    if (archivedProjects === null) actions.loadArchived();
+  }, [actions, archivedProjects]);
 
-  const paneRow = (pane: Session, label: string, key: string) => (
+  // Only one copy of the open Pane is highlighted: the row it was opened from,
+  // else its first row in sidebar order.
+  const selectedScope = useMemo(() => {
+    if (!selectedPaneId || openSessionId) return null;
+    const scopes: string[] = [];
+    const addSessionScopes = (list: OrchestrationSessionRecord[], placement: 'pinned' | 'sessions') => {
+      for (const session of list) {
+        if (session.associations.some(association => association.paneId === selectedPaneId)) scopes.push(`${placement}:${session.id}`);
+      }
+    };
+    addSessionScopes(pinnedSessions, 'pinned');
+    if (pinnedPanes.some(({ session }) => session.id === selectedPaneId)) scopes.push('pinned');
+    addSessionScopes(activeSessions, 'sessions');
+    if (paneById.has(selectedPaneId)) scopes.push('repositories');
+    const tapped = selectedPane?.paneId === selectedPaneId ? selectedPane.scope : null;
+    return tapped && scopes.includes(tapped) ? tapped : scopes[0] ?? null;
+  }, [activeSessions, openSessionId, paneById, pinnedPanes, pinnedSessions, selectedPane, selectedPaneId]);
+
+  const paneRow = (pane: Session, label: string, scope: string, detail?: string) => (
     <RemotePaneRow
-      key={key}
+      key={`${scope}:${pane.id}`}
       pane={pane}
       label={label}
-      selected={!openSessionId && selectedPaneId === pane.id}
+      detail={detail}
+      selected={selectedPaneId === pane.id && selectedScope === scope}
       busy={actionId === pane.id}
-      onSelect={() => actions.selectPane(pane.id)}
+      onSelect={() => actions.selectPane(pane.id, scope)}
       onTogglePinned={() => actions.togglePanePinned(pane.id)}
       onArchive={() => actions.archivePane(pane.id)}
     />
@@ -102,7 +126,7 @@ export function RemoteSidebar({
     const name = session.name || 'Untitled';
     return (
       <div key={nestedKey}>
-        <div className={`flex w-full items-center gap-1 rounded-md py-3 pl-1 pr-3 text-sm transition-colors md:py-2 ${
+        <div className={`flex w-full items-stretch gap-1 rounded-md pl-1 pr-3 text-sm transition-colors ${
           openSessionId === session.id
             ? 'bg-interactive-surface text-text-primary'
             : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -114,35 +138,46 @@ export function RemoteSidebar({
               aria-expanded={nestedExpanded}
               aria-controls={nestedId}
               aria-label={`${nestedExpanded ? 'Hide' : 'Show'} panes in ${name}`}
-              className={`${ROW_ACTION} shrink-0 text-text-muted hover:text-text-primary`}
+              className={`${ROW_ACTION} self-center text-text-muted hover:text-text-primary`}
             >
               {nestedExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </button>
-          ) : (
-            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-text-tertiary" aria-hidden="true">
-              <MessageSquare className="h-3.5 w-3.5" />
-            </span>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={() => actions.openSession(session.id)}
             aria-label={`Open Session ${name}`}
-            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left"
+            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
           >
+            {/* Without Panes the icon sits inside the button, so tapping it opens the Session too. */}
+            {panes.length === 0 && (
+              <span className="-mr-1 inline-flex h-11 w-11 shrink-0 items-center justify-center text-text-tertiary md:h-8 md:w-8" aria-hidden="true">
+                <MessageSquare className="h-3.5 w-3.5" />
+              </span>
+            )}
             <SessionActivityDot session={session} paneIds={paneIds} />
-            <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate font-medium">{name}</span>
+              {/* Phones have no hover, so the first blocker shows as text under the name. */}
+              {session.blockers.length > 0 && (
+                <span className="truncate text-[11px] text-status-error">
+                  {session.blockers.length === 1 ? `Blocked: ${session.blockers[0]}` : `${session.blockers.length} blockers: ${session.blockers[0]}`}
+                </span>
+              )}
+            </span>
             <SessionActivitySummary session={session} paneIds={paneIds} />
           </button>
-          <span className="flex shrink-0 items-center gap-0.5">
+          <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">
             <button
               type="button"
               disabled={actionId === session.id}
               onClick={() => actions.toggleSessionPinned(session)}
-              className={`${ROW_ACTION} hover:text-text-primary ${session.isPinned ? 'text-text-tertiary' : 'text-text-muted'}`}
+              className={`${ROW_ACTION} ${session.isPinned ? 'text-interactive hover:text-interactive-hover' : 'text-text-muted hover:text-text-primary'}`}
               title={session.isPinned ? 'Unpin' : 'Pin'}
-              aria-label={`${session.isPinned ? 'Unpin' : 'Pin'} Session ${name}`}
+              aria-label={`Pin Session ${name}`}
+              aria-pressed={session.isPinned === true}
             >
-              <Pin className="h-3.5 w-3.5 rotate-45" />
+              <PinIcon pinned={session.isPinned === true} />
             </button>
             <button
               type="button"
@@ -157,8 +192,8 @@ export function RemoteSidebar({
           </span>
         </div>
         {panes.length > 0 && (
-          <div id={nestedId} hidden={!nestedExpanded} className="ml-5 space-y-1 border-l border-border-primary pl-2">
-            {panes.map(pane => paneRow(pane, pane.name, `${nestedKey}:${pane.id}`))}
+          <div id={nestedId} hidden={!nestedExpanded} className="ml-6 space-y-1 border-l border-border-primary pl-2 md:ml-5">
+            {panes.map(pane => paneRow(pane, pane.name, nestedKey))}
           </div>
         )}
       </div>
@@ -217,7 +252,7 @@ export function RemoteSidebar({
         {hasPinned && (
           <SidebarSection section="pinned" label="Pinned" expanded={expanded.pinned} onToggle={toggleSection}>
             {pinnedSessions.map(session => sessionRow(session, 'pinned'))}
-            {pinnedPanes.map(({ session, label }) => paneRow(session, label, `pinned-${session.id}`))}
+            {pinnedPanes.map(({ session, label, repositoryName }) => paneRow(session, label, 'pinned', repositoryName))}
           </SidebarSection>
         )}
 
@@ -250,7 +285,7 @@ export function RemoteSidebar({
                 <button
                   type="button"
                   onClick={() => actions.createPane(project)}
-                  className="rounded-md p-1 text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary md:h-auto md:w-auto md:p-1"
                   title={`New pane in ${project.name}`}
                   aria-label={`New pane in ${project.name}`}
                 >
@@ -258,7 +293,7 @@ export function RemoteSidebar({
                 </button>
               </div>
               <div className="space-y-1">
-                {(project.sessions ?? []).map(pane => paneRow(pane, pane.name, pane.id))}
+                {(project.sessions ?? []).map(pane => paneRow(pane, pane.name, 'repositories'))}
               </div>
             </div>
           ))}
@@ -269,12 +304,12 @@ export function RemoteSidebar({
           label="Archived"
           expanded={expanded.archived}
           onToggle={toggleSection}
-          count={archivedProjects ? archivedPaneCount + archivedSessions.length : undefined}
+          count={archivedPaneCount + archivedSessions.length}
         >
           {archivedProjects === null ? (
             <p className="px-2 py-1 text-xs text-text-muted">Loading archived panes…</p>
           ) : archivedPaneCount + archivedSessions.length === 0 ? (
-            <p className="px-2 py-1 text-xs text-text-muted">No archived panes</p>
+            <p className="px-2 py-1 text-xs text-text-muted">Nothing archived</p>
           ) : (
             <>
               {archivedSessions.map(session => (
@@ -355,7 +390,7 @@ interface ArchivedRowProps {
 
 function ArchivedRow({ label, detail, restoreLabel, icon, busy, onRestore }: ArchivedRowProps) {
   return (
-    <div className="flex items-center gap-2 rounded-md py-1 pl-3 pr-3 text-sm text-text-tertiary">
+    <div className="flex items-center gap-2 rounded-md pl-3 pr-3 text-sm text-text-tertiary md:py-1">
       <span className="shrink-0 text-text-muted" aria-hidden="true">{icon}</span>
       <span className="min-w-0 flex-1 truncate">
         {label}
@@ -378,6 +413,8 @@ function ArchivedRow({ label, detail, restoreLabel, icon, busy, onRestore }: Arc
 interface RemotePaneRowProps {
   pane: Session;
   label: string;
+  /** Secondary muted text, e.g. a pinned Pane's repository. */
+  detail?: string;
   selected: boolean;
   busy: boolean;
   onSelect: () => void;
@@ -388,6 +425,7 @@ interface RemotePaneRowProps {
 function RemotePaneRow({
   pane,
   label,
+  detail,
   selected,
   busy,
   onSelect,
@@ -396,7 +434,7 @@ function RemotePaneRow({
 }: RemotePaneRowProps) {
   return (
     <div
-      className={`group flex w-full items-center justify-between gap-2 rounded-md px-3 py-3 text-left text-sm transition-colors md:py-2 ${
+      className={`group flex w-full items-stretch justify-between gap-2 rounded-md px-3 text-left text-sm transition-colors ${
         selected
           ? 'bg-interactive-surface text-text-primary'
           : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -406,21 +444,25 @@ function RemotePaneRow({
         type="button"
         onClick={onSelect}
         aria-current={selected ? 'page' : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
       >
         <SessionStatusBadge sessionId={pane.id} size="sm" />
-        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-medium">{label}</span>
+          {detail && <span className="ml-2 text-xs text-text-muted">{detail}</span>}
+        </span>
       </button>
-      <span className="flex shrink-0 items-center gap-0.5">
+      <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">
         <button
           type="button"
           disabled={busy}
           onClick={onTogglePinned}
-          className={`${ROW_ACTION} hover:text-text-primary ${pane.isFavorite ? 'text-text-tertiary' : 'text-text-muted'}`}
+          className={`${ROW_ACTION} ${pane.isFavorite ? 'text-interactive hover:text-interactive-hover' : 'text-text-muted hover:text-text-primary'}`}
           title={pane.isFavorite ? 'Unpin' : 'Pin'}
-          aria-label={pane.isFavorite ? 'Unpin pane' : 'Pin pane'}
+          aria-label="Pin pane"
+          aria-pressed={Boolean(pane.isFavorite)}
         >
-          <Pin className="h-3.5 w-3.5 rotate-45" />
+          <PinIcon pinned={Boolean(pane.isFavorite)} />
         </button>
         <button
           type="button"
@@ -435,4 +477,11 @@ function RemotePaneRow({
       </span>
     </div>
   );
+}
+
+/** Unpin glyph for a pinned row, pin glyph otherwise; both share one box. */
+function PinIcon({ pinned }: { pinned: boolean }) {
+  return pinned
+    ? <PinOff className="h-3.5 w-3.5" aria-hidden="true" />
+    : <Pin className="h-3.5 w-3.5 rotate-45" aria-hidden="true" />;
 }

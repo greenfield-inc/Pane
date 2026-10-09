@@ -846,6 +846,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('project:updated', wrappedCallback);
       return () => ipcRenderer.removeListener('project:updated', wrappedCallback);
     },
+    onProjectListChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('project:list-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('project:list-changed', wrappedCallback);
+    },
     
     // Panel events
     // The host or an agent brought a tab forward; act only when showing that Pane.

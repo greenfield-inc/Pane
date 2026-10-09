@@ -30,7 +30,7 @@ interface RemoteHostState {
   orchestrationError: string | null;
   /** The open Session, set while its workspace Pane is selected. */
   openOrchestrationSession: OrchestrationSessionView<Session> | null;
-  /** Null until the Archived section first opens. */
+  /** Null until the first archived load. */
   archivedProjects: RemoteProjectWithSessions[] | null;
 }
 

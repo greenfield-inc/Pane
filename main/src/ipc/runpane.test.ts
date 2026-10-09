@@ -211,6 +211,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
       })),
     },
     sessionManager: {
+      emit: vi.fn(() => true),
       getAllSessions: vi.fn(() => [session]),
       getSessionsForProject: vi.fn(() => [session]),
       getSession: vi.fn(() => session),
@@ -1981,6 +1982,8 @@ describe('runpane IPC handlers', () => {
       },
     });
     expect(services.databaseService.createProject).toHaveBeenCalledTimes(1);
+    expect(services.sessionManager.emit).toHaveBeenCalledTimes(1);
+    expect(services.sessionManager.emit).toHaveBeenCalledWith('project:list-changed');
     expect(fs.readFileSync(path.join(repoPath, 'AGENTS.md'), 'utf8')).toContain('runpane agent-context');
   });
 

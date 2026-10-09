@@ -24,6 +24,8 @@ interface OrchestrationSessionState {
   selectionError: string | null;
   selectionRevision: number;
   selectionVisits: Record<string, number>;
+  /** Bumps on every host switch, so host-scoped UI state (such as a pending Undo) can tell hosts apart. */
+  hostRevision: number;
   invalidateHost: () => void;
   load: () => Promise<void>;
   refresh: (options?: { adoptServerSelection?: boolean }) => Promise<void>;
@@ -81,6 +83,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
   selectionError: null,
   selectionRevision: 0,
   selectionVisits: {},
+  hostRevision: 0,
   invalidateHost: () => {
     operationGeneration += 1;
     refreshSequence += 1;
@@ -88,7 +91,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     preferredSessionId = undefined;
     loadPromise = null;
     loadSequence += 1;
-    set({ sessions: [], selectedSessionId: undefined, availability: 'idle', error: null, selectionError: null, selectionRevision: 0, selectionVisits: {} });
+    set(state => ({ sessions: [], selectedSessionId: undefined, availability: 'idle', error: null, selectionError: null, selectionRevision: 0, selectionVisits: {}, hostRevision: state.hostRevision + 1 }));
   },
 
   load: async () => {

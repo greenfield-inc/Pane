@@ -87,31 +87,34 @@ test.describe('motion', () => {
     expect(panel?.transition).toBe('0s');
   });
 
-  test('the sidebar menu grows from the left edge of its trigger', async ({ page }) => {
+  test('the sidebar More menu grows upward from the right edge of its trigger', async ({ page }) => {
     await openDesktop(page);
 
-    const trigger = page.getByRole('button', { name: 'Home menu' });
+    const trigger = page.getByRole('button', { name: 'More', exact: true });
     await trigger.click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
 
-    // The trigger is the Home button at the foot of the sidebar, so the menu
-    // opens upward from it: anchored by its bottom-left corner, above the
-    // trigger, and on screen.
-    const { origin, left, bottom, height } = await menu.evaluate((element: HTMLElement) => {
+    // The trigger sits at the right of the sidebar footer, so the menu opens
+    // upward from it: anchored by its bottom-right corner to the trigger's
+    // right edge, above the trigger, and on screen.
+    const { origin, left, right, bottom, width, height } = await menu.evaluate((element: HTMLElement) => {
       const box = element.getBoundingClientRect();
       return {
         origin: getComputedStyle(element).transformOrigin,
         left: box.left,
+        right: box.right,
         bottom: box.bottom,
+        width: box.width,
         height: box.height,
       };
     });
     const triggerBox = await trigger.boundingBox();
-    if (!triggerBox) throw new Error('Home menu trigger has no box');
+    if (!triggerBox) throw new Error('More menu trigger has no box');
     const [originX, originY] = origin.split(' ').map(Number.parseFloat);
-    expect(originX).toBe(0);
+    expect(originX).toBeCloseTo(width, 0);
     expect(originY).toBeCloseTo(height, 0);
+    expect(right).toBeCloseTo(triggerBox.x + triggerBox.width, 0);
     expect(left).toBeGreaterThanOrEqual(8);
     expect(bottom).toBeLessThanOrEqual(triggerBox.y);
   });
@@ -151,7 +154,7 @@ test.describe('motion', () => {
     );
     expect(reveal).toBe('0s');
 
-    await page.getByRole('button', { name: 'Home menu' }).click();
+    await page.getByRole('button', { name: 'More', exact: true }).click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     expect(await menu.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
