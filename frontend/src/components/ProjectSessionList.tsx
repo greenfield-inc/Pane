@@ -346,13 +346,14 @@ export function ProjectSessionList({
 
   const pinnedPaneRows = pinnedSessions.length > 0 ? (
     <div>
-      {pinnedSessions.map(({ session, label }) => (
+      {pinnedSessions.map(({ session, label, repositoryName }) => (
         <SessionRow
           key={`pinned-${session.id}`}
           session={session}
           isActive={activeView === 'sessions' && sidebarNavigationScope === 'pinned' && session.id === activeSessionId}
           globalIndex={-1}
           displayName={label}
+          repositoryName={repositoryName}
           onClick={() => handleSessionClick(session.id, 'pinned')}
           onArchive={() => handleArchiveSession(session.id)}
           onTogglePinned={() => handleTogglePinnedSession(session.id)}
@@ -602,6 +603,7 @@ function SessionRowContent({
   adds,
   dels,
   displayName,
+  repositoryName,
   showActivity,
   showUnviewedCompleted,
   agentDisplayStatus,
@@ -614,6 +616,7 @@ function SessionRowContent({
   adds: number;
   dels: number;
   displayName?: string;
+  repositoryName?: string;
   showActivity: boolean;
   showUnviewedCompleted: boolean;
   agentDisplayStatus: AgentDisplayStatus;
@@ -623,6 +626,10 @@ function SessionRowContent({
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
+  // The repository yields space before the Pane name does.
+  const repositoryLabel = repositoryName ? (
+    <span className="min-w-0 shrink-[4] truncate text-[11px] text-text-muted">{repositoryName}</span>
+  ) : null;
 
   if (rowLayout === 'single') {
     return (
@@ -633,12 +640,15 @@ function SessionRowContent({
           <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         )}
         <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
-        <span className={cn(
-          'min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
-          showActivity && 'animate-sidebar-active-label',
-          showUnviewedCompleted && 'underline decoration-dashed'
-        )}>
-          {title}
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className={cn(
+            'min-w-0 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
+            showActivity && 'animate-sidebar-active-label',
+            showUnviewedCompleted && 'underline decoration-dashed'
+          )}>
+            {title}
+          </span>
+          {repositoryLabel}
         </span>
       </div>
     );
@@ -653,12 +663,15 @@ function SessionRowContent({
       )}
       <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className={cn(
-          'min-w-0 truncate text-[13px] font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
-          showActivity && 'animate-sidebar-active-label',
-          showUnviewedCompleted && 'underline decoration-dashed'
-        )}>
-          {title}
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className={cn(
+            'min-w-0 truncate text-[13px] font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
+            showActivity && 'animate-sidebar-active-label',
+            showUnviewedCompleted && 'underline decoration-dashed'
+          )}>
+            {title}
+          </span>
+          {repositoryLabel}
         </span>
         {showMetadata && (
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
@@ -691,6 +704,7 @@ interface SessionRowProps {
   onArchive: () => void;
   onTogglePinned: () => void;
   displayName?: string;
+  repositoryName?: string;
   rowLayout: SidebarPaneRowLayout;
   nested?: boolean;
 }
@@ -702,7 +716,7 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, displayName, rowLayout, nested = false,
+  onArchive, onTogglePinned, displayName, repositoryName, rowLayout, nested = false,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
@@ -811,6 +825,7 @@ function SessionRow({
           adds={adds}
           dels={dels}
           displayName={accessibleName}
+          repositoryName={repositoryName}
           showActivity={showActivity}
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
           agentDisplayStatus={agentDisplayStatus}
@@ -941,7 +956,7 @@ export function ArchivedSessions() {
         { sessionId },
         { archived: false },
       );
-      // Keep the current chat selected when a historical Session is restored.
+      // Keep the current Session selected when a historical Session is restored.
       await refreshOrchestrationSessions();
     } catch (cause) {
       setOrchestrationRestoreError(
@@ -1079,8 +1094,8 @@ export function ArchivedSessions() {
                   </div>
                 ))}
               </div>
-              <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Worktrees</p>
-              {archivedPaneCount === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived worktrees</p>}
+              <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Panes</p>
+              {archivedPaneCount === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Panes</p>}
               {archivedProjects.map(project => {
                 const isExpanded = expandedArchivedProjects.has(project.id);
                 return (

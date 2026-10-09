@@ -161,7 +161,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       <form onSubmit={submit} className="flex min-h-0 flex-col">
         {header ?? <ModalHeader title="Create Session" />}
         <ModalBody className="min-h-0 space-y-4">
-          <Input label="Name your chat (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="New chat" autoFocus fullWidth />
+          <Input label="Session name (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="New chat" autoFocus fullWidth />
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
             <div className="grid gap-2" role="radiogroup" aria-label="Session agent">
