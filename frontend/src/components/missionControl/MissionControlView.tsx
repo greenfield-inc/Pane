@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight, CheckSquare, ChevronDown, ChevronRight, LayoutGrid, Loader2,
   RefreshCw, Settings2, Square, X,
@@ -250,7 +250,7 @@ export function MissionControlView() {
   const promoteTimerRef = useRef<number | undefined>(undefined);
   const inFlightRef = useRef(false);
   /** Roster loads overlap; only the newest one gets to set the roster. */
-  const rosterGateRef = useRef(createRequestGate());
+  const [rosterGate] = useState(createRequestGate);
   /** Coalesces a burst of panel and session events into one reload. */
   const rosterRefreshTimerRef = useRef<number | undefined>(undefined);
   /** Display order captured when a tile took the keyboard; see handleFocusAgent. */
@@ -313,7 +313,7 @@ export function MissionControlView() {
     // Request-owned: status churn, panel events and the refresh button can all
     // start a load, and over a remote daemon they do not come back in order. An
     // older roster landing last resurrects agents that are already gone.
-    const isCurrent = rosterGateRef.current.start();
+    const isCurrent = rosterGate.start();
     try {
       const response = await API.missionControl.listAgents();
       if (!isCurrent()) return;
@@ -328,7 +328,7 @@ export function MissionControlView() {
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, []);
+  }, [rosterGate]);
 
   /**
    * Reload the roster after the events that change it, coalesced.
@@ -382,10 +382,7 @@ export function MissionControlView() {
   }, [scheduleRosterRefresh]);
 
   // Nothing in flight may set state after this view is gone.
-  useEffect(() => {
-    const gate = rosterGateRef.current;
-    return () => gate.abandon();
-  }, []);
+  useEffect(() => () => rosterGate.abandon(), [rosterGate]);
 
   /** The panels the roster still knows about. */
   const rosterPanelIds = useMemo(
@@ -405,13 +402,11 @@ export function MissionControlView() {
    */
   const tilesRef = useRef<MissionControlTileModel[]>([]);
   const tiles: MissionControlTileModel[] = useMemo(
-    () => {
-      const next = reconcileTileModels(tilesRef.current, agents, agentStatus, snapshots);
-      tilesRef.current = next;
-      return next;
-    },
+    () => reconcileTileModels(tilesRef.current, agents, agentStatus, snapshots),
     [agents, agentStatus, snapshots]
   );
+  // Remember only committed models: render work React discards must not leak.
+  useLayoutEffect(() => { tilesRef.current = tiles; }, [tiles]);
 
   const groups = useMemo(() => groupMissionControlTiles(tiles, grouping), [tiles, grouping]);
 
