@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import ntpath
@@ -17,6 +18,11 @@ DEFAULT_TIMEOUT_MS = 130_000
 
 
 CONNECT_NEXT = "Open Pane on this machine, then check the connection with `runpane doctor`."
+
+
+def connect_error_code(error: OSError) -> str:
+    """The OS error name (ENOENT, ECONNREFUSED), as the Node CLI reports it."""
+    return errno.errorcode.get(error.errno or 0, "ERR_RUNPANE_DAEMON_CONNECT_FAILED")
 
 
 class PaneDaemonClientError(RuntimeError):
@@ -86,7 +92,7 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
             except OSError as error:
                 raise PaneDaemonClientError(
                     f"Could not connect to Pane daemon at {socket_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
-                    "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+                    connect_error_code(error),
                     CONNECT_NEXT,
                 ) from error
 
@@ -146,7 +152,7 @@ def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: floa
     except OSError as error:
         raise PaneDaemonClientError(
             f"Could not connect to Pane daemon at {pipe_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
-            "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+            connect_error_code(error),
             CONNECT_NEXT,
         ) from error
 

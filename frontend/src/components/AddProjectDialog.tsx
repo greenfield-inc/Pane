@@ -6,7 +6,7 @@ import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
 import { API } from '../utils/api';
-import { showActionError, useErrorStore } from '../stores/errorStore';
+import { showActionError } from '../stores/errorStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import type { CreateProjectRequest } from '../types/project';
 
@@ -60,7 +60,7 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
       const response = await API.projects.create(projectToCreate);
       if (!response.success || !response.data) {
         console.error('Failed to create project:', response.error);
-        useErrorStore.getState().showError({ title: 'Could not add the project', error: response.error || 'Pane did not say why.', details: response.details });
+        showActionError('Could not add the project', response.error);
         return;
       }
 
