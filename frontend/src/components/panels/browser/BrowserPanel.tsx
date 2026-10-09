@@ -34,7 +34,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [portsMenuAt, setPortsMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const ports = useListeningPorts();
-  const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
+  // Null until the config loads: until then this desktop may be remote.
+  const remoteMode = useConfigStore((state) => (state.config ? state.config.remoteDaemon?.client.mode === 'remote' : null));
+  const isRemoteMode = remoteMode === true;
   // Panel state keeps the host's own URLs (http://localhost:5173/...). A remote desktop reaches a
   // forwarded host port through its tunnel, sometimes on another local port, so it maps on load
   // and maps navigation back before saving.
@@ -53,7 +55,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [toHostUrl]);
   const urlPort = loopbackPortOf(url);
   // Until the host's Ports list arrives, a loopback URL would load this computer's own port.
-  const waitingForTunnel = isRemoteMode && urlPort !== null && ports === null;
+  // A host switch remounts its panels, so `ports` never holds another host's list here.
+  const waitingForTunnel = urlPort !== null && (remoteMode === null || (remoteMode && ports === null));
   const tunnelHost = urlPort !== null && hostToLocal.has(urlPort) ? ports?.host : undefined;
   const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
