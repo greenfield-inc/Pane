@@ -63,6 +63,16 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     expect((await monitor.refresh()).ports.some(entry => entry.port === port)).toBe(false);
   });
 
+  it('relabels a slow server as web once it answers in time', async () => {
+    // Answers its first request after 1.5 s, like a dev server compiling its first page.
+    const { port } = await startListener(`let first = true; require('http').createServer((_, res) => { setTimeout(() => res.end('ok'), first ? 1500 : 0); first = false; }).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`);
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
+
+    expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.kind).toBe('tcp');
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.kind).toBe('web');
+  });
+
   it('labels a port that does not answer HTTP as tcp, under Other apps', async () => {
     const { port } = await startListener(SILENT_TCP_SERVER);
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });

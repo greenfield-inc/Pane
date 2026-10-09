@@ -16,6 +16,12 @@ const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_DUTY = 0.1;
 const READ_TIMEOUT_MS = 5_000;
 const WEB_PROBE_TIMEOUT_MS = 500;
+/**
+ * A port that accepts but does not answer in time may be a dev server busy
+ * with its first request (next dev compiles the page), so it is asked again
+ * on later polls, this many times.
+ */
+const SILENT_PORT_RETRIES = 10;
 /** Relays that exit after their first connection; probing one would end it. */
 const ONE_SHOT_LISTENERS = new Set(['nc', 'ncat', 'netcat', 'socat']);
 
@@ -59,10 +65,10 @@ interface Owner {
  */
 export function createListeningPortMonitor(options: ListeningPortMonitorOptions): ListeningPortMonitor {
   const panePid = options.panePid ?? process.pid;
-  // Ownership never changes for a running process, and a port's kind is
-  // checked once, so both are remembered while the listener lives.
+  // Ownership never changes for a running process, and a port keeps its kind
+  // once it answers, so both are remembered while the listener lives.
   const owners = new Map<string, Owner>();
-  const kinds = new Map<string, ListeningPortKind>();
+  const kinds = new Map<string, { kind: ListeningPortKind; retriesLeft: number }>();
   let current: ListeningPortsSnapshot = { host: os.hostname(), ports: [] };
   let inFlight: Promise<ListeningPortsSnapshot> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -80,8 +86,15 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
       const target = table.length > 0 ? owners : provisional;
       for (const socket of unknownOwners) target.set(key(socket), classify(socket, table, terminals, panePid));
     }
-    await Promise.all(sockets.filter(socket => !kinds.has(key(socket))).map(async socket => {
-      kinds.set(key(socket), ONE_SHOT_LISTENERS.has(socket.process) ? 'tcp' : await probeKind(socket.port));
+    await Promise.all(sockets.filter(socket => (kinds.get(key(socket))?.retriesLeft ?? 1) > 0).map(async socket => {
+      if (ONE_SHOT_LISTENERS.has(socket.process)) {
+        kinds.set(key(socket), { kind: 'tcp', retriesLeft: 0 });
+        return;
+      }
+      const answer = await probe(socket.port);
+      const previous = kinds.get(key(socket));
+      const retriesLeft = answer !== 'silent' ? 0 : previous ? previous.retriesLeft - 1 : SILENT_PORT_RETRIES;
+      kinds.set(key(socket), { kind: answer === 'web' ? 'web' : 'tcp', retriesLeft });
     }));
 
     const live = new Set(sockets.map(key));
@@ -92,7 +105,7 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
       ...socket,
       // SAFETY: every live socket was classified and probed above.
       ...(owners.get(key(socket)) ?? provisional.get(key(socket)))!,
-      kind: kinds.get(key(socket))!,
+      kind: kinds.get(key(socket))!.kind,
     }));
     ports.sort((a, b) =>
       LISTENING_PORT_GROUP_ORDER.indexOf(a.group) - LISTENING_PORT_GROUP_ORDER.indexOf(b.group) || a.port - b.port);
@@ -169,8 +182,11 @@ function isSystemProcess(row: ProcessTableRow): boolean {
   return false;
 }
 
-/** `web` when the port answers an HTTP request with any status within 500 ms. */
-function probeKind(port: number): Promise<ListeningPortKind> {
+/**
+ * `web` when the port answers an HTTP request with any status within 500 ms,
+ * `silent` when it accepts and says nothing in that time, else `tcp`.
+ */
+function probe(port: number): Promise<ListeningPortKind | 'silent'> {
   return new Promise(resolve => {
     // `localhost` by name: a dev server may bind only IPv6 loopback, and
     // Node tries both address families.
@@ -178,7 +194,10 @@ function probeKind(port: number): Promise<ListeningPortKind> {
       response.destroy();
       resolve('web');
     });
-    request.on('timeout', () => request.destroy());
+    request.on('timeout', () => {
+      resolve('silent');
+      request.destroy();
+    });
     request.on('error', () => resolve('tcp'));
     request.end();
   });
