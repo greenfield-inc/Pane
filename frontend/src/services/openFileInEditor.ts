@@ -11,6 +11,9 @@ import type { EditorDiffRef, EditorPanelState, SessionPanelLayout, ToolPanel } f
 import { diffRefLabel, sameDiffRef } from '../components/panels/diff/diffScope';
 import { panelApi } from './panelApi';
 import { usePanelStore } from '../stores/panelStore';
+import { useConfigStore } from '../stores/configStore';
+import { rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { addPanelToGroup, findGroup, findGroupContainingPanel, primaryGroup } from '../utils/panelLayout';
 
 export interface OpenFileInEditorOptions {
@@ -75,7 +78,10 @@ function revealInLayout(sessionId: string, panelId: string): void {
   const next: SessionPanelLayout = { ...layout, root, focusedGroupId: group.id };
   store.setLayout(sessionId, next);
   store.setFocusedGroup(sessionId, group.id);
+  // The host keeps it as the last-used layout; this desktop keeps its own.
   panelApi.setLayout(sessionId, next).catch(() => {});
+  const config = useConfigStore.getState().config;
+  rememberPaneLayout(config ? getActiveRemoteHostId(config.remoteDaemon) : undefined, sessionId, next);
 }
 
 async function activate(sessionId: string, panelId: string): Promise<void> {

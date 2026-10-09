@@ -188,7 +188,7 @@ test('flat chrome preserves the primary navigation hierarchy', async ({ page }, 
 
   const sidebar = page.getByTestId('sidebar');
   await expect(sidebar.getByRole('button', { name: 'New project', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('button', { name: 'Home menu', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'More', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Feedback', exact: true })).toBeVisible();
   await expect(page.locator('.pane-sidebar-shell')).toHaveCSS('border-radius', '0px');

@@ -12,11 +12,13 @@ export const usePanelStore = create<PanelStore>()(
     activityStatus: {},
     agentStatus: {},
     agentStatusSession: {},
+    agentStatusReason: {},
     agentStatusSnapshotVersion: 0,
     lastActivityAt: {},
     unviewedCompletedActivity: {},
     layouts: {},
     focusedGroupIds: {},
+    activationRequests: {},
 
     // Pure synchronous state updates
     removeBrowserPanelsForHostSwitch: () => {
@@ -32,6 +34,7 @@ export const usePanelStore = create<PanelStore>()(
           if (owner === sessionId && !panelIds.has(panelId)) {
             delete state.agentStatus[panelId];
             delete state.agentStatusSession[panelId];
+            delete state.agentStatusReason[panelId];
             delete state.activityStatus[panelId];
             delete state.lastActivityAt[panelId];
           }
@@ -57,9 +60,6 @@ export const usePanelStore = create<PanelStore>()(
         if (!existing) {
           state.panels[panel.sessionId].push(panel);
         }
-        if (panel.state.isActive) {
-          state.activePanels[panel.sessionId] = panel.id;
-        }
       });
     },
 
@@ -75,6 +75,7 @@ export const usePanelStore = create<PanelStore>()(
         delete state.activityStatus[panelId];
         delete state.agentStatus[panelId];
         delete state.agentStatusSession[panelId];
+        delete state.agentStatusReason[panelId];
         delete state.lastActivityAt[panelId];
       });
     },
@@ -107,10 +108,11 @@ export const usePanelStore = create<PanelStore>()(
       });
     },
 
-    setAgentStatus: (panelId, sessionId, agentState) => {
+    setAgentStatus: (panelId, sessionId, agentState, reason = null) => {
       set((state) => {
         state.agentStatus[panelId] = agentState;
         state.agentStatusSession[panelId] = sessionId;
+        state.agentStatusReason[panelId] = reason;
       });
     },
 
@@ -118,6 +120,7 @@ export const usePanelStore = create<PanelStore>()(
       set((state) => {
         delete state.agentStatus[panelId];
         delete state.agentStatusSession[panelId];
+        delete state.agentStatusReason[panelId];
       });
     },
 
@@ -131,6 +134,7 @@ export const usePanelStore = create<PanelStore>()(
         delete state.activityStatus[panelId];
         delete state.agentStatus[panelId];
         delete state.agentStatusSession[panelId];
+        delete state.agentStatusReason[panelId];
         delete state.lastActivityAt[panelId];
       });
     },
@@ -150,6 +154,7 @@ export const usePanelStore = create<PanelStore>()(
           delete state.activityStatus[panelId];
           delete state.agentStatus[panelId];
           delete state.agentStatusSession[panelId];
+          delete state.agentStatusReason[panelId];
           delete state.lastActivityAt[panelId];
         }
         delete state.unviewedCompletedActivity[sessionId];
@@ -178,6 +183,18 @@ export const usePanelStore = create<PanelStore>()(
     setFocusedGroup: (sessionId, groupId) => {
       set((state) => {
         state.focusedGroupIds[sessionId] = groupId;
+      });
+    },
+
+    requestActivation: (request) => {
+      set((state) => {
+        state.activationRequests[request.sessionId] = request;
+      });
+    },
+
+    clearActivationRequest: (sessionId) => {
+      set((state) => {
+        delete state.activationRequests[sessionId];
       });
     },
 

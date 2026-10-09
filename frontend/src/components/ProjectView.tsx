@@ -7,7 +7,11 @@ import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
-import type { ToolPanel, ToolPanelType, TerminalPanelState } from '../../../shared/types/panels';
+import { useConfigStore } from '../stores/configStore';
+import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { createSingleGroupLayout } from '../utils/panelLayout';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import type { PanelActivationRequest, ToolPanel, ToolPanelType, TerminalPanelState } from '../../../shared/types/panels';
 import type { PanelCreateOptions } from '../types/panelComponents';
 import { SessionProvider } from '../contexts/SessionContext';
 import { DetailPanel } from './DetailPanel';
@@ -21,7 +25,6 @@ import { useMainRepoGitActions } from '../hooks/useMainRepoGitActions';
 import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
-import { shouldActivateReopenedPanel } from '../utils/panelLayout';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
 
 interface ProjectViewProps {
@@ -105,26 +108,74 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     enabled: detailVisible && !immersiveMode,
   });
 
-  // Load panels when main repo session changes (no auto-creation, matches worktree session behavior)
+  // This desktop's own tab for the repository Pane, kept like a worktree
+  // Pane's layout memory as a single group.
+  const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  const shownPanelId = usePanelStore(state => mainRepoSessionId ? state.activePanels[mainRepoSessionId] : undefined);
+  // Read when the repository opens; the remembered tab belongs to that host.
+  const hostIdRef = useRef(hostId);
   useEffect(() => {
+    hostIdRef.current = hostId;
+  }, [hostId]);
+  useEffect(() => {
+    if (!mainRepoSessionId || !shownPanelId) return;
+    rememberPaneLayout(hostIdRef.current, mainRepoSessionId, createSingleGroupLayout([shownPanelId], shownPanelId));
+  }, [mainRepoSessionId, shownPanelId]);
+
+  // Load panels when main repo session changes (no auto-creation, matches worktree session behavior)
+  // The repository whose tab this visit has restored; activation requests wait for it.
+  const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setRestoredSessionId(null);
     if (mainRepoSessionId) {
+      const loadHostId = hostIdRef.current;
+      const ownsLoad = () => !cancelled && hostIdRef.current === loadHostId;
       panelApi.loadPanelsForSession(mainRepoSessionId).then(async (loadedPanels) => {
+        if (!ownsLoad()) return;
         setPanels(mainRepoSessionId, loadedPanels);
+
+        // This desktop's remembered tab wins; the host's last-used tab and
+        // the default are only for a repository it has not shown.
+        const remembered = await readPaneLayout(loadHostId, mainRepoSessionId);
+        if (!ownsLoad()) return;
+        const rememberedId = remembered?.root.type === 'group' ? remembered.root.activePanelId : null;
+        if (rememberedId && loadedPanels.some(p => p.id === rememberedId)) {
+          setActivePanelInStore(mainRepoSessionId, rememberedId);
+          setRestoredSessionId(mainRepoSessionId);
+          return;
+        }
 
         // Pick default active: the first working panel (Explorer and Review
         // live in the inspector, not the stage).
         const fallback = loadedPanels.find(p => p.type !== 'diff' && p.type !== 'explorer');
 
         const activePanel = await panelApi.getActivePanel(mainRepoSessionId);
+        if (!ownsLoad()) return;
         if (activePanel) {
           setActivePanelInStore(mainRepoSessionId, activePanel.id);
         } else if (fallback) {
           setActivePanelInStore(mainRepoSessionId, fallback.id);
           await panelApi.setActivePanel(mainRepoSessionId, fallback.id);
+          if (!ownsLoad()) return;
         }
+        setRestoredSessionId(mainRepoSessionId);
       });
     }
+    return () => { cancelled = true; };
   }, [mainRepoSessionId, setPanels, setActivePanelInStore]);
+
+  // A tab the host or an agent brought forward applies after this visit's
+  // restore, so a slower memory read cannot replace it.
+  const activationRequest = usePanelStore(state => mainRepoSessionId ? state.activationRequests[mainRepoSessionId] : undefined);
+  useEffect(() => {
+    if (!activationRequest || !mainRepoSessionId || restoredSessionId !== mainRepoSessionId) return;
+    const store = usePanelStore.getState();
+    store.clearActivationRequest(mainRepoSessionId);
+    if (store.panels[mainRepoSessionId]?.some(p => p.id === activationRequest.panelId)) {
+      setActivePanelInStore(mainRepoSessionId, activationRequest.panelId);
+    }
+  }, [activationRequest, mainRepoSessionId, restoredSessionId, setActivePanelInStore]);
   
   // Get panels for current main repo session
   const sessionPanels = useMemo(
@@ -390,22 +441,25 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       }
     };
 
-    // Reopening a file through `runpane panels open` updates its existing tab.
     const handlePanelUpdated = (panel: ToolPanel) => {
-      if (panel.sessionId !== mainRepoSessionId) return;
-      const previous = usePanelStore.getState().panels[mainRepoSessionId]?.find(p => p.id === panel.id);
-      updatePanelState(panel);
-      if (shouldActivateReopenedPanel(panel, previous)) setActivePanelInStore(mainRepoSessionId, panel.id);
+      if (panel.sessionId === mainRepoSessionId) updatePanelState(panel);
+    };
+
+    // The host or an agent brought a tab forward, as `runpane panels open` does.
+    const handleActivationRequested = (request: PanelActivationRequest) => {
+      if (request.sessionId === mainRepoSessionId) usePanelStore.getState().requestActivation(request);
     };
 
     // Listen for panel events
     const unsubscribeCreated = window.electronAPI?.events?.onPanelCreated?.(handlePanelCreated);
     const unsubscribeUpdated = window.electronAPI?.events?.onPanelUpdated?.(handlePanelUpdated);
+    const unsubscribeActivation = window.electronAPI?.events?.onPanelActivationRequested?.(handleActivationRequested);
 
     // Cleanup
     return () => {
       unsubscribeCreated?.();
       unsubscribeUpdated?.();
+      unsubscribeActivation?.();
     };
   }, [mainRepoSessionId, addPanel, updatePanelState, setActivePanelInStore]);
 

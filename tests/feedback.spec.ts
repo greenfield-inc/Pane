@@ -96,8 +96,7 @@ test.describe('Feedback entry points', () => {
 
   test('failure keeps the text and offers the prefilled fallback', async ({ page }, testInfo) => {
     await bootApp(page, { feedbackOutcome: 'failure' });
-    await page.getByRole('button', { name: 'Home menu' }).click();
-    await page.getByRole('menuitem', { name: 'Feedback', exact: true }).click();
+    await page.getByRole('button', { name: 'Feedback', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Send feedback' });
     await dialog.locator('textarea').fill('Pane will not start after the update.');
     await dialog.getByRole('button', { name: 'Submit feedback' }).click();

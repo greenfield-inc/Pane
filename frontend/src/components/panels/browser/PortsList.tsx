@@ -19,7 +19,7 @@ interface PortsListProps {
   snapshot: ListeningPortsSnapshot | null;
   /** The port the tab shows now, marked instead of offered. */
   currentPort?: number | null;
-  /** False on a remote desktop: these ports are on the host, which this computer cannot reach yet. */
+  /** False on a remote desktop: only ports tunnelled to this computer (with a `localPort`) open. */
   canOpen: boolean;
   /** Shown on tcp rows when this client cannot open them at all (a phone: "desktop only"). */
   tcpLabel?: string;
@@ -57,7 +57,7 @@ export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, can
 
 const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: boolean; tcpLabel?: string; onOpen(port: number): void }> = ({ port, isCurrent, canOpen, tcpLabel, onOpen }) => {
   const isWeb = port.kind === 'web';
-  const opens = isWeb && canOpen;
+  const opens = isWeb && (canOpen || port.localPort !== undefined);
   const content = (
     <>
       <span className="w-12 flex-shrink-0 font-mono text-xs font-semibold text-text-primary">{port.port}</span>
@@ -71,6 +71,14 @@ const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: bool
         {port.kind}
       </span>
       <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{port.paneName}</span>
+      {port.localPort !== undefined && port.localPort !== port.port && (
+        <span
+          className="flex-shrink-0 font-mono text-[10px] text-status-warning"
+          title={`${port.port} was taken on this computer, so it is reached here at localhost:${port.localPort}`}
+        >
+          here :{port.localPort}
+        </span>
+      )}
       {/* One fixed slot for the swapping indicator: Open, the current-page check, the tcp label, or nothing. */}
       <span className={cn('flex flex-shrink-0 justify-end text-xs', tcpLabel ? 'w-20' : 'w-10', opens ? 'text-interactive' : 'text-text-tertiary')}>
         {opens ? (isCurrent ? <Check className="h-3.5 w-3.5" aria-label="Open in this tab" /> : 'Open') : !isWeb && tcpLabel}

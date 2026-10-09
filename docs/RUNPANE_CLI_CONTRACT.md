@@ -185,7 +185,7 @@ For `panes create --wait-ready`, `initialInput.delivery` says where the prompt w
 
 `runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
 
-`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, including HTML source; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.
+`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, including HTML source; an existing tab showing the same target is reused. It brings the tab forward for clients already showing that Pane, and never raises or focuses the Pane window or switches anyone's Pane.
 
 `runpane panels list` lists tool panels inside one Pane session.
 

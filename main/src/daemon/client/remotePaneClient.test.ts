@@ -6,6 +6,10 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../
 import type { PaneEventSink } from '../../core/eventSink';
 import { RemotePaneClient, RemotePaneClientController } from './remotePaneClient';
 import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
+import { hashRemoteDaemonToken } from '../auth';
+import { PaneCommandRegistry } from '../commandRegistry';
+import { PaneRemoteHttpApiServer } from '../httpApiServer';
 
 interface TestRemoteServer {
   baseUrl: string;
@@ -565,6 +569,84 @@ describe('RemotePaneClientController', () => {
       activeBaseUrl: null,
       lastError: null,
     });
+  });
+});
+
+describe('RemotePaneClientController links to host ports', () => {
+  const cleanups: Array<() => Promise<void> | void> = [];
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  });
+
+  /** A real host API that lists `ports` and can announce a new list, with a controller connected to it. */
+  async function connectToHost(options: { listsPorts: boolean; ports: number[] }) {
+    const registry = new PaneCommandRegistry();
+    const snapshotOf = (ports: number[]): ListeningPortsSnapshot => ({
+      host: 'studio',
+      ports: ports.map(port => ({ port, pid: 1, process: 'node', group: 'other', kind: 'web' })),
+    });
+    if (options.listsPorts) registry.register('ports:list', () => snapshotOf(options.ports));
+    const hostConfig = createDefaultRemoteDaemonConfig();
+    hostConfig.host.config = { ...hostConfig.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
+    hostConfig.host.clients = [{ id: 'laptop', label: 'Laptop', createdAt: new Date(0).toISOString(), tokenHash: hashRemoteDaemonToken('link-token') }];
+    const host = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: hostConfig }) }, {
+      isForwardedPort: () => true,
+    });
+    await host.start();
+    cleanups.push(() => host.stop());
+
+    const clientConfig = createDefaultRemoteDaemonConfig();
+    clientConfig.client = {
+      profiles: [{ id: 'studio', label: 'Studio', baseUrl: `http://127.0.0.1:${host.getAddress()!.port}`, token: 'link-token', transport: 'http+sse' }],
+      activeProfileId: 'studio',
+      mode: 'remote',
+    };
+    const controller = new RemotePaneClientController();
+    const rendererEvents: string[] = [];
+    controller.initialize({
+      configManager: createConfigManagerStub(clientConfig),
+      rendererEventSink: { send: channel => { rendererEvents.push(channel); } },
+    });
+    cleanups.push(() => controller.switchToLocalMode().then(() => undefined));
+    await waitFor(() => controller.getConnectionState().status === 'connected', 3_000);
+    return {
+      controller,
+      rendererEvents,
+      announce: (ports: number[]) => host.getEventSink().send('ports:changed', snapshotOf(ports)),
+    };
+  }
+
+  /** A port taken on this machine, so the tunnel has to move it, as on a desktop already running its own server. */
+  async function takenPort(): Promise<number> {
+    const server = http.createServer((_request, response) => response.end('this desktop'));
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+    cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())));
+    // SAFETY: a server listening on a host and port reports an AddressInfo.
+    return (server.address() as import('net').AddressInfo).port;
+  }
+
+  it('opens a tunnelled host port at its local number, and refuses it once the host stops listing it', async () => {
+    const port = await takenPort();
+    const { controller, rendererEvents, announce } = await connectToHost({ listsPorts: true, ports: [port] });
+    await waitFor(() => rendererEvents.includes('ports:changed'), 3_000);
+
+    const opened = controller.toLocalUrl(`http://localhost:${port}/app`);
+    expect(opened).toMatch(/^http:\/\/localhost:\d+\/app$/);
+    expect(opened).not.toBe(`http://localhost:${port}/app`);
+
+    const changes = rendererEvents.length;
+    announce([]);
+    await waitFor(() => rendererEvents.length > changes, 3_000);
+    // This desktop still serves that port number itself; the link must not reach it.
+    expect(controller.toLocalUrl(`http://localhost:${port}/app`)).toBeNull();
+    expect(controller.toLocalUrl('https://example.com/docs')).toBe('https://example.com/docs');
+  });
+
+  it('opens loopback links unchanged for a host too old to list ports', async () => {
+    const port = await takenPort();
+    const { controller } = await connectToHost({ listsPorts: false, ports: [] });
+    await waitFor(() => controller.toLocalUrl(`http://localhost:${port}/`) !== null, 3_000);
+    expect(controller.toLocalUrl(`http://localhost:${port}/`)).toBe(`http://localhost:${port}/`);
   });
 });
 

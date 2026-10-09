@@ -170,6 +170,7 @@ export class PaneWorkspaceHostController {
     private readonly configManager: WorkspaceConfigProvider,
     private readonly defaultEnabled: boolean,
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
+    private readonly isForwardedPort?: (port: number) => boolean,
   ) {}
 
   getEventSink(): PaneEventSink {
@@ -335,6 +336,7 @@ export class PaneWorkspaceHostController {
     if (address) return address.port;
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
       workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy() },
+      isForwardedPort: this.isForwardedPort,
     });
     await server.start();
     this.server = server;

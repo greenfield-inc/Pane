@@ -48,9 +48,10 @@ interface CreateSessionJob {
   toolType?: 'claude' | 'none';
   startPinned?: boolean;
   activateOnCreate?: boolean;
+  clientRequestId?: string;
 }
 
-interface SessionCreationJob {
+export interface SessionCreationJob {
   id: string | number;
   data: CreateSessionJob;
   status?: string;
@@ -173,6 +174,7 @@ export class TaskQueue {
     
     this.sessionQueue.on('failed', (job: { id: string | number }, err: Error) => {
       console.error(`[TaskQueue] Job ${job.id} failed:`, err);
+      this.sessionCreatedListeners.delete(String(job.id));
     });
     
     this.sessionQueue.on('error', (error: Error) => {
@@ -326,6 +328,7 @@ export class TaskQueue {
         // Emit the session-created event BEFORE running build script so UI shows immediately
         sessionManager.emitSessionCreated(session, {
           activateOnCreate: job.data.activateOnCreate !== false,
+          clientRequestId: job.data.clientRequestId,
         });
 
         sessionCreatedEmitted = true;
@@ -517,8 +520,10 @@ export class TaskQueue {
           if (!sessionCreatedEmitted) {
             sessionManager.emitSessionCreated(failedSession, {
               activateOnCreate: job.data.activateOnCreate !== false,
+              clientRequestId: job.data.clientRequestId,
               createDefaultTerminalOnCreate: false,
             });
+            this.sessionCreatedListeners.get(String(job.id))?.(createdSession.id);
           }
         } else {
           console.error(`[TaskQueue] Failed to create session:`, error);
@@ -576,9 +581,21 @@ export class TaskQueue {
     }
   }
 
+  /**
+   * Calls `listener` once with the job's Pane id as soon as the Pane exists, even if the job
+   * later fails during setup. A job that fails before creating its Pane drops the listener.
+   */
+  whenSessionCreated(job: SessionCreationJob, listener: (sessionId: string) => void): void {
+    const jobId = String(job.id);
+    this.sessionCreatedListeners.set(jobId, sessionId => {
+      this.sessionCreatedListeners.delete(jobId);
+      listener(sessionId);
+    });
+  }
+
   private async waitForSessionCreationJob(
     job: SessionCreationJob,
-    timeoutMs: number,
+    timeoutMs = 120_000,
   ): Promise<CreateSessionQueueResult> {
     if (job.finished) {
       return this.withSessionCreationTimeout(
@@ -673,7 +690,8 @@ export class TaskQueue {
     toolType?: 'claude' | 'none',
     providedFolderId?: string,
     isMainRepo?: boolean,
-    startPinned?: boolean
+    startPinned?: boolean,
+    clientRequestId?: string
   ): Promise<SessionCreationJob[]> {
     let folderId: string | undefined = providedFolderId;
     let generatedBaseName: string | undefined;
@@ -720,7 +738,7 @@ export class TaskQueue {
     for (let i = 0; i < count; i++) {
       // Use the generated base name if no template was provided
       const templateToUse = worktreeTemplate || generatedBaseName || '';
-      jobs.push(this.sessionQueue.add({ prompt, worktreeTemplate: templateToUse, index: i, permissionMode, projectId, folderId, isMainRepo, baseBranch, toolType, startPinned }));
+      jobs.push(this.sessionQueue.add({ prompt, worktreeTemplate: templateToUse, index: i, permissionMode, projectId, folderId, isMainRepo, baseBranch, toolType, startPinned, clientRequestId }));
     }
     return Promise.all(jobs);
   }

@@ -6,18 +6,18 @@
  */
 
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { X, Terminal, GitBranch, FileCode, FileDiff, FileText, FolderTree, BarChart3, Globe } from 'lucide-react';
+import { X } from 'lucide-react';
 import { cn } from '../../utils/cn';
-import { ToolPanel, ToolPanelType, LogsPanelState } from '../../../../shared/types/panels';
+import { ToolPanel, LogsPanelState } from '../../../../shared/types/panels';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Tooltip } from '../ui/Tooltip';
 import { Kbd } from '../ui/Kbd';
 import { usePanelStore } from '../../stores/panelStore';
-import { getCliBrandIcon } from '../ui/brandIconRegistry';
 import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
+import { getPanelIcon } from './panelIcon';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
 
 // ---------------------------------------------------------------------------
@@ -63,36 +63,6 @@ export interface PanelTabStripProps {
   getPanelTabPresentation?: PanelTabPresentationResolver;
   /** Stable group/strip namespace used for tab and tabpanel relationships. */
   idNamespace: string;
-}
-
-// ---------------------------------------------------------------------------
-// Icon helper (existing icons from PanelTabBar)
-// ---------------------------------------------------------------------------
-
-function getPanelIcon(type: ToolPanelType, panel?: ToolPanel, iconClass = 'w-4 h-4'): React.ReactNode {
-  switch (type) {
-    case 'terminal': {
-      if (panel?.title) {
-        const brandIcon = getCliBrandIcon(panel.title, iconClass);
-        if (brandIcon) return brandIcon;
-      }
-      return <Terminal className={iconClass} />;
-    }
-    case 'diff':
-      return <GitBranch className={iconClass} />;
-    case 'explorer':
-      return <FolderTree className={iconClass} />;
-    case 'editor':
-      return panel && editorPanelState(panel)?.diff ? <FileDiff className={iconClass} /> : <FileText className={iconClass} />;
-    case 'logs':
-      return <FileCode className={iconClass} />;
-    case 'dashboard':
-      return <BarChart3 className={iconClass} />;
-    case 'browser':
-      return <Globe className={iconClass} />;
-    default:
-      return null;
-  }
 }
 
 // ---------------------------------------------------------------------------

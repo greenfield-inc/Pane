@@ -12,8 +12,10 @@ import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
 export interface RemotePwaMockOptions {
   /** Panes the mock host reports, in sidebar order. */
   sessionNames?: string[];
-  /** Terminal panels the selected pane reports, in tab order. */
+  /** Panels the selected pane reports, in host order. */
   panelTitles?: string[];
+  /** Each panel's type, by index into panelTitles; terminal when absent. */
+  panelTypes?: string[];
   /** Host-defined terminal shortcuts offered in the mobile input bar. */
   shortcuts?: Array<{ id: string; key: string; label: string; text: string }>;
   /** Index of the panel the host reports as active. */
@@ -36,6 +38,12 @@ export interface RemotePwaMockHost {
   panes: MockPane[];
   archivedPanes: MockPane[];
   sessions: OrchestrationSessionRecord[];
+  /** The host's last-used tab per Pane, as `panels:set-active` and host activations leave it. */
+  activePanelIds: Record<string, string>;
+  /** Extra panels in each Session's workspace Pane (keyed by Session id), after its agent chats. */
+  sessionTools: Record<string, Array<{ id: string; title: string }>>;
+  /** While set, the host holds its reply on that channel until the promise settles. */
+  held: Record<string, Promise<void>>;
   /** The `panels:agent-statuses` baseline: what the host's agents are doing now. */
   agentStatuses: Array<{ sessionId: string; panelId: string; state: 'blocked' | 'working' | 'idle' | 'unknown' }>;
 }
@@ -112,9 +120,10 @@ function buildFixtures(options: RemotePwaMockOptions) {
     sessions,
   };
 
-  const panel = (type: string, title: string, index: number, customState?: { currentUrl: string }) => ({
-    id: `anim-panel-${index}`,
-    sessionId: sessions[0].id,
+  // Every Pane has the same tabs; the first Pane keeps the historic ids.
+  const panel = (paneId: string, type: string, title: string, index: number, customState?: { currentUrl: string }) => ({
+    id: paneId === sessions[0].id ? `anim-panel-${index}` : `${paneId}-panel-${index}`,
+    sessionId: paneId,
     type,
     title,
     state: { isActive: index === 0, hasBeenViewed: index === 0, customState },
@@ -124,10 +133,10 @@ function buildFixtures(options: RemotePwaMockOptions) {
       position: index,
     },
   });
-  const panels = [
-    ...panelTitles.map((title, index) => panel('terminal', title, index)),
+  const panelsFor = (paneId: string) => [
+    ...panelTitles.map((title, index) => panel(paneId, options.panelTypes?.[index] ?? 'terminal', title, index)),
     ...(options.browserPanels ?? []).map((browser, index) => (
-      panel('browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
+      panel(paneId, 'browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
     )),
   ];
 
@@ -155,15 +164,19 @@ function buildFixtures(options: RemotePwaMockOptions) {
     },
   };
 
+  const panelsByPane = Object.fromEntries(sessions.map(pane => [pane.id, panelsFor(pane.id)]));
   const host: RemotePwaMockHost = {
     panes: sessions,
     archivedPanes: [],
     sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
+    activePanelIds: Object.fromEntries(sessions.map(pane => [pane.id, panelsByPane[pane.id][options.activePanelIndex ?? 0].id])),
+    sessionTools: {},
+    held: {},
     agentStatuses: options.agentStatuses ?? [],
   };
 
   const ports = options.ports ?? { host: 'MacBook Pro', ports: [] };
-  return { project, panels, panel, affordances, host, ports, activePanel: panels[options.activePanelIndex ?? 0] };
+  return { project, panelsByPane, panel, affordances, host, ports };
 }
 
 function buildOrchestrationSession(name: string, index: number): OrchestrationSessionRecord {
@@ -191,20 +204,32 @@ function buildOrchestrationSession(name: string, index: number): OrchestrationSe
   };
 }
 
-/** The agent chat a mock Session opens on, shaped like the host's Session view. */
-function orchestrationSessionView(session: OrchestrationSessionRecord) {
-  const panel = {
-    id: session.panelIds[session.agent],
+function sessionPanel(session: OrchestrationSessionRecord, id: string, title: string, position: number) {
+  return {
+    id,
     sessionId: session.internalSessionId,
     type: 'terminal',
-    title: PANE_CHAT_AGENT_LABELS[session.agent],
-    state: { isActive: true, hasBeenViewed: true },
-    metadata: {
-      createdAt: session.createdAt,
-      lastActiveAt: session.createdAt,
-      position: 0,
-    },
+    title,
+    state: { isActive: position === 0, hasBeenViewed: true },
+    metadata: { createdAt: session.createdAt, lastActiveAt: session.createdAt, position },
   };
+}
+
+/**
+ * A Session's workspace Pane in host order: its agent chat, its tools, and the
+ * chats of agents it no longer uses (which the PWA hides) between them.
+ */
+function sessionWorkspace(session: OrchestrationSessionRecord, tools: Array<{ id: string; title: string }> = []) {
+  const chat = sessionPanel(session, session.panelIds[session.agent], PANE_CHAT_AGENT_LABELS[session.agent], 0);
+  if (tools.length === 0) return [chat];
+  const otherAgent = session.agent === 'codex' ? 'claude' : 'codex';
+  const [first, ...rest] = tools.map((tool, index) => sessionPanel(session, tool.id, tool.title, index + 1));
+  return [chat, first, sessionPanel(session, session.panelIds[otherAgent], PANE_CHAT_AGENT_LABELS[otherAgent], tools.length + 1), ...rest];
+}
+
+/** The agent chat a mock Session opens on, shaped like the host's Session view. */
+function orchestrationSessionView(session: OrchestrationSessionRecord) {
+  const panel = sessionPanel(session, session.panelIds[session.agent], PANE_CHAT_AGENT_LABELS[session.agent], 0);
   return {
     session,
     internalSession: {
@@ -223,86 +248,93 @@ function orchestrationSessionView(session: OrchestrationSessionRecord) {
 }
 
 /**
+ * Runs in the page before the PWA loads. The saved profile is seeded into
+ * localStorage so the connection screen offers a one-click Connect.
+ */
+function installClientMocks(profile: typeof PROFILE): void {
+  window.localStorage.setItem('pane.remotePwa.savedProfiles', JSON.stringify([profile]));
+
+  // The PWA opens an EventSource for host push events. It stays quiet unless a
+  // test sends an event (`emitRemoteHostEvent`), and it has to be able to
+  // *drop*, because losing the host is the defining event of using Pane from a
+  // phone and the status bar's motion is about saying so.
+  class MockEventSource {
+    onopen: ((event: Event) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    constructor(readonly url: string) {
+      // Handed to the registrar rather than aliased into a local, so the
+      // newest stream is reachable without keeping a `self` around.
+      register(this);
+      // While the host is held down, the client's retries connect to nothing —
+      // which is what keeps `reconnecting` on screen for as long as a caller
+      // needs rather than for one backoff interval.
+      if (!held) {
+        window.setTimeout(() => this.onopen?.(new Event('open')), 0);
+      }
+    }
+    readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>();
+    addEventListener(name: string, listener: (event: MessageEvent) => void): void {
+      this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+    }
+    removeEventListener(): void {}
+    close(): void {}
+  }
+
+  let live: MockEventSource | undefined;
+  let held = false;
+  const register = (source: MockEventSource) => { live = source; };
+
+  Object.defineProperty(window, 'EventSource', { configurable: true, value: MockEventSource });
+
+  // Drops the stream the way a phone leaving wifi does, and keeps it down. The
+  // client's own backoff walks the status to `reconnecting` and keeps retrying
+  // into the void until the host is brought back.
+  Object.defineProperty(window, '__paneRemoteDropConnection', {
+    configurable: true,
+    value: () => {
+      held = true;
+      live?.onerror?.(new Event('error'));
+    },
+  });
+
+  // Delivers one host event on the live stream, as the daemon's SSE does.
+  Object.defineProperty(window, '__paneRemoteEmit', {
+    configurable: true,
+    value: (channel: string, args: unknown[]) => {
+      const data = JSON.stringify({ channel, args, timestamp: new Date().toISOString() });
+      for (const listener of live?.listeners.get('daemon-event') ?? []) listener(new MessageEvent('daemon-event', { data }));
+    },
+  });
+
+  // Lets the next retry through, and opens the one already waiting so the
+  // recovery does not have to sit out another backoff interval.
+  Object.defineProperty(window, '__paneRemoteRestoreConnection', {
+    configurable: true,
+    value: () => {
+      held = false;
+      live?.onopen?.(new Event('open'));
+    },
+  });
+}
+
+/**
  * Stands up a fake remote Pane host and drives the PWA to its connected state.
- * The saved profile is seeded into localStorage so the connection screen offers
- * a one-click Connect rather than needing a pasted code.
+ * The saved profile is seeded into localStorage, so the PWA reconnects to it on
+ * open rather than needing a pasted code.
  */
 export async function openConnectedRemotePwa(
   page: Page,
   options: RemotePwaMockOptions = {},
 ): Promise<RemotePwaMockHost> {
   const fixtures = buildFixtures(options);
+  hostFixtures.set(fixtures.host, fixtures);
 
-  await page.addInitScript((profile) => {
-    window.localStorage.setItem('pane.remotePwa.savedProfiles', JSON.stringify([profile]));
-
-    // The PWA opens an EventSource for host push events. Nothing here depends on
-    // server-sent traffic, so it only has to connect and stay quiet — but it does
-    // have to be able to *drop*, because losing the host is the defining event of
-    // using Pane from a phone and the status bar's motion is about saying so.
-    class MockEventSource {
-      onopen: ((event: Event) => void) | null = null;
-      onerror: ((event: Event) => void) | null = null;
-      readonly listeners = new Map<string, (event: MessageEvent) => void>();
-      constructor(readonly url: string) {
-        // Handed to the registrar rather than aliased into a local, so the
-        // newest stream is reachable without keeping a `self` around.
-        register(this);
-        // While the host is held down, the client's retries connect to nothing —
-        // which is what keeps `reconnecting` on screen for as long as a caller
-        // needs rather than for one backoff interval.
-        if (!held) {
-          window.setTimeout(() => this.onopen?.(new Event('open')), 0);
-        }
-      }
-      addEventListener(name: string, listener: (event: MessageEvent) => void): void {
-        this.listeners.set(name, listener);
-      }
-      removeEventListener(): void {}
-      close(): void {}
-    }
-
-    let live: MockEventSource | undefined;
-    let held = false;
-    const register = (source: MockEventSource) => { live = source; };
-
-    Object.defineProperty(window, 'EventSource', { configurable: true, value: MockEventSource });
-
-    // Drops the stream the way a phone leaving wifi does, and keeps it down. The
-    // client's own backoff walks the status to `reconnecting` and keeps retrying
-    // into the void until the host is brought back.
-    Object.defineProperty(window, '__paneRemoteDropConnection', {
-      configurable: true,
-      value: () => {
-        held = true;
-        live?.onerror?.(new Event('error'));
-      },
-    });
-
-    // Pushes one host event down the live stream, as the daemon's SSE does.
-    Object.defineProperty(window, '__paneRemoteEmit', {
-      configurable: true,
-      value: (channel: string, payload: JsonValue) => {
-        const data = JSON.stringify({ channel, args: [payload], timestamp: new Date().toISOString() });
-        live?.listeners.get('daemon-event')?.(new MessageEvent('daemon-event', { data }));
-      },
-    });
-
-    // Lets the next retry through, and opens the one already waiting so the
-    // recovery does not have to sit out another backoff interval.
-    Object.defineProperty(window, '__paneRemoteRestoreConnection', {
-      configurable: true,
-      value: () => {
-        held = false;
-        live?.onopen?.(new Event('open'));
-      },
-    });
-  }, PROFILE);
+  await page.addInitScript(installClientMocks, PROFILE);
 
   await installRemoteHostRoute(page, fixtures);
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
   return fixtures.host;
 }
 
@@ -323,6 +355,31 @@ export async function dropRemoteConnection(page: Page): Promise<void> {
   });
 }
 
+const hostFixtures = new WeakMap<RemotePwaMockHost, ReturnType<typeof buildFixtures>>();
+
+/**
+ * Connects another client (its own browser context, so its own storage) to a
+ * host already opened with `openConnectedRemotePwa`. Both clients share the
+ * host's state.
+ */
+export async function connectAnotherRemoteClient(page: Page, host: RemotePwaMockHost): Promise<void> {
+  const fixtures = hostFixtures.get(host);
+  if (!fixtures) throw new Error('Open the host with openConnectedRemotePwa first.');
+  await page.addInitScript(installClientMocks, PROFILE);
+  await installRemoteHostRoute(page, fixtures);
+  await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
+}
+
+/** Sends one host event to this client, the way the daemon's event stream does. */
+export async function emitRemoteHostEvent(page: Page, channel: string, ...args: JsonValue[]): Promise<void> {
+  await page.evaluate(({ channel, args }) => {
+    const emit = window.__paneRemoteEmit;
+    if (!emit) throw new Error('Remote PWA mock is not installed on this page.');
+    emit(channel, args);
+  }, { channel, args });
+}
+
 /** Brings the held host back, settling the status to `connected`. */
 export async function restoreRemoteConnection(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -334,21 +391,17 @@ export async function restoreRemoteConnection(page: Page): Promise<void> {
 
 /** Sends a host event, such as `panel:agentStatus`, to the connected PWA. */
 export async function emitRemoteEvent(page: Page, channel: string, payload: JsonValue): Promise<void> {
-  await page.evaluate(([eventChannel, eventPayload]) => {
-    const emit = window.__paneRemoteEmit;
-    if (!emit) throw new Error('Remote PWA mock is not installed on this page.');
-    emit(eventChannel, eventPayload);
-  }, [channel, payload] as const);
+  await emitRemoteHostEvent(page, channel, payload);
 }
 
 declare global {
   interface Window {
-    /** Installed by `openConnectedRemotePwa`; see `emitRemoteEvent`. */
-    __paneRemoteEmit?: (channel: string, payload: JsonValue) => void;
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
     __paneRemoteDropConnection?: () => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
     __paneRemoteRestoreConnection?: () => void;
+    /** Installed by `openConnectedRemotePwa`; see `emitRemoteHostEvent`. */
+    __paneRemoteEmit?: (channel: string, args: unknown[]) => void;
   }
 }
 
@@ -373,6 +426,7 @@ async function installRemoteHostRoute(
     const session = host.sessions.find(candidate => candidate.id === sessionId);
     const ownerSession = host.sessions.find(candidate => candidate.internalSessionId === args[0]);
     let result: JsonValue | ListeningPortsSnapshot = null;
+    if (body.channel) await host.held[body.channel];
 
     switch (body.channel) {
       case 'sessions:get-all-with-projects':
@@ -400,10 +454,16 @@ async function installRemoteHostRoute(
         result = { success: true, data: host.agentStatuses };
         break;
       case 'panels:list':
-        result = ownerSession ? [orchestrationSessionView(ownerSession).panel] : fixtures.panels;
+        result = ownerSession ? sessionWorkspace(ownerSession, host.sessionTools[ownerSession.id]) : fixtures.panelsByPane[String(args[0])] ?? [];
         break;
       case 'panels:getActive':
-        result = ownerSession ? orchestrationSessionView(ownerSession).panel : fixtures.activePanel;
+        result = ownerSession
+          ? orchestrationSessionView(ownerSession).panel
+          : fixtures.panelsByPane[String(args[0])]?.find(panel => panel.id === host.activePanelIds[String(args[0])]) ?? null;
+        break;
+      case 'panels:set-active':
+        host.activePanelIds[String(args[0])] = String(args[1]);
+        result = { success: true };
         break;
       case 'orchestration-sessions:list':
         result = { success: true, data: { sessions: host.sessions } };
@@ -449,8 +509,9 @@ async function installRemoteHostRoute(
         break;
       case 'panels:create': {
         // SAFETY: the PWA sends a CreatePanelRequest first.
-        const request = args[0] as { type: string; title: string };
-        result = fixtures.panel(request.type, request.title, fixtures.panels.length, request.type === 'browser' ? { currentUrl: '' } : undefined);
+        const request = args[0] as { sessionId: string; type: string; title: string };
+        const existing = fixtures.panelsByPane[request.sessionId] ?? [];
+        result = fixtures.panel(request.sessionId, request.type, request.title, existing.length, request.type === 'browser' ? { currentUrl: '' } : undefined);
         break;
       }
       case 'panels:checkInitialized':

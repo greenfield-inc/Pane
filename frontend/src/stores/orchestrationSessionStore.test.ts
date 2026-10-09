@@ -47,10 +47,10 @@ it.each([true, false])('stale selected-event refresh cannot replace B (ack first
   snapshot.resolve(reply('a')); await refreshing;
   expect(store.getState().selectedSessionId).toBe('b');
   if (!ackFirst) { selection.resolve(reply('b')); await selecting; }
-  // A later intentional external selection still works.
+  // Another client selecting A later does not move this desktop either.
   list.mockResolvedValue(reply('a'));
   await store.getState().refresh({ adoptServerSelection: true });
-  expect(store.getState().selectedSessionId).toBe('a');
+  expect(store.getState().selectedSessionId).toBe('b');
 });
 
 it('invalidates outgoing-host requests even when Session ids collide', async () => {
@@ -64,4 +64,36 @@ it('invalidates outgoing-host requests even when Session ids collide', async () 
   store.setState({ sessions: [{ id: 'a', name: 'Incoming A' } as OrchestrationSessionRecord], selectedSessionId: 'a', availability: 'ready' });
   old.resolve(reply('a')); await selecting;
   expect(store.getState().sessions[0].name).toBe('Incoming A');
+});
+
+describe('Session selection per desktop', () => {
+  async function freshStore() {
+    vi.resetModules();
+    vi.stubGlobal('window', { electronAPI: { orchestrationSessions: { select, list } } });
+    const { useOrchestrationSessionStore: store } = await import('./orchestrationSessionStore');
+    return store;
+  }
+
+  it('opens on the Session this desktop remembered, not the one another client picked last', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await freshStore();
+    store.getState().preferSelection('b');
+    await store.getState().load();
+    expect(store.getState().selectedSessionId).toBe('b');
+  });
+
+  it('starts from the host’s last-used Session when it remembers none', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await freshStore();
+    await store.getState().load();
+    expect(store.getState().selectedSessionId).toBe('a');
+  });
+
+  it('switches to the remembered Session when the memory arrives after the list', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await freshStore();
+    await store.getState().load();
+    store.getState().preferSelection('b');
+    expect(store.getState().selectedSessionId).toBe('b');
+  });
 });
