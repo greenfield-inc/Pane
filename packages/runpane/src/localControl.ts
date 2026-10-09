@@ -311,6 +311,8 @@ interface PaneCreateSuccessItem {
   association?: { sessionId: string; ok: boolean; error?: string };
   promptFile?: string;
   warnings?: PromptWarning[];
+  /** Set when setup waits for a slot; the agent starts after setup, so there is no panel yet. */
+  setupQueue?: { position: number; message: string };
 }
 
 interface PaneCreateFailureItem {
@@ -3460,6 +3462,9 @@ function printPaneCreateResult(result: PaneCreateResult, dryRun = false, action:
           : `  Not associated with Session ${item.association.sessionId}: ${item.association.error ?? 'unknown error'}`);
       }
       printPromptNotes(item, '  ');
+      if (item.setupQueue) {
+        console.log(`  ${item.setupQueue.message}`);
+      }
       if (item.nextCommand) {
         console.log(`  Next: ${item.nextCommand}`);
       }

@@ -25,6 +25,7 @@ import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
+import { queuedSetupMessage } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
@@ -263,6 +264,7 @@ const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
 const WORKSPACE_CONSUMER_PATTERN = /^[A-Za-z0-9._-]{1,128}$/u;
 /** One daemon call waits at most this long for a lock; the CLI chains calls for longer waits. */
 const MAX_LOCK_WAIT_PER_CALL_MS = 120_000;
+const DEFAULT_PANE_CREATE_TIMEOUT_MS = 120_000;
 const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:create',
   'panes:adopt',
@@ -2287,6 +2289,8 @@ async function createPaneItem(
     // Checked again under the creation lock; this early check keeps a bad or
     // taken branch name from reaching the queue and its failure toast.
     await validateRequestedBranch(services, repo, item.branch);
+    // One budget covers the Pane's creation and an unqueued setup, as when setup ran inside the job.
+    const createDeadline = Date.now() + (options.timeoutMs ?? DEFAULT_PANE_CREATE_TIMEOUT_MS);
     const sessionResult = await taskQueue.createSessionAndWait({
       prompt: item.sessionPrompt ?? '',
       worktreeTemplate: item.worktreeName ?? item.name,
@@ -2309,6 +2313,32 @@ async function createPaneItem(
     }
     createdWorktreePath = session.worktreePath;
     const association = await associateCreatedPane(services, options.associateSession, session.id);
+
+    // A queued setup can wait longer than any caller should block, so report the
+    // Pane now and launch its agent once setup finishes.
+    const setupPosition = taskQueue.setupQueuePosition(session.id);
+    if (setupPosition !== undefined) {
+      void taskQueue.waitForSetup(session.id)
+        .then(() => createTerminalPanelForSession(services, session, tool, { activate: options.activate }))
+        .catch(error => console.error(`[Runpane] Pane ${session.id} did not launch after queued setup:`, error));
+      return {
+        ok: true,
+        index,
+        name: item.name,
+        pinned: Boolean(session.isFavorite),
+        sessionId: session.id,
+        paneId: session.id,
+        worktreePath: session.worktreePath,
+        nextCommand: `runpane panels list --pane ${session.id} --json`,
+        tool: describeTool(tool),
+        setupQueue: {
+          position: setupPosition,
+          message: `${queuedSetupMessage(setupPosition)}. Its agent starts after setup.`,
+        },
+        association,
+      };
+    }
+    await taskQueue.waitForSetup(session.id, Math.max(0, createDeadline - Date.now()));
 
     const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, session, tool, {
       activate: options.activate,
@@ -2345,7 +2375,41 @@ async function validateRequestedBranch(services: AppServices, repo: Project, bra
   if (branch === undefined) return;
   const context = services.sessionManager.getProjectContextByProjectId(repo.id);
   if (!context) throw new Error(`Project context is unavailable for ${repo.name}`);
+  await assertBranchHasNoPane(services, repo, branch, context.pathResolver, context.commandRunner);
   await assertNewBranchName(repo.path, branch, context.commandRunner);
+}
+
+/** 1 branch = 1 Pane: a branch already checked out by a Pane gets new work as a tab there. */
+async function assertBranchHasNoPane(
+  services: AppServices,
+  repo: Project,
+  branch: string,
+  pathResolver: PathResolver,
+  commandRunner: CommandRunner,
+): Promise<void> {
+  const worktree = (await services.worktreeManager.listWorktrees(repo.path, commandRunner))
+    .find(entry => entry.branch === branch);
+  if (!worktree) return;
+  let identityPath: string;
+  try {
+    identityPath = resolvePathIdentity(worktree.path, pathResolver);
+  } catch {
+    return;
+  }
+  const pane = findSessionByWorktreeIdentity(services.databaseService.getAllSessions(repo.id), identityPath, pathResolver);
+  if (!pane) return;
+  throw new RunpaneCodedError(
+    `Branch '${branch}' already has Pane "${pane.name}" (${pane.id}). Add this work to it as a new tab: `
+      + `runpane panels create --pane ${pane.id} --tool-command "<cmd>" --source agent --no-focus`,
+    'ERR_RUNPANE_BRANCH_HAS_PANE',
+  );
+}
+
+/** An error whose `code` reaches the caller's JSON instead of the generic failure code. */
+class RunpaneCodedError extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+  }
 }
 
 function isPaneCreateItemSuccessful(item: RunpanePaneCreateResultItem): boolean {
@@ -4908,7 +4972,7 @@ function createFailureItem(
     worktreePath,
     error: {
       message: cause instanceof Error ? cause.message : String(cause),
-      code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
+      code: cause instanceof RunpaneCodedError ? cause.code : 'ERR_RUNPANE_PANE_CREATE_FAILED',
     },
   };
 }

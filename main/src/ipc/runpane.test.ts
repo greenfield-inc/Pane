@@ -33,6 +33,7 @@ import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
+import { WorktreeManager } from '../services/worktreeManager';
 import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
@@ -240,6 +241,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
       })),
     },
     taskQueue: {
+      ...idleSetupQueue(),
       createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
     },
     analyticsManager: {
@@ -249,6 +251,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     },
     spotlightManager: {},
     worktreeManager: {
+      listWorktrees: vi.fn(async () => []),
       getUpstream: vi.fn(async () => null),
       getSessionLocalBaseBranch: vi.fn(async () => 'main'),
     },
@@ -264,6 +267,11 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     },
     ...overrides,
   } as AppServices;
+}
+
+/** A setup queue with a free slot: setup runs at once and is already done. */
+function idleSetupQueue(): Pick<TaskQueue, 'setupQueuePosition' | 'waitForSetup'> {
+  return { setupQueuePosition: vi.fn(() => undefined), waitForSetup: vi.fn(async () => {}) };
 }
 
 const tempDirs: string[] = [];
@@ -4099,7 +4107,7 @@ describe('runpane IPC handlers', () => {
   });
 
   describe('panes create --branch', () => {
-    function branchServices(existingBranches: string[] = []): AppServices {
+    function branchServices(existingBranches: string[] = [], paneRows: Array<{ id: string; name: string; worktree_path: string }> = []): AppServices {
       const repoPath = createTempGitRepo('branch-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
       execFileSync('git', ['branch', 'release/foo'], { cwd: repoPath, stdio: 'ignore' });
@@ -4107,15 +4115,45 @@ describe('runpane IPC handlers', () => {
         execFileSync('git', ['branch', branch], { cwd: repoPath, stdio: 'ignore' });
       }
       const branchProject = { ...project, path: repoPath };
-      // SAFETY: This session-manager double implements the project-context lookup the create handler uses.
+      // SAFETY: These doubles implement the project-context, worktree, and session lookups the create handler uses.
       return createServices({
-        databaseService: { ...createServices().databaseService, getAllProjects: vi.fn(() => [branchProject]) },
+        databaseService: {
+          ...createServices().databaseService,
+          getAllProjects: vi.fn(() => [branchProject]),
+          getAllSessions: vi.fn(() => paneRows),
+        } as never,
         sessionManager: {
           ...createServices().sessionManager,
-          getProjectContextByProjectId: vi.fn(() => ({ commandRunner: new CommandRunner(branchProject) })),
+          getProjectContextByProjectId: vi.fn(() => ({ commandRunner: new CommandRunner(branchProject), pathResolver: new PathResolver(branchProject) })),
         } as never,
+        worktreeManager: new WorktreeManager(),
       });
     }
+
+    it('refuses a branch another Pane has checked out and names that Pane', async () => {
+      const ownerPath = path.join(createTempGitRepo('owner-parent'), '..', 'owner-worktree');
+      const services = branchServices([], [{ id: 'pane-owner-1', name: 'Owner feature', worktree_path: ownerPath }]);
+      const repoPath = services.databaseService.getAllProjects()[0].path;
+      execFileSync('git', ['worktree', 'add', '-b', 'agents/owned', ownerPath], { cwd: repoPath, stdio: 'ignore' });
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'second', branch: 'agents/owned', tool: { agent: 'codex' } }],
+      }]);
+
+      expect(result).toMatchObject({
+        ok: false,
+        items: [{
+          ok: false,
+          error: {
+            code: 'ERR_RUNPANE_BRANCH_HAS_PANE',
+            message: "Branch 'agents/owned' already has Pane \"Owner feature\" (pane-owner-1). Add this work to it as a new tab: "
+              + 'runpane panels create --pane pane-owner-1 --tool-command "<cmd>" --source agent --no-focus',
+          },
+        }],
+      });
+      expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
+    });
 
     it('passes the exact requested branch and base to pane creation', async () => {
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
@@ -4172,6 +4210,39 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('returns a queued Pane at once and launches its agent after setup', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    let finishSetup: () => void = () => {};
+    const services = createServices({
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+        setupQueuePosition: vi.fn(() => 2),
+        waitForSetup: vi.fn(() => new Promise<void>(resolve => { finishSetup = resolve; })),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      panes: [{ name: 'reviewer', tool: { agent: 'codex' } }],
+    }]);
+
+    expect(result).toMatchObject({
+      ok: true,
+      items: [{
+        ok: true,
+        paneId: session.id,
+        setupQueue: { position: 2, message: 'Queued for setup: 2nd in line; setup starts when an earlier Pane finishes. Its agent starts after setup.' },
+      }],
+    });
+    expect(result.items[0]).not.toHaveProperty('panelId');
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+
+    finishSetup();
+
+    await vi.waitFor(() => expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({ sessionId: session.id, type: 'terminal' })));
+  });
+
   it('creates a pinned pane without focusing it', async () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue({
       ...terminalPanel,
@@ -4191,6 +4262,7 @@ describe('runpane IPC handlers', () => {
       } as never,
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       taskQueue: {
+        ...idleSetupQueue(),
         createSessionAndWait: vi.fn(async (request: { startPinned?: boolean }) => {
           databaseRow.is_favorite = request.startPinned ? 1 : 0;
           databaseRow.favorite_pinned_at = request.startPinned ? '2026-07-21 12:00:00' : null;
@@ -4228,6 +4300,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       taskQueue: {
+        ...idleSetupQueue(),
         createSessionAndWait: vi.fn(async (...[, options]: Parameters<TaskQueue['createSessionAndWait']>) => {
           options?.onSessionCreated?.('session-created-early');
           throw new Error('Timed out waiting for session creation job 7');
@@ -4257,6 +4330,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       taskQueue: {
+        ...idleSetupQueue(),
         createSessionAndWait: vi.fn(async (request: { startPinned?: boolean }) => {
           startPinnedCalls.push(request.startPinned);
           return { sessionId: session.id };
@@ -4547,6 +4621,7 @@ describe('runpane IPC handlers', () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     const services = createServices({
       taskQueue: {
+        ...idleSetupQueue(),
         createSessionAndWait,
       },
     } as never);
@@ -7164,7 +7239,7 @@ describe('runpane IPC handlers', () => {
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       const services = createServices({
         // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-        taskQueue: { createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })) } as never,
+        taskQueue: { ...idleSetupQueue(), createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })) } as never,
       });
 
       await createRegistry(services).invoke('runpane:panes:create', [{

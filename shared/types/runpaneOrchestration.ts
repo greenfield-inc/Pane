@@ -507,6 +507,8 @@ export interface RunpanePaneCreateSuccessItem {
   promptFile?: string;
   warnings?: RunpanePromptWarning[];
   association?: RunpanePaneAssociationOutcome;
+  /** Set when the Pane's setup waits for a slot; its agent starts after setup, so there is no panel yet. */
+  setupQueue?: { position: number; message: string };
 }
 
 /** Automatic Session association for a created or adopted Pane; failure never undoes the Pane. */
