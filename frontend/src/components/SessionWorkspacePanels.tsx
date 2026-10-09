@@ -198,18 +198,9 @@ export function SessionWorkspacePanels({
     const updated = events.onPanelUpdated(panel => {
       if (panel.sessionId === sessionId) usePanelStore.getState().updatePanelState(panel);
     });
+    // Queued until this visit's layout has loaded (the effect below applies it).
     const activation = events.onPanelActivationRequested(request => {
-      if (request.sessionId !== sessionId) return;
-      const current = usePanelStore.getState().layouts[sessionId];
-      const panel = usePanelStore.getState().panels[sessionId]?.find(saved => saved.id === request.panelId);
-      if (!current || !panel) return;
-      const inLayoutNow = layoutPanelIds(current);
-      if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, inLayoutNow)) return;
-      const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
-      const root = request.placement === 'split'
-        ? placePanelInSplit(current.root, panel.id)
-        : addPanelToGroup(current.root, focused.id, panel.id);
-      applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
+      if (request.sessionId === sessionId) usePanelStore.getState().requestActivation(request);
     });
     const deleted = events.onPanelDeleted(event => {
       if (event.sessionId !== sessionId) return;
@@ -227,6 +218,22 @@ export function SessionWorkspacePanels({
       activation();
     };
   }, [sessionId, agentPanelId, applyLayout, retry]);
+
+  const activationRequest = usePanelStore(state => state.activationRequests[sessionId]);
+  useEffect(() => {
+    if (!activationRequest || !loaded) return;
+    const store = usePanelStore.getState();
+    store.clearActivationRequest(sessionId);
+    const current = store.layouts[sessionId];
+    const panel = store.panels[sessionId]?.find(saved => saved.id === activationRequest.panelId);
+    if (!current || !panel) return;
+    if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
+    const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
+    const root = activationRequest.placement === 'split'
+      ? placePanelInSplit(current.root, panel.id)
+      : addPanelToGroup(current.root, focused.id, panel.id);
+    applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
+  }, [activationRequest, loaded, sessionId, agentPanelId, applyLayout]);
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;
