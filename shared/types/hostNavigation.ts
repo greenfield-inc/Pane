@@ -6,7 +6,7 @@ import type { BoundarySchema } from '../validation/boundaryDecoder';
  * aliases this, because a host's remembered location crosses the IPC boundary
  * and has to be decodable in main.
  */
-export const PANE_NAVIGATION_VIEWS = ['sessions', 'project', 'pane-chat'] as const;
+export const PANE_NAVIGATION_VIEWS = ['sessions', 'project', 'pane-chat', 'mission-control'] as const;
 
 export type PaneNavigationView = (typeof PANE_NAVIGATION_VIEWS)[number];
 

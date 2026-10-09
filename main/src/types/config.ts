@@ -136,6 +136,8 @@ export interface AppConfig {
   // Route PTY spawns through an isolated ptyHost UtilityProcess for crash isolation.
   // On by default on Windows. Requires app restart; the supervisor is forked once at `app.whenReady`.
   usePtyHost?: boolean;
+  // Experimental: show Mission Control, the grid of every agent pane (off by default).
+  missionControlEnabled?: boolean;
   // PostHog analytics settings
   analytics?: {
     enabled: boolean;
@@ -232,6 +234,8 @@ export interface UpdateConfigRequest {
   // Route PTY spawns through an isolated ptyHost UtilityProcess for crash isolation.
   // On by default on Windows. Requires app restart to take effect.
   usePtyHost?: boolean;
+  // Experimental: show Mission Control, the grid of every agent pane (off by default).
+  missionControlEnabled?: boolean;
   // PostHog analytics settings
   analytics?: AppConfig['analytics'];
   // User-defined custom commands for the Add Tool picker

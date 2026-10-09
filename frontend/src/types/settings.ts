@@ -68,7 +68,8 @@ export type SettingsSettingId =
   | 'developer-mode'
   | 'journey-timings'
   | 'pty-host'
-  | 'additional-paths';
+  | 'additional-paths'
+  | 'mission-control';
 
 export interface SettingsTarget {
   category: SettingsCategoryId;
