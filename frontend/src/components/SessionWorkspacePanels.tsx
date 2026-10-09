@@ -188,9 +188,10 @@ export function SessionWorkspacePanels({
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
       // This desktop's own memory takes new tabs inactive into its own groups;
       // the shared split placement only shapes the host's seed layout.
-      const splitIds = remembered
-        ? new Set<string>()
-        : new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
+      const splitIds = new Set<string>();
+      if (!remembered) {
+        for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
+      }
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
     }).catch(error => {

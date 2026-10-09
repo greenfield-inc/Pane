@@ -157,6 +157,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         } else if (fallback) {
           setActivePanelInStore(mainRepoSessionId, fallback.id);
           await panelApi.setActivePanel(mainRepoSessionId, fallback.id);
+          if (!ownsLoad()) return;
         }
         setRestoredSessionId(mainRepoSessionId);
       });
