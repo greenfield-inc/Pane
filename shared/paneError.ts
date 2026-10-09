@@ -28,3 +28,8 @@ export function toPaneDaemonError(error: unknown, fallbackCode: string): PaneDae
 export function paneErrorText(error: { message: string; next?: string }): string {
   return error.next ? `${error.message} Next: ${error.next}` : error.message;
 }
+
+/** The underlying reason to quote inside a sentence: the error's message without trailing whitespace or period. */
+export function reasonOf(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).trim().replace(/\.+$/, '');
+}

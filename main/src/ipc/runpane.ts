@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
+import { reasonOf } from '../../../shared/paneError';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -1829,8 +1830,8 @@ async function readPanelLastMessage(
   let message: string | undefined;
   try {
     message = locator ? await agentTranscripts.lastAssistantMessage(locator) : undefined;
-  } catch {
-    message = undefined;
+  } catch (error) {
+    return unavailable(`Could not read the ${agentType} transcript for panel ${panel.id}: ${reasonOf(error)}. Use \`runpane panels screen --panel ${panel.id}\`.`);
   }
   if (message === undefined) {
     return unavailable(`No ${agentType} transcript reply found for panel ${panel.id}. Use \`runpane panels screen --panel ${panel.id}\`.`);
@@ -3623,7 +3624,11 @@ async function associateCreatedPane(
     await requireOrchestrationSessionManager(services).associate({ sessionId }, { paneId });
     return { sessionId, ok: true };
   } catch (error) {
-    return { sessionId, ok: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      sessionId,
+      ok: false,
+      error: `Could not add Pane ${paneId} to Session ${sessionId}: ${reasonOf(error)}. The Pane was created and kept. Add it with \`runpane sessions associate --session ${sessionId} --pane ${paneId}\`.`,
+    };
   }
 }
 
@@ -4860,7 +4865,9 @@ function createFailureItem(
     paneId: sessionId,
     worktreePath,
     error: {
-      message: cause instanceof Error ? cause.message : String(cause),
+      message: `Could not create ${item.name ? `Pane "${item.name}"` : `pane ${index}`}: ${reasonOf(cause)}. ${sessionId
+        ? `Pane ${sessionId} was created before the failure and was kept. Check it with \`runpane panes list --json\` before retrying, so you do not create a duplicate.`
+        : 'No Pane was created.'}`,
       code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
     },
   };

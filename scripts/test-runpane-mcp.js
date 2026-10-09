@@ -373,6 +373,22 @@ test('when Pane is not running, the CLI keeps the connection error and says what
   }
 });
 
+test('a result this runpane cannot read says the command ran and how to line up versions', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
+  try {
+    await withStubDaemon(paneDir, { 'runpane:repos:list': { ok: true, repos: 'not-a-list' } }, async () => {
+      const result = await runCli(['repos', 'list', '--pane-dir', paneDir, '--json']);
+      assert.equal(result.status, 1);
+      const { error } = JSON.parse(result.stdout);
+      assert.equal(error.code, 'ERR_RUNPANE_RESULT_UNREADABLE');
+      assert.match(error.message, /Pane answered runpane:repos:list, but this runpane could not read the result \(input\.repos: expected array\)\. Pane ran the command; only reading its answer failed\./);
+      assert.match(error.next, /`runpane doctor`/);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('a tool error reads as the message, the next step in tool names, and the code', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
   try {

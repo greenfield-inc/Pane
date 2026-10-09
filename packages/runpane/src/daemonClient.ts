@@ -107,6 +107,20 @@ export class PaneDaemonClientError extends Error {
   }
 }
 
+/** Decodes a daemon result; a shape this runpane does not know is a version mismatch, reported as one. */
+function decodeResult<T>(channel: string, result: unknown, resultSchema: BoundarySchema<T>): T {
+  try {
+    return decodeBoundary(result, resultSchema);
+  } catch (error) {
+    throw new PaneDaemonClientError(
+      `Pane answered ${channel}, but this runpane could not read the result (${error instanceof Error ? error.message : String(error)}). Pane ran the command; only reading its answer failed. This usually means runpane and Pane are different versions.`,
+      'ERR_RUNPANE_RESULT_UNREADABLE',
+      false,
+      'Compare the versions with `runpane doctor` and update the older one, then check the result in Pane before running the command again.',
+    );
+  }
+}
+
 export function resolvePaneDirectory(paneDir?: string): string {
   return paneDir ?? process.env.PANE_DIR ?? process.env.FOOZOL_DIR ?? path.join(os.homedir(), '.pane');
 }
@@ -153,8 +167,10 @@ export async function invokeRemoteDaemon<T>(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
   const unreachable = (detail: string) => new PaneDaemonClientError(
-    `Could not reach Pane on ${target.machine} (${target.baseUrl}): ${detail}. Pane must be running there with workspaces on; check with "runpane workspace list".`,
+    `Could not reach Pane on ${target.machine} (${target.baseUrl}): ${detail}. Pane must be running there with workspaces on. Nothing was changed.`,
     'ERR_WORKSPACE_UNREACHABLE',
+    false,
+    'Check the machine with `runpane workspace list`.',
   );
   let response: Response;
   try {
@@ -166,7 +182,12 @@ export async function invokeRemoteDaemon<T>(
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new PaneDaemonClientError(`${target.machine} did not answer within ${timeoutMs} ms.`, 'ERR_WORKSPACE_TIMEOUT');
+      throw new PaneDaemonClientError(
+        `${target.machine} did not answer within ${timeoutMs} ms. It may still finish ${channel}.`,
+        'ERR_WORKSPACE_TIMEOUT',
+        false,
+        'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.',
+      );
     }
     const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : String(error);
     throw unreachable(cause);
@@ -185,7 +206,7 @@ export async function invokeRemoteDaemon<T>(
       : '';
     throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}${fix}`, payload.error.code, false, payload.error.next);
   }
-  return decodeBoundary(payload.result, resultSchema);
+  return decodeResult(channel, payload.result, resultSchema);
 }
 
 export async function invokeDaemon<T>(
@@ -235,7 +256,12 @@ export async function invokeDaemon<T>(
     };
 
     timeoutRef.current = setTimeout(() => {
-      settle({ error: new PaneDaemonClientError(`Timed out waiting for Pane daemon response on ${endpoint.path}`, 'ERR_RUNPANE_DAEMON_TIMEOUT') });
+      settle({ error: new PaneDaemonClientError(
+        `Timed out waiting for Pane daemon response on ${endpoint.path}. Pane may be busy, and it may still finish ${channel}.`,
+        'ERR_RUNPANE_DAEMON_TIMEOUT',
+        false,
+        'Check whether the command took effect before running it again; if Pane stays unresponsive, run `runpane doctor`.',
+      ) });
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     socket.once('connect', () => {
@@ -251,7 +277,7 @@ export async function invokeDaemon<T>(
             continue;
           }
           if (frame.ok) {
-            settle({ result: decodeBoundary(frame.result, resultSchema) });
+            settle({ result: decodeResult(channel, frame.result, resultSchema) });
             return;
           }
           settle({ error: new PaneDaemonClientError(frame.error.message, frame.error.code, false, frame.error.next) });
@@ -274,7 +300,12 @@ export async function invokeDaemon<T>(
 
     socket.once('close', () => {
       if (!settled) {
-        settle({ error: new PaneDaemonClientError(`Pane daemon closed the connection before responding at ${endpoint.path}`, 'ERR_RUNPANE_DAEMON_CLOSED') });
+        settle({ error: new PaneDaemonClientError(
+          `Pane daemon closed the connection before responding at ${endpoint.path}, so it is unknown whether ${channel} ran.`,
+          'ERR_RUNPANE_DAEMON_CLOSED',
+          false,
+          'Check whether the command took effect before running it again; if Pane quit, open it and run `runpane doctor`.',
+        ) });
       }
     });
   });

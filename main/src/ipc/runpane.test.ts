@@ -778,7 +778,10 @@ describe('runpane IPC handlers', () => {
       const failed = await createRegistry(services).invoke('runpane:panes:adopt', [request]);
       expect(failed).toMatchObject({
         ok: true,
-        items: [{ ok: true, association: { ok: false, error: 'Pane is already associated with Session Other' } }],
+        items: [{ ok: true, association: {
+          ok: false,
+          error: `Could not add Pane ${session.id} to Session orchestrator-1: Pane is already associated with Session Other. The Pane was created and kept. Add it with \`runpane sessions associate --session orchestrator-1 --pane ${session.id}\`.`,
+        } }],
       });
     });
 
@@ -4248,7 +4251,10 @@ describe('runpane IPC handlers', () => {
         ok: false,
         paneId: 'session-created-early',
         sessionId: 'session-created-early',
-        error: { code: 'ERR_RUNPANE_PANE_CREATE_FAILED' },
+        error: {
+          code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
+          message: 'Could not create Pane "slow-setup-pane": Timed out waiting for session creation job 7. Pane session-created-early was created before the failure and was kept. Check it with `runpane panes list --json` before retrying, so you do not create a duplicate.',
+        },
       }],
     });
   });

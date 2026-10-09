@@ -13,6 +13,7 @@ import { listArchive, listSqlite } from './filePreviewListing';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { previewPathSchema, streamMediaFile, type PreviewFile } from './mediaStream';
+import { reasonOf } from '../../../shared/paneError';
 import { revealInFileManager } from '../utils/revealInFileManager';
 
 const requestSchema = boundary.object({ sessionId: boundary.string, filePath: boundary.string });
@@ -128,7 +129,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
       `Could not copy ${basename(file.filePath)} from the host to open it here: ${reason}. Nothing was changed. Check the connection to the host, then try again.`,
     );
     const response = await host.fetchMedia(file, new Request('pane-media://preview/open'))
-      .catch((error: unknown) => { throw copyFailed(error instanceof Error ? error.message : String(error)); });
+      .catch((error: unknown) => { throw copyFailed(reasonOf(error)); });
     if (response.status !== 200 || !response.body) throw copyFailed(`the host answered HTTP ${response.status}`);
     const directory = await mkdtemp(join(tmpdir(), 'pane-remote-open-'));
     const target = join(directory, clientSafeName(file.filePath));
@@ -154,7 +155,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
       if (error) {
         // A successful copy stays for the system app; a failed open leaves nothing behind.
         if (host) await rm(dirname(target), { recursive: true, force: true });
-        throw new Error(`Could not open ${basename(request.filePath)} with the default app: ${error}. ${host ? 'The copy made for it was removed.' : 'Nothing was changed.'} Set a default app for this file type, then try again.`);
+        throw new Error(`Could not open ${basename(request.filePath)} with the default app: ${reasonOf(error)}. ${host ? 'The copy made for it was removed.' : 'Nothing was changed.'} Set a default app for this file type, then try again.`);
       }
     } else {
       await revealInFileManager((await resolve(request)).path);
