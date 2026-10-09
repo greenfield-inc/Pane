@@ -113,14 +113,21 @@ async function killProcesses(pids: readonly number[]): Promise<void> {
   }
 }
 
+export interface ProcessTableRow {
+  pid: number;
+  parentPid: number;
+  /** Owner's numeric user id. Unknown on Windows, where reading it costs a call per process. */
+  uid: number | null;
+  /** Full executable path where the platform reports one, else the process name. Empty when hidden. */
+  executable: string;
+}
+
 /**
- * Parent pid → its child pids, for every process on the machine.
- *
- * One snapshot rather than a query per pid: on Windows each query starts a
- * PowerShell process, which costs far more than the walk it serves.
+ * Every process on the machine, in one snapshot rather than a query per pid:
+ * on Windows each query starts a PowerShell process, which costs far more than
+ * the read it serves. Best effort: an unreadable table yields an empty list.
  */
-async function readProcessChildren(): Promise<Map<number, number[]>> {
-  const children = new Map<number, number[]>();
+export async function readProcessTable(): Promise<ProcessTableRow[]> {
   let stdout: string;
   try {
     stdout = process.platform === 'win32'
@@ -128,19 +135,40 @@ async function readProcessChildren(): Promise<Map<number, number[]>> {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$(if ($_.ExecutablePath) { $_.ExecutablePath } else { $_.Name })" }',
       ], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout
-      : (await execFileAsync('ps', ['-Ao', 'pid=,ppid='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout;
+      // `comm` goes last: on macOS it is the full executable path, which may contain spaces.
+      : (await execFileAsync('ps', ['-Ao', 'pid=,ppid=,uid=,comm='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout;
   } catch (error) {
     console.warn('[ProcessTree] snapshot_failed:', error);
-    return children;
+    return [];
   }
-  for (const line of stdout.split('\n')) {
-    const [pid, parent] = line.trim().split(/\s+/u).map(value => Number.parseInt(value, 10));
-    if (!Number.isInteger(pid) || !Number.isInteger(parent) || pid === parent) continue;
-    const siblings = children.get(parent);
+  const rows: ProcessTableRow[] = [];
+  for (const line of stdout.split(/\r?\n/u)) {
+    const match = process.platform === 'win32'
+      ? /^(\d+)\t(\d+)\t(.*)$/u.exec(line)
+      : /^\s*(\d+)\s+(\d+)\s+(\d+)\s?(.*)$/u.exec(line);
+    if (!match) continue;
+    const [pid, parentPid, ...rest] = match.slice(1);
+    const [uid, executable] = rest.length === 2 ? rest : [null, rest[0]];
+    rows.push({
+      pid: Number.parseInt(pid, 10),
+      parentPid: Number.parseInt(parentPid, 10),
+      uid: uid === null ? null : Number.parseInt(uid, 10),
+      executable: executable.trim(),
+    });
+  }
+  return rows;
+}
+
+/** Parent pid → its child pids, for every process on the machine. */
+async function readProcessChildren(): Promise<Map<number, number[]>> {
+  const children = new Map<number, number[]>();
+  for (const { pid, parentPid } of await readProcessTable()) {
+    if (pid === parentPid) continue;
+    const siblings = children.get(parentPid);
     if (siblings) siblings.push(pid);
-    else children.set(parent, [pid]);
+    else children.set(parentPid, [pid]);
   }
   return children;
 }

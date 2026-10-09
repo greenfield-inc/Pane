@@ -89,6 +89,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'mobile:',
   'panels:',
   'pane-chat:',
+  'ports:',
   'orchestration-sessions:',
   'projects:',
   'prompts:',

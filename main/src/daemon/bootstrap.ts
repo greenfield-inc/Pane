@@ -37,6 +37,7 @@ import { registerWorkspaceCommands } from '../ipc/workspace';
 import { getMobilePushSender } from './mobilePushSender';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
+  getPaneEventSink,
   setPaneRuntime,
   type PaneWebviewContext,
   type PtyHostRuntime,
@@ -49,6 +50,7 @@ import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { createListeningPortMonitor } from '../services/listeningPorts';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { NamedLockService } from '../services/namedLockService';
@@ -365,6 +367,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
   );
   registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
+  const listeningPortMonitor = createListeningPortMonitor({
+    terminalPanes: () => [...terminalPanelManager.getSessionPids()].flatMap(([sessionId, pids]) => {
+      const paneName = sessionManager.getSession(sessionId)?.name ?? '';
+      return pids.map(pid => ({ pid, sessionId, paneName }));
+    }),
+    onChange: snapshot => getPaneEventSink().send('ports:changed', snapshot),
+  });
+  commandRegistry.register('ports:list', () => listeningPortMonitor.refresh());
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
@@ -420,6 +430,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   gitStatusManager.startPolling();
   sessionPrMonitor.start();
+  listeningPortMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
   }
@@ -456,6 +467,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
       resourceMonitorService.stop();
+      listeningPortMonitor.stop();
       await spotlightManager.disableAll();
       await sessionManager.cleanup();
       await runCommandManager.stopAllRunCommands();
