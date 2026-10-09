@@ -33,7 +33,7 @@ Each tab is an ordinary Pane terminal. Pane starts its default shell (**Settings
 
 Pane also reads every file that config pulls in with `Include`, the way `ssh` does: globs such as `Include conf.d/*` expand in sorted order, relative paths start from your `.ssh` folder, and `~` means your home folder. Pane takes the home folder from your user account, as `ssh` does: on macOS and Linux changing `$HOME` does not move it, and on Windows it is the profile folder Windows records for your account.
 
-Pane reads the files again on start, when its window comes back into focus, and when you expand the section. After editing the config in another app, switch back to Pane to see the change. After editing it in a Pane terminal, collapse and expand **SSH hosts**. A tab that is already open stays open after you delete its host.
+Pane reads the files again on start, when its window comes back into focus, and when you expand the section. After editing the config in another app, switch back to Pane to see the change. After editing it in a Pane terminal, collapse and expand **SSH hosts**. A host you delete from the config stays in the list while it has an open tab, so you can return to that tab; it disappears once you close its tabs.
 
 Pane opens only the config and its included files. It never opens, copies or uploads your keys; `ssh` reads them.
 
@@ -45,7 +45,7 @@ Every name on a `Host` line appears, in file order, so `Host web db` lists both 
 - Names with characters other than letters, digits and `. _ @ : -`. Pane types the name into a shell, so it lists only names a shell reads as plain text.
 - Hosts that appear only in `Match` blocks, and the system-wide config (`/etc/ssh/ssh_config`, or `%ProgramData%\ssh\ssh_config` on Windows).
 
-If a host is missing from the list, check it against these rules. A missing or unreadable config lists no hosts; an unreadable included file is skipped. With no hosts to list, the section and its sidebar icon stay hidden.
+If a host is missing from the list, check it against these rules. A missing or unreadable config lists no hosts; an unreadable included file is skipped. With no hosts and no open SSH tabs, the section and its sidebar icon stay hidden.
 
 ## Windows
 

@@ -29,12 +29,20 @@ function ensureSshSession(sessionManager: SessionManager): void {
   sessionManager.updateSession(SSH_HOSTS_SESSION_ID, { status: 'stopped' });
 }
 
+/** Aliases with an open tab, in tab order, whether or not the config still lists them. */
+function openSshHosts(): string[] {
+  const aliases = panelManager.getPanelsForSession(SSH_HOSTS_SESSION_ID).map(sshHostOf);
+  return [...new Set(aliases.filter((alias): alias is string => alias !== undefined))];
+}
+
 async function openSshHost(sessionManager: SessionManager, alias: string, newTab: boolean): Promise<SshHostOpenResult> {
-  // Only an alias the config lists right now is ever typed into a shell.
-  if (!(await listSshConfigHosts()).includes(alias)) throw new Error('That host is no longer in your SSH config');
+  const hosts = await listSshConfigHosts();
   return withLock('ssh-hosts-session', async () => {
-    ensureSshSession(sessionManager);
+    // An open tab stays reachable after its host leaves the config.
     const existing = newTab ? undefined : panelManager.getPanelsForSession(SSH_HOSTS_SESSION_ID).find(panel => sshHostOf(panel) === alias);
+    // Only an alias the config lists right now is ever typed into a shell.
+    if (!existing && !hosts.includes(alias)) throw new Error('That host is no longer in your SSH config');
+    ensureSshSession(sessionManager);
     const panel = existing ?? await panelManager.createPanel({
       sessionId: SSH_HOSTS_SESSION_ID,
       type: 'terminal',
@@ -54,9 +62,7 @@ export function registerSshHostHandlers(
 ): void {
   commandRegistry.register('ssh-hosts:list', async () => {
     try {
-      const openHosts = new Set(panelManager.getPanelsForSession(SSH_HOSTS_SESSION_ID).map(sshHostOf));
-      const hosts = await listSshConfigHosts();
-      const data: SshHostList = { hosts, openHosts: hosts.filter(alias => openHosts.has(alias)) };
+      const data: SshHostList = { hosts: await listSshConfigHosts(), openHosts: openSshHosts() };
       return { success: true, data };
     } catch (error) {
       console.error('[SSH hosts] Failed to list hosts:', error instanceof Error ? error.message : error);

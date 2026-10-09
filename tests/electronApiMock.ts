@@ -767,7 +767,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         list: () => {
           const hosts = mockOptions.sshHosts ?? [];
           const open = new Set(mockPanels.map(sshHostOf));
-          return success({ hosts, openHosts: hosts.filter(alias => open.has(alias)) });
+          return success({ hosts, openHosts: [...open].filter((alias): alias is string => !!alias) });
         },
         open: (alias: string, newTab: boolean) => {
           const sessionId = '__ssh_hosts_session__';

@@ -12,6 +12,8 @@ interface SshHostsState {
   hosts: string[];
   /** Aliases with an open tab in the SSH view. */
   openHosts: ReadonlySet<string>;
+  /** What the sidebar lists: the config's hosts, then hosts the config dropped that still have a tab. */
+  rows: string[];
   error: string | null;
   /** Re-reads the SSH config. The files are small, so every trigger reads them again. */
   refresh: () => Promise<void>;
@@ -24,6 +26,7 @@ let refreshGeneration = 0;
 export const useSshHostsStore = create<SshHostsState>((set, get) => ({
   hosts: [],
   openHosts: new Set(),
+  rows: [],
   error: null,
 
   refresh: async () => {
@@ -32,21 +35,23 @@ export const useSshHostsStore = create<SshHostsState>((set, get) => ({
     // A slower answer from before a host switch never overwrites a newer one.
     if (generation !== refreshGeneration) return;
     if (!response?.success || !response.data) {
-      set({ hosts: [], openHosts: new Set() });
+      set({ hosts: [], openHosts: new Set(), rows: [] });
       return;
     }
-    set({ hosts: response.data.hosts, openHosts: new Set(response.data.openHosts) });
+    const { hosts, openHosts } = response.data;
+    set({ hosts, openHosts: new Set(openHosts), rows: [...new Set([...hosts, ...openHosts])] });
   },
 
   open: async (alias, newTab = false) => {
     set({ error: null });
     const response = await window.electronAPI.sshHosts.open(alias, newTab).catch(() => null);
-    if (!response?.success || !response.data) {
+    if (response?.success && response.data) {
+      usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, response.data.panelId);
+    } else {
+      // The SSH view shows the message, so a failed click from anywhere still explains itself.
       set({ error: response?.error ?? `Could not open ${alias}` });
       void get().refresh();
-      return;
     }
-    usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, response.data.panelId);
     void useSessionStore.getState().setActiveSession(null);
     useNavigationStore.getState().navigateToSsh();
   },

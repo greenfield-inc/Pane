@@ -272,7 +272,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
   const navigateToSsh = useNavigationStore((state) => state.navigateToSsh);
-  const hasSshHosts = useSshHostsStore((state) => state.hosts.length > 0);
+  const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);

@@ -93,6 +93,7 @@ function SshViewForHost() {
   }), [tabs, activePanelId]);
 
   const selectPanel = useCallback((panel: ToolPanel) => {
+    useSshHostsStore.setState({ error: null });
     usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, panel.id);
     void panelApi.setActivePanel(SSH_HOSTS_SESSION_ID, panel.id).catch(() => {});
   }, []);
@@ -116,9 +117,11 @@ function SshViewForHost() {
         <PanelTabStrip panels={tabs} activePanelId={activePanelId} idNamespace="top" alwaysShowClose
           onPanelSelect={selectPanel} onPanelClose={closePanel} />
       </div>}
-      {alert && <p role="alert" className="px-3 py-1 text-xs text-status-error">{alert}</p>}
+      {alert && !hasTabs && <p role="alert" className="px-3 py-1 text-xs text-status-error">{alert}</p>}
       {hasTabs ? (
         <div className="relative min-h-0 flex-1">
+          {/* Over the stage, so showing it never resizes a terminal. */}
+          {alert && <p role="alert" className="absolute right-3 top-2 z-10 rounded border border-border-primary bg-surface-primary px-2 py-1 text-xs text-status-error shadow-sm">{alert}</p>}
           {session && <SessionProvider session={session}>
             <SplitLayout layout={layout} panels={tabs} focusedGroupId={GROUP_ID} isMainRepo={false}
               onSizesChange={noop} onPanelSelect={selectGroupPanel} onPanelClose={closePanel} onFocusGroup={noop}
