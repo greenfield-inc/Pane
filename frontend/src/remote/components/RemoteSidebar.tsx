@@ -1,9 +1,10 @@
-import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, Pin, PinOff, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 import type { Session } from '../../types/session';
 import { RemoteDesktopLink } from './RemoteDesktopLink';
+import { Dropdown } from '../../components/ui/Dropdown';
 import { createProjectById, getPinnedSessions } from '../../utils/sessionOrdering';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
@@ -38,7 +39,7 @@ interface RemoteSidebarProps {
 }
 
 const SECTION_HEADER = 'flex min-h-11 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-text-tertiary hover:text-text-primary md:min-h-0';
-const CREATE_BUTTON = 'flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-interactive px-3 text-sm font-semibold text-text-on-interactive transition-colors hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-50 md:min-h-9';
+const SECTION_ACTION = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 md:h-7 md:w-7';
 const ROW_ACTION = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50 md:h-8 md:w-8';
 
 export function RemoteSidebar({
@@ -175,16 +176,36 @@ export function RemoteSidebar({
             >
               <PinIcon pinned={session.isPinned === true} />
             </button>
-            <button
-              type="button"
-              disabled={actionId === session.id}
-              onClick={() => actions.setSessionArchived(session, true)}
-              className={`${ROW_ACTION} text-text-muted hover:text-status-error`}
-              title="Archive"
-              aria-label={`Archive Session ${name}`}
-            >
-              <Archive className="h-3.5 w-3.5" />
-            </button>
+            <Dropdown
+              width="sm"
+              position="bottom-right"
+              itemClassName="min-h-11 md:min-h-[1.75rem]"
+              items={[
+                {
+                  id: 'pin',
+                  label: session.isPinned ? 'Unpin Session' : 'Pin Session',
+                  icon: session.isPinned ? PinOff : Pin,
+                  onClick: () => actions.toggleSessionPinned(session),
+                },
+                {
+                  id: 'archive',
+                  label: 'Archive Session',
+                  icon: Archive,
+                  onClick: () => actions.setSessionArchived(session, true),
+                },
+              ]}
+              trigger={(
+                <button
+                  type="button"
+                  disabled={actionId === session.id}
+                  className={`${ROW_ACTION} text-text-muted hover:text-text-primary`}
+                  title="More actions"
+                  aria-label={`More actions for ${name}`}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              )}
+            />
           </span>
         </div>
         {panes.length > 0 && (
@@ -228,22 +249,6 @@ export function RemoteSidebar({
         </div>
       </div>
 
-      <div className="shrink-0 space-y-2 border-b border-border-primary p-3">
-        <div className="flex gap-2">
-          {sessionsSupported && (
-            <button type="button" onClick={actions.createSession} className={CREATE_BUTTON}>
-              <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
-              New Session
-            </button>
-          )}
-          <button type="button" onClick={() => actions.createPane()} disabled={projects.length === 0} className={CREATE_BUTTON}>
-            <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
-            New Pane
-          </button>
-        </div>
-        <RemoteDesktopLink />
-      </div>
-
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {hasPinned && (
           <SidebarSection section="pinned" label="Pinned" expanded={expanded.pinned} onToggle={toggleSection}>
@@ -253,7 +258,17 @@ export function RemoteSidebar({
         )}
 
         {sessionsSupported && (
-          <SidebarSection section="sessions" label="Sessions" expanded={expanded.sessions} onToggle={toggleSection}>
+          <SidebarSection
+            section="sessions"
+            label="Sessions"
+            expanded={expanded.sessions}
+            onToggle={toggleSection}
+            action={(
+              <button type="button" onClick={actions.createSession} className={SECTION_ACTION} title="New Session" aria-label="New Session">
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            )}
+          >
             {sessionsError && (
               <div role="alert" className="mx-2 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error">
                 <p>{sessionsError}</p>
@@ -267,7 +282,24 @@ export function RemoteSidebar({
           </SidebarSection>
         )}
 
-        <SidebarSection section="repositories" label="Repositories" expanded={expanded.repositories} onToggle={toggleSection}>
+        <SidebarSection
+          section="repositories"
+          label="Repositories"
+          expanded={expanded.repositories}
+          onToggle={toggleSection}
+          action={(
+            <button
+              type="button"
+              onClick={() => actions.createPane()}
+              disabled={projects.length === 0}
+              className={SECTION_ACTION}
+              title="New Pane"
+              aria-label="New Pane"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+        >
           {projects.length === 0 && !loading && (
             <div className="rounded-md border border-border-primary bg-surface-secondary p-4 text-sm text-text-secondary">
               No remote panes found on this host.
@@ -333,6 +365,10 @@ export function RemoteSidebar({
           )}
         </SidebarSection>
       </div>
+
+      <div className="shrink-0 border-t border-border-primary p-3">
+        <RemoteDesktopLink />
+      </div>
     </aside>
   );
 }
@@ -349,25 +385,30 @@ interface SidebarSectionProps {
   label: string;
   expanded: boolean;
   count?: number;
+  /** A create button beside the header, as desktop's section headers have. */
+  action?: ReactNode;
   onToggle: (section: RemoteSidebarSection) => void;
   children: ReactNode;
 }
 
-function SidebarSection({ section, label, expanded, count, onToggle, children }: SidebarSectionProps) {
+function SidebarSection({ section, label, expanded, count, action, onToggle, children }: SidebarSectionProps) {
   const contentId = `remote-sidebar-${section}`;
   return (
     <section role="group" aria-label={label}>
-      <button
-        type="button"
-        onClick={() => onToggle(section)}
-        aria-expanded={expanded}
-        aria-controls={contentId}
-        className={SECTION_HEADER}
-      >
-        {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        {count !== undefined && count > 0 && <span className="font-normal tabular-nums text-text-muted">{count}</span>}
-      </button>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onToggle(section)}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          className={SECTION_HEADER}
+        >
+          {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {count !== undefined && count > 0 && <span className="font-normal tabular-nums text-text-muted">{count}</span>}
+        </button>
+        {action}
+      </div>
       <div id={contentId} hidden={!expanded} className="mt-1 space-y-1">
         {children}
       </div>
