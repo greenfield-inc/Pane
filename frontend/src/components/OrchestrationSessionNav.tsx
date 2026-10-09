@@ -221,23 +221,20 @@ export function OrchestrationSessionNav({
     const wasOpen = useNavigationStore.getState().activeView === 'pane-chat' && before.selectedSessionId === sessionId;
     setSessionMenu(null);
     setActionError(null);
+    // Archiving the open Session lands on Home, never on a Session the server or the
+    // auto-selection picks. Leaving before the request means a person who opens something
+    // else while it is in flight keeps what they opened.
+    if (wasOpen) {
+      void setActiveSession(null);
+      navigateToSessions();
+    }
     try {
       await update(
         { sessionId },
         { archived: true } satisfies OrchestrationSessionUpdateInput,
       );
-      const after = useOrchestrationSessionStore.getState();
-      // A host switch during the request leaves nothing on the new host to undo or leave.
-      if (after.hostRevision !== before.hostRevision) return;
-      // Archiving the open Session lands on Home, never on a Session the server picked,
-      // unless the user opened something else while the archive was in flight.
-      const stillOpen = wasOpen
-        && useNavigationStore.getState().activeView === 'pane-chat'
-        && after.selectionRevision === before.selectionRevision;
-      if (stillOpen) {
-        void setActiveSession(null);
-        navigateToSessions();
-      }
+      // A host switch during the request leaves nothing on the new host to undo.
+      if (useOrchestrationSessionStore.getState().hostRevision !== before.hostRevision) return;
       setArchivedToast({ sessionId, sessionName, wasOpen, hostRevision: before.hostRevision });
       await refresh();
     } catch (cause) {

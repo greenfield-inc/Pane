@@ -1253,6 +1253,10 @@ test('Session rows archive and restore without losing selection or associated Pa
   await expect(alphaRow).toHaveCount(0);
   await expect(page.getByRole('status').filter({ hasText: 'Archived Alpha' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
+  // Home holds even after the app auto-selects another active Session (Beta) for the chat view.
+  await page.waitForTimeout(1_000);
+  await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectedSessionId: () => string | undefined } };
