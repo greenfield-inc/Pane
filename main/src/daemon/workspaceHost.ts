@@ -42,6 +42,14 @@ export type TailnetSelf =
   }
   | { ok: false; reason: string; fix: string };
 
+/** This machine on the tailnet, while workspaces are on. */
+export interface WorkspaceTailnet {
+  tailscale: ResolvedCommand;
+  dnsName: string;
+  machineName: string;
+  ownerLogin: string;
+}
+
 export interface WorkspaceHostStatus {
   state: 'on' | 'off';
   /** Why workspaces are off, and the one step that turns them on. */
@@ -144,6 +152,8 @@ export class PaneWorkspaceHostController {
     send: (channel, ...args) => this.server?.getEventSink().send(channel, ...args),
   };
   private ownerLogin: string | null = null;
+  private tailnet: WorkspaceTailnet | null = null;
+  private readonly syncListeners = new Set<() => void>();
   private tailnetLogins: ReadonlySet<string> = new Set();
   private passwordVerifier: { stored: WorkspacePasswordHash; verify: (secret: string, login: string) => SecretCheck } | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
@@ -182,8 +192,18 @@ export class PaneWorkspaceHostController {
     };
   }
 
+  getTailnet(): WorkspaceTailnet | null {
+    return this.status.state === 'on' ? this.tailnet : null;
+  }
+
+  /** Called after every sync, the once-a-minute re-check included. */
+  onSync(listener: () => void): () => void {
+    this.syncListeners.add(listener);
+    return () => this.syncListeners.delete(listener);
+  }
+
   /** Read on every request, so config changes apply to the next one. */
-  private access(): WorkspaceAccessPolicy | null {
+  getAccessPolicy(): WorkspaceAccessPolicy | null {
     if (!this.ownerLogin || !this.isEnabled()) return null;
     const workspaces = this.configManager.getConfig().workspaces;
     return {
@@ -266,6 +286,7 @@ export class PaneWorkspaceHostController {
       }
 
       this.ownerLogin = self.ownerLogin;
+      this.tailnet = { tailscale, dnsName: self.dnsName, machineName: self.machineName, ownerLogin: self.ownerLogin };
       this.tailnetLogins = new Set(self.tailnetLogins);
       const port = await this.ensureServer();
       // Serve handlers belong to one tailnet profile, so a tailnet switch drops this one.
@@ -312,7 +333,7 @@ export class PaneWorkspaceHostController {
     const address = this.server?.getAddress();
     if (address) return address.port;
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
-      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.access() },
+      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy() },
     });
     await server.start();
     this.server = server;
@@ -356,6 +377,8 @@ export class PaneWorkspaceHostController {
     const next = this.syncQueue.then(work, work).catch((error) => {
       console.error('[Pane workspaces] Failed to sync workspace host', error);
       this.setOff(error instanceof Error ? error.message : String(error), 'Pane retries every minute; restart Pane if it persists.');
+    }).then(() => {
+      for (const listener of this.syncListeners) listener();
     });
     this.syncQueue = next;
     return next;

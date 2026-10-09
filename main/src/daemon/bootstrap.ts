@@ -52,6 +52,9 @@ import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { createListeningPortMonitor } from '../services/listeningPorts';
+import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
+import { PhonePreviewHost } from './phonePreviews';
+import { createPreviewFiles } from './previewProxy';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { NamedLockService } from '../services/namedLockService';
@@ -375,9 +378,29 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         const paneName = sessionManager.getSession(sessionId)?.name ?? '';
         return pids.map(pid => ({ pid, sessionId, paneName }));
       })),
-    onChange: snapshot => getPaneEventSink().send('ports:changed', snapshot),
+    onChange: snapshot => {
+      latestPorts = snapshot;
+      publishPorts();
+      void phonePreviews.update(snapshot);
+    },
   });
-  commandRegistry.register('ports:list', () => listeningPortMonitor.refresh());
+  const phonePreviews = new PhonePreviewHost({
+    workspace: workspaceHost,
+    paneDir: getAppDirectory(),
+    files: createPreviewFiles({
+      getPanel: panelId => panelManager.getPanel(panelId),
+      resolvePath: async (sessionId, filePath) => decodeBoundary(
+        await commandRegistry.invoke('file:getPath', [{ sessionId, filePath }]),
+        boundary.object({ success: boundary.literal(true), path: boundary.string }),
+      ).path,
+    }),
+    onChange: () => publishPorts(),
+  });
+  let latestPorts: ListeningPortsSnapshot | null = null;
+  const publishPorts = () => {
+    if (latestPorts) getPaneEventSink().send('ports:changed', phonePreviews.decorate(latestPorts));
+  };
+  commandRegistry.register('ports:list', async () => phonePreviews.decorate(await listeningPortMonitor.refresh()));
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
@@ -404,6 +427,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
 
   void workspaceHost.start();
+  void phonePreviews.start().catch(error => console.warn('[Pane phone previews] Failed to start:', error));
   if (startRemoteTransport) {
     void remoteHostTailnetMonitor.start();
   }
@@ -483,6 +507,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await permissionIpcServer?.stop();
       remoteHostTailnetMonitor.stop();
       await remoteTransportController.stopWatchingAndShutdown();
+      await phonePreviews.shutdown();
       await workspaceHost.shutdown();
       if (paneDaemonServer) {
         await paneDaemonServer.stop();

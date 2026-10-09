@@ -20,11 +20,19 @@ export interface ListeningPort {
   /** The Pane whose terminal started the process, for `pane-terminal` ports. */
   sessionId?: string;
   paneName?: string;
+  /** The HTTPS address phones open this web port at; absent until its Serve handler exists. */
+  phoneUrl?: string;
 }
+
+/** Whether phones can open pages from this host, and where its HTML files and media are served. */
+export type PhonePreviewStatus =
+  | { state: 'on'; filesUrl: string }
+  | { state: 'off'; reason: string };
 
 export interface ListeningPortsSnapshot {
   /** The host machine's name, for "Ports on <host>". */
   host: string;
   /** Sorted by group order, then port. */
   ports: ListeningPort[];
+  phone?: PhonePreviewStatus;
 }
