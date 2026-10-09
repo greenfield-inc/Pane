@@ -42,7 +42,7 @@ Pane opens only the config and its included files. It never opens, copies or upl
 Every name on a `Host` line appears, in file order, so `Host web db` lists both `web` and `db`. Hosts from an included file appear where its `Include` line is. A repeated name appears once. Pane skips:
 
 - Patterns with `*`, `?` or `!`, such as `Host *` or `Host *.internal`.
-- Names with characters other than letters, digits and `. _ @ : -`. Pane types the name into a shell, so it lists only names a shell reads as plain text.
+- Names that do not start with a letter, digit or `_`, or that contain characters other than letters, digits and `. _ @ : -`. Pane types the name into a shell, so it lists only names every shell passes to `ssh` unchanged; a leading `-` would be an `ssh` option and a leading `@` means something else in PowerShell.
 - Hosts that appear only in `Match` blocks, and the system-wide config (`/etc/ssh/ssh_config`, or `%ProgramData%\ssh\ssh_config` on Windows).
 
 If a host is missing from the list, check it against these rules. A missing or unreadable config lists no hosts; an unreadable included file is skipped. With no hosts and no open SSH tabs, the section and its sidebar icon stay hidden.
