@@ -5,6 +5,7 @@ import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaem
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
 import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
+import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
 import { getRemotePanelTabId, getRemotePanelTabPanelId } from './remotePanelTabIds';
 
 // The remote host executes these commands. Until its platform capabilities are
@@ -134,6 +135,7 @@ export function RemotePanelTabs({
                 : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
+            {panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
             <PanelTabIcon type={panel.type} />
             <span className="truncate">{panel.title}</span>
           </button>

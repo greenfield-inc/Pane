@@ -117,10 +117,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'advanced',
     label: 'Advanced',
-    description: 'Diagnostics, terminal backend, and environment paths.',
+    description: 'Diagnostics, terminal backend, environment paths, and experimental features.',
     icon: SlidersHorizontal,
-    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths'],
-    aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path'],
+    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'attention-inbox'],
+    aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path', 'experimental', 'mission control', 'inbox', 'attention'],
   },
 ] as const;
 

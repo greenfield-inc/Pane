@@ -121,6 +121,41 @@ export const usePanelStore = create<PanelStore>()(
       });
     },
 
+    forgetPanel: (panelId) => {
+      set((state) => {
+        // `removePanel` needs the session id to find the panel in the list;
+        // this does not. A panel deleted anywhere — another session, RunPane,
+        // a remote daemon — leaves its status behind otherwise, and a stale
+        // `blocked` entry keeps the sidebar's "needs input" badge lit for a
+        // pane that no longer exists.
+        delete state.activityStatus[panelId];
+        delete state.agentStatus[panelId];
+        delete state.agentStatusSession[panelId];
+        delete state.lastActivityAt[panelId];
+      });
+    },
+
+    forgetSession: (sessionId) => {
+      set((state) => {
+        // Archiving a session deletes its panes without a `panel:deleted` for
+        // each one, so the session is the only handle on what to forget. Panel
+        // ids come from both sides: the loaded panel list, and the session id
+        // that rides on every status event (background sessions never load
+        // their panels at all).
+        const panelIds = new Set((state.panels[sessionId] ?? []).map((panel: ToolPanel) => panel.id));
+        for (const [panelId, panelSessionId] of Object.entries(state.agentStatusSession)) {
+          if (panelSessionId === sessionId) panelIds.add(panelId);
+        }
+        for (const panelId of panelIds) {
+          delete state.activityStatus[panelId];
+          delete state.agentStatus[panelId];
+          delete state.agentStatusSession[panelId];
+          delete state.lastActivityAt[panelId];
+        }
+        delete state.unviewedCompletedActivity[sessionId];
+      });
+    },
+
     markUnviewedCompletedActivity: (sessionId, completedAt) => {
       set((state) => {
         state.unviewedCompletedActivity[sessionId] = completedAt ?? new Date().toISOString();

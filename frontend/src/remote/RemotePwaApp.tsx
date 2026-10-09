@@ -28,6 +28,7 @@ import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileS
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
+import { subscribeRemotePanelStatus } from './runtime/remotePanelStatus';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ErrorDialog } from '../components/ErrorDialog';
 
@@ -653,6 +654,8 @@ export function RemotePwaApp() {
       if (state.status !== 'connecting') streamDropped = state.status !== 'connected';
     });
   }, [adapter, resyncHost]);
+
+  useEffect(() => adapter ? subscribeRemotePanelStatus(adapter) : undefined, [adapter]);
 
   useEffect(() => {
     if (!adapter || !activeProfile || !isNativeMobile()) return;

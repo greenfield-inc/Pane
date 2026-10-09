@@ -4,11 +4,12 @@ export function acknowledgeTerminalOutput(
   bytes: number,
   ptyId: string | null,
   isRemoteMode: boolean,
+  viewerId?: string,
 ): void {
   if (!isRemoteMode && ptyId) {
     window.electronAPI.ptyHost.ack(ptyId, bytes);
   } else {
-    void window.electronAPI.invoke('terminal:ack', panelId, bytes).catch((error) => {
+    void window.electronAPI.invoke('terminal:ack', panelId, bytes, ...(viewerId === undefined ? [] : [viewerId])).catch((error) => {
       console.warn('[Terminal] Output acknowledgement was not delivered:', error);
     });
   }
