@@ -520,6 +520,7 @@ export class TaskQueue {
               activateOnCreate: job.data.activateOnCreate !== false,
               createDefaultTerminalOnCreate: false,
             });
+            this.sessionCreatedListeners.get(String(job.id))?.(createdSession.id);
           }
         } else {
           console.error(`[TaskQueue] Failed to create session:`, error);
