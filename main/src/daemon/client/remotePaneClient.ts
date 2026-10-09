@@ -4,6 +4,7 @@ import http, { type IncomingMessage, type RequestOptions } from 'http';
 import https from 'https';
 import { isIP, type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
+import WebSocket, { type ClientOptions } from 'ws';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
 import type { ConfigManager } from '../../services/configManager';
 import type { AnalyticsManager } from '../../services/analyticsManager';
@@ -22,6 +23,9 @@ import { boundary, decodeBoundary } from '../../../../shared/validation/boundary
 import type { BoundarySchema, JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { PaneSseParser } from './sseParser';
 import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
+import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
+import { remapLoopbackPort } from '../../../../shared/utils/browserUrl';
+import { createPortTunnel, type PortTunnel } from './portTunnel';
 
 interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
@@ -108,6 +112,8 @@ const REMOTE_DAEMON_RECONNECT_ERROR_THRESHOLD = 5;
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const TAILSCALE_MAGIC_DNS_SERVER = '100.100.100.100';
+const PORTS_LIST_CHANNEL = 'ports:list';
+const PORTS_CHANGED_CHANNEL = 'ports:changed';
 const REMOTE_RUNTIME_ID = createRemoteRuntimeId();
 
 type RemoteRequestOptions = RequestOptions & {
@@ -214,6 +220,16 @@ export class RemotePaneClient {
 
   async invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined> {
     return this.inputQueue.invoke(channel, args);
+  }
+
+  /** One raw byte stream to a forwarded port on the host, signed in like every other request. */
+  openPortStream(port: number): WebSocket {
+    const endpoint = new URL(`ports/${port}`, this.normalizedBaseUrl);
+    const lookup = createTailscaleFallbackLookup(this.profile, endpoint);
+    const options: ClientOptions & { lookup?: LookupFunction } = { headers: this.authorizationHeader() };
+    if (lookup) options.lookup = lookup;
+    endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
+    return new WebSocket(endpoint, options);
   }
 
   /** Drops the event stream for system sleep so it neither times out nor retries. */
@@ -564,6 +580,12 @@ export class RemotePaneClientController extends EventEmitter {
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
   private resolveTailnetMachineUrl: ((machine: TailnetMachineRef) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
+  /** Mirrors the active host's forwarded ports onto this machine's loopback. */
+  private portTunnel: PortTunnel | null = null;
+  /** Tunnel syncs run one at a time, in the order the host's lists arrived. */
+  private portTunnelSync: Promise<unknown> = Promise.resolve();
+  /** Host port to where this desktop reaches it, from the last sync. */
+  private tunnelledPorts: ReadonlyMap<number, number> = new Map();
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
   private remoteRuntimeUsageTracked = false;
@@ -610,6 +632,11 @@ export class RemotePaneClientController extends EventEmitter {
     return this.state.mode === 'remote';
   }
 
+  /** Points a host link to a forwarded port, such as one in terminal output, at where this desktop reaches it. */
+  toLocalUrl(url: string): string {
+    return this.isRemoteModeActive() ? remapLoopbackPort(url, this.tunnelledPorts) : url;
+  }
+
   shouldForwardLocalRendererEvent(channel: string): boolean {
     return !this.isRemoteModeActive() || !isPaneDaemonEventChannel(channel);
   }
@@ -618,7 +645,7 @@ export class RemotePaneClientController extends EventEmitter {
     channel: string,
     args: unknown[],
     invokeLocal: () => Promise<Result>,
-  ): Promise<Result | JsonValue | undefined> {
+  ): Promise<Result | JsonValue | ListeningPortsSnapshot | undefined> {
     if (!this.isRemoteModeActive()) {
       return invokeLocal();
     }
@@ -627,7 +654,9 @@ export class RemotePaneClientController extends EventEmitter {
       throw new Error(this.state.lastError ?? 'Remote Pane client is not connected');
     }
 
-    const result = await this.activeClient.invoke(channel, args);
+    const client = this.activeClient;
+    let result: JsonValue | ListeningPortsSnapshot | undefined = await client.invoke(channel, args);
+    if (channel === PORTS_LIST_CHANNEL) result = await this.tunnelPorts(client, result) ?? result;
     if (!this.remoteRuntimeUsageTracked) {
       this.remoteRuntimeUsageTracked = true;
       trackRemotePaneEvent(this.analyticsManager, 'remote_pane_remote_runtime_used', {
@@ -753,7 +782,15 @@ export class RemotePaneClientController extends EventEmitter {
     });
 
     const client = new RemotePaneClient(profile, {
-      eventSink: this.rendererEventSink,
+      eventSink: {
+        send: (channel, ...args) => {
+          if (channel === PORTS_CHANGED_CHANNEL) {
+            void this.publishTunnelledPorts(client, args[0]);
+            return;
+          }
+          this.rendererEventSink.send(channel, ...args);
+        },
+      },
       onConnectionStateChange: (status, errorMessage, metadata) => {
         if (status === 'connected') {
           trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connected', {
@@ -789,10 +826,12 @@ export class RemotePaneClientController extends EventEmitter {
       },
       onResyncRequired: () => {
         this.rendererEventSink.send('remote-daemon:resync-required');
+        void this.refreshTunnelledPorts(client);
       },
     });
 
     this.activeClient = client;
+    this.portTunnel = createPortTunnel(port => client.openPortStream(port));
     try {
       await client.connect({
         retryOnInitialFailure: options.retryOnInitialFailure,
@@ -857,9 +896,53 @@ export class RemotePaneClientController extends EventEmitter {
     }
   }
 
+  /**
+   * Tunnels every port in a host's Ports list and returns the list with where each port is
+   * reachable here. Null for a list of an unknown shape, or from a client that is no longer active.
+   */
+  private async tunnelPorts<Value>(client: RemotePaneClient, value: Value): Promise<ListeningPortsSnapshot | null> {
+    const snapshot = decodeListeningPortsSnapshot(value);
+    const tunnel = this.portTunnel;
+    if (!snapshot || !tunnel || this.activeClient !== client) return null;
+    const sync = this.portTunnelSync.then(() => tunnel.sync(snapshot.ports.map(port => port.port)));
+    this.portTunnelSync = sync.catch(error => console.warn('[Pane port tunnel] sync_failed:', error));
+    const localPorts = await sync;
+    if (this.activeClient === client) this.tunnelledPorts = localPorts;
+    return {
+      ...snapshot,
+      ports: snapshot.ports.map(port => {
+        const localPort = localPorts.get(port.port);
+        return localPort === undefined ? port : { ...port, localPort };
+      }),
+    };
+  }
+
+  private async publishTunnelledPorts<Value>(client: RemotePaneClient, value: Value): Promise<void> {
+    try {
+      const snapshot = await this.tunnelPorts(client, value);
+      if (snapshot && this.activeClient === client) this.rendererEventSink.send(PORTS_CHANGED_CHANNEL, snapshot);
+    } catch (error) {
+      console.warn('[Pane port tunnel] publish_failed:', error);
+    }
+  }
+
+  /** Tunnels the host's ports on every (re)connect, before any tab asks for them. */
+  private async refreshTunnelledPorts(client: RemotePaneClient): Promise<void> {
+    try {
+      await this.publishTunnelledPorts(client, await client.invoke(PORTS_LIST_CHANNEL, []));
+    } catch (error) {
+      // A host older than port detection has no Ports list; it simply forwards nothing.
+      console.warn('[Pane port tunnel] list_failed:', error);
+    }
+  }
+
   private async disconnectActiveClient(): Promise<void> {
     const client = this.activeClient;
     this.activeClient = null;
+    const tunnel = this.portTunnel;
+    this.portTunnel = null;
+    this.tunnelledPorts = new Map();
+    await tunnel?.close();
     if (client) {
       await client.disconnect();
       trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_disconnected', {

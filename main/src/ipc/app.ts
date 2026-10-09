@@ -2,6 +2,7 @@ import { IpcMain, shell } from 'electron';
 import { execFile } from 'child_process';
 import type { AppServices } from './types';
 import { revealInFileManager } from '../utils/revealInFileManager';
+import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
@@ -112,7 +113,8 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
   });
 
   // System utilities
-  ipcMain.handle('openExternal', async (_event, url: string) => {
+  ipcMain.handle('openExternal', async (_event, hostUrl: string) => {
+    const url = remotePaneClientController.toLocalUrl(hostUrl);
     try {
       if (process.platform === 'darwin') {
         // On macOS, shell.openExternal can fail silently due to permission/entitlement issues.
