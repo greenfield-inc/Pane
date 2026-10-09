@@ -3225,7 +3225,7 @@ function compareAgentContextParity() {
   assert.deepStrictEqual(pyDetail, nodeDetail);
   assert.strictEqual(nodeDetail.mode, 'command');
   assert.strictEqual(nodeDetail.command.name, 'panes create');
-  assert.ok(nodeDetail.command.summary.includes('One Pane per feature'));
+  assert.ok(nodeDetail.command.summary.includes('1 feature = 1 worktree = 1 branch = 1 Pane'));
   assert.ok(nodeDetail.command.details.includes('do not pre-create a git worktree'));
   assert.ok(nodeDetail.command.notes.some((note) => note.includes("not the agent's default private delegation mechanism")));
   assert.ok(nodeDetail.command.notes.some((note) => note.includes('panels create')));
