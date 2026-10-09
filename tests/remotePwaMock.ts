@@ -26,6 +26,8 @@ export interface RemotePwaMockOptions {
   browserPanels?: Array<{ title: string; url: string }>;
   /** What `ports:list` answers. */
   ports?: ListeningPortsSnapshot;
+  /** Worktree files by relative path, served through `file:*`; adds the Explorer tab last. Binary files are `null`. */
+  files?: Record<string, string | null>;
   /** Agent statuses the host already reports when the PWA connects. */
   agentStatuses?: RemotePwaMockHost['agentStatuses'];
 }
@@ -38,6 +40,8 @@ export interface RemotePwaMockHost {
   panes: MockPane[];
   archivedPanes: MockPane[];
   sessions: OrchestrationSessionRecord[];
+  /** The selected pane's worktree; `file:write` changes it. */
+  files: Record<string, string | null>;
   /** The host's last-used tab per Pane, as `panels:set-active` and host activations leave it. */
   activePanelIds: Record<string, string>;
   /** Extra panels in each Session's workspace Pane (keyed by Session id), after its agent chats. */
@@ -133,12 +137,16 @@ function buildFixtures(options: RemotePwaMockOptions) {
       position: index,
     },
   });
-  const panelsFor = (paneId: string) => [
-    ...panelTitles.map((title, index) => panel(paneId, options.panelTypes?.[index] ?? 'terminal', title, index)),
-    ...(options.browserPanels ?? []).map((browser, index) => (
-      panel(paneId, 'browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
-    )),
-  ];
+  const panelsFor = (paneId: string) => {
+    const panels = [
+      ...panelTitles.map((title, index) => panel(paneId, options.panelTypes?.[index] ?? 'terminal', title, index)),
+      ...(options.browserPanels ?? []).map((browser, index) => (
+        panel(paneId, 'browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
+      )),
+    ];
+    if (options.files) panels.push(panel(paneId, 'explorer', 'Explorer', panels.length));
+    return panels;
+  };
 
   const affordances = {
     terminalShortcuts: options.shortcuts ?? [
@@ -169,6 +177,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     panes: sessions,
     archivedPanes: [],
     sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
+    files: { ...options.files },
     activePanelIds: Object.fromEntries(sessions.map(pane => [pane.id, panelsByPane[pane.id][options.activePanelIndex ?? 0].id])),
     sessionTools: {},
     held: {},
@@ -514,6 +523,27 @@ async function installRemoteHostRoute(
         result = fixtures.panel(request.sessionId, request.type, request.title, existing.length, request.type === 'browser' ? { currentUrl: '' } : undefined);
         break;
       }
+      case 'file:list': {
+        // SAFETY: the PWA sends a FileListRequest first.
+        const folder = (args[0] as { path?: string }).path ?? '';
+        result = { success: true, files: listMockFolder(host.files, folder) };
+        break;
+      }
+      case 'file:read': {
+        // SAFETY: the PWA sends a FileReadRequest first.
+        const content = host.files[(args[0] as { filePath: string }).filePath];
+        result = content === undefined ? { success: false, error: 'ENOENT' }
+          : content === null ? { success: false, binary: true, error: 'Binary files cannot be edited as text' }
+          : { success: true, content };
+        break;
+      }
+      case 'file:write': {
+        // SAFETY: the PWA sends a FileWriteRequest first.
+        const request = args[0] as { filePath: string; content: string };
+        host.files[request.filePath] = request.content;
+        result = { success: true };
+        break;
+      }
       case 'panels:checkInitialized':
         result = true;
         break;
@@ -533,4 +563,18 @@ async function installRemoteHostRoute(
       body: JSON.stringify({ ok: true, result }),
     });
   });
+}
+
+/** One folder of the mock worktree, folders first, the way `file:list` answers. */
+function listMockFolder(files: Record<string, string | null>, folder: string) {
+  const prefix = folder ? `${folder}/` : '';
+  const entries = new Map<string, { name: string; path: string; isDirectory: boolean; size?: number }>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.startsWith(prefix)) continue;
+    const [name, ...rest] = path.slice(prefix.length).split('/');
+    entries.set(name, rest.length
+      ? { name, path: `${prefix}${name}`, isDirectory: true }
+      : { name, path, isDirectory: false, size: content?.length ?? 1024 });
+  }
+  return [...entries.values()].sort((a, b) => (a.isDirectory === b.isDirectory ? a.name.localeCompare(b.name) : a.isDirectory ? -1 : 1));
 }

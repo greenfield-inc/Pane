@@ -39,6 +39,16 @@ export function phonePage(url: string, ports: ListeningPortsSnapshot | null, pan
   return { kind: 'frame', src: `${listening.phoneUrl}${path}`, address, host };
 }
 
+/**
+ * Where a phone loads a worktree file for preview: the files address, which streams it with Range
+ * support. `filePath` is relative to the pane's worktree, in either separator.
+ */
+export function phoneMediaUrl(filePath: string, ports: ListeningPortsSnapshot | null, sessionId: string): { url: string } | { reason: string } {
+  if (ports?.phone?.state !== 'on') return { reason: offReason(ports) };
+  const path = filePath.split(/[\\/]/u).filter(Boolean).map(encodeURIComponent).join('/');
+  return { url: `${ports.phone.filesUrl}/media/${encodeURIComponent(sessionId)}/${path}` };
+}
+
 function offReason(ports: ListeningPortsSnapshot | null): string {
   if (!ports) return 'Reading the host\'s ports…';
   const reason = ports.phone?.state === 'off' ? ports.phone.reason : 'starting';

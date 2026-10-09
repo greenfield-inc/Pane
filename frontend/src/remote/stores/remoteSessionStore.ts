@@ -185,6 +185,11 @@ function findRememberedPaneId(hostId: string | null, projects: Array<{ sessions?
   return paneId && projects.some(project => project.sessions?.some(session => session.id === paneId)) ? paneId : null;
 }
 
+/** Panel types the phone renders; other types open a card pointing to desktop Pane. */
+export function phoneShows(panel: ToolPanel): boolean {
+  return panel.type === 'terminal' || panel.type === 'browser' || panel.type === 'explorer';
+}
+
 /** The tabs a client shows for a Pane: a Session's workspace hides other agents' chats. */
 export function visibleTabs(openSession: OrchestrationSessionView<Session> | null, paneId: string, panels: ToolPanel[]): ToolPanel[] {
   return openSession?.internalSession.id === paneId ? sessionWorkspacePanels(openSession, panels) : panels;

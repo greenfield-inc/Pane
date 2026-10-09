@@ -86,11 +86,11 @@ const archiveSession = async (page: Page, name: string) => {
 
 test('a pane opens on the host\'s active tab only when the phone can show it, with desktop-only tabs last', async ({ page }) => {
   await openConnectedRemotePwa(page, {
-    panelTitles: ['Explorer', 'claude', 'Diff', 'shell'],
-    panelTypes: ['explorer', 'terminal', 'diff', 'terminal'],
+    panelTitles: ['Diff', 'claude', 'Explorer', 'shell'],
+    panelTypes: ['diff', 'terminal', 'explorer', 'terminal'],
     activePanelIndex: 0,
   });
-  await expect(page.getByRole('tab')).toHaveText(['claude', 'shell', 'Explorer', 'Diff']);
+  await expect(page.getByRole('tab')).toHaveText(['claude', 'Explorer', 'shell', 'Diff']);
   await expect(page.getByRole('tab', { name: 'claude', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 

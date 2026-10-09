@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
-import { phonePage } from './phonePage';
+import { phoneMediaUrl, phonePage } from './phonePage';
 
 const ports: ListeningPortsSnapshot = {
   host: 'parsas-macbook-pro',
@@ -56,6 +56,23 @@ describe('phonePage', () => {
       reason: 'Nothing on parsas-macbook-pro listens on port 8080.',
     });
     expect(phonePage('http://localhost:5173/', { ...ports, phone: { state: 'off', reason: 'Tailscale is not installed' } }, 'panel-1')).toMatchObject({
+      reason: 'Phone pages from parsas-macbook-pro are unavailable right now (Tailscale is not installed). Pane checks again every minute.',
+    });
+  });
+});
+
+describe('phoneMediaUrl', () => {
+  it('serves a worktree file from the files address, one encoded segment per folder', () => {
+    expect(phoneMediaUrl('docs/demo clips/intro#1.mp4', ports, 'session-1')).toEqual({
+      url: 'https://mac.tail3c2c57.ts.net:44300/media/session-1/docs/demo%20clips/intro%231.mp4',
+    });
+    expect(phoneMediaUrl('assets\\logo.png', ports, 'session-1')).toEqual({
+      url: 'https://mac.tail3c2c57.ts.net:44300/media/session-1/assets/logo.png',
+    });
+  });
+
+  it('explains why media cannot load while phone pages are off', () => {
+    expect(phoneMediaUrl('logo.png', { ...ports, phone: { state: 'off', reason: 'Tailscale is not installed' } }, 'session-1')).toEqual({
       reason: 'Phone pages from parsas-macbook-pro are unavailable right now (Tailscale is not installed). Pane checks again every minute.',
     });
   });

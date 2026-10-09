@@ -29,6 +29,17 @@ export interface RemoteBranchInfo {
   isRemote: boolean;
 }
 
+/** One entry of a worktree folder; `path` is relative to the worktree, in the host's separators. */
+export interface RemoteFileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size?: number;
+}
+
+/** The `file:*` commands answer `{ success, error, ...result }` instead of the `{ success, data }` envelope. */
+type FileCommandResult<T> = T & { success: boolean; error?: string };
+
 export interface RemoteCreateSessionResult {
   jobId?: string;
   jobIds?: string[];
@@ -207,6 +218,29 @@ export class RemoteRuntimeAdapter {
 
   getListeningPorts(): Promise<ListeningPortsSnapshot> {
     return this.invoke<ListeningPortsSnapshot>('ports:list');
+  }
+
+  /** A folder of the pane's worktree, folders first; '' is the worktree itself. */
+  async listFiles(sessionId: string, path: string): Promise<RemoteFileEntry[]> {
+    return (await this.invokeFileCommand<{ files: RemoteFileEntry[] }>('file:list', [{ sessionId, path }])).files;
+  }
+
+  /** A worktree file's text, or null when the host finds it binary. */
+  async readTextFile(sessionId: string, filePath: string): Promise<string | null> {
+    const result = await this.client.invoke<FileCommandResult<{ content?: string; binary?: boolean }>>('file:read', [{ sessionId, filePath }]);
+    if (result.binary) return null;
+    if (!result.success) throw new Error(result.error ?? 'Could not read the file');
+    return result.content ?? '';
+  }
+
+  async writeTextFile(sessionId: string, filePath: string, content: string): Promise<void> {
+    await this.invokeFileCommand('file:write', [{ sessionId, filePath, content }]);
+  }
+
+  private async invokeFileCommand<T extends object = object>(channel: string, args: unknown[]): Promise<T> {
+    const result = await this.client.invoke<FileCommandResult<T>>(channel, args);
+    if (!result.success) throw new Error(result.error ?? `${channel} failed`);
+    return result;
   }
 
   checkPanelInitialized(panelId: string): Promise<boolean> {
