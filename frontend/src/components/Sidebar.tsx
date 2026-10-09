@@ -1,7 +1,6 @@
 import { NewDialog } from './NewDialog';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CreateSessionDialog } from './CreateSessionDialog';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
 import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
@@ -15,7 +14,6 @@ import { Dropdown } from './ui/Dropdown';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { SessionStatusBadge } from './SessionStatusBadge';
 import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
 import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -50,6 +48,17 @@ function ProjectAgentStatus({ sessions }: { sessions: readonly Session[] }) {
   return status === 'unknown'
     ? <AgentActivityDot active={false} size="sm" className="absolute bottom-0 right-0" />
     : <AgentStatusDot status={status} size="sm" className="absolute bottom-0 right-0" />;
+}
+
+// The rail draws every Pane with the Pane icon; agent status sits on its corner.
+function CompactPaneIcon({ sessionId, testId }: { sessionId: string; testId: string }) {
+  const status = useSessionAgentDisplayStatus(sessionId);
+  return (
+    <>
+      <SquareTerminal data-testid={testId} aria-hidden="true" className="h-4 w-4" />
+      <AgentStatusDot status={status} size="sm" className="absolute bottom-0 right-0" />
+    </>
+  );
 }
 
 function CollapsedProjectTooltip({ project, sessionCount }: { project: Project; sessionCount: number }) {
@@ -115,6 +124,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
 
 export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
+  const showFooterHomeLabel = width >= 230;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -245,7 +255,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
   // State for collapsed sidebar
   const [projects, setProjects] = useState<Project[]>([]);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
@@ -295,6 +304,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       window.removeEventListener('project-sessions-refresh', loadProjects);
     };
   }, [loadProjects]);
+
+  // Projects added or removed outside this window (runpane CLI, MCP) reach every
+  // project-changed listener, the same way the in-app dialogs announce them.
+  useEffect(() => window.electronAPI.events.onProjectListChanged?.(() => {
+    window.dispatchEvent(new Event('project-changed'));
+  }), []);
 
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
@@ -346,28 +361,20 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     }
   }, [compactSessionMenu]);
 
-  const sidebarMenuItems = [
-        {
-          id: 'home',
-          label: 'Home',
-          icon: Home,
-          onClick: () => {
-            setSidebarNavigationScope('repositories');
-            void setActiveSession(null);
-            navigateToSessions();
-          }
-        },
+  const goHome = () => {
+    setSidebarNavigationScope('repositories');
+    void setActiveSession(null);
+    navigateToSessions();
+  };
+
+  // Home, Settings, Feedback and Discord are buttons beside this menu, so it
+  // holds only what has no button of its own.
+  const moreMenuItems = [
         {
           id: 'help',
           label: 'Help',
           icon: HelpCircleIcon,
           onClick: onHelpClick
-        },
-        {
-          id: 'settings',
-          label: 'Settings',
-          icon: SettingsIcon,
-          onClick: onSettingsClick
         },
         {
           id: 'sort',
@@ -392,18 +399,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           onClick: onRemoteSettingsClick
         },
         {
-          id: 'feedback',
-          label: 'Feedback',
-          icon: MessageSquare,
-          onClick: onFeedbackClick
-        },
-        {
-          id: 'discord',
-          label: 'Discord',
-          icon: DiscordIcon,
-          onClick: onDiscordClick
-        },
-        {
           id: 'docs',
           label: 'Docs',
           icon: BookOpen,
@@ -419,8 +414,20 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         }
   ] satisfies DropdownItem[];
 
+  // The collapsed rail has Home and Settings buttons but no Feedback or Discord.
+  const compactMoreMenuItems = [
+    ...moreMenuItems,
+    { id: 'feedback', label: 'Feedback', icon: MessageSquare, onClick: onFeedbackClick },
+    { id: 'discord', label: 'Discord', icon: DiscordIcon, onClick: onDiscordClick },
+  ] satisfies DropdownItem[];
+
   // Expanded controls sit beside the window controls. The collapsed toggle stays
   // in the rail so reopening the sidebar is reachable where the sidebar lives.
+  // The host pill keeps to the sidebar's width: the room right of the toggle,
+  // capped at 180px, and only its icon once a name no longer fits.
+  const hostPillRoom = width - (titleBarControlsSlot?.offsetLeft ?? 0) - 44;
+  const hostPillMaxWidth = Math.min(180, hostPillRoom);
+  const showHostPillLabel = hostPillRoom >= 96;
   const headerControls = (
     <>
       {onToggleCollapse && (
@@ -438,12 +445,13 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         <button
           type="button"
           aria-label={`Agents run on ${remoteHostSwitcher.label}. Switch host`}
-          className="ml-1 flex h-6 max-w-[180px] items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-2 pr-1.5 text-[12px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          style={{ maxWidth: hostPillMaxWidth }}
+          className="ml-1 flex h-6 min-w-0 shrink items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-2 pr-1.5 text-[12px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
         >
           {remoteHostSwitcher.dotClassName
             ? <span className={`h-2 w-2 shrink-0 rounded-full ${remoteHostSwitcher.dotClassName}`} />
             : <Laptop className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />}
-          <span className="truncate">{remoteHostSwitcher.label}</span>
+          {showHostPillLabel && <span className="min-w-0 truncate">{remoteHostSwitcher.label}</span>}
           <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
         </button>,
         'bottom-left',
@@ -499,11 +507,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               <button
                 type="button"
                 data-compact-rail-item
-                onClick={() => {
-                  setSidebarNavigationScope('repositories');
-                  void setActiveSession(null);
-                  navigateToSessions();
-                }}
+                onClick={goHome}
                 aria-label="Home"
                 className={`${COMPACT_RAIL_BUTTON} ${activeView === 'sessions' && !activeSessionId ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
               >
@@ -567,16 +571,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                       aria-label={`Open pinned pane ${label}`}
                       className={`${COMPACT_RAIL_BUTTON} ${session.id === activeSessionId && activeView === 'sessions' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                     >
-                      <SessionStatusBadge
-                        sessionId={session.id}
-                        unknownFallback={(
-                          <SquareTerminal
-                            data-testid={`compact-pinned-pane-placeholder-${session.id}`}
-                            aria-hidden="true"
-                            className="h-4 w-4 text-text-tertiary"
-                          />
-                        )}
-                      />
+                      <CompactPaneIcon sessionId={session.id} testId={`compact-pinned-pane-placeholder-${session.id}`} />
                     </button>
                   </Tooltip>
                 ))}
@@ -619,7 +614,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                         aria-label={`Open main workspace for ${project.name}`}
                         className={`${COMPACT_RAIL_BUTTON} text-xs font-semibold ${isActiveProject ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                       >
-                        {initial}
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md border border-border-primary">{initial}</span>
                         <ProjectAgentStatus sessions={projectSessions} />
                       </button>
                     </Tooltip>
@@ -640,16 +635,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                           aria-label={`Open pane ${project.name}/${session.name || 'Untitled'}`}
                           className={`${COMPACT_RAIL_BUTTON} ${session.id === activeSessionId && activeView === 'sessions' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                         >
-                          <SessionStatusBadge
-                            sessionId={session.id}
-                            unknownFallback={(
-                              <SquareTerminal
-                                data-testid={`compact-repository-pane-placeholder-${session.id}`}
-                                aria-hidden="true"
-                                className="h-4 w-4 text-text-tertiary"
-                              />
-                            )}
-                          />
+                          <CompactPaneIcon sessionId={session.id} testId={`compact-repository-pane-placeholder-${session.id}`} />
                         </button>
                       </Tooltip>
                     ))}
@@ -662,19 +648,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
           {/* Bottom actions stay reachable even with a long Session list. */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
-            {activeProject && (
-              <Tooltip content={`New pane in ${activeProject.name}`} side="right">
-                <button
-                  type="button"
-                  data-compact-rail-item
-                  onClick={() => setShowCreateDialog(true)}
-                  aria-label={`New pane in ${activeProject.name}`}
-                  className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE} hover:text-interactive`}
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </Tooltip>
-            )}
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
               {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
             </Tooltip>
@@ -694,13 +667,13 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 <button
                   type="button"
                   data-compact-rail-item
-                  aria-label="Sidebar menu"
+                  aria-label="More"
                   className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </button>
               }
-              items={sidebarMenuItems}
+              items={compactMoreMenuItems}
               position="top-right"
               width="sm"
             />
@@ -708,14 +681,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         </div>
 
         {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
-        {showCreateDialog && activeProject && (
-          <CreateSessionDialog
-            isOpen={showCreateDialog}
-            onClose={() => setShowCreateDialog(false)}
-            projectName={activeProject.name}
-            projectId={activeProject.id}
-          />
-        )}
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -782,25 +747,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <ArchivedSessions />
         </div>
 
-        {/* Home opens the footer menu, with navigation and account actions together. */}
         <div className="flex h-12 flex-shrink-0 items-center gap-1 px-2">
-          <Dropdown
-            trigger={
-              <button
-                type="button"
-                aria-label="Home menu"
-                className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary"
-              >
-                <Home className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate text-left">Home</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
-              </button>
-            }
-            items={sidebarMenuItems}
-            position="top-left"
-            width="sm"
-            className="min-w-0 flex-1"
-          />
+          <button
+            type="button"
+            onClick={goHome}
+            aria-label="Home"
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md bg-surface-hover/40 px-2 text-[13px] font-medium text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          >
+            <Home className="h-3.5 w-3.5 shrink-0" />
+            {showFooterHomeLabel && <span className="min-w-0 truncate">Home</span>}
+          </button>
           <button
             type="button"
             onClick={onFeedbackClick}
@@ -825,6 +781,19 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             size="sm"
             variant="ghost"
             icon={<SettingsIcon className="h-4 w-4" />}
+          />
+          <Dropdown
+            trigger={
+              <IconButton
+                aria-label="More"
+                size="sm"
+                variant="ghost"
+                icon={<MoreHorizontal className="h-4 w-4" />}
+              />
+            }
+            items={moreMenuItems}
+            position="top-right"
+            width="sm"
           />
         </div>
 
