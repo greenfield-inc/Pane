@@ -5805,7 +5805,9 @@
             "required": [
               "name",
               "os",
-              "online"
+              "online",
+              "owner",
+              "mine"
             ],
             "additionalProperties": false,
             "properties": {
@@ -5821,6 +5823,14 @@
               },
               "online": {
                 "type": "boolean"
+              },
+              "owner": {
+                "type": "string",
+                "description": "Tailscale login of the machine's owner."
+              },
+              "mine": {
+                "type": "boolean",
+                "description": "Signed in to this machine's own Tailscale login."
               }
             }
           }

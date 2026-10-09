@@ -5807,7 +5807,9 @@ export const RUNPANE_CONTRACT = {
             "required": [
               "name",
               "os",
-              "online"
+              "online",
+              "owner",
+              "mine"
             ],
             "additionalProperties": false,
             "properties": {
@@ -5823,6 +5825,14 @@ export const RUNPANE_CONTRACT = {
               },
               "online": {
                 "type": "boolean"
+              },
+              "owner": {
+                "type": "string",
+                "description": "Tailscale login of the machine's owner."
+              },
+              "mine": {
+                "type": "boolean",
+                "description": "Signed in to this machine's own Tailscale login."
               }
             }
           }

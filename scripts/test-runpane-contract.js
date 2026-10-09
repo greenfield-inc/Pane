@@ -3177,6 +3177,37 @@ function checkHelpOutput() {
   }
 }
 
+/** Both wrappers' workspaces block, on a tailnet with my machine and a teammate's, matches the contract. */
+function checkWorkspacesSummarySchema() {
+  if (process.platform === 'win32') return; // The fake tailscale is a shell script.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-summary-'));
+  const peer = (name, UserID) => ({ DNSName: `${name}.tail.invalid.`, OS: 'linux', Online: true, UserID, TailscaleIPs: ['100.64.0.9'] });
+  const status = {
+    BackendState: 'Running',
+    Self: { ...peer('this-box', 1), OS: 'macOS' },
+    Peer: { a: peer('my-devbox', 1), b: peer('teammate-box', 2) },
+    User: { 1: { LoginName: 'me@example.com' }, 2: { LoginName: 'teammate@example.com' } },
+  };
+  fs.writeFileSync(path.join(bin, 'tailscale'), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(status)}\nEOF\n`, { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, PANE_DIR: bin, RUNPANE_TELEMETRY_DISABLED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: pythonSource };
+  const schema = contract.jsonSchemas.workspacesSummary;
+  for (const [label, command, args] of [
+    ['node', process.execPath, [npmCli, 'agent-context', '--json']],
+    ['python', findPython(), ['-m', 'runpane', 'agent-context', '--json']],
+  ]) {
+    const { workspaces } = JSON.parse(childProcess.execFileSync(command, args, { encoding: 'utf8', env, cwd: rootDir }));
+    assertMatchesJsonSchema(workspaces, schema, `${label} workspaces summary`);
+    assert.deepStrictEqual(workspaces.otherMachines.map((machine) => [machine.name, machine.owner, machine.mine]), [
+      ['my-devbox', 'me@example.com', true],
+      ['teammate-box', 'teammate@example.com', false],
+    ], `${label} lists my machine and the teammate's`);
+    for (const machine of workspaces.otherMachines) {
+      assertMatchesJsonSchema(machine, schema.properties.otherMachines.items, `${label} workspaces machine row`);
+    }
+  }
+  fs.rmSync(bin, { recursive: true, force: true });
+}
+
 function compareAgentContextParity() {
   const python = findPython();
   const pythonEnv = {
@@ -4046,6 +4077,7 @@ async function runChecks() {
   checkContractDocListsEveryCommand();
   await checkAgentTemplateParity();
   checkHelpOutput();
+  checkWorkspacesSummarySchema();
   compareAgentContextParity();
   await checkNodeReleaseTimeout();
   checkNoArgsAndSetupFallback();
