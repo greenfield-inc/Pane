@@ -161,6 +161,18 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             onSave={(value) => persistence.saveConfig('mission-control', { missionControlEnabled: value })}
           />
         </SettingRow>
+        <SettingRow
+          settingId="attention-inbox"
+          label="Attention inbox"
+          description="List only the Panes that need you in the sidebar: waiting on you, finished, or errored. Running Panes are counted below the list, and Show all lists every Pane."
+          saveState={persistence.saveStates['attention-inbox']}
+        >
+          <ImmediateToggle
+            label="Attention inbox"
+            value={persistence.preferences.sidebarAttentionInbox}
+            onSave={(value) => persistence.savePreference('sidebarAttentionInbox', value)}
+          />
+        </SettingRow>
       </SettingsSection>
     </SettingsPage>
   );

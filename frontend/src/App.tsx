@@ -29,6 +29,7 @@ import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
+import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
@@ -155,6 +156,10 @@ function App() {
 
   // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
   useEffect(() => subscribePanelStatus(), []);
+  useEffect(() => {
+    void useAttentionInboxStore.getState().loadEnabled();
+    return subscribeAttentionInbox();
+  }, []);
 
   /**
    * Forget a pane's status when the pane itself goes.

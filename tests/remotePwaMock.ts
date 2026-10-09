@@ -19,6 +19,8 @@ export interface RemotePwaMockOptions {
   activePanelIndex?: number;
   /** Orchestration Sessions the mock host reports. */
   orchestrationSessionNames?: string[];
+  /** Agent statuses the host already reports when the PWA connects. */
+  agentStatuses?: RemotePwaMockHost['agentStatuses'];
 }
 
 /**
@@ -35,6 +37,8 @@ export interface RemotePwaMockHost {
   sessionTools: Record<string, Array<{ id: string; title: string }>>;
   /** While set, the host holds its reply on that channel until the promise settles. */
   held: Record<string, Promise<void>>;
+  /** The `panels:agent-statuses` baseline: what the host's agents are doing now. */
+  agentStatuses: Array<{ sessionId: string; panelId: string; state: 'blocked' | 'working' | 'idle' | 'unknown' }>;
 }
 
 const PROFILE = {
@@ -155,6 +159,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     activePanelIds: Object.fromEntries(sessions.map(pane => [pane.id, panelsByPane[pane.id][options.activePanelIndex ?? 0].id])),
     sessionTools: {},
     held: {},
+    agentStatuses: options.agentStatuses ?? [],
   };
 
   return { project, panelsByPane, affordances, host };
@@ -370,6 +375,11 @@ export async function restoreRemoteConnection(page: Page): Promise<void> {
   });
 }
 
+/** Sends a host event, such as `panel:agentStatus`, to the connected PWA. */
+export async function emitRemoteEvent(page: Page, channel: string, payload: JsonValue): Promise<void> {
+  await emitRemoteHostEvent(page, channel, payload);
+}
+
 declare global {
   interface Window {
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
@@ -425,6 +435,9 @@ async function installRemoteHostRoute(
       case 'sessions:restore':
         host.panes.push(...host.archivedPanes.filter(pane => pane.id === args[0]));
         host.archivedPanes = host.archivedPanes.filter(pane => pane.id !== args[0]);
+        break;
+      case 'panels:agent-statuses':
+        result = { success: true, data: host.agentStatuses };
         break;
       case 'panels:list':
         result = ownerSession ? sessionWorkspace(ownerSession, host.sessionTools[ownerSession.id]) : fixtures.panelsByPane[String(args[0])] ?? [];

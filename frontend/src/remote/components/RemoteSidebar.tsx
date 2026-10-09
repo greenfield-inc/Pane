@@ -4,6 +4,8 @@ import type { OrchestrationSessionRecord } from '../../../../shared/types/orches
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 import type { Session } from '../../types/session';
 import { RemoteDesktopLink } from './RemoteDesktopLink';
+import { SessionActivityDot, SessionActivitySummary } from '../../components/SessionActivity';
+import { SessionStatusBadge } from '../../components/SessionStatusBadge';
 import { createProjectById, getPinnedSessions } from '../../utils/sessionOrdering';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
@@ -93,6 +95,7 @@ export function RemoteSidebar({
     const panes = session.associations
       .map(association => paneById.get(association.paneId))
       .filter((pane): pane is Session => pane !== undefined);
+    const paneIds = panes.map(pane => pane.id);
     const nestedKey = `${placement}:${session.id}`;
     const nestedExpanded = !collapsedSessionIds.has(nestedKey);
     const nestedId = `remote-session-panes-${placement}-${session.id}`;
@@ -126,8 +129,9 @@ export function RemoteSidebar({
             aria-label={`Open Session ${name}`}
             className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left"
           >
+            <SessionActivityDot session={session} paneIds={paneIds} />
             <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-            {panes.length > 0 && <span className="shrink-0 text-[10px] tabular-nums text-text-muted">{panes.length}</span>}
+            <SessionActivitySummary session={session} paneIds={paneIds} />
           </button>
           <span className="flex shrink-0 items-center gap-0.5">
             <button
@@ -404,12 +408,8 @@ function RemotePaneRow({
         aria-current={selected ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >
+        <SessionStatusBadge sessionId={pane.id} size="sm" />
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-        {pane.status === 'running' && (
-          <span className="hidden shrink-0 rounded-sm border border-status-success/30 bg-status-success/10 px-1.5 py-0.5 text-[10px] text-status-success sm:inline">
-            running
-          </span>
-        )}
       </button>
       <span className="flex shrink-0 items-center gap-0.5">
         <button

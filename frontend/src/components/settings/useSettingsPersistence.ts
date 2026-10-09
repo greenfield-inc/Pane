@@ -10,12 +10,14 @@ import {
   type SettingsSettingId,
 } from '../../types/settings';
 import { useConfigStore } from '../../stores/configStore';
+import { useAttentionInboxStore } from '../../stores/attentionInboxStore';
 
 type PreferenceName = keyof SettingsPreferenceValues;
 
 const PREFERENCE_KEY_BY_NAME = {
   autoRenameSessionsToPr: SETTINGS_PREFERENCE_KEYS.autoRenameSessionsToPr,
   sidebarPaneRowLayout: SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout,
+  sidebarAttentionInbox: SETTINGS_PREFERENCE_KEYS.sidebarAttentionInbox,
   atTerminalPasteMode: SETTINGS_PREFERENCE_KEYS.atTerminalPasteMode,
   atTerminalLineCount: SETTINGS_PREFERENCE_KEYS.atTerminalLineCount,
 } satisfies Record<PreferenceName, string>;
@@ -23,6 +25,7 @@ const PREFERENCE_KEY_BY_NAME = {
 const PREFERENCE_SETTING_ID = {
   autoRenameSessionsToPr: 'auto-rename-pr',
   sidebarPaneRowLayout: 'sidebar-pane-rows',
+  sidebarAttentionInbox: 'attention-inbox',
   atTerminalPasteMode: 'terminal-reference-paste-mode',
   atTerminalLineCount: 'terminal-reference-line-count',
 } satisfies Record<PreferenceName, SettingsSettingId>;
@@ -133,6 +136,9 @@ export function useSettingsPersistence(isOpen: boolean) {
       setPreferences((current) => ({ ...current, [name]: value }));
       if (name === 'sidebarPaneRowLayout') {
         window.dispatchEvent(new CustomEvent('sidebar-pane-row-layout-changed', { detail: { layout: value } }));
+      }
+      if (name === 'sidebarAttentionInbox') {
+        useAttentionInboxStore.getState().setEnabled(value === true);
       }
       setSaveState(settingId, { state: 'saved' });
       return true;
