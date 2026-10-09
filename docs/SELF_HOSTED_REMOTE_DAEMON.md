@@ -219,7 +219,8 @@ The Remote Pane PWA is a browser runtime. It does not have `window.electronAPI`,
 A desktop connected to a remote host reaches every port listening on the host as if it were local. Pane lists the host's ports on a new, empty browser tab and under the address bar's **Ports** button, and the desktop opens a matching listener on its own `127.0.0.1` and `::1` for each one. Only the desktop app sets up these listeners; the browser app and phones don't yet.
 
 - A browser tab at `localhost:5173` loads the host's dev server, live reload included. The address bar reads `localhost:5173` with **on &lt;host name&gt;**.
-- When something on the desktop already answers on 5173, the desktop uses the next free port, up to 19 numbers higher. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**. When all 20 are taken, that port is not forwarded and its row has no **Open**.
+- When something on the desktop already answers on 5173, the desktop uses the next free port, or any free port when the next 19 are taken too. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**.
+- A tab never loads the desktop's own service in the host's place. While the host's Ports list is loading it waits, and when a port stops listening on the host it says the port isn't reachable, then loads once the port is back.
 - **Copy URL** copies the address that works on the desktop, for its system browser.
 - Clicking a `localhost` link in a terminal opens the host's server in your system browser, using the local port number if it moved.
 - When a port closes on the host, the desktop closes its listener. Disconnecting closes all of them.

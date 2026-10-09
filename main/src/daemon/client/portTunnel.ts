@@ -26,7 +26,7 @@ interface PortListener {
 }
 
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1'] as const;
-/** How many ports above the host's number to try when the host's own is taken here. */
+/** How many ports above the host's number to try when the host's own is taken here, before any free port. */
 const MAX_PORT_ATTEMPTS = 20;
 const ANSWER_PROBE_TIMEOUT_MS = 300;
 const MAX_PORT = 65_535;
@@ -52,12 +52,19 @@ export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
     const taken = ownLocalPorts();
     for (let candidate = hostPort; candidate < hostPort + MAX_PORT_ATTEMPTS && candidate <= MAX_PORT; candidate += 1) {
       if (taken.has(candidate) || await answersHere(candidate)) continue;
-      const sockets = new Set<net.Socket>();
-      const servers = await listenOnLoopback(candidate, accept(hostPort, sockets));
-      if (servers) return { localPort: candidate, servers, sockets };
+      const listener = await listenFor(hostPort, candidate);
+      if (listener) return listener;
     }
-    console.warn(`[Pane port tunnel] No free local port for host port ${hostPort}`);
-    return null;
+    // Everything near the host's number is taken: any free port the OS picks will do.
+    const listener = await listenFor(hostPort, 0);
+    if (!listener) console.warn(`[Pane port tunnel] No free local port for host port ${hostPort}`);
+    return listener;
+  };
+
+  const listenFor = async (hostPort: number, localPort: number): Promise<PortListener | null> => {
+    const sockets = new Set<net.Socket>();
+    const bound = await listenOnLoopback(localPort, accept(hostPort, sockets));
+    return bound && { localPort: bound.port, servers: bound.servers, sockets };
   };
 
   const shut = async (listener: PortListener) => {
@@ -110,9 +117,16 @@ async function answersHere(port: number): Promise<boolean> {
   return answers.some(Boolean);
 }
 
-/** Listens on both loopback addresses, or on IPv4 alone when this machine has no IPv6. Null when the port is taken. */
-async function listenOnLoopback(port: number, onConnection: (socket: net.Socket) => void): Promise<net.Server[] | null> {
+/**
+ * Listens on both loopback addresses, or on IPv4 alone when this machine has no IPv6. Port 0 lets
+ * the OS pick IPv4's port, and IPv6 takes the same one. Null when the port is taken.
+ */
+async function listenOnLoopback(
+  requestedPort: number,
+  onConnection: (socket: net.Socket) => void,
+): Promise<{ port: number; servers: net.Server[] } | null> {
   const servers: net.Server[] = [];
+  let port = requestedPort;
   for (const host of LOOPBACK_HOSTS) {
     const server = net.createServer(onConnection);
     const error = await new Promise<NodeJS.ErrnoException | null>(resolve => {
@@ -121,11 +135,13 @@ async function listenOnLoopback(port: number, onConnection: (socket: net.Socket)
     });
     if (!error) {
       servers.push(server);
+      // SAFETY: a server listening on a host and port reports an AddressInfo.
+      port = (server.address() as net.AddressInfo).port;
       continue;
     }
     if (host === '::1' && (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT')) continue;
     await Promise.all(servers.map(open => new Promise<void>(resolve => open.close(() => resolve()))));
     return null;
   }
-  return servers;
+  return { port, servers };
 }

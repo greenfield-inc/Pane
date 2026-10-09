@@ -111,6 +111,37 @@ describe('port tunnel', () => {
     expect(host.requestedPorts).toEqual([taken]);
   });
 
+  it('falls back to any free port when the host port and the next 19 are all taken here', async () => {
+    const host = await startEchoHost();
+    // Find 20 consecutive free ports and hold them all.
+    let base = 0;
+    for (let attempt = 0; attempt < 20 && !base; attempt += 1) {
+      const candidate = 20_000 + Math.floor(Math.random() * 30_000);
+      const held: net.Server[] = [];
+      for (let port = candidate; port < candidate + 20; port += 1) {
+        const server = net.createServer();
+        const ok = await new Promise<boolean>(resolve => {
+          server.once('error', () => resolve(false));
+          server.listen(port, '127.0.0.1', () => resolve(true));
+        });
+        if (!ok) break;
+        held.push(server);
+      }
+      if (held.length === 20) base = candidate;
+      for (const server of held) {
+        if (base) cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())));
+        else server.close();
+      }
+    }
+    expect(base).toBeGreaterThan(0);
+    const tunnel = track(createPortTunnel(host.openStream));
+
+    const local = (await tunnel.sync([base])).get(base);
+    expect(local).toBeDefined();
+    expect(local! < base || local! >= base + 20).toBe(true);
+    expect(await echoThrough('127.0.0.1', local!, 'still reachable')).toBe('still reachable');
+  });
+
   it('closes a port\'s listener once the host stops listing it', async () => {
     const host = await startEchoHost();
     const port = await freePort();
