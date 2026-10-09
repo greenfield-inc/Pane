@@ -51,6 +51,8 @@ interface ArchivedSessionToast {
   sessionId: string;
   sessionName: string;
   wasOpen: boolean;
+  /** The host that archived the Session; Undo is offered only while that host is current. */
+  hostRevision: number;
 }
 
 /** The pending archive Undo, shared so the toast survives a switch between the rail and the tree. */
@@ -122,7 +124,9 @@ export function OrchestrationSessionNav({
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const archivedToast = useArchivedSessionToastStore(state => state.toast);
+  const hostRevision = useOrchestrationSessionStore(state => state.hostRevision);
+  const pendingToast = useArchivedSessionToastStore(state => state.toast);
+  const archivedToast = pendingToast?.hostRevision === hostRevision ? pendingToast : null;
   const compactError = actionError ?? sessionError;
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
@@ -213,8 +217,8 @@ export function OrchestrationSessionNav({
   const archiveSession = useCallback(async () => {
     if (!sessionMenu) return;
     const { sessionId, sessionName } = sessionMenu;
-    const wasOpen = useNavigationStore.getState().activeView === 'pane-chat'
-      && useOrchestrationSessionStore.getState().selectedSessionId === sessionId;
+    const before = useOrchestrationSessionStore.getState();
+    const wasOpen = useNavigationStore.getState().activeView === 'pane-chat' && before.selectedSessionId === sessionId;
     setSessionMenu(null);
     setActionError(null);
     try {
@@ -222,12 +226,19 @@ export function OrchestrationSessionNav({
         { sessionId },
         { archived: true } satisfies OrchestrationSessionUpdateInput,
       );
-      // Archiving the open Session lands on Home, never on a Session the server picked.
-      if (wasOpen) {
+      const after = useOrchestrationSessionStore.getState();
+      // A host switch during the request leaves nothing on the new host to undo or leave.
+      if (after.hostRevision !== before.hostRevision) return;
+      // Archiving the open Session lands on Home, never on a Session the server picked,
+      // unless the user opened something else while the archive was in flight.
+      const stillOpen = wasOpen
+        && useNavigationStore.getState().activeView === 'pane-chat'
+        && after.selectionRevision === before.selectionRevision;
+      if (stillOpen) {
         void setActiveSession(null);
         navigateToSessions();
       }
-      setArchivedToast({ sessionId, sessionName, wasOpen });
+      setArchivedToast({ sessionId, sessionName, wasOpen, hostRevision: before.hostRevision });
       await refresh();
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to archive Session');
@@ -241,6 +252,7 @@ export function OrchestrationSessionNav({
     setActionError(null);
     try {
       await update({ sessionId }, { archived: false } satisfies OrchestrationSessionUpdateInput);
+      if (useOrchestrationSessionStore.getState().hostRevision !== archivedToast.hostRevision) return;
       await refresh();
       if (wasOpen) await openSession(sessionId);
     } catch (cause) {
@@ -558,6 +570,12 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
     if (event.key === 'Escape') {
       // TerminalPopover's document listener closes the menu.
       menu?.trigger?.focus();
+      return;
+    }
+    if (event.key === 'Tab') {
+      // Like Dropdown: close and let Tab continue from the trigger, so focus never leaves an open menu behind.
+      menu?.trigger?.focus();
+      onClose();
       return;
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
