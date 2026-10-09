@@ -228,4 +228,37 @@ describe('preview proxy', () => {
     expect(response.headers['content-range']).toBe('bytes 4-6/10');
     expect(response.headers['content-type']).toBe('video/mp4');
   });
+
+  it('keeps serving after a phone drops a media stream midway, as seeking a video does', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'preview-proxy-'));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    await fs.writeFile(path.join(root, 'big.mp4'), Buffer.alloc(32 * 1024 * 1024, 1));
+    const proxy = await startProxy({ ports: [] }, {
+      readBundleFile: async () => { throw new Error('no bundles'); },
+      resolveMediaPath: async () => path.join(root, 'big.mp4'),
+    });
+    const unexpected: string[] = [];
+    const record = (error: Error) => { unexpected.push(String(error)); };
+    const recordRejection = (reason: Error | null | undefined) => record(reason ?? new Error('empty rejection'));
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', recordRejection);
+    cleanups.push(() => {
+      process.off('uncaughtException', record);
+      process.off('unhandledRejection', recordRejection);
+    });
+
+    await new Promise<void>(resolve => {
+      const request = http.get({
+        host: '127.0.0.1',
+        port: proxy.port,
+        path: `${BASE}/files/media/session-1/big.mp4`,
+        headers: { host: `${DNS_NAME}:44300`, 'tailscale-user-login': OWNER },
+      }, response => response.once('data', () => { request.destroy(); resolve(); }));
+      request.on('error', () => resolve());
+    });
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    expect(unexpected).toEqual([]);
+    expect((await get(proxy, `${BASE}/files/media/session-1/big.mp4`, { range: 'bytes=0-3' })).status).toBe(206);
+  });
 });

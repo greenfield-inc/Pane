@@ -1,6 +1,7 @@
 import http from 'http';
 import net, { type AddressInfo } from 'net';
 import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import type { ReadableStream as WebReadableStream } from 'stream/web';
 import { timingSafeEqual } from 'crypto';
 import { dirname, join } from 'path';
@@ -224,7 +225,8 @@ async function serveFile(files: PreviewFiles, path: string, request: http.Incomi
       }
       // SAFETY: streamMediaFile builds this body with Readable.toWeb, so it is Node's web stream.
       const body = result.body as WebReadableStream<Uint8Array>;
-      Readable.fromWeb(body).pipe(response);
+      // A phone that seeks or closes the tab cuts the stream; pipeline ends both sides without an uncaught error.
+      await pipeline(Readable.fromWeb(body), response).catch(() => undefined);
       return;
     }
     response.writeHead(404).end();
