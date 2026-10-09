@@ -50,3 +50,47 @@ describe('UIStateManager host navigation memory', () => {
     expect(manager.getNavigationMemory(null)).toBeNull();
   });
 });
+
+describe('UIStateManager Pane layout memory', () => {
+  const split = {
+    version: 1 as const,
+    root: {
+      type: 'split' as const, id: 'root', direction: 'row' as const, sizes: [1, 1],
+      children: [
+        { type: 'group' as const, id: 'left', panelIds: ['u'], activePanelId: 'u' },
+        { type: 'group' as const, id: 'right', panelIds: ['page'], activePanelId: 'page' },
+      ],
+    },
+    focusedGroupId: 'left',
+  };
+  const single = {
+    version: 1 as const,
+    root: { type: 'group' as const, id: 'main', panelIds: ['u', 'v'], activePanelId: 'v' },
+  };
+
+  it('keeps each host’s view of a Pane separate, and forgets it on request', () => {
+    const manager = new UIStateManager(createUiStateDb());
+
+    manager.savePaneLayout(null, 'pane-p', split);
+    manager.savePaneLayout('host-b', 'pane-p', single);
+
+    expect(manager.getPaneLayout(null, 'pane-p')).toEqual(split);
+    expect(manager.getPaneLayout('host-b', 'pane-p')).toEqual(single);
+    expect(manager.getPaneLayout(null, 'pane-q')).toBeNull();
+
+    manager.savePaneLayout(null, 'pane-p', null);
+    expect(manager.getPaneLayout(null, 'pane-p')).toBeNull();
+    expect(manager.getPaneLayout('host-b', 'pane-p')).toEqual(single);
+  });
+
+  it('ignores a stored layout it cannot read', () => {
+    const db = createUiStateDb();
+    const manager = new UIStateManager(db);
+
+    db.setUIState('paneLayout.pane-p', 'not json');
+    expect(manager.getPaneLayout(null, 'pane-p')).toBeNull();
+
+    db.setUIState('paneLayout.pane-p', JSON.stringify({ ...single, version: 2 }));
+    expect(manager.getPaneLayout(null, 'pane-p')).toBeNull();
+  });
+});

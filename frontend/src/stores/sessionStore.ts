@@ -9,6 +9,7 @@ import type { Session, SessionOutput, GitStatus, ClaudeJsonMessage } from '../ty
 import { API } from '../utils/api';
 import { startSwitchPane } from '../utils/journeyTimings';
 import { normalizeSession, normalizeSessionOutput, normalizeSessions } from '../utils/sessionNormalization';
+import { isOwnPaneCreation } from '../utils/ownPaneCreations';
 
 interface CreateSessionRequest {
   prompt: string;
@@ -112,7 +113,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   
   addSession: (session) => set((state) => {
     const normalizedSession = normalizeSession(session);
-    const shouldActivate = normalizedSession.activateOnCreate !== false;
+    // Another client's new Pane, or one an agent created, never moves this desktop.
+    const shouldActivate = isOwnPaneCreation(normalizedSession.clientRequestId);
     
     // Initialize arrays if they don't exist
     const sessionWithArrays = {

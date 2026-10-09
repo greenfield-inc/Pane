@@ -12,6 +12,7 @@ import type { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { databaseService } from './database';
 import { panelManager } from './panelManager';
+import { setPaneRuntime, type PaneRuntime } from '../core/runtime';
 import type {
   OrchestrationLink,
   OrchestrationSessionCreateInput,
@@ -274,6 +275,19 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('opens a Session view as a client-local read that asks no client to move', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Quiet open' });
+    const send = vi.fn();
+    setPaneRuntime(partialRuntime({ eventSink: { send } }));
+
+    const view = await fixture.manager.getView({ sessionId: created.session.id });
+
+    expect(databaseService.getActivePanel(view.internalSession.id)?.id).toBe(view.panel.id);
+    expect(send.mock.calls.filter(([channel]) => channel === 'panel:activeChanged')).toEqual([]);
+    setPaneRuntime(partialRuntime({ eventSink: { send: () => undefined } }));
+  });
+
   it('creates a pinned Session and persists declarative pin updates', async () => {
     const fixture = createFixture();
     const input = { name: 'Pinned coordinator', isPinned: true };
@@ -1291,3 +1305,8 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.paneChatManager.getOrCreate).not.toHaveBeenCalled();
   });
 });
+
+function partialRuntime(value: Partial<PaneRuntime>): PaneRuntime {
+  // SAFETY: The test reads only the event sink from the runtime.
+  return value as PaneRuntime;
+}

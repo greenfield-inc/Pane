@@ -309,7 +309,8 @@ export function registerSessionHandlers(
           sessionToolType,
           request.folderId,
           request.isMainRepo,
-          request.startPinned
+          request.startPinned,
+          request.clientRequestId
         );
         associateWhenCreated(jobs, request.associateSessionId);
 
@@ -324,7 +325,8 @@ export function registerSessionHandlers(
           isMainRepo: request.isMainRepo,
           baseBranch: request.baseBranch,
           toolType: sessionToolType,
-          startPinned: request.startPinned
+          startPinned: request.startPinned,
+          clientRequestId: request.clientRequestId
         });
         associateWhenCreated([job], request.associateSessionId);
 

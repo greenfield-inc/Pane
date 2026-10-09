@@ -1,4 +1,4 @@
-import { ToolPanel, SessionPanelLayout } from '../../../shared/types/panels';
+import { ToolPanel, SessionPanelLayout, PanelActivationRequest } from '../../../shared/types/panels';
 import { AgentState } from '../../../shared/types/agentStatus';
 
 export interface PanelStore {
@@ -16,6 +16,8 @@ export interface PanelStore {
   // Layout state for split tab groups
   layouts: Record<string, SessionPanelLayout>;   // sessionId -> layout tree
   focusedGroupIds: Record<string, string>;        // sessionId -> focused group id
+  // Tabs the host or `panes focus` asked to bring forward, applied once that Pane's layout has loaded
+  activationRequests: Record<string, PanelActivationRequest>; // sessionId -> request
 
   // Synchronous state update actions
   removeBrowserPanelsForHostSwitch: () => void;
@@ -38,6 +40,8 @@ export interface PanelStore {
   // Layout actions
   setLayout: (sessionId: string, layout: SessionPanelLayout) => void;
   setFocusedGroup: (sessionId: string, groupId: string) => void;
+  requestActivation: (request: PanelActivationRequest) => void;
+  clearActivationRequest: (sessionId: string) => void;
 
   // Getters
   getSessionPanels: (sessionId: string) => ToolPanel[];

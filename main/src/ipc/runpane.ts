@@ -755,8 +755,9 @@ export function registerRunpaneHandlers(
         }
       }
 
+      // Last used only: pane:focus-requested moves the host's own desktop, and no other client.
       if (normalized.panelId) {
-        await panelManager.setActivePanel(pane.id, normalized.panelId);
+        await panelManager.rememberActivePanel(pane.id, normalized.panelId);
       }
 
       // A headless host has no window; its connected clients still follow the event.
@@ -814,13 +815,17 @@ export function registerRunpaneHandlers(
 
       const items = await mapSequentially(
         normalized.panes,
-        (item, index) => createPaneItem(services, repo, item, index, {
-          timeoutMs: normalized.timeoutMs,
-          waitReady: normalized.waitReady,
-          readyTimeoutMs: normalized.readyTimeoutMs,
-          activate: resolvePaneCreateActivation(normalized, item),
-          associateSession: normalized.associateSession,
-        }),
+        async (item, index) => {
+          const created = await createPaneItem(services, repo, item, index, {
+            timeoutMs: normalized.timeoutMs,
+            waitReady: normalized.waitReady,
+            readyTimeoutMs: normalized.readyTimeoutMs,
+            activate: resolvePaneCreateActivation(normalized, item),
+            associateSession: normalized.associateSession,
+          });
+          if (normalized.focus === true) requestHostDesktopFocus(created);
+          return created;
+        },
       );
 
       return {
@@ -922,6 +927,7 @@ export function registerRunpaneHandlers(
             initialInput,
             nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
           });
+          if (normalized.focus === true) requestHostDesktopFocus({ paneId: session.id, panelId: panel.id });
         } catch (error) {
           let failureSessionId = createdSessionId;
           if (createdSessionId) {
@@ -1075,7 +1081,7 @@ export function registerRunpaneHandlers(
         ? await resolvePanelOpenUrl(normalized.url, services, pane)
         : await resolvePanelOpenFile(services, pane, normalized.filePath ?? '');
       const placement = normalized.placement ?? 'split';
-      // Activates the tab inside its Pane; never raises or focuses the window.
+      // Brings the tab forward on clients showing this Pane; never raises or focuses the window.
       const activate = normalized.noFocus !== true;
       const existing = panelManager.getPanelsForSession(pane.id).find(panel => panelShowsOpenTarget(panel, target));
 
@@ -1083,7 +1089,7 @@ export function registerRunpaneHandlers(
       if (existing) {
         const title = normalized.title && normalized.title !== existing.title ? normalized.title : undefined;
         if (activate) {
-          await panelManager.setActivePanel(pane.id, existing.id);
+          await panelManager.setActivePanel(pane.id, existing.id, placement);
         }
         // Publish the final active state and reload signal together for desktop consumers.
         const current = panelManager.getPanel(existing.id) ?? existing;
@@ -1101,6 +1107,7 @@ export function registerRunpaneHandlers(
           initialState: { customState: target.customState },
           metadata: { openPlacement: placement },
           activate,
+          announceActivation: activate,
         });
       }
 
@@ -1974,6 +1981,8 @@ async function createTerminalPanelForSession(
   };
   if (options.activate === false) {
     createRequest.activate = false;
+  } else {
+    createRequest.announceActivation = true;
   }
 
   const panel = await panelManager.createPanel(createRequest);
@@ -2339,6 +2348,22 @@ async function validateRequestedBranch(services: AppServices, repo: Project, bra
 
 function isPaneCreateItemSuccessful(item: RunpanePaneCreateResultItem): boolean {
   return item.ok && (!item.readiness || item.readiness.ok) && (!('initialInput' in item) || !item.initialInput || item.initialInput.submitted);
+}
+
+/**
+ * `--focus` on a new Pane switches the desktop attached to this host, the way
+ * `panes focus` does. Other clients only switch to Panes they create.
+ */
+function requestHostDesktopFocus(item: { paneId?: string; panelId?: string }): void {
+  // Failed items carry no panel, and their Pane may already be rolled back.
+  if (!item.paneId || !item.panelId) return;
+  const focusEvent: RunpanePaneFocusRequestedEvent = { paneId: item.paneId, panelId: item.panelId };
+  // Best effort: the Pane is already created, and a missed switch never undoes it.
+  try {
+    getPaneEventSink().send('pane:focus-requested', focusEvent);
+  } catch (error) {
+    console.error('[Runpane] Failed to request host desktop focus:', error);
+  }
 }
 
 function resolvePaneCreateActivation(

@@ -46,6 +46,7 @@ vi.spyOn(panelManager, 'getPanel');
 vi.spyOn(panelManager, 'getPanelsForSession');
 vi.spyOn(panelManager, 'updatePanel');
 vi.spyOn(panelManager, 'setActivePanel');
+vi.spyOn(panelManager, 'rememberActivePanel');
 vi.spyOn(panelManager, 'ensureExplorerPanel');
 vi.spyOn(panelManager, 'ensureDiffPanel');
 vi.spyOn(terminalPanelManager, 'initializeTerminal');
@@ -321,6 +322,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.getPanelsForSession).mockReset();
     vi.mocked(panelManager.updatePanel).mockReset();
     vi.mocked(panelManager.setActivePanel).mockReset();
+    vi.mocked(panelManager.rememberActivePanel).mockReset().mockResolvedValue();
     vi.mocked(panelManager.ensureExplorerPanel).mockReset().mockResolvedValue(undefined);
     vi.mocked(panelManager.ensureDiffPanel).mockReset().mockResolvedValue(undefined);
     vi.mocked(terminalPanelManager.initializeTerminal).mockReset();
@@ -505,6 +507,33 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: true, items: [{ ok: true, worktreePath: fs.realpathSync.native(worktreePath) }] });
       expect(services.sessionManager.createSession).not.toHaveBeenCalled();
       expect(panelManager.createPanel).not.toHaveBeenCalled();
+    });
+
+    it('keeps an adopted Pane when the --focus request cannot be delivered', async () => {
+      const repoPath = createTempGitRepo('adopt-focus-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'adopt-focus-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'feature', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      setPaneRuntime({
+        eventSink: { send: (channel: string) => { if (channel === 'pane:focus-requested') throw new Error('sink closed'); } },
+        getConfigManager: () => { throw new Error('unused'); },
+        getPtyHostRuntime: () => null,
+        getWebviewContextMap: () => new Map(),
+      });
+      try {
+        const services = adoptionServices(repoPath, worktreePath);
+        const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+          repo: { id: project.id },
+          focus: true,
+          panes: [{ path: worktreePath, name: 'Adopted', tool: { command: 'bash' } }],
+        }]);
+
+        expect(result).toMatchObject({ ok: true, items: [{ ok: true, paneId: session.id }] });
+        expect(services.sessionManager.archiveSession).not.toHaveBeenCalled();
+      } finally {
+        resetPaneRuntimeForTests();
+      }
     });
 
     it('refuses paths outside the selected repo and duplicate canonical paths', async () => {
@@ -6983,7 +7012,7 @@ describe('runpane IPC handlers', () => {
       }]);
 
       expect(window.restore).toHaveBeenCalledTimes(1);
-      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, terminalPanel.id);
+      expect(panelManager.rememberActivePanel).toHaveBeenCalledWith(session.id, terminalPanel.id);
       expect(window.show).toHaveBeenCalledTimes(1);
       expect(window.focus).toHaveBeenCalledTimes(1);
       expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', {
@@ -7005,6 +7034,27 @@ describe('runpane IPC handlers', () => {
 
       expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', { paneId: session.id, panelId: undefined });
       expect(result).toMatchObject({ ok: true, paneId: session.id });
+    });
+
+    it.each([
+      [{ focus: true }, true],
+      [{ source: 'agent' }, false],
+      [{}, false],
+    ])('panes create %o asks the host desktop to switch: %s', async (flags, switches) => {
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const services = createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        taskQueue: { createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })) } as never,
+      });
+
+      await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: 'active',
+        ...flags,
+        panes: [{ name: 'new-pane', tool: { command: 'bash' } }],
+      }]);
+
+      const focusRequests = sentEvents.mock.calls.filter(([channel]) => channel === 'pane:focus-requested');
+      expect(focusRequests).toEqual(switches ? [['pane:focus-requested', { paneId: session.id, panelId: terminalPanel.id }]] : []);
     });
 
     it('refuses to focus an archived pane and never touches the window', async () => {
@@ -7379,7 +7429,7 @@ describe('runpane IPC handlers', () => {
       const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, url: 'http://localhost:3000' }]);
 
       expect(panelManager.createPanel).not.toHaveBeenCalled();
-      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, 'existing-browser');
+      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, 'existing-browser', 'split');
       // Reopening stamps the tab so an open page reloads with the latest content.
       expect(panelManager.updatePanel).toHaveBeenCalledWith('existing-browser', expect.objectContaining({
         state: expect.objectContaining({ isActive: true, customState: expect.objectContaining({ currentUrl: 'http://localhost:3000/', reopenedAt: expect.any(String) }) }),

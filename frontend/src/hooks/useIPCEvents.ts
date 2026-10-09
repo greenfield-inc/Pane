@@ -10,6 +10,8 @@ import { panelApi } from '../services/panelApi';
 import { openPaneTarget } from '../components/terminal/openPaneLink';
 import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/hostNavigationMemory';
 import { API } from '../utils/api';
+import { rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { devLog } from '../utils/console';
 import { claimCreatedPane, markAppReady } from '../utils/journeyTimings';
 import type { Session, SessionOutput, GitStatus } from '../types/session';
@@ -31,7 +33,7 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     // Invalidate outgoing Session requests and tile memory before any host read.
     useOrchestrationSessionStore.getState().invalidateHost();
     useSessionStore.getState().invalidateHost();
-    usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {},
+    usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {}, activationRequests: {},
       agentStatus: {}, agentStatusSession: {}, agentStatusReason: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
     useSessionWorkspaceLayoutStore.getState().reset();
     // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
@@ -78,12 +80,9 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   if (activeSessionId) {
     const panels = await panelApi.loadPanelsForSession(activeSessionId);
     if (!ownsRuntime()) return;
+    // The tab shown stays this desktop's own; the host's active flag is only
+    // the last one any client picked.
     usePanelStore.getState().setPanels(activeSessionId, panels);
-
-    const activePanel = panels.find((panel) => panel.state.isActive);
-    if (activePanel) {
-      usePanelStore.getState().setActivePanel(activeSessionId, activePanel.id);
-    }
   }
 
   if (!ownsRuntime()) return;
@@ -278,13 +277,16 @@ export function useIPCEvents() {
 
     const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(({ paneId, panelId }) => {
       devLog.debug('[useIPCEvents] Pane focus requested:', { paneId, panelId });
+      // `panes focus` and `panes create --focus` move the host's own desktop
+      // window only; a desktop connected to that host as a remote stays put.
+      const config = useConfigStore.getState().config;
+      if (!config || getActiveRemoteHostId(config.remoteDaemon) !== null) return;
       // Same as clicking the Pane in the sidebar, which also leaves a repository or Sessions view.
       useNavigationStore.getState().navigateToSessions();
-      void useSessionStore.getState().setActiveSession(paneId).then(() => {
-        if (panelId) {
-          usePanelStore.getState().setActivePanel(paneId, panelId);
-        }
-      });
+      // The Pane view applies the tab once its layout has loaded, over this
+      // desktop's remembered one.
+      if (panelId) usePanelStore.getState().requestActivation({ sessionId: paneId, panelId });
+      void useSessionStore.getState().setActiveSession(paneId);
     });
     unsubscribeFunctions.push(unsubscribePaneFocusRequested);
 
@@ -318,6 +320,10 @@ export function useIPCEvents() {
         gitStatusLoading.drain(sessionId);
         gitStatusUpdated.drain(sessionId);
       }
+
+      // Archived or deleted: drop this desktop's view memory for the Pane.
+      const config = useConfigStore.getState().config;
+      if (sessionId && config) rememberPaneLayout(getActiveRemoteHostId(config.remoteDaemon), sessionId, null);
 
       // Dispatch a custom event for other components to listen to
       window.dispatchEvent(new CustomEvent('session-deleted', {
