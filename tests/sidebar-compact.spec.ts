@@ -104,10 +104,12 @@ test.describe('compact sidebar', () => {
       await pane.click();
       await expect(pane).toHaveAttribute('aria-current', 'page');
       await page.screenshot({ path: `${evidence}-active.png` });
-      const unpin = page.getByRole('button', { name: `Unpin ${title}-pinned`, exact: true });
+      // The pinned Pane also has a row under its project; act on the Pinned group's row.
+      const pinnedGroup = page.getByRole('group', { name: 'Pinned', exact: true });
+      const unpin = pinnedGroup.getByRole('button', { name: `Unpin ${title}-pinned`, exact: true });
       await expect(unpin).toBeAttached();
       await page.mouse.move(800, 500);
-      const pinnedArchive = page.getByRole('button', { name: `Archive ${title}-pinned`, exact: true });
+      const pinnedArchive = pinnedGroup.getByRole('button', { name: `Archive ${title}-pinned`, exact: true });
       await expect(unpin.locator('..')).toHaveCSS('opacity', '1');
       await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '0');
       const pinBox = await unpin.boundingBox();
@@ -118,7 +120,7 @@ test.describe('compact sidebar', () => {
       await unpin.hover();
       await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '1');
       await page.mouse.move(800, 500);
-      await page.getByRole('button', { name: `${title}-pinned`, exact: true }).focus();
+      await pinnedGroup.getByRole('button', { name: `${title}-pinned`, exact: true }).focus();
       await page.keyboard.press('Tab');
       await expect(pinnedArchive).toBeFocused();
       await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '1');
@@ -214,10 +216,12 @@ test.describe('compact sidebar', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
     const pinnedToggle = page.getByRole('button', { name: 'Pinned', exact: true });
+    // The pinned row also shows its project name, so match the project header.
+    const alphaHeader = page.getByRole('button', { name: /^(Expand|Collapse) project Alpha$/ });
     const repositoriesToggle = page.getByRole('button', { name: 'Projects', exact: true });
     await expect(pinnedToggle).toBeVisible();
     await expect(repositoriesToggle).toBeVisible();
-    await expect(page.getByText('Alpha', { exact: true })).toBeVisible();
+    await expect(alphaHeader).toBeVisible();
 
     const [pinnedBox, repositoriesBox] = await Promise.all([
       pinnedToggle.boundingBox(),
@@ -226,7 +230,7 @@ test.describe('compact sidebar', () => {
     expect(repositoriesBox?.height).toBe(pinnedBox?.height);
 
     await repositoriesToggle.click();
-    await expect(page.getByText('Alpha', { exact: true })).toHaveCount(0);
+    await expect(alphaHeader).toHaveCount(0);
 
     await collapseSidebar(page);
     await expect(page.getByTestId('compact-repositories-toggle')).toHaveAttribute('aria-expanded', 'false');
@@ -514,7 +518,7 @@ test.describe('compact sidebar', () => {
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: 'Projects', exact: true })).toBeVisible();
-    await expect(page.getByText('Alpha', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^(Expand|Collapse) project Alpha$/ })).toHaveCount(0);
     await collapseSidebar(page);
 
     await expect(page.getByTestId('compact-pinned-toggle')).toHaveAttribute('aria-expanded', 'true');

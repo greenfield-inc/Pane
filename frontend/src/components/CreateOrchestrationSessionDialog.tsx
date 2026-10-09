@@ -10,7 +10,7 @@ import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
-import { Input } from './ui/Input';
+import { Input, Textarea } from './ui/Input';
 import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 
@@ -43,6 +43,7 @@ interface CreateOrchestrationSessionDialogProps {
 interface SessionCreationForm {
   agent: PaneChatAgent;
   name: string;
+  goal: string;
   launchCommand: string;
   customResume: CustomCommandResume | null;
   profile: string;
@@ -58,6 +59,7 @@ function initialSessionCreationForm(config: AppConfig | null): SessionCreationFo
   return {
     agent: supportedSessionAgent(config?.defaultOrchestratorAgent),
     name: '',
+    goal: '',
     launchCommand: config?.defaultSessionCommand ?? '',
     customResume: config?.defaultSessionResume ?? null,
     profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
@@ -89,7 +91,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [isOpen]);
-  const [{ agent, name, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
+  const [{ agent, name, goal, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
   const userEditedLaunch = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
@@ -142,6 +144,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       await onCreate({
         agent,
         name: name.trim() || undefined,
+        goal: goal.trim() || undefined,
         launchCommand,
         profile,
         customResume,
@@ -161,7 +164,8 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       <form onSubmit={submit} className="flex min-h-0 flex-col">
         {header ?? <ModalHeader title="Create Session" />}
         <ModalBody className="min-h-0 space-y-4">
-          <Input label="Name your chat (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="New chat" autoFocus fullWidth />
+          <Input label="Session name (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="Named from your first message" autoFocus fullWidth />
+          <Textarea label="What is this Session for? (optional)" value={goal} onChange={event => dispatch({ type: 'update', values: { goal: event.target.value } })} rows={2} fullWidth />
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
             <div className="grid gap-2" role="radiogroup" aria-label="Session agent">

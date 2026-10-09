@@ -75,6 +75,7 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
   promotedFrom: boundary.optional(boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.nonEmptyString })),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
+  nameIsDefault: boundary.optional(boundary.boolean),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   agent: paneChatAgentSchema,

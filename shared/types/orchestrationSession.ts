@@ -80,6 +80,8 @@ export interface OrchestrationSessionRecord {
   promotedFrom?: { paneId: string; panelId: string };
   id: string;
   name: string;
+  /** The name is the default one; the first message the person sends renames the Session once. */
+  nameIsDefault?: boolean;
   /** Durable UI archive marker. Older records omit this field and read as active. */
   archived?: boolean;
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
@@ -182,6 +184,8 @@ export interface OrchestrationSessionCreateInput {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
+  /** The person left the name blank; the first message they send renames the Session once. */
+  nameFromFirstMessage?: boolean;
   isPinned?: boolean;
   agent?: PaneChatAgent;
   launchCommand?: string;
@@ -213,7 +217,7 @@ export interface OrchestrationSessionUpdateInput {
   outputs?: OrchestrationLink[];
   report?: OrchestrationReport | null;
   expectedRevision?: number;
-  source?: 'user' | 'agent';
+  source?: OrchestrationActivity['source'];
 }
 
 export interface OrchestrationSessionSelector {

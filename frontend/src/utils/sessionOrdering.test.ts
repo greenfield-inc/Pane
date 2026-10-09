@@ -38,7 +38,7 @@ function project(id: number, name = `Project ${id}`): Project {
 }
 
 describe('sessionOrdering', () => {
-  it('formats pinned labels with a short repository name and no owner prefix', () => {
+  it('labels pinned rows with the Pane name and the full repository name without its owner', () => {
     const projects = new Map([
       [1, project(1, 'bloomapi/bloom-mono')],
       [2, project(2, 'dcouple\\doozy')],
@@ -48,8 +48,24 @@ describe('sessionOrdering', () => {
       session({ id: 'doozy', name: 'improve fan out', projectId: 2, isFavorite: true }),
     ], projects);
 
-    expect(pinned.find(item => item.session.id === 'bloom')?.label).toBe('bloom-.../do-tm-560');
-    expect(pinned.find(item => item.session.id === 'doozy')?.label).toBe('doozy/improve fan out');
+    expect(pinned.find(item => item.session.id === 'bloom')).toMatchObject({ label: 'do-tm-560', repositoryName: 'bloom-mono' });
+    expect(pinned.find(item => item.session.id === 'doozy')).toMatchObject({ label: 'improve fan out', repositoryName: 'doozy' });
+  });
+
+  it('breaks pinned ties by Pane name, then repository', () => {
+    const projects = new Map([
+      [1, project(1, 'zeta')],
+      [2, project(2, 'alpha')],
+    ]);
+    const pinnedAt = '2026-01-01T00:00:00.000Z';
+
+    const pinned = getPinnedSessions([
+      session({ id: 'b-zeta', name: 'b', projectId: 1, isFavorite: true, favoritePinnedAt: pinnedAt }),
+      session({ id: 'a-zeta', name: 'a', projectId: 1, isFavorite: true, favoritePinnedAt: pinnedAt }),
+      session({ id: 'a-alpha', name: 'a', projectId: 2, isFavorite: true, favoritePinnedAt: pinnedAt }),
+    ], projects);
+
+    expect(pinned.map(item => item.session.id)).toEqual(['a-alpha', 'a-zeta', 'b-zeta']);
   });
 
   it('orders sessions by displayOrder in the default ascending view', () => {

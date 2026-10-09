@@ -1319,8 +1319,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitPanelUpdated(panel: JsonObject) {
           emit('panel:updated', clone(panel));
         },
-        emitPanelAgentStatus(panelId: string, sessionId: string, state: string) {
-          emit('panel:agent-status', { panelId, sessionId, state });
+        emitPanelAgentStatus(panelId: string, sessionId: string, state: string, reason?: string) {
+          emit('panel:agent-status', { panelId, sessionId, state, reason });
         },
         emitPanelDeleted(panelId: string, sessionId: string) {
           emit('panel:deleted', { panelId, sessionId });

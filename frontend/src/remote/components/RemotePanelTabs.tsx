@@ -1,10 +1,11 @@
 import { ChevronDown, Plus, TerminalSquare } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
 import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
+import { getPanelIcon } from '../../components/panels/panelIcon';
 import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
 import { getRemotePanelTabId, getRemotePanelTabPanelId } from './remotePanelTabIds';
 
@@ -27,7 +28,7 @@ interface RemotePanelTabsProps {
 }
 
 export function RemotePanelTabs({
-  panels,
+  panels: hostPanels,
   selectedPanelId,
   creating,
   customCommands,
@@ -40,6 +41,11 @@ export function RemotePanelTabs({
   const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addMenuId = useId();
+  // Tabs the phone can show (terminals) come first; desktop-only panels follow, each group in host order.
+  const panels = useMemo(
+    () => [...hostPanels].sort((a, b) => Number(a.type !== 'terminal') - Number(b.type !== 'terminal')),
+    [hostPanels],
+  );
 
   useEffect(() => {
     if (!showAddMenu) return;
@@ -134,7 +140,7 @@ export function RemotePanelTabs({
             }`}
           >
             {panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
-            <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">{getPanelIcon(panel.type, panel, 'h-4 w-4')}</span>
             <span className="truncate">{panel.title}</span>
           </button>
         ))}

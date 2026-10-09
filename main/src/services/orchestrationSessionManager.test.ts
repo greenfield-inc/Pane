@@ -12,6 +12,7 @@ import type { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { databaseService } from './database';
 import { panelManager } from './panelManager';
+import { setPaneRuntime, type PaneRuntime } from '../core/runtime';
 import type {
   OrchestrationLink,
   OrchestrationSessionCreateInput,
@@ -274,6 +275,19 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('opens a Session view as a client-local read that asks no client to move', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Quiet open' });
+    const send = vi.fn();
+    setPaneRuntime(partialRuntime({ eventSink: { send } }));
+
+    const view = await fixture.manager.getView({ sessionId: created.session.id });
+
+    expect(databaseService.getActivePanel(view.internalSession.id)?.id).toBe(view.panel.id);
+    expect(send.mock.calls.filter(([channel]) => channel === 'panel:activeChanged')).toEqual([]);
+    setPaneRuntime(partialRuntime({ eventSink: { send: () => undefined } }));
+  });
+
   it('creates a pinned Session and persists declarative pin updates', async () => {
     const fixture = createFixture();
     const input = { name: 'Pinned coordinator', isPinned: true };
@@ -285,6 +299,62 @@ describe('OrchestrationSessionManager', () => {
     await fixture.manager.update(selector, { isPinned: true });
     await fixture.manager.update(selector, { isPinned: true });
     expect((await fixture.manager.get(selector)).isPinned).toBe(true);
+  });
+
+  it('names a Session created without a typed name from its first message, once', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    fixture.manager.observeInput(panelId, '1\r');
+    fixture.manager.observeInput(panelId, 'fix the flaky checkout test please\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please'));
+    fixture.manager.observeInput(panelId, 'now update the docs\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please');
+    expect((await fixture.manager.get(selector)).activity.at(-1)).toMatchObject({ message: 'Renamed to “fix the flaky checkout test please”.', source: 'system' });
+  });
+
+  it('does not name the Session from a message edited with cursor keys', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    // The composer sends "fix cuts"; Pane cannot follow the cursor, so it skips this message.
+    for (const key of ['fix cats', '\x1b[D', '\x1b[D', '\x7f', 'u', '\r']) fixture.manager.observeInput(panelId, key);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('New chat');
+    fixture.manager.observeInput(panelId, 'update the docs\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('update the docs'));
+  });
+
+  it('names the Session from a later message when the first rename fails', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    vi.spyOn(fixture.manager, 'update').mockRejectedValueOnce(new Error('Session changed'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fixture.manager.observeInput(panelId, 'fix the flaky checkout test please\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('New chat');
+    fixture.manager.observeInput(panelId, 'now update the docs\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('now update the docs'));
+  });
+
+  it('keeps a name the person chose', async () => {
+    const fixture = createFixture();
+    const typed = await fixture.manager.create({ name: 'Release prep', agent: 'claude' });
+    const typedNewChat = await fixture.manager.create({ name: 'New chat 42', agent: 'claude' });
+    const renamed = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    await fixture.manager.update({ sessionId: renamed.session.id }, { name: 'Billing' });
+    for (const session of [typed, typedNewChat, renamed]) {
+      fixture.manager.observeInput(session.session.panelIds.claude, 'fix the flaky checkout test please\r');
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get({ sessionId: typed.session.id })).name).toBe('Release prep');
+    expect((await fixture.manager.get({ sessionId: typedNewChat.session.id })).name).toBe('New chat 42');
+    expect((await fixture.manager.get({ sessionId: renamed.session.id })).name).toBe('Billing');
   });
 
   it('reopens WSL Sessions with Linux paths, native commands, and durable distro choice', async () => {
@@ -983,7 +1053,7 @@ describe('OrchestrationSessionManager', () => {
 
     const detached = await fixture.manager.detach({ sessionId: first.session.id }, pane.id);
     expect(detached.associations).toEqual([]);
-    expect(detached.activity.at(-1)?.kind).toBe('detached');
+    expect(detached.activity.at(-1)).toMatchObject({ kind: 'detached', message: 'Detached Pane “Feature Pane”.' });
     const reassigned = await fixture.manager.associate({ sessionId: second.session.id }, { paneId: pane.id });
     expect(reassigned.associations).toEqual([expect.objectContaining({ paneId: pane.id, panelIds: [] })]);
   });
@@ -1235,3 +1305,8 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.paneChatManager.getOrCreate).not.toHaveBeenCalled();
   });
 });
+
+function partialRuntime(value: Partial<PaneRuntime>): PaneRuntime {
+  // SAFETY: The test reads only the event sink from the runtime.
+  return value as PaneRuntime;
+}

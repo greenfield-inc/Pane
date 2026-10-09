@@ -202,10 +202,10 @@ test.describe('animation evidence', () => {
     await capture(
       browser,
       'sidebar-menu-open',
-      'The sidebar Home menu opening from its footer trigger',
+      'The sidebar More menu opening from its footer trigger',
       async () => {},
       async (page) => {
-        await page.getByRole('button', { name: 'Home menu' }).click();
+        await page.getByRole('button', { name: 'More', exact: true }).click();
         await expect(page.getByRole('menu')).toBeVisible();
       },
       (page) => boxOf(page, '[role="menu"]', 52),
@@ -218,7 +218,7 @@ test.describe('animation evidence', () => {
       'menu-row-highlight',
       'Running the pointer down the menu rows',
       async (page) => {
-        await page.getByRole('button', { name: 'Home menu' }).click();
+        await page.getByRole('button', { name: 'More', exact: true }).click();
         await expect(page.getByRole('menu')).toBeVisible();
       },
       async (page) => {
