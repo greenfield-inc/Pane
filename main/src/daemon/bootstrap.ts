@@ -33,6 +33,7 @@ import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { PaneWorkspaceHostController } from './workspaceHost';
+import { runRemoteSetupCommand } from './remote-setup-command';
 import { RemoteHostTailnetMonitor } from './remoteHostTailnet';
 import { registerWorkspaceCommands } from '../ipc/workspace';
 import { getMobilePushSender } from './mobilePushSender';
@@ -361,13 +362,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
-  // On by default only for the desktop Pane that owns ~/.pane; other data dirs opt in through config.
-  const workspaceHost = new PaneWorkspaceHostController(
-    commandRegistry,
-    configManager,
-    mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
-  );
-  registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
   const listeningPortMonitor = createListeningPortMonitor({
     // Terminal panels and agent CLIs (Claude, Codex) both run PTYs inside a Pane.
     terminalPanes: () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()].flatMap(manager =>
@@ -378,9 +372,20 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     onChange: snapshot => getPaneEventSink().send('ports:changed', snapshot),
   });
   commandRegistry.register('ports:list', () => listeningPortMonitor.refresh());
+  // Every listed port is forwarded to signed-in clients, Pane's own included.
+  const isForwardedPort = (port: number) => listeningPortMonitor.snapshot().ports.some(listed => listed.port === port);
+  // On by default only for the desktop Pane that owns ~/.pane; other data dirs opt in through config.
+  const workspaceHost = new PaneWorkspaceHostController(
+    commandRegistry,
+    configManager,
+    mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
+    runRemoteSetupCommand,
+    isForwardedPort,
+  );
+  registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
 
   let paneDaemonServer: PaneDaemonServer | null = null;
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort);
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
