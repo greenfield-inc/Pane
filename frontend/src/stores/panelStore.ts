@@ -17,6 +17,7 @@ export const usePanelStore = create<PanelStore>()(
     unviewedCompletedActivity: {},
     layouts: {},
     focusedGroupIds: {},
+    activationRequests: {},
 
     // Pure synchronous state updates
     removeBrowserPanelsForHostSwitch: () => {
@@ -140,6 +141,18 @@ export const usePanelStore = create<PanelStore>()(
     setFocusedGroup: (sessionId, groupId) => {
       set((state) => {
         state.focusedGroupIds[sessionId] = groupId;
+      });
+    },
+
+    requestActivation: (request) => {
+      set((state) => {
+        state.activationRequests[request.sessionId] = request;
+      });
+    },
+
+    clearActivationRequest: (sessionId) => {
+      set((state) => {
+        delete state.activationRequests[sessionId];
       });
     },
 

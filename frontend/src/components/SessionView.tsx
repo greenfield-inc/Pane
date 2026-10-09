@@ -428,19 +428,7 @@ export const SessionView = memo(() => {
 
     // The host or an agent brought a tab forward in the Pane this desktop shows.
     const handleActivationRequested = (request: PanelActivationRequest) => {
-      if (request.sessionId !== sid) return;
-      const current = usePanelStore.getState().layouts[sid];
-      const panel = usePanelStore.getState().panels[sid]?.find(p => p.id === request.panelId);
-      if (!current || !panel) return;
-      // The dock and the inspector panels live outside the layout tree.
-      const dock = getDockTerminalPanel(usePanelStore.getState().panels[sid] || []);
-      if (dock?.id === panel.id || isInspectorPanelType(panel.type)) return;
-      const focusedGid = usePanelStore.getState().focusedGroupIds[sid];
-      const group = (focusedGid && findGroup(current.root, focusedGid)) || primaryGroup(current.root);
-      const root = request.placement === 'split'
-        ? placePanelInSplit(current.root, panel.id)
-        : addPanelToGroup(current.root, group.id, panel.id);
-      applyLayout(sid, activatePanelInLayout({ ...current, root }, panel.id));
+      if (request.sessionId === sid) usePanelStore.getState().requestActivation(request);
     };
 
     // Handle panel deletion events (for backend-initiated deletes)
@@ -474,6 +462,29 @@ export const SessionView = memo(() => {
       unsubscribeActivation?.();
     };
   }, [activeSession?.id, addPanel, updatePanelState, removePanel, panels, applyLayout]);
+
+  // Apply a requested tab once this visit's layout has loaded, so it wins over
+  // the remembered one. A request for a panel this Pane lacks is dropped.
+  const activationRequest = usePanelStore(state => activeSession ? state.activationRequests[activeSession.id] : undefined);
+  const panelLoadReady = ownsPanelLoad && !panelLoad?.error;
+  useEffect(() => {
+    if (!activationRequest || !panelLoadReady) return;
+    const sid = activationRequest.sessionId;
+    const store = usePanelStore.getState();
+    store.clearActivationRequest(sid);
+    const current = store.layouts[sid];
+    const sessionPanelList = store.panels[sid] || [];
+    const panel = sessionPanelList.find(p => p.id === activationRequest.panelId);
+    if (!current || !panel) return;
+    // The dock and the inspector panels live outside the layout tree.
+    if (getDockTerminalPanel(sessionPanelList)?.id === panel.id || isInspectorPanelType(panel.type)) return;
+    const focusedGid = store.focusedGroupIds[sid];
+    const group = (focusedGid && findGroup(current.root, focusedGid)) || primaryGroup(current.root);
+    const root = activationRequest.placement === 'split'
+      ? placePanelInSplit(current.root, panel.id)
+      : addPanelToGroup(current.root, group.id, panel.id);
+    applyLayout(sid, activatePanelInLayout({ ...current, root }, panel.id));
+  }, [activationRequest, panelLoadReady, applyLayout]);
 
   // Get panels for current session with memoization
   const sessionPanels = useMemo(

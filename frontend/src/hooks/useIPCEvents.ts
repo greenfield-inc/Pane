@@ -33,7 +33,7 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     // Invalidate outgoing Session requests and tile memory before any host read.
     useOrchestrationSessionStore.getState().invalidateHost();
     useSessionStore.getState().invalidateHost();
-    usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {},
+    usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {}, activationRequests: {},
       agentStatus: {}, agentStatusSession: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
     useSessionWorkspaceLayoutStore.getState().reset();
     // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
@@ -283,11 +283,10 @@ export function useIPCEvents() {
       if (!config || getActiveRemoteHostId(config.remoteDaemon) !== null) return;
       // Same as clicking the Pane in the sidebar, which also leaves a repository or Sessions view.
       useNavigationStore.getState().navigateToSessions();
-      void useSessionStore.getState().setActiveSession(paneId).then(() => {
-        if (panelId) {
-          usePanelStore.getState().setActivePanel(paneId, panelId);
-        }
-      });
+      // The Pane view applies the tab once its layout has loaded, over this
+      // desktop's remembered one.
+      if (panelId) usePanelStore.getState().requestActivation({ sessionId: paneId, panelId });
+      void useSessionStore.getState().setActiveSession(paneId);
     });
     unsubscribeFunctions.push(unsubscribePaneFocusRequested);
 
