@@ -127,17 +127,22 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
         ...state.panelsBySessionId,
         [panel.sessionId]: nextPanels,
       },
-      selectedPanelId: state.selectedPanelId ?? panel.id,
+      // Only a Pane on screen with no tab yet takes the new tab; otherwise nobody moves.
+      selectedPanelId: state.selectedPanelId ?? (panel.sessionId === state.selectedSessionId ? panel.id : null),
     };
   }),
 
-  removePanel: (sessionId, panelId) => set((state) => ({
-    panelsBySessionId: {
-      ...state.panelsBySessionId,
-      [sessionId]: (state.panelsBySessionId[sessionId] ?? []).filter(panel => panel.id !== panelId),
-    },
-    selectedPanelId: state.selectedPanelId === panelId ? null : state.selectedPanelId,
-  })),
+  removePanel: (sessionId, panelId) => set((state) => {
+    const panels = state.panelsBySessionId[sessionId] ?? [];
+    const index = panels.findIndex(panel => panel.id === panelId);
+    const remaining = panels.filter(panel => panel.id !== panelId);
+    // Closing the shown tab elsewhere moves this client to its neighbour, as closing a browser tab does.
+    const neighbour = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]?.id ?? null;
+    return {
+      panelsBySessionId: { ...state.panelsBySessionId, [sessionId]: remaining },
+      selectedPanelId: state.selectedPanelId === panelId ? neighbour : state.selectedPanelId,
+    };
+  }),
 }));
 
 export function findFirstSessionId(projects: Array<{ sessions?: Session[] }>): string | null {

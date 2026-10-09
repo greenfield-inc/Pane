@@ -125,3 +125,21 @@ test('reopens the Session it had open after a reload', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(shownPane(page)).toHaveCount(0);
 });
+
+test('moves to a neighbouring tab when another client closes the one it shows, then stays there', async ({ page }) => {
+  await openConnectedRemotePwa(page, { sessionNames: ['Pane P', 'Pane Q'], panelTitles: ['claude', 'shell', 'logs'] });
+  await page.getByRole('tab', { name: 'shell', exact: true }).click();
+
+  await emitRemoteHostEvent(page, 'panel:deleted', { sessionId: P, panelId: 'anim-panel-1' });
+  await expect(selectedTab(page)).toHaveText('logs');
+
+  // A background tab opened on any Pane afterwards moves nobody.
+  for (const sessionId of [Q, P]) {
+    await emitRemoteHostEvent(page, 'panel:created', {
+      id: `${sessionId}-background`, sessionId, type: 'terminal', title: 'background',
+      state: { isActive: false }, metadata: { createdAt: '', lastActiveAt: '', position: 9 },
+    });
+  }
+  await expect(page.getByRole('tab', { name: 'background', exact: true })).toBeVisible();
+  await expect(selectedTab(page)).toHaveText('logs');
+});
