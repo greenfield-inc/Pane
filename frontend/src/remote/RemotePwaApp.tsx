@@ -20,6 +20,7 @@ import { RemoteSidebar, type RemoteSidebarActions } from './components/RemoteSid
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
+import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
 import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
@@ -870,9 +871,13 @@ export function RemotePwaApp() {
             tabIndex={0}
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
-            {selectedPanel.type === 'browser'
-              ? <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
-              : <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
+            {selectedPanel.type === 'browser' && (
+              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
+            )}
+            {selectedPanel.type === 'explorer' && adapter && (
+              <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
+            )}
+            {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}
       </section>
@@ -910,7 +915,7 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {panel.type} panels are visible in desktop Pane. Remote Pane PWA shows terminal and browser tabs for {session.name}.
+          {panel.type} panels are visible in desktop Pane. Remote Pane PWA shows terminal, browser and explorer tabs for {session.name}.
         </p>
       </div>
     </div>

@@ -24,6 +24,8 @@ export interface RemotePwaMockOptions {
   browserPanels?: Array<{ title: string; url: string }>;
   /** What `ports:list` answers. */
   ports?: ListeningPortsSnapshot;
+  /** Worktree files by relative path, served through `file:*`; adds the Explorer tab last. Binary files are `null`. */
+  files?: Record<string, string | null>;
 }
 
 /**
@@ -34,6 +36,8 @@ export interface RemotePwaMockHost {
   panes: MockPane[];
   archivedPanes: MockPane[];
   sessions: OrchestrationSessionRecord[];
+  /** The selected pane's worktree; `file:write` changes it. */
+  files: Record<string, string | null>;
 }
 
 const PROFILE = {
@@ -126,6 +130,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
       panel('browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
     )),
   ];
+  if (options.files) panels.push(panel('explorer', 'Explorer', panels.length));
 
   const affordances = {
     terminalShortcuts: options.shortcuts ?? [
@@ -155,6 +160,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     panes: sessions,
     archivedPanes: [],
     sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
+    files: { ...options.files },
   };
 
   const ports = options.ports ?? { host: 'MacBook Pro', ports: [] };
@@ -422,6 +428,27 @@ async function installRemoteHostRoute(
         result = fixtures.panel(request.type, request.title, fixtures.panels.length, request.type === 'browser' ? { currentUrl: '' } : undefined);
         break;
       }
+      case 'file:list': {
+        // SAFETY: the PWA sends a FileListRequest first.
+        const folder = (args[0] as { path?: string }).path ?? '';
+        result = { success: true, files: listMockFolder(host.files, folder) };
+        break;
+      }
+      case 'file:read': {
+        // SAFETY: the PWA sends a FileReadRequest first.
+        const content = host.files[(args[0] as { filePath: string }).filePath];
+        result = content === undefined ? { success: false, error: 'ENOENT' }
+          : content === null ? { success: false, binary: true, error: 'Binary files cannot be edited as text' }
+          : { success: true, content };
+        break;
+      }
+      case 'file:write': {
+        // SAFETY: the PWA sends a FileWriteRequest first.
+        const request = args[0] as { filePath: string; content: string };
+        host.files[request.filePath] = request.content;
+        result = { success: true };
+        break;
+      }
       case 'panels:checkInitialized':
         result = true;
         break;
@@ -441,4 +468,18 @@ async function installRemoteHostRoute(
       body: JSON.stringify({ ok: true, result }),
     });
   });
+}
+
+/** One folder of the mock worktree, folders first, the way `file:list` answers. */
+function listMockFolder(files: Record<string, string | null>, folder: string) {
+  const prefix = folder ? `${folder}/` : '';
+  const entries = new Map<string, { name: string; path: string; isDirectory: boolean; size?: number }>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!path.startsWith(prefix)) continue;
+    const [name, ...rest] = path.slice(prefix.length).split('/');
+    entries.set(name, rest.length
+      ? { name, path: `${prefix}${name}`, isDirectory: true }
+      : { name, path, isDirectory: false, size: content?.length ?? 1024 });
+  }
+  return [...entries.values()].sort((a, b) => (a.isDirectory === b.isDirectory ? a.name.localeCompare(b.name) : a.isDirectory ? -1 : 1));
 }

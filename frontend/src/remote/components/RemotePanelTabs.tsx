@@ -1,4 +1,4 @@
-import { ChevronDown, Globe, Plus, TerminalSquare } from 'lucide-react';
+import { ChevronDown, FolderTree, Globe, Plus, TerminalSquare } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
@@ -134,9 +134,7 @@ export function RemotePanelTabs({
                 : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
-            {panel.type === 'browser'
-              ? <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
-              : <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />}
+            <PanelTabIcon type={panel.type} />
             <span className="truncate">{panel.title}</span>
           </button>
         ))}
@@ -215,6 +213,12 @@ export function RemotePanelTabs({
       </div>
     </div>
   );
+}
+
+function PanelTabIcon({ type }: { type: ToolPanel['type'] }) {
+  if (type === 'browser') return <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />;
+  if (type === 'explorer') return <FolderTree className="h-4 w-4 shrink-0" aria-hidden="true" />;
+  return <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />;
 }
 
 function AddToolMenuItem({
