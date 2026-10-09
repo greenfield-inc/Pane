@@ -492,7 +492,8 @@ export function registerPanelHandlers(
   // Panel CRUD operations
   commandRegistry.register('panels:create', async (request: CreatePanelRequest) => {
     try {
-      const panel = await panelManager.createPanel(request);
+      // A client's own new tab moves no other client.
+      const panel = await panelManager.createPanel({ ...request, announceActivation: false });
       return { success: true, data: panel };
     } catch (error) {
       console.error('[IPC] Failed to create panel:', error);
@@ -577,7 +578,7 @@ export function registerPanelHandlers(
   
   commandRegistry.register('panels:set-active', async (sessionId: string, panelId: string) => {
     try {
-      await panelManager.setActivePanel(sessionId, panelId);
+      await panelManager.rememberActivePanel(sessionId, panelId);
       return { success: true };
     } catch (error) {
       console.error('[IPC] Failed to set active panel:', error);

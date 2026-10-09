@@ -754,8 +754,9 @@ export function registerRunpaneHandlers(
         }
       }
 
+      // Last used only: pane:focus-requested moves the host's own desktop, and no other client.
       if (normalized.panelId) {
-        await panelManager.setActivePanel(pane.id, normalized.panelId);
+        await panelManager.rememberActivePanel(pane.id, normalized.panelId);
       }
 
       // A headless host has no window; its connected clients still follow the event.
@@ -1074,7 +1075,7 @@ export function registerRunpaneHandlers(
         ? await resolvePanelOpenUrl(normalized.url, services, pane)
         : await resolvePanelOpenFile(services, pane, normalized.filePath ?? '');
       const placement = normalized.placement ?? 'split';
-      // Activates the tab inside its Pane; never raises or focuses the window.
+      // Brings the tab forward on clients showing this Pane; never raises or focuses the window.
       const activate = normalized.noFocus !== true;
       const existing = panelManager.getPanelsForSession(pane.id).find(panel => panelShowsOpenTarget(panel, target));
 
@@ -1082,7 +1083,7 @@ export function registerRunpaneHandlers(
       if (existing) {
         const title = normalized.title && normalized.title !== existing.title ? normalized.title : undefined;
         if (activate) {
-          await panelManager.setActivePanel(pane.id, existing.id);
+          await panelManager.setActivePanel(pane.id, existing.id, placement);
         }
         // Publish the final active state and reload signal together for desktop consumers.
         const current = panelManager.getPanel(existing.id) ?? existing;
@@ -1100,6 +1101,7 @@ export function registerRunpaneHandlers(
           initialState: { customState: target.customState },
           metadata: { openPlacement: placement },
           activate,
+          announceActivation: activate,
         });
       }
 
@@ -1973,6 +1975,8 @@ async function createTerminalPanelForSession(
   };
   if (options.activate === false) {
     createRequest.activate = false;
+  } else {
+    createRequest.announceActivation = true;
   }
 
   const panel = await panelManager.createPanel(createRequest);

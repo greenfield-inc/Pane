@@ -41,11 +41,13 @@ The tool panel system consists of several key components:
 ## Database Schema
 
 - `tool_panels` table stores panel configuration and state
-- `sessions.active_panel_id` tracks the currently active panel per session
+- `sessions.active_panel_id` is the last-used tab per session: the one any client picked most recently. A client with no memory of a Pane opens it there, and `runpane panels list` reports it as active
 - Foreign key constraints ensure panels are cleaned up when sessions are deleted
 
 ## Event System
 
+- A client's tab click (`panels:set-active`), `runpane panes focus` and opening a Session view update `active_panel_id` and move no other client. A host- or agent-initiated activation (`runpane panels open`, `panels create`/`panes create` with focus, Pane Chat, new-Pane setup, run scripts) sends `panel:activeChanged` (`PanelActivationRequest`), which only clients already showing that Pane follow
+- The remote web and mobile app remembers its own Pane, Session and tab per host in browser storage. The desktop still opens a Pane on `active_panel_id` and the stored `panel_layout`
 - Terminal panels emit `terminal:command_executed`, `terminal:exit`, and `files:changed` events
 - Event bus routes events to subscribed panels (planned for future panel types)
 - Events support future inter-panel communication (e.g., diff panels reacting to file changes)
