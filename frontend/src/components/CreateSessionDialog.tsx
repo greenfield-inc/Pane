@@ -10,6 +10,8 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { useSessionPreferencesStore, type SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useNavigationStore } from '../stores/navigationStore';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../stores/configStore';
 import { generatePaneName, sanitizePaneName } from '../utils/paneName';
 
@@ -35,6 +37,28 @@ interface CreateSessionDialogProps {
   initialFolderId?: string; // Folder to create the new session in
   // Callback called after session is successfully created (for "Discard and Retry" to archive old session)
   onSessionCreated?: () => void;
+}
+
+/** Adds each Pane this form creates to the Session as its creation event arrives; returns a function that stops listening. */
+function associateCreatedPanes(sessionId: string, projectId: number | undefined, paneName: string, count: number): () => void {
+  let remaining = count;
+  const stop = () => {
+    clearTimeout(timer);
+    unsubscribe?.();
+  };
+  const unsubscribe = window.electronAPI?.events?.onSessionCreated(session => {
+    if (session.projectId !== projectId || !session.name.startsWith(paneName)) return;
+    remaining -= 1;
+    if (remaining === 0) stop();
+    void API.orchestrationSessions.associate({ sessionId }, { paneId: session.id })
+      .then(result => {
+        if (!result.success) console.warn('[CreateSessionDialog] Could not add the Pane to the Session:', result.error);
+        return useOrchestrationSessionStore.getState().refresh();
+      })
+      .catch(error => console.warn('[CreateSessionDialog] Could not add the Pane to the Session:', error));
+  });
+  const timer = setTimeout(stop, 120_000);
+  return stop;
 }
 
 export function CreateSessionDialog(props: CreateSessionDialogProps) {
@@ -76,6 +100,10 @@ export function CreatePaneForm({
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [useWorktree, setUseWorktree] = useState(true);
   const [startPinned, setStartPinned] = useState(false);
+  const [addToSession, setAddToSession] = useState(true);
+  const openSession = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId && session.archived !== true));
+  const sessionViewShowing = useNavigationStore(state => state.activeView === 'pane-chat');
+  const targetSession = sessionViewShowing ? openSession : undefined;
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSessionOptions, setShowSessionOptions] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
@@ -104,6 +132,7 @@ export function CreatePaneForm({
         setSessionName(initialSessionName);
       }
       setSessionCount(1);
+      setAddToSession(true);
       setFormData(prev => ({ ...prev, count: 1, baseBranch: initialBaseBranch }));
     }
   }, [isOpen, loadPreferences, initialSessionName, initialBaseBranch]);
@@ -346,6 +375,7 @@ export function CreatePaneForm({
     setIsSubmitting(true);
     onSubmittingChange?.(true);
 
+    let stopAssociating: (() => void) | undefined;
     try {
       // Determine if we need to create a folder
       // Create folder when: multiple sessions (sessionCount > 1)
@@ -366,6 +396,10 @@ export function CreatePaneForm({
         }
       }
 
+      // Listen before creating so a fast creation event is not missed.
+      stopAssociating = addToSession && targetSession
+        ? associateCreatedPanes(targetSession.id, projectId, cleanedName, sessionCount)
+        : undefined;
       const response = await API.sessions.create({
         prompt: '',
         worktreeTemplate: cleanedName,
@@ -380,6 +414,7 @@ export function CreatePaneForm({
       });
 
       if (!response.success) {
+        stopAssociating?.();
         showError({
           title: 'Failed to Create Pane',
           error: response.error || 'An error occurred while creating the pane.',
@@ -396,6 +431,7 @@ export function CreatePaneForm({
 
       onClose();
     } catch (error: unknown) {
+      stopAssociating?.();
       console.error('Error creating session:', error);
       const errorMessage = error instanceof Error ? error.message : 'An error occurred while creating the pane.';
       const errorDetails = error instanceof Error ? (error.stack || error.toString()) : String(error);
@@ -620,6 +656,17 @@ export function CreatePaneForm({
                 <p className="text-xs text-text-tertiary mt-2">
                   Leave empty to use {suggestedName}.
                 </p>
+              )}
+              {targetSession && (
+                <label className="mt-3 flex min-w-0 items-center gap-2 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    checked={addToSession}
+                    onChange={(e) => setAddToSession(e.target.checked)}
+                    className="flex-shrink-0"
+                  />
+                  <span className="truncate min-w-0">Add to {targetSession.name}</span>
+                </label>
               )}
             </div>
 
