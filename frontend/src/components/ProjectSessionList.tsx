@@ -16,6 +16,7 @@ import type { DropdownItem } from './ui/Dropdown';
 import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
+import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { showActionError } from '../stores/errorStore';
 import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
@@ -1091,11 +1092,8 @@ export function ArchivedSessions() {
   const handleRestoreSession = async (sessionId: string) => {
     try {
       const response = await API.sessions.restore(sessionId);
-      if (!response.success) {
-        showActionError('Could not restore the Pane', response.error);
-        return;
-      }
-      loadArchivedSessions();
+      if (response.success) loadArchivedSessions();
+      else showActionError('Could not restore the Pane', response.error);
     } catch (e) {
       console.error('Failed to restore session:', e);
       showActionError('Could not restore the Pane', e);
@@ -1112,9 +1110,7 @@ export function ArchivedSessions() {
       // Keep the current Session selected when a historical Session is restored.
       await refreshOrchestrationSessions();
     } catch (cause) {
-      setOrchestrationRestoreError(
-        cause instanceof Error ? cause.message : 'Failed to restore Session',
-      );
+      setOrchestrationRestoreError(ipcErrorMessage(cause, 'Failed to restore Session'));
     }
   };
 
@@ -1128,7 +1124,6 @@ export function ArchivedSessions() {
     try {
       const response = await API.sessions.permanentDelete(session.id);
       if (!response.success) {
-        console.error('Failed to permanently delete session:', response.error);
         showActionError('Could not delete the Pane', response.error);
         return;
       }
@@ -1154,7 +1149,6 @@ export function ArchivedSessions() {
     try {
       const response = await API.sessions.permanentDeleteArchived();
       if (!response.success) {
-        console.error('Failed to permanently delete archived sessions:', response.error);
         showActionError('Could not delete the archived Panes', response.error);
         return;
       }
