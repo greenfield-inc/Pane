@@ -38,7 +38,8 @@ async function exited(child: ChildProcess): Promise<void> {
   await new Promise(resolve => child.once('exit', resolve));
 }
 
-describe('listening port monitor', () => {
+// Each read runs lsof, ss or PowerShell, which takes seconds on a busy CI runner.
+describe('listening port monitor', { timeout: 30_000 }, () => {
   it('lists a web server started in a Pane terminal under that Pane, and drops it once it stops', async () => {
     const { child, port } = await startListener(HTTP_SERVER);
     const monitor = createListeningPortMonitor({
@@ -70,7 +71,8 @@ describe('listening port monitor', () => {
     expect(listed).toMatchObject({ port, group: 'other', kind: 'tcp', process: 'node' });
   });
 
-  it('lists a one-shot listener like nc as tcp without connecting to it', async () => {
+  // Windows ships no nc.
+  it.skipIf(process.platform === 'win32')('lists a one-shot listener like nc as tcp without connecting to it', async () => {
     const port = await freePort();
     const child = spawn('nc', ['-l', String(port)], { stdio: 'ignore' });
     children.push(child);
