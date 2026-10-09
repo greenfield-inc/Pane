@@ -23,6 +23,7 @@ async function openBrowserPanel(page: Page, url = ''): Promise<void> {
 const answerPortsList = (page: Page, ports: ListeningPortsSnapshot) => page.evaluate(value => window.portsTest.answerPortsList(value), ports);
 const answerConnectionState = (page: Page, mode: 'local' | 'remote') => page.evaluate(value => window.portsTest.answerConnectionState(value), mode);
 const emitPorts = (page: Page, ports: ListeningPortsSnapshot) => page.evaluate(value => window.portsTest.emitPorts(value), ports);
+const loadConfig = (page: Page, mode: 'local' | 'remote') => page.evaluate(value => window.portsTest.loadConfig(value), mode);
 
 test('ports open only once this computer is known to be the host', async ({ page }) => {
   await openBrowserPanel(page);
@@ -71,4 +72,55 @@ test('the Ports menu works from the keyboard', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(page.getByTitle('Open localhost:5174')).toHaveCount(0);
   await expect(trigger).toBeFocused();
+});
+
+test.describe('a remote desktop loading a host page', () => {
+  const tunnelled = (localPort: number): ListeningPortsSnapshot => ({
+    host: 'devbox',
+    ports: [{ port: 5173, pid: 5173, process: 'node', group: 'other', kind: 'web', localPort }],
+  });
+  const page5173 = 'http://localhost:5173/app';
+
+  test('waits for the host\'s ports, then loads the tunnelled port marked with the host', async ({ page }) => {
+    await openBrowserPanel(page, page5173);
+    await loadConfig(page, 'remote');
+    await expect(page.getByText("Connecting to the host's ports…")).toBeVisible();
+    await expect(page.locator('webview')).toHaveCount(0);
+
+    await answerPortsList(page, tunnelled(5174));
+    await expect(page.locator('webview')).toHaveAttribute('src', 'http://localhost:5174/app');
+    await expect(page.getByText('on devbox')).toBeVisible();
+  });
+
+  test('never loads this computer\'s own port for a host port without a tunnel', async ({ page }) => {
+    await openBrowserPanel(page, page5173);
+    await loadConfig(page, 'remote');
+    await answerPortsList(page, snapshot(5173));
+
+    await expect(page.getByText("Port 5173 on devbox isn't reachable from this computer.")).toBeVisible();
+    await expect(page.locator('webview')).toHaveCount(0);
+  });
+
+  test('unloads the page while the host stops listening, and loads it again when the port returns', async ({ page }) => {
+    await openBrowserPanel(page, page5173);
+    await loadConfig(page, 'remote');
+    await answerPortsList(page, tunnelled(5174));
+    await expect(page.locator('webview')).toHaveAttribute('src', 'http://localhost:5174/app');
+
+    await emitPorts(page, { host: 'devbox', ports: [] });
+    await expect(page.getByText('Nothing listens on it on the host right now.', { exact: false })).toBeVisible();
+    await expect(page.locator('webview')).toHaveCount(0);
+
+    await emitPorts(page, tunnelled(5175));
+    await expect(page.locator('webview')).toHaveAttribute('src', 'http://localhost:5175/app');
+  });
+
+  test('loads the URL as it is from a host too old to list ports', async ({ page }) => {
+    await openBrowserPanel(page, page5173);
+    await loadConfig(page, 'remote');
+    await answerPortsList(page, { host: 'old host', ports: [], unsupportedHost: true });
+
+    await expect(page.locator('webview')).toHaveAttribute('src', page5173);
+    await expect(page.getByText('on old host')).toHaveCount(0);
+  });
 });
