@@ -348,6 +348,7 @@ export function RemotePwaApp() {
     : selectedSessionId ? `pane:${selectedSessionId}` : null;
   const { requestView, cancelRequest } = useRemoteBrowserHistory({
     enabled: adapter !== null && !isNativeMobile(),
+    host: activeProfile?.id ?? '',
     view: historyView,
     overlayOpen: sidebarOpen || createSessionProject !== null || createOrchestrationOpen,
     onNavigate: (view) => {

@@ -43,12 +43,14 @@ export function nextHistoryAction(
 const STATE_KEY = 'paneRemote';
 
 const HISTORY_STATE = boundary.object({
-  [STATE_KEY]: boundary.object({ view: boundary.nullable(boundary.string), overlay: boundary.boolean }),
+  [STATE_KEY]: boundary.object({ host: boundary.string, view: boundary.nullable(boundary.string), overlay: boundary.boolean }),
 });
 
 interface RemoteBrowserHistoryOptions {
   /** Off in the native shell, whose back button has its own handler. */
   enabled: boolean;
+  /** The connected host's profile id; entries from another host are skipped. */
+  host: string;
   view: RemoteHistoryView;
   overlayOpen: boolean;
   onNavigate: (view: RemoteHistoryView) => void;
@@ -61,22 +63,25 @@ interface RemoteBrowserHistoryOptions {
  * the next view the person opens so it gets its own history entry, and
  * `cancelRequest`, which drops that mark when the view fails to open.
  */
-export function useRemoteBrowserHistory({ enabled, view, overlayOpen, onNavigate, onCloseOverlays }: RemoteBrowserHistoryOptions) {
+export function useRemoteBrowserHistory({ enabled, host, view, overlayOpen, onNavigate, onCloseOverlays }: RemoteBrowserHistoryOptions) {
   const pendingViewRef = useRef<RemoteHistoryView | undefined>(undefined);
-  const latestRef = useCommittedRef({ enabled, view, overlayOpen, onNavigate, onCloseOverlays });
+  const latestRef = useCommittedRef({ enabled, host, view, overlayOpen, onNavigate, onCloseOverlays });
 
   const syncHistory = useCallback(() => {
     const latest = latestRef.current;
     if (!latest.enabled) return;
     const current: RemoteHistoryEntry = { view: latest.view, overlay: latest.overlayOpen };
-    const action = nextHistoryAction(decodeOptionalBoundary(window.history.state, HISTORY_STATE)?.[STATE_KEY] ?? null, current, pendingViewRef.current);
+    const stored = decodeOptionalBoundary(window.history.state, HISTORY_STATE)?.[STATE_KEY];
+    const top = stored && stored.host === latest.host ? stored : null;
+    const action = nextHistoryAction(top, current, pendingViewRef.current);
     if (pendingViewRef.current === latest.view) pendingViewRef.current = undefined;
-    if (action === 'push') window.history.pushState({ [STATE_KEY]: current }, '');
-    else if (action === 'replace') window.history.replaceState({ [STATE_KEY]: current }, '');
+    const state = { [STATE_KEY]: { ...current, host: latest.host } };
+    if (action === 'push') window.history.pushState(state, '');
+    else if (action === 'replace') window.history.replaceState(state, '');
     else if (action === 'back') window.history.back();
   }, [latestRef]);
 
-  useEffect(() => { syncHistory(); }, [enabled, overlayOpen, view, syncHistory]);
+  useEffect(() => { syncHistory(); }, [enabled, host, overlayOpen, view, syncHistory]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -84,6 +89,11 @@ export function useRemoteBrowserHistory({ enabled, view, overlayOpen, onNavigate
       const entry = decodeOptionalBoundary(event.state, HISTORY_STATE)?.[STATE_KEY];
       if (!entry) return;
       const latest = latestRef.current;
+      // An entry from a host connected earlier in this tab: step past it.
+      if (entry.host !== latest.host) {
+        window.history.back();
+        return;
+      }
       pendingViewRef.current = undefined;
       if (latest.overlayOpen) latest.onCloseOverlays();
       if (entry.view !== latest.view) latest.onNavigate(entry.view);
