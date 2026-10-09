@@ -16,7 +16,7 @@ export function usePreviewUrl(sessionId: string, filePath: string) {
         if (disposed) release(value);
         else { source = value; setUrl(value); }
       } catch {
-        if (!disposed) setError('Cannot preview this file. It may be unavailable or on a remote host.');
+        if (!disposed) setError('Cannot preview this file. It may have been moved or deleted.');
       }
     };
     void acquire();
