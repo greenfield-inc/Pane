@@ -167,6 +167,7 @@ export function SessionWorkspacePanels({
     void panelApi.loadPanelsForSession(sessionId).then(async saved => {
       if (cancelled) return;
       usePanelStore.getState().setPanels(sessionId, saved);
+      // applyLayout below remembers whatever this desktop shows first.
       const stored = await readPaneLayout(hostIdRef.current, sessionId) ?? await panelApi.getLayout(sessionId);
       if (cancelled) return;
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);

@@ -356,6 +356,9 @@ export const SessionView = memo(() => {
           : primaryGroup(layout.root).id;
         const shownPanelId = remembered ? findGroup(layout.root, focusedGroupId)?.activePanelId : fallbackActiveId;
         if (shownPanelId) setActivePanelInStore(sid, shownPanelId);
+        // What this desktop showed first is its own from now on, even if it
+        // never changes it, so another client's later split does not leak in.
+        if (!remembered) rememberPaneLayout(hostId, sid, layout);
         setLayoutInStore(sid, layout);
         setFocusedGroupInStore(sid, focusedGroupId);
         setPanelLoad({ id: sid, revision: selectionRevision, hostId, error: null });
