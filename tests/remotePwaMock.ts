@@ -270,7 +270,7 @@ export async function openConnectedRemotePwa(
     // Pushes one host event down the live stream, as the daemon's SSE does.
     Object.defineProperty(window, '__paneRemoteEmit', {
       configurable: true,
-      value: (channel: string, payload: unknown) => {
+      value: (channel: string, payload: JsonValue) => {
         const data = JSON.stringify({ channel, args: [payload], timestamp: new Date().toISOString() });
         live?.listeners.get('daemon-event')?.(new MessageEvent('daemon-event', { data }));
       },
