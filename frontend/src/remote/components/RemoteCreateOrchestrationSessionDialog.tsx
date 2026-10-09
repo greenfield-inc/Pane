@@ -37,6 +37,7 @@ export function RemoteCreateOrchestrationSessionDialog({
   onCreated,
 }: RemoteCreateOrchestrationSessionDialogProps) {
   const [name, setName] = useState('');
+  const [goal, setGoal] = useState('');
   // Follows the host default, which can arrive after the sheet opens, until the person picks one.
   const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   const agent = pickedAgent ?? sessionAgents.defaultAgent;
@@ -51,7 +52,7 @@ export function RemoteCreateOrchestrationSessionDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const view = await adapter.createOrchestrationSession({ name: name.trim() || defaultName, agent, isPinned: startPinned });
+      const view = await adapter.createOrchestrationSession({ name: name.trim() || defaultName, nameFromFirstMessage: !name.trim(), goal: goal.trim() || undefined, agent, isPinned: startPinned });
       onCreated(view);
       onClose();
     } catch (createError) {
@@ -102,14 +103,27 @@ export function RemoteCreateOrchestrationSessionDialog({
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
               <div>
                 <label htmlFor="remote-create-session-name" className="mb-2 block text-sm font-semibold text-text-primary">
-                  Name your chat (optional)
+                  Session name (optional)
                 </label>
                 <input
                   id="remote-create-session-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder={defaultName}
+                  placeholder="Named from your first message"
                   className="h-12 w-full rounded-md border border-border-primary bg-surface-secondary px-3 text-text-primary outline-none placeholder:text-text-muted focus:border-interactive focus:ring-2 focus:ring-interactive"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="remote-create-session-goal" className="mb-2 block text-sm font-semibold text-text-primary">
+                  What is this Session for? (optional)
+                </label>
+                <textarea
+                  id="remote-create-session-goal"
+                  value={goal}
+                  onChange={(event) => setGoal(event.target.value)}
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-border-primary bg-surface-secondary px-3 py-2 text-text-primary outline-none placeholder:text-text-muted focus:border-interactive focus:ring-2 focus:ring-interactive"
                 />
               </div>
 

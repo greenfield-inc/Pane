@@ -72,6 +72,8 @@ Password protection is off by default. When it is on, every client must send the
 
 ## What `write` and `exec` can do
 
+Every admitted login can also reach any port listening on the machine from desktop Pane, as [forwarded ports](SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports).
+
 `write` and `exec` give your agents SSH-level control of every joined machine, and so does anyone the machine's visibility lets in: under "Everyone on this tailnet" that includes the other people on the tailnet. A local agent's permission prompts and sandbox see only `runpane workspace ... exec`, not what runs on the other machine. Turn workspaces off on any machine that should not accept this.
 
 ## Hand a task to another machine

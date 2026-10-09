@@ -11,6 +11,7 @@ import { existsSync } from 'fs';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { CreateSessionRequest, Session } from '../types/session';
+import type { SessionCreationJob } from '../services/taskQueue';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { convertDbFolderToRendererFolder } from '../services/folderEvents';
 import { sessionImageCounters } from './panels';
@@ -254,6 +255,19 @@ export function registerSessionHandlers(
     }
   });
 
+  // Create Pane's "Add to <Session>": each Pane joins the Session as soon as it exists,
+  // even if its setup later fails. A failed association is logged and never undoes the Pane.
+  const associateWhenCreated = (jobs: SessionCreationJob[], orchestrationSessionId: string | undefined) => {
+    const manager = services.orchestrationSessionManager;
+    if (!orchestrationSessionId || !manager || !taskQueue) return;
+    for (const job of jobs) {
+      taskQueue.whenSessionCreated(job, paneId => {
+        manager.associate({ sessionId: orchestrationSessionId }, { paneId })
+          .catch(error => console.warn('[IPC] Could not add the new Pane to its Session:', error));
+      });
+    }
+  };
+
   commandRegistry.register('sessions:create', async (request: CreateSessionRequest) => {
     try {
       let targetProject;
@@ -295,8 +309,10 @@ export function registerSessionHandlers(
           sessionToolType,
           request.folderId,
           request.isMainRepo,
-          request.startPinned
+          request.startPinned,
+          request.clientRequestId
         );
+        associateWhenCreated(jobs, request.associateSessionId);
 
         return { success: true, data: { jobIds: jobs.map(job => job.id) } };
       } else {
@@ -309,8 +325,10 @@ export function registerSessionHandlers(
           isMainRepo: request.isMainRepo,
           baseBranch: request.baseBranch,
           toolType: sessionToolType,
-          startPinned: request.startPinned
+          startPinned: request.startPinned,
+          clientRequestId: request.clientRequestId
         });
+        associateWhenCreated([job], request.associateSessionId);
 
         return { success: true, data: { jobId: job.id } };
       }

@@ -4,6 +4,8 @@ import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
 import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
+import { decodeSessionPanelLayout } from '../../../shared/types/panels';
+import type { SessionPanelLayout } from '../../../shared/types/panels';
 
 type SidebarSection = 'pinned' | 'repositories';
 
@@ -140,6 +142,33 @@ class UIStateManager {
   /** A null layout clears the memory: this host has nothing tiled worth keeping. */
   saveSessionWorkspaceLayout(hostId: string | null, layout: SessionWorkspaceLayout | null): void {
     const key = this.sessionWorkspaceLayoutKey(hostId);
+    if (!layout) {
+      this.db.deleteUIState(key);
+      return;
+    }
+    this.db.setUIState(key, JSON.stringify(layout));
+  }
+
+  // This computer's own split and tabs for one Pane. The host keeps the layout
+  // last used by any client; this copy is what this desktop shows when it
+  // returns. Keyed by host like navigation memory, for the same reason.
+  private paneLayoutKey(hostId: string | null, paneId: string): string {
+    return hostId ? `paneLayout.${paneId}@${hostId}` : `paneLayout.${paneId}`;
+  }
+
+  getPaneLayout(hostId: string | null, paneId: string): SessionPanelLayout | null {
+    const value = this.db.getUIState(this.paneLayoutKey(hostId, paneId));
+    if (!value) return null;
+    try {
+      return decodeSessionPanelLayout(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+
+  /** A null layout forgets the Pane, as when it is archived or deleted. */
+  savePaneLayout(hostId: string | null, paneId: string, layout: SessionPanelLayout | null): void {
+    const key = this.paneLayoutKey(hostId, paneId);
     if (!layout) {
       this.db.deleteUIState(key);
       return;

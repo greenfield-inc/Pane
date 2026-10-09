@@ -5,7 +5,7 @@ import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import type { AppServices } from './types';
 
 describe('orchestration-sessions:create', () => {
-  it('passes a requested pin through to the new Session', async () => {
+  it('passes a requested pin and blank-name intent through to the new Session', async () => {
     const create = vi.fn(async () => ({}));
     const registry = new PaneCommandRegistry();
     registerOrchestrationSessionHandlers(
@@ -16,8 +16,8 @@ describe('orchestration-sessions:create', () => {
       registry,
     );
 
-    await registry.invokeRemote('orchestration-sessions:create', [{ name: 'Release prep', agent: 'codex', isPinned: true }]);
+    await registry.invokeRemote('orchestration-sessions:create', [{ name: 'New chat', nameFromFirstMessage: true, agent: 'codex', isPinned: true }]);
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Release prep', isPinned: true }));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'New chat', nameFromFirstMessage: true, isPinned: true }));
   });
 });

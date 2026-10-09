@@ -1,4 +1,4 @@
-import { ToolPanel, SessionPanelLayout } from '../../../shared/types/panels';
+import { ToolPanel, SessionPanelLayout, PanelActivationRequest } from '../../../shared/types/panels';
 import { AgentState } from '../../../shared/types/agentStatus';
 
 export interface PanelStore {
@@ -8,6 +8,7 @@ export interface PanelStore {
   activityStatus: Record<string, 'active' | 'idle'>; // panelId -> status
   agentStatus: Record<string, AgentState>;    // panelId -> detected agent state (blocked/working/idle)
   agentStatusSession: Record<string, string>; // panelId -> sessionId (so status rolls up without panels loaded)
+  agentStatusReason: Record<string, string | null>; // panelId -> rule id behind the last status event
   agentStatusSnapshotVersion: number; // Snapshots and terminal endings silently rebaseline notification subscribers
   lastActivityAt: Record<string, string>;     // panelId -> last PTY output timestamp
   unviewedCompletedActivity: Record<string, string>; // sessionId -> completion timestamp
@@ -15,6 +16,8 @@ export interface PanelStore {
   // Layout state for split tab groups
   layouts: Record<string, SessionPanelLayout>;   // sessionId -> layout tree
   focusedGroupIds: Record<string, string>;        // sessionId -> focused group id
+  // Tabs the host or `panes focus` asked to bring forward, applied once that Pane's layout has loaded
+  activationRequests: Record<string, PanelActivationRequest>; // sessionId -> request
 
   // Synchronous state update actions
   removeBrowserPanelsForHostSwitch: () => void;
@@ -25,7 +28,7 @@ export interface PanelStore {
   updatePanelState: (panel: ToolPanel) => void;
   setActivityStatus: (panelId: string, status: 'active' | 'idle', lastActivityAt?: string) => void;
   clearActivityStatus: (panelId: string) => void;
-  setAgentStatus: (panelId: string, sessionId: string, state: AgentState) => void;
+  setAgentStatus: (panelId: string, sessionId: string, state: AgentState, reason?: string | null) => void;
   clearAgentStatus: (panelId: string) => void;
   /** Drop every per-panel status entry, without needing the session id. */
   forgetPanel: (panelId: string) => void;
@@ -37,6 +40,8 @@ export interface PanelStore {
   // Layout actions
   setLayout: (sessionId: string, layout: SessionPanelLayout) => void;
   setFocusedGroup: (sessionId: string, groupId: string) => void;
+  requestActivation: (request: PanelActivationRequest) => void;
+  clearActivationRequest: (sessionId: string) => void;
 
   // Getters
   getSessionPanels: (sessionId: string) => ToolPanel[];

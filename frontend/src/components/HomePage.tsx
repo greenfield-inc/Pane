@@ -237,7 +237,8 @@ export function HomePage() {
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
 
-  const [projects, setProjects] = useState<Project[]>([]);
+  // null until the first load, so a returning user never sees the first-run card flash.
+  const [projects, setProjects] = useState<Project[] | null>(null);
   const [showAddProject, setShowAddProject] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const { shells: availableShells, preferredShell, setPreferredShell } = useHostShellSettings();
@@ -276,11 +277,13 @@ export function HomePage() {
 
   const projectNameMap = useMemo(() => {
     const map = new Map<number, string>();
-    for (const project of projects) {
+    for (const project of projects ?? []) {
       map.set(project.id, getRepositoryName(project));
     }
     return map;
   }, [projects]);
+
+  const isFirstRun = projects?.length === 0;
 
   const handleOpenSession = (session: Session) => {
     navigateToSessions();
@@ -308,7 +311,8 @@ export function HomePage() {
               {paneAscii}
             </pre>
           </div>
-          <section className="grid gap-8 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)] lg:items-stretch">
+          <section className={`grid gap-8 lg:items-stretch ${isFirstRun ? 'lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]' : ''}`}>
+            {isFirstRun && (
             <div className="space-y-5 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
             <div>
               <h2 className="mb-2 text-lg font-semibold text-text-primary">Get Started</h2>
@@ -318,7 +322,7 @@ export function HomePage() {
             </div>
             <div className="grid justify-center gap-4 sm:grid-cols-3">
               <OpenProjectCard
-                projects={projects}
+                projects={projects ?? []}
                 onAddProject={() => setShowAddProject(true)}
               />
               <button
@@ -339,6 +343,7 @@ export function HomePage() {
               </button>
             </div>
             </div>
+            )}
 
             <section className="space-y-4 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
               <div>
@@ -481,7 +486,7 @@ export function HomePage() {
             </section>
           )}
 
-          {recentSessions.length === 0 && projects.length === 0 && (
+          {recentSessions.length === 0 && isFirstRun && (
             <p className="text-center text-sm text-text-tertiary">
               Select a project from the sidebar or create a new one to get started.
             </p>

@@ -42,6 +42,8 @@ export interface ListeningPortMonitorOptions {
 export interface ListeningPortMonitor {
   /** Reads the host's listening ports now and returns the new list. */
   refresh(): Promise<ListeningPortsSnapshot>;
+  /** The list from the last read, without reading again. */
+  snapshot(): ListeningPortsSnapshot;
   /** Refreshes every 2 s, or less often when a read is slow, until `stop`. */
   start(): void;
   stop(): void;
@@ -151,6 +153,7 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
 
   return {
     refresh,
+    snapshot: () => current,
     start() {
       if (running) return;
       running = true;

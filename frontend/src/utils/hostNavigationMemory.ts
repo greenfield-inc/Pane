@@ -1,6 +1,7 @@
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { API } from './api';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { HostNavigationMemory, PaneNavigationView } from '../../../shared/types/hostNavigation';
@@ -19,6 +20,7 @@ interface NavigationSnapshot {
   view: PaneNavigationView;
   projectId: number | null;
   paneId: string | null;
+  orchestrationSessionId: string | null;
 }
 
 // Pane switching can be held down on Cmd/Ctrl+Arrow; coalesce the writes.
@@ -29,18 +31,20 @@ let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 let recorded: NavigationSnapshot | null = null;
 let shownHostId: string | null | undefined;
 
-/** Reads the three fields that make up a location. Cheap enough for a hot store subscription. */
+/** Reads the fields that make up a location. Cheap enough for a hot store subscription. */
 function currentNavigation(): NavigationSnapshot {
   const { activeView, activeProjectId } = useNavigationStore.getState();
   return {
     view: activeView,
     projectId: activeProjectId,
     paneId: useSessionStore.getState().activeSessionId,
+    orchestrationSessionId: useOrchestrationSessionStore.getState().selectedSessionId ?? null,
   };
 }
 
 function isSameNavigation(left: NavigationSnapshot, right: NavigationSnapshot): boolean {
-  return left.view === right.view && left.projectId === right.projectId && left.paneId === right.paneId;
+  return left.view === right.view && left.projectId === right.projectId && left.paneId === right.paneId
+    && left.orchestrationSessionId === right.orchestrationSessionId;
 }
 
 function activeHostIdFromConfig(): string | null | undefined {
@@ -80,6 +84,7 @@ async function writeNavigationMemory(hostId: string | null): Promise<void> {
     view: snapshot.view,
     projectId: snapshot.projectId,
     paneId: snapshot.paneId,
+    orchestrationSessionId: snapshot.orchestrationSessionId,
   };
   try {
     const response = await window.electronAPI.uiState.saveNavigationMemory(hostId, memory);
@@ -110,9 +115,11 @@ export function startHostNavigationMemoryWrites(): () => void {
   shownHostId = undefined;
   const unsubscribeNavigation = useNavigationStore.subscribe(scheduleNavigationMemoryWrite);
   const unsubscribeSessions = useSessionStore.subscribe(scheduleNavigationMemoryWrite);
+  const unsubscribeOrchestration = useOrchestrationSessionStore.subscribe(scheduleNavigationMemoryWrite);
   return () => {
     unsubscribeNavigation();
     unsubscribeSessions();
+    unsubscribeOrchestration();
     cancelPendingWrite();
   };
 }
@@ -161,6 +168,29 @@ async function readNavigationMemory(hostId: string | null): Promise<HostNavigati
 }
 
 /**
+ * On launch the desktop opens no Pane, but it returns to the Session it had
+ * selected on this host. Writes wait meanwhile, so the host's last-used Session
+ * is never remembered as this desktop's own.
+ */
+export async function restoreSessionSelection(): Promise<void> {
+  await withHostNavigationWritesPaused(async () => {
+    try {
+      const config = useConfigStore.getState().config ?? await useConfigStore.getState().fetchConfig();
+      const hostId = getActiveRemoteHostId(config.remoteDaemon);
+      // A Session picked while the memory was read, or a host switch, wins.
+      const revision = useOrchestrationSessionStore.getState().selectionRevision;
+      const memory = await readNavigationMemory(hostId);
+      if (activeHostIdFromConfig() !== hostId || useOrchestrationSessionStore.getState().selectionRevision !== revision) return;
+      if (memory?.orchestrationSessionId) {
+        useOrchestrationSessionStore.getState().preferSelection(memory.orchestrationSessionId);
+      }
+    } catch (error) {
+      console.warn('[hostNavigationMemory] Failed to restore the selected Session:', error);
+    }
+  });
+}
+
+/**
  * Restores the newly active host's remembered location. Must run after that
  * host's Panes and config have loaded, since every id is validated against them;
  * anything that no longer exists leaves the caller's home view in place.
@@ -174,6 +204,8 @@ export async function restoreHostNavigation(ownsRuntime: () => boolean = () => t
 
   const memory = await readNavigationMemory(hostId);
   if (!memory || !ownsRuntime()) return;
+  // The resync that follows adopts this desktop's own Session over the host's.
+  useOrchestrationSessionStore.getState().preferSelection(memory.orchestrationSessionId ?? undefined);
 
   const navigation = useNavigationStore.getState();
   const { setActiveSession } = useSessionStore.getState();
@@ -194,7 +226,6 @@ export async function restoreHostNavigation(ownsRuntime: () => boolean = () => t
   }
 
   if (memory.view === 'pane-chat') {
-    // Which Session is selected is the host's own state; the resync adopts it.
     await setActiveSession(null);
     if (!ownsRuntime()) return;
     navigation.navigateToPaneChat();
