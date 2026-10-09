@@ -38,6 +38,19 @@ test('a phone edits a worktree file and saves it to the host', async ({ page }) 
   await expect(page.getByRole('button', { name: 'app.css' })).toBeVisible();
 });
 
+test('an unsaved edit survives switching to another tab and back', async ({ page }) => {
+  await openConnectedRemotePwa(page, { ports: PORTS, files: { 'notes.txt': 'draft me\n' } });
+
+  await page.getByRole('tab', { name: 'Explorer' }).click();
+  await page.getByRole('button', { name: 'notes.txt' }).click();
+  await page.getByRole('textbox', { name: 'notes.txt' }).fill('half-written thought\n');
+  await page.getByRole('tab', { name: 'shell' }).click();
+  await page.getByRole('tab', { name: 'Explorer' }).click();
+
+  await expect(page.getByRole('textbox', { name: 'notes.txt' })).toHaveValue('half-written thought\n');
+  await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
+});
+
 test('saving keeps a file\'s Windows line endings', async ({ page }) => {
   const host = await openConnectedRemotePwa(page, { ports: PORTS, files: { 'notes.txt': 'one\r\ntwo\r\n' } });
 

@@ -9,6 +9,7 @@ import { phoneMediaUrl } from '../utils/phonePage';
 
 interface RemoteExplorerPanelProps {
   adapter: RemoteRuntimeAdapter;
+  panelId: string;
   sessionId: string;
   /** The host's phone addresses; media previews load from its files address. */
   ports: ListeningPortsSnapshot | null;
@@ -20,14 +21,24 @@ const MEDIA_KINDS: ReadonlySet<FilePreviewKind> = new Set(['image', 'pdf', 'vide
 /** Larger text files stay on the desktop: a phone text area slows to a crawl well before this. */
 const MAX_EDIT_BYTES = 1024 * 1024;
 
+// Switching tabs or panes unmounts the Explorer. These keep its open file, by panel, and its
+// unsaved drafts, by pane and path, until the app closes.
+const openFiles = new Map<string, RemoteFileEntry>();
+const unsavedDrafts = new Map<string, TextState>();
+
 /**
  * The phone's Explorer tab: the pane's worktree as a tree, a text editor that saves to the host,
  * and previews for images, PDFs, video and audio from the host's phone files address.
  */
-export function RemoteExplorerPanel({ adapter, sessionId, ports, onError }: RemoteExplorerPanelProps) {
+export function RemoteExplorerPanel({ adapter, panelId, sessionId, ports, onError }: RemoteExplorerPanelProps) {
   const [folders, setFolders] = useState<Record<string, RemoteFileEntry[]>>({});
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const [openFile, setOpenFile] = useState<RemoteFileEntry | null>(null);
+  const [openFile, setOpenFileState] = useState<RemoteFileEntry | null>(() => openFiles.get(panelId) ?? null);
+  const setOpenFile = (file: RemoteFileEntry | null) => {
+    if (file) openFiles.set(panelId, file);
+    else openFiles.delete(panelId);
+    setOpenFileState(file);
+  };
   const [refreshing, setRefreshing] = useState(false);
 
   const loadFolder = useCallback(async (path: string) => {
@@ -133,12 +144,20 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
   onBack(): void;
   onError(message: string): void;
 }) {
-  const [text, setText] = useState<TextState>({ kind: 'loading' });
+  const draftKey = `${sessionId}\0${file.path}`;
+  const [text, setText] = useState<TextState>(() => unsavedDrafts.get(draftKey) ?? { kind: 'loading' });
   const [saving, setSaving] = useState(false);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const dirty = text.kind === 'text' && text.draft !== text.saved;
 
   useEffect(() => {
+    if (dirty) unsavedDrafts.set(draftKey, text);
+    else unsavedDrafts.delete(draftKey);
+  }, [draftKey, dirty, text]);
+
+  useEffect(() => {
+    // An unsaved draft from an earlier visit wins over the host's copy.
+    if (unsavedDrafts.has(draftKey)) return;
     if ((file.size ?? 0) > MAX_EDIT_BYTES) {
       setText({ kind: 'notice', message: `${file.name} is larger than 1 MB. Open it on a desktop.` });
       return;
@@ -157,7 +176,7 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
       (error: Error) => { if (!cancelled) setText({ kind: 'notice', message: error.message }); },
     );
     return () => { cancelled = true; };
-  }, [adapter, sessionId, file]);
+  }, [adapter, sessionId, file, draftKey]);
 
   const save = async () => {
     if (text.kind !== 'text') return;
@@ -190,7 +209,7 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
       {confirmingDiscard && (
         <div role="alert" className="flex flex-shrink-0 items-center gap-2 border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
           <span className="min-w-0 flex-1 text-text-secondary">Unsaved changes</span>
-          <button type="button" className="rounded-md px-2 py-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary" onClick={onBack}>Discard</button>
+          <button type="button" className="rounded-md px-2 py-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary" onClick={() => { unsavedDrafts.delete(draftKey); onBack(); }}>Discard</button>
           <button type="button" className="rounded-md px-2 py-1 font-medium text-interactive hover:bg-surface-hover" onClick={() => setConfirmingDiscard(false)}>Keep editing</button>
         </div>
       )}

@@ -875,7 +875,7 @@ export function RemotePwaApp() {
               <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
             )}
             {selectedPanel.type === 'explorer' && adapter && (
-              <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
+              <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
             )}
             {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
