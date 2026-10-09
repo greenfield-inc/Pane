@@ -63,11 +63,17 @@ test('stays on its tab when the host brings forward a tab phones cannot show, an
   await page.screenshot({ path: screenshot });
   await testInfo.attach('phone-stays-on-terminal.png', { path: screenshot, contentType: 'image/png' });
 
-  // Tapping the editor shows its desktop-only card, but a reload returns to the last tab the phone can show.
+  // Another browser tab of this profile moves to Q. Tapping the editor here shows its desktop-only card;
+  // a reload returns to this Pane and the last tab the phone can show.
+  const second = await page.context().newPage();
+  await connectAnotherRemoteClient(second, host);
+  await paneButton(second, 'Pane Q').click();
+  await expect(shownPane(second)).toHaveText(/^Pane Q/);
   await page.getByRole('tab', { name: 'notes.md', exact: true }).click();
   await expect(selectedTab(page)).toHaveText('notes.md');
   await page.reload();
   await reconnected(page);
+  await expect(shownPane(page)).toHaveText(/^Pane P/);
   await expect(selectedTab(page)).toHaveText('shell');
 });
 
