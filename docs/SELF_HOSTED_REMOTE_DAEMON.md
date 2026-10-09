@@ -225,7 +225,7 @@ Who can open these pages: the devices that **Who can connect to this machine** a
 
 ### Files on the phone
 
-Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. Files over 1 MB and binary files without a preview stay on the desktop. Images, PDFs, video and audio preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
+Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. Text files over 1 MB, and binary files that are not images, PDFs, video or audio, stay on the desktop. Images, PDFs, video and audio of any size preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
 
 Browsing and editing go through the PWA's own connection, so they work over every connection the PWA supports. Previews load from the same Serve address as HTML files in browser tabs, so they need what [browser tabs on the phone](#browser-tabs-on-the-phone) need: Tailscale on the host, password protection off, and a phone signed in to a login that **Who can connect to this machine** admits. Without that, a preview explains why it cannot load. Files outside the worktree are refused.
 
