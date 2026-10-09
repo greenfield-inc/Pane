@@ -155,6 +155,17 @@ rows show the Pane name with its repository muted beside it. Single-line Pane ro
 optional two-row layout shows those details below the title. Session and Pane
 context menus use compact widths.
 
+The experimental **Attention inbox** (Settings > Advanced > Experimental) turns
+the Projects list into an Inbox of the Panes that need you: an agent waiting on
+input or approval, an agent that completed a real turn since Pane started (it
+worked on a prompt and went idle; a freshly started agent does not count), or a
+Pane that errored. Session child rows follow the same filter, and a Session row still
+counts all of its Panes. A row leaves when its agent works again; opening it
+does not remove it. Hover a row and choose **Dismiss** (check mark) to hide it
+until its agent works again. The row under the Inbox counts the hidden Panes
+("3 running · 1 idle") and **Show all** lists every Pane. Pinned rows are
+unchanged, and ⌘1–9 number the Inbox rows while it is shown.
+
 The right sidebar has Overview, Files, and Changes tabs. Overview shows the
 Session's blockers, goal, next step, and decisions when they are set, then its
 Panes and recent activity. Agent state changes stay out of Activity; the status

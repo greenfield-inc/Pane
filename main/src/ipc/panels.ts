@@ -460,6 +460,7 @@ const DAEMON_PANEL_CHANNELS = [
   'panels:send-terminal-input',
   'panels:shouldAutoCreate',
   'terminal:input',
+  'terminal:reply',
   'terminal:resize',
   'terminal:getState',
   'terminal:saveState',
@@ -501,8 +502,15 @@ export function registerPanelHandlers(
   
   commandRegistry.register('panels:delete', async (panelId: string) => {
     try {
-      // Clean up terminal process if it's a terminal panel
       const panel = panelManager.getPanel(panelId);
+      // Refuse before teardown. `deletePanel` declines permanent panels but
+      // returns quietly, so destroying the terminal first would kill the
+      // process, leave the panel in place, and still report success.
+      if (panel?.metadata.permanent) {
+        return { success: false, error: 'This panel cannot be closed.' };
+      }
+
+      // Clean up terminal process if it's a terminal panel
       if (panel?.type === 'terminal') {
         await terminalPanelManager.destroyTerminal(panelId, { saveState: false });
       }
@@ -751,6 +759,12 @@ export function registerPanelHandlers(
     return terminalPanelManager.writeToTerminal(panelId, data);
   });
   
+  // A reply to a query the agent asked its terminal, from a viewer that may not
+  // be the one allowed to answer. terminalPanelManager holds the designation.
+  commandRegistry.register('terminal:reply', async (panelId: string, data: string, viewerId?: string) => {
+    return terminalPanelManager.writeTerminalReply(panelId, data, viewerId);
+  });
+
   commandRegistry.register('terminal:resize', async (
     panelId: string,
     cols: number,
@@ -792,16 +806,13 @@ export function registerPanelHandlers(
   // output cadence can drop to OUTPUT_BATCH_INTERVAL_HIDDEN while hidden.
   // No-op when the panel's PTY isn't in the map (pre-init / post-destroy).
   commandRegistry.register('terminal:setVisibility', async (panelId: string, isVisible: boolean, viewerId?: string) => {
-    const scopedViewerId = viewerId?.includes(':')
-      ? viewerId
-      : viewerId
-        ? `local:${viewerId}`
-        : undefined;
-    terminalPanelManager.setVisibility(panelId, !!isVisible, scopedViewerId);
+    // Scoping lives in terminalPanelManager, so registration and ack cannot
+    // disagree about how a bare id is spelled.
+    terminalPanelManager.setVisibility(panelId, !!isVisible, viewerId);
   });
 
-  commandRegistry.register('terminal:ack', async (panelId: string, bytesConsumed: number) => {
-    terminalPanelManager.acknowledgeBytes(panelId, bytesConsumed);
+  commandRegistry.register('terminal:ack', async (panelId: string, bytesConsumed: number, viewerId?: string) => {
+    terminalPanelManager.acknowledgeBytes(panelId, bytesConsumed, viewerId);
   });
 
   // Reset flow control state (for recovering from stuck terminals)

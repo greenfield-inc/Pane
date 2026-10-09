@@ -21,6 +21,11 @@ export function isCommandPaletteShortcutEnabled(config: AppConfig | null): boole
   );
 }
 
+/** Mission Control is experimental: every entry point waits for this opt-in. */
+export function isMissionControlEnabled(config: AppConfig | null): boolean {
+  return config?.missionControlEnabled === true;
+}
+
 export const useConfigStore = create<ConfigStore>((set, get) => ({
   config: null,
   isLoading: false,
