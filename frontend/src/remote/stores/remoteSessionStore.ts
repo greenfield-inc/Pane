@@ -134,8 +134,10 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
 
   setSelectedPanel: (panelId) => {
     set({ selectedPanelId: panelId });
-    const { hostId, selectedSessionId, openOrchestrationSession } = get();
-    if (hostId && selectedSessionId && panelId) {
+    const { hostId, selectedSessionId, openOrchestrationSession, panelsBySessionId } = get();
+    // A tab the phone cannot show stays viewable, but the phone never comes back to it.
+    const panel = selectedSessionId ? panelsBySessionId[selectedSessionId]?.find(candidate => candidate.id === panelId) : undefined;
+    if (hostId && selectedSessionId && panelId && (!panel || phoneShows(panel))) {
       rememberRemoteView(hostId, { paneId: selectedSessionId, sessionId: openOrchestrationSession?.session.id ?? null, panelId });
     }
   },

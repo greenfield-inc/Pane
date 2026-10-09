@@ -328,11 +328,10 @@ export function RemotePwaApp() {
       const routeMatches = routedPanel?.sessionId === sessionId && panels.some(panel => panel.id === routedPanel.panelId);
       if (routedPanel?.sessionId === sessionId) pushRoutePanelRef.current = null;
       const strip = visibleTabs(openView, sessionId, panels);
-      const shown = (panelId: string | null | undefined) => strip.some(panel => panel.id === panelId) ? panelId : null;
-      // This client's own tab first; the host's last-used tab only for a Pane this client has not opened,
-      // and only when the phone can show it; else the first tab it can.
-      const hostPanelId = activePanel && phoneShows(activePanel) ? shown(activePanel.id) : null;
-      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? hostPanelId ?? firstSupportedPanel(strip)?.id ?? null);
+      const shown = (panelId: string | null | undefined) => strip.some(panel => panel.id === panelId && phoneShows(panel)) ? panelId : null;
+      // This client's own tab first; the host's last-used tab only for a Pane this client has not opened;
+      // else the first tab it can show. A tab the phone cannot show is never restored.
+      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? shown(activePanel?.id) ?? firstSupportedPanel(strip)?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
         setLastError('The notified panel is no longer available on this Pane host.');
       } else {
@@ -848,8 +847,12 @@ export function RemotePwaApp() {
       if (event.channel === 'panel:activeChanged') {
         // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
         const payload = event.args[0] as Partial<PanelActivationRequest> | undefined;
-        if (payload?.sessionId === selectedSessionId && payload.panelId) {
-          setSelectedPanel(payload.panelId);
+        // A phone stays put when the tab is one it cannot show, such as an editor.
+        const panel = payload?.sessionId === selectedSessionId
+          ? useRemoteSessionStore.getState().panelsBySessionId[payload.sessionId]?.find(candidate => candidate.id === payload.panelId)
+          : undefined;
+        if (panel && phoneShows(panel)) {
+          setSelectedPanel(panel.id);
         }
         return;
       }
