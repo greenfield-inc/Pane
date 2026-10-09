@@ -3,13 +3,18 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { authenticateWorkspaceRequest } from './auth';
 import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
-import { resolveTailscaleCommandAsync, type ResolvedCommand } from './tailscaleSetup';
+import { resolveTailscaleCommandAsync, runTailscaleServe, type ResolvedCommand } from './tailscaleSetup';
 import { startPreviewProxy, type PreviewFiles, type PreviewProxy } from './previewProxy';
 import type { PaneWorkspaceHostController } from './workspaceHost';
 
 /** Serve ports Pane picks for phone pages start here, clear of common dev server ports. */
 const FIRST_SERVE_PORT = 44300;
 const FILES = 'files';
+/**
+ * Quit removes handlers one `tailscale serve` call at a time, inside Pane's 10 s shutdown budget.
+ * Whatever is left after this long is removed at the next launch.
+ */
+const QUIT_REMOVAL_BUDGET_MS = 5_000;
 
 const serveStatusSchema = boundary.object({
   TCP: boundary.optional(boundary.nullable(boundary.jsonObject)),
@@ -50,6 +55,8 @@ export class PhonePreviewHost {
   private serveClear = false;
   private queue: Promise<void> = Promise.resolve();
   private stopped = false;
+  /** Past this time, quit stops removing handlers and leaves the rest to the next launch. */
+  private removeUntil = Number.POSITIVE_INFINITY;
   private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly options: PhonePreviewHostOptions) {
@@ -94,6 +101,7 @@ export class PhonePreviewHost {
 
   async shutdown(): Promise<void> {
     this.stopped = true;
+    this.removeUntil = Date.now() + QUIT_REMOVAL_BUDGET_MS;
     this.unsubscribe?.();
     await this.reconcile();
     await this.proxy?.close();
@@ -135,7 +143,7 @@ export class PhonePreviewHost {
       this.notifyIfChanged(before);
       return;
     }
-    const serve = (args: string[]) => this.run(tailscale.command, ['serve', ...args], { env: tailscale.env });
+    const serve = (args: string[]) => runTailscaleServe(this.run, tailscale, args);
     const status = await serve(['status', '--json']);
     if (!status.ok) throw new Error(`tailscale serve status failed: ${firstLine(status.stderr || status.stdout)}`);
     const { ours, taken } = this.readServeConfig(status.stdout);
@@ -150,6 +158,10 @@ export class PhonePreviewHost {
       if (wanted.includes(handler.key) && handler.target === target(handler.key) && !next.has(handler.key)) {
         next.set(handler.key, handler.servePort);
         continue;
+      }
+      if (Date.now() > this.removeUntil) {
+        failure ??= 'quit ran out of time; the next launch removes the remaining Serve handlers';
+        break;
       }
       const removal = await serve([`--https=${handler.servePort}`, 'off']);
       if (!removal.ok) failure ??= `could not remove the Serve handler on ${handler.servePort}: ${firstLine(removal.stderr || removal.stdout)}`;

@@ -14,6 +14,7 @@ import {
   tailscaleServeFailureFix,
   tailscaleStatusFailureIssue,
   resolveTailscaleCommandAsync,
+  runTailscaleServe,
   type ResolvedCommand,
 } from './tailscaleSetup';
 
@@ -370,7 +371,7 @@ export class PaneWorkspaceHostController {
   }
 
   private runServe(tailscale: ResolvedCommand, args: string[]) {
-    return this.run(tailscale.command, ['serve', ...args], { env: tailscale.env });
+    return runTailscaleServe(this.run, tailscale, args);
   }
 
   private enqueue(work: () => Promise<void>): Promise<void> {

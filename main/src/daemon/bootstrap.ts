@@ -507,8 +507,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await permissionIpcServer?.stop();
       remoteHostTailnetMonitor.stop();
       await remoteTransportController.stopWatchingAndShutdown();
-      await phonePreviews.shutdown();
+      // The workspace handler first: phone handler removal can use up the rest of the budget.
       await workspaceHost.shutdown();
+      await phonePreviews.shutdown();
       if (paneDaemonServer) {
         await paneDaemonServer.stop();
       }

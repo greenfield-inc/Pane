@@ -146,6 +146,16 @@ describe('phone previews', () => {
     expect(Object.values(afterQuit).some(target => target.endsWith('/4000'))).toBe(true);
   });
 
+  it('retries a Serve change that another client\'s write rejected', async () => {
+    const tailscale = createFakeTailscale();
+    const { previews } = await startHost(tailscale);
+
+    tailscale.busyServe(2);
+    await previews.update(snapshot([port(5173)]));
+
+    expect(previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl).toMatch(/^https:\/\//u);
+  });
+
   it('says why phones cannot open pages while workspaces are off', async () => {
     const tailscale = createFakeTailscale();
     const { previews } = await startHost(tailscale, { enabled: false });

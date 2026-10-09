@@ -30,7 +30,7 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
   const cli = options.cli ?? 'tailscale';
   const serveByTailnet = new Map<string, ServeConfig>();
   const calls: FakeTailscaleCall[] = [];
-  const state = { tailnet: options.tailnet ?? TAILNET_A, serveFails: '', statusFails: '', backend: 'Running', serveIgnored: false };
+  const state = { tailnet: options.tailnet ?? TAILNET_A, serveFails: '', statusFails: '', backend: 'Running', serveIgnored: false, busyWrites: 0 };
 
   const dnsName = () => `${machine}.${state.tailnet.suffix}`;
   const serveConfig = (): ServeConfig => {
@@ -63,6 +63,10 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
       return ok(Object.keys(config.TCP).length === 0 ? '{}\n' : JSON.stringify(config));
     }
     if (state.serveFails) return { ok: false, stdout: '', stderr: state.serveFails };
+    if (state.busyWrites > 0) {
+      state.busyWrites -= 1;
+      return { ok: false, stdout: '', stderr: 'Another client is changing the serve config; please try again.' };
+    }
     if (state.serveIgnored) return ok();
     const config = serveConfig();
     const tls = args.find(arg => arg.startsWith('--tls-terminated-tcp='));
@@ -92,6 +96,8 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
     /** Makes `status --json` fail, as it does when tailscaled is not running. */
     failStatus: (stderr: string) => { state.statusFails = stderr; },
     setBackendState: (backend: 'Running' | 'NeedsLogin' | 'Stopped' | 'Starting' | 'NeedsMachineAuth') => { state.backend = backend; },
+    /** The next `count` Serve changes fail as they do while another process writes the config. */
+    busyServe: (count: number) => { state.busyWrites = count; },
     /** `serve --bg` reports success but changes nothing. */
     ignoreServe: () => { state.serveIgnored = true; },
     /** Sets a handler directly, as if `tailscale serve` was run outside Pane. */
