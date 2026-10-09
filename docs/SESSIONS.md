@@ -6,7 +6,7 @@ optional overview keeps the Session name, associated Panes, and recent
 activity together while the chat remains the focused work surface. A tab
 shares its parent Pane's worktree.
 
-In the sidebar, `+` opens an agent picker and an optional chat name field. Pane
+In the sidebar, `+` opens an agent picker and an optional Session name field. Pane
 remembers the chosen agent as the default for future Sessions while existing
 Sessions keep their own agent. A blank name receives a generated name such as
 `New chat` or `New chat 2`; each new Session opens as one Pane Chat and can be
@@ -135,7 +135,7 @@ automatically; use an explicit resume command if you know their ID.
 ## Session sidebar and archive
 
 Pinned is the first sidebar category and can contain both Session chats and
-Panes. Right-click a Session to pin or unpin it, or turn on **Start pinned** in
+Panes. Right-click a Session, or use the ⋯ button that appears on hover, to pin or unpin it, or turn on **Start pinned** in
 Create Session to pin it from the start. The dialog remembers that toggle for
 the next Session (on the desktop in Pane's config, in the remote web app on
 that device). The pin preference survives restarts; an archived Session stays
@@ -144,16 +144,22 @@ out of Pinned until it is restored. RunPane can set the same preference with
 `isPinned` (default false), and update JSON accepts it without changing the
 preference when omitted.
 
-Click a Session row to open its chat. A Session with associated Panes shows a
+Click a Session row to open its chat, or use **Switch to Session: <name>** in the
+command palette (`⌘⇧P` / `Ctrl+Shift+P`), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
 Child Pane rows are indented beyond the Session chat icon and keep the ordinary
-Pane actions. Single-line Pane rows omit change counts and PR numbers; the
+Pane actions. To file a Pane under a Session, right-click the Pane, choose
+**Add to Session**, then pick the Session. **Remove from <Session>** in the same
+menu takes it out again; the Pane and its worktree are unchanged. Pinned Pane
+rows show the Pane name with its repository muted beside it. Single-line Pane rows omit change counts and PR numbers; the
 optional two-row layout shows those details below the title. Session and Pane
 context menus use compact widths.
 
-The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
-Panes and activity. Files browses the Session workspace. Changes summarizes
-linked worktrees and opens a Pane for detailed review. The upper-right sidebar
+The right sidebar has Overview, Files, and Changes tabs. Overview shows the
+Session's blockers, goal, next step, and decisions when they are set, then its
+Panes and recent activity. Agent state changes stay out of Activity; the status
+dot shows them. Files browses the Session workspace. Changes summarizes the
+Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the
 top: the window title bar shows its name and controls, and the tab strip sits
 directly below it. Session file clicks open editor tabs beside the agent tab in
@@ -164,7 +170,9 @@ restores its tab.
 
 ![Two-row Session header in Walnut](screenshots/two-row-header-walnut.png)
 
-Right-click a Session to archive it. Archiving hides the chat from the active
+Right-click a Session, or use its ⋯ button, to archive it. An "Archived · Undo"
+toast offers to restore it for a few seconds, and archiving the open Session
+returns the desktop view to Home. Archiving hides the chat from the active
 Sessions list while retaining its identity, conversation history, and Pane
 associations. Its Panes and worktrees remain accessible through repository
 navigation. Restore the Session from the sidebar’s Archived section. This is
