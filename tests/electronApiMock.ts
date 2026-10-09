@@ -123,6 +123,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     }
     const preferences: MockPreferences = {
       analytics_consent_shown: mockOptions.analyticsConsentShown === false ? 'false' : 'true',
+      sidebar_attention_inbox: 'false',
       ...clone(mockOptions.initialPreferences ?? {}),
     };
     const defaultAnalyticsIdentity = {

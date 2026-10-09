@@ -1,6 +1,7 @@
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { usePanelStore } from '../stores/panelStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 
 const statusSnapshotSchema = boundary.object({
@@ -36,6 +37,10 @@ export function subscribePanelStatus(): () => void {
     const store = usePanelStore.getState();
     const prevState = store.agentStatus[data.panelId];
     store.setAgentStatus(data.panelId, data.sessionId, data.state);
+    // Visible work before idle is a real turn; startup and stray output are not.
+    if (data.state === 'idle' && data.workedVisibly) {
+      useAttentionInboxStore.getState().markFinished(data.sessionId);
+    }
     if (prevState === 'working' && data.state === 'idle') {
       const next = usePanelStore.getState();
       const activeSessionId = useSessionStore.getState().activeSessionId;
