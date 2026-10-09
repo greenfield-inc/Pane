@@ -356,7 +356,7 @@ export async function connectAnotherRemoteClient(page: Page, host: RemotePwaMock
   await page.addInitScript(installClientMocks, PROFILE);
   await installRemoteHostRoute(page, fixtures);
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
 }
 
 /** Sends one host event to this client, the way the daemon's event stream does. */
