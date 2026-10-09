@@ -162,6 +162,17 @@ it('names the client copy so every desktop OS can open it', async () => {
   ]);
 });
 
+it('explains a failed copy when the host is unreachable', async () => {
+  const unreachable: RemoteMediaHost = {
+    id: 'gone',
+    invoke: async () => ({ success: true, path: '/srv/clip.mp4', url: 'file:///srv/clip.mp4' }),
+    fetchMedia: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:47983'); },
+  };
+  connection = { kind: 'remote', host: unreachable };
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toThrow('Could not copy this file from the host');
+  expect(opened).toEqual([]);
+});
+
 it('removes the client copy when the system app cannot open it', async () => {
   connection = (await connectToHost()).remote;
   openError = 'No application knows how to open this file';

@@ -124,8 +124,9 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   });
   /** System apps run where the file is, so a remote host's file is opened from a client copy. */
   const copyFromHost = async (host: RemoteMediaHost, file: PreviewFile) => {
-    const response = await host.fetchMedia(file, new Request('pane-media://preview/open'));
-    if (response.status !== 200 || !response.body) throw new Error('Could not copy this file from the host');
+    const copyFailed = new Error('Could not copy this file from the host');
+    const response = await host.fetchMedia(file, new Request('pane-media://preview/open')).catch(() => { throw copyFailed; });
+    if (response.status !== 200 || !response.body) throw copyFailed;
     const directory = await mkdtemp(join(tmpdir(), 'pane-remote-open-'));
     const target = join(directory, clientSafeName(file.filePath));
     try {
