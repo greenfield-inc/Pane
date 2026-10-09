@@ -47,7 +47,7 @@ The tool panel system consists of several key components:
 ## Event System
 
 - A client's tab click (`panels:set-active`), `runpane panes focus` and opening a Session view update `active_panel_id` and move no other client. A host- or agent-initiated activation (`runpane panels open`, `panels create`/`panes create` with focus, Pane Chat, new-Pane setup, run scripts) sends `panel:activeChanged` (`PanelActivationRequest`), which only clients already showing that Pane follow
-- The remote web and mobile app remembers its own Pane, Session and tab per host in browser storage. The desktop still opens a Pane on `active_panel_id` and the stored `panel_layout`
+- The remote web and mobile app remembers its own Pane, Session and tab per host in browser storage. Each desktop remembers its own split and tabs per Pane in its local `ui_state` (`paneLayout.<pane id>[@<host profile id>]`) and its own Session in navigation memory; it opens a Pane on `active_panel_id` and the stored `panel_layout` only when it has no memory of it
 - Terminal panels emit `terminal:command_executed`, `terminal:exit`, and `files:changed` events
 - Event bus routes events to subscribed panels (planned for future panel types)
 - Events support future inter-panel communication (e.g., diff panels reacting to file changes)
