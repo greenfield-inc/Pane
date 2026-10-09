@@ -273,7 +273,7 @@ async function installSessionsFixture(
         changed('selected');
         return success({ sessions: clone(sessions), selectedSessionId });
       },
-      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null; runtime?: 'windows' | 'wsl'; wslDistribution?: string }) => {
+      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null; runtime?: 'windows' | 'wsl'; wslDistribution?: string; isPinned?: boolean }) => {
         const id = `created-session-${nextId++}`;
         const record: SessionRecord = {
           id,
@@ -303,7 +303,7 @@ async function installSessionsFixture(
           createdAt: now,
           updatedAt: now,
           archived: false,
-          isPinned: false,
+          isPinned: input.isPinned ?? false,
         };
         sessions = [...sessions, record];
         selectedSessionId = id;
@@ -1047,16 +1047,9 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
-  const emptyChildren = page.locator('#orchestration-session-panes-sessions-alpha');
-  await expect(page.getByRole('button', { name: 'Expand Alpha children' })).toHaveAttribute('aria-expanded', 'false');
-  await expect(emptyChildren).toBeHidden();
-  await page.getByRole('button', { name: 'Expand Alpha children' }).click();
-  const collapseChildren = page.getByRole('button', { name: 'Collapse Alpha children' });
-  await expect(collapseChildren).toHaveAttribute('aria-expanded', 'true');
-  await expect(emptyChildren.getByText('No child sessions')).toBeVisible();
-  await collapseChildren.click();
-  await expect(page.getByRole('button', { name: 'Expand Alpha children' })).toHaveAttribute('aria-expanded', 'false');
-  await expect(emptyChildren).toBeHidden();
+  // A Session without Panes has nothing to expand.
+  await expect(page.getByRole('button', { name: /Alpha children/ })).toHaveCount(0);
+  await expect(page.locator('#orchestration-session-panes-sessions-alpha')).toHaveCount(0);
   await alphaRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin Session', exact: true }).click();
 
@@ -1083,6 +1076,36 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null } };
     return mockWindow.__paneTestElectronMock.getOrchestrationRecord('alpha')?.isPinned;
   })).toBe(false);
+});
+
+test('Start pinned creates the Session pinned and is remembered for the next Session', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await installSessionsFixture(page, []);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await dismissStartupDialogs(page);
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  const startPinned = dialog.getByRole('switch', { name: 'Start pinned', exact: true });
+
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(startPinned).not.toBeChecked();
+  await startPinned.click();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByTestId('orchestration-pinned-session-created-session-1')).toBeVisible();
+
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(startPinned).toBeChecked();
+  await startPinned.click();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByTestId('orchestration-session-created-session-2')).toBeVisible();
+  await expect(page.getByTestId('orchestration-pinned-session-created-session-2')).toHaveCount(0);
+});
+
+test('Start pinned starts on when the saved config says so', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { initialConfig: { defaultSessionPinned: true } });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(page.getByRole('dialog', { name: 'Create Session', exact: true }).getByRole('switch', { name: 'Start pinned', exact: true })).toBeChecked();
 });
 
 test('switching hosts replaces the Sessions and pinned Sessions in the sidebar', async ({ page }) => {

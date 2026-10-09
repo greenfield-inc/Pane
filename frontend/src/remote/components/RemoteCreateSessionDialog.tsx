@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { generatePaneName, sanitizePaneName } from '../../utils/paneName';
 import type { RemoteBranchInfo, RemoteProjectWithSessions, RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
+import { loadStartPinnedPreference, saveStartPinnedPreference } from '../utils/startPinnedPreference';
 
 /**
  * Remote Pane runs as a browser PWA, not inside Electron. Keep create-dialog
@@ -38,7 +39,7 @@ export function RemoteCreateSessionDialog({
   const [paneName, setPaneName] = useState('');
   const [branchSearch, setBranchSearch] = useState('');
   const [useWorktree, setUseWorktree] = useState(true);
-  const [startPinned, setStartPinned] = useState(() => loadRemoteStartPinnedPreference());
+  const [startPinned, setStartPinned] = useState(() => loadStartPinnedPreference(REMOTE_START_PINNED_PREFERENCE_KEY));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
@@ -363,29 +364,14 @@ export function RemoteCreateSessionDialog({
           </section>
 
           <section className="border-b border-border-primary p-5">
-            <label className="flex items-center justify-between gap-4">
-              <span className="flex min-w-0 gap-3">
-                <Pin className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-text-primary">Start pinned</span>
-                  <span className="mt-1 block text-sm text-text-secondary">Show this pane in the pinned section immediately.</span>
-                </span>
-              </span>
-              <span className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${startPinned ? 'bg-interactive' : 'bg-surface-tertiary'}`}>
-                <input
-                  type="checkbox"
-                  checked={startPinned}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setStartPinned(checked);
-                    saveRemoteStartPinnedPreference(checked);
-                  }}
-                  className="peer sr-only"
-                  aria-label="Start pinned"
-                />
-                <span className={`absolute top-1 h-5 w-5 rounded-full bg-text-on-interactive shadow-sm ring-1 ring-border-primary transition-transform ${startPinned ? 'translate-x-6' : 'translate-x-1'}`} />
-              </span>
-            </label>
+            <RemoteStartPinnedToggle
+              checked={startPinned}
+              description="Show this pane in the pinned section immediately."
+              onChange={(checked) => {
+                setStartPinned(checked);
+                saveStartPinnedPreference(REMOTE_START_PINNED_PREFERENCE_KEY, checked);
+              }}
+            />
           </section>
 
           <section className="p-5">
@@ -442,19 +428,30 @@ export function RemoteCreateSessionDialog({
   );
 }
 
-
-function loadRemoteStartPinnedPreference(): boolean {
-  try {
-    return window.localStorage.getItem(REMOTE_START_PINNED_PREFERENCE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function saveRemoteStartPinnedPreference(value: boolean): void {
-  try {
-    window.localStorage.setItem(REMOTE_START_PINNED_PREFERENCE_KEY, value ? 'true' : 'false');
-  } catch {
-    // Ignore storage failures so the current create flow can still use local state.
-  }
+export function RemoteStartPinnedToggle({ checked, description, onChange }: {
+  checked: boolean;
+  description: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-4">
+      <span className="flex min-w-0 gap-3">
+        <Pin className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-text-primary">Start pinned</span>
+          <span className="mt-1 block text-sm text-text-secondary">{description}</span>
+        </span>
+      </span>
+      <span className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${checked ? 'bg-interactive' : 'bg-surface-tertiary'}`}>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="peer sr-only"
+          aria-label="Start pinned"
+        />
+        <span className={`absolute top-1 h-5 w-5 rounded-full bg-text-on-interactive shadow-sm ring-1 ring-border-primary transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+      </span>
+    </label>
+  );
 }
