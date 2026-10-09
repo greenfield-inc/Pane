@@ -11,8 +11,8 @@ import { glob } from 'glob';
  * OpenSSH would: Include globs expand in lexical order, relative paths resolve
  * against `<home>/.ssh`, and an Include cycle stops. Only Includes that apply
  * to every host are followed (top level or under `Host *`). Patterns (`*`, `?`, `!`)
- * and aliases outside a shell-safe character set are skipped, because each
- * alias is later typed into a shell. A missing or unreadable file lists
+ * and aliases outside a shell-safe form are skipped, because each alias is
+ * later typed into a shell. A missing or unreadable file lists
  * nothing. Key files are never opened.
  */
 export async function listSshConfigHosts(home = sshUserHome()): Promise<string[]> {
@@ -35,7 +35,13 @@ function sshUserHome(): string {
   }
 }
 
-const SAFE_ALIAS = /^[A-Za-z0-9._@:-]+$/;
+/**
+ * Every shell Pane starts (bash, zsh, fish, PowerShell, cmd) reads such an alias
+ * as one literal word, and ssh reads it as a destination: it starts with a
+ * letter, digit or underscore, so it is never an option (`-V`) or a PowerShell
+ * splat (`@prod`).
+ */
+const SAFE_ALIAS = /^[A-Za-z0-9_][A-Za-z0-9._@:-]*$/;
 
 interface ReadContext {
   home: string;

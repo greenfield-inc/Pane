@@ -63,13 +63,15 @@ describe('listSshConfigHosts', () => {
   it('skips aliases that a shell would interpret and keeps the safe character set', async () => {
     const home = await homeWith({
       config: [
-        'Host ok-1 user@box.example:22 under_score',
+        'Host ok-1 user@box.example:22 under_score _lead 9lives',
         'Host bad;rm $(touch) `x` it\'s "two words" a|b',
+        // A leading - reads as an ssh option; a leading @ splats a variable in PowerShell.
+        'Host -V -oProxyCommand=x @prod .dot :colon',
         'Host fine',
       ].join('\n'),
     });
 
-    expect(await listSshConfigHosts(home)).toEqual(['ok-1', 'user@box.example:22', 'under_score', 'fine']);
+    expect(await listSshConfigHosts(home)).toEqual(['ok-1', 'user@box.example:22', 'under_score', '_lead', '9lives', 'fine']);
   });
 
   it('lists each alias once even when it appears again', async () => {
