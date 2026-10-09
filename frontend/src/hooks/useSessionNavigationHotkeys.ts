@@ -4,6 +4,7 @@ import { useCommittedRef } from './useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
+import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import {
@@ -205,6 +206,8 @@ export function useSessionNavigationHotkeys({
         label,
         keys: `mod+${i}`,
         category: 'session',
+        // Empty slots keep their hotkey but stay out of the palette.
+        showInPalette: !!session,
         enabled: () => !!visibleSessionsRef.current[idx],
         action: () => {
           const s = visibleSessionsRef.current[idx];
@@ -227,4 +230,34 @@ export function useSessionNavigationHotkeys({
     unregister,
     visibleSessionsRef,
   ]);
+
+  // One palette command per active Session, selected the way its sidebar row is.
+  // A string key, so store refreshes that keep the same ids and names don't re-register.
+  const orchestrationSessionsKey = useOrchestrationSessionStore(s => JSON.stringify(
+    s.sessions.flatMap(session => isArchivedOrchestrationSession(session) ? [] : [[session.id, session.name]]),
+  ));
+  const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
+  const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
+
+  useEffect(() => {
+    const ids: string[] = [];
+    for (const session of useOrchestrationSessionStore.getState().sessions) {
+      if (isArchivedOrchestrationSession(session)) continue;
+      const id = `switch-orchestration-session-${session.id}`;
+      ids.push(id);
+      register({
+        id,
+        label: `Switch to Session: ${session.name}`,
+        keys: '',
+        category: 'navigation',
+        action: () => {
+          void setActiveSession(null);
+          navigateToPaneChat();
+          // The store owns selection errors and surfaces them in the sidebar.
+          selectOrchestrationSession({ sessionId: session.id }).catch(() => {});
+        },
+      });
+    }
+    return () => ids.forEach(id => unregister(id));
+  }, [navigateToPaneChat, orchestrationSessionsKey, register, selectOrchestrationSession, setActiveSession, unregister]);
 }

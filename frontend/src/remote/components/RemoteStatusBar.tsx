@@ -4,6 +4,8 @@ import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '..
 
 interface RemoteStatusBarProps {
   profile: RemotePaneConnectionProfile;
+  /** The open Pane or Session. The header falls back to the host when nothing is open. */
+  openName: string | null;
   status: RemotePaneConnectionStatus;
   lastError: string | null;
   lastSeenAt: string | null;
@@ -13,6 +15,7 @@ interface RemoteStatusBarProps {
 
 export function RemoteStatusBar({
   profile,
+  openName,
   status,
   lastError,
   lastSeenAt,
@@ -27,7 +30,9 @@ export function RemoteStatusBar({
     ? 'bg-status-success'
     : status === 'error' ? 'bg-status-error' : 'bg-status-warning';
   const statusLabel = getStatusLabel(status);
-  const title = connected ? profile.label : `${statusLabel} ${profile.label}`;
+  const hostLabel = connected ? profile.label : `${statusLabel} ${profile.label}`;
+  const title = openName ?? hostLabel;
+  const hostDetail = openName ? `${hostLabel} · ${profile.baseUrl}` : profile.baseUrl;
   const [announcement, setAnnouncement] = useState('');
   const previousAnnouncementRef = useRef('');
 
@@ -70,7 +75,7 @@ export function RemoteStatusBar({
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-text-primary">{title}</p>
           <p className="truncate text-xs text-text-tertiary">
-            {lastError || profile.baseUrl}
+            {lastError || hostDetail}
             {lastSeenAt ? ` · seen ${formatLastSeen(lastSeenAt)}` : ''}
           </p>
         </div>

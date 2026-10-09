@@ -15,7 +15,6 @@ import type {
   PanelGroupNode,
   PanelLayoutNode,
   SessionPanelLayout,
-  ToolPanel,
 } from '../../../shared/types/panels';
 import {
   allLeaves,
@@ -440,7 +439,7 @@ export function reconcile(
   for (const id of unassigned) {
     if (!splitPanelIds.has(id)) continue;
     changed = true;
-    root = placePanelInSplit(root, id);
+    root = placePanelInSplit(root, id, false);
   }
   if (orphans.length > 0) {
     changed = true;
@@ -571,13 +570,4 @@ export function findGroupInDirection(
   dir: 'left' | 'right' | 'up' | 'down',
 ): string | null {
   return findLeafInDirection<PanelGroupNode>(root, fromGroupId, dir);
-}
-
-/** Only a new, explicitly focused reopen request may change the selected tab. */
-export function shouldActivateReopenedPanel(panel: ToolPanel, previous?: ToolPanel): boolean {
-  const state = panel.state.customState;
-  const before = previous?.state.customState;
-  return !!state && 'reopenedAt' in state && !!state.reopenedAt
-    && 'reopenedWithFocus' in state && state.reopenedWithFocus === true
-    && (!before || !('reopenedAt' in before) || before.reopenedAt !== state.reopenedAt);
 }

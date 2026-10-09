@@ -206,6 +206,7 @@ export function registerProjectHandlers(
       }
 
       console.log('[Main] Project created successfully:', project);
+      sessionManager.emit('project:list-changed');
 
       if (project) {
         await updateProjectAgentContextBestEffort(project, configManager, 'project create');
@@ -455,6 +456,7 @@ export function registerProjectHandlers(
 
       // Now safe to delete the project
       const success = databaseService.deleteProject(projectIdNum);
+      sessionManager.emit('project:list-changed');
       return { success: true, data: success };
     } catch (error) {
       console.error('Failed to delete project:', error);

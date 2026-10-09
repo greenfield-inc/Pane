@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ToolPanel, CreatePanelRequest, PanelEventType, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState } from '../../../shared/types/panels';
+import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
 import { splitPanelBufferState } from '../database/panelBuffers';
@@ -33,6 +33,10 @@ class PanelManager {
 
   private sendRendererEvent(channel: string, ...args: PaneEventArgument[]): void {
     getPaneEventSink().send(channel, ...args);
+  }
+
+  private announceActivation(request: PanelActivationRequest): void {
+    this.sendRendererEvent('panel:activeChanged', request);
   }
 
   constructor() {
@@ -163,6 +167,9 @@ class PanelManager {
       
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:created', panel);
+      if (shouldActivate && request.announceActivation) {
+        this.announceActivation({ sessionId: request.sessionId, panelId, placement: panel.metadata.openPlacement });
+      }
 
       // Track terminal panel creation analytics (only for new panels, not restoration)
       if (request.type === 'terminal' && this.analyticsManager) {
@@ -239,9 +246,9 @@ class PanelManager {
         const otherPanels = this.getPanelsForSession(panel.sessionId).filter(p => p.id !== panelId);
         const nextPanel = otherPanels.find(p => p.type !== 'explorer' && p.type !== 'diff') ?? otherPanels[0];
         if (nextPanel) {
-          await this.setActivePanel(panel.sessionId, nextPanel.id);
+          await this.rememberActivePanel(panel.sessionId, nextPanel.id);
         } else {
-          await this.setActivePanel(panel.sessionId, null);
+          await this.rememberActivePanel(panel.sessionId, null);
         }
       }
 
@@ -317,7 +324,17 @@ class PanelManager {
     });
   }
   
-  async setActivePanel(sessionId: string, panelId: string | null): Promise<void> {
+  /**
+   * Host- or agent-initiated activation: records the tab as last used and asks
+   * clients already showing this Pane to bring it forward.
+   */
+  async setActivePanel(sessionId: string, panelId: string, placement?: PanelOpenPlacement): Promise<void> {
+    await this.rememberActivePanel(sessionId, panelId);
+    this.announceActivation({ sessionId, panelId, placement });
+  }
+
+  /** A client's own tab choice: updates the host's last-used tab and moves no client. */
+  async rememberActivePanel(sessionId: string, panelId: string | null): Promise<void> {
     return await withLock(`panel-active-${sessionId}`, async () => {
       // Get current active panel for analytics
       const currentActivePanel = databaseService.getActivePanel(sessionId);
@@ -350,9 +367,6 @@ class PanelManager {
           this.panels.set(panel.id, panel);
         }
       });
-
-      // Emit IPC event to notify frontend
-      this.sendRendererEvent('panel:activeChanged', { sessionId, panelId });
 
       // Track panel switching (only if both from and to panels exist)
       if (this.analyticsManager && fromPanelType && toPanelType && fromPanelType !== toPanelType) {

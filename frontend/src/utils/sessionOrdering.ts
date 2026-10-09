@@ -4,18 +4,13 @@ import type { SidebarNavigationScope } from '../stores/navigationStore';
 
 export interface PinnedSession {
   session: Session;
+  /** Pane name. */
   label: string;
+  repositoryName: string;
 }
 
-const PINNED_REPOSITORY_NAME_LENGTH = 6;
-
-function getPinnedSessionLabel(projectName: string | undefined, sessionName: string | undefined): string {
-  const repositoryName = projectName?.split(/[\\/]/).filter(Boolean).pop();
-  const shortRepositoryName = repositoryName && repositoryName.length > PINNED_REPOSITORY_NAME_LENGTH
-    ? `${repositoryName.slice(0, PINNED_REPOSITORY_NAME_LENGTH)}...`
-    : repositoryName || 'Unknown';
-
-  return `${shortRepositoryName}/${sessionName || 'Untitled'}`;
+function getRepositoryName(projectName: string | undefined): string {
+  return projectName?.split(/[\\/]/).filter(Boolean).pop() || 'Unknown';
 }
 
 function hasDisplayOrder(session: Session): boolean {
@@ -108,13 +103,15 @@ export function getPinnedSessions(
         : session.projectId != null ? projectById.get(session.projectId)?.name : undefined;
       return {
         session,
-        label: getPinnedSessionLabel(projectName, session.name),
+        label: session.name || 'Untitled',
+        repositoryName: getRepositoryName(projectName),
       };
     })
     .sort((a, b) => {
       const pinnedDiff = pinnedAtTime(b.session) - pinnedAtTime(a.session);
       if (pinnedDiff !== 0) return pinnedDiff;
-      return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
+      return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+        || a.repositoryName.localeCompare(b.repositoryName, undefined, { sensitivity: 'base' });
     });
 }
 
