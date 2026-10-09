@@ -121,7 +121,7 @@ function SshViewForHost() {
       {hasTabs ? (
         <div className="relative min-h-0 flex-1">
           {/* Over the stage, so showing it never resizes a terminal. */}
-          {alert && <p role="alert" className="absolute right-3 top-2 z-10 rounded border border-border-primary bg-surface-primary px-2 py-1 text-xs text-status-error shadow-sm">{alert}</p>}
+          {alert && <p role="alert" className="absolute left-1/2 top-2 z-40 -translate-x-1/2 rounded border border-border-primary bg-surface-primary px-2 py-1 text-xs text-status-error shadow-sm">{alert}</p>}
           {session && <SessionProvider session={session}>
             <SplitLayout layout={layout} panels={tabs} focusedGroupId={GROUP_ID} isMainRepo={false}
               onSizesChange={noop} onPanelSelect={selectGroupPanel} onPanelClose={closePanel} onFocusGroup={noop}

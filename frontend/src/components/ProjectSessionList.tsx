@@ -767,7 +767,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
             <Plus className="h-3.5 w-3.5" />
           </button>}
           {/* The open-tab dot and the hover "+" share one fixed box, so neither shifts the row. */}
-          {openHosts.has(alias) && <span className="pointer-events-none absolute right-3 top-0.5 flex h-6 w-6 items-center justify-center group-hover/ssh-host:invisible peer-focus-visible:invisible">
+          {openHosts.has(alias) && <span className={cn('pointer-events-none absolute right-3 top-0.5 flex h-6 w-6 items-center justify-center', configured.has(alias) && 'group-hover/ssh-host:invisible peer-focus-visible:invisible')}>
             <span data-testid="ssh-host-open-dot" role="img" aria-label="Open tab" className="h-1.5 w-1.5 rounded-full bg-interactive" />
           </span>}
         </div>
