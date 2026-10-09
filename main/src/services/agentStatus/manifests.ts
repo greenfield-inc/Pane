@@ -98,6 +98,9 @@ export const CLAUDE_MANIFEST: AgentManifest = {
       region: 'after_last_horizontal_rule',
       visibleBlocker: true,
       contains: ['accessing workspace:', 'yes, i trust this folder'],
+      // Live only while its footer is the last thing on screen: after "No, exit"
+      // the screen stays in scrollback above a shell prompt.
+      regex: [/esc to cancel\s*$/i],
     },
     {
       // Startup menus: bypass-permissions warnings ("❯ No, exit"
