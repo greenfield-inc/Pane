@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { generatePaneName, sanitizePaneName } from '../../utils/paneName';
 import type { RemoteBranchInfo, RemoteProjectWithSessions, RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
+import { loadStartPinnedPreference, saveStartPinnedPreference } from '../utils/startPinnedPreference';
 
 /**
  * Remote Pane runs as a browser PWA, not inside Electron. Keep create-dialog
@@ -38,7 +39,7 @@ export function RemoteCreateSessionDialog({
   const [paneName, setPaneName] = useState('');
   const [branchSearch, setBranchSearch] = useState('');
   const [useWorktree, setUseWorktree] = useState(true);
-  const [startPinned, setStartPinned] = useState(() => loadRemoteStartPinnedPreference());
+  const [startPinned, setStartPinned] = useState(() => loadStartPinnedPreference(REMOTE_START_PINNED_PREFERENCE_KEY));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
@@ -368,7 +369,7 @@ export function RemoteCreateSessionDialog({
               description="Show this pane in the pinned section immediately."
               onChange={(checked) => {
                 setStartPinned(checked);
-                saveRemoteStartPinnedPreference(checked);
+                saveStartPinnedPreference(REMOTE_START_PINNED_PREFERENCE_KEY, checked);
               }}
             />
           </section>
@@ -453,20 +454,4 @@ export function RemoteStartPinnedToggle({ checked, description, onChange }: {
       </span>
     </label>
   );
-}
-
-export function loadRemoteStartPinnedPreference(key = REMOTE_START_PINNED_PREFERENCE_KEY): boolean {
-  try {
-    return window.localStorage.getItem(key) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-export function saveRemoteStartPinnedPreference(value: boolean, key = REMOTE_START_PINNED_PREFERENCE_KEY): void {
-  try {
-    window.localStorage.setItem(key, value ? 'true' : 'false');
-  } catch {
-    // Ignore storage failures so the current create flow can still use local state.
-  }
 }

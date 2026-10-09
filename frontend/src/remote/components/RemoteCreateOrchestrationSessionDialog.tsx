@@ -10,7 +10,8 @@ import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } f
 import type { RemotePwaSessionAgents } from '../../../../shared/types/remoteDaemon';
 import type { Session } from '../../types/session';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
-import { loadRemoteStartPinnedPreference, RemoteStartPinnedToggle, saveRemoteStartPinnedPreference } from './RemoteCreateSessionDialog';
+import { loadStartPinnedPreference, saveStartPinnedPreference } from '../utils/startPinnedPreference';
+import { RemoteStartPinnedToggle } from './RemoteCreateSessionDialog';
 
 const START_PINNED_PREFERENCE_KEY = 'pane.remoteCreateOrchestrationSession.startPinned';
 const ALL_AGENTS: RemotePwaSessionAgents = { agents: ['claude', 'codex', 'cursor'], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
@@ -39,7 +40,7 @@ export function RemoteCreateOrchestrationSessionDialog({
   // Follows the host default, which can arrive after the sheet opens, until the person picks one.
   const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   const agent = pickedAgent ?? sessionAgents.defaultAgent;
-  const [startPinned, setStartPinned] = useState(() => loadRemoteStartPinnedPreference(START_PINNED_PREFERENCE_KEY));
+  const [startPinned, setStartPinned] = useState(() => loadStartPinnedPreference(START_PINNED_PREFERENCE_KEY));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const defaultName = nextOrchestrationSessionName(sessions);
@@ -148,7 +149,7 @@ export function RemoteCreateOrchestrationSessionDialog({
                 description="Show this Session in the pinned section immediately."
                 onChange={(checked) => {
                   setStartPinned(checked);
-                  saveRemoteStartPinnedPreference(checked, START_PINNED_PREFERENCE_KEY);
+                  saveStartPinnedPreference(START_PINNED_PREFERENCE_KEY, checked);
                 }}
               />
 
