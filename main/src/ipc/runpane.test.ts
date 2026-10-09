@@ -5975,6 +5975,7 @@ describe('runpane IPC handlers', () => {
         sessionManager: {
           ...createServices().sessionManager,
           getSession: vi.fn(() => dirtySession),
+          getProjectContext: vi.fn(() => ({ commandRunner: new CommandRunner({ path: repoPath }) })),
         } as never,
       });
       const registry = createRegistry(services);
@@ -6160,6 +6161,7 @@ describe('runpane IPC handlers', () => {
         sessionManager: {
           ...createServices().sessionManager,
           getSession: vi.fn(() => dryRunSession),
+          getProjectContext: vi.fn(() => ({ commandRunner: new CommandRunner({ path: repoPath }) })),
         } as never,
       });
       const registry = createRegistry(services);
