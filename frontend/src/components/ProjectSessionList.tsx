@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, Ar
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
+import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
@@ -95,6 +96,7 @@ export function ProjectSessionList({
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const navigateToMissionControl = useNavigationStore(s => s.navigateToMissionControl);
+  const missionControlEnabled = useConfigStore(s => isMissionControlEnabled(s.config));
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
   // Expansion state lives in the navigation store so the always-mounted
   // session hotkeys (useSessionNavigationHotkeys) see the same visible ordering
@@ -393,36 +395,38 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
-        <button
-          type="button"
-          data-testid="mission-control-nav"
-          onClick={() => {
-            setSidebarNavigationScope('repositories');
-            navigateToMissionControl();
-          }}
-          className={cn(
-            SIDEBAR_ROW_BASE,
-            SIDEBAR_ROW_GAP,
-            SIDEBAR_ROW_PADDING,
-            'py-2 text-sm hover:bg-surface-hover hover:text-text-primary',
-            activeView === 'mission-control'
-              ? 'bg-surface-hover text-text-primary'
-              : 'text-text-secondary',
-          )}
-        >
-          <LayoutGrid className="w-4 h-4" />
-          <span>Mission Control</span>
-          {/* Agents waiting on an answer are worth seeing without opening the grid. */}
-          {blockedAgentCount > 0 && (
-            <span
-              className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error"
-              title={`${blockedAgentCount} ${blockedAgentCount === 1 ? 'agent needs' : 'agents need'} input`}
-            >
-              <AgentStatusDot status="blocked" size="sm" />
-              {blockedAgentCount}
-            </span>
-          )}
-        </button>
+        {missionControlEnabled && (
+          <button
+            type="button"
+            data-testid="mission-control-nav"
+            onClick={() => {
+              setSidebarNavigationScope('repositories');
+              navigateToMissionControl();
+            }}
+            className={cn(
+              SIDEBAR_ROW_BASE,
+              SIDEBAR_ROW_GAP,
+              SIDEBAR_ROW_PADDING,
+              'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+              activeView === 'mission-control'
+                ? 'bg-surface-hover text-text-primary'
+                : 'text-text-secondary',
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span>Mission Control</span>
+            {/* Agents waiting on an answer are worth seeing without opening the grid. */}
+            {blockedAgentCount > 0 && (
+              <span
+                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error"
+                title={`${blockedAgentCount} ${blockedAgentCount === 1 ? 'agent needs' : 'agents need'} input`}
+              >
+                <AgentStatusDot status="blocked" size="sm" />
+                {blockedAgentCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {showRemoteDesktopLink && onRemoteDesktopClick && (
           <Tooltip content={remoteDesktopTooltip} side="right" className="block w-full">

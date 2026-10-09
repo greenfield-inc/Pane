@@ -28,7 +28,7 @@ import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus, getRemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
-import { useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -255,6 +255,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
+  const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
@@ -534,27 +535,29 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </Tooltip>
             )}
 
-            <Tooltip content="Mission Control" side="right">
-              <button
-                type="button"
-                data-testid="compact-mission-control"
-                data-compact-rail-item
-                onClick={() => {
-                  setSidebarNavigationScope('repositories');
-                  navigateToMissionControl();
-                }}
-                aria-label={blockedAgentCount > 0
-                  ? `Mission Control — ${blockedAgentCount} waiting for input`
-                  : 'Mission Control'}
-                className={`${COMPACT_RAIL_BUTTON} ${activeView === 'mission-control' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
-              >
-                <LayoutGrid className="h-4 w-4" />
-                {/* Same affordance as Pane Chat above: an agent is waiting. */}
-                {blockedAgentCount > 0 && (
-                  <AgentStatusDot status="blocked" size="sm" className="absolute right-0 top-0" />
-                )}
-              </button>
-            </Tooltip>
+            {missionControlEnabled && (
+              <Tooltip content="Mission Control" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-mission-control"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    navigateToMissionControl();
+                  }}
+                  aria-label={blockedAgentCount > 0
+                    ? `Mission Control — ${blockedAgentCount} waiting for input`
+                    : 'Mission Control'}
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'mission-control' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  {/* Same affordance as Pane Chat above: an agent is waiting. */}
+                  {blockedAgentCount > 0 && (
+                    <AgentStatusDot status="blocked" size="sm" className="absolute right-0 top-0" />
+                  )}
+                </button>
+              </Tooltip>
+            )}
 
             <OrchestrationSessionNav compact />
             {pinnedSessions.length > 0 && (

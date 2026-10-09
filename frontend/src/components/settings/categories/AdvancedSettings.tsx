@@ -5,6 +5,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
+import { isMissionControlEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 
@@ -49,7 +50,7 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
   };
 
   return (
-    <SettingsPage title="Advanced" description="Application diagnostics, terminal backend isolation, and process environment.">
+    <SettingsPage title="Advanced" description="Application diagnostics, terminal backend isolation, process environment, and experimental features.">
       <SettingsSection title="Diagnostics">
         <SettingRow
           settingId="verbose-logging"
@@ -144,6 +145,21 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
               <Button type="button" size="sm" disabled={!dirty} onClick={applyPaths}>Apply</Button>
             </div>
           </div>
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Experimental">
+        <SettingRow
+          settingId="mission-control"
+          label="Mission Control"
+          description="Add a sidebar view that shows every agent pane in one live grid."
+          saveState={persistence.saveStates['mission-control']}
+        >
+          <ImmediateToggle
+            label="Mission Control"
+            value={isMissionControlEnabled(config)}
+            onSave={(value) => persistence.saveConfig('mission-control', { missionControlEnabled: value })}
+          />
         </SettingRow>
       </SettingsSection>
     </SettingsPage>
