@@ -45,7 +45,8 @@ describe('trustClaudeSessionFolder', () => {
         [sessionFolder]: { allowedTools: [], lastCost: 1.5, hasTrustDialogAccepted: true },
       },
     });
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits to keep.
+    if (process.platform !== 'win32') expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
   });
 
   it('creates the project entry when the config has none', () => {
