@@ -11,7 +11,7 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
-import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type PanelLayoutNode } from '../../../shared/types/panels';
+import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -24,33 +24,6 @@ import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
 import { ChunkedUploadStore, type UploadStart } from '../services/chunkedUploadStore';
 
 const execFileAsync = promisify(execFile);
-
-const panelLayoutNodeSchema: BoundarySchema<PanelLayoutNode> = {
-  decode(cursor) {
-    return boundary.union(
-      boundary.object({
-        type: boundary.literal('group'),
-        id: boundary.string,
-        panelIds: boundary.array(boundary.string),
-        activePanelId: boundary.nullable(boundary.string),
-      }),
-      boundary.object({
-        type: boundary.literal('split'),
-        id: boundary.string,
-        direction: boundary.enumeration('row', 'column'),
-        children: boundary.array(panelLayoutNodeSchema),
-        sizes: boundary.array(boundary.number),
-      }),
-    ).decode(cursor);
-  },
-};
-
-const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.object({
-  version: boundary.literal(1),
-  root: panelLayoutNodeSchema,
-  focusedGroupId: boundary.optional(boundary.string),
-  zoomedGroupId: boundary.optional(boundary.nullable(boundary.string)),
-});
 
 /**
  * Check if a session's project is WSL-enabled and convert path if needed.
@@ -588,13 +561,14 @@ export function registerPanelHandlers(
       const raw = databaseService.getSessionPanelLayout(sessionId);
       if (!raw) return { success: true, data: null };
       try {
-        const parsed = decodeBoundary(JSON.parse(raw), sessionPanelLayoutSchema);
-        return { success: true, data: parsed };
+        // The same decoder reads each desktop's own layout memory.
+        const parsed = decodeSessionPanelLayout(JSON.parse(raw));
+        if (parsed) return { success: true, data: parsed };
       } catch {
         // Malformed JSON should never brick a session
-        console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
-        return { success: true, data: null };
       }
+      console.warn('[IPC] Corrupt panel_layout JSON for session', sessionId);
+      return { success: true, data: null };
     } catch (error) {
       console.error('[IPC] Failed to get panel layout:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
