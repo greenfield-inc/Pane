@@ -196,6 +196,8 @@ async function installSessionsFixture(
     };
     let currentListDelayMs = listDelayMs;
     let currentGetDelayMs = getDelayMs;
+    let heldLists: Promise<void> | null = null;
+    let releaseHeldLists = () => {};
     let selectCalls = 0;
     let overviewCalls = 0;
     let nextOrchestrationUpdateError: string | null = null;
@@ -268,6 +270,7 @@ async function installSessionsFixture(
           ? selectedSessionId
           : undefined;
         const snapshot = { sessions: clone(sessions), selectedSessionId: selected };
+        if (heldLists) await heldLists;
         if (currentListDelayMs > 0) await new Promise(resolve => setTimeout(resolve, currentListDelayMs));
         return success(snapshot);
       },
@@ -406,6 +409,9 @@ async function installSessionsFixture(
     Object.assign(window.__paneTestElectronMock, {
       setOrchestrationListDelay: (delayMs: number) => { currentListDelayMs = delayMs; },
       setOrchestrationGetDelay: (delayMs: number) => { currentGetDelayMs = delayMs; },
+      // Holds every list answer, taken from the Sessions at call time, until release.
+      holdOrchestrationLists: () => { heldLists = new Promise(resolve => { releaseHeldLists = resolve; }); },
+      releaseOrchestrationLists: () => { heldLists = null; releaseHeldLists(); },
       getOrchestrationSelectCalls: () => selectCalls,
       getOrchestrationViewRequests: () => clone(viewRequests),
       getOrchestrationOverviewCalls: () => overviewCalls,
@@ -1157,6 +1163,64 @@ test('switching hosts replaces the Sessions and pinned Sessions in the sidebar',
   await expect(page.getByTestId('orchestration-session-remote')).toBeVisible();
   await expect(page.getByTestId('orchestration-pinned-session-local-pinned')).toHaveCount(0);
   await expect(page.getByTestId('orchestration-session-local')).toHaveCount(0);
+});
+
+test('an Undo still refreshing when the host changes does not reopen the Session on the new host', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('shared-id', 'Local', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('local-other', 'Local other', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  const localRow = page.getByTestId('orchestration-session-shared-id');
+  await expect(localRow).toBeVisible({ timeout: 10_000 });
+  await localRow.click();
+  await expect(page.getByRole('heading', { name: 'Local', exact: true })).toBeAttached({ timeout: 10_000 });
+  await localRow.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  const home = page.getByRole('heading', { name: 'Preferences', exact: true });
+  await expect(home).toBeVisible();
+
+  type HostSwitchMock = {
+    holdOrchestrationLists: () => void;
+    releaseOrchestrationLists: () => void;
+    getOrchestrationSelectCalls: () => number;
+    getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null;
+    replaceOrchestrationSessions: (sessions: UiSessionFixture[]) => void;
+    emitRemoteDaemonResyncRequested: (event: { hostChanged: boolean }) => void;
+  };
+  // SAFETY: installSessionsFixture and installElectronApiMock add these controls before the app loads.
+  const selectCalls = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock.getOrchestrationSelectCalls());
+  const selectCallsBeforeUndo = await selectCalls();
+  await page.evaluate(() => {
+    // SAFETY: installSessionsFixture adds this control before the app loads.
+    (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock.holdOrchestrationLists();
+  });
+  await page.getByRole('status').filter({ hasText: 'Archived Local' }).getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: installSessionsFixture adds this control before the app loads.
+    return (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock.getOrchestrationRecord('shared-id')?.archived;
+  })).toBe(false);
+
+  // The new host has an active Session with the same id, so a stale reopen would land on it.
+  await page.evaluate((remoteSessions) => {
+    // SAFETY: installSessionsFixture and installElectronApiMock add these controls before the app loads.
+    const mock = (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock;
+    mock.replaceOrchestrationSessions(remoteSessions);
+    mock.emitRemoteDaemonResyncRequested({ hostChanged: true });
+    mock.releaseOrchestrationLists();
+  }, [
+    sessionFixture('remote', 'Remote', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('shared-id', 'Remote twin', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+
+  await expect(page.getByTestId('orchestration-session-remote')).toBeVisible();
+  await expect(page.getByTestId('orchestration-session-shared-id')).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await selectCalls()).toBe(selectCallsBeforeUndo);
+  await expect(home).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Remote twin', exact: true })).toHaveCount(0);
 });
 
 test('Session rows archive and restore without losing selection or associated Panes', async ({ page }) => {

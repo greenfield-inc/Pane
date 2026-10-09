@@ -247,14 +247,16 @@ export function OrchestrationSessionNav({
 
   const undoArchive = useCallback(async () => {
     if (!archivedToast) return;
-    const { sessionId, wasOpen } = archivedToast;
+    const { sessionId, wasOpen, hostRevision } = archivedToast;
+    // Every await can outlive the host; nothing may act on a host that never archived this Session.
+    const hostChanged = () => useOrchestrationSessionStore.getState().hostRevision !== hostRevision;
     setArchivedToast(null);
     setActionError(null);
     try {
       await update({ sessionId }, { archived: false } satisfies OrchestrationSessionUpdateInput);
-      if (useOrchestrationSessionStore.getState().hostRevision !== archivedToast.hostRevision) return;
+      if (hostChanged()) return;
       await refresh();
-      if (wasOpen) await openSession(sessionId);
+      if (wasOpen && !hostChanged()) await openSession(sessionId);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to restore Session');
     }
