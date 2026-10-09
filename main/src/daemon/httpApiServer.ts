@@ -1,5 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'http';
-import { pipeline, type Duplex, type Writable } from 'stream';
+import { pipeline as pipelineCallback, Readable, type Duplex, type Writable } from 'stream';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
+import { pipeline } from 'stream/promises';
 import { constants as zlibConstants, createGzip, gzip } from 'zlib';
 import net, { type AddressInfo } from 'net';
 import WebSocket, { createWebSocketStream, type RawData, WebSocketServer } from 'ws';
@@ -29,6 +31,7 @@ import { getRemotePwaAssetResponse } from './pwaStaticAssets';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
+import { streamWorktreePreview } from '../services/mediaStream';
 
 interface RemoteHttpAddress {
   host: string;
@@ -503,7 +506,7 @@ export class PaneRemoteHttpApiServer {
       // By name, so a service on either IPv4 or IPv6 loopback answers.
       const upstream = net.connect({ host: 'localhost', port });
       const stream = createWebSocketStream(client);
-      pipeline(stream, upstream, stream, () => {
+      pipelineCallback(stream, upstream, stream, () => {
         upstream.destroy();
         client.terminate();
       });
@@ -621,6 +624,11 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
+    if (url.pathname === '/media') {
+      await this.handleMediaRequest(request, response, url);
+      return;
+    }
+
     const remotePwaResponse = await getRemotePwaAssetResponse(url.pathname);
     if (remotePwaResponse.handled) {
       response.writeHead(remotePwaResponse.statusCode ?? 200, withCorsHeaders(remotePwaResponse.headers ?? {}));
@@ -731,6 +739,36 @@ export class PaneRemoteHttpApiServer {
         },
       } satisfies RemoteInvokeErrorPayload);
     }
+  }
+
+  /** File previews for remote desktops; Range passes through so media can seek. */
+  private async handleMediaRequest(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      this.writeMethodNotAllowed(response, 'GET');
+      return;
+    }
+    const auth = this.authenticateRequest(request);
+    if (!auth.ok) {
+      this.writeJson(response, auth.statusCode, auth);
+      return;
+    }
+    const abort = new AbortController();
+    response.once('close', () => abort.abort());
+    const range = request.headers.range;
+    const media = await streamWorktreePreview(this.commandRegistry, {
+      sessionId: url.searchParams.get('sessionId') ?? '',
+      filePath: url.searchParams.get('filePath') ?? '',
+    }, new Request(url, { method: request.method, headers: range ? { Range: range } : {}, signal: abort.signal }));
+    const headers: http.OutgoingHttpHeaders = {};
+    media.headers.forEach((value, name) => { headers[name] = value; });
+    response.writeHead(media.status, withCorsHeaders(headers));
+    if (!media.body) {
+      response.end();
+      return;
+    }
+    // SAFETY: the DOM and Node typings describe the same WHATWG ReadableStream.
+    // A client that stops reading (a seek) closes the response; that ends the file read.
+    await pipeline(Readable.fromWeb(media.body as NodeReadableStream<Uint8Array>), response).catch(() => {});
   }
 
   private handleHealthRequest(request: IncomingMessage, response: ServerResponse): void {
@@ -1168,7 +1206,7 @@ function acceptsGzip(request: IncomingMessage): boolean {
 // every write still delivers each SSE event immediately.
 function createSseGzipStream(response: ServerResponse): Writable {
   const gzipStream = createGzip({ flush: zlibConstants.Z_SYNC_FLUSH });
-  pipeline(gzipStream, response, () => {});
+  pipelineCallback(gzipStream, response, () => {});
   return gzipStream;
 }
 

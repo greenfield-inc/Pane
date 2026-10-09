@@ -32,6 +32,7 @@ it.each(['session', 'project'] as const)('stops the %s logs process before delet
       hasTerminalSession: () => false,
       getProjectContextByProjectId: () => ({ project }),
       invalidateProjectContext: () => {},
+      emit: () => true,
     },
     worktreeManager: {
       removeWorktree: async () => { removedWhileRunning = runningPanels.has('logs'); },

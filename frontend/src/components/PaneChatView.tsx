@@ -1,10 +1,11 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
+import { Info, Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
 import type {
+  OrchestrationActivityKind,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionUpdateInput,
@@ -34,6 +35,7 @@ import {
 import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { usePanelStore } from '../stores/panelStore';
 import { useHotkey } from '../hooks/useHotkey';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import type { DropZone, LayoutDirection } from '../utils/layoutTree';
@@ -139,7 +141,7 @@ export function PaneChatView() {
           <>
             <h2 className="text-base font-semibold text-text-primary">Choose a Session</h2>
             <p className="mt-2 text-sm text-text-secondary">
-              Create a new Session or restore one from Archived to start a chat.
+              Create a new Session or restore one from Archived.
             </p>
           </>
         )}
@@ -681,6 +683,8 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
+  const showsTrustPrompt = usePanelStore(state => state.agentStatus[view.panel.id] === 'blocked'
+    && state.agentStatusReason[view.panel.id] === 'workspace_trust_prompt');
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
   const isMounted = useRef(false);
@@ -812,6 +816,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
             toolbarActions={sessionControls}
+            stageNotice={showsTrustPrompt && <FolderTrustNotice />}
             chromeInline={chrome.tiled}
             focusWithin={chrome.isFocused}
             overviewContent={<SessionOverviewPanel
@@ -829,6 +834,19 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
             changesContent={<SessionChangesPanel overview={overview} error={overviewError} onRetry={onRetry} />} />
         </SessionProvider>
       </div>
+    </div>
+  );
+}
+
+const FOLDER_TRUST_NOTICE = 'The agent is asking whether to trust this folder. It is Pane\'s own folder for this Session\'s notes, with no project code, so it is safe to trust.';
+
+/** Overlays the top terminal row, which holds only the blank line and rule above the trust prompt, so the terminal keeps its size. */
+function FolderTrustNotice() {
+  return (
+    <div role="status" title={FOLDER_TRUST_NOTICE}
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 flex h-7 items-center gap-2 border-b border-interactive/30 bg-surface-secondary px-3 text-xs text-text-primary">
+      <Info className="h-3.5 w-3.5 flex-shrink-0 text-status-info" aria-hidden="true" />
+      <span className="min-w-0 truncate">{FOLDER_TRUST_NOTICE}</span>
     </div>
   );
 }
@@ -881,6 +899,11 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
     </Modal>
   );
 }
+
+// Agent state flips are shown by the status dot; the Activity list keeps Session events.
+const AGENT_STATE_ACTIVITY_KINDS = new Set<OrchestrationActivityKind>(['working', 'blocked', 'idle', 'unknown']);
+
+const OVERVIEW_HEADING = 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary';
 
 interface SessionOverviewPanelProps {
   record: OrchestrationSessionRecord;
@@ -940,18 +963,47 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
           </>
         ) : null}
 
+        {record.blockers.length > 0 && (
+          <div className="rounded-md border border-status-error/30 bg-status-error/10 px-2 py-2">
+            <h3 className={cn(OVERVIEW_HEADING, 'text-status-error')}>Blockers</h3>
+            <ul className="select-text list-disc space-y-1 pl-4 text-status-error">
+              {record.blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}
+            </ul>
+          </div>
+        )}
+        {record.goal && (
+          <div>
+            <h3 className={OVERVIEW_HEADING}>Goal</h3>
+            <p className="select-text whitespace-pre-wrap text-text-secondary">{record.goal}</p>
+          </div>
+        )}
+        {record.nextAction && (
+          <div>
+            <h3 className={OVERVIEW_HEADING}>Next step</h3>
+            <p className="select-text whitespace-pre-wrap text-text-secondary">{record.nextAction}</p>
+          </div>
+        )}
+        {record.decisions.length > 0 && (
+          <div>
+            <h3 className={OVERVIEW_HEADING}>Decisions</h3>
+            <ul className="select-text list-disc space-y-1 pl-4 text-text-secondary">
+              {record.decisions.map((decision, index) => <li key={index}>{decision}</li>)}
+            </ul>
+          </div>
+        )}
+
         <div>
-          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Associated Panes</h3>
+          <h3 className={OVERVIEW_HEADING}>Associated Panes</h3>
           {!overview && !error && <p className="text-text-muted">Loading live state…</p>}
           {error && <div className="space-y-1"><p role="alert" className="text-status-error">{error}</p><button type="button" className="underline text-text-secondary" onClick={onRetry}>Retry</button></div>}
-          {overview?.panes.length === 0 && <p className="text-text-muted">This Session has no associated Panes.</p>}
+          {overview?.panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
           {overview?.panes.map(pane => <PaneOverviewCard key={pane.paneId} pane={pane} />)}
         </div>
 
         <div className="border-t border-border-primary pt-3">
-          <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Activity</h3>
+          <h3 className={OVERVIEW_HEADING}>Activity</h3>
           <div className="select-text space-y-2">
-            {(overview?.activity ?? record.activity).slice(0, 12).map(activity => (
+            {(overview?.activity ?? record.activity).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
               <div key={activity.id} className="border-l-2 border-border-primary pl-2">
                 <p className="text-text-secondary">{activity.message}</p>
                 <p className="mt-0.5 text-[10px] text-text-muted">{formatActivityTime(activity.at)} · {activity.source}</p>
@@ -976,8 +1028,8 @@ function SessionChangesPanel({ overview, error, onRetry }: {
   return (
     <div className="space-y-2 p-3 text-[12px] text-text-secondary">
       {error && <div role="alert" className="space-y-1"><p className="text-status-error">{error}</p><button type="button" className="underline" onClick={onRetry}>Retry</button></div>}
-      {!overview && !error && <p className="text-text-muted">Loading linked worktrees…</p>}
-      {overview && panes.length === 0 && <p className="text-text-muted">No linked worktrees.</p>}
+      {!overview && !error && <p className="text-text-muted">Loading Panes…</p>}
+      {overview && panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
       {panes.map(pane => (
         <div key={pane.paneId} className="rounded-md bg-surface-secondary px-2 py-2">
           <div className="flex items-center justify-between gap-2">
@@ -986,7 +1038,7 @@ function SessionChangesPanel({ overview, error, onRetry }: {
               onClick={() => { setActiveSession(pane.paneId); navigateToSessions(); }}>Open Pane</button>}
           </div>
           <p className="mt-1 text-[11px] text-text-tertiary">
-            {pane.missing ? 'Worktree unavailable' : pane.git?.hasUncommittedChanges || pane.git?.hasUntrackedFiles ? 'Uncommitted changes' : 'No uncommitted changes'}
+            {pane.missing ? 'Pane unavailable' : pane.git?.hasUncommittedChanges || pane.git?.hasUntrackedFiles ? 'Uncommitted changes' : 'No uncommitted changes'}
             {pane.branch ? ` · ${pane.branch}` : ''}
           </p>
           {pane.git && (pane.git.ahead || pane.git.behind) ? (

@@ -33,7 +33,7 @@ import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attent
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
-import { startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { useWindowActive } from './hooks/useWindowActive';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
@@ -265,6 +265,16 @@ function App() {
     },
   });
 
+  // mod+shift+n is New Project, so New Session is palette-only.
+  // OrchestrationSessionNav owns the Create Session dialog and opens it on this event.
+  useHotkey({
+    id: 'new-orchestration-session',
+    label: 'New Session',
+    keys: '',
+    category: 'navigation',
+    action: () => window.dispatchEvent(new Event('open-create-orchestration-session')),
+  });
+
   useHotkey({
     id: 'new-project',
     label: 'New Project',
@@ -282,7 +292,11 @@ function App() {
   }, [fetchConfig]);
 
   // Remember where the user is on the active host, so a host switch can return here.
-  useEffect(() => startHostNavigationMemoryWrites(), []);
+  useEffect(() => {
+    const stopWrites = startHostNavigationMemoryWrites();
+    void restoreSessionSelection();
+    return stopWrites;
+  }, []);
 
   // Detect unclean shutdown from previous session and notify user
   useEffect(() => {

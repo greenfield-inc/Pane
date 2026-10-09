@@ -114,7 +114,8 @@ test.describe('remote pwa motion', () => {
 
   test('the status dot reaches only while it is actually reaching', async ({ page }) => {
     await openConnectedRemotePwa(page);
-    await expect(page.getByText('MacBook Pro', { exact: true })).toBeVisible();
+    // The header title is the open Pane; the host name leads the subtitle.
+    await expect(page.getByText(/^MacBook Pro · /)).toBeVisible();
 
     // Connected is a settled state and stays still.
     await expect(page.locator('.pane-status-reaching')).toHaveCount(0);

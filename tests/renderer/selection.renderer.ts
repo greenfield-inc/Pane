@@ -134,7 +134,7 @@ test('Session tool hydration hides cached tools and offers retry on failure', as
   await expect(page.getByRole('status').filter({ hasText: 'Opening Session tools' })).toBeVisible();
 });
 
-test('an old selected event snapshot cannot move B after its acknowledgement, but a new external event can', async ({ page }) => {
+test('an old selected event snapshot cannot move B after its acknowledgement, and neither can a later one', async ({ page }) => {
   await page.goto('/renderer-tests/selection.html?events');
   await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
@@ -142,9 +142,10 @@ test('an old selected event snapshot cannot move B after its acknowledgement, bu
   await resolve(page, 'list', 'a');
   await expect(page).toHaveTitle(/Session B/);
   await expect(page.getByRole('status').filter({ hasText: 'Opening Session B' })).toBeVisible();
+  // Another client selecting A does not move this desktop.
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
   await resolve(page, 'list', 'a');
-  await expect(page).toHaveTitle(/Session A/);
+  await expect(page).toHaveTitle(/Session B/);
 });
 
 test('B content stays mounted when the earlier A content reply arrives last', async ({ page }) => {
@@ -276,7 +277,7 @@ for (const source of ['initial', 'resync']) {
   }
 }
 
-test('same-host reconnect retains failed Session intent and retry; explicit selection remains adoptable', async ({ page }) => {
+test('same-host reconnect retains failed Session intent and retry; another client\'s selection does not move it', async ({ page }) => {
   await page.goto('/renderer-tests/selection.html?runtime-events');
   await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
   await resolve(page, 'select', 'b', 'Disconnected B');
@@ -307,7 +308,8 @@ test('same-host reconnect retains failed Session intent and retry; explicit sele
   await expect(page.locator('aside').getByRole('alert').filter({ hasText: 'Pin failed independently' })).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
   await resolve(page, 'list', 'a');
-  await expect(page).toHaveTitle(/Session A/);
+  await expect(page).toHaveTitle(/Session B/);
+  expect(await state(page)).toMatchObject({ session: 'b' });
 });
 
 test('a different host adopts its Session selection after failed local intent', async ({ page }) => {
@@ -323,17 +325,16 @@ test('a different host adopts its Session selection after failed local intent', 
   await expect(page.getByRole('button', { name: 'Open Session Session A', exact: true }).locator('..')).toHaveClass(/bg-surface-selected/);
 });
 
-test('explicit external selection remains authoritative while local Session selection has failed', async ({ page }) => {
+test('another client\'s selection does not replace a failed local Session intent', async ({ page }) => {
   await page.goto('/renderer-tests/selection.html?runtime-events');
   await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
   await resolve(page, 'select', 'b', 'Disconnected B');
   await expect(page.locator('[data-session-tile="b"]').getByRole('alert')).toContainText('Disconnected B');
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
   await resolve(page, 'list', 'a');
-  await expect(page).toHaveTitle(/Session A/);
-  expect(await state(page)).toMatchObject({ session: 'a', route: 'pane-chat' });
-  await expect(page.locator('[data-session-tile="a"]').getByRole('alert')).toHaveCount(0);
-  await expect(page.getByRole('status').filter({ hasText: 'Opening Session A' })).toBeVisible();
+  await expect(page).toHaveTitle(/Session B/);
+  expect(await state(page)).toMatchObject({ session: 'b', route: 'pane-chat' });
+  await expect(page.locator('[data-session-tile="b"]').getByRole('alert')).toContainText('Disconnected B');
 });
 
 for (const compact of [false, true]) {

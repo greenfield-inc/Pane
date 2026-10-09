@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
@@ -107,6 +107,19 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   });
   const activeSessionId = useSessionStore(state => state.activeSessionId);
   const orchestrationName = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId)?.name);
+  // The Session this Pane belongs to, named in place of the project as a way
+  // back. The selected Session is the one the Pane was opened from, if it holds it.
+  const parentSession = useOrchestrationSessionStore(state => {
+    if (activeView !== 'sessions' || !activeSessionId) return undefined;
+    const owners = state.sessions.filter(session => (
+      !isArchivedOrchestrationSession(session)
+      && session.associations.some(association => association.paneId === activeSessionId)
+    ));
+    return owners.find(session => session.id === state.selectedSessionId) ?? owners[0];
+  });
+  const setActiveSession = useSessionStore(state => state.setActiveSession);
+  const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
+  const selectOrchestrationSession = useOrchestrationSessionStore(state => state.select);
   const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) ?? (activeSessionId ? { project: 'Pane', pane: activeSession?.name ?? activeSessionId } : null)
     : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
@@ -123,6 +136,16 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   const arrived = useArrivedKeys(activeSession?.id ?? null, pills.map(pill => pill.key));
 
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
+
+  const parentSessionName = parentSession?.name ?? null;
+  // Opens the Session the way its sidebar row does.
+  const openParentSession = () => {
+    if (!parentSession) return;
+    void setActiveSession(null);
+    navigateToPaneChat();
+    // The store owns selection errors and shows them in the Session view.
+    selectOrchestrationSession({ sessionId: parentSession.id }).catch(() => undefined);
+  };
 
   return (
     <div
@@ -156,12 +179,26 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
             data-testid="window-title-bar-label"
-            title={windowTitle}
+            title={parentSessionName && title.pane ? `${parentSessionName} › ${title.pane}` : windowTitle}
           >
-            <span className="truncate text-text-tertiary">{title.project}</span>
+            {parentSessionName ? (
+              <button
+                type="button"
+                className="min-w-0 truncate rounded-sm text-text-tertiary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                style={NO_DRAG}
+                onClick={openParentSession}
+                aria-label={`Back to Session ${parentSessionName}`}
+                title={`Back to Session ${parentSessionName}`}
+                data-testid="window-title-bar-parent-session"
+              >
+                {parentSessionName}
+              </button>
+            ) : (
+              <span className="truncate text-text-tertiary">{title.project}</span>
+            )}
             {title.pane && (
               <>
-                <span className="flex-shrink-0 text-text-tertiary" aria-hidden="true">·</span>
+                <span className="flex-shrink-0 text-text-tertiary" aria-hidden="true">{parentSessionName ? '›' : '·'}</span>
                 <span
                   className="truncate font-medium text-text-secondary"
                   style={HEAD_ELLIPSIS_STYLE}

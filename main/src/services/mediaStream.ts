@@ -1,6 +1,23 @@
 import { open } from 'fs/promises';
 import { extname } from 'path';
 import { Readable } from 'stream';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { filePreviewKind } from '../../../shared/utils/filePreview';
+import type { PaneCommandRegistry } from '../daemon/commandRegistry';
+
+export interface PreviewFile { sessionId: string; filePath: string }
+export const previewPathSchema = boundary.object({ success: boundary.literal(true), path: boundary.string, url: boundary.string });
+
+/** The host side of a remote preview: the worktree boundary of `file:getPath`, then the requested bytes. */
+export async function streamWorktreePreview(commandRegistry: PaneCommandRegistry, file: PreviewFile, request: Request): Promise<Response> {
+  try {
+    if (!filePreviewKind(file.filePath)) throw new Error('No preview for this file type');
+    const resolved = decodeBoundary(await commandRegistry.invokeRemote('file:getPath', [file]), previewPathSchema);
+    return await streamMediaFile(resolved.path, request);
+  } catch {
+    return new Response(null, { status: 404 });
+  }
+}
 
 const MIME_TYPES = new Map([
   ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
