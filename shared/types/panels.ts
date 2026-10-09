@@ -525,13 +525,3 @@ const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.ob
 export function decodeSessionPanelLayout<Value>(value: Value): SessionPanelLayout | null {
   return decodeOptionalBoundary(value, sessionPanelLayoutSchema) ?? null;
 }
-
-/**
- * Sent as `panel:activeChanged` when the host or an agent brings a tab forward.
- * Only clients already showing `sessionId` act on it.
- */
-export interface PanelActivationRequest {
-  sessionId: string;
-  panelId: string;
-  placement?: 'split' | 'tab';
-}
