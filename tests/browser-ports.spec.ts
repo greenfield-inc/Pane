@@ -108,7 +108,7 @@ test.describe('a remote desktop loading a host page', () => {
     await expect(page.locator('webview')).toHaveAttribute('src', 'http://localhost:5174/app');
 
     await emitPorts(page, { host: 'devbox', ports: [] });
-    await expect(page.getByText('Nothing listens on it on the host right now.', { exact: false })).toBeVisible();
+    await expect(page.getByText("The host isn't listing it right now.", { exact: false })).toBeVisible();
     await expect(page.locator('webview')).toHaveCount(0);
 
     await emitPorts(page, tunnelled(5175));

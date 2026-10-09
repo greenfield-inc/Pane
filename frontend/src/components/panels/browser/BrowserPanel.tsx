@@ -625,7 +625,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
               <p className="text-xs text-text-tertiary">
                 {target.listed
                   ? 'Pane could not open a local port for it here.'
-                  : 'Nothing listens on it on the host right now. The page loads when it starts again.'}
+                  : "The host isn't listing it right now. The page loads when it is listed again."}
               </p>
             </div>
           )}
