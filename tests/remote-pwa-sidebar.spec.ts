@@ -67,6 +67,19 @@ test('pinned Sessions and pinned panes share the Pinned section', async ({ page 
   await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 
+test('a phone opens a Session by tapping its icon, not only its name', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
+
+  await page.getByRole('button', { name: 'Open remote panes' }).click();
+  const row = page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' });
+  const box = await row.locator('xpath=..').boundingBox();
+  if (!box) throw new Error('Session row has no box');
+  // The leading chat icon of a Session without Panes, at the row's left edge.
+  await page.mouse.click(box.x + 20, box.y + box.height / 2);
+  await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
 test('archived Sessions and panes are restored from the Archived section', async ({ page }) => {
   page.on('dialog', dialog => void dialog.accept());
   await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });

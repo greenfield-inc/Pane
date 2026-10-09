@@ -139,17 +139,19 @@ export function RemoteSidebar({
             >
               {nestedExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </button>
-          ) : (
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center self-center text-text-tertiary md:h-8 md:w-8" aria-hidden="true">
-              <MessageSquare className="h-3.5 w-3.5" />
-            </span>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={() => actions.openSession(session.id)}
             aria-label={`Open Session ${name}`}
             className="flex min-h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
           >
+            {/* Without Panes the icon sits inside the button, so tapping it opens the Session too. */}
+            {panes.length === 0 && (
+              <span className="-mr-1 inline-flex h-11 w-11 shrink-0 items-center justify-center text-text-tertiary md:h-8 md:w-8" aria-hidden="true">
+                <MessageSquare className="h-3.5 w-3.5" />
+              </span>
+            )}
             <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
             {panes.length > 0 && <span className="shrink-0 text-[10px] tabular-nums text-text-muted">{panes.length}</span>}
           </button>
