@@ -20,7 +20,7 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "6",
+      "buildNumber": "16",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -46,7 +46,15 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host."
+          "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host and to take photos you send to your agents."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pane lets you pick photos and videos to send to your agents.",
+          "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host and to take photos you send to your agents.",
+          "microphonePermission": false
         }
       ],
       [

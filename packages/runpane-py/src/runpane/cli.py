@@ -23,6 +23,7 @@ from .installers import (
     spawn_pane,
     spawn_pane_captured,
 )
+from .workspaces import read_workspace_summary
 from .local_control import (
     has_cadence_value_flag,
     run_agents_doctor,
@@ -58,6 +59,7 @@ from .local_control import (
     run_sessions_overview,
     run_sessions_set_agent,
     run_sessions_update,
+    run_sessions_pin,
     run_watch,
     run_workspace_state,
 )
@@ -144,6 +146,7 @@ class ParsedArgs:
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
     as_file_pointer: bool = False
+    interrupt: bool = False
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
@@ -255,13 +258,10 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
 
 
 def run_tracked_command(telemetry_context: WrapperTelemetryContext, execute: Callable[[], int]) -> int:
-    track_wrapper_event("runpane_wrapper_command_started", telemetry_context)
     try:
         code = execute()
         telemetry_context["exit_code"] = code
-        if code == 0:
-            track_wrapper_event("runpane_wrapper_command_succeeded", telemetry_context)
-        else:
+        if code != 0:
             telemetry_context.setdefault("failure_stage", infer_failure_stage(telemetry_context))
             telemetry_context.setdefault("failure_category", "process_exit")
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
@@ -384,8 +384,20 @@ def create_parsed_args(command: str, **overrides: object) -> ParsedArgs:
     return parsed
 
 
+def take_leading_pane_dir(args: List[str]) -> List[str]:
+    # `runpane --pane-dir <dir> <command>` puts the global flag before the command;
+    # set those tokens aside so the command matches, then parse them with the flags.
+    taken: List[str] = []
+    while args and (args[0] == "--pane-dir" or args[0].startswith("--pane-dir=")):
+        width = 2 if args[0] == "--pane-dir" else 1
+        taken.extend(args[:width])
+        del args[:width]
+    return taken
+
+
 def parse_args(argv: List[str]) -> ParsedArgs:
     args = list(argv)
+    leading_pane_dir_args = take_leading_pane_dir(args)
     if not args or args[0] in {"-h", "--help"}:
         return ParsedArgs(command="help")
     first = args[0]
@@ -416,6 +428,7 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "update":
         parsed.target = "client"
 
+    args[:0] = leading_pane_dir_args
     parse_flags(args, parsed)
     if parsed.command == "panes archive":
         validate_panes_archive_args(parsed)
@@ -607,6 +620,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--force":
         parsed.force = True
+        return
+    if flag == "--interrupt":
+        parsed.interrupt = True
         return
     if flag == "--as-file-pointer":
         parsed.as_file_pointer = True
@@ -1114,6 +1130,13 @@ def help_text(topic: Optional[str]) -> str:
     return "\n".join(help_topics.get(topic or "default", help_topics["default"]))
 
 
+def print_help(parsed: ParsedArgs) -> int:
+    print(help_text(parsed.help_topic))
+    if not parsed.help_topic or parsed.help_topic == "workspace":
+        print("\n".join(["", *read_workspace_summary(parsed.pane_dir)["lines"]]))
+    return 0
+
+
 def run_unsupported_contract(parsed: ParsedArgs, context: WrapperTelemetryContext) -> int:
     print(help_text(parsed.command), file=sys.stderr)
     return 2
@@ -1131,6 +1154,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),
     "sessions update": lambda parsed, context: run_sessions_update(parsed),
+    "sessions pin": lambda parsed, context: run_sessions_pin(parsed, True),
+    "sessions unpin": lambda parsed, context: run_sessions_pin(parsed, False),
     "sessions set-agent": lambda parsed, context: run_sessions_set_agent(parsed),
     "sessions associate": lambda parsed, context: run_sessions_associate(parsed),
     "sessions detach": lambda parsed, context: run_sessions_detach(parsed),
@@ -1142,6 +1167,13 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),
     "watch": lambda parsed, context: run_watch(parsed),
+    "workspace list": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace enable": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace disable": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace read": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace write": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "workspace exec": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
     "panes create": lambda parsed, context: run_panes_create(parsed),
     "panes archive": lambda parsed, context: run_panes_archive(parsed),
     "panes pin": lambda parsed, context: run_panes_pin(parsed, True),
@@ -1161,7 +1193,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "report": lambda parsed, context: run_report(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
     "panes adopt": lambda parsed, context: run_panes_adopt(parsed),
-    "help": lambda parsed, context: print(help_text(parsed.help_topic)) or 0,
+    "help": lambda parsed, context: print_help(parsed),
     "install": lambda parsed, context: install_or_update(parsed, context),
     "update": lambda parsed, context: install_or_update(parsed, context),
     "mcp": lambda parsed, context: run_unsupported_contract(parsed, context),

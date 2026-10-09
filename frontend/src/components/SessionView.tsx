@@ -1,10 +1,13 @@
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionHistoryStore } from '../stores/sessionHistoryStore';
 import { useHotkey } from '../hooks/useHotkey';
 import { useCommittedRef } from '../hooks/useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
+import { SelectionLoading } from './ui/SelectionLoading';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
 import { LiveRegion } from './ui/LiveRegion';
@@ -96,6 +99,12 @@ export const SessionView = memo(() => {
     () => (config?.customCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
     [config?.customCommands]
   );
+  const selectedPaneId = useSessionStore(state => state.activeSessionId);
+  const selectionRevision = useSessionStore(state => state.selectionRevision);
+  const selectionError = useSessionStore(state => state.selectionError);
+  const hostId = config ? getActiveRemoteHostId(config.remoteDaemon) : undefined;
+  const [panelLoad, setPanelLoad] = useState<{ id: string; revision: number; hostId: typeof hostId; error: string | null } | null>(null);
+  const [panelRetry, setPanelRetry] = useState(0);
   const isRemoteMode = config?.remoteDaemon?.client.mode === 'remote';
 
   // Get active session by subscribing directly to store state
@@ -109,6 +118,7 @@ export const SessionView = memo(() => {
     // Otherwise look in regular sessions
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
+  const ownsPanelLoad = panelLoad?.id === selectedPaneId && panelLoad?.revision === selectionRevision && panelLoad?.hostId === hostId;
   const activeProjectEnvironment = sessionProject && sessionProject.id === activeSession?.projectId
     ? sessionProject.environment
     : undefined;
@@ -140,7 +150,19 @@ export const SessionView = memo(() => {
     focusedGroupIds,
     setLayout: setLayoutInStore,
     setFocusedGroup: setFocusedGroupInStore,
-  } = usePanelStore();
+  } = usePanelStore(useShallow(state => ({
+    panels: state.panels,
+    activePanels: state.activePanels,
+    setPanels: state.setPanels,
+    setActivePanel: state.setActivePanel,
+    addPanel: state.addPanel,
+    removePanel: state.removePanel,
+    updatePanelState: state.updatePanelState,
+    layouts: state.layouts,
+    focusedGroupIds: state.focusedGroupIds,
+    setLayout: state.setLayout,
+    setFocusedGroup: state.setFocusedGroup,
+  })));
   
   // History store for navigation
   const { addToHistory } = useSessionHistoryStore();
@@ -228,8 +250,10 @@ export const SessionView = memo(() => {
 
   // Load panels AND layout when session changes
   useEffect(() => {
+    let cancelled = false;
     if (activeSession?.id) {
       const sid = activeSession.id;
+      setPanelLoad(null);
       devLog.debug('[SessionView] Loading panels for session:', sid);
 
       // Flush any pending layout from the previous session
@@ -246,6 +270,7 @@ export const SessionView = memo(() => {
 
       // Always reload panels from database when switching sessions
       panelApi.loadPanelsForSession(sid).then(async loadedPanels => {
+        if (cancelled) return;
         devLog.debug('[SessionView] Loaded panels:', loadedPanels);
         const sessionState = useSessionStore.getState();
         const loadedSession = sessionState.activeMainRepoSession?.id === sid
@@ -261,6 +286,7 @@ export const SessionView = memo(() => {
         const fallback = pickDefaultPanel(loadedPanels, hasReviewPr);
 
         const activePanelResult = await panelApi.getActivePanel(sid);
+        if (cancelled) return;
         const effectiveActivePanel = activePanelResult ?? fallback;
         const fallbackActiveId = effectiveActivePanel?.id ?? null;
 
@@ -290,12 +316,8 @@ export const SessionView = memo(() => {
           return (a.metadata?.position ?? 0) - (b.metadata?.position ?? 0);
         });
 
-        let stored: SessionPanelLayout | null = null;
-        try {
-          stored = await panelApi.getLayout(sid);
-        } catch (err) {
-          console.warn('[SessionView] Failed to load layout, creating default:', err);
-        }
+        const stored = await panelApi.getLayout(sid);
+        if (cancelled) return;
         // Recompute live ids from the store at set time: panel:created
         // events that landed while this load was in flight are in the store
         // but not in the loadedPanels snapshot. Reconciling against the
@@ -322,14 +344,18 @@ export const SessionView = memo(() => {
           : reconciledLayout;
         setLayoutInStore(sid, layout);
         setFocusedGroupInStore(sid, layout.focusedGroupId ?? primaryGroup(layout.root).id);
+        setPanelLoad({ id: sid, revision: selectionRevision, hostId, error: null });
+      }).catch(error => {
+        if (!cancelled) setPanelLoad({ id: sid, revision: selectionRevision, hostId, error: error instanceof Error ? error.message : 'Failed to open Pane' });
       });
     }
 
     // Flush layout on cleanup (session switch or unmount)
     return () => {
+      cancelled = true;
       flushLayoutPersist();
     };
-  }, [activeSession?.id, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
+  }, [activeSession?.id, selectionRevision, hostId, panelRetry, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
   
   // Listen for panel updates from the backend
   useEffect(() => {
@@ -1508,7 +1534,7 @@ export const SessionView = memo(() => {
   const hasTriedCreatingTerminal = useRef(false);
   useEffect(() => {
     // Any terminal counts, so an agent-only pane gains no shell.
-    if (!activeSession?.id || sessionPanels.some(p => p.type === 'terminal') || hasTriedCreatingTerminal.current) return;
+    if (!ownsPanelLoad || panelLoad?.error || !activeSession?.id || sessionPanels.some(p => p.type === 'terminal') || hasTriedCreatingTerminal.current) return;
     // Only attempt once per session to avoid loops
     hasTriedCreatingTerminal.current = true;
 
@@ -1527,7 +1553,7 @@ export const SessionView = memo(() => {
         console.error('[SessionView] Failed to auto-create terminal panel:', err);
       });
     });
-  }, [activeSession?.id, sessionPanels, addPanel]);
+  }, [activeSession?.id, ownsPanelLoad, panelLoad?.error, sessionPanels, addPanel]);
 
   // Reset the flag when session changes
   useEffect(() => {
@@ -1815,9 +1841,17 @@ export const SessionView = memo(() => {
     return <PaneChatView />;
   }
 
-  if (!activeSession) {
-    return <HomePage />;
+  const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
+  if (selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)) {
+    return <div className="flex flex-1 flex-col bg-bg-primary">
+      {loadError ? <div className="p-6 text-text-secondary"><p role="alert">{loadError}</p>
+        <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => {
+          if (selectionError) void useSessionStore.getState().setActiveSession(selectedPaneId);
+          else { setPanelLoad(null); setPanelRetry(value => value + 1); }
+        }}>Retry</button></div> : <SelectionLoading name={activeSession?.name ?? selectedPaneId} />}
+    </div>;
   }
+  if (!activeSession) return <HomePage />;
   
   return (
     <div className="pane-session-shell flex-1 flex flex-col overflow-hidden bg-bg-primary">

@@ -1,3 +1,4 @@
+import { isBinaryFile } from '../utils/binaryFile';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
@@ -12,6 +13,8 @@ import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { Session } from '../types/session';
 import { commitGitMessage } from '../utils/gitCommit';
+import { describeGitFailure, readGitIdentity, writeGitIdentity } from '../utils/gitIdentity';
+import { GIT_IDENTITY_MISSING, type GitIdentityScope } from '../../../shared/types/gitIdentity';
 import { revealInFileManager } from '../utils/revealInFileManager';
 
 interface FileReadRequest {
@@ -91,6 +94,8 @@ const DAEMON_FILE_CHANNELS = [
   'file:write-binary',
   'file:getPath',
   'git:commit',
+  'git:identity',
+  'git:set-identity',
   'git:revert',
   'git:restore',
   'file:readAtRevision',
@@ -206,6 +211,9 @@ export function registerFileHandlers(
         throw new Error('File path is outside worktree');
       }
 
+      if (await isBinaryFile(fullPath)) {
+        return { success: false, binary: true, error: 'Binary files cannot be edited as text' };
+      }
       const content = await fs.readFile(fullPath, 'utf-8');
       return { success: true, content };
     } catch (error) {
@@ -313,6 +321,10 @@ export function registerFileHandlers(
       // Verify the file is within the worktree using PathResolver
       if (!await pathResolver.isWithin(basePath, fullPath)) {
         throw new Error('File path is outside worktree');
+      }
+
+      if (await fileExists(fullPath) && await isBinaryFile(fullPath)) {
+        throw new Error('Binary files cannot be edited as text');
       }
 
       // Create directory if it doesn't exist
@@ -445,55 +457,77 @@ export function registerFileHandlers(
       if (!ctx) throw new Error('Project not found for session');
       const { commandRunner } = ctx;
 
-      try {
-        // Stage all changes
+      const commitAll = async () => {
         await commandRunner.execAsync('git add -A', session.worktreePath);
-
         await commitGitMessage(commandRunner, session.worktreePath, request.message, configManager.getConfig(), {
           timeout: 120_000,
         });
+      };
 
-        // Refresh git status for this session after commit
+      try {
         try {
-          await gitStatusManager.refreshSessionGitStatus(request.sessionId, false);
-        } catch (error) {
-          // Git status refresh failures are logged by GitStatusManager
-          console.error('Failed to refresh git status after commit:', error);
+          await commitAll();
+        } catch (error: unknown) {
+          if (!(error instanceof Error && error.message.includes('pre-commit hook'))) throw error;
+          // Try again in case the pre-commit hook made changes
+          await commitAll();
         }
-
-        return { success: true };
       } catch (error: unknown) {
-        // Check if it's a pre-commit hook failure
-        if (error instanceof Error && error.message.includes('pre-commit hook')) {
-          // Try to commit again in case the pre-commit hook made changes
-          try {
-            await commandRunner.execAsync('git add -A', session.worktreePath);
-
-            await commitGitMessage(commandRunner, session.worktreePath, request.message, configManager.getConfig(), {
-              timeout: 120_000,
-            });
-
-            // Refresh git status for this session after commit
-            try {
-              await gitStatusManager.refreshSessionGitStatus(request.sessionId, false);
-            } catch (error) {
-              // Git status refresh failures are logged by GitStatusManager
-              console.error('Failed to refresh git status after commit (retry):', error);
-            }
-
-            return { success: true };
-          } catch (retryError: unknown) {
-            throw new Error(`Git commit failed: ${retryError instanceof Error ? retryError.message : retryError}`);
-          }
-        }
-        throw new Error(`Git commit failed: ${error instanceof Error ? error.message : error}`);
+        console.error('Error committing changes:', error);
+        const failure = describeGitFailure(error instanceof Error ? error : new Error(String(error)));
+        return failure.identityMissing
+          ? { success: false, code: GIT_IDENTITY_MISSING, error: 'Git needs your name and email before it can commit.', details: failure.details }
+          : { success: false, error: `Git commit failed: ${failure.message}`, details: failure.details };
       }
+
+      // The commit has landed; don't hold the caller on a status read, which
+      // can take tens of seconds through wsl.exe.
+      gitStatusManager.refreshSessionGitStatus(request.sessionId, false).catch(error => {
+        console.error('Failed to refresh git status after commit:', error);
+      });
+      return { success: true };
     } catch (error) {
       console.error('Error committing changes:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+    }
+  });
+
+  // Read the git identity a commit in this session's worktree would use
+  commandRegistry.register('git:identity', async (request: { sessionId: string }) => {
+    try {
+      const session = sessionManager.getSession(request.sessionId);
+      if (!session) throw new Error(`Session not found: ${request.sessionId}`);
+      const ctx = sessionManager.getProjectContext(request.sessionId);
+      if (!ctx) throw new Error('Project not found for session');
+      return { success: true, data: await readGitIdentity(ctx.commandRunner, session.worktreePath) };
+    } catch (error) {
+      return { success: false, error: describeGitFailure(error instanceof Error ? error : new Error(String(error))).message };
+    }
+  });
+
+  // Set user.name/user.email in the session's environment (native or WSL)
+  commandRegistry.register('git:set-identity', async (request: { sessionId: string; name: string; email: string; scope: GitIdentityScope }) => {
+    try {
+      const session = sessionManager.getSession(request.sessionId);
+      if (!session) throw new Error(`Session not found: ${request.sessionId}`);
+      const ctx = sessionManager.getProjectContext(request.sessionId);
+      if (!ctx) throw new Error('Project not found for session');
+      const identity = await writeGitIdentity(ctx.commandRunner, session.worktreePath, request);
+      if (!identity.configured) {
+        return {
+          success: false,
+          error: request.scope === 'global'
+            ? "Saved, but this repository's own git config still overrides it. Untick \"Use for all repositories\" to save it for this repository."
+            : 'Saved, but git still has no usable name and email here.',
+        };
+      }
+      return { success: true };
+    } catch (error) {
+      const failure = describeGitFailure(error instanceof Error ? error : new Error(String(error)));
+      return { success: false, error: failure.message, details: failure.details };
     }
   });
 

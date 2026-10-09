@@ -122,6 +122,8 @@ runpane sessions list [--json] [--pane-dir <path>]
 runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]
 runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
 runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
@@ -173,9 +175,9 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.
 
-`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin; manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.
+`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.
 
-For `panes create --wait-ready`, `initialInput.delivery` says where the prompt went: `taken` or `queued` (from the agent's transcript, its screen, or `argv` for a launch-argument prompt), `in-composer`, or `unknown`. `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`. Routing input does not by itself verify submission.
+For `panes create --wait-ready`, `initialInput.delivery` says where the prompt went: `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch but acceptance is not yet observed). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`. Routing input does not by itself verify submission. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Cursor launch prompts currently remain unknown because no acceptance probe is available. First-run trust and daemon dialogs return blocked.kind=first-run-dialog with the dialog in blocked.message and a suggestedCommand; while readiness is blocked or times out, launch-argument delivery remains unknown and unverified.
 
 `runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.
 
@@ -183,7 +185,7 @@ For `panes create --wait-ready`, `initialInput.delivery` says where the prompt w
 
 `runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
 
-`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.
+`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, including HTML source; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.
 
 `runpane panels list` lists tool panels inside one Pane session.
 
@@ -203,6 +205,8 @@ When running from WSL while Pane is installed on Windows, the Linux wrapper may 
 
 `runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. For Session members with an open PR, the daemon polls GitHub about every 3 minutes and reports `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`), `pr.checks` (`... CHECKS PASSED` or `... CHECKS FAILED <names>`), and `pr.merged` (`... MERGED`) on transitions only; list them in `--kinds`. In JSON, an entry with `replay: true` restates current state after a reset and is never READY.
 
+A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.
+
 `sessions list` list durable named orchestration Sessions.
 
 `sessions create` create a durable named orchestration Session and its hidden terminal owner.
@@ -210,6 +214,8 @@ When running from WSL while Pane is installed on Windows, the Linux wrapper may 
 `sessions get` read one durable named orchestration Session.
 
 `sessions update` update a Session overview from structured JSON.
+
+`sessions pin` and `sessions unpin` set the Session pin star through the existing UI update path. Create JSON accepts `isPinned` (default false); update JSON preserves the pin when the field is omitted.
 
 `sessions set-agent` switch the durable terminal agent for a named Session.
 
@@ -233,6 +239,8 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
+`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel.
+
 ## Command reference
 
 Every command and its options, from `commands` in `contracts/runpane/contract.json`.
@@ -252,6 +260,13 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
+- `workspace list`: List your machines on Tailscale and whether each has joined workspaces.
+- `workspace enable`: Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).
+- `workspace disable`: Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.
+- `workspace read`: Print a file from one of your machines; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
+- `workspace write`: Write stdin to a file on one of your machines, creating parent folders.
+- `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
+- `handoff`: Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
 - `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
 - `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
@@ -295,9 +310,9 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agents send`: Send a follow-up message to an agent and confirm it was submitted.
 - `report`: Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.
 - `sessions list`: List durable named orchestration Sessions.
-- `sessions create`: Create a durable named orchestration Session and its hidden terminal owner.
+- `sessions create`: Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).
 - `sessions get`: Read one durable named orchestration Session.
-- `sessions update`: Update a Session overview from structured JSON.
+- `sessions update`: Update a Session overview from structured JSON; isPinned sets the UI pin star.
 - `sessions set-agent`: Switch the durable terminal agent for a named Session.
 - `sessions associate`: Associate a user-visible Pane with a named Session.
 - `sessions detach`: Detach a Pane from a named Session.
@@ -305,6 +320,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
+- `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
 
 ```bash
 runpane help [command]
@@ -325,6 +342,14 @@ runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <pa
 runpane panes list [--repo <selector>] [--json] [--pane-dir <path>]
 runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane workspace state [--repo <selector>] [--json] [--pane-dir <path>]
+runpane workspace list [--json] [--pane-dir <path>]
+runpane workspace enable [--json] [--pane-dir <path>]
+runpane workspace disable [--json] [--pane-dir <path>]
+runpane workspace [<machine>] read <path> [--json]
+runpane workspace [<machine>] write <path> [--json]
+runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
+runpane handoff --template
+runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]
 runpane watch [--as <name>|--since <generation>] [--follow] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>|--session <id|name>] [--include-shells] [--self-test] [--quiet] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
@@ -343,8 +368,8 @@ runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <tit
 runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panels output --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels screen --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
-runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json] [--pane-dir <path>]
-runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]
+runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) [--source user|agent] --yes [--json] [--pane-dir <path>]
+runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]
 runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json] [--pane-dir <path>]
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
@@ -385,6 +410,8 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -527,6 +554,11 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--cwd <path>
+--note-file <path|->
+--machine <name>
+--model <model>
+--effort <level>
 --json
 --wait-ready
 --no-focus
@@ -553,6 +585,9 @@ These flags are consumed by local daemon-control commands:
 --idle-backoff
 --report
 --read-only
+--template
+--push
+--interrupt
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.
@@ -590,9 +625,10 @@ The npm package uses `source=npm` for all npm-registry consumers, including `npx
 The PyPI package uses `source=pip` for all Python consumers, including pip, pipx, uvx, and `python -m runpane`.
 Wrappers should prefer `https://runpane.com/api/download?platform=<platform>&arch=<arch>&format=<format>&version=<version>&channel=<channel>&source=<npm|pip>`.
 If the website route cannot satisfy the download, wrappers may fall back to the matching GitHub release asset and print a warning that website attribution may be incomplete for that run.
-Wrappers also emit best-effort lifecycle telemetry to `https://runpane.com/api/runpane/telemetry` for command start/success/failure, download request/success/failure, and GitHub fallback usage.
-Wrapper telemetry uses a persisted anonymous `install_id` in the form `install_<uuid>` and PostHog `distinct_id = install:<install_id>` so distinct wrapper users can be counted with `count(DISTINCT properties.install_id)`.
-Wrapper telemetry must be disabled in CI and when `RUNPANE_TELEMETRY_DISABLED` is set, and must not include raw paths, labels, prompts, raw error text, or environment values.
+Wrappers emit best-effort telemetry to `https://runpane.com/api/runpane/telemetry` for command failures, download request/success/failure, and GitHub fallback usage. Routine command starts and successes emit nothing.
+Wrapper telemetry uses a persisted anonymous `install_id` in the form `install_<uuid>` and PostHog `distinct_id = install:<install_id>` so installs reporting failures or downloads can be counted with `count(DISTINCT properties.install_id)`; this is not a count of all CLI users.
+Wrapper telemetry must be disabled in CI, when `RUNPANE_TELEMETRY_DISABLED` is set, and when the local config explicitly disables analytics. It must not include raw paths, labels, prompts, raw error text, or environment values.
+Desktop local control reports useful failures as `runpane_local_control_failed`; normal polling, wait deadlines, and optional agent unavailability emit nothing. Reports contain coarse operation and failure classification only, with a five-minute deduplication interval and a maximum of 20 per hour per app process. Handled CLI failures are ordinary events, not exceptions.
 
 ## Publishing Credentials
 

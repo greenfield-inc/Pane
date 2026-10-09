@@ -43,7 +43,11 @@ describe('WSL Session RunPane bridge', () => {
     }
   });
 
-  it.skipIf(process.platform !== 'win32' || !process.env.PANE_TEST_WSL_DISTRO)('crosses actual WSL interop with literal arguments, paths, and the calling panel identity', () => {
+  it.skipIf(process.platform !== 'win32' || !process.env.PANE_TEST_WSL_DISTRO).each([
+    { name: 'CLI flags without a delimiter', remoteArgs: [] },
+    { name: 'empty command after the delimiter', remoteArgs: ['--'] },
+    { name: 'workspace exec payload', remoteArgs: ['--', `printf '%s\\n' 'spaces, "quotes" & apostrophes'`, '--file', '/remote/file', '--repo=./remote', '--pane-dir', '/remote/pane', '--', ''] },
+  ])('crosses actual WSL interop with $name', ({ remoteArgs }) => {
     const { directory, launcher } = fixture();
     const record: OrchestrationSessionRecord = {
       id: 'session', internalSessionId: 'owner', name: 'Bridge test', agent: 'codex',
@@ -57,10 +61,10 @@ describe('WSL Session RunPane bridge', () => {
     const literal = 'quotes " and \' $dollar `tick`; Unicode é' + 'x'.repeat(16_001);
     try {
       execFileSync('wsl.exe', ['-d', process.env.PANE_TEST_WSL_DISTRO!, '--exec', 'env', 'PANE_PANEL_ID=calling-panel', 'PATH=/usr/bin:/bin',
-        'bash', windowsPathToWSLMount(script), '--summary', literal, '--file', windowsPathToWSLMount(script),
+        'bash', windowsPathToWSLMount(script), 'workspace', 'mac', 'exec', '--summary', literal, '--file', windowsPathToWSLMount(script),
         '--input-file', '-', `--from-json=${windowsPathToWSLMount(script)}`, '--path', directory,
         `--pane-path=${windowsPathToWSLMount(launcher)}`, '--download-dir', 'relative downloads',
-        '--repo', windowsPathToWSLMount(directory), '--repo=.', '--repo', 'my-repo', '--repo=active'],
+        '--repo', windowsPathToWSLMount(directory), '--repo=.', '--repo', 'my-repo', '--repo=active', ...remoteArgs],
       { input: 'piped input stays available', encoding: 'utf8', timeout: 30000 });
       throw new Error('Expected CLI exit code 7');
     } catch (error) {
@@ -68,9 +72,9 @@ describe('WSL Session RunPane bridge', () => {
       // SAFETY: execFileSync errors with the asserted exit status include captured UTF-8 stdout.
       const output = JSON.parse((error as { stdout: string }).stdout);
       expect(output).toMatchObject({ session: 'session', panel: 'calling-panel', stdin: 'piped input stays available' });
-      expect(output.args).toEqual(['--summary', literal, '--file', script, '--input-file', '-', `--from-json=${script}`, '--path', directory,
+      expect(output.args).toEqual(['workspace', 'mac', 'exec', '--summary', literal, '--file', script, '--input-file', '-', `--from-json=${script}`, '--path', directory,
         `--pane-path=${launcher}`, '--download-dir', path.resolve('relative downloads'),
-        '--repo', directory, `--repo=${process.cwd()}`, '--repo', 'my-repo', '--repo=active', '--pane-dir', directory]);
+        '--repo', directory, `--repo=${process.cwd()}`, '--repo', 'my-repo', '--repo=active', '--pane-dir', directory, ...remoteArgs]);
       expect(fs.readdirSync(directory).filter(name => name.startsWith('bridge-'))).toEqual([]);
     }
   });

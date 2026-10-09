@@ -10,6 +10,7 @@ import { worktreePoolManager } from './worktreePoolManager';
 import { ensureFastGitConfig, forceRemoveWorktree } from './gitPerformanceConfig';
 import { removeWorktreeViaTrash, sweepWorktreeTrash, type WorktreeTrashDeletion } from './worktreeTrash';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { withArchiveRepositoryLock } from './archiveRepositoryLock';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
 
@@ -229,6 +230,11 @@ export async function assertNewBranchName(
 
 export class WorktreeManager {
   private projectsCache: Map<string, { baseDir: string }> = new Map();
+  private archivePathGuard?: (target: string) => Promise<void>;
+
+  setArchivePathGuard(guard: (target: string) => Promise<void>): void {
+    this.archivePathGuard = guard;
+  }
 
   constructor(
     private configManager?: ConfigManager,
@@ -272,9 +278,10 @@ export class WorktreeManager {
   }
 
   async createWorktree(projectPath: string, name: string, branch: string | undefined, baseBranch: string | undefined, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<{ worktreePath: string; baseCommit: string; baseBranch: string }> {
-    return await withLock(`worktree-create-${projectPath}-${name}`, async () => {
+    return await withArchiveRepositoryLock(projectPath, commandRunner, () => withLock(`worktree-create-${projectPath}-${name}`, async () => {
 
       const worktreePath = this.getWorktreePath(projectPath, name, worktreeFolder, pathResolver);
+      await this.archivePathGuard?.(pathResolver.toFileSystem(worktreePath));
       const branchName = branch || name;
     
 
@@ -397,7 +404,7 @@ export class WorktreeManager {
         console.error(`[WorktreeManager] Failed to create worktree:`, error);
         throw new Error(`Failed to create worktree: ${error instanceof Error ? error.message : String(error)}`);
       }
-    });
+    }));
   }
 
   /**
@@ -431,15 +438,19 @@ export class WorktreeManager {
       // Try claiming a pre-created reserve worktree for instant creation
       try {
         const branchName = requestedBranch ?? worktreeName;
-        const claimed = await worktreePoolManager.claimReserve(
-          projectPath,
-          effectiveBase,
-          worktreeName,
-          branchName,
-          worktreeFolder,
-          pathResolver,
-          commandRunner
-        );
+        const claimed = await withArchiveRepositoryLock(projectPath, commandRunner, async () => {
+          const target = this.getWorktreePath(projectPath, worktreeName, worktreeFolder, pathResolver);
+          await this.archivePathGuard?.(pathResolver.toFileSystem(target));
+          return worktreePoolManager.claimReserve(
+            projectPath,
+            effectiveBase,
+            worktreeName,
+            branchName,
+            worktreeFolder,
+            pathResolver,
+            commandRunner
+          );
+        });
         if (claimed) {
           // Detect base commit from the claimed worktree
           const { baseCommit } = await detectGitBase(claimed.worktreePath, commandRunner);
@@ -477,7 +488,8 @@ export class WorktreeManager {
    * stored path rather than a name.
    */
   async removeWorktreeAtPath(projectPath: string, worktreePath: string, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
-    return await withLock(`worktree-remove-${projectPath}-${worktreePath}`, async () => {
+    return await withArchiveRepositoryLock(projectPath, commandRunner, () => withLock(`worktree-remove-${projectPath}-${worktreePath}`, async () => {
+      await this.archivePathGuard?.(pathResolver.toFileSystem(worktreePath));
       const auditDetails = {
         source: auditContext?.source,
         sessionId: auditContext?.sessionId,
@@ -525,7 +537,7 @@ export class WorktreeManager {
         // For other errors, still throw
         throw new Error(`Failed to remove worktree: ${errorMessage}`);
       }
-    });
+    }));
   }
 
   async listWorktrees(projectPath: string, commandRunner: CommandRunner): Promise<WorktreeEntry[]> {

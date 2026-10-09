@@ -766,7 +766,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   includeHeldInput: false, idleBackoff: false, allManaged: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
-  asFilePointer: false, noAssociate: false, removeWorktree: false, merged: false,
+  asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
   quiet: false, readOnly: false, launch: false,
 };
 
@@ -2269,7 +2269,7 @@ async function checkDeliveryParity() {
   assert.strictEqual(printed[2].composer.ghostText, 'merge it');
   assert.deepStrictEqual(printed[3].delivery, queued);
   assert.strictEqual(printed[3].delivered, true);
-  assert.ok(stdout.includes('Delivery: queued (transcript)'), stdout.join('\n'));
+  assert.ok(stdout.includes('Delivery: queued (transcript) — The agent sees this only after its current turn ends. Do not resend.'), stdout.join('\n'));
   assert.ok(stdout.includes('Delivered to panel-1 (queued, from the transcript).'), stdout.join('\n'));
   assert.ok(stdout.includes('  Delivery: taken (argv)'), stdout.join('\n'));
   const screenOut = written.join('');
@@ -2298,7 +2298,7 @@ with contextlib.redirect_stdout(stdout):
 print(json.dumps({"stdout": stdout.getvalue().splitlines()}))
 `);
   const python = JSON.parse(pythonOutput);
-  assert.ok(python.stdout.includes('Delivery: queued (transcript)'), python.stdout.join('\n'));
+  assert.ok(python.stdout.includes('Delivery: queued (transcript) — The agent sees this only after its current turn ends. Do not resend.'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Delivery: in-composer (screen)'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('❯ merge it  ⟨suggestion⟩'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('  Delivery: taken (argv)'), python.stdout.join('\n'));
@@ -3191,9 +3191,11 @@ function compareAgentContextParity() {
     cwd: rootDir
   }).trim();
 
-  const nodeBrief = JSON.parse(runNode(['agent-context', '--json']));
-  const pyBrief = JSON.parse(runPython(['agent-context', '--json']));
+  // The workspaces block reports live Tailscale and Pane state, which can change between the two runs.
+  const { workspaces: nodeWorkspaces, ...nodeBrief } = JSON.parse(runNode(['agent-context', '--json']));
+  const { workspaces: pyWorkspaces, ...pyBrief } = JSON.parse(runPython(['agent-context', '--json']));
   assert.deepStrictEqual(pyBrief, nodeBrief);
+  for (const workspaces of [nodeWorkspaces, pyWorkspaces]) assert.match(workspaces.lines[0], /^Workspaces: (on|off)/);
   assert.strictEqual(nodeBrief.mode, 'brief');
   assert.ok(nodeBrief.rules.some((rule) => rule.includes('runpane doctor --json')));
   assert.ok(nodeBrief.summary.includes('Pane-managed git worktree'));
@@ -3297,9 +3299,10 @@ function compareAgentContextParity() {
   assertIncludes(runNode(['agent-context']), 'Detailed definitions: runpane agent-context --command <command> [--json]');
   assertIncludes(runPython(['agent-context', '--command', 'panes create']), 'runpane panes create');
 
-  // --pane-dir is accepted and ignored by the offline commands.
-  assert.deepStrictEqual(JSON.parse(runNode(['agent-context', '--json', '--pane-dir', '/tmp/pane'])), nodeBrief);
-  assert.deepStrictEqual(JSON.parse(runPython(['agent-context', '--json', '--pane-dir', '/tmp/pane'])), nodeBrief);
+  // --pane-dir only picks which Pane the workspaces block asks; the rest of the brief is offline.
+  const withoutWorkspaces = ({ workspaces, ...brief }) => brief;
+  assert.deepStrictEqual(withoutWorkspaces(JSON.parse(runNode(['agent-context', '--json', '--pane-dir', '/tmp/pane']))), nodeBrief);
+  assert.deepStrictEqual(withoutWorkspaces(JSON.parse(runPython(['agent-context', '--json', '--pane-dir', '/tmp/pane']))), nodeBrief);
   assertIncludes(runNode(['version', '--pane-dir', '/tmp/pane']), 'runpane');
   assertIncludes(runPython(['version', '--pane-dir', '/tmp/pane']), 'runpane');
 
@@ -3552,7 +3555,7 @@ async function checkAgentTemplateParity() {
   const { runPanesCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
 
   const agents = [...RUNPANE_CONTRACT.enums.agents].sort();
-  assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor']);
+  assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor', 'opencode']);
   for (const agent of RUNPANE_CONTRACT.enums.agents) {
     const template = RUNPANE_CONTRACT.agentTemplates[agent];
     assert.ok(template, `agentTemplates missing entry for ${agent}`);
@@ -3561,6 +3564,7 @@ async function checkAgentTemplateParity() {
     assert.ok(template.description.trim().length > 0, `agentTemplates.${agent}.description is empty`);
   }
   assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.cursor.command, 'cursor-agent --force --trust');
+  assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.opencode.command, 'opencode --auto');
 
   const originalInvokeDaemon = daemonClient.invokeDaemon;
   const originalConsoleLog = console.log;
@@ -3769,6 +3773,8 @@ async function checkCliEventSubscriptions() {
 }
 
 async function checkSessionChildPinDefaults() {
+  const { helpText } = require(path.join(rootDir, 'packages/runpane/dist/commands.js'));
+  assert.match(helpText('panes create'), /Session.*unpinned/);
   const daemonClient = require(path.join(rootDir, 'packages/runpane/dist/daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages/runpane/dist/commands.js'));
   const { runPanesCreate } = require(path.join(rootDir, 'packages/runpane/dist/localControl.js'));
@@ -3808,13 +3814,35 @@ print(json.dumps([build_pane_create_request(parse_args(base + extra))["panes"][0
   }
 }
 
+async function checkSessionPinCommands() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-session-pins-'));
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const action of ['pin', 'pin', 'unpin', 'unpin']) {
+        const args = ['sessions', action, '--session', 'coordinator', '--json'];
+        const output = await withFakeDaemon(paneDir, frame => {
+          assert.strictEqual(frame.channel, 'runpane:sessions:update');
+          assert.deepStrictEqual(frame.args, [{ selector: { sessionId: 'coordinator' }, input: { isPinned: action === 'pin' } }]);
+          return { result: { ok: true, session: { id: 'coordinator', name: 'Coordinator', isPinned: action === 'pin', agent: 'codex',
+            internalSessionId: 'owner', panelIds: { claude: 'claude-panel', codex: 'codex-panel', cursor: 'cursor-panel' },
+            goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [],
+            activity: [], revision: 1, createdAt: '2026-10-06T03:00:00Z', updatedAt: '2026-10-06T03:00:00Z' } } };
+        }, () => runControlProcess(runtime, runtime === 'npm' ? args : ['-m', 'runpane', ...args], paneDir));
+        assert.strictEqual(JSON.parse(output).session.isPinned, action === 'pin');
+      }
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkSessionRuntime() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const { runSessionsCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runtime-contract-'));
   const file = path.join(directory, 'session.json');
-  const input = { name: 'WSL planning', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' };
+  const input = { name: 'WSL planning', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04', isPinned: true };
   fs.writeFileSync(file, JSON.stringify(input));
   const originalInvoke = daemonClient.invokeDaemon;
   const originalLog = console.log;
@@ -3829,6 +3857,7 @@ async function checkSessionRuntime() {
     assert.strictEqual(await runSessionsCreate(parseRunpaneArgs(['sessions', 'create', '--from-json', file, '--json'])), 0);
     assert.strictEqual(received.runtime, 'wsl');
     assert.strictEqual(received.wslDistribution, 'Ubuntu-24.04');
+    assert.strictEqual(received.isPinned, true);
   } finally {
     daemonClient.invokeDaemon = originalInvoke;
     console.log = originalLog;
@@ -4012,6 +4041,7 @@ async function runChecks() {
   await checkLockParity();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();
+  await checkSessionPinCommands();
   await checkPanesAdoptCliParity();
   checkContractDocListsEveryCommand();
   await checkAgentTemplateParity();

@@ -12,6 +12,7 @@ import type { RunCommandManager } from '../services/runCommandManager';
 import type { VersionChecker } from '../services/versionChecker';
 import type { Logger } from '../utils/logger';
 import type { ArchiveProgressManager } from '../services/archiveProgressManager';
+import type { ArchiveCleanupManager } from '../services/archiveCleanupManager';
 import type { SkillCacheManager } from '../services/skillCacheManager';
 import type { PaneChatManager } from '../services/paneChatManager';
 import type { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
@@ -35,6 +36,7 @@ export interface CoreServices {
   versionChecker: VersionChecker;
   logger?: Logger;
   archiveProgressManager?: ArchiveProgressManager;
+  archiveCleanupManager?: ArchiveCleanupManager;
   skillCacheManager?: SkillCacheManager;
   paneChatManager?: PaneChatManager;
   orchestrationSessionManager?: OrchestrationSessionManager;

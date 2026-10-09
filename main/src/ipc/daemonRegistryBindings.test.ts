@@ -50,6 +50,7 @@ const PROJECT_CHANNELS = [
 
 const CONFIG_CHANNELS = [
   'remote:pwa-affordances',
+  'remote:settings:update',
   'terminal:get-shell-settings',
   'terminal:set-preferred-shell',
 ] as const;
@@ -97,6 +98,8 @@ const FILE_CHANNELS = [
   'file:write-binary',
   'file:getPath',
   'git:commit',
+  'git:identity',
+  'git:set-identity',
   'git:revert',
   'git:restore',
   'file:readAtRevision',
@@ -145,6 +148,10 @@ const PANEL_CHANNELS = [
   'terminal:paste-image',
   'terminal:save-scrollback',
   'terminal:paste-file',
+  'terminal:upload-start',
+  'terminal:upload-chunk',
+  'terminal:upload-commit',
+  'terminal:upload-cancel',
 ] as const;
 
 const SCRIPT_CHANNELS = [
@@ -192,6 +199,7 @@ const SESSION_CHANNELS = [
   'sessions:resume-interrupted',
   'sessions:dismiss-interrupted',
   'archive:get-progress',
+  'archive:retry-cleanup',
   'panels:get-output',
   'panels:get-conversation-messages',
   'panels:get-json-messages',

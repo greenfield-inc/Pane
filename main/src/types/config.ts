@@ -1,9 +1,11 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
+import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
 
 interface TerminalShortcut {
@@ -47,6 +49,9 @@ export interface AppConfig {
   falApiKey?: string;
   openRouterApiKey?: string;
   deepgramApiKey?: string;
+  apns?: ApnsCredentialConfig;
+  /** When and where each shared key was last set or cleared. A record without a value means cleared. */
+  sharedCredentials?: Partial<Record<SharedCredentialId, SharedCredentialMeta>>;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   // Legacy fields for backward compatibility
   gitRepoPath?: string;
@@ -63,15 +68,13 @@ export interface AppConfig {
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
+  defaultSessionPinned?: boolean;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
   autoStartOnBoot?: boolean;
   // Prevent idle sleep while Pane sessions are active
   keepAwakeWhileSessionsActive?: boolean;
-  // Stravu MCP integration
-  stravuApiKey?: string;
-  stravuServerUrl?: string;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -115,7 +118,7 @@ export interface AppConfig {
   gitAttributionEnabled?: boolean;
   // Agent-facing Pane context
   agentContext?: {
-    /** Write a marked Pane section into repository AGENTS.md files (off by default; edits the repo). */
+    /** Publish Pane instructions and scoped Notes into repository instruction files (off by default; edits the repo). */
     managedAgentsMd?: boolean;
     /** Register Pane's MCP server with the user-level Claude Code, Codex, and Cursor configs. */
     registerMcp?: boolean;
@@ -165,6 +168,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  // Codeless remote access over Tailscale (runpane workspace and desktop remote mode)
+  workspaces?: WorkspaceAccessConfig;
   terminalFontFamily?: string;
   terminalFontSize?: number;
   // Leaderboard opt-in and cached state
@@ -178,6 +183,7 @@ export interface UpdateConfigRequest {
   falApiKey?: string;
   openRouterApiKey?: string;
   deepgramApiKey?: string;
+  apns?: ApnsCredentialConfig;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   claudeExecutablePath?: string;
   systemPromptAppend?: string;
@@ -187,11 +193,10 @@ export interface UpdateConfigRequest {
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
+  defaultSessionPinned?: boolean;
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;
-  stravuApiKey?: string;
-  stravuServerUrl?: string;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: LightTheme;

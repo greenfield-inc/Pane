@@ -1,4 +1,5 @@
 import { installRunpaneShimBestEffort } from '../services/runpaneShim';
+import os from 'os';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { startupPanelBufferMigration, startupRetentionResult } from '../services/database';
@@ -8,6 +9,7 @@ import { DatabaseService } from '../database/database';
 import { AnalyticsManager } from '../services/analyticsManager';
 import { SessionManager } from '../services/sessionManager';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
+import { ArchiveCleanupManager } from '../services/archiveCleanupManager';
 import { SpotlightManager } from '../services/spotlightManager';
 import { PermissionIpcServer } from '../services/permissionIpcServer';
 import { WorktreeManager } from '../services/worktreeManager';
@@ -29,6 +31,10 @@ import { isLockOwnerLive } from '../ipc/runpane';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
+import { PaneWorkspaceHostController } from './workspaceHost';
+import { RemoteHostTailnetMonitor } from './remoteHostTailnet';
+import { registerWorkspaceCommands } from '../ipc/workspace';
+import { getMobilePushSender } from './mobilePushSender';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
   setPaneRuntime,
@@ -241,6 +247,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     // of silently replacing the user's metadata.
     logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
   });
+  getMobilePushSender(configManager, { resolveSubject: paneId => orchestrationSessionManager.alertSubject(paneId) });
   const taskQueue = new TaskQueue({
     sessionManager,
     worktreeManager,
@@ -314,6 +321,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     log: (message, error) => logger.warn(message, error),
   });
 
+  const archiveCleanupManager = new ArchiveCleanupManager(databaseService, sessionManager, archiveProgressManager);
+  worktreeManager.setArchivePathGuard(target => archiveCleanupManager.assertPathAvailable(target));
   const daemonServices: DaemonHostServices = {
     configManager,
     databaseService,
@@ -334,6 +343,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     getMainWindow: options.getMainWindow,
     logger,
     archiveProgressManager,
+    archiveCleanupManager,
     analyticsManager,
     spotlightManager,
     workspaceJournal,
@@ -348,9 +358,17 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+  // On by default only for the desktop Pane that owns ~/.pane; other data dirs opt in through config.
+  const workspaceHost = new PaneWorkspaceHostController(
+    commandRegistry,
+    configManager,
+    mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
+  );
+  registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);
+  const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
     const endpoint = paneDaemonServer.getEndpoint();
@@ -372,6 +390,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     });
   }
 
+  void workspaceHost.start();
+  if (startRemoteTransport) {
+    void remoteHostTailnetMonitor.start();
+  }
+
   const daemonSinks: PaneEventSink[] = [workspaceJournal, namedLockService];
   if (paneDaemonServer) {
     daemonSinks.push(paneDaemonServer.getEventSink());
@@ -379,6 +402,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   if (startRemoteTransport) {
     daemonSinks.push(remoteTransportController.getEventSink());
   }
+  daemonSinks.push(workspaceHost.getEventSink());
 
   installPaneRuntime(
     createFanoutEventSink([rendererEventSink, ...daemonSinks]),
@@ -389,6 +413,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
+  archiveCleanupManager.start();
 
   const { logsManager } = await import('../services/panels/logPanel/logsManager');
   logsManager.setAnalyticsManager(analyticsManager);
@@ -427,6 +452,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
       resourceMonitorService.stop();
@@ -440,7 +466,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await taskQueue.close();
       workspaceJournal.dispose();
       await permissionIpcServer?.stop();
+      remoteHostTailnetMonitor.stop();
       await remoteTransportController.stopWatchingAndShutdown();
+      await workspaceHost.shutdown();
       if (paneDaemonServer) {
         await paneDaemonServer.stop();
       }

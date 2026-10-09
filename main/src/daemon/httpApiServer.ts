@@ -11,7 +11,9 @@ import {
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
-import { authenticateRemoteDaemonBearerToken } from './auth';
+import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type WorkspaceAccessPolicy } from './auth';
+
+export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import {
   createDefaultRemoteDaemonConfig,
@@ -24,7 +26,7 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getRemotePwaAssetResponse } from './pwaStaticAssets';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
 
@@ -54,6 +56,13 @@ interface ConnectedRemoteEventClient {
   connectedAt: string;
   lastSeenAt: string;
   heartbeatTimer: NodeJS.Timeout;
+  /** What a workspace client signed in with, checked again before each event it receives. */
+  workspaceCredentials: WorkspaceCredentials | null;
+}
+
+interface WorkspaceCredentials {
+  login: string | string[] | undefined;
+  authorization: string | string[] | undefined;
 }
 
 interface RemoteInvokeSuccessPayload {
@@ -101,6 +110,7 @@ type RemoteRequestAuthResult =
 
 const MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES = 1024 * 1024;
 const MAX_AUTHENTICATED_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS = 5_000;
 const REMOTE_VISIBILITY_VIEWER_STALE_MS = 15 * 60 * 1000;
 const MIN_GZIP_BODY_BYTES = 1024;
@@ -166,7 +176,24 @@ const REMOTE_DAEMON_CORS_HEADERS = {
 interface PaneRemoteHttpApiServerOptions {
   heartbeatIntervalMs?: number;
   analyticsSink?: RemotePaneAnalyticsSink;
+  /** Serve workspaces on loopback behind Tailscale Serve, trusting the Tailscale logins `access` allows. */
+  workspace?: WorkspaceIdentityOptions;
 }
+
+interface WorkspaceIdentityOptions {
+  listenPort: number;
+  /**
+   * Tailscale Serve's target path, secret per launch. Serve prefixes every request with it, so
+   * another OS user who finds the loopback port cannot call it directly.
+   */
+  pathSecret: string;
+  /** Who may connect right now; null refuses every request. */
+  access(): WorkspaceAccessPolicy | null;
+}
+
+/** Commands that act on the whole machine: workspace identity only, never pairing tokens. */
+const WORKSPACE_ONLY_CHANNEL_PREFIX = 'runpane:machine:';
+const WORKSPACE_LISTEN_HOST = '127.0.0.1';
 
 type RemoteHttpConfig = Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon'>;
 
@@ -194,6 +221,7 @@ export class PaneRemoteHttpApiServer {
   private nextClientConnectionId = 1;
   private readonly heartbeatIntervalMs: number;
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
+  private readonly workspace?: WorkspaceIdentityOptions;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -202,6 +230,7 @@ export class PaneRemoteHttpApiServer {
   ) {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS;
     this.analyticsSink = options.analyticsSink;
+    this.workspace = options.workspace;
     this.daemonEventSink = createFanoutEventSink([
       {
         send: (channel, ...args) => {
@@ -216,7 +245,7 @@ export class PaneRemoteHttpApiServer {
           };
 
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (!this.shouldKeepEventClient(client.remoteClientId, client.remoteClientTokenHash)) {
+            if (!this.shouldKeepEventClient(client)) {
               this.dropEventClient(clientConnectionId);
               continue;
             }
@@ -263,15 +292,9 @@ export class PaneRemoteHttpApiServer {
       throw new Error('Remote daemon HTTP API server is already running');
     }
 
-    const hostConfig = this.getRemoteConfig().host.config;
-    if (!hostConfig.enabled) {
-      throw new Error('Remote daemon HTTP API server is disabled in config');
-    }
-
-    const hostConfigError = getRemoteDaemonHostConfigValidationError(hostConfig);
-    if (hostConfigError) {
-      throw new Error(hostConfigError);
-    }
+    const listen = this.workspace
+      ? { host: WORKSPACE_LISTEN_HOST, port: this.workspace.listenPort }
+      : this.getValidatedPairingListenAddress();
 
     const server = http.createServer((request, response) => {
       void this.handleRequest(request, response).catch((error) => {
@@ -290,6 +313,9 @@ export class PaneRemoteHttpApiServer {
         response.destroy(error instanceof Error ? error : new Error(message));
       });
     });
+    // Phones on slow links send uploads in chunks that can take minutes each;
+    // Node's default 300 s per request would cut one off on a bad link.
+    server.requestTimeout = REQUEST_TIMEOUT_MS;
     const voiceDeepgramWss = new WebSocketServer({ noServer: true });
     this.voiceDeepgramWss = voiceDeepgramWss;
     server.on('upgrade', (request, socket, head) => {
@@ -311,7 +337,7 @@ export class PaneRemoteHttpApiServer {
 
       server.once('error', handleError);
       server.once('listening', handleListening);
-      server.listen(hostConfig.listenPort, hostConfig.listenHost);
+      server.listen(listen.port, listen.host);
     });
 
     server.on('error', (error) => {
@@ -325,9 +351,22 @@ export class PaneRemoteHttpApiServer {
 
     this.server = server;
     this.address = {
-      host: hostConfig.listenHost,
+      host: listen.host,
       port: address.port,
     };
+  }
+
+  private getValidatedPairingListenAddress(): RemoteHttpAddress {
+    const hostConfig = this.getRemoteConfig().host.config;
+    if (!hostConfig.enabled) {
+      throw new Error('Remote daemon HTTP API server is disabled in config');
+    }
+
+    const hostConfigError = getRemoteDaemonHostConfigValidationError(hostConfig);
+    if (hostConfigError) {
+      throw new Error(hostConfigError);
+    }
+    return { host: hostConfig.listenHost, port: hostConfig.listenPort };
   }
 
   async stop(): Promise<void> {
@@ -357,6 +396,10 @@ export class PaneRemoteHttpApiServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    if (this.workspace) {
+      socket.destroy();
+      return;
+    }
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
       socket.destroy();
@@ -452,6 +495,9 @@ export class PaneRemoteHttpApiServer {
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (this.workspace && !this.admitWorkspaceRequest(request, response, this.workspace.pathSecret)) {
+      return;
+    }
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
 
     if (request.method === 'OPTIONS') {
@@ -525,6 +571,33 @@ export class PaneRemoteHttpApiServer {
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
+    }
+    if (!this.workspace && invokeRequest.channel.startsWith(WORKSPACE_ONLY_CHANNEL_PREFIX)) {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: {
+          message: 'Machine commands are available only to the owner\'s own devices through runpane workspace.',
+          code: 'ERR_WORKSPACE_ONLY_COMMAND',
+        },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
+
+    // Discovery probes peers as this computer's owner, so only that same identity may
+    // request its view. A paired client or another tailnet user must use their own computer.
+    if (invokeRequest.channel === 'runpane:workspaces:machines') {
+      const login = decodeOptionalBoundary(request.headers['tailscale-user-login'], boundary.string);
+      const owner = this.workspace?.access()?.ownerLogin;
+      if (!owner || login === undefined || login.trim().toLowerCase() !== owner.toLowerCase()) {
+        this.writeJson(response, 403, {
+          ok: false,
+          error: {
+            message: 'Find computers using an address on your own Tailscale login.',
+            code: 'ERR_WORKSPACE_DISCOVERY_OWNER_REQUIRED',
+          },
+        } satisfies RemoteInvokeErrorPayload);
+        return;
+      }
     }
 
     try {
@@ -631,6 +704,12 @@ export class PaneRemoteHttpApiServer {
       connectedAt,
       lastSeenAt: connectedAt,
       heartbeatTimer,
+      workspaceCredentials: this.workspace
+        ? {
+          login: request.headers['tailscale-user-login'],
+          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
+        }
+        : null,
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     this.publishConnectedClients();
@@ -645,7 +724,38 @@ export class PaneRemoteHttpApiServer {
     response.on('close', cleanup);
   }
 
+  /** Strips Serve's secret path prefix; refuses direct loopback callers and every browser request. */
+  private admitWorkspaceRequest(request: IncomingMessage, response: ServerResponse, pathSecret: string): boolean {
+    const prefix = `/${pathSecret}`;
+    const rawUrl = request.url ?? '/';
+    if (rawUrl !== prefix && !rawUrl.startsWith(`${prefix}/`) && !rawUrl.startsWith(`${prefix}?`)) {
+      this.writeJson(response, 404, {
+        ok: false,
+        error: { message: 'Not found', code: 'ERR_REMOTE_DAEMON_HTTP_NOT_FOUND' },
+      } satisfies RemoteInvokeErrorPayload);
+      return false;
+    }
+    // Serve signs every request from the owner's devices, including ones a web page sends from
+    // the owner's browser; only the runpane CLI, which sends no Origin, may use workspaces.
+    if (request.headers.origin !== undefined || request.method === 'OPTIONS') {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: { message: 'Workspaces answer the runpane CLI, not browsers.', code: 'ERR_WORKSPACE_BROWSER_REFUSED' },
+      } satisfies RemoteInvokeErrorPayload);
+      return false;
+    }
+    request.url = rawUrl.slice(prefix.length) || '/';
+    return true;
+  }
+
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
+    if (this.workspace) {
+      return authenticateWorkspaceRequest(
+        request.headers['tailscale-user-login'],
+        getAuthorizationHeaderForRequest(request, token),
+        this.workspace.access(),
+      );
+    }
     const remoteConfig = this.getRemoteConfig();
     if (!remoteConfig.host.config.enabled) {
       return {
@@ -737,7 +847,16 @@ export class PaneRemoteHttpApiServer {
     }));
   }
 
-  private shouldKeepEventClient(remoteClientId: string | null, remoteClientTokenHash: string | null): boolean {
+  private shouldKeepEventClient(client: ConnectedRemoteEventClient): boolean {
+    const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
+    if (this.workspace) {
+      // Narrower visibility or a new password applies to clients that are already connected.
+      return workspaceCredentials !== null && authenticateWorkspaceRequest(
+        workspaceCredentials.login,
+        workspaceCredentials.authorization,
+        this.workspace.access(),
+      ).ok;
+    }
     const remoteConfig = this.getRemoteConfig();
     if (!remoteConfig.host.config.enabled) {
       return false;
@@ -798,6 +917,8 @@ export class PaneRemoteHttpApiServer {
   }
 
   private publishConnectedClients(): void {
+    // The host's connected-client list belongs to the paired transport; this one would replace it.
+    if (this.workspace) return;
     remoteHostRuntimeStateStore.setConnectedClients(this.getConnectedClientSnapshots());
   }
 
@@ -819,11 +940,12 @@ export class PaneRemoteHttpApiServer {
     request: IncomingMessage,
   ): JsonValue[] {
     const args = [...invokeRequest.args];
-    if (invokeRequest.channel.startsWith('mobile:push-')) {
+    const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:');
+    if (invokeRequest.channel.startsWith('mobile:push-') || sharesKeys) {
       if (!auth.client) {
         throw new RemoteDaemonBadRequestError(
-          'ERR_MOBILE_PUSH_PAIRING_REQUIRED',
-          'Mobile notifications require an authenticated paired host.',
+          sharesKeys ? 'ERR_SHARED_CREDENTIALS_PAIRING_REQUIRED' : 'ERR_MOBILE_PUSH_PAIRING_REQUIRED',
+          sharesKeys ? 'Sharing keys requires a paired device.' : 'Mobile notifications require an authenticated paired host.',
           403,
         );
       }

@@ -10,10 +10,15 @@ export interface PanelTabsProps {
   selectedId: string | null;
   onSelect: (panel: ToolPanel) => void;
   onAdd: () => void;
+  /** Sends Ctrl+C to the open terminal; hidden when there is none. */
+  onStop?: () => void;
 }
 
-/** The web app's tool tabs: bordered tabs on a raised strip, then a square + that adds one. */
-export function PanelTabs({ panels, selectedId, onSelect, onAdd }: PanelTabsProps) {
+/**
+ * The web app's tool tabs: bordered tabs on a raised strip, a square + that
+ * adds one, and Stop (Ctrl+C) in red at the end, always fully visible.
+ */
+export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: PanelTabsProps) {
   const theme = useTheme();
   const { colors } = theme;
   return (
@@ -76,25 +81,45 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd }: PanelTabsProp
       >
         <Icon ios="plus" android="add" size={16} color={colors.textSecondary} />
       </Pressable>
+      {onStop ? (
+        <Pressable
+          testID="terminal-stop"
+          accessibilityRole="button"
+          accessibilityLabel="Stop"
+          accessibilityHint="Sends Ctrl+C to stop the running command"
+          hitSlop={6}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onStop();
+          }}
+          style={({ pressed }) => [
+            styles.stop,
+            { borderColor: colors.danger, backgroundColor: pressed ? colors.surfacePressed : colors.dangerSoft },
+          ]}
+        >
+          <Icon ios="stop.fill" android="stop" size={10} color={colors.danger} />
+          <Text variant="footnote" tone="danger" style={styles.stopLabel}>Stop</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   bar: {
-    minHeight: 48,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
     paddingHorizontal: 8,
-    paddingTop: 8,
+    paddingTop: 4,
     borderBottomWidth: 1,
   },
   scroll: { flex: 1 },
   tabs: { alignItems: 'flex-end', gap: 4 },
   // Open at the bottom, so the tab reads as attached to the terminal below it.
   tab: {
-    height: 40,
+    height: 36,
     maxWidth: 192,
     flexDirection: 'row',
     alignItems: 'center',
@@ -104,5 +129,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   label: { flexShrink: 1 },
-  add: { width: 32, height: 32, marginBottom: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  stop: {
+    height: 28,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    borderWidth: 1,
+  },
+  stopLabel: { fontWeight: '600' },
+  add: { width: 30, height: 30, marginBottom: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

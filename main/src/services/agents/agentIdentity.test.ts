@@ -12,7 +12,7 @@ import {
 type CommandClassificationCase = {
   name: string;
   command: string | undefined;
-  expected: 'claude' | 'codex' | 'cursor' | undefined;
+  expected: 'claude' | 'codex' | 'cursor' | 'opencode' | undefined;
   platformHint?: NodeJS.Platform;
 };
 
@@ -20,6 +20,13 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'direct Claude command', command: 'claude --dangerously-skip-permissions', expected: 'claude' },
   { name: 'direct Codex command', command: 'codex --yolo', expected: 'codex' },
   { name: 'direct Cursor command', command: 'cursor-agent --force --trust', expected: 'cursor' },
+  { name: 'direct OpenCode command', command: 'opencode --auto', expected: 'opencode' },
+  { name: 'quoted OpenCode command', command: "'opencode' --auto", expected: 'opencode' },
+  {
+    name: 'path-qualified OpenCode command',
+    command: '/usr/local/bin/opencode --auto',
+    expected: 'opencode',
+  },
   {
     name: 'POSIX single-quoted path with spaces',
     command: "'/opt/OpenAI tools/codex' --yolo",
@@ -131,6 +138,7 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'agent-like directory name', command: '/tmp/claude-501/x.sh', expected: undefined },
   { name: 'Claude executable substring', command: 'claude-code-something', expected: undefined },
   { name: 'Cursor executable substring', command: 'mycursor-agent', expected: undefined },
+  { name: 'OpenCode executable substring', command: 'my-opencode-wrapper', expected: undefined },
   { name: 'agent name in an argument', command: 'echo cursor-agent', expected: undefined },
   { name: 'shell option without command mode', command: 'bash --norc cursor-agent', expected: undefined },
   { name: 'unterminated single quote', command: "'cursor-agent", expected: undefined },
@@ -147,7 +155,7 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
 
 describe('CLI_AGENT_TYPES', () => {
   it('lists the supported agents', () => {
-    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor']);
+    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor', 'opencode']);
   });
 });
 
@@ -156,6 +164,7 @@ describe('isCliAgentType', () => {
     expect(isCliAgentType('claude')).toBe(true);
     expect(isCliAgentType('codex')).toBe(true);
     expect(isCliAgentType('cursor')).toBe(true);
+    expect(isCliAgentType('opencode')).toBe(true);
     expect(isCliAgentType('aider')).toBe(false);
     expect(isCliAgentType(undefined)).toBe(false);
     expect(isCliAgentType(null)).toBe(false);
@@ -174,10 +183,13 @@ describe('foreground process identity', () => {
     ['claude', 'claude'],
     ['codex', 'codex'],
     ['cursor-agent', 'cursor'],
+    ['opencode', 'opencode'],
+    ['/usr/local/bin/opencode', 'opencode'],
     ['/usr/local/bin/codex', 'codex'],
     ['codex.exe', 'codex'],
     ['node', undefined],
     ['agent-farm', undefined],
+    ['my-opencode-wrapper', undefined],
     ['2.1.283', undefined],
     [undefined, undefined],
   ] as const)('maps process %s to %s', (name, expected) => {

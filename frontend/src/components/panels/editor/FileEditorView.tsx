@@ -1,26 +1,25 @@
 /**
  * FileEditorView: the editor half of the old Explorer split. Renders one file
- * (Monaco, markdown/notebook preview, image or PDF) for a center `editor`
+ * (Monaco, markdown/notebook preview, image, PDF or media) for a center `editor`
  * tab. The tree that opens files lives in the Files inspector (FileEditor).
  */
-import { useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
-import Editor from '@monaco-editor/react';
+import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import type * as monaco from 'monaco-editor';
 import { MonacoErrorBoundary } from '../../MonacoErrorBoundary';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
 import { debounce } from '../../../utils/debounce';
 import { useCommittedRef } from '../../../hooks/useCommittedRef';
-import { MarkdownPreview } from '../../MarkdownPreview';
 import { NotebookPreview } from './NotebookPreview';
 import type { EditorPanelState } from '../../../../../shared/types/panels';
-import { isHtmlFile } from './htmlFile';
-import { previewHtmlFileInBrowser } from './previewHtmlFile';
-import { fileExtension, getLanguageFromPath, IMAGE_EXTENSIONS, PDF_EXTENSIONS } from './fileKinds';
-import { fetchGitFileStatus, isBinaryPath, readEditorFile, type FileItem } from './editorFileIo';
+import { fileExtension, getLanguageFromPath } from './fileKinds';
+import { fetchGitFileStatus, readEditorFile, type FileItem } from './editorFileIo';
 import { fileEditorReducer, initialFileEditorState } from './fileEditorState';
 import { restoreEditorPosition, trackEditorPosition, type PositionTracker } from './monacoPosition';
 import { FileEditorHeader } from './FileEditorHeader';
-import { BinaryFilePreview } from './BinaryFilePreview';
+import { MediaFilePreview, FilePreviewNotice } from './MediaFilePreview';
+import { DocumentFilePreview } from './DocumentFilePreview';
+
+const Editor = lazy(() => import('@monaco-editor/react'));
 
 export interface FileEditorViewProps {
   sessionId: string;
@@ -43,7 +42,7 @@ export function FileEditorView({
   onUserEdit,
 }: FileEditorViewProps) {
   const [state, dispatch] = useReducer(fileEditorReducer, initialFileEditorState);
-  const { selectedFile, fileContent, originalContent, loading, error, gitStatus, binaryBlobUrl, viewMode } = state;
+  const { selectedFile, fileContent, originalContent, loading, error, gitStatus, viewMode, previewKind } = state;
   const selectedFilePathRef = useCommittedRef(selectedFile?.path ?? null);
   const onStateChangeRef = useCommittedRef(onStateChange);
   const mountedRef = useRef(true);
@@ -60,30 +59,13 @@ export function FileEditorView({
   // Debounced cursor/scroll saves, so a re-target can drop the old file's.
   const positionTrackerRef = useRef<PositionTracker | null>(null);
 
-  // Clean up blob URLs when they are replaced or the tab closes
-  useEffect(() => () => {
-    if (binaryBlobUrl) URL.revokeObjectURL(binaryBlobUrl);
-  }, [binaryBlobUrl]);
-
   const { theme } = useTheme();
   const isDarkMode = !isLightTheme(theme);
   const hasUnsavedChanges = fileContent !== originalContent;
 
   const ext = selectedFile ? fileExtension(selectedFile.path) : '';
-  const isMarkdownFile = ext === 'md' || ext === 'markdown';
   const isNotebookFile = ext === 'ipynb';
-  const isImageFile = IMAGE_EXTENSIONS.has(ext);
-  const isPdfFile = PDF_EXTENSIONS.has(ext);
-  const isBinaryPreview = isImageFile || isPdfFile;
-
-  const previewHtmlFile = useCallback(async (path: string) => {
-    dispatch({ type: 'error', message: null });
-    try {
-      await previewHtmlFileInBrowser(sessionId, path);
-    } catch (previewError) {
-      dispatch({ type: 'error', message: previewError instanceof Error ? previewError.message : 'Failed to preview HTML file' });
-    }
-  }, [sessionId]);
+  const isReadOnlyPreview = previewKind !== null;
 
   const refreshGitStatus = useCallback((path: string) => {
     void fetchGitFileStatus(sessionId, path).then((status) => {
@@ -100,30 +82,27 @@ export function FileEditorView({
     try {
       const loaded = await readEditorFile(sessionId, file.path);
       if (seq !== loadSeqRef.current) {
-        // Superseded by a re-target: nothing will own this blob, release it.
-        if (loaded.kind === 'binary') URL.revokeObjectURL(loaded.blobUrl);
         return;
       }
 
       if (preserveEdits && revision !== editRevision.current) {
-        if (loaded.kind === 'binary') URL.revokeObjectURL(loaded.blobUrl);
         dispatch({ type: 'load-cancelled' });
         return;
       }
 
-      if (loaded.kind === 'error' && !isBinaryPath(file.path)) {
+      if (loaded.kind === 'error') {
         dispatch({ type: 'load-failed', message: loaded.message });
         return;
       }
       if (loaded.kind === 'text') {
         dispatch({ type: 'load-text', file, content: loaded.content });
       } else {
-        // A failed image/PDF read still shows the header, with the error under it.
+        // Preview files never enter the editable auto-save path, including when loading fails.
         dispatch({
-          type: 'load-binary',
+          type: 'load-preview',
           file,
-          blobUrl: loaded.kind === 'binary' ? loaded.blobUrl : null,
-          error: loaded.kind === 'error' ? loaded.message : undefined,
+          previewKind: loaded.kind === 'media' ? loaded.mediaKind
+            : loaded.kind === 'preview' ? loaded.previewKind : 'unsupported',
         });
       }
       onFileChange?.(file.path, false);
@@ -213,6 +192,7 @@ export function FileEditorView({
   }, [autoSaveRef, onUserEdit]);
 
   const handleEditorChange = (value: string | undefined) => {
+    if (isReadOnlyPreview || selectedFile?.path !== filePath) return;
     editRevision.current += 1;
     const content = value || '';
     dispatch({ type: 'edit', content });
@@ -239,10 +219,13 @@ export function FileEditorView({
     // Invalidate it before the same-path check: A → B → A while B is loading
     // must not let B's response land on top of the A that is still shown.
     loadSeqRef.current += 1;
-    if (selectedFile?.path === filePath) return;
+    if (selectedFile?.path === filePath) {
+      dispatch({ type: 'load-cancelled' });
+      return;
+    }
     autoSave.flush();
     positionTrackerRef.current?.cancel();
-    void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false });
+    void loadFile({ name: filePath.split(/[\\/]/).pop() || '', path: filePath, isDirectory: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
@@ -254,7 +237,7 @@ export function FileEditorView({
     if (loading) return;
     lastReopenedAt.current = reopenedAt;
     if (!reopenedAt || hasUnsavedChanges) return;
-    void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false }, true);
+    void loadFile({ name: filePath.split(/[\\/]/).pop() || '', path: filePath, isDirectory: false }, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialState?.reopenedAt, loading]);
 
@@ -295,8 +278,8 @@ export function FileEditorView({
     );
   }
 
-  const canToggleMode = !isBinaryPreview && (isMarkdownFile || isNotebookFile);
-  const fileName = selectedFile.path.split('/').pop() || 'Image';
+  const canToggleMode = !isReadOnlyPreview && isNotebookFile;
+  const fileName = selectedFile.path.split(/[\\/]/).pop() || 'Image';
 
   return (
     <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
@@ -304,10 +287,9 @@ export function FileEditorView({
         filePath={selectedFile.path}
         hasUnsavedChanges={hasUnsavedChanges}
         gitStatus={gitStatus}
-        onPreviewHtml={isHtmlFile(selectedFile.path) ? () => previewHtmlFile(selectedFile.path) : undefined}
         viewMode={canToggleMode ? viewMode : undefined}
         onViewModeChange={canToggleMode ? (mode) => dispatch({ type: 'view-mode', mode }) : undefined}
-        showSaveState={!isBinaryPreview}
+        showSaveState={!isReadOnlyPreview}
       />
       {error && (
         <div role="alert" className="px-4 py-2 bg-status-error/20 text-status-error text-sm">
@@ -315,35 +297,34 @@ export function FileEditorView({
         </div>
       )}
       <div className="flex-1 min-w-0 overflow-hidden">
-        {viewMode === 'preview' && isMarkdownFile ? (
-          <div className="h-full overflow-auto bg-bg-primary">
-            <MarkdownPreview
-              content={fileContent}
-              className="min-h-full"
-              id={`file-editor-preview-${sessionId}-${selectedFile.path.replace(/[^a-zA-Z0-9]/g, '-')}`}
-            />
-          </div>
+        {previewKind === 'video' || previewKind === 'audio' ? (
+          <MediaFilePreview key={`${sessionId}:${selectedFile.path}:${initialState?.reopenedAt ?? ''}`} kind={previewKind} sessionId={sessionId} filePath={selectedFile.path} fileName={fileName} />
+        ) : previewKind === 'unsupported' ? (
+          <FilePreviewNotice sessionId={sessionId} filePath={selectedFile.path} message="Binary file — text editing is disabled." />
+        ) : previewKind ? (
+          <DocumentFilePreview key={`${sessionId}:${selectedFile.path}:${initialState?.reopenedAt ?? ''}`} kind={previewKind} sessionId={sessionId} filePath={selectedFile.path} fileName={fileName} />
         ) : viewMode === 'preview' && isNotebookFile ? (
           <div className="h-full overflow-auto bg-bg-primary">
             <NotebookPreview content={fileContent} className="min-h-full" />
           </div>
-        ) : isBinaryPreview && (binaryBlobUrl || !error) ? (
-          <BinaryFilePreview kind={isImageFile ? 'image' : 'pdf'} blobUrl={binaryBlobUrl} fileName={fileName} />
         ) : (
           <MonacoErrorBoundary>
-            <Editor
-              theme={isDarkMode ? 'vs-dark' : 'light'}
-              value={fileContent}
-              onChange={handleEditorChange}
-              onMount={handleEditorMount}
-              options={{
-                minimap: { enabled: true },
-                fontSize: 14,
-                wordWrap: 'on',
-                automaticLayout: true,
-              }}
-              language={getLanguageFromPath(selectedFile.path)}
-            />
+            <Suspense fallback={<p role="status" className="p-6 text-text-secondary">Loading source editor...</p>}>
+              <Editor
+                theme={isDarkMode ? 'vs-dark' : 'light'}
+                value={fileContent}
+                onChange={handleEditorChange}
+                onMount={handleEditorMount}
+                options={{
+                  readOnly: selectedFile.path !== filePath,
+                  minimap: { enabled: true },
+                  fontSize: 14,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                }}
+                language={getLanguageFromPath(selectedFile.path)}
+              />
+            </Suspense>
           </MonacoErrorBoundary>
         )}
       </div>

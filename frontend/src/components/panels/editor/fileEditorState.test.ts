@@ -14,27 +14,26 @@ describe('fileEditorReducer', () => {
   });
 
   it('load-text selects the file with clean content and resets to edit mode', () => {
-    const before = { ...loading(), viewMode: 'preview' as const, binaryBlobUrl: 'blob:old' };
+    const before = { ...loading(), viewMode: 'preview' as const };
     const next = fileEditorReducer(before, { type: 'load-text', file, content: 'hello' });
     expect(next).toMatchObject({
       selectedFile: file,
       fileContent: 'hello',
       originalContent: 'hello',
-      binaryBlobUrl: null,
       viewMode: 'edit',
       loading: false,
       error: null,
     });
   });
 
-  it('load-binary keeps the file selected with the blob and no text', () => {
-    const next = fileEditorReducer(loading(), { type: 'load-binary', file: image, blobUrl: 'blob:new' });
-    expect(next).toMatchObject({ selectedFile: image, binaryBlobUrl: 'blob:new', fileContent: '', originalContent: '', loading: false, error: null });
+  it('load-preview keeps the file selected read-only with no text', () => {
+    const next = fileEditorReducer(loading(), { type: 'load-preview', previewKind: 'image', file: image });
+    expect(next).toMatchObject({ selectedFile: image, fileContent: '', originalContent: '', loading: false, error: null });
   });
 
   it('a failed binary read still selects the file so the header shows the error', () => {
-    const next = fileEditorReducer(loading(), { type: 'load-binary', file: image, blobUrl: null, error: 'boom' });
-    expect(next).toMatchObject({ selectedFile: image, binaryBlobUrl: null, error: 'boom', loading: false });
+    const next = fileEditorReducer(loading(), { type: 'load-preview', previewKind: 'image', file: image, error: 'boom' });
+    expect(next).toMatchObject({ selectedFile: image, error: 'boom', loading: false });
   });
 
   it('a failed text read reports the error without changing the selected file', () => {

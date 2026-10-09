@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
+import { restampSharedCredentials } from './sharedCredentials';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   AppearanceValidationError,
@@ -72,8 +73,6 @@ export class ConfigManager extends EventEmitter {
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,
-      stravuApiKey: undefined,
-      stravuServerUrl: '', // Stravu integration disabled
       notifications: {
         playSound: true,
         enabled: true
@@ -148,6 +147,10 @@ export class ConfigManager extends EventEmitter {
       const data = await fs.readFile(this.configPath, 'utf-8');
       // SAFETY: initialize immediately normalizes boundary-sensitive fields before assigning the parsed config.
       const loadedConfig = JSON.parse(data) as AppConfig;
+      // Drop keys from the removed Stravu integration so they leave the file on the next save.
+      for (const legacyKey of ['stravuApiKey', 'stravuServerUrl']) {
+        Reflect.deleteProperty(loadedConfig, legacyKey);
+      }
       const normalizedAppearance = normalizeAppearance(loadedConfig);
       for (const diagnostic of normalizedAppearance.diagnostics) {
         console.error(`[ConfigManager] appearance: ${diagnostic}`);
@@ -232,9 +235,16 @@ export class ConfigManager extends EventEmitter {
         this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
         shouldPersistMigration = true;
       }
+      const restamped = restampSharedCredentials(this.config, 'untimed');
+      if (restamped) {
+        this.config.sharedCredentials = restamped;
+        shouldPersistMigration = true;
+      }
       if (shouldPersistMigration) {
         await this.writeConfigToDisk(this.config);
       }
+      // Lets key sharing pick up a key edited by hand.
+      if (restamped) this.emit('config-updated', this.config);
     } catch (error: unknown) {
       let errorCode: string | undefined;
       try {
@@ -400,6 +410,7 @@ export class ConfigManager extends EventEmitter {
           defaultsVersion: boundary.optional(boundary.number),
         }));
       }
+      next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
       this.validateAppearanceUpdate(updates, next);
       await this.writeConfigToDisk(next);
       this.config = next;
@@ -477,14 +488,6 @@ export class ConfigManager extends EventEmitter {
 
   getRunScript(): string[] | undefined {
     return this.config.runScript;
-  }
-
-  getStravuApiKey(): string | undefined {
-    return this.config.stravuApiKey;
-  }
-
-  getStravuServerUrl(): string {
-    return this.config.stravuServerUrl || ''; // Stravu integration disabled
   }
 
   getDefaultModel(): string {

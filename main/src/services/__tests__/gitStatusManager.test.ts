@@ -183,6 +183,23 @@ describe('GitStatusManager', () => {
       gitStatusManager.stopPolling();
     });
 
+    it('settles a refresh that a later refresh superseded during the debounce', async () => {
+      vi.useFakeTimers();
+      try {
+        const superseded = gitStatusManager.refreshSessionGitStatus('test-session');
+        const latest = gitStatusManager.refreshSessionGitStatus('test-session');
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        const [first, second] = await Promise.all([superseded, latest]);
+        expect(first?.state).toBe('clean');
+        expect(second).toBe(first);
+        expect(fastCheckWorkingDirectory).toHaveBeenCalledTimes(1);
+      } finally {
+        gitStatusManager.stopPolling();
+        vi.useRealTimers();
+      }
+    });
+
     it('returns clean state when no changes, no ahead/behind, no untracked', async () => {
       vi.mocked(fastCheckWorkingDirectory).mockResolvedValue(cleanIndexStatus);
       vi.mocked(fastGetAheadBehind).mockResolvedValue({ ahead: 0, behind: 0 });

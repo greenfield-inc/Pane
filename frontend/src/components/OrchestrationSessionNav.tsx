@@ -1,9 +1,8 @@
-import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ChevronDown, ChevronRight, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
-import { useConfigStore } from '../stores/configStore';
 import {
   isArchivedOrchestrationSession,
   useOrchestrationSessionStore,
@@ -11,21 +10,16 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Tooltip } from './ui/Tooltip';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
-import { visibleAgentPresets } from '../utils/agentPresets';
 import { cn } from '../utils/cn';
 import { useOrchestrationSessionActivity } from '../hooks/useAgentStatus';
 import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
 import { startSessionDrag } from '../utils/sessionDrag';
-import { SessionLaunchFields } from './SessionLaunchFields';
-import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
-import type { AppConfig } from '../types/config';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -76,21 +70,6 @@ function availabilityIsVisible(availability: OrchestrationSessionAvailability): 
   return availability === 'ready' || availability === 'loading' || availability === 'error';
 }
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
-  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
-
-function availableSessionAgents(wsl = false): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
-  if (wsl) return SESSION_AGENT_OPTIONS;
-  const visible = new Set(visibleAgentPresets().map(preset => preset.id));
-  return SESSION_AGENT_OPTIONS.filter(option => visible.has(option.id));
-}
-
-function supportedSessionAgent(preferred?: PaneChatAgent): PaneChatAgent {
-  const options = availableSessionAgents();
-  if (preferred && options.some(option => option.id === preferred)) return preferred;
-  return options[0]?.id ?? DEFAULT_PANE_CHAT_AGENT;
-}
-
 export function OrchestrationSessionNav({
   compact = false,
   availablePaneIds,
@@ -111,6 +90,8 @@ export function OrchestrationSessionNav({
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const availability = useOrchestrationSessionStore(state => state.availability);
   const error = useOrchestrationSessionStore(state => state.error);
+  const selectionError = useOrchestrationSessionStore(state => state.selectionError);
+  const sessionError = selectionError ?? error;
   const load = useOrchestrationSessionStore(state => state.load);
   const refresh = useOrchestrationSessionStore(state => state.refresh);
   const select = useOrchestrationSessionStore(state => state.select);
@@ -125,13 +106,14 @@ export function OrchestrationSessionNav({
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const compactError = actionError ?? sessionError;
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
 
-  const createSession = useCallback(async (agent: PaneChatAgent, requestedName?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => {
+  const createSession = useCallback(async ({ name: requestedName, ...input }: SessionCreateRequest) => {
     await load();
-    const name = requestedName?.trim() || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ name, agent, launchCommand, profile, customResume, runtime: wslDistribution ? 'wsl' : 'windows', wslDistribution });
+    const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+    await create({ ...input, name });
     setShowCreate(false);
     setActiveSession(null);
     navigateToPaneChat();
@@ -147,7 +129,13 @@ export function OrchestrationSessionNav({
       const detail = event instanceof CustomEvent
         ? event.detail as { kind?: string; selectionChanged?: boolean }
         : undefined;
-      const adoptServerSelection = detail?.kind === 'selected' || detail?.selectionChanged === true;
+      // Reconnection snapshots can still contain the selection preceding a failed click.
+      // A new host clears selectionError during invalidation; explicit selection events
+      // remain authoritative on the current host.
+      const retainFailedIntent = detail?.kind === 'runtime-resync'
+        && useOrchestrationSessionStore.getState().selectionError !== null;
+      const adoptServerSelection = !retainFailedIntent
+        && (detail?.kind === 'selected' || detail?.selectionChanged === true);
       void refresh({ adoptServerSelection });
     };
     window.addEventListener('orchestration-sessions-changed', handleSessionsChanged);
@@ -155,13 +143,14 @@ export function OrchestrationSessionNav({
   }, [refresh]);
 
   const openSession = useCallback(async (sessionId: string) => {
-    setActionError(null);
+    // Navigation belongs to the click, never to the order of remote replies.
+    void setActiveSession(null);
+    navigateToPaneChat();
     try {
       await select({ sessionId });
-      setActiveSession(null);
-      navigateToPaneChat();
-    } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : 'Failed to open Session');
+    } catch {
+      // The store owns selection errors, including retries from the content view.
+      // Keeping a second local copy would leave the sidebar error after recovery.
     }
   }, [navigateToPaneChat, select, setActiveSession]);
 
@@ -252,12 +241,14 @@ export function OrchestrationSessionNav({
           'mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           activeView === 'pane-chat' && session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
-          <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
-            aria-expanded={expanded} aria-controls={panesId}
-            onClick={() => toggleSessionExpanded(session.id, expanded)}
-            className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
-            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          </button>
+          {paneRows.length > 0 ? (
+            <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
+              aria-expanded={expanded} aria-controls={panesId}
+              onClick={() => toggleSessionExpanded(session.id, expanded)}
+              className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
+              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </button>
+          ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />}
           <button
             type="button"
             data-testid={rowId}
@@ -277,11 +268,9 @@ export function OrchestrationSessionNav({
             <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
           </button>
         </div>
-        <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>
-          {paneRows.length > 0 ? paneRows : (
-            <p className="py-1 pl-2 text-[11px] text-text-tertiary">No child sessions</p>
-          )}
-        </div>
+        {paneRows.length > 0 && (
+          <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>{paneRows}</div>
+        )}
       </div>
     );
   };
@@ -291,19 +280,21 @@ export function OrchestrationSessionNav({
 
   if (compact) {
     return (
-      <div role="group" aria-label="Sessions" className="flex w-full shrink-0 flex-col items-center gap-0.5">
-        <Tooltip content="New Session" side="right">
-          <button
-            type="button"
-            data-testid="compact-new-orchestration-session"
-            data-compact-rail-item
-            aria-label="New Session"
-            onClick={() => setShowCreate(true)}
-            className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-        </Tooltip>
+      <div role="group" aria-label="Sessions" className="contents">
+        <div className="pane-sidebar-sessions-header sticky top-0 bottom-10 z-30 flex h-10 w-full shrink-0 items-center justify-center bg-surface-secondary">
+          <Tooltip content="New Session" side="right">
+            <button
+              type="button"
+              data-testid="compact-new-orchestration-session"
+              data-compact-rail-item
+              aria-label="New Session"
+              onClick={() => setShowCreate(true)}
+              className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </Tooltip>
+        </div>
         {activeSessions.map(session => (
           <Tooltip key={session.id} content={`${session.name} · ${statusLabel(session)}`} side="right">
             <button
@@ -326,23 +317,26 @@ export function OrchestrationSessionNav({
             </button>
           </Tooltip>
         ))}
-        {error && (
-          <Tooltip content={error} side="right">
+        {sessionError && (
+          <Tooltip content={sessionError} side="right">
             <button
               type="button"
               data-testid="compact-sessions-error"
               data-compact-rail-item
-              aria-label="Sessions unavailable"
-              onClick={() => void load()}
+              aria-label={selectionError ? "Retry selected Session" : "Sessions unavailable"}
+              onClick={() => {
+                if (selectionError && selectedSessionId) void openSession(selectedSessionId);
+                else void load();
+              }}
               className="flex h-9 w-9 items-center justify-center rounded text-status-error hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
             >
               <RefreshCw className="h-4 w-4" />
             </button>
           </Tooltip>
         )}
-        {actionError && (
-          <Tooltip content={actionError} side="right">
-            <span role="alert" aria-label={actionError} className="flex h-9 w-9 items-center justify-center rounded text-status-error">!</span>
+        {compactError && (
+          <Tooltip content={compactError} side="right">
+            <span role="alert" aria-label={compactError} className="flex h-9 w-9 items-center justify-center rounded text-status-error">!</span>
           </Tooltip>
         )}
         <SessionContextMenu
@@ -386,8 +380,8 @@ export function OrchestrationSessionNav({
           )}
         </div>
       )}
-      {sessionsVisible && <div className="mt-3" role="group" aria-label="Sessions">
-        <div data-testid="sessions-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
+      {sessionsVisible && <div className="contents" role="group" aria-label="Sessions">
+        <div data-testid="sessions-section-header" className="pane-sidebar-sessions-header group/section sticky top-0 bottom-8 z-30 mt-3 flex h-8 shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1">
           <button
             type="button"
             aria-expanded={sectionExpanded}
@@ -428,10 +422,13 @@ export function OrchestrationSessionNav({
           </button>
         </div>
         <div id="orchestration-sessions-list" hidden={!sectionExpanded}>
-        {error && (
+        {sessionError && (
           <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-status-error" role="alert">
-            <p>{error}</p>
-            <button type="button" className="mt-1 underline" onClick={() => void load()}>Retry</button>
+            <p>{sessionError}</p>
+            <button type="button" className="mt-1 underline" onClick={() => {
+              if (selectionError && selectedSessionId) void openSession(selectedSessionId);
+              else void load();
+            }}>Retry</button>
           </div>
         )}
         {actionError && (
@@ -519,183 +516,4 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
       </form>
     </Modal>
   </>);
-}
-
-interface CreateOrchestrationSessionDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => Promise<void>;
-}
-
-interface SessionCreationForm {
-  agent: PaneChatAgent;
-  name: string;
-  launchCommand: string;
-  customResume: CustomCommandResume | null;
-  profile: string;
-  error: string | null;
-}
-
-type SessionCreationAction =
-  | { type: 'reset'; config: AppConfig | null }
-  | { type: 'update'; values: Partial<SessionCreationForm> };
-
-function initialSessionCreationForm(config: AppConfig | null): SessionCreationForm {
-  return {
-    agent: supportedSessionAgent(config?.defaultOrchestratorAgent),
-    name: '',
-    launchCommand: config?.defaultSessionCommand ?? '',
-    customResume: config?.defaultSessionResume ?? null,
-    profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
-    error: null,
-  };
-}
-
-function sessionCreationReducer(state: SessionCreationForm, action: SessionCreationAction): SessionCreationForm {
-  return action.type === 'reset' ? initialSessionCreationForm(action.config) : { ...state, ...action.values };
-}
-
-function CreateOrchestrationSessionDialog({ isOpen, onClose, onCreate }: CreateOrchestrationSessionDialogProps) {
-  const [distributions, setDistributions] = useState<string[]>([]);
-  const [wslDistribution, setWslDistribution] = useState('');
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    setWslDistribution('');
-    setDistributions([]);
-    void window.electronAPI?.orchestrationSessions.runtimes?.().then(result => {
-      if (!cancelled && result.success) setDistributions(result.data?.distributions ?? []);
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [isOpen]);
-  const [{ agent, name, launchCommand, customResume, profile, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
-  const userEditedLaunch = useRef(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const config = useConfigStore(state => state.config);
-  const fetchConfig = useConfigStore(state => state.fetchConfig);
-  const updateConfig = useConfigStore(state => state.updateConfig);
-  const userSelectedAgent = useRef(false);
-
-  useEffect(() => {
-    if (!isOpen || userSelectedAgent.current) return;
-    dispatch({ type: 'update', values: { agent: wslDistribution
-      ? config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT
-      : supportedSessionAgent(config?.defaultOrchestratorAgent) } });
-  }, [isOpen, wslDistribution, config?.defaultOrchestratorAgent]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    userSelectedAgent.current = false;
-    userEditedLaunch.current = false;
-    const savedConfig = useConfigStore.getState().config;
-    dispatch({ type: 'reset', config: savedConfig });
-    if (!savedConfig) {
-      void fetchConfig().then(nextConfig => {
-        if (!userSelectedAgent.current) dispatch({ type: 'update', values: { agent: supportedSessionAgent(nextConfig.defaultOrchestratorAgent) } });
-        if (!userEditedLaunch.current) {
-          dispatch({ type: 'update', values: {
-            launchCommand: nextConfig.defaultSessionCommand ?? '',
-            customResume: nextConfig.defaultSessionResume ?? null,
-            profile: nextConfig.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
-          } });
-        }
-      }).catch(() => undefined);
-    }
-  }, [fetchConfig, isOpen]);
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsSubmitting(true);
-    dispatch({ type: 'update', values: { error: null } });
-    try {
-      const defaults: Partial<AppConfig> = {};
-      if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
-      if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
-      if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
-      if (Object.keys(defaults).length > 0) await updateConfig(defaults);
-      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume, wslDistribution || undefined);
-    } catch (cause) {
-      dispatch({ type: 'update', values: { error: cause instanceof Error ? cause.message : 'Failed to create Session' } });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md" ariaLabel="Create Session">
-      <form onSubmit={submit} className="flex min-h-0 flex-col">
-        <ModalHeader title="Create Session" />
-        <ModalBody className="min-h-0 space-y-4">
-          <Input label="Name your chat (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="New chat" autoFocus fullWidth />
-          <fieldset className="space-y-2">
-            <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
-            <div className="grid gap-2" role="radiogroup" aria-label="Session agent">
-              {availableSessionAgents(Boolean(wslDistribution)).map(option => {
-                const selected = agent === option.id;
-                const isDefault = config?.defaultOrchestratorAgent === option.id;
-                return (
-                  <label
-                    key={option.id}
-                    data-testid={`create-session-agent-${option.id}`}
-                    htmlFor={`create-session-agent-input-${option.id}`}
-                    className={cn(
-                      'flex cursor-default items-center justify-between rounded border px-3 py-2 text-left text-sm transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-interactive',
-                      selected ? 'border-interactive bg-surface-selected text-text-primary' : 'border-border-primary text-text-secondary hover:bg-surface-hover hover:text-text-primary',
-                    )}
-                  >
-                    <input
-                      id={`create-session-agent-input-${option.id}`}
-                      type="radio"
-                      name="orchestration-session-agent"
-                      value={option.id}
-                      aria-label={option.label}
-                      checked={selected}
-                      onChange={() => {
-                        userSelectedAgent.current = true;
-                        dispatch({ type: 'update', values: { agent: option.id } });
-                      }}
-                      className="sr-only"
-                    />
-                    <span>{option.label}</span>
-                    {isDefault && <span className="text-[11px] text-text-muted">Default</span>}
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
-          {distributions.length > 0 && (
-            <div className="space-y-2">
-              <label htmlFor="session-runtime" className="text-label font-medium text-text-primary">Run agent in</label>
-              <select id="session-runtime" value={wslDistribution} onChange={event => {
-                setWslDistribution(event.target.value);
-                if (!event.target.value) dispatch({ type: 'update', values: { agent: supportedSessionAgent(agent) } });
-              }} disabled={isSubmitting}
-                className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus:ring-2 focus:ring-interactive">
-                <option value="">Windows</option>
-                {distributions.map(distribution => <option key={distribution} value={distribution}>WSL · {distribution}</option>)}
-              </select>
-              {wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
-            </div>
-          )}
-          <details className="space-y-3">
-            <summary className="cursor-default text-sm font-medium text-text-secondary">Launch command and behavior</summary>
-            <SessionLaunchFields
-              resume={customResume}
-              onResumeChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { customResume: value } }); }}
-              command={launchCommand}
-              profile={profile}
-              customCommands={config?.customCommands}
-              onCommandChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { launchCommand: value } }); }}
-              onProfileChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { profile: value } }); }}
-            />
-          </details>
-          {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
-        </ModalBody>
-        <ModalFooter className="shrink-0">
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={isSubmitting} loadingText="Creating…">Create Session</Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
 }

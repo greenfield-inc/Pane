@@ -52,6 +52,18 @@ and `backend-debug.log` in the repository root. Both are reset at startup.
 A dev build is the same app as an installed Pane, and by default it shares that
 install's data:
 
+- **OS startup integration is not isolated** by a separate Pane data directory
+  or Chromium profile. Startup calls `syncAutoStartOnBoot`: the default enables
+  login registration, and disabling it can remove an existing Linux autostart entry. Windows/macOS login settings can
+  also change. Native QA needs a separate OS environment or a test-runtime guard
+  for this integration before launch; setting `autoStartOnBoot: false` is not an
+  isolation mechanism.
+- **Analytics** are on by default in a fresh data directory. Setting
+  `analytics.enabled: false` in config alone does not prevent the first-render
+  default policy from enabling analytics when neither `analytics_consent_shown`
+  nor `analytics_default_applied` records a choice. Native QA must establish an
+  explicit analytics choice and its persisted preference before the first UI
+  render, or isolate analytics with a test-runtime guard.
 - **Pane data** (`sessions.db`, `config.json`, skills) lives in `~/.pane`
   unless you set `PANE_DIR` or pass `--pane-dir`. Always set one for `pnpm dev`,
   Playwright runs and scripts. Keep the path short, like `~/.pane_test`: a long
@@ -69,12 +81,14 @@ install's data:
   ```
   `NODE_ENV=production` loads the built renderer from `frontend/dist`, so no
   Vite server is needed. Rebuild after changes.
-- **Analytics** are on by default in a fresh data directory. To keep test runs
-  out of the product analytics, create `<PANE_DIR>/config.json` with
-  `{"analytics": {"enabled": false}}` before the first launch.
 - A copy of a real `sessions.db` makes the dev build reconcile reserve worktrees
   in the real repositories it lists. Use a fresh data directory unless you need
   real data.
+
+The renderer selection race tests run with `PANE_DIR=/tmp/pane_test pnpm test:renderer-selection`.
+They mount the production sidebar and views in Chromium with a controllable Electron transport;
+they do not launch Electron or use a Pane data directory. Install Chromium with
+`pnpm exec playwright install chromium` first.
 
 ### Native modules
 
@@ -111,7 +125,7 @@ pnpm test:ci:minimal
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: smoke, health check, accessibility and settings.
+  CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
   on port `4521`, which also opens an Electron window against your data
@@ -121,6 +135,10 @@ pnpm test:ci:minimal
   ```bash
   PANE_DIR=~/.pane_test PLAYWRIGHT_PORT=4522 pnpm test -- tests/smoke.spec.ts
   ```
+- File editor/preview lifecycle regressions can also run without a dev app or
+  daemon: `pnpm exec playwright test -c playwright.file-preview.config.ts`.
+  They mount the real components with controlled IPC and replace only Monaco's
+  UI adapter, so deferred reads, autosave and preview cleanup execute normally.
 - Add Playwright tests for user-visible flows, and mock external services
   where you can.
 
@@ -134,6 +152,19 @@ pnpm test:ci:minimal
   `[render-evidence]` summaries. React Scan never ships in production builds.
 - To measure dropped frames while terminal output streams, see the header of
   `tests/terminal-frames.perf.spec.ts`.
+
+Terminal timing diagnostics are opt-in. Set `PANE_TERMINAL_TIMING=1` before
+launching an isolated app to log bounded main-process event-loop delay and PTY
+write-call durations every ten seconds. In renderer DevTools, set
+`localStorage.setItem('pane:terminalTiming', '1')` and reload; read
+`window.paneTerminalTiming.snapshot()` for input IPC round-trip, output parsing,
+write-to-next-render notification, and renderer event-loop delay. Remove that
+storage key and reload to disable. Each metric retains at most 128 numeric
+samples and a count; no keystrokes, output, or panel identifiers are captured.
+Input round-trip ends when the input handler returns (PTY-host writes may still
+be queued), and xterm render notification is not physical display presentation.
+These independent intervals do not identify an output chunk as an input echo.
+Background browser timer throttling can affect event-loop samples.
 
 ## Code Style
 

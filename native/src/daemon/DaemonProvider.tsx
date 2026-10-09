@@ -5,6 +5,8 @@ import { AppState } from 'react-native';
 import type { RemoteDaemonClient, RemoteDaemonConnectionState } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
+import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
+
 import { createDaemonClient } from './createClient';
 
 interface DaemonContextValue {
@@ -23,7 +25,12 @@ const OFFLINE_RETRY_MS = 15_000;
  */
 export function DaemonProvider({ profile, children }: { profile: RemotePaneConnectionProfile; children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [client] = useState(() => createDaemonClient(profile));
+  const [binding, setBinding] = useState(() => ({ profile, client: createDaemonClient(profile) }));
+  // Updating a saved host's password must replace its authenticated connection too.
+  if (binding.profile.baseUrl !== profile.baseUrl || binding.profile.token !== profile.token) {
+    setBinding({ profile, client: createDaemonClient(profile) });
+  }
+  const { client } = binding;
   const [connection, setConnection] = useState<RemoteDaemonConnectionState>(() => client.getState());
 
   useEffect(() => {
@@ -52,6 +59,13 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
       client.disconnect();
     };
   }, [client, profile.id, queryClient]);
+
+  // Any client saved settings on the host (shortcuts, voice keys): refetch them once, and share any new key.
+  useEffect(() => client.onEvent(event => {
+    if (event.type !== 'daemon-event' || event.payload.channel !== 'remote:settings-changed') return;
+    void queryClient.invalidateQueries({ queryKey: [profile.id, 'remote:pwa-affordances'] }, { cancelRefetch: false });
+    requestSharedCredentialSync();
+  }), [client, profile.id, queryClient]);
 
   // The client gives up after its reconnect backoff (about 30 s). A phone
   // changing networks or waking a sleeping Mac needs longer, so keep trying

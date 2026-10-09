@@ -22,6 +22,7 @@ import type {
   RemotePaneConnectionState,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
+import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { ToolPanel } from '../../shared/types/panels';
@@ -335,6 +336,11 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  onNotesChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('notes:changed', listener);
+    return () => ipcRenderer.removeListener('notes:changed', listener);
+  },
   // Generic invoke method for direct IPC calls
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   
@@ -595,6 +601,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSessionPreferences: (): Promise<IPCResponse> => invokeIpc('config:get-session-preferences'),
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
+    chooseApnsKey: (): Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>> => invokeIpc('dialog:open-apns-key'),
   },
 
   remoteDaemon: {
@@ -632,6 +639,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('remote-daemon:delete-connection-profile', profileId),
     updateClientState: (updates: Partial<Pick<RemoteDaemonClientSettings, 'activeProfileId' | 'mode'>>): Promise<IPCResponse<RemoteDaemonClientSettings>> =>
       invokeIpc('remote-daemon:update-client-state', updates),
+    getWorkspaceAccess: (): Promise<IPCResponse<WorkspaceAccessSummary>> => invokeIpc('remote-daemon:get-workspace-access'),
+    updateWorkspaceAccess: (update: WorkspaceAccessUpdate): Promise<IPCResponse<WorkspaceAccessSummary>> =>
+      invokeIpc('remote-daemon:update-workspace-access', update),
+    listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
+    saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
+      invokeIpc('remote-daemon:save-tailnet-machine', input),
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => callback(state);
       ipcRenderer.on('remote-daemon:connection-state-changed', wrappedCallback);
@@ -667,17 +680,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   permissions: {
     respond: (requestId: string, response: PermissionResponse): Promise<IPCResponse> => invokeIpc('permission:respond', requestId, response),
     getPending: (): Promise<IPCResponse<PermissionRequest[]>> => invokeIpc('permission:getPending'),
-  },
-
-  // Stravu OAuth integration
-  stravu: {
-    getConnectionStatus: (): Promise<IPCResponse> => invokeIpc('stravu:get-connection-status'),
-    initiateAuth: (): Promise<IPCResponse> => invokeIpc('stravu:initiate-auth'),
-    checkAuthStatus: (sessionId: string): Promise<IPCResponse> => invokeIpc('stravu:check-auth-status', sessionId),
-    disconnect: (): Promise<IPCResponse> => invokeIpc('stravu:disconnect'),
-    getNotebooks: (): Promise<IPCResponse> => invokeIpc('stravu:get-notebooks'),
-    getNotebook: (notebookId: string): Promise<IPCResponse> => invokeIpc('stravu:get-notebook', notebookId),
-    searchNotebooks: (query: string, limit?: number): Promise<IPCResponse> => invokeIpc('stravu:search-notebooks', query, limit),
   },
 
   // Dashboard
@@ -773,6 +775,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
       ipcRenderer.on('pane:open-link', wrappedCallback);
       return () => ipcRenderer.removeListener('pane:open-link', wrappedCallback);
+    },
+    onRemoteSettingsChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('remote:settings-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);

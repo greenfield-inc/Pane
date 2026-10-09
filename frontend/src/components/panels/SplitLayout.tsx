@@ -1,8 +1,8 @@
 /**
  * SplitLayout: recursive allotment-based renderer for the layout tree.
  *
- * - Single-group root renders PanelGroupView directly (no Allotment wrapper)
- *   so the default DOM matches today.
+ * - The root always uses Allotment, including a single group, so opening or
+ *   closing a sibling split preserves the existing mounted terminal.
  * - Split nodes render <Allotment> with one <Allotment.Pane> per child keyed
  *   by child.id.
  * - Zoom: sets Allotment.Pane visible={false} on non-zoomed branches.
@@ -150,8 +150,8 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   const recordLiveSizes = useAllotmentSizeSync<PanelGroupNode>(layout.root, onSizesChange);
 
   // Recursive render
-  const renderNode = useCallback((node: PanelLayoutNode): React.ReactNode => {
-    if (node.type === 'group') {
+  const renderNode = useCallback((node: PanelLayoutNode, isRoot = false): React.ReactNode => {
+    if (node.type === 'group' && !isRoot) {
       const groupPanels = resolvePanels(node);
       const isPrimary = node.id === primaryGroupId;
       return (
@@ -190,22 +190,24 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     // on each frame of a sash drag. onChange writes only to a ref, feeding
     // the structural-change sync above.
     const handleDragEnd = (sizes: number[]) => {
-      onSizesChange(node.id, sizes);
+      if (node.type === 'split') onSizesChange(node.id, sizes);
     };
     const handleChange = (sizes: number[]) => {
-      recordLiveSizes(node.id, sizes);
+      if (node.type === 'split') recordLiveSizes(node.id, sizes);
     };
 
     return (
       <Allotment
-        key={node.id}
-        vertical={node.direction === 'column'}
-        defaultSizes={node.sizes}
+        // Allotment captures orientation on mount. Preserve the row root used
+        // by sibling tabs, but rebuild when changing to/from a column split.
+        key={isRoot ? (node.type === 'split' && node.direction === 'column' ? 'root-column' : 'root-row') : node.id}
+        vertical={node.type === 'split' && node.direction === 'column'}
+        defaultSizes={node.type === 'split' ? node.sizes : undefined}
         proportionalLayout
         onChange={handleChange}
         onDragEnd={handleDragEnd}
       >
-        {node.children.map(child => {
+        {(node.type === 'group' ? [node] : node.children).map(child => {
           const isVisible = !zoomedGroupId || containsGroup(child, zoomedGroupId);
           return (
             <Allotment.Pane
@@ -227,13 +229,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
   ]);
 
-  // Single-group root: render directly without Allotment
-  if (layout.root.type === 'group') {
-    return <>{renderNode(layout.root)}</>;
-  }
-
-  // Multi-group: render through Allotment
-  return <>{renderNode(layout.root)}</>;
+  return <>{renderNode(layout.root, true)}</>;
 });
 
 SplitLayout.displayName = 'SplitLayout';

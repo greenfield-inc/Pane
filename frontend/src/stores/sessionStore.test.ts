@@ -16,6 +16,138 @@ function session(overrides: Partial<Session> = {}): Session {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+describe('session selection ordering', () => {
+  const invoke = vi.fn();
+  const getSession = vi.fn();
+  const markViewed = vi.fn();
+
+  beforeEach(() => {
+    invoke.mockReset().mockResolvedValue({ success: true });
+    getSession.mockReset();
+    markViewed.mockReset().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', {
+      dispatchEvent: vi.fn(),
+      electronAPI: { invoke, sessions: { get: getSession, markViewed } },
+    });
+    useSessionStore.setState({
+      sessions: [session({ id: 'a' }), session({ id: 'b' })],
+      activeSessionId: null,
+      activeMainRepoSession: null,
+    });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the last selection when IPC replies arrive in reverse order', async () => {
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    invoke.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const selectA = useSessionStore.getState().setActiveSession('a');
+    const selectB = useSessionStore.getState().setActiveSession('b');
+
+    second.resolve({ success: true });
+    await selectB;
+    expect(useSessionStore.getState().getActiveSession()?.id).toBe('b');
+    first.resolve({ success: true });
+    await selectA;
+    expect(useSessionStore.getState().getActiveSession()?.id).toBe('b');
+  });
+
+  it('selects immediately and preserves a clear while a notification is pending', async () => {
+    const reply = deferred<unknown>();
+    invoke.mockReturnValueOnce(reply.promise);
+    const selecting = useSessionStore.getState().setActiveSession('a');
+    expect(useSessionStore.getState().getActiveSession()?.id).toBe('a');
+    await useSessionStore.getState().setActiveSession(null);
+    reply.resolve({ success: true });
+    await selecting;
+    expect(useSessionStore.getState().activeSessionId).toBeNull();
+  });
+
+  it.each(['b', null])('ignores an uncached main-repo fetch after selecting %s', async (next) => {
+    const reply = deferred<{ success: boolean; data: Session }>();
+    getSession.mockReturnValueOnce(reply.promise);
+    const selecting = useSessionStore.getState().setActiveSession('missing');
+    await useSessionStore.getState().setActiveSession(next);
+    reply.resolve({ success: true, data: session({ id: 'missing', isMainRepo: true }) });
+    await selecting;
+    expect(useSessionStore.getState().activeSessionId).toBe(next);
+    expect(useSessionStore.getState().activeMainRepoSession).toBeNull();
+    expect(useSessionStore.getState().sessions.map(item => item.id)).toEqual(['a', 'b']);
+    expect(markViewed).not.toHaveBeenCalledWith('missing');
+  });
+
+  it('does not restore a selection after its fetch fails', async () => {
+    const reply = deferred<Session>();
+    getSession.mockImplementationOnce(async () => {
+      await reply.promise;
+      throw new Error('Disconnected');
+    });
+    const selecting = useSessionStore.getState().setActiveSession('missing');
+    await useSessionStore.getState().setActiveSession('b');
+    reply.resolve(session());
+    await selecting;
+    expect(useSessionStore.getState().getActiveSession()?.id).toBe('b');
+  });
+
+  it('marks a fetched main-repo session viewed once, with initialized output', async () => {
+    getSession.mockResolvedValueOnce({ success: true, data: session({ id: 'main', isMainRepo: true }) });
+    await useSessionStore.getState().setActiveSession('main');
+    expect(useSessionStore.getState().getActiveSession()).toMatchObject({ id: 'main', output: [], jsonMessages: [] });
+    await useSessionStore.getState().setActiveSession('main');
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('main');
+  });
+
+  it('marks an uncached session viewed when reselected before its data arrives', async () => {
+    const first = deferred<{ success: boolean; data: Session }>();
+    getSession.mockReturnValueOnce(first.promise).mockResolvedValueOnce({ success: false });
+    const selecting = useSessionStore.getState().setActiveSession('missing');
+    const reselecting = useSessionStore.getState().setActiveSession('missing');
+    first.resolve({ success: true, data: session({ id: 'missing', name: 'Current data' }) });
+    await Promise.all([selecting, reselecting]);
+    expect(useSessionStore.getState().getActiveSession()?.name).toBe('Current data');
+    expect(getSession).toHaveBeenCalledExactlyOnceWith('missing');
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
+  });
+
+  it('starts a fresh fetch when returning to an uncached session after navigating away', async () => {
+    const first = deferred<{ success: boolean; data: Session }>();
+    const second = deferred<{ success: boolean; data: Session }>();
+    getSession.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const selecting = useSessionStore.getState().setActiveSession('missing');
+    await useSessionStore.getState().setActiveSession(null);
+    const returning = useSessionStore.getState().setActiveSession('missing');
+    first.resolve({ success: true, data: session({ id: 'missing', name: 'Old host' }) });
+    await selecting;
+    expect(useSessionStore.getState().getActiveSession()).toBeUndefined();
+    second.resolve({ success: true, data: session({ id: 'missing', name: 'Current host' }) });
+    await returning;
+    expect(useSessionStore.getState().getActiveSession()?.name).toBe('Current host');
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
+  });
+
+  it.each(['not-found', 'disconnected'])('keeps an uncached selection and error when its current fetch fails: %s', async (failure) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      if (failure === 'disconnected') getSession.mockRejectedValueOnce(new Error('Disconnected'));
+      else getSession.mockResolvedValueOnce({ success: false });
+      await useSessionStore.getState().setActiveSession('missing');
+      expect(useSessionStore.getState().activeSessionId).toBe('missing');
+      expect(useSessionStore.getState().selectionError).toBeTruthy();
+      expect(useSessionStore.getState().activeMainRepoSession).toBeNull();
+      expect(markViewed).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
 describe('sessionStore', () => {
   beforeEach(() => {
     vi.useFakeTimers();

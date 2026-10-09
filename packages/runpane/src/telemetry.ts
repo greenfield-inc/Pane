@@ -14,12 +14,10 @@ const INSTALL_ID_PATTERN = /^install_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const TELEMETRY_TIMEOUT_MS = 1500;
 
 export type WrapperTelemetryEventName =
-  | 'runpane_wrapper_command_started'
   | 'runpane_wrapper_download_requested'
   | 'runpane_wrapper_download_succeeded'
   | 'runpane_wrapper_download_failed'
   | 'runpane_wrapper_github_fallback_used'
-  | 'runpane_wrapper_command_succeeded'
   | 'runpane_wrapper_command_failed';
 
 type WrapperInvocation =
@@ -231,6 +229,8 @@ export async function trackWrapperEvent(
   }
 
   try {
+    const config = await readConfig(path.join(appDirectory(), 'config.json'));
+    if (config.status === 'ok' && readJsonObject(config.value.analytics).enabled === false) return;
     const installId = await getOrCreateWrapperInstallId();
     const properties = buildWrapperTelemetryProperties({
       installId,
@@ -340,7 +340,7 @@ function createInstallId(): string {
 }
 
 function sanitizeShortString(value: string | undefined): string | undefined {
-  if (!value || value.length > 80 || /[\\/]/.test(value)) {
+  if (!value || value.length > 80 || (value !== 'latest' && !/^v?\d+\.\d+\.\d+(?:-(?:nightly|alpha|beta|rc)[.-]?\d*)?$/.test(value))) {
     return undefined;
   }
   return value;

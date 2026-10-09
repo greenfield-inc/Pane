@@ -44,6 +44,8 @@ try {
 }
 
 let cachedPath: string | null = null;
+let pendingWarmup: Promise<void> | undefined;
+let pathGeneration = 0;
 
 /**
  * Get the path separator for the current platform
@@ -255,12 +257,23 @@ export function getShellPath(): string {
  */
 export async function warmShellPath(): Promise<void> {
   if (cachedPath) return;
-  logDetectionStart();
+  if (pendingWarmup) return pendingWarmup;
+  const generation = pathGeneration;
+  const warmup = (async () => {
+    logDetectionStart();
+    try {
+      const shellPath = await probeShellPath(getProbePlan());
+      // Cache invalidation while probing must not restore the old PATH.
+      if (generation === pathGeneration && !cachedPath) cacheShellPath(shellPath);
+    } catch (error) {
+      console.error('[ShellPath] Background PATH probe failed:', error);
+    }
+  })();
+  pendingWarmup = warmup;
   try {
-    const shellPath = await probeShellPath(getProbePlan());
-    if (!cachedPath) cacheShellPath(shellPath);
-  } catch (error) {
-    console.error('[ShellPath] Background PATH probe failed:', error);
+    await warmup;
+  } finally {
+    if (pendingWarmup === warmup) pendingWarmup = undefined;
   }
 }
 
@@ -464,6 +477,8 @@ function fallbackShellPath(): string {
  * Clear the cached PATH (useful for development/testing and config changes)
  */
 export function clearShellPathCache(): void {
+  pathGeneration++;
+  pendingWarmup = undefined;
   cachedPath = null;
   console.log('[ShellPath] PATH cache cleared - will be rebuilt on next access');
 }

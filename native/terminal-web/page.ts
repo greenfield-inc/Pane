@@ -82,6 +82,34 @@ terminal.onScroll(() => {
   post({ type: 'scrolled', atBottom });
 });
 
+/**
+ * Scrolls by `lines` (negative is up). A full-screen app on the alternate
+ * screen, or any app that asked for mouse events, keeps no scrollback here and
+ * scrolls itself, so it gets wheel input: one wheel line per line. xterm turns
+ * each into a mouse-wheel report when the app asked for mouse events, or an
+ * arrow key otherwise, just as it does for a desktop mouse wheel.
+ */
+function scroll(lines: number): void {
+  const appScrolls = terminal.buffer.active.type === 'alternate' || terminal.modes.mouseTrackingMode !== 'none';
+  if (!appScrolls) {
+    terminal.scrollLines(lines);
+    return;
+  }
+  const screen = terminal.element?.querySelector('.xterm-screen');
+  if (!screen) return;
+  const box = screen.getBoundingClientRect();
+  for (let line = 0; line < Math.abs(lines); line++) {
+    screen.dispatchEvent(new WheelEvent('wheel', {
+      deltaY: Math.sign(lines),
+      deltaMode: WheelEvent.DOM_DELTA_LINE,
+      clientX: box.left + box.width / 2,
+      clientY: box.top + box.height / 2,
+      bubbles: true,
+      cancelable: true,
+    }));
+  }
+}
+
 function write(data: string): void {
   terminal.write(data, () => post({ type: 'written', units: data.length }));
 }
@@ -97,7 +125,7 @@ window.paneTerminal = {
         write(command.data);
         break;
       case 'scroll':
-        terminal.scrollLines(command.lines);
+        scroll(command.lines);
         break;
       case 'scrollToBottom':
         terminal.scrollToBottom();

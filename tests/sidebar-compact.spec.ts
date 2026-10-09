@@ -55,6 +55,144 @@ async function collapseSidebar(page: Page) {
 }
 
 test.describe('compact sidebar', () => {
+  for (const [theme, layout] of [['night-owl', 'single'], ['light', 'single'], ['night-owl', 'two-row'], ['light', 'two-row']]) {
+    test(`pane titles use the row width beneath quick actions (${theme}, ${layout})`, async ({ page }) => {
+      const title = 'pictur-pr-web-component-sidebar-action-overlay';
+      const evidence = `tmp/verify/sidebar-row-action-overlay/${theme}-${layout}`;
+      await installElectronApiMock(page, {
+        initialConfig: { theme },
+        initialPreferences: { sidebar_pane_row_layout: layout },
+        initialProjects: projects,
+        initialSessions: [
+          session('overlay', title, 1, { gitStatus: { prNumber: 123, prState: 'OPEN', additions: 12, deletions: 3 } }),
+          session('pinned-overlay', `${title}-pinned`, 1, { isFavorite: true }),
+        ],
+        initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true, pinnedSectionExpanded: true },
+      });
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('html')).toHaveClass(new RegExp(theme));
+      const pane = page.getByRole('button', { name: title, exact: true });
+      const label = page.getByTestId('sidebar').getByText(title, { exact: true });
+      await expect(pane).toBeVisible();
+      await page.mouse.move(800, 500);
+      await page.screenshot({ path: `${evidence}-idle.png` });
+      const rowBox = await pane.boundingBox();
+      const labelBox = await label.boundingBox();
+      if (!rowBox || !labelBox) throw new Error('Pane title has no bounds');
+      expect(rowBox.x + rowBox.width - labelBox.x - labelBox.width).toBeLessThanOrEqual(9);
+      await pane.hover();
+      const archive = page.getByRole('button', { name: `Archive ${title}`, exact: true });
+      await expect(archive.locator('..')).toHaveCSS('opacity', '1');
+      const actionBox = await archive.boundingBox();
+      if (!actionBox) throw new Error('Archive has no bounds');
+      expect(actionBox.x).toBeLessThan(labelBox.x + labelBox.width);
+      const overlayBox = await archive.locator('..').boundingBox();
+      if (!overlayBox) throw new Error('Action overlay has no bounds');
+      expect(overlayBox.y).toBeLessThanOrEqual(labelBox.y);
+      expect(overlayBox.y + overlayBox.height).toBeGreaterThanOrEqual(labelBox.y + labelBox.height);
+      await page.screenshot({ path: `${evidence}-hover.png` });
+      await page.evaluate(() => {
+        // SAFETY: installElectronApiMock installs this event bridge before navigation.
+        const mock = (window as typeof window & { __paneTestElectronMock: {
+          emitPanelAgentStatus(panelId: string, sessionId: string, state: string): void;
+        } }).__paneTestElectronMock;
+        mock.emitPanelAgentStatus('overlay-agent', 'overlay', 'working');
+        mock.emitPanelAgentStatus('overlay-agent', 'overlay', 'idle');
+      });
+      await expect(label).toHaveCSS('text-decoration-style', 'dashed');
+      await page.screenshot({ path: `${evidence}-activity.png` });
+      await pane.click();
+      await expect(pane).toHaveAttribute('aria-current', 'page');
+      await page.screenshot({ path: `${evidence}-active.png` });
+      const unpin = page.getByRole('button', { name: `Unpin ${title}-pinned`, exact: true });
+      await expect(unpin).toBeAttached();
+      await page.mouse.move(800, 500);
+      const pinnedArchive = page.getByRole('button', { name: `Archive ${title}-pinned`, exact: true });
+      await expect(unpin.locator('..')).toHaveCSS('opacity', '1');
+      await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '0');
+      const pinBox = await unpin.boundingBox();
+      const pinSurfaceBox = await unpin.locator('..').boundingBox();
+      if (!pinBox || !pinSurfaceBox) throw new Error('Pinned action has no bounds');
+      expect(pinSurfaceBox.width).toBe(pinBox.width);
+      await page.screenshot({ path: `${evidence}-pinned-idle.png` });
+      await unpin.hover();
+      await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '1');
+      await page.mouse.move(800, 500);
+      await page.getByRole('button', { name: `${title}-pinned`, exact: true }).focus();
+      await page.keyboard.press('Tab');
+      await expect(pinnedArchive).toBeFocused();
+      await expect(pinnedArchive.locator('..')).toHaveCSS('opacity', '1');
+      await expect(pinnedArchive).toHaveCSS('outline-width', '2px');
+    });
+  }
+
+  test('keeps Projects + direct while the top New button opens the chooser', async ({ page }) => {
+    await installElectronApiMock(page, {
+      initialProjects: projects,
+      initialConfig: { theme: 'night-owl' },
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const projectsToggle = page.getByRole('button', { name: 'Projects', exact: true });
+    await expect(projectsToggle).toBeVisible();
+    await page.screenshot({ path: 'tmp/verify/sidebar-affordances/projects.png' });
+    // The adjacent + stays available even when the project list is folded away.
+    await projectsToggle.click();
+    await projectsToggle.focus();
+    await page.keyboard.press('Tab');
+    const addProject = page.getByTestId('new-project');
+    await expect(addProject).toBeFocused();
+    await expect(addProject).toHaveAccessibleName('New project');
+    await expect(addProject).toHaveCSS('outline-style', 'solid');
+    await expect(addProject).toHaveCSS('outline-width', '2px');
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Add New Repository' });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText('Alpha', { exact: true })).toHaveCount(0);
+    await projectsToggle.click();
+    await addProject.click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'New', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create Pane A workspace' })).toBeVisible();
+  });
+
+  for (const titleBar of [true, false]) {
+    test(`keeps the keyboard expand control inside the rail (title bar: ${titleBar})`, async ({ page }) => {
+      await installElectronApiMock(page, {
+        platform: 'win32',
+        windowControlsOverlayEnabled: titleBar,
+        initialProjects: projects,
+        initialConfig: { theme: 'night-owl' },
+      });
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await collapseSidebar(page);
+      const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+      await expect(expand).toHaveCount(1);
+      const rail = page.getByTestId('sidebar');
+      await page.screenshot({ path: `tmp/verify/sidebar-affordances/rail-${titleBar}.png` });
+      await expect(rail.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+      const railBox = await rail.boundingBox();
+      const buttonBox = await expand.boundingBox();
+      if (!railBox || !buttonBox) throw new Error('Sidebar controls have no bounds');
+      expect(buttonBox.x).toBeGreaterThanOrEqual(railBox.x);
+      expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(railBox.x + railBox.width);
+      expect(buttonBox.y).toBeGreaterThanOrEqual(railBox.y);
+      expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(railBox.y + railBox.height);
+      // Shift-Tab back from the next control proves the toggle is in the tab order.
+      await expand.focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      await expect(expand).toBeFocused();
+      await expect(expand).toHaveCSS('outline-style', 'solid');
+      await expect(expand).toHaveCSS('outline-width', '2px');
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible();
+    });
+  }
+
   test('collapses repositories from the full sidebar using the shared section state', async ({ page }) => {
     await installElectronApiMock(page, {
       initialConfig: { theme: 'night-owl' },

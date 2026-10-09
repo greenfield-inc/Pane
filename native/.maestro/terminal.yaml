@@ -1,5 +1,6 @@
 # Opens a pane, runs a command in its shell tab through the input bar, stops a
-# running command with the Ctrl-C quick key, scrolls back with the joystick,
+# running command with Stop in the tab bar, scrolls back with the joystick,
+# scrolls a full-screen app (less) with it,
 # switches tabs, opens a new shell tab and swipes back. Needs a host whose
 # first pane has a "Terminal" tab and a "Claude Code" tab (see README: Test it).
 appId: com.dcouple.pane.mobile
@@ -35,14 +36,14 @@ appId: com.dcouple.pane.mobile
     id: terminal-screen
 - takeScreenshot: terminal-shell
 
-# Quick keys: Ctrl-C interrupts a running command.
+# Stop in the tab bar sends Ctrl-C.
 - tapOn:
     id: terminal-input
 - inputText: "sleep 120"
 - tapOn:
     id: terminal-send
 - tapOn:
-    id: quick-key-ctrl-c
+    id: terminal-stop
 - inputText: "echo after-$((40+2))"
 - tapOn:
     id: terminal-send
@@ -83,6 +84,37 @@ appId: com.dcouple.pane.mobile
     notVisible:
       id: terminal-scroll-bottom
     timeout: 5000
+
+# A full-screen app keeps no scrollback, so the joystick sends it wheel
+# input: less pages forward when dragged down.
+- tapOn:
+    id: terminal-input
+- inputText: "seq 1 300 | less"
+- tapOn:
+    id: terminal-send
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s)1\\n2\\n3\\n.*"
+    timeout: 15000
+- tapOn:
+    id: terminal-screen
+- swipe:
+    from:
+      id: terminal-scroll-joystick
+    direction: DOWN
+    duration: 1500
+- extendedWaitUntil:
+    notVisible:
+      id: terminal-screen
+      text: "(?s)1\\n2\\n3\\n.*"
+    timeout: 5000
+- takeScreenshot: terminal-full-screen-scrolled
+- tapOn:
+    id: terminal-input
+- inputText: "q"
+- tapOn:
+    id: terminal-send
 
 # Tabs: switch to the agent tab, then open a new shell tab.
 - tapOn: "Claude Code"

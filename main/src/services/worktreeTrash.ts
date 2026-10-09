@@ -1,10 +1,21 @@
-import { promises as fs } from 'fs';
+import { promises as nodeFs } from 'fs';
+import { createRequire } from 'module';
 import path from 'path';
 import { randomBytes } from 'crypto';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { PathResolver } from '../utils/pathResolver';
 import { forceRemoveWorktree, stopFsmonitorDaemon } from './gitPerformanceConfig';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+
+// Worktrees contain physical files, including dependencies' .asar archives.
+// Electron's patched fs treats those archives as directories and caches open
+// handles, so recursive removal can lock its own input on Windows. Bypass ASAR
+// interpretation for all worktree filesystem operations. Plain Node (including
+// service tests) has no original-fs module and already uses physical semantics.
+// SAFETY: Electron's built-in original-fs exposes the Node fs API unchanged.
+const fs: typeof nodeFs = process.versions.electron
+  ? (createRequire(__filename)('original-fs') as typeof import('fs')).promises
+  : nodeFs;
 
 /**
  * Once the worktree is removed, whether its files are fully deleted:
@@ -148,10 +159,12 @@ async function renameWhileBusy(from: string, to: string, budgetMs: number): Prom
  *
  * `git worktree remove --force` can delete every file inside the worktree and
  * then fail on the root directory, because a live process is sitting in it.
- * The worktree is gone in every way that matters at that point, so finish the
- * job by hand instead of reporting the whole archive as failed: move the
- * leftover aside — an empty directory moves as soon as its last holder exits —
- * or delete it in place.
+ * Recover that case by moving the leftover aside, or removing an empty root.
+ * Git can also fail with files still present (for example, Windows long paths).
+ * Never recursively delete that leftover in place: fs.rm retries can restart
+ * child walks at every depth, with no cancellation or total retry deadline.
+ * One busy descendant can hold the serial archive queue for minutes.
+ * Only a successful rename makes recursive background deletion safe.
  *
  * Returns whether the leftover ended up at `trashPath`, so the caller deletes
  * it in the background like any other trashed worktree. Rethrows git's error
@@ -178,10 +191,25 @@ async function removeWithGit(
     } catch (renameError) {
       console.warn(`[WorktreeTrash] leftover_rename_failed worktreePath=${JSON.stringify(worktreePath)}:`, renameError);
     }
-    await fs.rm(worktreePath, { recursive: true, force: true, maxRetries: 5, retryDelay: BUSY_RETRY_DELAY_MS })
+    await removeEmptyRootWhileBusy(worktreePath, busyRetryMs)
       .catch(error => console.warn(`[WorktreeTrash] leftover_delete_failed worktreePath=${JSON.stringify(worktreePath)}:`, error));
     if (await exists(worktreePath)) throw gitError;
     return false;
+  }
+}
+
+async function removeEmptyRootWhileBusy(target: string, budgetMs: number): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    try {
+      await fs.rmdir(target);
+      return;
+    } catch (error) {
+      const failure = decodeOptionalBoundary(error, boundary.object({ code: boundary.string }));
+      if (failure?.code === 'ENOENT') return;
+      if (!failure || !BUSY_ERROR_CODES.has(failure.code) || Date.now() >= deadline) throw error;
+      await delay(BUSY_RETRY_DELAY_MS);
+    }
   }
 }
 

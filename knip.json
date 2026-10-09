@@ -30,7 +30,9 @@
         "tests/**/*.ts",
         "playwright*.ts"
       ],
+      "ignoreUnresolved": ["/usr/bin/time"],
       "ignoreDependencies": [
+        "original-fs",
         "@anthropic-ai/sdk",
         "@lydell/node-pty",
         "@modelcontextprotocol/sdk",
@@ -71,6 +73,7 @@
         "build-mcp-bridge.js"
       ],
       "project": ["src/**/*.ts", "build-mcp-bridge.js"],
+      "ignoreUnresolved": ["/bin/sh"],
       "ignoreBinaries": [
         "fc-list",
         "system_profiler",
@@ -89,6 +92,7 @@
       "entry": [
         "src/cli.ts",
         "src/doctor.ts",
+        "src/handoff.ts",
         "src/installers.ts",
         "src/releases.ts",
         "src/telemetry.ts",

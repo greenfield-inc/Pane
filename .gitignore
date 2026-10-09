@@ -123,3 +123,6 @@ docs/research/
 # Draft posts (local only)
 docs/posts/
 .agent-farm/generated/
+
+# Generated from the Excalidraw dependency for offline drawing support
+frontend/public/excalidraw-assets/

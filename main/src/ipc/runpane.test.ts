@@ -1,3 +1,7 @@
+import net from 'net';
+import { once } from 'events';
+import { PaneDaemonServer } from '../daemon/server';
+import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from '../daemon/socketFraming';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -5,12 +9,14 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { Project } from '../database/models';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import type { RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration';
+import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { panelManager } from '../services/panelManager';
@@ -152,10 +158,14 @@ const terminalPanel: ToolPanel = {
   },
 };
 
+function openCodeComposer(text: string): string {
+  return `  ┃\n  ┃  ${text.replaceAll('\n', '\n  ┃  ')}\n  ┃\n  ┃  Build\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n  shift+tab agents  ctrl+p commands`;
+}
+
 function terminalSnapshot(
   text: string,
   activityStatus: 'active' | 'idle',
-  agentType: 'claude' | 'codex' = 'codex',
+  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' = 'codex',
   lastActivityTime = '2026-01-01T00:02:00.000Z',
 ) {
   return {
@@ -233,6 +243,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     },
     analyticsManager: {
       track: vi.fn(),
+      isEnabled: vi.fn(() => true),
       hashSessionId: vi.fn((id: string) => `hash-${id}`),
     },
     spotlightManager: {},
@@ -349,6 +360,9 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) =>
       panelId === terminalPanel.id ? terminalPanel : undefined
     );
+    // The real staged-launch path reads this store, not the IPC panelManager spy.
+    // Do not retain an OpenCode panel from the preceding adoption fixture.
+    terminalPanelStore.getPanel.mockReset().mockImplementation((panelId: string) => panelManager.getPanel(panelId));
     vi.mocked(panelManager.getPanelsForSession).mockImplementation((sessionId: string) =>
       sessionId === session.id ? [terminalPanel] : []
     );
@@ -356,6 +370,83 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(null);
     vi.mocked(terminalPanelManager.getCleanTerminalScrollback).mockResolvedValue(null);
+  });
+
+  it('preserves the requested Session pin through daemon create decoding', async () => {
+    const create = vi.fn(async (input: OrchestrationSessionCreateInput) => ({
+      session: { id: 'coordinator', name: input.name, isPinned: input.isPinned ?? false },
+      panel: { id: 'coordinator-panel' },
+      internalSession: { id: 'coordinator-owner' },
+    }));
+    // SAFETY: This command only reaches create; the stub reports its decoded input as a Session result.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create } as never }));
+    const result = await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', isPinned: true }]);
+    expect(result).toMatchObject({ ok: true, session: { isPinned: true } });
+    await expect(registry.invoke('runpane:sessions:create', [{ name: 'Invalid', isPinned: 'true' }]))
+      .rejects.toThrow('expected boolean');
+  });
+
+  describe('local failure telemetry', () => {
+    it('reports sanitized thrown failures once while keeping command error behavior', async () => {
+      const services = createServices();
+      const registry = createRegistry(services);
+      const error = Object.assign(new Error('EACCES /Users/private/repo token=secret prompt'), { code: 'EACCES' });
+      error.name = 'private-secret';
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation(() => { throw error; });
+      for (let i = 0; i < 50; i++) {
+        await expect(registry.invoke('runpane:panels:input', [{ panelId: terminalPanel.id, input: 'secret prompt' }])).rejects.toThrow(error);
+      }
+      expect(services.analyticsManager?.track).toHaveBeenCalledTimes(1);
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', {
+        action: 'panels:input', status: 'failure', command_ok: false, failure_kind: 'thrown',
+        error_type: 'Error', error_code: 'EACCES', failure_category: 'permission',
+      });
+    });
+
+    it('keeps a handled submit failure observable without sending its screen or prompt', async () => {
+      const services = createServices();
+      const registry = createRegistry(services);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('private terminal contents', 'idle'));
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'private prompt' }]);
+      expect(result).toMatchObject({ ok: false, blocked: { kind: 'composer-unknown' } });
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', {
+        action: 'panels:submit', status: 'failure', command_ok: false, failure_kind: 'handled',
+        error_type: 'Error', error_code: 'unknown', failure_category: 'unknown',
+      });
+    });
+
+    it('does not report successful polling or normal wait deadlines as failures', async () => {
+      const services = createServices();
+      const registry = createRegistry(services);
+      for (let i = 0; i < 20; i++) await registry.invoke('runpane:panes:list', [{}]);
+      const result = await registry.invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, condition: 'ready', timeoutMs: 1, intervalMs: 1 }]);
+      expect(result).toMatchObject({ ok: false, timedOut: true });
+      expect(services.analyticsManager?.track).not.toHaveBeenCalled();
+    });
+
+    it('honors analytics opt-out for local failures', async () => {
+      const services = createServices();
+      vi.mocked(services.analyticsManager!.isEnabled).mockReturnValue(false);
+      await expect(createRegistry(services).invoke('runpane:panels:input', [{ panelId: 'missing', input: 'private' }])).rejects.toThrow();
+      expect(services.analyticsManager?.track).not.toHaveBeenCalled();
+    });
+
+    it('caps repeated local failures at 20 in an hour across operations', async () => {
+      vi.useFakeTimers();
+      const services = createServices();
+      const registry = createRegistry(services);
+      for (let minute = 0; minute < 55; minute += 5) {
+        for (const operation of ['input', 'screen', 'submit', 'output']) {
+          await expect(registry.invoke(`runpane:panels:${operation}`, [{ panelId: 'missing', input: 'private' }])).rejects.toThrow();
+        }
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+      }
+      expect(services.analyticsManager?.track).toHaveBeenCalledTimes(20);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await expect(registry.invoke('runpane:panels:input', [{ panelId: 'missing', input: 'private' }])).rejects.toThrow();
+      expect(services.analyticsManager?.track).toHaveBeenCalledTimes(21);
+      vi.useRealTimers();
+    });
   });
 
   describe('runpane:panes:adopt', () => {
@@ -469,6 +560,167 @@ describe('runpane IPC handlers', () => {
       );
     });
 
+    it('adopts an OpenCode session id and passes it to the launch command exactly once', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('opencode-resume-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      let createdPanel: ToolPanel | undefined;
+      vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
+        createdPanel = {
+          ...terminalPanel,
+          title: request.title ?? '',
+          state: {
+            isActive: false,
+            customState: {
+              // SAFETY: The create request is for a terminal panel, so its initial state is TerminalPanelState.
+              ...(request.initialState as TerminalPanelState),
+            },
+          },
+        };
+        return createdPanel;
+      });
+      vi.mocked(panelManager.getPanel).mockImplementation(() => createdPanel);
+      terminalPanelStore.getPanel.mockImplementation(() => createdPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{
+          path: worktreePath,
+          name: 'OpenCode existing',
+          tool: { agent: 'opencode' },
+          resume: 'ses_existing',
+        }],
+      }]);
+
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true }] });
+      expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+        initialState: expect.objectContaining({
+          agentType: 'opencode',
+          agentSessionId: 'ses_existing',
+          hasClaudeSessionId: false,
+        }),
+      }));
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledTimes(1);
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(
+        terminalPanel.id,
+        'opencode --auto --session "ses_existing"',
+      );
+    });
+
+    it.each(['', 'thread-1', 'ses_bad-value', ' ses_existing '])(
+      'rejects invalid OpenCode resume %j before dry-run output or mutation',
+      async (resume) => {
+        const { repoPath, worktreePath } = createAdoptWorktree(`invalid-opencode-${resume.length}`);
+        const services = adoptionServices(repoPath, worktreePath);
+
+        const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+          repo: { id: project.id },
+          dryRun: true,
+          panes: [{ path: worktreePath, name: 'Invalid OpenCode', tool: { agent: 'opencode' }, resume }],
+        }]);
+
+        expect(result).toMatchObject({
+          ok: false,
+          items: [{ ok: false, error: { message: expect.stringMatching(/OpenCode.*ses_\*/i) } }],
+        });
+        expect(services.sessionManager.createSession).not.toHaveBeenCalled();
+        expect(panelManager.createPanel).not.toHaveBeenCalled();
+        expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['dry-run', true, 123],
+      ['mutation', false, null],
+    ])('rejects a non-string OpenCode resume on the %s path before normalization or mutation', async (_name, dryRun, resume) => {
+      const services = adoptionServices(project.path, '/not-used');
+
+      await expect(createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        dryRun,
+        panes: [{ path: '/not-used', name: 'Invalid OpenCode', tool: { agent: 'opencode' }, resume }],
+      }])).rejects.toThrow(/OpenCode.*resume.*string.*ses_\*/i);
+
+      expect(services.sessionManager.createSession).not.toHaveBeenCalled();
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+    });
+
+    it('keeps wrapped OpenCode commands opaque and preserves wrapper resume rejection', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('wrapped-opencode-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      const registry = createRegistry(services);
+
+      const preview = await registry.invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        dryRun: true,
+        panes: [{ path: worktreePath, name: 'Wrapped OpenCode', tool: { command: 'agent-farm opencode', agentType: 'opencode' } }],
+      }]);
+      const rejected = await registry.invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        dryRun: true,
+        panes: [{ path: worktreePath, name: 'Wrapped OpenCode', tool: { command: 'agent-farm opencode', agentType: 'opencode' }, resume: 'bad' }],
+      }]);
+
+      expect(preview).toMatchObject({
+        ok: true,
+        items: [{ tool: { command: 'agent-farm opencode', agent: 'opencode' } }],
+      });
+      expect(rejected).toMatchObject({
+        ok: false,
+        items: [{ error: { message: expect.stringContaining('--resume needs a built-in agent') } }],
+      });
+      expect(services.sessionManager.createSession).not.toHaveBeenCalled();
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+    });
+
+    it('keeps an adopted OpenCode session id available when readiness times out', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('opencode-timeout-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      let createdPanel: ToolPanel | undefined;
+      vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
+        createdPanel = {
+          ...terminalPanel,
+          title: request.title ?? '',
+          state: {
+            isActive: false,
+            customState: {
+              // SAFETY: The create request is for a terminal panel, so its initial state is TerminalPanelState.
+              ...(request.initialState as TerminalPanelState),
+            },
+          },
+        };
+        return createdPanel;
+      });
+      vi.mocked(panelManager.getPanel).mockImplementation(() => createdPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+        ...terminalSnapshot('OpenCode is starting', 'idle', 'opencode'),
+        isCliReady: false,
+      });
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        waitReady: true,
+        readyTimeoutMs: 1,
+        panes: [{
+          path: worktreePath,
+          name: 'OpenCode timeout',
+          tool: { agent: 'opencode' },
+          resume: 'ses_retryable',
+          launch: true,
+        }],
+      }]);
+
+      expect(result).toMatchObject({
+        ok: false,
+        items: [{
+          readiness: { timedOut: true, state: { agentType: 'opencode', isCliReady: false } },
+        }],
+      });
+      expect(createdPanel?.state.customState).toMatchObject({ agentSessionId: 'ses_retryable' });
+    });
+
     it('associates adopted panes with the calling Session and reports association failures', async () => {
       const repoPath = createTempGitRepo('associate-adopt-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -490,7 +742,7 @@ describe('runpane IPC handlers', () => {
       const result = await createRegistry(services).invoke('runpane:panes:adopt', [request]);
 
       expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
-      expect(result).toMatchObject({ ok: true, items: [{ ok: true, association: { sessionId: 'orchestrator-1', ok: true } }] });
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true, association: { sessionId: 'orchestrator-1', ok: true } }] });
 
       associate.mockRejectedValueOnce(new Error('Pane is already associated with Session Other'));
       const failed = await createRegistry(services).invoke('runpane:panes:adopt', [request]);
@@ -517,7 +769,7 @@ describe('runpane IPC handlers', () => {
       }]);
 
       expect(associate).not.toHaveBeenCalled();
-      expect(result).toMatchObject({ ok: true, items: [expect.not.objectContaining({ association: expect.anything() })] });
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [expect.not.objectContaining({ association: expect.anything() })] });
     });
 
     function createAdoptWorktree(name: string) {
@@ -573,7 +825,7 @@ describe('runpane IPC handlers', () => {
           sessionId: session.id,
           panelId: claudePanel.id,
           readiness: { ok: true, condition: 'ready' },
-          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: true },
+          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: false },
           nextCommand: expect.stringContaining(`--panel ${claudePanel.id}`),
         }],
       });
@@ -881,6 +1133,106 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       entries: [{ kind: 'agent.ready', gen: 1, paneId: session.id }],
     });
+  });
+
+  it('releases anonymous watch slots when their socket disconnects', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-disconnect-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({ workspaceJournal }));
+    const server = new PaneDaemonServer(registry, directory);
+    await server.start();
+    const socket = net.createConnection(server.getEndpoint().path);
+    try {
+      await once(socket, 'connect');
+      const decoder = new PaneDaemonFrameDecoder();
+      const armed = new Promise<void>(resolve => {
+        socket.on('data', chunk => {
+          if (decoder.push(chunk).some(frame => frame.type === 'response' && frame.id === 9)) resolve();
+        });
+      });
+      for (let id = 1; id <= 8; id++) {
+        socket.write(encodePaneDaemonFrame({ type: 'request', id, channel: 'runpane:workspace:wait', args: [{ since: 0, timeoutMs: 60_000 }] }));
+      }
+      socket.write(encodePaneDaemonFrame({ type: 'request', id: 9, channel: 'runpane:workspace:state', args: [] }));
+      await armed;
+      socket.destroy();
+      await vi.waitFor(() => expect(server.getSubscriberCount()).toBe(0));
+      const replacement = registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 60_000 }]);
+      const assertion = expect(replacement).resolves.toMatchObject({ ok: true, entries: [{ kind: 'pane.created' }] });
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+    } finally {
+      socket.destroy();
+      workspaceJournal.dispose();
+      await server.stop();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('allows the maximum long poll to time out normally before its lease expires', async () => {
+    vi.useFakeTimers();
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({ workspaceJournal }));
+    try {
+      const waiting = registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 120_000 }]);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await expect(waiting).resolves.toMatchObject({ ok: true, timedOut: true, entries: [] });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      workspaceJournal.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the current named watcher alive when a replacement has an invalid selector', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-invalid-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({
+      workspaceJournal,
+      workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
+    }));
+    const request = { as: 'healthy-monitor', timeoutMs: 60_000 };
+    try {
+      await registry.invoke('runpane:workspace:wait', [request]);
+      const healthy = registry.invoke('runpane:workspace:wait', [request]);
+      const assertion = expect(healthy).resolves.toMatchObject({ entries: [{ kind: 'pane.created' }] });
+      await expect(registry.invoke('runpane:workspace:wait', [{ ...request, repo: 'missing-repo' }])).rejects.toThrow();
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+    } finally {
+      workspaceJournal.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('lets a re-armed named cursor take over its slot after repeated restarts', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-takeover-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const services = createServices({
+      workspaceJournal,
+      workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
+    });
+    const registry = createRegistry(services);
+    const request = { as: 'restarted-monitor', timeoutMs: 60_000 };
+    try {
+      await registry.invoke('runpane:workspace:wait', [request]); // Establish the cursor.
+      const abandoned = Array.from({ length: 8 }, () =>
+        registry.invoke('runpane:workspace:wait', [request]).catch(error => error));
+      const replacement = registry.invoke('runpane:workspace:wait', [request]);
+      const assertion = expect(replacement).resolves.toMatchObject({ ok: true, entries: [{ kind: 'pane.created' }] });
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+      for (const result of await Promise.all(abandoned)) {
+        expect(result).toBeInstanceOf(Error);
+        expect(result).toEqual(expect.objectContaining({ message: expect.stringContaining('superseded') }));
+      }
+      expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
+        'runpane_local_control', expect.objectContaining({ action: 'workspace:wait', status: 'failure' }),
+      );
+    } finally {
+      workspaceJournal.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('emits session-scoped, re-firing idle events without advancing the journal cursor', async () => {
@@ -1682,18 +2034,9 @@ describe('runpane IPC handlers', () => {
       }],
     });
     expect(panelManager.getPanelsForSession).toHaveBeenCalledWith(session.id);
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panes:list',
-        status: 'success',
-        repo_id: project.id,
-        result_count: 1,
-      }),
-    );
   });
 
-  it('reports pane costs with totals and analytics in the unscoped form', async () => {
+  it('reports pane costs with totals in the unscoped form', async () => {
     const services = createServices();
     const registry = createRegistry(services);
     const result = await registry.invoke('runpane:panes:cost', [{}]);
@@ -1704,10 +2047,6 @@ describe('runpane IPC handlers', () => {
       unattributed: expect.any(Object),
       totals: expect.any(Object),
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({ action: 'panes:cost', status: 'success', result_count: 2 }),
-    );
   });
 
   it('returns only the requested pane without workspace totals', async () => {
@@ -2114,22 +2453,26 @@ describe('runpane IPC handlers', () => {
       inputBytes: 8,
       nextCommand: `runpane panels output --panel ${terminalPanel.id} --limit 200 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:input',
-        status: 'success',
-        pane_id_hash: `hash-${session.id}`,
-        panel_id_hash: `hash-${terminalPanel.id}`,
-        input_bytes: 8,
-      }),
-    );
-    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        input: 'echo hi\r',
-      }),
-    );
+  });
+
+  it('arms the phone\'s finished alert only for input a person submitted', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const services = createServices();
+    const registry = createRegistry(services);
+    const arm = vi.spyOn(getMobilePushSender(services.configManager), 'arm');
+    const send = async (channel: string, input: string, source?: 'user' | 'agent') => {
+      arm.mockClear();
+      await registry.invoke(channel, [{ panelId: terminalPanel.id, input, source }]);
+      return arm.mock.calls.length > 0;
+    };
+
+    expect(await send('runpane:panels:submit', 'ship it', 'user')).toBe(true);
+    expect(await send('runpane:panels:submit', 'ship it', 'agent')).toBe(false);
+    expect(await send('runpane:panels:submit', 'ship it')).toBe(false);
+    expect(await send('runpane:panels:input', 'ship it\r', 'user')).toBe(true);
+    expect(await send('runpane:panels:input', 'ship it', 'user')).toBe(false);
+    expect(await send('runpane:panels:input', 'line one\x1b\r', 'user')).toBe(false);
+    expect(await send('runpane:panels:input', 'ship it\r', 'agent')).toBe(false);
   });
 
   it('submits text with a terminal Enter and returns validation guidance', async () => {
@@ -2152,20 +2495,6 @@ describe('runpane IPC handlers', () => {
       enter: 'cr',
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:submit',
-        status: 'success',
-        input_bytes: 11,
-      }),
-    );
-    expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        input: 'echo hello\n',
-      }),
-    );
   });
 
   it('stages text before submitting an idle Codex composer', async () => {
@@ -2217,6 +2546,113 @@ describe('runpane IPC handlers', () => {
     expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, 'ping-busy');
     expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\t');
     expect(result).toMatchObject({ ok: true, enter: 'tab', sequenceName: 'tab', verifiedSubmitted: true });
+  });
+
+  it('interrupts busy Codex and waits for idle before delivering the replacement turn', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot('• Working (esc to interrupt)\n› Ask Codex to do anything\n', 'active'))
+      .mockReturnValueOnce(terminalSnapshot('• Working (esc to interrupt)\n› Ask Codex to do anything\n', 'active'))
+      .mockReturnValueOnce(terminalSnapshot('› Ask Codex to do anything\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› replacement\n', 'idle'))
+      .mockReturnValue(terminalSnapshot('Working\n', 'active'));
+    const registry = createRegistry();
+    const pendingResult = registry.invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([[terminalPanel.id, '\x1b']]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pendingResult).toMatchObject({ ok: true, delivery: { state: 'taken' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+      [terminalPanel.id, '\x1b'], [terminalPanel.id, 'replacement'], [terminalPanel.id, '\r'],
+    ]);
+  });
+
+  it('waits beyond the activity monitor settling period after Escape', async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    let staged = false;
+    let submitted = false;
+    vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_id, input) => {
+      if (input === 'replacement') staged = true;
+      if (input === '\r') submitted = true;
+    });
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      terminalSnapshot(submitted ? 'Working' : staged ? '› replacement' : '› Ask Codex to do anything',
+        Date.now() - started < 12_000 || submitted ? 'active' : 'idle'),
+    );
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(await pending).toMatchObject({ ok: true, delivery: { state: 'taken' } });
+  });
+
+  it('does not send replacement text when interruption never reaches idle', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
+      terminalSnapshot('• Working\n› Ask Codex to do anything', 'active'),
+    );
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(await pending).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'agent-prompt' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([[terminalPanel.id, '\x1b']]);
+  });
+
+  it.each([false, true])('rejects an empty interrupt submission without cancelling work (file pointer: %s)', async (asFilePointer) => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› Ask Codex to do anything', 'idle'));
+    expect(await createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: '\n', interrupt: true, asFilePointer,
+    }])).toMatchObject({ ok: false, inputBytes: 0 });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it('preserves occupied composers on interrupt', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'idle'));
+    expect(await createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }])).toMatchObject({ ok: false, inputBytes: 0 });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it('interrupts Claude with Escape before staging the replacement', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValueOnce(0).mockReturnValue(1);
+    const rule = '─'.repeat(40);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ \n${rule}`, 'active', 'claude'))
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ \n${rule}`, 'idle', 'claude'))
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ replacement\n${rule}`, 'idle', 'claude'))
+      .mockReturnValueOnce(terminalSnapshot(`${rule}\n❯ replacement\n${rule}`, 'idle', 'claude'))
+      .mockReturnValue(terminalSnapshot(`${rule}\n❯ \n${rule}`, 'active', 'claude'));
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ ok: true, delivery: { state: 'taken' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+      [terminalPanel.id, '\x1b'], [terminalPanel.id, 'replacement'], [terminalPanel.id, '\r'],
+    ]);
+  });
+
+  it('interrupts Cursor with Ctrl+C and verifies its replacement starts working', async () => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(terminalSnapshot('→ Add a follow-up    ctrl+c to stop', 'active', 'cursor'))
+      .mockReturnValueOnce(terminalSnapshot('→ Add a follow-up', 'idle', 'cursor'))
+      .mockReturnValue(terminalSnapshot('⠘ Working\n→ Add a follow-up    ctrl+c to stop', 'active', 'cursor'));
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValueOnce(0).mockReturnValue(1);
+    const pending = createRegistry().invoke('runpane:panels:submit', [{
+      panelId: terminalPanel.id, input: 'replacement', interrupt: true,
+    }]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ ok: true, delivery: { state: 'taken', evidence: 'screen' } });
+    expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.calls).toEqual([
+      [terminalPanel.id, '\x03'], [terminalPanel.id, 'replacement\r'],
+    ]);
   });
 
   it('stages text before submitting a Claude composer', async () => {
@@ -2487,14 +2923,6 @@ describe('runpane IPC handlers', () => {
       verifiedSubmitted: true,
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
-    expect(services.analyticsManager?.track).toHaveBeenCalledWith(
-      'runpane_local_control',
-      expect.objectContaining({
-        action: 'panels:submit-composer',
-        status: 'success',
-        input_bytes: 1,
-      }),
-    );
   });
 
   it('queues a working Codex composer with Tab and verifies it left the composer', async () => {
@@ -2782,10 +3210,10 @@ describe('runpane IPC handlers', () => {
   });
 
   it.each([
-    ['› Continue the existing task\n  gpt-5.6 high\n', true],
+    ['› Continue the existing task\n\n  gpt-5.6 high\n  ? for shortcuts\n', true],
     ['› [Pasted Content 2048 chars]\n  Ctrl+Enter to submit\n', true],
-    ['› Ask Codex to do anything\n  gpt-5.6 high\n', false],
-    ['previous output\n›\n  gpt-5.6 high\n', false],
+    ['› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n', false],
+    ['previous output\n›\n\n  gpt-5.6 high\n  ? for shortcuts\n', false],
   ])('reports whether the Codex composer has undelivered text', async (text, expected) => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
       terminalSnapshot(text, 'idle'),
@@ -2878,9 +3306,10 @@ describe('runpane IPC handlers', () => {
   });
 
   it('waits for ready terminal state with bounded screen output', async () => {
+    vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: '› Ask Codex to do anything\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -2892,10 +3321,13 @@ describe('runpane IPC handlers', () => {
     });
     const registry = createRegistry();
 
-    const result = await registry.invoke('runpane:panels:wait', [{
+    const pending = registry.invoke('runpane:panels:wait', [{
       panelId: terminalPanel.id,
       timeoutMs: 10,
     }]);
+
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await pending;
 
     expect(result).toMatchObject({
       ok: true,
@@ -2905,7 +3337,7 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       screen: {
         source: 'scrollback',
-        text: '› Ask Codex to do anything\n',
+        text: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       },
       nextCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
     });
@@ -2968,6 +3400,120 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('reports a first-run trust dialog and leaves the launch prompt unverified', async () => {
+    const panel = {
+      ...terminalPanel,
+      state: { ...terminalPanel.state, customState: { agentType: 'codex', initialInputSentAt: '2026-01-01T00:02:00.000Z' } },
+    };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(panel);
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'Trust this folder?\n› 1. Trust and continue\n  2. Quit\n', 'idle', 'codex',
+    ));
+    const result = await createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id }, waitReady: true, readyTimeoutMs: 100,
+      panes: [{ name: 'issue-946', tool: { agent: 'codex', initialInput: 'Read prompt.md' } }],
+    }]);
+    expect(result).toMatchObject({ items: [{
+      readiness: { ok: false, blocked: {
+        kind: 'first-run-dialog', message: expect.stringContaining('Trust this folder?'),
+        suggestedCommand: `runpane panels input --panel ${panel.id} --keys 1,enter --yes --json`,
+      } },
+      initialInput: { verifiedSubmitted: false, delivery: { state: 'unknown' } },
+    }] });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['claude', 'Quick safety check\nDo you trust this folder?\n❯ 1. Yes, I trust this folder\n  2. No, exit', '1'],
+    ['codex', 'Cannot use the background server\n  1. Retry\n› 2. Run without daemon this time\n  3. Exit', '2'],
+  ] as const)('identifies %s first-run choices from the live screen', async (agent, text, key) => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', agent));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
+      .toMatchObject({ ok: false, timedOut: false, blocked: {
+        kind: 'first-run-dialog', message: text,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys ${key},enter --yes --json`,
+      } });
+  });
+
+  it('selects the affirmative Claude trust option when No is selected by default', async () => {
+    const text = 'Accessing workspace:\n/tmp/new-repo\nQuick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\nEnter to confirm · Esc to cancel';
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', 'claude'));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
+      .toMatchObject({ ok: false, blocked: {
+        kind: 'first-run-dialog', message: text,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys down,enter --yes --json`,
+      } });
+  });
+
+  it('waits past a transient composer before reporting startup ready', async () => {
+    const composer = terminalSnapshot('› Ask Codex to do anything', 'idle', 'codex');
+    const dialog = terminalSnapshot('Cannot use the background server\n  1. Run without daemon this time\n› 2. Cancel', 'idle', 'codex');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(composer)
+      .mockReturnValueOnce(composer)
+      .mockReturnValue(dialog);
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 100, intervalMs: 1,
+    }])).toMatchObject({ ok: false, timedOut: false, blocked: { kind: 'first-run-dialog' } });
+  });
+
+  it('waits for trust after a provisional Codex composer persists across several polls', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const provisional = terminalSnapshot(
+      '>_ OpenAI Codex (v0.160.0)\n  permissions: YOLO mode\n  Pull up a prompt.\n\n› Ask Codex to do anything\n  ? for shortcuts',
+      'active',
+    );
+    const trust = terminalSnapshot('Folder access\nTrust this folder?\n› 1. Trust and continue\n  2. Quit', 'active');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      Date.now() - startedAt < 1500 ? provisional : trust);
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 5000, intervalMs: 500,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      ok: false, matched: false, timedOut: false,
+      blocked: { kind: 'first-run-dialog', message: expect.stringContaining('Trust this folder?') },
+    });
+  });
+
+  it.each([
+    'GPT-6.1-Sol low fast · /tmp/qa\n  ? for shortcuts',
+    'GPT-6-Astra medium · ~\\qa\n  ← for agents · ? for shortcuts',
+    'gpt-5.6 high\n  ? for shortcuts',
+    'o3 high · /tmp/qa\n  ? for shortcuts',
+    '100% context left\n  ? for shortcuts',
+  ])('recognizes configured Codex readiness from its live footer: %s', async (footer) => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      `› Ask Codex to do anything\n\n  ${footer}`, 'idle',
+    ));
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 30, intervalMs: 1,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({ ok: true, matched: true, timedOut: false });
+  });
+
+  it('does not infer Codex readiness from missing chrome or a model mentioned above the composer', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'gpt-5.6 high\nPrevious model information\n› Ask Codex to do anything\n  ? for shortcuts', 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 10, intervalMs: 1,
+    }])).toMatchObject({ ok: false, matched: false, timedOut: true });
+  });
+
+  it('does not mistake model names typed in the provisional composer for a status row', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      '› Compare these models:\n  gpt-5.6 high\n\n\n  ? for shortcuts', 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 10, intervalMs: 1,
+    }])).toMatchObject({ ok: false, timedOut: true });
+  });
+
   it('reports Codex update prompts as blockers instead of ready', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
@@ -3018,7 +3564,7 @@ describe('runpane IPC handlers', () => {
       condition: 'ready',
       matched: false,
       timedOut: false,
-      blocked: { kind: 'agent-prompt' },
+      blocked: { kind: 'first-run-dialog' },
     });
   });
 
@@ -3088,6 +3634,174 @@ describe('runpane IPC handlers', () => {
         name: project.name,
       },
     });
+  });
+
+  it('reports OpenCode unavailable without attempting a session capability probe', async () => {
+    const lookupCommand = process.platform === 'win32' ? 'where opencode' : 'command -v opencode';
+    const execAsync = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'opencode', repo: 'active' }]);
+
+    expect(execAsync).toHaveBeenCalledWith(lookupCommand, project.path, expect.objectContaining({ timeout: 5000, silent: true }));
+    expect(execAsync.mock.calls.some(([command]) => command.includes('--help'))).toBe(false);
+    expect(result).toMatchObject({ ok: false, available: false, agent: 'opencode' });
+  });
+
+  it('probes the resolved OpenCode executable path on POSIX, including spaces', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const executablePath = '/opt/Open Code/bin/opencode';
+    const helpCommand = "'/opt/Open Code/bin/opencode' --help";
+    const execAsync = vi.fn(async (command: string) => {
+      if (command === 'command -v opencode') return { stdout: `${executablePath}\n`, stderr: '' };
+      if (command === 'opencode --version') return { stdout: '2.0.19\n', stderr: '' };
+      if (command === helpCommand) return { stdout: 'Usage: opencode [flags]\n  --session, -s string\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+      } as never,
+    });
+
+    try {
+      const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'opencode', repo: 'active' }]);
+
+      expect(execAsync).toHaveBeenCalledWith(helpCommand, project.path, expect.objectContaining({ timeout: 5000, silent: true }));
+      expect(execAsync.mock.calls.every(([command]) => !command.includes('--continue'))).toBe(true);
+      expect(result).toMatchObject({
+        ok: true,
+        available: true,
+        environment: 'linux',
+        executablePath,
+        version: '2.0.19',
+        checks: expect.arrayContaining([
+          expect.objectContaining({ name: 'session-capability', ok: true }),
+        ]),
+      });
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+    }
+  });
+
+  it('probes the resolved OpenCode executable path on Windows, including spaces', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const executablePath = 'C:\\Program Files\\OpenCode\\opencode.cmd';
+    const helpCommand = '"C:\\Program Files\\OpenCode\\opencode.cmd" --help';
+    const execAsync = vi.fn(async (command: string) => {
+      if (command === 'where opencode') return { stdout: `${executablePath}\r\n`, stderr: '' };
+      if (command === 'opencode --version') return { stdout: '2.0.19\r\n', stderr: '' };
+      if (command === helpCommand) return { stdout: '  --session, -s string\r\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+      } as never,
+    });
+
+    try {
+      const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'opencode', repo: 'active' }]);
+
+      expect(execAsync).toHaveBeenCalledWith(helpCommand, project.path, expect.objectContaining({ timeout: 5000, silent: true }));
+      expect(result).toMatchObject({ ok: true, available: true, environment: 'windows', executablePath });
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+    }
+  });
+
+  it.each([
+    ['continue and short alias only', 'Usage\n  --continue, -c\n  -s string\n'],
+    ['session-id lookalike', 'Usage\n  --session-id string\n'],
+    ['prose mention', 'Use --session to reconnect when supported.\n'],
+  ])('rejects OpenCode help with %s', async (_caseName, help) => {
+    const lookupCommand = process.platform === 'win32' ? 'where opencode' : 'command -v opencode';
+    const executablePath = process.platform === 'win32' ? 'C:\\Tools\\opencode.cmd' : '/usr/local/bin/opencode';
+    const helpCommand = process.platform === 'win32'
+      ? '"C:\\Tools\\opencode.cmd" --help'
+      : "'/usr/local/bin/opencode' --help";
+    const execAsync = vi.fn(async (command: string) => {
+      if (command === lookupCommand) return { stdout: `${executablePath}\n`, stderr: '' };
+      if (command === 'opencode --version') return { stdout: '2.0.18\n', stderr: '' };
+      if (command === helpCommand) return { stdout: help, stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'opencode', repo: 'active' }]);
+
+    expect(result).toMatchObject({
+      ok: false,
+      available: true,
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'session-capability',
+          ok: false,
+          message: expect.stringMatching(/upgrade.*--session/i),
+        }),
+      ]),
+    });
+    expect(execAsync.mock.calls.every(([command]) => !command.includes('--continue'))).toBe(true);
+  });
+
+  it('probes OpenCode through the WSL project command runner context', async () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const wslProject = { ...project, wsl_enabled: true, wsl_distribution: 'Ubuntu' };
+    const executablePath = '/home/user/Open Code/bin/opencode';
+    const helpCommand = "'/home/user/Open Code/bin/opencode' --help";
+    const execAsync = vi.fn(async (command: string) => {
+      if (command === 'command -v opencode') return { stdout: `${executablePath}\n`, stderr: '' };
+      if (command === 'opencode --version') return { stdout: '2.0.19\n', stderr: '' };
+      if (command === helpCommand) return { stdout: '', stderr: '--session, -s string\n' };
+      return { stdout: '', stderr: '' };
+    });
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the project lookup seam used by the doctor unit.
+      databaseService: { ...base.databaseService, getAllProjects: vi.fn(() => [wslProject]) } as never,
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({
+          commandRunner: {
+            wslContext: { enabled: true, distribution: 'Ubuntu', linuxPath: project.path },
+            execAsync,
+          },
+        })),
+      } as never,
+    });
+
+    try {
+      const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'opencode', repo: 'active' }]);
+
+      expect(result).toMatchObject({ ok: true, available: true, environment: 'wsl', executablePath });
+      expect(execAsync).toHaveBeenCalledWith(helpCommand, project.path, expect.objectContaining({ timeout: 5000, silent: true }));
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+    }
   });
 
   // The ~/.local/bin fallback is POSIX-only; on a win32 host the doctor gates cursor out entirely.
@@ -3209,6 +3923,19 @@ describe('runpane IPC handlers', () => {
     });
     expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
   });
+
+  it.each(['bash -lc "opencode --auto"', 'env -- opencode --auto'])(
+    'rejects unsupported native OpenCode argv at the RunPane boundary before panel allocation: %s', async (command) => {
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const registry = createRegistry(createServices());
+      await expect(registry.invoke('runpane:panels:create', [{
+        paneId: session.id, tool: { command, agentType: 'opencode' },
+      }])).rejects.toThrow(/unsupported.*wrapper/i);
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+      expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
+      expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+    },
+  );
 
   it('allows cursor panel creation for WSL repos', async () => {
     const wslProject = { ...project, wsl_enabled: true, wsl_distribution: 'Ubuntu' };
@@ -3826,7 +4553,7 @@ describe('runpane IPC handlers', () => {
     } as never);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: '› Ask Codex to do anything\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -3873,7 +4600,7 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('reports earned Claude argument delivery during wait-ready pane creation', async () => {
+  it('requires observed evidence before verifying Claude argument delivery during pane creation', async () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     const claudePanel = {
       id: 'panel-1',
@@ -3939,8 +4666,8 @@ describe('runpane IPC handlers', () => {
           submitted: true,
           strategy: 'argument',
           sequenceName: 'argument',
-          verifiedSubmitted: true,
-          delivery: { state: 'taken', evidence: 'argv' },
+          verifiedSubmitted: false,
+          delivery: { state: 'unknown', evidence: 'argv' },
         },
       }],
     });
@@ -3959,6 +4686,82 @@ describe('runpane IPC handlers', () => {
       Date.parse('2026-01-01T00:02:00.000Z'),
       'Please start issue 302',
     );
+  });
+
+  it('waits for OpenCode readiness, writes initial input through the PTY, and submits with Enter', async () => {
+    vi.useFakeTimers();
+    let ready = false;
+    let staged = false;
+    let submitted = false;
+    let createdPanel: ToolPanel | undefined;
+    vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
+      createdPanel = {
+        ...terminalPanel,
+        title: request.title ?? '',
+        state: {
+          isActive: false,
+          customState: {
+            // SAFETY: The create request is for a terminal panel, so its initial state is TerminalPanelState.
+            ...(request.initialState as TerminalPanelState),
+          },
+        },
+      };
+      return createdPanel;
+    });
+    vi.mocked(panelManager.getPanel).mockImplementation(() => createdPanel);
+    vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, input) => {
+      if (input === '\r') submitted = true;
+      else staged = true;
+    });
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => submitted ? 1 : 0);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => ({
+      ...terminalSnapshot(
+        submitted
+        ? `Implement issue 252\nOpenCode working\n\n${openCodeComposer('Ask anything…')}`
+        : staged
+          ? openCodeComposer('Implement issue 252')
+          : ready
+            ? openCodeComposer('Ask anything…')
+            : 'OpenCode is starting',
+        submitted ? 'active' : 'idle',
+        'opencode',
+      ),
+      isCliReady: ready,
+    }));
+
+    const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      waitReady: true,
+      readyTimeoutMs: 1_000,
+      panes: [{ name: 'opencode-input', tool: { agent: 'opencode', initialInput: 'Implement issue 252' } }],
+    }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+
+    ready = true;
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+      initialState: expect.objectContaining({
+        initialCommand: 'opencode --auto',
+        initialInput: 'Implement issue 252',
+        initialInputMode: 'stdin',
+        initialInputSubmitStrategy: 'enter',
+        agentType: 'opencode',
+      }),
+    }));
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, 'Implement issue 252');
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\r');
+    expect(result).toMatchObject({
+      ok: true,
+      items: [{
+        ok: true,
+        readiness: { ok: true, state: { agentType: 'opencode' } },
+        initialInput: { submitted: true, strategy: 'enter', sequenceName: 'enter-cr' },
+      }],
+    });
   });
 
   it('marks pane creation unsuccessful when Claude argument delivery is unverified', async () => {
@@ -4038,12 +4841,12 @@ describe('runpane IPC handlers', () => {
       .mockReturnValue(2);
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReturnValue('2026-01-01T00:01:59.300Z');
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
       .mockReturnValueOnce(terminalSnapshot('Working on TM-x\n›', 'active'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4089,7 +4892,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReturnValue(undefined);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
-      terminalSnapshot('› /do TM-x', 'idle', 'codex', '2026-01-01T00:01:59.000Z'),
+      terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle', 'codex', '2026-01-01T00:01:59.000Z'),
     );
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4125,10 +4928,10 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(codexPanel);
     vi.mocked(panelManager.getPanel).mockReturnValue(codexPanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
       .mockReturnValue(terminalSnapshot('You ran /frobnicate x\nWorking\n›', 'active'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4175,7 +4978,7 @@ describe('runpane IPC handlers', () => {
       .mockReturnValueOnce(3)
       .mockReturnValue(3);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
-      terminalSnapshot('› /do TM-x', 'idle', 'codex', new Date(Date.now() + 1).toISOString()),
+      terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle', 'codex', new Date(Date.now() + 1).toISOString()),
     );
     const startedAt = Date.now();
 
@@ -4282,9 +5085,9 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(codexPanel);
     vi.mocked(panelManager.getPanel).mockReturnValue(codexPanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
       .mockReturnValue(terminalSnapshot('›', 'idle'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4306,8 +5109,8 @@ describe('runpane IPC handlers', () => {
   it('routes every agent, readiness, and input case consistently', async () => {
     vi.useFakeTimers();
     const toolKinds = process.platform === 'win32'
-      ? (['claude', 'codex', 'custom'] as const)
-      : (['claude', 'codex', 'cursor', 'custom'] as const);
+      ? (['claude', 'codex', 'opencode', 'custom'] as const)
+      : (['claude', 'codex', 'cursor', 'opencode', 'custom'] as const);
     const inputCases = [
       { name: 'slash', input: '/do TM-x' },
       { name: 'prose', input: 'Please implement this' },
@@ -4321,6 +5124,15 @@ describe('runpane IPC handlers', () => {
           vi.mocked(panelManager.getPanel).mockReset();
           vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReset();
           vi.mocked(terminalPanelManager.writeToTerminal).mockReset();
+          let openCodeStaged = false;
+          let openCodeSubmitted = false;
+          vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReturnValue(toolKind === 'opencode');
+          vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, input) => {
+            if (toolKind !== 'opencode') return;
+            if (input === '\r') openCodeSubmitted = true;
+            else openCodeStaged = true;
+          });
+          vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => openCodeSubmitted ? 1 : 0);
           let createRequest: CreatePanelRequest | undefined;
           let createdPanel: ToolPanel | undefined;
           vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
@@ -4364,13 +5176,17 @@ describe('runpane IPC handlers', () => {
             if (toolKind === 'codex' && inputCase.name === 'slash' && snapshotCalls >= 4) {
               return terminalSnapshot('Working\n›', 'active');
             }
-            // SAFETY: The `custom` kind is handled above, leaving only agent kinds the snapshot frames as claude/codex.
+            // SAFETY: The `custom` kind is handled above, leaving only known agent kinds.
             return terminalSnapshot(
               toolKind === 'codex'
-                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}`
-                : `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`,
+                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}\n\n  gpt-5.6 high\n  ? for shortcuts`
+                : toolKind === 'opencode'
+                  ? openCodeSubmitted
+                    ? `${inputCase.input}\nOpenCode working\n\n${openCodeComposer('Ask anything…')}`
+                    : openCodeComposer(openCodeStaged ? inputCase.input : 'Ask anything…')
+                  : `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`,
               'idle',
-              toolKind as 'claude' | 'codex',
+              toolKind as 'claude' | 'codex' | 'opencode',
             );
           });
           const tool: RunpaneToolSpec = toolKind === 'custom'
@@ -4383,18 +5199,28 @@ describe('runpane IPC handlers', () => {
             readyTimeoutMs: 100,
             panes: [{ name: `${toolKind}-${inputCase.name}`, tool }],
           }]);
-          await vi.runAllTimersAsync();
+          let completed = false;
+          void resultPromise.then(() => { completed = true; }, () => { completed = true; });
+          await vi.waitFor(async () => {
+            await vi.runAllTimersAsync();
+            expect(completed).toBe(true);
+          }, { interval: 1 });
           // SAFETY: The panes:create handler resolves to a result object exposing the per-pane `items` array read below.
           const result = await resultPromise as { items: Array<{ ok?: boolean; initialInput?: unknown }> };
+          if (toolKind === 'opencode' && waitReady && inputCase.name === 'multiline') {
+            expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith('panel-1', `\x1b[200~${inputCase.input}\x1b[201~`);
+          }
           // SAFETY: createPanel was invoked for a terminal panel, so the captured initialState is the terminal customState.
           const initialState = createRequest?.initialState as TerminalPanelState | undefined;
           const useArgument = toolKind === 'claude'
             || toolKind === 'cursor'
             || (toolKind === 'codex' && inputCase.name !== 'slash');
-          const premarkedComposer = waitReady && toolKind === 'codex' && inputCase.name === 'slash';
+          const premarkedComposer = waitReady && (
+            (toolKind === 'codex' && inputCase.name === 'slash') || toolKind === 'opencode'
+          );
 
           expect(initialState?.initialInputMode, `${toolKind}/${waitReady}/${inputCase.name} mode`).toBe(
-            useArgument ? 'argument' : undefined,
+            useArgument ? 'argument' : toolKind === 'opencode' ? 'stdin' : undefined,
           );
           expect(initialState?.initialInputSubmitStrategy, `${toolKind}/${waitReady}/${inputCase.name} strategy`).toBe(
             toolKind === 'codex' && inputCase.name === 'slash' ? 'codex-ctrl-enter' : 'enter',
@@ -4406,10 +5232,10 @@ describe('runpane IPC handlers', () => {
             waitReady && toolKind !== 'custom',
           );
           if (waitReady && toolKind !== 'custom' && inputCase.name !== 'slash') {
-            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} verified result`).toMatchObject({
+            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} delivery result`).toMatchObject({
               ok: true,
               initialInput: {
-                verifiedSubmitted: true,
+                verifiedSubmitted: toolKind === 'opencode',
               },
             });
           }
@@ -4970,7 +5796,7 @@ describe('runpane IPC handlers', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       const result = await pending;
 
-      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'transcript' } });
+      expect(result).toMatchObject({ ok: true, verifiedSubmitted: true, delivery: { state: 'queued', evidence: 'transcript', message: expect.stringContaining('only after its current turn ends') } });
     });
 
     it('reports a message Claude queued from its queue hint when there is no transcript', async () => {
@@ -6463,22 +7289,21 @@ describe('runpane IPC handlers', () => {
       });
     }
 
-    it('opens an HTML file as a browser tab in split view by default', async () => {
+    it('opens an HTML file in the editor preview in split view by default', async () => {
       const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
 
       const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: 'plan.html', source: 'agent' }]);
 
       const request = vi.mocked(panelManager.createPanel).mock.calls[0][0];
-      const url = pathToFileURL(path.join(worktree, 'plan.html')).href;
       expect(request).toMatchObject({
         sessionId: session.id,
-        type: 'browser',
+        type: 'editor',
         title: 'plan.html',
         metadata: { openPlacement: 'split' },
         activate: true,
       });
-      expect(request.initialState).toEqual({ customState: { currentUrl: url } });
-      expect(result).toMatchObject({ ok: true, type: 'browser', filePath: 'plan.html', url, placement: 'split', reused: false, active: true });
+      expect(request.initialState).toEqual({ customState: { filePath: 'plan.html', isPreview: false, isDirty: false } });
+      expect(result).toMatchObject({ ok: true, type: 'editor', filePath: 'plan.html', placement: 'split', reused: false, active: true });
     });
 
     it('opens other files as editor tabs and honors --tab and --no-focus', async () => {
@@ -6528,7 +7353,85 @@ describe('runpane IPC handlers', () => {
 
       const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, filePath: 'plan.html' }]);
 
-      expect(result).toMatchObject({ paneId: orchestrator.id, type: 'browser', filePath: 'plan.html' });
+      expect(result).toMatchObject({ paneId: orchestrator.id, type: 'editor', filePath: 'plan.html' });
+    });
+
+    it.skipIf(process.platform !== 'win32')('opens a WSL Session file using its Linux mount path', async () => {
+      const orchestrator: Session = { ...session, id: '__orchestration_session_wsl', isHidden: true, worktreePath: worktree };
+      const services = openServices(orchestrator, false);
+      // SAFETY: File resolution only reads the owning Session's runtime metadata.
+      services.orchestrationSessionManager = {
+        sessionIdForPane: async () => 'wsl-session',
+        get: async () => ({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' }),
+      } as never;
+      const registry = createRegistry(services);
+      const linuxPath = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}/plan.html`;
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, filePath: linuxPath }]);
+      expect(result).toMatchObject({ type: 'editor', filePath: 'plan.html' });
+    });
+
+    it.skipIf(process.platform !== 'win32')('normalizes a WSL Session file URL to the same target as --file', async () => {
+      const orchestrator: Session = { ...session, id: '__orchestration_session_wsl', isHidden: true, worktreePath: worktree };
+      const services = openServices(orchestrator, false);
+      // SAFETY: File resolution only reads the owning Session's runtime metadata.
+      services.orchestrationSessionManager = {
+        sessionIdForPane: async () => 'wsl-session',
+        get: async () => ({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' }),
+      } as never;
+      const registry = createRegistry(services);
+      const linuxPath = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}/plan.html`;
+      const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, url: `file://${linuxPath}?mode=preview#heading` }]);
+      expect(result).toMatchObject({ url: `${pathToFileURL(path.join(worktree, 'plan.html')).href}?mode=preview#heading` });
+    });
+
+    it.skipIf(process.platform !== 'win32').each([
+      ['file:///home/me/Preview%20%23%25.html?view=1#section', 'file://wsl.localhost/Ubuntu/home/me/Preview%20%23%25.html?view=1#section'],
+      ['file://wsl$/Ubuntu/home/me/index.html', 'file://wsl.localhost/Ubuntu/home/me/index.html'],
+      ['file:///C:/repo/index.html', 'file:///C:/repo/index.html'],
+      ['file://wsl.localhost/Other/home/me/index.html', 'file://wsl.localhost/Other/home/me/index.html'],
+    ])('opens WSL project URL %s', async (url, expected) => {
+      const services = openServices({ ...session, worktreePath: '/home/me' });
+      // SAFETY: Browser resolution reads only pathResolver.
+      vi.mocked(services.sessionManager.getProjectContext).mockReturnValue({
+        pathResolver: new PathResolver({ path: '/home/me', wsl_enabled: true, wsl_distribution: 'Ubuntu' }),
+      } as never);
+      const registry = createRegistry(services);
+      expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, url }])).toMatchObject({ url: expected });
+    });
+
+    it('preserves native file URLs without project context', async () => {
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }, false));
+      const url = pathToFileURL(path.join(worktree, 'plan.html')).href;
+      expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, url }])).toMatchObject({ url });
+    });
+
+    it.skipIf(process.platform !== 'win32' || !process.env.PANE_TEST_WSL_DISTRO)('opens real WSL files and preserves containment', async () => {
+      const distro = process.env.PANE_TEST_WSL_DISTRO!;
+      const linuxRoot = `/tmp/pane-browser-${Date.now()}`;
+      const resolver = new PathResolver({ path: linuxRoot, wsl_enabled: true, wsl_distribution: distro });
+      const hostRoot = resolver.toFileSystem(linuxRoot);
+      fs.mkdirSync(hostRoot);
+      try {
+        fs.writeFileSync(path.join(hostRoot, 'plan #%.html'), '<h1>WSL plan</h1>');
+        const services = openServices({ ...session, worktreePath: linuxRoot });
+        // SAFETY: Browser resolution reads only pathResolver.
+        vi.mocked(services.sessionManager.getProjectContext).mockReturnValue({ pathResolver: resolver } as never);
+        const registry = createRegistry(services);
+        for (const filePath of ['plan #%.html', `${linuxRoot}/plan #%.html`, path.join(hostRoot, 'plan #%.html'), path.join(hostRoot, 'plan #%.html').replace('wsl.localhost', 'wsl$')]) {
+          expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath }])).toMatchObject({ type: 'editor', filePath: 'plan #%.html' });
+        }
+        await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: '/etc/passwd' }])).rejects.toThrow('inside the Pane worktree');
+        const mounted = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}`;
+        const mountedServices = openServices({ ...session, worktreePath: mounted });
+        // SAFETY: Browser resolution reads only pathResolver.
+        vi.mocked(mountedServices.sessionManager.getProjectContext).mockReturnValue({ pathResolver: resolver } as never);
+        const mountedRegistry = createRegistry(mountedServices);
+        const fromWindows = await mountedRegistry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: path.join(worktree, 'plan.html') }]);
+        const fromLinux = await mountedRegistry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: `${mounted}/plan.html` }]);
+        expect(fromWindows).toEqual(fromLinux);
+      } finally {
+        fs.rmSync(hostRoot, { recursive: true, force: true });
+      }
     });
 
     it('rejects paths outside the worktree, missing files, and unsupported URL schemes', async () => {

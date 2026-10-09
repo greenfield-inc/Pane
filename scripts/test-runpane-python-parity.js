@@ -56,6 +56,41 @@ print(json.dumps(results))
   ]);
 });
 
+test('--pane-dir is accepted before, after, and between command flags', () => {
+  const cases = [
+    ['--pane-dir', '/tmp/pane-x', 'doctor', '--json'],
+    ['--pane-dir=/tmp/pane-x', 'repos', 'list', '--json'],
+    ['--pane-dir', '/tmp/pane-x', 'install', 'daemon', '--print-only'],
+    ['doctor', '--pane-dir', '/tmp/pane-x', '--json'],
+    ['repos', 'list', '--json', '--pane-dir=/tmp/pane-x'],
+    ['--pane-dir', '/tmp/pane-x', 'version'],
+  ];
+  const output = JSON.parse(runPython(`
+import json, sys
+from runpane.cli import parse_args
+results = []
+for args in json.load(sys.stdin):
+    parsed = parse_args(args)
+    results.append([parsed.command, parsed.pane_dir, parsed.remote_setup_args])
+print(json.dumps(results))
+`, cases));
+  const { parseRunpaneArgs } = require(path.join(root, 'packages/runpane/dist/commands'));
+  const nodeOutput = cases.map(args => {
+    const parsed = parseRunpaneArgs(args);
+    return [parsed.command, parsed.paneDir ?? null, parsed.remoteSetupArgs ?? []];
+  });
+  assert.deepEqual(output, nodeOutput);
+  assert.deepEqual(output, [
+    ['doctor', '/tmp/pane-x', []],
+    ['repos list', '/tmp/pane-x', []],
+    // install daemon forwards --pane-dir to the remote setup it launches.
+    ['install', null, ['--pane-dir', '/tmp/pane-x', '--print-only']],
+    ['doctor', '/tmp/pane-x', []],
+    ['repos list', '/tmp/pane-x', []],
+    ['version', '/tmp/pane-x', []],
+  ]);
+});
+
 test('Python daemon diagnostics distinguish stale Unix sockets from unopened Pane', () => {
   const output = JSON.parse(runPython(`
 import json, os, tempfile

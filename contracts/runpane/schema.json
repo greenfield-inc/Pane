@@ -457,6 +457,13 @@
         "panes cost",
         "workspace",
         "workspace state",
+        "workspace list",
+        "workspace enable",
+        "workspace disable",
+        "workspace read",
+        "workspace write",
+        "workspace exec",
+        "handoff",
         "watch",
         "panes create",
         "panes adopt",
@@ -507,6 +514,8 @@
         "sessions create",
         "sessions get",
         "sessions update",
+        "sessions pin",
+        "sessions unpin",
         "sessions set-agent",
         "sessions associate",
         "sessions detach",
@@ -560,6 +569,27 @@
           "$ref": "#/$defs/helpLines"
         },
         "workspace state": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace enable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace disable": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace read": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace write": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "workspace exec": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "handoff": {
           "$ref": "#/$defs/helpLines"
         },
         "watch": {
@@ -734,6 +764,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions pin": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions unpin": {
           "$ref": "#/$defs/helpLines"
         }
       },

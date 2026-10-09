@@ -1,5 +1,7 @@
 import { createHash, createPrivateKey, createSign, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import { connect as connectHttp2 } from 'http2';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
@@ -11,9 +13,10 @@ import {
   type RemoteMobilePushRegistration,
   type RemoteMobilePushStatus,
 } from '../../../shared/types/remoteDaemon';
+import type { ApnsCredentialConfig } from '../../../shared/types/sharedCredentials';
 
 interface MobilePushConfigManager {
-  getConfig(): { remoteDaemon?: RemoteDaemonConfig };
+  getConfig(): { remoteDaemon?: RemoteDaemonConfig; apns?: ApnsCredentialConfig };
   updateConfigWith(update: (current: { remoteDaemon?: RemoteDaemonConfig }) => { remoteDaemon: RemoteDaemonConfig }): Promise<{ remoteDaemon?: RemoteDaemonConfig }>;
 }
 
@@ -28,18 +31,41 @@ export interface MobilePushRegistrationRequest {
 
 interface ProviderResponse { status: number; body: string; }
 export interface MobilePushTransport {
-  apns(request: { token: string; jwt: string; topic: string; payload: JsonObject }): Promise<ProviderResponse>;
+  apns(request: { token: string; jwt: string; topic: string; collapseId: string; payload: JsonObject }): Promise<ProviderResponse>;
   fcm(request: { token: string; accessToken: string; projectId: string; payload: JsonObject }): Promise<ProviderResponse>;
 }
-interface FcmCredentials { project_id: string; client_email: string; private_key: string; token_uri?: string; }
-interface ApnsCredentials { teamId: string; keyId: string; keyPath: string; topic: string; environment: 'sandbox' | 'production'; }
+interface FcmServiceAccountKey { project_id: string; client_email: string; private_key: string; token_uri?: string; }
+interface GcloudUserCredentials { client_id: string; client_secret: string; refresh_token: string; }
+/** A service-account key file, or keyless impersonation of a sender account through the operator's gcloud login. */
+type FcmCredentials =
+  | { kind: 'key'; projectId: string; key: FcmServiceAccountKey }
+  | { kind: 'impersonation'; projectId: string; serviceAccount: string; user: GcloudUserCredentials };
+type ApnsCredentials = ApnsCredentialConfig;
 class ProviderDeliveryError extends Error {
   constructor(readonly status: number, readonly body: string, message: string) { super(message); }
 }
 
 const MAX_RECENT_EVENTS = 64;
+/**
+ * How long an agent must stay idle after visible work before the phone hears
+ * it finished. Measured on Claude Code 2.1.289: the longest idle inside one
+ * turn was 3.5 s, on top of the monitor's 10 s settle.
+ */
+export const STABLE_IDLE_MS = 10_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSender>();
+
+type AttentionKind = 'needs-input' | 'completed';
+
+/** The name a Pane's alert is titled with, and the Pane whose alerts it stacks under. */
+export interface MobileAlertSubject {
+  title: string;
+  groupPaneId: string;
+}
+
+export interface MobilePushSenderOptions {
+  resolveSubject?: (paneId: string) => MobileAlertSubject;
+}
 
 /**
  * Host-owned sender. Its credentials are read only from operator environment
@@ -47,14 +73,23 @@ const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSen
  */
 export class MobilePushSender {
   private mutationQueue: Promise<void> = Promise.resolve();
+  /** Panels whose agent visibly worked and has not been reported finished yet. */
+  private readonly unreportedWork = new Set<string>();
+  /** Panels a person sent a prompt to whose turn has not been reported finished yet. */
+  private readonly armed = new Set<string>();
+  private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(private readonly configManager: MobilePushConfigManager, private readonly transport: MobilePushTransport = createProviderTransport()) {}
+  constructor(
+    private readonly configManager: MobilePushConfigManager,
+    private readonly transport: MobilePushTransport = createProviderTransport(),
+    private readonly options: MobilePushSenderOptions = {},
+  ) {}
 
   getStatus(clientId: string, platform: RemoteMobilePlatform, installationId: string): RemoteMobilePushStatus {
     const registration = this.config().host.mobilePush.registrations.find(item => (
       item.clientId === clientId && item.platform === platform && item.installationId === installationId && !item.revokedAt
     ));
-    const status: RemoteMobilePushStatus = { platform, registration: registration ? 'registered' : 'not-registered', ...providerReadiness(platform) };
+    const status: RemoteMobilePushStatus = { platform, registration: registration ? 'registered' : 'not-registered', ...providerReadiness(platform, this.configManager.getConfig().apns) };
     if (registration) {
       status.needsInputEnabled = registration.needsInputEnabled;
       status.completedEnabled = registration.completedEnabled;
@@ -69,7 +104,7 @@ export class MobilePushSender {
     if (!isSafeIdentifier(request.installationId) || !isSafeProfileId(request.hostProfileId) || !isSafeToken(request.token)) {
       throw new Error('Invalid mobile notification registration');
     }
-    const readiness = providerReadiness(request.platform);
+    const readiness = providerReadiness(request.platform, this.configManager.getConfig().apns);
     if (readiness.provider !== 'ready') return { platform: request.platform, registration: 'not-registered', ...readiness };
     const config = this.config();
     const now = new Date().toISOString();
@@ -129,41 +164,74 @@ export class MobilePushSender {
     await this.save(configWithRegistrations(config, registrations));
   }
 
+  /**
+   * A person submitted input to this panel, so its next finished turn tells the phone. A finish
+   * still settling from the turn before is theirs to see already, so it is dropped.
+   */
+  arm(panelId: string): void {
+    clearTimeout(this.finishTimers.get(panelId));
+    this.finishTimers.delete(panelId);
+    this.unreportedWork.delete(panelId);
+    this.armed.add(panelId);
+  }
+
+  /** Terminal input a person typed. Enter submits; ESC CR is a newline inside a pasted prompt. */
+  observeInput(panelId: string, data: string): void {
+    if (data.endsWith('\r') && !data.endsWith('\x1b\r')) this.arm(panelId);
+  }
+
   observeStatus(event: PanelAgentStatusEvent): Promise<void> {
+    // Plain shells go quiet all the time; only agents tell the phone anything.
+    if (!event.agentType) return Promise.resolve();
+    this.scheduleFinished(event);
     return this.mutate(() => this.processStatus(event));
+  }
+
+  /**
+   * "Finished" waits for visible work followed by a stable idle: output alone
+   * (typing, a redraw) never arms it, and a pause inside a turn re-arms it.
+   */
+  private scheduleFinished(event: PanelAgentStatusEvent): void {
+    clearTimeout(this.finishTimers.get(event.panelId));
+    this.finishTimers.delete(event.panelId);
+    const ended = event.reason === 'exit' || event.reason === 'destroyed';
+    if (ended) this.armed.delete(event.panelId);
+    if (ended || event.state === 'blocked') {
+      this.unreportedWork.delete(event.panelId);
+      return;
+    }
+    if (event.state !== 'idle') return;
+    if (event.workedVisibly) this.unreportedWork.add(event.panelId);
+    if (!this.unreportedWork.has(event.panelId)) return;
+    this.finishTimers.set(event.panelId, setTimeout(() => {
+      this.finishTimers.delete(event.panelId);
+      this.unreportedWork.delete(event.panelId);
+      // Self-wakes, timers and agent-sent prompts finish silently.
+      if (!this.armed.delete(event.panelId)) return;
+      void this.mutate(() => this.notify(event, 'completed')).catch(() => {
+        console.warn('[Pane mobile push] Could not send a finished alert');
+      });
+    }, STABLE_IDLE_MS));
   }
 
   private async processStatus(event: PanelAgentStatusEvent): Promise<void> {
     const config = this.config();
-    if (!config.host.mobilePush.registrations.some(item => !item.revokedAt && config.host.clients.some(client => client.id === item.clientId))) return;
+    if (!hasLiveRegistration(config)) return;
     const previous = config.host.mobilePush.panelStates[event.panelId];
-    const terminalEnded = event.reason === 'exit' || event.reason === 'destroyed';
-    const kind = terminalEnded ? null : event.state === 'blocked' && previous !== 'blocked'
-      ? 'needs-input'
-      : previous === 'working' && event.state === 'idle'
-        ? 'completed'
-        : null;
-    if (!kind) {
-      if (previous !== event.state) {
-        await this.save({
-          ...config,
-          host: {
-            ...config.host,
-            mobilePush: {
-              ...config.host.mobilePush,
-              panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state },
-            },
-          },
-        });
-      }
+    const ended = event.reason === 'exit' || event.reason === 'destroyed';
+    if (!ended && event.state === 'blocked' && previous !== 'blocked') {
+      await this.notify(event, 'needs-input');
       return;
     }
+    if (previous !== event.state) await this.save(withPanelState(config, event));
+  }
+
+  private async notify(event: PanelAgentStatusEvent, kind: AttentionKind): Promise<void> {
+    const config = this.config();
+    if (!hasLiveRegistration(config)) return;
     const sequence = config.host.mobilePush.attentionSequence + 1;
     const eventId = `pane:${event.sessionId}:${event.panelId}:${kind}:${sequence}`;
-    const updatedConfig: RemoteDaemonConfig = {
-      ...config,
-      host: { ...config.host, mobilePush: { ...config.host.mobilePush, attentionSequence: sequence, panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state } } },
-    };
+    const updatedConfig = withPanelState(config, event, sequence);
     await this.save(updatedConfig);
     for (const registration of updatedConfig.host.mobilePush.registrations) {
       if (registration.revokedAt || !isEnabled(registration, kind)) continue;
@@ -172,32 +240,41 @@ export class MobilePushSender {
       try {
         await this.deliver(registration, eventId, event, kind);
         await this.markDelivered(registration.id, eventId);
+        console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind });
       } catch (error) {
         if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
         const status = error instanceof ProviderDeliveryError ? error.status : undefined;
-        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, status });
+        const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
+        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, status, reason });
       }
     }
   }
 
-  private async deliver(registration: RemoteMobilePushRegistration, eventId: string, event: PanelAgentStatusEvent, kind: 'needs-input' | 'completed'): Promise<void> {
-    const title = kind === 'completed' ? 'Pane finished a turn' : 'Pane needs attention';
-    const payload: JsonObject = {
-      eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId,
-      aps: { alert: { title, body: 'Open Pane to continue.' }, sound: 'default' },
-    };
+  private async deliver(registration: RemoteMobilePushRegistration, eventId: string, event: PanelAgentStatusEvent, kind: AttentionKind): Promise<void> {
+    const subject: MobileAlertSubject = this.options.resolveSubject?.(event.sessionId) ?? { title: '', groupPaneId: event.sessionId };
+    const title = subject.title.trim() || 'Pane';
+    const body = kind === 'completed' ? `${title} needs your attention` : `${title} is blocked`;
+    // One alert per Pane: a newer one replaces the last. They stack under their Session, and the
+    // phone clears a Session's alerts with its own.
+    const collapseId = createHash('sha256').update(event.sessionId).digest('hex');
+    const routing = { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId, sessionPaneId: subject.groupPaneId };
+    const payload: JsonObject = { ...routing, aps: { alert: { title, body }, sound: 'default', 'thread-id': subject.groupPaneId } };
     if (registration.platform === 'ios') {
-      const credentials = readApnsCredentials();
+      const credentials = readApnsCredentials(this.configManager.getConfig().apns);
       if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
-      const response = await this.transport.apns({ token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, payload });
+      const response = await this.transport.apns({ token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, collapseId, payload });
       if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'APNs rejected notification');
       return;
     }
     const credentials = readFcmCredentials();
     if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
     const response = await this.transport.fcm({
-      token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.project_id,
-      payload: { message: { token: registration.token, notification: { title, body: 'Open Pane to continue.' }, data: { eventId, hostProfileId: registration.hostProfileId, paneId: event.sessionId, panelId: event.panelId } } },
+      token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId,
+      payload: { message: {
+        token: registration.token, notification: { title, body },
+        android: { notification: { tag: collapseId } },
+        data: routing,
+      } },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
   }
@@ -244,27 +321,38 @@ export class MobilePushSender {
 }
 
 /** One host config has one serial mutation stream across IPC and SSE delivery. */
-export function getMobilePushSender(configManager: MobilePushConfigManager): MobilePushSender {
+export function getMobilePushSender(configManager: MobilePushConfigManager, options?: MobilePushSenderOptions): MobilePushSender {
   const existing = senderByConfigManager.get(configManager);
   if (existing) return existing;
-  const sender = new MobilePushSender(configManager);
+  const sender = new MobilePushSender(configManager, undefined, options);
   senderByConfigManager.set(configManager, sender);
   return sender;
 }
 
-function providerReadiness(platform: RemoteMobilePlatform): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
-  if (platform === 'ios') return readApnsCredentials()
+function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
+  if (platform === 'ios') return readApnsCredentials(apns)
     ? { provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' }
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };
   return readFcmCredentials()
     ? { provider: 'ready', code: 'PUSH_READY', message: 'FCM delivery is configured.' }
-    : { provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED', message: 'This host has no valid FCM service account.' };
+    : { provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED', message: 'This host has no valid FCM sender configuration.' };
 }
 
+function hasLiveRegistration(config: RemoteDaemonConfig): boolean {
+  return config.host.mobilePush.registrations.some(item => !item.revokedAt && config.host.clients.some(client => client.id === item.clientId));
+}
+function withPanelState(config: RemoteDaemonConfig, event: PanelAgentStatusEvent, attentionSequence = config.host.mobilePush.attentionSequence): RemoteDaemonConfig {
+  const mobilePush = { ...config.host.mobilePush, attentionSequence, panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state } };
+  return { ...config, host: { ...config.host, mobilePush } };
+}
+/** APNs `reason` or FCM `status` from an error body, never the token. */
+function providerReason(body: string): string | undefined {
+  return /"(?:reason|status)"\s*:\s*"([A-Za-z_]+)"/.exec(body)?.[1];
+}
 function configWithRegistrations(config: RemoteDaemonConfig, registrations: RemoteMobilePushRegistration[]): RemoteDaemonConfig {
   return { ...config, host: { ...config.host, mobilePush: { ...config.host.mobilePush, registrations } } };
 }
-function isEnabled(registration: RemoteMobilePushRegistration, kind: 'needs-input' | 'completed'): boolean {
+function isEnabled(registration: RemoteMobilePushRegistration, kind: AttentionKind): boolean {
   return kind === 'needs-input' ? registration.needsInputEnabled : registration.completedEnabled;
 }
 function isSuccess(status: number): boolean { return status >= 200 && status < 300; }
@@ -275,40 +363,75 @@ function isSafeToken(value: string): boolean { return value.length > 0 && value.
 function isInvalidTokenResponse(error: ProviderDeliveryError): boolean {
   return error.status === 410 || ((error.status === 400 || error.status === 404) && /BadDeviceToken|Unregistered|registration-token-not-registered/i.test(error.body));
 }
-function readApnsCredentials(): ApnsCredentials | null {
+/** The host environment wins; otherwise the credentials saved in host config, which paired devices share. */
+function readApnsCredentials(saved: ApnsCredentialConfig | undefined): ApnsCredentials | null {
   const { PANE_APNS_TEAM_ID: teamId, PANE_APNS_KEY_ID: keyId, PANE_APNS_KEY_PATH: keyPath, PANE_APNS_TOPIC: topic, PANE_APNS_ENVIRONMENT: environment } = process.env;
+  if (!teamId && !keyId && !keyPath && !topic) return saved ?? null;
   if (!teamId || !keyId || !keyPath || !topic || (environment !== undefined && environment !== 'sandbox' && environment !== 'production')) return null;
-  try { readFileSync(keyPath, 'utf8'); } catch { return null; }
-  return { teamId, keyId, keyPath, topic, environment: environment ?? 'sandbox' };
+  try { return { teamId, keyId, privateKey: readFileSync(keyPath, 'utf8'), topic, environment: environment ?? 'sandbox' }; } catch { return null; }
 }
 function createApnsJwt(credentials: ApnsCredentials): string {
   const header = base64url(JSON.stringify({ alg: 'ES256', kid: credentials.keyId }));
   const claims = base64url(JSON.stringify({ iss: credentials.teamId, iat: Math.floor(Date.now() / 1000) }));
   const signer = createSign('SHA256'); signer.update(`${header}.${claims}`); signer.end();
-  const signature = signer.sign({ key: createPrivateKey(readFileSync(credentials.keyPath, 'utf8')), dsaEncoding: 'ieee-p1363' });
+  const signature = signer.sign({ key: createPrivateKey(credentials.privateKey), dsaEncoding: 'ieee-p1363' });
   return `${header}.${claims}.${signature.toString('base64url')}`;
 }
-const fcmCredentialsSchema = boundary.object({ project_id: boundary.nonEmptyString, client_email: boundary.nonEmptyString, private_key: boundary.nonEmptyString, token_uri: boundary.optional(boundary.nonEmptyString) });
+const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+const fcmServiceAccountKeySchema = boundary.object({ project_id: boundary.nonEmptyString, client_email: boundary.nonEmptyString, private_key: boundary.nonEmptyString, token_uri: boundary.optional(boundary.nonEmptyString) });
+const gcloudUserCredentialsSchema = boundary.object({ type: boundary.literal('authorized_user'), client_id: boundary.nonEmptyString, client_secret: boundary.nonEmptyString, refresh_token: boundary.nonEmptyString });
 function readFcmCredentials(): FcmCredentials | null {
-  const path = process.env.PANE_FCM_SERVICE_ACCOUNT_PATH;
-  if (!path) return null;
-  try { return decodeBoundary(JSON.parse(readFileSync(path, 'utf8')), fcmCredentialsSchema); } catch { return null; }
+  const { PANE_FCM_SERVICE_ACCOUNT_PATH: keyPath, PANE_FCM_IMPERSONATE_SERVICE_ACCOUNT: serviceAccount, PANE_FCM_PROJECT_ID: projectId } = process.env;
+  try {
+    if (keyPath) {
+      const key = decodeBoundary(JSON.parse(readFileSync(keyPath, 'utf8')), fcmServiceAccountKeySchema);
+      return { kind: 'key', projectId: key.project_id, key };
+    }
+    if (serviceAccount && projectId) {
+      const user = decodeBoundary(JSON.parse(readFileSync(gcloudApplicationDefaultCredentialsPath(), 'utf8')), gcloudUserCredentialsSchema);
+      return { kind: 'impersonation', projectId, serviceAccount, user };
+    }
+  } catch { return null; }
+  return null;
+}
+/** Where `gcloud auth application-default login` writes the operator's user credentials. */
+function gcloudApplicationDefaultCredentialsPath(): string {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const configDirectory = process.platform === 'win32' ? path.join(process.env.APPDATA ?? '', 'gcloud') : path.join(os.homedir(), '.config', 'gcloud');
+  return path.join(configDirectory, 'application_default_credentials.json');
 }
 async function createFcmAccessToken(credentials: FcmCredentials): Promise<string> {
-  const tokenUri = credentials.token_uri ?? 'https://oauth2.googleapis.com/token';
+  if (credentials.kind === 'key') return createServiceAccountKeyAccessToken(credentials.key);
+  const userToken = await postOAuthToken('https://oauth2.googleapis.com/token', {
+    grant_type: 'refresh_token', client_id: credentials.user.client_id, client_secret: credentials.user.client_secret, refresh_token: credentials.user.refresh_token,
+  });
+  const response = await fetch(`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(credentials.serviceAccount)}:generateAccessToken`, {
+    method: 'POST', signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope: [FCM_SCOPE] }),
+  });
+  const payload = decodeOptionalBoundary(await response.json(), boundary.object({ accessToken: boundary.optional(boundary.nonEmptyString) }));
+  if (!response.ok || !payload?.accessToken) throw new ProviderDeliveryError(response.status, '', 'FCM sender impersonation failed');
+  return payload.accessToken;
+}
+function createServiceAccountKeyAccessToken(key: FcmServiceAccountKey): Promise<string> {
+  const tokenUri = key.token_uri ?? 'https://oauth2.googleapis.com/token';
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const claims = base64url(JSON.stringify({ iss: credentials.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: tokenUri, iat: now, exp: now + 3600 }));
+  const claims = base64url(JSON.stringify({ iss: key.client_email, scope: FCM_SCOPE, aud: tokenUri, iat: now, exp: now + 3600 }));
   const signer = createSign('RSA-SHA256'); signer.update(`${header}.${claims}`); signer.end();
-  const assertion = `${header}.${claims}.${signer.sign(credentials.private_key).toString('base64url')}`;
-  const response = await fetch(tokenUri, { method: 'POST', signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }) });
+  const assertion = `${header}.${claims}.${signer.sign(key.private_key).toString('base64url')}`;
+  return postOAuthToken(tokenUri, { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion });
+}
+async function postOAuthToken(tokenUri: string, form: Record<string, string>): Promise<string> {
+  const response = await fetch(tokenUri, { method: 'POST', signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form) });
   const payload = decodeOptionalBoundary(await response.json(), boundary.object({ access_token: boundary.optional(boundary.nonEmptyString) }));
   if (!response.ok || !payload?.access_token) throw new ProviderDeliveryError(response.status, '', 'FCM OAuth exchange failed');
   return payload.access_token;
 }
 function createProviderTransport(): MobilePushTransport {
   return {
-    apns: ({ token, jwt, topic, payload }) => new Promise((resolve, reject) => {
+    apns: ({ token, jwt, topic, collapseId, payload }) => new Promise((resolve, reject) => {
       const host = process.env.PANE_APNS_ENVIRONMENT === 'production' ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
       const client = connectHttp2(host);
       let settled = false;
@@ -323,9 +446,6 @@ function createProviderTransport(): MobilePushTransport {
       const timeout = setTimeout(() => finish(new Error('APNs delivery timed out')), PROVIDER_TIMEOUT_MS);
       client.on('error', finish);
       client.on('close', () => finish(new Error('APNs connection closed before delivery completed')));
-      // APNs restricts collapse identifiers to 64 bytes. The opaque event ID
-      // can contain UUIDs, so derive a fixed-size, non-sensitive identifier.
-      const collapseId = createHash('sha256').update(String(payload.eventId)).digest('hex');
       const request = client.request({ ':method': 'POST', ':path': `/3/device/${encodeURIComponent(token)}`, authorization: `bearer ${jwt}`, 'apns-topic': topic, 'apns-push-type': 'alert', 'apns-collapse-id': collapseId });
       let body = '';
       request.setEncoding('utf8');

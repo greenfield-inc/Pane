@@ -22,6 +22,7 @@ import type {
   RemotePaneConnectionState,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
+import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -92,9 +93,13 @@ interface IPCResponse<T = any> {
 }
 
 interface ElectronAPI {
+  onNotesChanged: (callback: () => void) => () => void;
   // Generic invoke method. Daemon-owned channels route through the main-process
   // daemon bridge while adapter-only channels stay on direct Electron IPC.
   invoke: {
+    (channel: 'notes:context', paneId: string): Promise<import('../../../shared/types/notes').NoteContext>;
+    (channel: 'notes:list', paneId: string, scope: import('../../../shared/types/notes').NoteScope): Promise<import('../../../shared/types/notes').Note[]>;
+    (channel: 'notes:mutate', paneId: string, input: import('../../../shared/types/notes').NoteMutation): Promise<{ note?: import('../../../shared/types/notes').Note; exports: import('../../../shared/types/notes').NoteExportResult[] }>;
     (channel: 'panels:get-layout', sessionId: string): Promise<IPCResponse<SessionPanelLayout | null>>;
     (channel: 'panels:set-layout', sessionId: string, layout: SessionPanelLayout | null): Promise<IPCResponse<void>>;
     (channel: 'panels:emitEvent', panelId: string, eventType: PanelEventType, data: JsonValue): Promise<void>;
@@ -337,6 +342,7 @@ interface ElectronAPI {
     getSessionPreferences: () => Promise<IPCResponse>;
     updateSessionPreferences: (preferences: SessionCreationPreferences) => Promise<IPCResponse>;
     getMonospaceFonts: () => Promise<IPCResponse>;
+    chooseApnsKey: () => Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>>;
   };
 
   remoteDaemon: {
@@ -357,6 +363,10 @@ interface ElectronAPI {
     importConnectionCode: (code: string, options?: { connect?: boolean }) => Promise<IPCResponse<RemoteDaemonImportResult>>;
     deleteConnectionProfile: (profileId: string) => Promise<IPCResponse<RemoteDaemonClientSettings>>;
     updateClientState: (updates: Partial<Pick<RemoteDaemonClientSettings, 'activeProfileId' | 'mode'>>) => Promise<IPCResponse<RemoteDaemonClientSettings>>;
+    getWorkspaceAccess: () => Promise<IPCResponse<WorkspaceAccessSummary>>;
+    updateWorkspaceAccess: (update: WorkspaceAccessUpdate) => Promise<IPCResponse<WorkspaceAccessSummary>>;
+    listTailnetMachines: () => Promise<IPCResponse<TailnetMachineList>>;
+    saveTailnetMachine: (input: { name: string; password?: string }) => Promise<IPCResponse<RemotePaneConnectionProfile>>;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;
   };
@@ -424,6 +434,8 @@ interface ElectronAPI {
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
+    /** A phone or another window saved settings on this host; refetch the config. */
+    onRemoteSettingsChanged: (callback: () => void) => () => void;
     onSessionDeleted: (callback: (session: Pick<Session, 'id'>) => void) => () => void;
     onSessionsLoaded: (callback: (sessions: Session[]) => void) => () => void;
     onSessionOutput: (callback: (output: SessionOutput) => void) => () => void;

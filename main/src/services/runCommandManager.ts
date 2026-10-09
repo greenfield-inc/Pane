@@ -383,6 +383,17 @@ export class RunCommandManager extends EventEmitter {
     this.processes.delete(sessionId);
   }
 
+  getArchiveProcessPids(sessionId: string): number[] {
+    return (this.processes.get(sessionId) ?? []).map(item => item.process.pid).filter(pid => pid > 0);
+  }
+
+  /** The archive tracker persists the tree before retirement and escalates
+   * freshly matched survivors afterward, including escaped descendants. */
+  async retireRunCommandsForArchive(sessionId: string): Promise<void> {
+    for (const item of this.processes.get(sessionId) ?? []) item.process.kill();
+    this.processes.delete(sessionId);
+  }
+
   async stopAllRunCommands(): Promise<void> {
     const stopPromises = [];
     for (const sessionId of this.processes.keys()) {

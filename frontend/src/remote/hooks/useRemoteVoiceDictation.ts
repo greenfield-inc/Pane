@@ -14,7 +14,9 @@ import {
 } from '../../../../shared/voice/deepgramLive';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
-const MAX_RECORDING_MS = 60_000;
+const MAX_RECORDING_MS = 15 * 60_000;
+/** Keeps a 15-minute recorded clip near 7 MB, under MAX_AUDIO_BYTES; browsers default to about 128 kbps. */
+const RECORDED_BITS_PER_SECOND = 64_000;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 const STREAM_CHUNK_MS = 250;
 const STREAM_FINALIZE_WAIT_MS = 800;
@@ -173,9 +175,9 @@ export function useRemoteVoiceDictation({
     try {
       const selectedMimeType = selectRecordingMimeType();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = selectedMimeType
-        ? new MediaRecorder(stream, { mimeType: selectedMimeType })
-        : new MediaRecorder(stream);
+      const options: MediaRecorderOptions = { audioBitsPerSecond: RECORDED_BITS_PER_SECOND };
+      if (selectedMimeType) options.mimeType = selectedMimeType;
+      const recorder = new MediaRecorder(stream, options);
 
       chunksRef.current = [];
       mediaStreamRef.current = stream;

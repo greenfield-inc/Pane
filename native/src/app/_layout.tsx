@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
+import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, PushRegistration } from '@/features/notifications/NotificationRouting';
 import { useTheme } from '@/theme';
 
@@ -45,10 +46,13 @@ export default function RootLayout() {
         <ThemeProvider value={navigationTheme}>
           <StatusBar style="auto" />
           {activeHost ? (
-            <DaemonProvider key={activeHost.id} profile={activeHost}>
-              <RootStack signedIn />
-              <PushRegistration />
-            </DaemonProvider>
+            <>
+              <DaemonProvider key={activeHost.id} profile={activeHost}>
+                <RootStack signedIn />
+                {activeHost.tailnetMachine ? null : <PushRegistration />}
+              </DaemonProvider>
+              <SharedCredentialSync />
+            </>
           ) : (
             <RootStack signedIn={false} />
           )}
@@ -70,6 +74,9 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         {/* The pane list is home, like the PWA's pane drawer; it draws its own header. */}
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="settings/shortcuts" options={{ title: 'Shortcuts' }} />
+        <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
+        <Stack.Screen name="settings/voice" options={{ title: 'Voice' }} />
         {/* The terminal draws the PWA's top bar itself. */}
         <Stack.Screen name="pane/[paneId]/index" options={{ headerShown: false }} />
         <Stack.Screen
@@ -89,7 +96,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           name="pane/new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
         />
-        <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add host' }} />
+        <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
+        <Stack.Screen name="computers" options={{ title: 'Your computers' }} />
       </Stack.Protected>
       <Stack.Screen name="scan" options={{ presentation: 'fullScreenModal', headerShown: false }} />
       <Stack.Screen name="pair" options={{ presentation: 'modal', title: 'Connect to host' }} />

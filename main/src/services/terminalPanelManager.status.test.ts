@@ -289,7 +289,7 @@ describe('terminal status events', () => {
     await Promise.all([old.terminal.screenEmulator.refresh(), replacement.terminal.screenEmulator.refresh()]);
     access.pollAgentStatus();
     expect(events.filter(event => event.channel === 'panel:agentStatus').map(event => event.payload)).toEqual([
-      { panelId: 'p', sessionId: 's', state: 'working', reason: 'osc_title_working' },
+      { panelId: 'p', sessionId: 's', state: 'working', reason: 'osc_title_working', agentType: 'codex' },
     ]);
   });
 

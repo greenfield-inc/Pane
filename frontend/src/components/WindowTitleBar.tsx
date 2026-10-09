@@ -105,8 +105,9 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
     if (state.activeMainRepoSession?.id === state.activeSessionId) return state.activeMainRepoSession;
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
+  const activeSessionId = useSessionStore(state => state.activeSessionId);
   const orchestrationName = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId)?.name);
-  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects)
+  const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) ?? (activeSessionId ? { project: 'Pane', pane: activeSession?.name ?? activeSessionId } : null)
     : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
 

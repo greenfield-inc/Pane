@@ -33,6 +33,12 @@ export class MonacoErrorBoundary extends Component<MonacoErrorBoundaryProps, Mon
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.warn('Monaco editor error details:', { error, errorInfo });
+    window.electronAPI?.diagnostics?.rendererFatal({
+      kind: 'error-boundary',
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack ?? undefined,
+    }).catch(() => {});
     this.setState(prev => ({ errorCount: prev.errorCount + 1 }));
     
     // Auto-recover after a short delay

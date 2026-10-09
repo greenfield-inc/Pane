@@ -34,7 +34,8 @@ export interface VoiceTranscriptionUsage {
 export interface VoiceTranscriptionResult {
   mode: VoiceTranscriptionMode;
   provider: VoiceTranscriptionProvider;
-  cleanupModel: VoiceTranscriptionCleanupModel;
+  /** Absent when the host has no OpenRouter key and returned the transcript as heard. */
+  cleanupModel?: VoiceTranscriptionCleanupModel;
   text: string;
   rawText: string;
   chunks?: VoiceTranscriptionChunk[];

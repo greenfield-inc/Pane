@@ -50,6 +50,8 @@ export class PaneRemoteTransportController {
           sessionId: boundary.nonEmptyString,
           state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
           reason: boundary.nullable(boundary.string),
+          agentType: boundary.optional(boundary.string),
+          workedVisibly: boundary.optional(boundary.boolean),
         }));
         if (event) void this.mobilePushSender.observeStatus(event).catch(() => {
           console.warn('[Pane mobile push] Could not persist attention state');

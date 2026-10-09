@@ -79,7 +79,7 @@ export function PrivacySettings({ persistence }: { persistence: SettingsPersiste
         <SettingRow
           settingId="analytics"
           label="Product analytics"
-          description="Product analytics are on by default. Pane collects feature usage and may associate it with locally available GitHub or Git account details, such as a username or email. Pane never collects prompts, code, or file paths. Turn this off to stop telemetry."
+          description="Product analytics are on by default. Pane collects feature usage and may associate it with locally available GitHub or Git account details, such as a username or email. App error reports contain coarse error details and relative app stack locations. Pane never collects prompts, code, or repository paths. Turn this off to stop telemetry."
           saveState={persistence.saveStates.analytics}
         >
           <ImmediateToggle label="Allow product analytics" value={analytics.enabled === true} onSave={saveAnalytics} />

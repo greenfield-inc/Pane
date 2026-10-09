@@ -89,7 +89,7 @@ runpane setup</code></pre>
 <br />
 <br />
 
-[Installation](#installation) · [What Flying Feels Like](#what-flying-feels-like) · [Remote Pane](#remote-pane) · [Pane Chat](#pane-chat) · [Agent-Operable CLI](#agent-operable-cli) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Building from Source](#building-from-source)
+[Installation](#installation) · [What Flying Feels Like](#what-flying-feels-like) · [Remote Pane](#remote-pane) · [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) · [Pane Chat](#pane-chat) · [Agent-Operable CLI](#agent-operable-cli) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Building from Source](#building-from-source)
 
 </div>
 
@@ -121,6 +121,7 @@ Each of these is a small thing. Together they compound fast.
 |---|---|---|
 | **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, loads local Pane orchestration skills, and can coordinate Claude, Codex, or Cursor across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
+| **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task to a fresh agent with its branch and a written note. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
 | **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, and open follow-up panes for issues or tasks. Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
@@ -196,6 +197,53 @@ Windows PowerShell:
 ```
 
 The CLI setup command prints the same connection code and, for SSH mode, the forwarding command. See the [Remote Daemon docs](https://runpane.com/docs/remote-daemon) for the full step-by-step setup, mobile install instructions, API key notes, and security model, or [docs/SELF_HOSTED_REMOTE_DAEMON.md](docs/SELF_HOSTED_REMOTE_DAEMON.md) in this repo.
+
+For agents reaching your own machines from the CLI, see [Pane Workspaces](#pane-workspaces) below.
+
+Integration keys (voice dictation, iPhone notifications) set on one host reach your other hosts through the devices you paired. See [Shared integration keys](docs/SHARED_CREDENTIALS.md).
+
+---
+
+## Pane Workspaces
+
+Your agent can work across your Macs, Windows PCs, and Linux machines. Read a file on your desktop, run a command on your build machine, or check the agents running on your laptop — from the same terminal.
+
+Workspaces use your own Tailscale login, without SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS Certificates in the Tailscale admin console (see [setup](docs/RUNPANE_WORKSPACES.md#turning-it-on)), and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other Tailscale users and tagged devices are refused.
+
+Use the npm CLI (`npm i -g runpane`); the Python wrapper does not run workspace commands. Replace `devbox` with a machine name from the list:
+
+```bash
+runpane workspace list
+runpane workspace devbox read '~/project/README.md'
+runpane workspace devbox exec -- 'git --version'
+runpane workspace devbox panes list --json
+```
+
+Paths belong to the destination machine. `read` and `write` translate Windows and WSL path forms; `exec` uses that machine's shell. Workspaces give your agents file and command access on your joined machines. Run `runpane workspace disable` on a machine that should stop accepting it.
+
+See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) for path examples and startup diagnostics. Remote Pane's [pairing codes](#remote-pane) remain the way to connect a desktop or browser UI.
+
+### Hand off a task
+
+“Continue this on my Windows machine with Codex.” `runpane handoff` starts a fresh agent in a new Pane, using your pushed branch and a note about the task. The note carries the goal, decisions, verified state, and next steps. Live processes and agent session memory stay on the original machine.
+
+Run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
+
+From a Bash or Zsh terminal (for example, on your Mac):
+
+```bash
+runpane handoff --template > ~/handoff.md
+# Fill in every section of the note; use "None" where appropriate.
+# Commit and push the task's changes, then check the note and git state:
+runpane handoff "codex on devbox" --note-file ~/handoff.md --dry-run
+runpane handoff "codex on devbox" --note-file ~/handoff.md
+```
+
+You can choose Claude, Codex, or Cursor, with a model and, for Claude or Codex, an effort level. Optional `--push` commits remaining changes except the note as WIP and pushes without forcing, so review your working tree first.
+
+The receiver gets instructions to verify the starting commit, continue the note's next steps, push to your original branch, and report back to your sending panel with `runpane workspace <sender> panels submit`. Stop editing that branch after handing it off. If you sent from outside a Pane panel, the instructions use a PR comment or commit message instead.
+
+See the [handoff guide](main/src/services/paneChatBundle/skills/handoff/SKILL.md) and [CLI options](packages/runpane/README.md#handing-work-to-another-machine).
 
 ---
 
@@ -338,15 +386,39 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 1. **Open Pane** and create or select a project (any git repository)
 2. **Create a pane** — enter a prompt and pick your agent
-3. **Add tabs** — launch a Claude, Codex, or Cursor terminal, diff viewer, file explorer, or any CLI tool
+3. **Add tabs** — launch a Claude, Codex, Cursor, or OpenCode terminal, diff viewer, file explorer, or any CLI tool
 4. **Work in parallel** — create multiple panes for different approaches
 5. **Review diffs** — see what changed with the built-in diff viewer
 6. **Ship** — commit, rebase, and merge from keyboard shortcuts
+
+OpenCode's native terminal preset preserves its exact conversation ID when you reopen a project. OpenCode is not yet available as a Pane Chat or named Session agent.
 
 You can reuse an archived or deleted pane's name. Pane keeps any old worktree
 identity and Git branches separate, choosing a free worktree name for the new
 pane. Creation errors appear in a dismissible error dialog on desktop and Remote
 Pane even if the creation dialog has already closed.
+
+New native archive requests save cleanup intent alongside the archived state. Cleanup
+resumes after a restart, keeps Git branches, and never imports historical
+archives as deletion requests. The Archive Tasks area retains failure reasons
+and offers **Retry cleanup**. Restore waits until cleanup finishes so it cannot
+reuse a path that is still being deleted. An interrupted archive script is not
+replayed; its retry button explicitly skips that script. Native worktrees are
+moved to a private quarantine before files are removed in small batches. Busy
+operations retry up to three times; cross-volume renames, locked worktrees,
+and identity mismatches preserve the remaining files and show a failure.
+Cleanup also waits for known terminal and run-command processes to exit.
+If termination fails, the job retains their identities across restart and
+**Retry cleanup** retries termination before removing files.
+WSL worktrees retain the existing Git cleanup route without restart recovery.
+Unsupported native paths fail before archiving. A CLI wait timeout does not
+cancel a persisted job. Individual filesystem calls are awaited; batch budgets
+bound work between yields, not the time an operating-system call can take.
+
+Leaderboard submissions use the selected runtime's last 30 days of agent usage,
+matching the Usage page's source. When connected to a remote backend, Pane submits that
+backend's totals under the desktop app's existing leaderboard identity. If the
+backend is unavailable, the submission fails rather than using desktop totals.
 
 ---
 

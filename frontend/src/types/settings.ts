@@ -12,7 +12,7 @@ export type SettingsCategoryId =
   | 'privacy'
   | 'advanced';
 
-export type RemoteAccessSubviewId = 'host-setup' | 'connections' | 'advanced-host';
+export type RemoteAccessSubviewId = 'host-setup' | 'advanced-host';
 
 export type SettingsSettingId =
   | 'automatic-updates'
@@ -48,14 +48,17 @@ export type SettingsSettingId =
   | 'notification-sound'
   | 'desktop-notifications'
   | 'remote-pane'
+  | 'remote-machines'
+  | 'remote-visibility'
+  | 'remote-password'
+  | 'remote-address'
   | 'remote-host-setup'
   | 'remote-host-mode'
-  | 'remote-connections'
-  | 'remote-connection-code'
   | 'remote-advanced-host'
   | 'remote-paired-connection'
   | 'remote-existing-profile'
   | 'voice-transcription'
+  | 'apns-credentials'
   | 'keyboard-shortcuts'
   | 'command-palette-shortcut'
   | 'kitty-keyboard'

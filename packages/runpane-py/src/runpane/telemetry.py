@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.request
 import uuid
@@ -146,6 +147,11 @@ def track_wrapper_event(event: str, context: WrapperTelemetryContext) -> None:
     if _telemetry_disabled():
         return
     try:
+        status, config = _read_config(os.path.join(_app_directory(), "config.json"))
+        if status == "ok" and isinstance(config, dict):
+            analytics = config.get("analytics")
+            if isinstance(analytics, dict) and analytics.get("enabled") is False:
+                return
         install_id = get_or_create_wrapper_install_id()
         properties = build_wrapper_telemetry_properties(
             install_id=install_id,
@@ -257,7 +263,7 @@ def _valid_install_id(value: str) -> bool:
 def _sanitize_short_string(value: object) -> Optional[str]:
     if not isinstance(value, str) or len(value) == 0 or len(value) > 80:
         return None
-    if "/" in value or "\\" in value:
+    if value != "latest" and not re.fullmatch(r"v?\d+\.\d+\.\d+(?:-(?:nightly|alpha|beta|rc)[.-]?\d*)?", value):
         return None
     return value
 

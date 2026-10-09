@@ -10,6 +10,10 @@ The intended flow is:
 
 Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
 
+## Workspaces or pairing codes?
+
+To let your own machines reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your machines. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices signed in to someone else's Tailscale account. The remote daemon keeps port 443, and the two run side by side.
+
 ## Guided quick start
 
 On the host machine, run `npx --yes runpane@latest` in an interactive terminal.
@@ -17,6 +21,12 @@ Choose **Set up a remote host**, enter a name (or press Enter),
 and follow the Tailscale installation/login prompts. The wizard picks an available
 port and prints a connection code. Sign your other device into the same Tailscale
 network, then paste the code into Pane or [runpane.com/app](https://runpane.com/app/).
+
+If the host later switches to another tailnet, Pane notices while it runs: within
+a minute it re-creates the `:443` Serve forward on the new tailnet, and new codes
+use the new address. Codes created before the switch still point at the old
+tailnet, so create a new one. If Pane cannot confirm the forward, it shows the
+error and the `tailscale serve` command to run instead of creating a code.
 
 SSH and manual URL setups remain available through the explicit commands below.
 The no-argument and `setup` commands print help in non-interactive shells; they
@@ -174,11 +184,11 @@ check [Troubleshooting](#troubleshooting).
 On your local desktop machine:
 
 1. Open Pane.
-2. Go to `Settings > Remote Access > Connections`.
-3. Paste the full `pane-remote://...` code into `Connection code` under `Add connection`.
-4. Click `Import & Connect`.
+2. Go to `Settings > Remote Access` and click `Add with a Code` under `Your computers`.
+3. Paste the full `pane-remote://...` code into `Connection Code`.
+4. Click `Connect`.
 
-If the tunnel is not reachable yet, Pane still saves the profile and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` on the saved profile.
+If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` next to the saved host.
 
 ## Use the Mobile / Browser App
 
@@ -373,4 +383,4 @@ To the clipboard of the machine you are sitting at. In remote mode, dragging to 
 - No full live remote end-to-end CI harness yet
 # Mobile push notifications
 
-The native companion may register an APNs/FCM token through its existing paired bearer token. Registrations are scoped to that paired client and revalidated before every send. The daemon sends generic attention alerts for `blocked` and settled `working → idle` transitions; controls can disable either category per device. See [Native mobile](NATIVE_MOBILE.md) for the operator-only credentials and signing setup.
+The native companion may register an APNs/FCM token through its existing paired bearer token. Registrations are scoped to that paired client and revalidated before every send. The daemon sends attention alerts for `blocked` transitions and for settled `working → idle` transitions of turns a person started; controls can disable either category per device. See [Native mobile](NATIVE_MOBILE.md) for the operator-only credentials and signing setup.

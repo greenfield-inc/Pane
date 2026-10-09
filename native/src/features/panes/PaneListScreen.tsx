@@ -62,7 +62,8 @@ export function PaneListScreen() {
     projects: projects.data ?? [],
     sessions: sessions.unavailable ? 'unavailable' : sessions.data?.sessions ?? (sessions.isError ? [] : undefined),
     sessionsError: sessions.isError && !sessions.unavailable ? sessions.error.message : undefined,
-    archivedProjects: archived.data ?? (archived.isError ? [] : undefined),
+    archivedProjects: archived.data,
+    archivedError: archived.isError ? archived.error.message : undefined,
     expanded,
     collapsedSessions,
     query,
@@ -171,7 +172,7 @@ export function PaneListScreen() {
         );
       case 'note':
         return item.danger
-          ? <Notice danger message={item.text} action={{ title: 'Try again', onPress: () => void sessions.refetch() }} />
+          ? <Notice danger message={item.text} action={{ title: 'Try again', onPress: () => void (item.retry === 'archived' ? archived.refetch() : sessions.refetch()) }} />
           : <SidebarNote testID={item.key} text={item.text} />;
     }
   };

@@ -21,6 +21,10 @@ interface OrchestrationSessionState {
   selectedSessionId?: string;
   availability: OrchestrationSessionAvailability;
   error: string | null;
+  selectionError: string | null;
+  selectionRevision: number;
+  selectionVisits: Record<string, number>;
+  invalidateHost: () => void;
   load: () => Promise<void>;
   refresh: (options?: { adoptServerSelection?: boolean }) => Promise<void>;
   select: (selector: OrchestrationSessionSelector) => Promise<void>;
@@ -29,8 +33,10 @@ interface OrchestrationSessionState {
 }
 
 let loadPromise: Promise<void> | null = null;
+let loadSequence = 0;
 let operationGeneration = 0;
 let refreshSequence = 0;
+let pendingSelectionGeneration: number | null = null;
 
 function getOrchestrationApi(): typeof window.electronAPI.orchestrationSessions | undefined {
   return window.electronAPI?.orchestrationSessions;
@@ -61,13 +67,27 @@ function applyList(data: OrchestrationSessionListResult): void {
   });
 }
 
-export const useOrchestrationSessionStore = create<OrchestrationSessionState>((set) => ({
+export const useOrchestrationSessionStore = create<OrchestrationSessionState>((set, get) => ({
   sessions: [],
   selectedSessionId: undefined,
   availability: 'idle',
   error: null,
+  selectionError: null,
+  selectionRevision: 0,
+  selectionVisits: {},
+  invalidateHost: () => {
+    operationGeneration += 1;
+    refreshSequence += 1;
+    pendingSelectionGeneration = null;
+    loadPromise = null;
+    loadSequence += 1;
+    set({ sessions: [], selectedSessionId: undefined, availability: 'idle', error: null, selectionError: null, selectionRevision: 0, selectionVisits: {} });
+  },
 
   load: async () => {
+    // Mounting the workspace after a click must not start a second initial
+    // list load that supersedes the already-published selection intent.
+    if (get().availability === 'ready' || pendingSelectionGeneration !== null) return;
     const orchestrationApi = getOrchestrationApi();
     if (!orchestrationApi) {
       set({ availability: 'unavailable', error: null });
@@ -76,8 +96,11 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     if (loadPromise) return loadPromise;
 
     const generation = ++operationGeneration;
+    const sequence = ++loadSequence;
     set({ availability: 'loading', error: null });
-    loadPromise = (async () => {
+    const loading = (async () => {
+      // Assign the shared promise before even a synchronous transport failure.
+      await Promise.resolve();
       try {
         const data = ensureSuccess(await API.orchestrationSessions.list(), 'Failed to load Sessions');
         if (generation === operationGeneration) applyList(data);
@@ -89,9 +112,10 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
           });
         }
       } finally {
-        loadPromise = null;
+        if (sequence === loadSequence) loadPromise = null;
       }
     })();
+    loadPromise = loading;
     return loadPromise;
   },
 
@@ -100,17 +124,22 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     if (!orchestrationApi) return;
     const generation = operationGeneration;
     const sequence = ++refreshSequence;
+    const mayAdoptSelection = pendingSelectionGeneration === null;
 
     try {
       const data = ensureSuccess(await API.orchestrationSessions.list(), 'Failed to refresh Sessions');
       if (generation !== operationGeneration || sequence !== refreshSequence) return;
       set((state) => {
-        const selectedSessionId = options?.adoptServerSelection
+        const selectedSessionId = options?.adoptServerSelection && mayAdoptSelection
           ? activeSessionIdFromList(data.sessions, data.selectedSessionId)
           : activeSessionIdFromList(data.sessions, state.selectedSessionId);
         return {
           sessions: data.sessions,
           selectedSessionId,
+          selectionVisits: selectedSessionId && selectedSessionId !== state.selectedSessionId
+            ? { ...state.selectionVisits, [selectedSessionId]: (state.selectionVisits[selectedSessionId] ?? 0) + 1 }
+            : state.selectionVisits,
+          selectionError: selectedSessionId !== state.selectedSessionId ? null : state.selectionError,
           availability: state.availability === 'idle' ? 'ready' : state.availability,
           error: null,
         };
@@ -128,14 +157,27 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     const orchestrationApi = getOrchestrationApi();
     if (!orchestrationApi) throw new Error('Sessions are unavailable in this Pane runtime');
     const generation = ++operationGeneration;
+    pendingSelectionGeneration = generation;
+    set({ selectionRevision: get().selectionRevision + 1, selectionError: null });
+    const intended = get().sessions.find(session => session.id === selector.sessionId || session.name === selector.name);
+    if (intended && !isArchivedOrchestrationSession(intended)) {
+      set(state => ({ selectedSessionId: intended.id, availability: 'ready', error: null, selectionError: null,
+        selectionVisits: { ...state.selectionVisits, [intended.id]: (state.selectionVisits[intended.id] ?? 0) + 1 } }));
+    }
     try {
       const data = ensureSuccess(await API.orchestrationSessions.select(selector), 'Failed to select Session');
-      if (generation === operationGeneration) applyList(data);
+      if (generation === operationGeneration) {
+        refreshSequence += 1;
+        applyList(data);
+      }
     } catch (error) {
       if (generation === operationGeneration) {
-        set({ availability: 'error', error: error instanceof Error ? error.message : 'Failed to select Session' });
+        const message = error instanceof Error ? error.message : 'Failed to select Session';
+        set({ availability: 'error', error: message, selectionError: message });
+        throw error;
       }
-      throw error;
+    } finally {
+      if (pendingSelectionGeneration === generation) pendingSelectionGeneration = null;
     }
   },
 

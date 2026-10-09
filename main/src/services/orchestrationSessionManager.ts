@@ -2,7 +2,7 @@ import { validateCustomCommandResume, customResumeAgentType, type CustomCommandR
 import { validateWSLAvailable } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
-import { resolveAgentTypeFromCommand } from './agents/agentIdentity';
+import { CLI_AGENT_TYPES, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { EventEmitter } from 'events';
@@ -57,6 +57,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
+import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
@@ -67,6 +68,10 @@ const ORCHESTRATION_BOOTSTRAP_VERSION = 2;
 
 function getOrchestrationPanelId(sessionId: string, agent: PaneChatAgent): string {
   return `${ORCHESTRATION_SESSION_PANEL_PREFIX}${sessionId}_${agent}`;
+}
+
+function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor';
 }
 
 export class OrchestrationSessionManager extends EventEmitter {
@@ -214,7 +219,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         name,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
-        isPinned: false,
+        isPinned: input.isPinned ?? false,
         agent,
         launchCommand,
         customResume,
@@ -458,6 +463,22 @@ export class OrchestrationSessionManager extends EventEmitter {
         refreshedAt: new Date().toISOString(),
       };
     });
+  }
+
+  /**
+   * What a phone alert about a Pane is titled and grouped under: a Session's own pane is the
+   * Session, a worker is "Session › Pane", and any other Pane stands alone. `groupPaneId` is the
+   * Session's workspace pane, which the phone opens a Session by. Reads the in-memory store, like
+   * `workspaceMembership`.
+   */
+  alertSubject(paneId: string): MobileAlertSubject {
+    const sessions = this.store.read().sessions;
+    const own = sessions.find(session => session.internalSessionId === paneId);
+    if (own) return { title: own.name, groupPaneId: paneId };
+    const paneName = this.sessionManager.getSession(paneId)?.name ?? '';
+    const parent = sessions.find(session => session.associations.some(association => association.paneId === paneId));
+    if (!parent) return { title: paneName, groupPaneId: paneId };
+    return { title: paneName ? `${parent.name} › ${paneName}` : parent.name, groupPaneId: parent.internalSessionId };
   }
 
   /**
@@ -885,6 +906,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private buildTerminalState(record: OrchestrationSessionRecord): TerminalPanelState {
     const command = record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
     const nativeCommand = /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
+    const resolvedAgent = launchAgent(command, record.customResume);
     return {
       initialCommand: record.launchCommand?.trim() || (record.runtime === 'wsl' ? command : this.skillCacheManager?.launchCommand(record.agent)) || command,
       customResume: record.customResume,
@@ -892,7 +914,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',
       initialInputDeliveryVersion: ORCHESTRATION_BOOTSTRAP_VERSION,
-      agentType: record.customResume ? customResumeAgentType(record.customResume) : resolveAgentTypeFromCommand(command) ?? record.agent,
+      agentType: resolvedAgent ?? record.agent,
       orchestrationSessionId: record.id,
       orchestrationWorkspace: sessionRuntimePath(sessionWorkspacePath(record.id), record),
       orchestrationProfile: record.profile,
@@ -937,15 +959,16 @@ export class OrchestrationSessionManager extends EventEmitter {
       : association.panelIds.map(panelId => panelManager.getPanel(panelId)).filter((panel): panel is ToolPanel => panel !== undefined);
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
-        agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+        agentType: boundary.optional(boundary.enumeration(...CLI_AGENT_TYPES)),
         isInitialized: boundary.optional(boundary.boolean),
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
       const initialized = panel.type === 'terminal' && terminalPanelManager.isTerminalInitialized(panel.id);
+      const panelAgent = snapshot?.agentType ?? customState.agentType;
       return {
         panelId: panel.id,
         title: panel.title,
-        agentType: snapshot?.agentType ?? customState.agentType,
+        agentType: isPaneChatAgent(panelAgent) ? panelAgent : undefined,
         state: terminalPanelManager.getAgentStatus(panel.id) ?? 'unknown',
         initialized: initialized || customState.isInitialized === true,
         lastActivityAt: snapshot?.lastActivityTime,
@@ -1035,7 +1058,12 @@ export class OrchestrationSessionManager extends EventEmitter {
 }
 
 function launchAgent(command: string, resume?: CustomCommandResume | null): PaneChatAgent | undefined {
-  return customResumeAgentType(resume) ?? resolveAgentTypeFromCommand(command);
+  const commandAgent = resolveAgentTypeFromCommand(command);
+  if (commandAgent === 'opencode') {
+    throw new Error('OpenCode is a terminal-only agent and cannot be used in named Sessions');
+  }
+  const agent = customResumeAgentType(resume) ?? commandAgent;
+  return isPaneChatAgent(agent) ? agent : undefined;
 }
 
 /** An explicit agent wins; a launch command for a different agent is rejected. */

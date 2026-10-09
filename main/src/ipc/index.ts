@@ -1,6 +1,7 @@
 import { ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
+import { registerNotesHandlers } from './notes';
 import { registerUpdaterHandlers } from './updater';
 import { registerSessionHandlers } from './session';
 import { registerProjectHandlers } from './project';
@@ -9,6 +10,7 @@ import { registerDialogHandlers } from './dialog';
 import { registerGitHandlers } from './git';
 import { registerScriptHandlers } from './script';
 import { registerPromptHandlers } from './prompt';
+import { registerMediaPreview } from '../services/mediaPreview';
 import { registerFileHandlers } from './file';
 import { registerFolderHandlers } from './folders';
 import { registerUIStateHandlers } from './uiState';
@@ -35,10 +37,13 @@ import { registerPermissionHandlers } from './permissions';
 import { registerAgentUsageHandlers } from './agentUsage';
 import { registerFeedbackHandlers } from './feedback';
 import { registerMobilePushHandlers } from './mobilePush';
+import { registerSharedCredentialHandlers } from './sharedCredentials';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
+import { registerWorkspaceAccessHandlers } from './workspaceAccess';
+import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
 
 
 export function registerIpcHandlers(services: AppServices): PaneCommandRegistry {
@@ -57,6 +62,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     configManager: services.configManager,
     rendererEventSink,
     analyticsManager: services.analyticsManager,
+    resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
   });
   // Pause the remote connection while the system sleeps and reconnect on wake.
   powerMonitor.on('suspend', () => remotePaneClientController.suspend());
@@ -64,12 +70,14 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);
+  registerNotesHandlers(ipcMain, services);
   registerFeedbackHandlers(ipcMain, services);
   registerUpdaterHandlers(ipcMain, services);
   registerSessionHandlers(ipcMain, services, commandRegistry);
   registerProjectHandlers(ipcMain, services, commandRegistry);
   registerConfigHandlers(ipcMain, services, commandRegistry);
   registerMobilePushHandlers(ipcMain, services, commandRegistry);
+  registerSharedCredentialHandlers(services, commandRegistry);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);
   registerPermissionHandlers(ipcMain, services, commandRegistry);
@@ -77,6 +85,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerScriptHandlers(ipcMain, services, commandRegistry);
   registerPromptHandlers(ipcMain, services, commandRegistry);
   registerFileHandlers(ipcMain, services, commandRegistry);
+  registerMediaPreview(commandRegistry);
   registerFolderHandlers(ipcMain, services, commandRegistry);
   registerUIStateHandlers(services);
   registerDashboardHandlers(ipcMain, services);
@@ -87,6 +96,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSpotlightHandlers(ipcMain, services);
   registerJourneyTimingHandlers(ipcMain, services);
   registerRemoteDaemonHandlers(ipcMain, services);
+  registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),

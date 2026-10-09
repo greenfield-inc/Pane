@@ -1,0 +1,4 @@
+/* Excalidraw's body portals must share the Notes overlay's stacking level. */
+body:has(.pane-notes-dialog) > .excalidraw-modal-container {
+  z-index: var(--z-modal);
+}

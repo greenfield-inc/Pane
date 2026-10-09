@@ -1,0 +1,77 @@
+name: Notes Native QA
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'frontend/src/components/panels/notes/**'
+      - 'frontend/src/components/notes/**'
+      - 'main/src/ipc/notes.ts'
+      - 'main/src/services/note*.ts'
+      - 'main/src/services/cursorNoteHook.ts'
+      - 'main/src/services/sessionManager.ts'
+      - 'shared/types/notes.ts'
+      - 'scripts/notes-native-qa.cjs'
+      - '.github/workflows/notes-native-qa.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notes-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-notes:
+    name: Notes Electron (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    env:
+      AGENT_FARM_ARTIFACT_BUNDLE: ${{ github.workspace }}/tmp/greenfield/pane-notes
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pnpm
+      - name: Prepare evidence directory
+        shell: bash
+        run: mkdir -p "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build"
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/install.log"
+      - name: Build Electron native modules
+        shell: bash
+        run: pnpm electron:rebuild 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/native-build.log"
+      - name: Build application
+        shell: bash
+        run: |
+          pnpm build:main 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/main.log"
+          pnpm build:frontend 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/frontend.log"
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
+        run: pnpm exec playwright install-deps chromium
+      - name: Configure Linux Electron sandbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          electron_path="$(node -p "require('electron')")"
+          sudo chown root "$(dirname "$electron_path")/chrome-sandbox"
+          sudo chmod 4755 "$(dirname "$electron_path")/chrome-sandbox"
+      - name: Run native Linux journey
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/notes-native-qa.cjs
+      - name: Run native Windows journey
+        if: runner.os == 'Windows'
+        run: node scripts/notes-native-qa.cjs
+      - name: Upload screenshots, traces and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: notes-native-${{ matrix.os }}-${{ github.sha }}
+          path: tmp/greenfield/pane-notes/evidence/native/
+          if-no-files-found: warn
+          retention-days: 14

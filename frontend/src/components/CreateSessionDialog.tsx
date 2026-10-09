@@ -22,6 +22,10 @@ interface BranchInfo {
 }
 
 interface CreateSessionDialogProps {
+  onSubmittingChange?: (submitting: boolean) => void;
+  header?: React.ReactNode;
+  repositoryPicker?: React.ReactNode;
+  onBranchDropdownOpenChange?: (open: boolean) => void;
   isOpen: boolean;
   onClose: () => void;
   projectName?: string;
@@ -33,7 +37,18 @@ interface CreateSessionDialogProps {
   onSessionCreated?: () => void;
 }
 
-export function CreateSessionDialog({
+export function CreateSessionDialog(props: CreateSessionDialogProps) {
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  return <Modal isOpen={props.isOpen} onClose={props.onClose} size="lg" closeOnOverlayClick={false} closeOnEscape={!branchDropdownOpen}>
+    <CreatePaneForm {...props} onBranchDropdownOpenChange={setBranchDropdownOpen} />
+  </Modal>;
+}
+
+export function CreatePaneForm({
+  onSubmittingChange,
+  header,
+  repositoryPicker,
+  onBranchDropdownOpenChange,
   isOpen,
   onClose,
   projectName,
@@ -66,6 +81,10 @@ export function CreateSessionDialog({
   const [branchSearch, setBranchSearch] = useState('');
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [highlightedBranchIndex, setHighlightedBranchIndex] = useState(0);
+  const setBranchDropdownOpen = useCallback((open: boolean) => {
+    setIsBranchDropdownOpen(open);
+    onBranchDropdownOpenChange?.(open);
+  }, [onBranchDropdownOpenChange]);
   const [userEditedName, setUserEditedName] = useState(false);
   const userEditedNameRef = useRef(false);
   const branchDropdownRef = useRef<HTMLDivElement>(null);
@@ -111,8 +130,16 @@ export function CreateSessionDialog({
     if (!isOpen || !projectId) return;
 
     let cancelled = false;
+    // Only branch-derived fields belong to this repository. Keep the user's
+    // worktree/count/pinning choices and any name they have explicitly edited.
+    setBranches([]);
     setBranchesProjectId(null);
     setIsLoadingBranches(true);
+    setFormData(current => ({ ...current, baseBranch: initialBaseBranch }));
+    if (!userEditedNameRef.current) setSessionName(initialSessionName ?? '');
+    setBranchDropdownOpen(false);
+    setBranchSearch('');
+    setHighlightedBranchIndex(0);
     // First get the project to get its path
     API.projects.getAll().then(projectsResponse => {
       if (!projectsResponse.success || !projectsResponse.data) {
@@ -147,7 +174,7 @@ export function CreateSessionDialog({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, projectId]);
+  }, [isOpen, projectId, initialBaseBranch, initialSessionName, setBranchDropdownOpen]);
 
   useEffect(() => {
     if (!isOpen || branchesProjectId !== projectId || formData.baseBranch || branches.length === 0) return;
@@ -186,22 +213,22 @@ export function CreateSessionDialog({
     const handleClickOutside = (e: MouseEvent) => {
       // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
       if (branchDropdownRef.current && !branchDropdownRef.current.contains(e.target as Node)) {
-        setIsBranchDropdownOpen(false);
+        setBranchDropdownOpen(false);
         setBranchSearch('');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isBranchDropdownOpen]);
+  }, [isBranchDropdownOpen, setBranchDropdownOpen]);
 
   // Reset branch search state when dialog closes
   useEffect(() => {
     if (!isOpen) {
-      setIsBranchDropdownOpen(false);
+      setBranchDropdownOpen(false);
       setBranchSearch('');
       setHighlightedBranchIndex(0);
     }
-  }, [isOpen]);
+  }, [isOpen, setBranchDropdownOpen]);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -220,7 +247,7 @@ export function CreateSessionDialog({
   const selectBranch = useCallback((branchName: string) => {
     setFormData(prev => ({ ...prev, baseBranch: branchName }));
     savePreferences({ baseBranch: branchName });
-    setIsBranchDropdownOpen(false);
+    setBranchDropdownOpen(false);
     setBranchSearch('');
     setHighlightedBranchIndex(0);
 
@@ -230,13 +257,13 @@ export function CreateSessionDialog({
       setSessionName(autoName);
       setFormData(prev => ({ ...prev, baseBranch: branchName, worktreeTemplate: autoName }));
     }
-  }, [savePreferences, userEditedName, generateSessionName]);
+  }, [savePreferences, userEditedName, generateSessionName, setBranchDropdownOpen]);
 
   const handleBranchKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isBranchDropdownOpen) {
       if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        setIsBranchDropdownOpen(true);
+        setBranchDropdownOpen(true);
         return;
       }
       return;
@@ -262,12 +289,12 @@ export function CreateSessionDialog({
       case 'Escape':
         e.preventDefault();
         e.stopPropagation();
-        setIsBranchDropdownOpen(false);
+        setBranchDropdownOpen(false);
         setBranchSearch('');
         setHighlightedBranchIndex(0);
         break;
     }
-  }, [isBranchDropdownOpen, flatFilteredBranches, highlightedBranchIndex, selectBranch]);
+  }, [isBranchDropdownOpen, flatFilteredBranches, highlightedBranchIndex, selectBranch, setBranchDropdownOpen]);
 
   // Add keyboard shortcut handler
   useEffect(() => {
@@ -308,7 +335,7 @@ export function CreateSessionDialog({
     e.preventDefault();
 
     // Block submission while branches are still loading
-    if (isLoadingBranches) return;
+    if (isSubmitting || isLoadingBranches) return;
 
     // Session name is always required
     if (!sessionName.trim()) {
@@ -330,6 +357,7 @@ export function CreateSessionDialog({
     }
 
     setIsSubmitting(true);
+    onSubmittingChange?.(true);
 
     try {
       // Determine if we need to create a folder
@@ -391,24 +419,18 @@ export function CreateSessionDialog({
       });
     } finally {
       setIsSubmitting(false);
+      onSubmittingChange?.(false);
     }
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={() => {
-          onClose();
-      }}
-      size="lg"
-      closeOnOverlayClick={false}
-      closeOnEscape={!isBranchDropdownOpen}
-    >
-      <ModalHeader title={`New Pane${projectName ? ` in ${projectName}` : ''}`} />
+    <>
+      {header ?? <ModalHeader title={`New Pane${projectName ? ` in ${projectName}` : ''}`} />}
 
       <ModalBody className="p-0">
         <div className="flex-1 overflow-y-auto">
           <form id="create-session-form" onSubmit={handleSubmit}>
+            {repositoryPicker}
             {/* 1. Base Branch (select first, auto-populates session name) */}
             {isLoadingBranches && branches.length === 0 ? (
               <div className="px-6 pt-6 pb-5 border-b border-border-primary animate-pulse">
@@ -452,11 +474,11 @@ export function CreateSessionDialog({
                         setBranchSearch(e.target.value);
                         setHighlightedBranchIndex(0);
                         if (!isBranchDropdownOpen) {
-                          setIsBranchDropdownOpen(true);
+                          setBranchDropdownOpen(true);
                         }
                       }}
                       onFocus={() => {
-                        setIsBranchDropdownOpen(true);
+                        setBranchDropdownOpen(true);
                         setBranchSearch('');
                         setHighlightedBranchIndex(0);
                       }}
@@ -471,7 +493,7 @@ export function CreateSessionDialog({
                       tabIndex={-1}
                       aria-label={isBranchDropdownOpen ? 'Close branch options' : 'Open branch options'}
                       onClick={() => {
-                        setIsBranchDropdownOpen(!isBranchDropdownOpen);
+                        setBranchDropdownOpen(!isBranchDropdownOpen);
                         if (!isBranchDropdownOpen) {
                           setBranchSearch('');
                           setHighlightedBranchIndex(0);
@@ -771,6 +793,6 @@ export function CreateSessionDialog({
           </Button>
         </div>
       </ModalFooter>
-    </Modal>
+    </>
   );
 }

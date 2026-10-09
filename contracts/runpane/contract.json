@@ -57,7 +57,8 @@
     "agents": [
       "codex",
       "claude",
-      "cursor"
+      "cursor",
+      "opencode"
     ]
   },
   "agentTemplates": {
@@ -75,13 +76,18 @@
       "title": "Cursor",
       "command": "cursor-agent --force --trust",
       "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent."
+    },
+    "opencode": {
+      "title": "OpenCode",
+      "command": "opencode --auto",
+      "description": "Open an OpenCode terminal tab and allow the initial input to drive the agent."
     }
   },
   "terminalKeys": {
     "enter": "\r",
     "escape": "\u001b",
     "tab": "\t",
-    "backspace": "",
+    "backspace": "\u007f",
     "space": " ",
     "up": "\u001b[A",
     "down": "\u001b[B",
@@ -290,6 +296,89 @@
       ],
       "jsonSchemas": [
         "workspaceStateResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace list",
+      "summary": "List your machines on Tailscale and whether each has joined workspaces.",
+      "usage": [
+        "runpane workspace list [--json] [--pane-dir <path>]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace enable",
+      "summary": "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
+      "usage": [
+        "runpane workspace enable [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace disable",
+      "summary": "Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.",
+      "usage": [
+        "runpane workspace disable [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace read",
+      "summary": "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+      "usage": [
+        "runpane workspace [<machine>] read <path> [--json]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace write",
+      "summary": "Write stdin to a file on one of your machines, creating parent folders.",
+      "usage": [
+        "runpane workspace [<machine>] write <path> [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "workspace exec",
+      "summary": "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
+      "usage": [
+        "runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "handoff",
+      "summary": "Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.",
+      "usage": [
+        "runpane handoff --template",
+        "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]"
+      ],
+      "mutates": true,
+      "wrappers": [
+        "npm"
       ],
       "localControl": true
     },
@@ -510,7 +599,7 @@
       "name": "panels input",
       "summary": "Send input bytes to a terminal panel.",
       "usage": [
-        "runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json] [--pane-dir <path>]"
+        "runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) [--source user|agent] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -527,7 +616,7 @@
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json] [--pane-dir <path>]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -1104,7 +1193,7 @@
     },
     {
       "name": "sessions create",
-      "summary": "Create a durable named orchestration Session and its hidden terminal owner.",
+      "summary": "Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).",
       "usage": [
         "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
       ],
@@ -1134,7 +1223,7 @@
     },
     {
       "name": "sessions update",
-      "summary": "Update a Session overview from structured JSON.",
+      "summary": "Update a Session overview from structured JSON; isPinned sets the UI pin star.",
       "usage": [
         "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]"
       ],
@@ -1256,6 +1345,38 @@
       ],
       "jsonSchemas": [
         "lockListResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "sessions unpin",
+      "summary": "Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.",
+      "usage": [
+        "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "sessions"
+      ],
+      "jsonSchemas": [
+        "sessionResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "sessions pin",
+      "summary": "Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.",
+      "usage": [
+        "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "sessions"
+      ],
+      "jsonSchemas": [
+        "sessionResult"
       ],
       "localControl": true
     }
@@ -1431,7 +1552,7 @@
       {
         "name": "--file",
         "value": "<path>",
-        "description": "File inside the Pane worktree to open; HTML renders in a browser tab."
+        "description": "File inside the Pane worktree to open; supported formats have read-only previews, including HTML source."
       },
       {
         "name": "--initial-input",
@@ -1648,6 +1769,31 @@
         "name": "--question",
         "value": "<text>",
         "description": "What a blocked worker needs answered; required with --state blocked."
+      },
+      {
+        "name": "--cwd",
+        "value": "<path>",
+        "description": "Working directory on the target machine for workspace exec."
+      },
+      {
+        "name": "--note-file",
+        "value": "<path|->",
+        "description": "Handoff note to check and send; - reads stdin."
+      },
+      {
+        "name": "--machine",
+        "value": "<name>",
+        "description": "Handoff destination machine; overrides the machine in the destination text."
+      },
+      {
+        "name": "--model",
+        "value": "<model>",
+        "description": "Model for the receiving agent; overrides the destination text."
+      },
+      {
+        "name": "--effort",
+        "value": "<level>",
+        "description": "Reasoning effort for the receiving agent (minimal, low, medium, high, xhigh, max); overrides the destination text."
       }
     ],
     "localBoolean": [
@@ -1677,7 +1823,7 @@
       },
       {
         "name": "--pinned",
-        "description": "Accepted for backward compatibility; `panes create` already pins by default."
+        "description": "Request pinning at creation; Session association still clears the first pin. Outside a Session, creation pins by default."
       },
       {
         "name": "--no-pinned",
@@ -1757,6 +1903,18 @@
       {
         "name": "--read-only",
         "description": "Serve only read-only MCP tools."
+      },
+      {
+        "name": "--template",
+        "description": "Print the handoff note template, with this checkout's origin and git state filled in."
+      },
+      {
+        "name": "--push",
+        "description": "Before a handoff, commit uncommitted work as WIP and push the branch (never forces)."
+      },
+      {
+        "name": "--interrupt",
+        "description": "Stop the current agent turn, wait for an empty idle composer, then submit and verify the replacement."
       }
     ]
   },
@@ -1781,6 +1939,8 @@
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+        "  runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
+        "  runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
         "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
@@ -1791,6 +1951,8 @@
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
+        "  runpane workspace list [--json]",
+        "  runpane workspace <machine> read|write|exec|<command>",
         "  runpane watch --follow",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
@@ -2016,11 +2178,21 @@
         "  --json                         Print machine-readable output"
       ],
       "workspace": [
-        "Workspace observation commands.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
-        "  runpane watch --follow"
+        "  runpane watch --follow",
+        "  runpane workspace list [--json]",
+        "  runpane workspace <machine> read <path>",
+        "  runpane workspace <machine> write <path>          (content from stdin)",
+        "  runpane workspace <machine> exec -- <command>",
+        "  runpane workspace <machine> <runpane command>      (any command that talks to Pane, e.g. sessions list --json)",
+        "  runpane workspace enable|disable",
+        "",
+        "<machine> is a Tailscale name, unique prefix, or IP. Only machines signed in to your own Tailscale login are reachable.",
+        "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits.",
+        "Commands that only run here (doctor, agent-context, mcp, docs) run there with: runpane workspace <machine> exec -- 'runpane doctor'"
       ],
       "workspace state": [
         "Usage:",
@@ -2073,7 +2245,7 @@
         "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
-        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
+        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence. If the message says the cursor was superseded, keep the replacement monitor and do not re-arm the old one."
       ],
       "panes create": [
         "Usage:",
@@ -2107,13 +2279,15 @@
         "  --source <user|agent>          Mark mutation source; agent implies background creation",
         "  --no-focus                     Create in the background without stealing focus",
         "  --focus                        Explicitly focus the created pane",
-        "  --pinned                       Accepted for compatibility; creation already pins by default",
-        "  --no-pinned                    Create unpinned instead of the default pinned (the UI's favorite/pin star)",
+        "  --pinned                       Request pinning at creation; first Session association clears it",
+        "  --no-pinned                    Create unpinned (the UI's favorite/pin star)",
         "  --no-associate                 Inside a Session orchestrator, do not associate the new pane with that Session",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
-        "  --yes                          Skip confirmation for mutating commands"
+        "  --yes                          Skip confirmation for mutating commands",
+        "",
+        "Outside a Session, creation pins by default, including --source agent. Inside a Session (PANE_ORCHESTRATION_SESSION_ID), children default to unpinned to avoid duplicating them in the global pinned list. First Session association clears the creation pin, including --pinned; use panes pin afterward to pin an associated child."
       ],
       "panes adopt": [
         "Usage:",
@@ -2318,7 +2492,7 @@
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -2335,7 +2509,8 @@
         "  --as-file-pointer              Write the text to a prompt file and submit `Read and follow <path>`",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
-        "  --yes                          Skip confirmation for this mutating command"
+        "  --yes                          Skip confirmation for this mutating command",
+        "  --interrupt                   Stop the current turn, wait for idle, then submit the replacement"
       ],
       "panels wait": [
         "Usage:",
@@ -2381,12 +2556,12 @@
         "Usage:",
         "  runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]",
         "",
-        "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: .html/.htm files render in a browser tab, other files open in an editor tab. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
+        "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: files open in an editor tab with read-only previews for supported formats, including HTML source. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
         "",
         "Options:",
         "  --pane <pane-id>              Pane to open the tab in; defaults to PANE_SESSION_ID.",
         "  --url <url>                   http(s) or file URL to open in a browser tab.",
-        "  --file <path>                 File inside the Pane worktree (relative or absolute).",
+        "  --file <path>                 File inside the Pane worktree (relative, Linux, Windows, or WSL UNC path).",
         "  --title <title>               Tab title override.",
         "  --split                       Open in split view beside the agent (default).",
         "  --tab                         Open in the current tab group instead.",
@@ -2429,7 +2604,10 @@
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
-        "  --json                       Print JSON output."
+        "  --json                       Print JSON output.",
+        "",
+        "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
+        "Create-time isPinned requires an updated Pane app; on older apps, use sessions pin after creation and read back the result."
       ],
       "sessions get": [
         "Usage:",
@@ -2451,7 +2629,9 @@
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
-        "  --json                       Print JSON output."
+        "  --json                       Print JSON output.",
+        "",
+        "JSON isPinned: true/false sets the Session pin star. Select the Session with --session, not a session field in JSON."
       ],
       "sessions set-agent": [
         "Usage:",
@@ -2879,6 +3059,106 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "workspace list": [
+        "Usage:",
+        "  runpane workspace list [--json] [--pane-dir <path>]",
+        "",
+        "List your machines on Tailscale and whether each has joined workspaces.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace enable": [
+        "Usage:",
+        "  runpane workspace enable [--json] [--pane-dir <path>]",
+        "",
+        "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace disable": [
+        "Usage:",
+        "  runpane workspace disable [--json] [--pane-dir <path>]",
+        "",
+        "Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace read": [
+        "Usage:",
+        "  runpane workspace [<machine>] read <path> [--json]",
+        "",
+        "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "",
+        "Options:",
+        "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
+        "  <path>                          Absolute path in any form; ~ is that machine's home.",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace write": [
+        "Usage:",
+        "  runpane workspace [<machine>] write <path> [--json]",
+        "",
+        "Write stdin to a file on one of your machines, creating parent folders.",
+        "",
+        "Options:",
+        "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
+        "  <path>                          Absolute path in any form.",
+        "  --json                          Print machine-readable output."
+      ],
+      "workspace exec": [
+        "Usage:",
+        "  runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>",
+        "",
+        "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
+        "",
+        "Options:",
+        "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
+        "  --cwd <path>                    Working directory on that machine, in any path form; defaults to its home.",
+        "  --timeout-ms <milliseconds>     Stop the command after this long (default 120000, at most 540000).",
+        "  --json                          Print machine-readable output.",
+        "  -- <command>                    The command line, run by that machine's shell."
+      ],
+      "handoff": [
+        "Usage:",
+        "  runpane handoff --template",
+        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]",
+        "",
+        "Hand your task to a fresh agent. You write the note (runpane handoff --template); the CLI checks it,",
+        "makes sure your branch is pushed, sends the note to the destination, and starts the agent there.",
+        "",
+        "Options:",
+        "  <destination>                   Freeform: agent, model, effort, and machine, such as \"codex gpt-5 high on parsas-macbook-pro\".",
+        "  --template                      Print the note template, with this checkout's origin and git state filled in.",
+        "  --note-file <path|->            The note to check and send; every template section must be filled in.",
+        "  --machine <name>                Destination machine (Tailscale name or unique prefix); overrides the text.",
+        "  --agent <codex|claude|cursor>   Receiving agent; overrides the text.",
+        "  --model <model>                 Model for the receiving agent; overrides the text.",
+        "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
+        "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
+        "  --push                          Commit uncommitted work (not the note) as WIP and push the branch first (never forces).",
+        "  --dry-run                       Check destination reachability, saved repo and OS; print note and git state; send nothing.",
+        "  --json                          Print machine-readable output.",
+        "",
+        "Examples:",
+        "  runpane handoff --template > ~/handoff.md",
+        "  runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
+        "  runpane handoff \"codex gpt-5 high on parsa-devbox\" --note-file ~/handoff.md --dry-run"
+      ],
+      "sessions pin": [
+        "Usage:",
+        "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Set the named Session pin star on. Repeated requests keep that state. Uses the same Session update path as the UI."
+      ],
+      "sessions unpin": [
+        "Usage:",
+        "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Set the named Session pin star off. Repeated requests keep that state. Uses the same Session update path as the UI."
       ]
     },
     "pip": {
@@ -3117,11 +3397,13 @@
         "  --json"
       ],
       "workspace": [
-        "Workspace observation commands.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
-        "  runpane watch --follow"
+        "  runpane watch --follow",
+        "",
+        "runpane workspace list|read|write|exec|enable|disable ship in the npm package: npx --yes runpane@latest workspace list"
       ],
       "workspace state": [
         "Usage:",
@@ -3174,7 +3456,7 @@
         "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
-        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
+        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence. If the message says the cursor was superseded, keep the replacement monitor and do not re-arm the old one."
       ],
       "panes create": [
         "Usage:",
@@ -3208,13 +3490,15 @@
         "  --source <user|agent>          Mark mutation source; agent implies background creation",
         "  --no-focus                     Create in the background without stealing focus",
         "  --focus                        Explicitly focus the created pane",
-        "  --pinned                       Accepted for compatibility; creation already pins by default",
-        "  --no-pinned                    Create unpinned instead of the default pinned (the UI's favorite/pin star)",
+        "  --pinned                       Request pinning at creation; first Session association clears it",
+        "  --no-pinned                    Create unpinned (the UI's favorite/pin star)",
         "  --no-associate                 Inside a Session orchestrator, do not associate the new pane with that Session",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
-        "  --yes                          Skip confirmation for mutating commands"
+        "  --yes                          Skip confirmation for mutating commands",
+        "",
+        "Outside a Session, creation pins by default, including --source agent. Inside a Session (PANE_ORCHESTRATION_SESSION_ID), children default to unpinned to avoid duplicating them in the global pinned list. First Session association clears the creation pin, including --pinned; use panes pin afterward to pin an associated child."
       ],
       "panes adopt": [
         "Usage:",
@@ -3411,7 +3695,7 @@
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -3428,7 +3712,8 @@
         "  --as-file-pointer              Write the text to a prompt file and submit `Read and follow <path>`",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
-        "  --yes                          Skip confirmation for this mutating command"
+        "  --yes                          Skip confirmation for this mutating command",
+        "  --interrupt                   Stop the current turn, wait for idle, then submit the replacement"
       ],
       "panels wait": [
         "Usage:",
@@ -3474,12 +3759,12 @@
         "Usage:",
         "  python -m runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]",
         "",
-        "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: .html/.htm files render in a browser tab, other files open in an editor tab. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
+        "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: files open in an editor tab with read-only previews for supported formats, including HTML source. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
         "",
         "Options:",
         "  --pane <pane-id>              Pane to open the tab in; defaults to PANE_SESSION_ID.",
         "  --url <url>                   http(s) or file URL to open in a browser tab.",
-        "  --file <path>                 File inside the Pane worktree (relative or absolute).",
+        "  --file <path>                 File inside the Pane worktree (relative, Linux, Windows, or WSL UNC path).",
         "  --title <title>               Tab title override.",
         "  --split                       Open in split view beside the agent (default).",
         "  --tab                         Open in the current tab group instead.",
@@ -3522,7 +3807,10 @@
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
-        "  --json                       Print JSON output."
+        "  --json                       Print JSON output.",
+        "",
+        "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
+        "Create-time isPinned requires an updated Pane app; on older apps, use sessions pin after creation and read back the result."
       ],
       "sessions get": [
         "Usage:",
@@ -3544,7 +3832,9 @@
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
-        "  --json                       Print JSON output."
+        "  --json                       Print JSON output.",
+        "",
+        "JSON isPinned: true/false sets the Session pin star. Select the Session with --session, not a session field in JSON."
       ],
       "sessions set-agent": [
         "Usage:",
@@ -3941,6 +4231,68 @@
         "  --force                      Release a lock another owner holds (release).",
         "  --session <id|name>          Named Session whose locks to list or release.",
         "  --json                       Print JSON output."
+      ],
+      "workspace list": [
+        "Usage:",
+        "  runpane workspace list [--json] [--pane-dir <path>]",
+        "",
+        "`runpane workspace list` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace list"
+      ],
+      "workspace enable": [
+        "Usage:",
+        "  runpane workspace enable [--json] [--pane-dir <path>]",
+        "",
+        "`runpane workspace enable` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace enable"
+      ],
+      "workspace disable": [
+        "Usage:",
+        "  runpane workspace disable [--json] [--pane-dir <path>]",
+        "",
+        "`runpane workspace disable` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace disable"
+      ],
+      "workspace read": [
+        "Usage:",
+        "  runpane workspace [<machine>] read <path> [--json]",
+        "",
+        "`runpane workspace read` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace read"
+      ],
+      "workspace write": [
+        "Usage:",
+        "  runpane workspace [<machine>] write <path> [--json]",
+        "",
+        "`runpane workspace write` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace write"
+      ],
+      "workspace exec": [
+        "Usage:",
+        "  runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>",
+        "",
+        "`runpane workspace exec` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest workspace exec"
+      ],
+      "handoff": [
+        "Usage:",
+        "  runpane handoff --template",
+        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]",
+        "",
+        "`runpane handoff` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest handoff"
+      ],
+      "sessions pin": [
+        "Usage:",
+        "python -m runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Set the named Session pin star on. Repeated requests keep that state. Uses the same Session update path as the UI."
+      ],
+      "sessions unpin": [
+        "Usage:",
+        "python -m runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Set the named Session pin star off. Repeated requests keep that state. Uses the same Session update path as the UI."
       ]
     }
   },
@@ -4030,6 +4382,8 @@
       "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
       "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
       "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+      "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
+      "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
       "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
       "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
       "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
@@ -4065,12 +4419,12 @@
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
-      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin; manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
-      "For `panes create --wait-ready`, `initialInput.delivery` says where the prompt went: `taken` or `queued` (from the agent's transcript, its screen, or `argv` for a launch-argument prompt), `in-composer`, or `unknown`. `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`. Routing input does not by itself verify submission.",
+      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
+      "For `panes create --wait-ready`, `initialInput.delivery` says where the prompt went: `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch but acceptance is not yet observed). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`. Routing input does not by itself verify submission. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Cursor launch prompts currently remain unknown because no acceptance probe is available. First-run trust and daemon dialogs return blocked.kind=first-run-dialog with the dialog in blocked.message and a suggestedCommand; while readiness is blocked or times out, launch-argument delivery remains unknown and unverified.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
-      "`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. HTML files render in a browser tab and other files open in an editor tab; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.",
+      "`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, including HTML source; an existing tab showing the same target is reused. It activates the tab inside the Pane but never raises or focuses the Pane window.",
       "`runpane panels list` lists tool panels inside one Pane session.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
@@ -4080,10 +4434,12 @@
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
       "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. For Session members with an open PR, the daemon polls GitHub about every 3 minutes and reports `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`), `pr.checks` (`... CHECKS PASSED` or `... CHECKS FAILED <names>`), and `pr.merged` (`... MERGED`) on transitions only; list them in `--kinds`. In JSON, an entry with `replay: true` restates current state after a reset and is never READY.",
+      "A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.",
       "`sessions list` list durable named orchestration Sessions.",
       "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
       "`sessions get` read one durable named orchestration Session.",
       "`sessions update` update a Session overview from structured JSON.",
+      "`sessions pin` and `sessions unpin` set the Session pin star through the existing UI update path. Create JSON accepts `isPinned` (default false); update JSON preserves the pin when the field is omitted.",
       "`sessions set-agent` switch the durable terminal agent for a named Session.",
       "`sessions associate` associate a user-visible Pane with a named Session.",
       "`sessions detach` detach a Pane from a named Session.",
@@ -4094,7 +4450,8 @@
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
-      "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only."
+      "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
+      "`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
     "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.",
@@ -4104,9 +4461,10 @@
       "The PyPI package uses `source=pip` for all Python consumers, including pip, pipx, uvx, and `python -m runpane`.",
       "Wrappers should prefer `https://runpane.com/api/download?platform=<platform>&arch=<arch>&format=<format>&version=<version>&channel=<channel>&source=<npm|pip>`.",
       "If the website route cannot satisfy the download, wrappers may fall back to the matching GitHub release asset and print a warning that website attribution may be incomplete for that run.",
-      "Wrappers also emit best-effort lifecycle telemetry to `https://runpane.com/api/runpane/telemetry` for command start/success/failure, download request/success/failure, and GitHub fallback usage.",
-      "Wrapper telemetry uses a persisted anonymous `install_id` in the form `install_<uuid>` and PostHog `distinct_id = install:<install_id>` so distinct wrapper users can be counted with `count(DISTINCT properties.install_id)`.",
-      "Wrapper telemetry must be disabled in CI and when `RUNPANE_TELEMETRY_DISABLED` is set, and must not include raw paths, labels, prompts, raw error text, or environment values."
+      "Wrappers emit best-effort telemetry to `https://runpane.com/api/runpane/telemetry` for command failures, download request/success/failure, and GitHub fallback usage. Routine command starts and successes emit nothing.",
+      "Wrapper telemetry uses a persisted anonymous `install_id` in the form `install_<uuid>` and PostHog `distinct_id = install:<install_id>` so installs reporting failures or downloads can be counted with `count(DISTINCT properties.install_id)`; this is not a count of all CLI users.",
+      "Wrapper telemetry must be disabled in CI, when `RUNPANE_TELEMETRY_DISABLED` is set, and when the local config explicitly disables analytics. It must not include raw paths, labels, prompts, raw error text, or environment values.",
+      "Desktop local control reports useful failures as `runpane_local_control_failed`; normal polling, wait deadlines, and optional agent unavailability emit nothing. Reports contain coarse operation and failure classification only, with a five-minute deduplication interval and a maximum of 20 per hour per app process. Handled CLI failures are ordinary events, not exceptions."
     ],
     "publishingCredentials": [
       "Local implementation, build, and dry-run validation do not need npm or PyPI API tokens.",
@@ -4936,6 +5294,17 @@
         "--tab",
         "--yes",
         "--json"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel",
+        "panel-1",
+        "--text",
+        "correction",
+        "--interrupt",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -5391,9 +5760,79 @@
           "items": {
             "type": "string"
           }
+        },
+        "workspaces": {
+          "$ref": "#/jsonSchemas/workspacesSummary"
         }
       },
       "additionalProperties": false
+    },
+    "workspacesSummary": {
+      "type": "object",
+      "required": [
+        "state",
+        "machine",
+        "otherMachines",
+        "lines"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "machine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "This machine's Tailscale name."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why workspaces are off."
+        },
+        "fix": {
+          "type": "string",
+          "description": "The one step that turns them on."
+        },
+        "otherMachines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "os",
+              "online"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "os": {
+                "enum": [
+                  "macOS",
+                  "Windows",
+                  "Linux"
+                ]
+              },
+              "online": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The block printed by help, doctor, and agent-context."
+        }
+      }
     },
     "daemonRepairResult": {
       "type": "object",
@@ -5872,6 +6311,7 @@
                         "properties": {
                           "kind": {
                             "enum": [
+                              "first-run-dialog",
                               "codex-update",
                               "agent-prompt",
                               "submission_unverified",
@@ -5950,6 +6390,7 @@
                         "properties": {
                           "kind": {
                             "enum": [
+                              "first-run-dialog",
                               "codex-update",
                               "agent-prompt",
                               "submission_unverified",
@@ -7493,6 +7934,13 @@
         },
         "input": {
           "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
         }
       },
       "additionalProperties": false
@@ -7588,6 +8036,9 @@
         },
         "detailCommand": {
           "type": "string"
+        },
+        "workspaces": {
+          "$ref": "#/jsonSchemas/workspacesSummary"
         }
       },
       "additionalProperties": false
@@ -7787,6 +8238,16 @@
         },
         "asFilePointer": {
           "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "interrupt": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -7855,6 +8316,10 @@
                 "screen",
                 "argv"
               ]
+            },
+            "message": {
+              "type": "string",
+              "description": "Human explanation of delivery; queued means the agent has not read the message yet."
             }
           },
           "additionalProperties": false
@@ -7988,6 +8453,7 @@
           "properties": {
             "kind": {
               "enum": [
+                "first-run-dialog",
                 "codex-update",
                 "agent-prompt",
                 "submission_unverified",
@@ -8352,6 +8818,7 @@
               "properties": {
                 "kind": {
                   "enum": [
+                    "first-run-dialog",
                     "codex-update",
                     "agent-prompt",
                     "submission_unverified",
@@ -8555,6 +9022,7 @@
           "properties": {
             "kind": {
               "enum": [
+                "first-run-dialog",
                 "codex-update",
                 "agent-prompt",
                 "submission_unverified",
@@ -10998,7 +11466,7 @@
         ],
         "notes": [
           "Use this before `panels output` when an agent only needs the latest visible/current state.",
-          "The composer object reports whether a Claude or Codex composer is present and whether it holds undelivered text. Placeholder and suggestion text (drawn dim or grey, such as Claude's suggested next prompt) does not count as undelivered text; `composer.ghostText` carries it, and text output marks its line with `⟨suggestion⟩`.",
+          "The composer object reports whether a Claude or Codex composer is present and whether it holds undelivered text. Placeholder and suggestion text (drawn dim or grey, such as Claude's suggested next prompt) does not count as undelivered text; `composer.ghostText` carries it, and text output marks its line with `\u27e8suggestion\u27e9`.",
           "If hasMore is true and context is missing, rerun with a larger --limit or use `panels output`."
         ]
       },
@@ -11033,6 +11501,11 @@
             "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
           },
           {
+            "name": "--interrupt",
+            "required": false,
+            "description": "Interrupt the current turn and wait up to 30 seconds for an empty idle composer before delivering. Escape for Codex/Claude; Ctrl+C for Cursor."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for this mutating command."
@@ -11052,7 +11525,8 @@
         "examples": [
           "runpane panels submit --panel <panel-id> --text \"2\" --yes --json",
           "printf \"echo hello\" | runpane panels submit --panel <panel-id> --input-file - --yes --json",
-          "runpane panels submit --panel <panel-id> --input-file brief.md --as-file-pointer --yes --json"
+          "runpane panels submit --panel <panel-id> --input-file brief.md --as-file-pointer --yes --json",
+          "runpane panels submit --panel <panel-id> --text \"Stop that approach and follow this correction\" --interrupt --yes --json"
         ],
         "jsonSchemas": [
           "panelSubmitRequest",
@@ -11064,7 +11538,8 @@
           "Use `panels input` for Ctrl-C, escape sequences, or any workflow requiring exact bytes.",
           "On `blocked.kind: composer-unknown`, nothing was typed. Check `panels screen`; if the agent is at a prompt Pane does not recognise, use `panels input`.",
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
-          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts."
+          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts.",
+          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing."
         ]
       },
       "panels wait": {
@@ -11282,7 +11757,7 @@
       "panels open": {
         "name": "panels open",
         "summary": "Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.",
-        "details": "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: .html/.htm files render in a browser tab, other files open in an editor tab. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
+        "details": "Opens a tab inside a Pane (default: the Pane of the calling panel, from PANE_SESSION_ID). Use it to show the user an HTML page, plan, report, local dev server, or file beside the conversation. --url opens a browser tab (http, https, or file). --file opens a file inside the Pane worktree: files open in an editor tab with read-only previews for supported formats, including HTML source. Tabs open in split view beside the agent by default; --tab keeps them in the current group. An existing tab showing the same URL or file is reused. Never raises or focuses the Pane window.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -11296,13 +11771,13 @@
             "name": "--url",
             "value": "<url>",
             "required": false,
-            "description": "http(s) or file URL to open in a browser tab. Pass exactly one of --url or --file."
+            "description": "http(s) or file URL to open in a browser tab. WSL file URLs use the same automatic path conversion as --file. Pass exactly one of --url or --file."
           },
           {
             "name": "--file",
             "value": "<path>",
             "required": false,
-            "description": "File inside the Pane worktree, relative or absolute. .html/.htm renders in a browser tab; other files open in an editor tab."
+            "description": "File inside the Pane worktree, relative or absolute. WSL panes accept Linux, Windows drive, and WSL UNC paths without manual conversion. Files open in an editor tab; supported formats have read-only previews, including HTML source."
           },
           {
             "name": "--title",
@@ -11358,7 +11833,7 @@
         ],
         "notes": [
           "Prefer this over opening the system browser when showing the user a page, plan, report, or dev server.",
-          "Write plans and reports as self-contained HTML files, then open them with --file; rerunning the command on the same file reuses its tab.",
+          "Write plans and reports as self-contained HTML files. Use --url with a file URL to render a page in a live browser, or --file to inspect its read-only source; reopening the same target reuses its tab.",
           "Opening a tab does not steal window focus; use `panes focus` only on explicit user request."
         ]
       },
@@ -11637,7 +12112,7 @@
           "User-present profile (a person is waiting on the result): the same command with --settle 60000 --blocked-settle 15000 --min-interval 120000 and no --idle-backoff. READY arrives within about 3 minutes of the turn ending.",
           "BUSY carries no action; drop it with --kinds. HEARTBEAT is client-side proof of life and is never shaped by cadence flags; pass --quiet for any monitor that wakes an agent.",
           "STUCK means real unsubmitted composer text. An agent prompt suggestion (for example a grey Try \"...\" hint) never counts.",
-          "Dead watch: judge death by a non-zero exit or a WATCH ERROR line, not by silence. Re-arm once; if it dies again, file runpane doctor --report.",
+          "Dead watch: judge death by a non-zero exit or a WATCH ERROR line, not by silence. If the message says the cursor was superseded, keep the replacement monitor and do not re-arm the old one. Otherwise re-arm once; if it dies again, file runpane doctor --report. Stop the previous monitor before switching profiles.",
           "Cadence state is held per named consumer; an anonymous --follow with a cadence flag names itself follow-<pid>. Held lines survive a reconnect of the same consumer; a changed filter re-delivers them under the new filter.",
           "Journal loss is surfaced through reset and dropped metadata.",
           "The daemon treats omitted idleAfterMs as disabled so older clients never receive agent.idle unexpectedly.",
@@ -12760,8 +13235,8 @@
       },
       "sessions create": {
         "name": "sessions create",
-        "summary": "Create a durable named orchestration Session and its hidden terminal owner.",
-        "details": "Create a durable named orchestration Session and its hidden terminal owner.",
+        "summary": "Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).",
+        "details": "Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -12779,7 +13254,9 @@
           "sessionResult"
         ],
         "notes": [
-          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch."
+          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch.",
+          "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
+          "Create-time isPinned requires an updated Pane app. Older apps may ignore the field; use sessions pin after creation and read back the result."
         ]
       },
       "sessions get": {
@@ -12806,8 +13283,8 @@
       },
       "sessions update": {
         "name": "sessions update",
-        "summary": "Update a Session overview from structured JSON.",
-        "details": "Update a Session overview from structured JSON.",
+        "summary": "Update a Session overview from structured JSON; isPinned sets the UI pin star.",
+        "details": "Update a Session overview from structured JSON; isPinned sets the UI pin star.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -12825,7 +13302,8 @@
           "sessionResult"
         ],
         "notes": [
-          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch."
+          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch.",
+          "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted."
         ]
       },
       "sessions set-agent": {
@@ -13085,6 +13563,324 @@
           "lockListResult"
         ],
         "notes": []
+      },
+      "workspace list": {
+        "name": "workspace list",
+        "summary": "List your machines on Tailscale and whether each has joined workspaces.",
+        "details": "Shows this machine's workspace state, then each of your other Mac, Windows, and Linux machines with its OS, online state, and shell. Only machines signed in to your own Tailscale login appear.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace list --json"
+        ],
+        "notes": [
+          "A machine has joined when Pane runs there with workspaces on; it answers on https://<machine>.<tailnet>.ts.net:8443."
+        ]
+      },
+      "workspace enable": {
+        "name": "workspace enable",
+        "summary": "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
+        "details": "Serves this Pane's daemon with tailscale serve on port 8443 in HTTP proxy mode. Only your own Tailscale login is accepted; nothing is opened to the internet.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace enable"
+        ],
+        "notes": [
+          "Workspaces are on by default when Tailscale is installed and signed in; this undoes runpane workspace disable."
+        ]
+      },
+      "workspace disable": {
+        "name": "workspace disable",
+        "summary": "Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.",
+        "details": "Turns workspaces off for this machine until runpane workspace enable. The remote daemon on port 443 and pairing codes are unaffected.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace disable"
+        ],
+        "notes": [
+          "Other machines can no longer reach this one; this machine can still reach theirs."
+        ]
+      },
+      "workspace read": {
+        "name": "workspace read",
+        "summary": "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "details": "Reads the same way on every OS. On Windows, /mnt/c/... reaches C:\\... and WSL paths such as /home/<user>/... are read through \\\\wsl.localhost\\<distro>\\. Directories list their entries.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<machine>",
+            "required": false,
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          },
+          {
+            "name": "<path>",
+            "required": true,
+            "description": "Absolute path in any form; ~ is that machine's home."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane workspace parsa-devbox read 'C:\\Users\\me\\.pane\\plans\\topic\\index.html'",
+          "runpane workspace read /mnt/c/Users/me/notes.md"
+        ],
+        "notes": [
+          "--json returns content with encoding utf8 or base64."
+        ]
+      },
+      "workspace write": {
+        "name": "workspace write",
+        "summary": "Write stdin to a file on one of your machines, creating parent folders.",
+        "details": "Takes the same path forms as workspace read. Content comes from stdin and replaces the file.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<machine>",
+            "required": false,
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          },
+          {
+            "name": "<path>",
+            "required": true,
+            "description": "Absolute path in any form."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "echo done | runpane workspace parsa-devbox write '~/notes/status.md'"
+        ],
+        "notes": [
+          "Binary stdin is sent as base64 and written byte for byte."
+        ]
+      },
+      "workspace exec": {
+        "name": "workspace exec",
+        "summary": "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
+        "details": "Runs in the shell Pane uses for terminals on that machine (PowerShell or Git Bash on Windows, the login shell elsewhere). The exit code becomes runpane's exit code. Without <machine>, a --cwd that cannot exist here picks the machine.",
+        "requiresPaneDaemon": false,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<machine>",
+            "required": false,
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          },
+          {
+            "name": "--cwd",
+            "value": "<path>",
+            "required": false,
+            "description": "Working directory on that machine, in any path form; defaults to its home."
+          },
+          {
+            "name": "--timeout-ms",
+            "value": "<milliseconds>",
+            "required": false,
+            "description": "Stop the command after this long (default 120000, at most 540000)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The command line, run by that machine's shell."
+          }
+        ],
+        "examples": [
+          "runpane workspace parsa-devbox exec --json -- git -C C:\\src\\app status --short"
+        ],
+        "notes": [
+          "This is SSH-level power: a local agent's sandbox and permission prompts see only runpane workspace exec, not what runs on the other machine.",
+          "Pass the command as one quoted string; several words after -- are joined with spaces, so their own quoting is lost."
+        ]
+      },
+      "handoff": {
+        "name": "handoff",
+        "summary": "Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.",
+        "details": "Two steps. The agent writes the note, because only it has the context: run `runpane handoff --template > ~/handoff.md` (outside the checkout) and fill in every section (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state), writing \"None\" where one does not apply. Then `runpane handoff \"<destination>\" --note-file ~/handoff.md` moves it: it rejects a note with a missing or empty section, refuses an unpushed branch unless --push, finds the destination's saved repository with the same remote, fetches the branch there, writes the note to `~/.pane/handoffs/` on that machine with its origin in the front matter and receiver instructions appended, and starts the agent in a new Pane branched from your branch. The receiver verifies the head commit, continues from Next steps, pushes to your branch, and reports back to your panel with `runpane workspace <your machine> panels submit`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<destination>",
+            "required": false,
+            "description": "Freeform text naming the agent (claude, codex, cursor), and optionally the model, the effort, and the machine: a Tailscale machine name or unique prefix (list them with `runpane workspace list`), or \"this machine\". Required unless --agent is given. Examples: \"codex gpt-5 high on parsas-macbook-pro\", \"claude opus on parsa-devbox\", \"cursor on this machine\"."
+          },
+          {
+            "name": "--template",
+            "required": false,
+            "description": "Print the note template, with this checkout's origin and git state in its front matter, and exit."
+          },
+          {
+            "name": "--note-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "The note to check and send; required unless --template or --dry-run. Without it, --dry-run checks only the destination and git state."
+          },
+          {
+            "name": "--machine",
+            "value": "<name>",
+            "required": false,
+            "description": "Destination machine; overrides the text."
+          },
+          {
+            "name": "--agent",
+            "value": "<codex|claude|cursor>",
+            "required": false,
+            "description": "Receiving agent; overrides the text."
+          },
+          {
+            "name": "--model",
+            "value": "<model>",
+            "required": false,
+            "description": "Model for the receiving agent, such as opus, sonnet, gpt-5, or claude-opus-5-5; overrides the text."
+          },
+          {
+            "name": "--effort",
+            "value": "<level>",
+            "required": false,
+            "description": "minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected."
+          },
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "Saved repository on the destination. Defaults to the one with a remote for this repository."
+          },
+          {
+            "name": "--push",
+            "required": false,
+            "description": "Commit uncommitted work (except the note) as WIP and push the branch before sending; never forces. Without it, an unpushed branch stops the handoff."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Check destination daemon reachability and resolve its saved repository name, path, environment and OS; print the note check and git state without committing, pushing, fetching, writing notes or creating a Pane."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          }
+        ],
+        "examples": [
+          "runpane handoff --template > ~/handoff.md",
+          "runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
+          "runpane handoff \"codex gpt-5 high on parsa-devbox\" --note-file ~/handoff.md --dry-run --json",
+          "runpane handoff --machine build-server --agent cursor --note-file ~/handoff.md"
+        ],
+        "notes": [
+          "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with workspaces enabled and the repository saved. Repository listing and Pane creation call the reached daemon directly; no global destination CLI installation is required.",
+          "Destination preflight runs before sender commit/push. Inside WSL, an absent or refused local Linux daemon can fall back to its Windows host through reachable Windows Tailscale and enabled workspaces; explicit Pane directory selection keeps its instance. Select a native Windows saved repository; WSL saved repositories are rejected before sending.",
+          "A successful handoff requires initialInput.verifiedSubmitted and delivery taken or queued without blocked/error evidence. Unverified delivery exits nonzero with the created Pane, panel and a panels screen inspection command; inspect before retrying.",
+          "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
+          "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
+          "Run it from the checkout being handed off. The receiver works in a new Pane on the destination and pushes back to your branch, so stop changing that branch yourself."
+        ]
+      },
+      "sessions unpin": {
+        "name": "sessions unpin",
+        "summary": "Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.",
+        "details": "Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": true,
+            "description": "Named Session id or exact name."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print JSON output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": [
+          "Uses the same Session update path as the UI. The requested pin state is idempotent."
+        ]
+      },
+      "sessions pin": {
+        "name": "sessions pin",
+        "summary": "Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.",
+        "details": "Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": true,
+            "description": "Named Session id or exact name."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print JSON output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]"
+        ],
+        "jsonSchemas": [
+          "sessionResult"
+        ],
+        "notes": [
+          "Uses the same Session update path as the UI. The requested pin state is idempotent."
+        ]
       }
     },
     "managedBlock": [

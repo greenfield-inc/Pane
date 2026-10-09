@@ -98,7 +98,7 @@ function sessionInstructions(
     '## Session behavior profile',
     profile,
     `## Plans and documents
-When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show it with runpane panels open --file <path> --source agent --yes --json; it opens as a browser tab in split view beside this conversation. Rerunning the command for the same file reuses its tab, so update the file in place and reopen it after material changes.
+When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show the rendered page with runpane panels open --url <file-url> --source agent --yes --json; it opens as an intentional live browser in split view beside this conversation. Use --file <path> to inspect HTML as read-only source instead. Rerunning the command for the same target reuses its tab, so update the file in place and reopen it after material changes.
 Distinguish plans from verified results. Opening this Session is not an instruction to write or open documents.`,
     '## Persisted context',
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',

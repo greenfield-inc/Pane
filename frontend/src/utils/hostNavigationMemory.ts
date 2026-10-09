@@ -165,22 +165,24 @@ async function readNavigationMemory(hostId: string | null): Promise<HostNavigati
  * host's Panes and config have loaded, since every id is validated against them;
  * anything that no longer exists leaves the caller's home view in place.
  */
-export async function restoreHostNavigation(): Promise<void> {
+export async function restoreHostNavigation(ownsRuntime: () => boolean = () => true): Promise<void> {
+  if (!ownsRuntime()) return;
   // The resync refetched config before calling this, so it names the incoming
   // host, whose memory is the one to read.
   const hostId = activeHostIdFromConfig();
   if (hostId === undefined) return;
 
   const memory = await readNavigationMemory(hostId);
-  if (!memory) return;
+  if (!memory || !ownsRuntime()) return;
 
   const navigation = useNavigationStore.getState();
   const { setActiveSession } = useSessionStore.getState();
 
   if (memory.view === 'project') {
     // The repository view mounts the project's own main-repo Pane itself.
-    if (memory.projectId === null || !(await projectExists(memory.projectId))) return;
+    if (memory.projectId === null || !(await projectExists(memory.projectId)) || !ownsRuntime()) return;
     await setActiveSession(null);
+    if (!ownsRuntime()) return;
     navigation.navigateToProject(memory.projectId);
     return;
   }
@@ -194,6 +196,7 @@ export async function restoreHostNavigation(): Promise<void> {
   if (memory.view === 'pane-chat') {
     // Which Session is selected is the host's own state; the resync adopts it.
     await setActiveSession(null);
+    if (!ownsRuntime()) return;
     navigation.navigateToPaneChat();
     return;
   }

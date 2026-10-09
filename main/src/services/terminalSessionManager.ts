@@ -277,6 +277,16 @@ export class TerminalSessionManager extends EventEmitter {
     return this.terminalSessions.has(sessionId);
   }
 
+  getArchiveProcessPids(sessionId: string): number[] {
+    const session = this.terminalSessions.get(sessionId);
+    return session ? [session.pty.pid] : [];
+  }
+
+  retireForArchive(sessionId: string): void {
+    this.terminalSessions.get(sessionId)?.pty.kill();
+    this.terminalSessions.delete(sessionId);
+  }
+
   async cleanup(): Promise<void> {
     // Close all terminal sessions
     const closePromises = [];

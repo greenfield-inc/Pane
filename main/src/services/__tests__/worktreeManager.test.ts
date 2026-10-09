@@ -6,7 +6,7 @@ function partialMock<Contract>(implementation: Partial<Contract>): Contract {
   // its scenario; unexpected calls fail immediately.
   return implementation as Contract;
 }
-import type { PathResolver } from '../../utils/pathResolver';
+import { PathResolver } from '../../utils/pathResolver';
 import { resolveDefaultWorktreeBase, WorktreeManager } from '../worktreeManager';
 import { worktreePoolManager } from '../worktreePoolManager';
 
@@ -124,7 +124,7 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
       undefined,
       true,
       undefined,
-      partialMock<PathResolver>({}),
+      new PathResolver({ path: '/repo' }),
       runner,
     );
 
@@ -169,7 +169,7 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
       undefined,
       true,
       undefined,
-      partialMock<PathResolver>({}),
+      new PathResolver({ path: '/repo' }),
       runner,
     );
 
@@ -216,7 +216,7 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
     });
 
     await manager.resolveWorkingDirectory(
-      '/repo', 'w5a', 'release/foo', true, undefined, partialMock<PathResolver>({}), runner,
+      '/repo', 'w5a', 'release/foo', true, undefined, new PathResolver({ path: '/repo' }), runner,
       { branchName: 'agents/w5a' },
     );
 
@@ -240,7 +240,7 @@ describe('WorktreeManager.resolveWorkingDirectory', () => {
     const createWorktree = vi.spyOn(manager, 'createWorktree');
 
     await expect(manager.resolveWorkingDirectory(
-      '/repo', 'w5a', 'origin/main', true, undefined, partialMock<PathResolver>({}), runner,
+      '/repo', 'w5a', 'origin/main', true, undefined, new PathResolver({ path: '/repo' }), runner,
       { branchName },
     )).rejects.toThrow(message);
     expect(claimReserve).not.toHaveBeenCalled();

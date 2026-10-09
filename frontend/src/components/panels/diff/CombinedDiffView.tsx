@@ -3,7 +3,7 @@ import { RefreshCw, RotateCcw } from 'lucide-react';
 import type { ChangedFileSummary, DiffManifest, DiffScope } from '../../../../../shared/types/gitDiff';
 import type { CombinedDiffViewProps, ExecutionDiff } from '../../../types/diff';
 import { API } from '../../../utils/api';
-import { CommitDialog } from '../../CommitDialog';
+import { CommitDialog, type CommitResult } from '../../CommitDialog';
 import { editorPanelState, openFileInEditor } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
 import { ChangesList } from './ChangesList';
@@ -143,10 +143,10 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
     void openFileInEditor({ sessionId, filePath: file.path, pin, diff: editorDiffRefForFile(scope, file) });
   }, [scope, sessionId]);
 
-  const handleCommit = useCallback(async (message: string) => {
-    const response = await window.electronAPI.invoke('git:commit', { sessionId, message });
-    if (!response.success) throw new Error(response.error || 'Failed to commit changes');
-    refresh();
+  const handleCommit = useCallback(async (message: string): Promise<CommitResult> => {
+    const response: CommitResult = await window.electronAPI.invoke('git:commit', { sessionId, message });
+    if (response.success) refresh();
+    return response;
   }, [refresh, sessionId]);
 
   const handleRevert = useCallback(async (commitHash: string) => {
@@ -223,7 +223,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
             : visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
               : <div className="flex h-full items-center justify-center text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
       </div>
-      <CommitDialog isOpen={showCommitDialog} onClose={() => setShowCommitDialog(false)} onCommit={handleCommit} fileCount={visibleManifest?.stats.filesChanged ?? 0} />
+      <CommitDialog isOpen={showCommitDialog} onClose={() => setShowCommitDialog(false)} onCommit={handleCommit} fileCount={visibleManifest?.stats.filesChanged ?? 0} sessionId={sessionId} />
     </div>
   );
 }));

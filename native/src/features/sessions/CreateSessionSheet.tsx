@@ -6,9 +6,9 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { nextOrchestrationSessionName } from '@shared/types/orchestrationSession';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '@shared/types/paneChat';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
-import type { RemotePwaAffordances, RemotePwaSessionAgents } from '@shared/types/remoteDaemon';
+import type { RemotePwaSessionAgents } from '@shared/types/remoteDaemon';
 
-import { useInvokeQuery } from '@/daemon';
+import { useAffordances } from '@/features/hosts/hostSettings';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -22,7 +22,7 @@ const ALL_AGENTS: RemotePwaSessionAgents = { agents: ['claude', 'codex', 'cursor
 export function CreateSessionSheet() {
   const theme = useTheme();
   const sessions = useSessions();
-  const affordances = useInvokeQuery<RemotePwaAffordances>('remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
+  const affordances = useAffordances();
   const { create, isPending } = useCreateSession();
   const [name, setName] = useState('');
   // Follows the host default, which can arrive after the sheet opens, until the person picks one.

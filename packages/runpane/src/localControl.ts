@@ -42,6 +42,8 @@ interface OrchestrationActivity {
   panelId?: string;
 }
 
+type OrchestrationAgent = 'claude' | 'codex' | 'cursor';
+
 interface OrchestrationSessionRecord {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
@@ -49,9 +51,9 @@ interface OrchestrationSessionRecord {
   name: string;
   archived?: boolean;
   isPinned?: boolean;
-  agent: RunpaneAgent;
+  agent: OrchestrationAgent;
   internalSessionId: string;
-  panelIds: Record<RunpaneAgent, string>;
+  panelIds: Record<OrchestrationAgent, string>;
   goal: string;
   context: string;
   decisions: string[];
@@ -90,7 +92,8 @@ interface SessionCreatePayload {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
-  agent?: RunpaneAgent;
+  isPinned?: boolean;
+  agent?: OrchestrationAgent;
   goal?: string;
   context?: string;
   decisions?: string[];
@@ -104,7 +107,7 @@ interface SessionUpdatePayload {
   name?: string;
   archived?: boolean;
   isPinned?: boolean;
-  agent?: RunpaneAgent;
+  agent?: OrchestrationAgent;
   goal?: string;
   context?: string;
   decisions?: string[];
@@ -316,6 +319,7 @@ interface PaneCreateFailureItem {
   name?: string;
   sessionId?: string;
   paneId?: string;
+  panelId?: string;
   worktreePath?: string;
   error: { message: string; code?: string };
 }
@@ -690,6 +694,8 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  interrupt?: boolean;
+  source?: 'user' | 'agent';
 }
 
 interface PanelInputResult {
@@ -716,10 +722,11 @@ interface PanelStateSummary {
 interface Delivery {
   state: 'taken' | 'queued' | 'in-composer' | 'unknown';
   evidence: 'transcript' | 'screen' | 'argv';
+  message?: string;
 }
 
 interface PanelBlockedState {
-  kind: 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'composer-unknown' | 'unknown';
+  kind: 'first-run-dialog' | 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'composer-unknown' | 'unknown';
   message: string;
   suggestedCommand?: string;
 }
@@ -924,6 +931,7 @@ interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
 }
 
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
+const orchestrationAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
 const repoSummarySchema: BoundarySchema<RepoSummary> = boundary.object({
   id: boundary.number,
   name: boundary.string,
@@ -957,7 +965,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   ownership: boundary.enumeration('pane', 'external'),
 });
 const panelBlockedSchema: BoundarySchema<PanelBlockedState> = boundary.object({
-  kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'composer-unknown', 'unknown'),
+  kind: boundary.enumeration('first-run-dialog', 'codex-update', 'agent-prompt', 'submission_unverified', 'composer-unknown', 'unknown'),
   message: boundary.string,
   suggestedCommand: boundary.optional(boundary.string),
 });
@@ -984,6 +992,7 @@ const verificationSchema = boundary.optional(boundary.enumeration('observed', 'u
 const deliverySchema: BoundarySchema<Delivery | undefined> = boundary.optional(boundary.object({
   state: boundary.enumeration('taken', 'queued', 'in-composer', 'unknown'),
   evidence: boundary.enumeration('transcript', 'screen', 'argv'),
+  message: boundary.optional(boundary.string),
 }));
 const promptWarningsSchema = boundary.optional(boundary.array(boundary.object({
   code: boundary.enumeration('leading-bang-runs-shell', 'leading-hash-memory', 'leading-slash-command', 'leading-at-mention'),
@@ -1087,7 +1096,7 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   report: boundary.optional(agentReportSchema),
 });
 
-const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
+export const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
   ok: boundary.literal(true),
   repos: boundary.array(repoSummarySchema),
 });
@@ -1138,7 +1147,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: agentSchema,
+  agent: orchestrationAgentSchema,
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({
     claude: boundary.nonEmptyString,
@@ -1388,6 +1397,7 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       name: boundary.optional(boundary.string),
       sessionId: boundary.optional(boundary.string),
       paneId: boundary.optional(boundary.string),
+      panelId: boundary.optional(boundary.string),
       worktreePath: boundary.optional(boundary.string),
       error: boundary.object({
       message: boundary.string,
@@ -1856,6 +1866,13 @@ export async function runSessionsUpdate(parsed: ParsedArgs): Promise<number> {
   return printSessionResult(result, parsed.json, 'Updated');
 }
 
+export async function runSessionsPin(parsed: ParsedArgs, pinned: boolean): Promise<number> {
+  const result = await invokeDaemon('runpane:sessions:update', [{
+    selector: sessionSelectorFromParsed(parsed), input: { isPinned: pinned },
+  }], runpaneSessionResultSchema, { paneDir: parsed.paneDir });
+  return printSessionResult(result, parsed.json, pinned ? 'Pinned' : 'Unpinned');
+}
+
 export async function runSessionsSetAgent(parsed: ParsedArgs): Promise<number> {
   const selector = sessionSelectorFromParsed(parsed);
   if (!parsed.agent) throw new Error('runpane sessions set-agent requires --agent.');
@@ -2018,6 +2035,7 @@ function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
     runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
     wslDistribution: boundary.optional(boundary.nonEmptyString),
     name: boundary.nonEmptyString,
+    isPinned: boundary.optional(boundary.boolean),
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),
@@ -2701,7 +2719,7 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   if (parsed.json) {
     printJson(result);
   } else {
-    const verb = result.ok ? 'Submitted' : 'Could not verify';
+    const verb = result.delivery?.state === 'queued' ? 'Queued' : result.ok ? 'Submitted' : 'Could not verify';
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${verb} ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} via ${result.sequenceName} to panel ${result.panelId}.${verified}`);
     printDelivery(result.delivery);
@@ -2720,7 +2738,9 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
 /** Where the prompt went, for human output: `Delivery: queued (transcript)`. */
 function printDelivery(delivery: Delivery | undefined, prefix = ''): void {
   if (delivery) {
-    console.log(`${prefix}Delivery: ${delivery.state} (${delivery.evidence})`);
+    const message = delivery.message ?? (delivery.state === 'queued'
+      ? 'The agent sees this only after its current turn ends. Do not resend.' : undefined);
+    console.log(`${prefix}Delivery: ${delivery.state} (${delivery.evidence})${message ? ` — ${message}` : ''}`);
   }
 }
 
@@ -2854,6 +2874,9 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
   if (parsed.keys !== undefined && command !== 'input') {
     throw new Error('--keys is for panels input; panels submit sends text followed by the agent submit key.');
   }
+  if (parsed.interrupt && command !== 'submit') {
+    throw new Error('--interrupt is for panels submit.');
+  }
   if (parsed.asFilePointer && command !== 'submit') {
     throw new Error('--as-file-pointer is for panels submit; panels input sends exact bytes.');
   }
@@ -2862,6 +2885,8 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    interrupt: parsed.interrupt || undefined,
+    source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
   };
 }
 

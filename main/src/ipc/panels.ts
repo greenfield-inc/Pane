@@ -9,6 +9,7 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import { getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
 import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, type PanelLayoutNode } from '../../../shared/types/panels';
 import type { AppServices } from './types';
@@ -20,6 +21,7 @@ import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '..
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
+import { ChunkedUploadStore, type UploadStart } from '../services/chunkedUploadStore';
 
 const execFileAsync = promisify(execFile);
 
@@ -107,6 +109,80 @@ async function readCleanTerminalScrollback(panelId: string, lines: number): Prom
   if (persistedScrollback === null || persistedScrollback === '') return null;
 
   return sanitizeTerminalOutput(persistedScrollback).split('\n').slice(-lines).join('\n');
+}
+
+const MAX_PASTE_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Save a pasted or uploaded image to the session's images folder and return
+ * its path with an image number for UI ordering.
+ */
+async function landPastedImage(sessionId: string, buffer: Buffer, mimeType: string) {
+  // Initialize counter from existing files on disk if not cached.
+  // Note: this counts files in the host-side .pane/images/ for backwards compat —
+  // it's just a counter for UI ordering, not a strict inventory of saved files.
+  const hostImagesDir = getAppSubdirectory('images');
+  if (!existsSync(hostImagesDir)) {
+    await fs.mkdir(hostImagesDir, { recursive: true });
+  }
+  if (!sessionImageCounters.has(sessionId)) {
+    const existing = readdirSync(hostImagesDir)
+      .filter(f => f.startsWith(`${sessionId}_`));
+    sessionImageCounters.set(sessionId, existing.length);
+  }
+
+  const count = (sessionImageCounters.get(sessionId) ?? 0) + 1;
+  const timestamp = Date.now();
+  const randomStr = Math.random().toString(36).substring(2, 9);
+  const extension = MIME_EXTENSIONS[mimeType] ?? 'png';
+  const filename = `${sessionId}_${count}_${timestamp}_${randomStr}.${extension}`;
+
+  if (buffer.length > MAX_PASTE_BYTES) {
+    throw new Error('Image too large (max 50 MB)');
+  }
+
+  const resolvedPath = await saveFileForSession(sessionId, 'images', filename, buffer);
+
+  // Commit counter only after successful save
+  sessionImageCounters.set(sessionId, count);
+
+  return { filePath: resolvedPath, imageNumber: count };
+}
+
+/** Save a pasted or uploaded file (any type) to the session's files folder and return its path. */
+async function landPastedFile(sessionId: string, buffer: Buffer, originalFileName: string) {
+  const extMatch = originalFileName.match(/\.([a-zA-Z0-9]+)$/);
+  const extension = extMatch ? extMatch[1].toLowerCase() : 'bin';
+  const timestamp = Date.now();
+  const randomStr = Math.random().toString(36).substring(2, 9);
+  const filename = `${sessionId}_${timestamp}_${randomStr}.${extension}`;
+
+  if (buffer.length > MAX_PASTE_BYTES) {
+    throw new Error('File too large (max 50 MB)');
+  }
+
+  const resolvedPath = await saveFileForSession(sessionId, 'files', filename, buffer);
+  return { filePath: resolvedPath };
+}
+
+const uploadStartSchema: BoundarySchema<UploadStart> = boundary.object({
+  uploadId: boundary.nonEmptyString,
+  sessionId: boundary.nonEmptyString,
+  fileName: boundary.nonEmptyString,
+  mimeType: boundary.string,
+  size: boundary.number,
+  md5: boundary.string,
+});
+const uploadChunkSchema = boundary.object({
+  uploadId: boundary.nonEmptyString,
+  offset: boundary.number,
+  base64: boundary.string,
+});
+
+let chunkedUploads: ChunkedUploadStore | null = null;
+function uploadStore(): ChunkedUploadStore {
+  chunkedUploads ??= new ChunkedUploadStore({ dir: getAppSubdirectory('uploads') });
+  return chunkedUploads;
 }
 
 /**
@@ -398,6 +474,10 @@ const DAEMON_PANEL_CHANNELS = [
   'terminal:paste-image',
   'terminal:save-scrollback',
   'terminal:paste-file',
+  'terminal:upload-start',
+  'terminal:upload-chunk',
+  'terminal:upload-commit',
+  'terminal:upload-cancel',
 ] as const;
 
 export function registerPanelHandlers(
@@ -674,6 +754,8 @@ export function registerPanelHandlers(
   
   // Terminal-specific handlers (internal use)
   commandRegistry.register('terminal:input', async (panelId: string, data: string) => {
+    // Desktop, phone and remote web all type through here, so it is always a person.
+    getMobilePushSender(services.configManager).observeInput(panelId, data);
     return terminalPanelManager.writeToTerminal(panelId, data);
   });
   
@@ -768,46 +850,11 @@ export function registerPanelHandlers(
     dataUrl: string,
     mimeType: string
   ) => {
-    // Initialize counter from existing files on disk if not cached.
-    // Note: this counts files in the host-side .pane/images/ for backwards compat —
-    // it's just a counter for UI ordering, not a strict inventory of saved files.
-    const hostImagesDir = getAppSubdirectory('images');
-    if (!existsSync(hostImagesDir)) {
-      await fs.mkdir(hostImagesDir, { recursive: true });
-    }
-    if (!sessionImageCounters.has(sessionId)) {
-      const existing = readdirSync(hostImagesDir)
-        .filter(f => f.startsWith(`${sessionId}_`));
-      sessionImageCounters.set(sessionId, existing.length);
-    }
-
-    // Increment counter
-    const count = (sessionImageCounters.get(sessionId) ?? 0) + 1;
-
-    const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 9);
-    const extension = MIME_EXTENSIONS[mimeType] ?? 'png';
-    const filename = `${sessionId}_${count}_${timestamp}_${randomStr}.${extension}`;
-
-    // Decode base64
     const base64Data = dataUrl.split(',')[1];
     if (!base64Data) {
       throw new Error('Invalid image data URL');
     }
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    // Backend size validation: same 50MB cap as terminal:paste-file, since this
-    // handler also just saves the bytes to disk and returns the resolved path
-    if (buffer.length > 50 * 1024 * 1024) {
-      throw new Error('Image too large (max 50 MB)');
-    }
-
-    const resolvedPath = await saveFileForSession(sessionId, 'images', filename, buffer);
-
-    // Commit counter only after successful save
-    sessionImageCounters.set(sessionId, count);
-
-    return { filePath: resolvedPath, imageNumber: count };
+    return landPastedImage(sessionId, Buffer.from(base64Data, 'base64'), mimeType);
   });
 
   // Fallback clipboard image check for platforms where browser clipboardData
@@ -861,27 +908,32 @@ export function registerPanelHandlers(
     dataUrl: string,
     originalFileName: string
   ) => {
-    // Derive extension from original filename
-    const extMatch = originalFileName.match(/\.([a-zA-Z0-9]+)$/);
-    const extension = extMatch ? extMatch[1].toLowerCase() : 'bin';
-
-    const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 9);
-    const filename = `${sessionId}_${timestamp}_${randomStr}.${extension}`;
-
     const base64Data = dataUrl.split(',')[1];
     if (!base64Data) {
       throw new Error('Invalid data URL');
     }
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    if (buffer.length > 50 * 1024 * 1024) {
-      throw new Error('File too large (max 50 MB)');
-    }
-
-    const resolvedPath = await saveFileForSession(sessionId, 'files', filename, buffer);
-    return { filePath: resolvedPath };
+    return landPastedFile(sessionId, Buffer.from(base64Data, 'base64'), originalFileName);
   });
+
+  // Uploads from a phone on a slow link arrive in chunks and land exactly
+  // like a paste: images through landPastedImage, anything else through
+  // landPastedFile. See ChunkedUploadStore for resume and retry.
+  commandRegistry.register('terminal:upload-start', (input: PaneCommandValue) =>
+    uploadStore().start(decodeBoundary(input, uploadStartSchema)));
+  commandRegistry.register('terminal:upload-chunk', (uploadId: PaneCommandValue, offset: PaneCommandValue, base64: PaneCommandValue) => {
+    const chunk = decodeBoundary({ uploadId, offset, base64 }, uploadChunkSchema);
+    return uploadStore().append(chunk.uploadId, chunk.offset, chunk.base64);
+  });
+  commandRegistry.register('terminal:upload-commit', (uploadId: PaneCommandValue) =>
+    uploadStore().commit(decodeBoundary(uploadId, boundary.nonEmptyString), async (record, bytes) => {
+      // Image types an agent can attach land as images; anything else (HEIC, video) keeps its own extension.
+      const landed = record.mimeType in MIME_EXTENSIONS
+        ? await landPastedImage(record.sessionId, bytes, record.mimeType)
+        : await landPastedFile(record.sessionId, bytes, record.fileName);
+      return landed.filePath;
+    }));
+  commandRegistry.register('terminal:upload-cancel', (uploadId: PaneCommandValue) =>
+    uploadStore().cancel(decodeBoundary(uploadId, boundary.nonEmptyString)));
 
   // Check if a panel type should be auto-created (not previously closed by user)
   commandRegistry.register('panels:shouldAutoCreate', async (sessionId: string, panelType: string) => {

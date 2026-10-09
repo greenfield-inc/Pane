@@ -9,6 +9,7 @@ import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionAddToolMenu, type SessionToolSpec } from './SessionAddToolMenu';
+import { SelectionLoading } from './ui/SelectionLoading';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
@@ -29,7 +30,7 @@ const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
 /** Panels that always live on the Session stage as tabs; Files docks in the inspector. */
-const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser']);
+const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser', 'notes']);
 
 /** A terminal started with a command (an agent or a custom command) is always a tab. */
 function launchesCommand(panel: ToolPanel): boolean {
@@ -102,15 +103,20 @@ export function SessionWorkspacePanels({
     return () => observer.disconnect();
   }, []);
   const [loaded, setLoaded] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const creating = useRef(false);
   const inLayout = useMemo(() => layoutPanelIds(layout), [layout]);
   const agentPanelIdSet = useMemo(() => new Set(agentPanelIds), [agentPanelIds]);
   const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIdSet.has(panel.id) && !isStagePanel(panel, agentPanelIdSet, inLayout));
   const explorer = panels.find(panel => panel.type === 'explorer');
+  // Readiness may arrive while the initial layout is loading, before the
+  // terminal subscribes. Use the live record after this visit's load finishes;
+  // until then the store may still contain a previous visit or host's record.
+  const currentAgentPanel = (loaded && panels.find(panel => panel.id === agentPanel.id)) || agentPanel;
   const tabs = useMemo(
-    () => [agentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
-    [agentPanel, panels, agentPanelIdSet, inLayout],
+    () => [currentAgentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
+    [currentAgentPanel, panels, agentPanelIdSet, inLayout],
   );
   const agentPanelId = agentPanel.id;
   // The panel events below outlive the render that subscribed them, so they read
@@ -145,10 +151,12 @@ export function SessionWorkspacePanels({
 
   useEffect(() => {
     let cancelled = false;
+    setLoaded(false);
+    setError(null);
     void panelApi.loadPanelsForSession(sessionId).then(async saved => {
       if (cancelled) return;
       usePanelStore.getState().setPanels(sessionId, saved);
-      const stored = await panelApi.getLayout(sessionId).catch(() => null);
+      const stored = await panelApi.getLayout(sessionId);
       if (cancelled) return;
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
       const storedIds = layoutPanelIds(base);
@@ -157,8 +165,8 @@ export function SessionWorkspacePanels({
       const splitIds = new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
-    }).catch(() => {
-      if (!cancelled) setError('Could not load Session tools. Reopen the Session to retry.');
+    }).catch(error => {
+      if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');
     });
     const events = window.electronAPI.events;
     const created = events.onPanelCreated(panel => {
@@ -198,7 +206,7 @@ export function SessionWorkspacePanels({
       updated();
       deleted();
     };
-  }, [sessionId, agentPanelId, applyLayout]);
+  }, [sessionId, agentPanelId, applyLayout, retry]);
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;
@@ -222,6 +230,15 @@ export function SessionWorkspacePanels({
   const addTool = useCallback(async (tool: SessionToolSpec, groupId?: string) => {
     setError(null);
     try {
+      if (tool.type === 'notes') {
+        const state = usePanelStore.getState();
+        const current = state.layouts[sessionId];
+        const existing = state.panels[sessionId]?.find(panel => panel.type === 'notes');
+        if (current && existing && layoutPanelIds(current).has(existing.id)) {
+          applyLayout(activatePanelInLayout(current, existing.id));
+          return;
+        }
+      }
       let initialState: { customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> } | undefined;
       if (tool.initialCommand) {
         const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = { initialCommand: tool.initialCommand };
@@ -290,7 +307,7 @@ export function SessionWorkspacePanels({
   const primary = layout ? primaryGroup(layout.root) : null;
   const primaryTabs = primary
     ? primary.panelIds.map(id => tabs.find(panel => panel.id === id)).filter((panel): panel is ToolPanel => !!panel)
-    : [agentPanel];
+    : [currentAgentPanel];
   const tabStrip = (
     <div data-testid="session-workspace-tabs" className="flex min-w-0 items-center">
       <PanelTabStrip panels={primaryTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
@@ -305,6 +322,14 @@ export function SessionWorkspacePanels({
       {sidebarToggle}
     </>
   );
+
+  if (!loaded) {
+    return <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+      {!error ? <SelectionLoading name="Session tools" /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
+        <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => { setError(null); setRetry(value => value + 1); }}>Retry</button>
+      </div>}
+    </div>;
+  }
 
   return (
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">

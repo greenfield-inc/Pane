@@ -203,16 +203,49 @@ when `--kinds` lists it, and it skips the `--min-interval` batch.
 `runpane panels last-message --panel <panel-id>` reads an agent's last reply
 from its transcript.
 
+### Handing Work to Another Machine
+
+`runpane handoff` passes a task to a fresh agent on this or another of your
+machines. Write the note from the template, then name the agent and machine in
+plain words. The CLI checks every section is filled in, needs the branch pushed
+(`--push` commits uncommitted work as WIP and pushes, never forcing), and starts
+the agent in a new Pane there, branched from yours. It reports back to you.
+
+```bash
+runpane handoff --template > ~/handoff.md
+runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --push
+```
+
+`--dry-run` checks destination daemon reachability and resolves its saved repository
+(name, path, environment and OS) without committing, pushing, fetching, writing a
+note or creating a Pane. These checks also run before `--push` changes sender work.
+
+From WSL, when no local Linux daemon exists, handoff can use the Windows host's
+Pane through its enabled workspaces connection (Windows Tailscale and Pane
+workspaces must be reachable). Repository listing and Pane creation use the
+reached daemon directly, so the host needs no global CLI installation. Select a Windows-native saved
+repository with `--repo`. Saved WSL repositories are rejected before sending.
+An explicit `--pane-dir` or `PANE_DIR` keeps that instance selected instead of
+falling back to a different host instance.
+
+Success requires verified prompt delivery (`taken` or `queued`). If a startup
+dialog blocks delivery or evidence is missing, handoff exits nonzero and includes
+the created Pane, panel ID and a `runpane panels screen` inspection command.
+Inspect that receiver before retrying to avoid creating a duplicate Pane.
+
+`runpane handoff --help` lists every option. Model selection works for Claude, Codex and Cursor. Effort selection works for Claude and Codex; Cursor effort is rejected before committing or sending.
+
 ## Attribution
 
 npm package downloads use `source=npm` when requesting release artifacts from
 `runpane.com/api/download`. If that route is unavailable, the CLI falls back to
 matching GitHub release assets and prints a warning.
 
-The wrapper also sends best-effort lifecycle telemetry with a persisted
-anonymous `install_id`. Count distinct wrapper users with
-`count(DISTINCT properties.install_id)` on `runpane_wrapper_*` events. Set
-`RUNPANE_TELEMETRY_DISABLED=1` to disable wrapper telemetry.
+The wrapper sends best-effort command failures and download lifecycle telemetry
+with a persisted anonymous `install_id`. Successful routine commands emit nothing.
+Distinct `install_id` counts on `runpane_wrapper_*` events measure installs that
+report failures or download activity, not all CLI users. Telemetry is disabled in
+CI, when local analytics is explicitly opted out, or with `RUNPANE_TELEMETRY_DISABLED=1`.
 
 ## Maintenance Notes
 

@@ -1,5 +1,6 @@
 import { RUNPANE_CONTRACT } from './generated/contract';
 import type { ParsedArgs } from './commands';
+import { readWorkspaceSummary, type WorkspaceSummary } from './workspace';
 
 type AgentContextCommand =
   typeof RUNPANE_CONTRACT.agentContext.commands[keyof typeof RUNPANE_CONTRACT.agentContext.commands];
@@ -12,6 +13,7 @@ interface AgentContextBriefResult {
   rules: readonly string[];
   tools: typeof RUNPANE_CONTRACT.agentContext.brief.tools;
   detailCommand: string;
+  workspaces: WorkspaceSummary;
 }
 
 interface AgentContextCommandResult {
@@ -32,11 +34,11 @@ interface AgentContextUnknownCommandError {
 
 const MAX_COMMAND_CANDIDATES = 5;
 
-export function runAgentContext(parsed: Pick<ParsedArgs, 'contextCommand' | 'json'>): number {
+export async function runAgentContext(parsed: Pick<ParsedArgs, 'contextCommand' | 'json' | 'paneDir'>): Promise<number> {
   if (parsed.contextCommand !== undefined && !findCommandDetail(parsed.contextCommand)) {
     return printUnknownCommand(parsed.contextCommand, parsed.json);
   }
-  const result = buildAgentContextResult(parsed.contextCommand);
+  const result = await buildAgentContextResult(parsed.contextCommand, parsed.paneDir);
   if (parsed.json) {
     console.log(JSON.stringify(result, null, 2));
     return 0;
@@ -48,7 +50,7 @@ export function runAgentContext(parsed: Pick<ParsedArgs, 'contextCommand' | 'jso
   return 0;
 }
 
-function buildAgentContextResult(commandName?: string): AgentContextResult {
+async function buildAgentContextResult(commandName?: string, paneDir?: string): Promise<AgentContextResult> {
   if (commandName) {
     return {
       ok: true,
@@ -66,7 +68,8 @@ function buildAgentContextResult(commandName?: string): AgentContextResult {
     summary: brief.summary,
     rules: brief.rules,
     tools: brief.tools,
-    detailCommand: brief.detailCommand
+    detailCommand: brief.detailCommand,
+    workspaces: await readWorkspaceSummary(paneDir)
   };
 }
 
@@ -164,6 +167,8 @@ function renderBrief(result: AgentContextBriefResult): string {
     RUNPANE_CONTRACT.agentContext.brief.title,
     '',
     result.summary,
+    '',
+    ...result.workspaces.lines,
     '',
     'Rules:',
     ...result.rules.map((rule) => `- ${rule}`),

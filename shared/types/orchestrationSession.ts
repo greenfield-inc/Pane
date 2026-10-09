@@ -182,6 +182,7 @@ export interface OrchestrationSessionCreateInput {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
+  isPinned?: boolean;
   agent?: PaneChatAgent;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;

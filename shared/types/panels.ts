@@ -17,7 +17,7 @@ export interface ToolPanel {
   metadata: ToolPanelMetadata;   // Creation time, position, etc.
 }
 
-export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser';
+export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
 
 export interface ToolPanelState {
   isActive: boolean;
@@ -91,7 +91,7 @@ export interface TerminalPanelState {
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
-  agentType?: 'claude' | 'codex' | 'cursor'; // CLI agent type for panel-local resume behavior
+  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode'; // CLI agent type for panel-local resume behavior
   /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
   agentDetection?: TerminalAgentDetection;
   /** The command the panel was launched (or staged) with, as the user gave it. */
@@ -362,10 +362,12 @@ interface PanelCapabilityRegistry {
   dashboard: PanelCapabilities;
   'setup-tasks': PanelCapabilities;
   browser: PanelCapabilities;
+  notes: PanelCapabilities;
 }
 
 // Panel Registry - Currently only terminal is implemented
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
+  notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
   terminal: {
     canEmit: ['terminal:command_executed', 'terminal:exit', 'files:changed'],
     canConsume: [], // Terminal doesn't consume events in Phase 1-2

@@ -10,6 +10,11 @@ export interface ArchiveProgressTask {
   error?: string;
   /** Once the worktree is removed: whether its files are deleted, or still being deleted in the background. */
   trashDeletion?: 'pending' | 'done';
+  cleanupId?: string;
+  attempts?: number;
+  nextAttempt?: number;
+  remainingPath?: string;
+  interruptedScript?: boolean;
 }
 
 /** Returned by `archive:get-progress` and sent on `archive:progress`. */

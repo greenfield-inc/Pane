@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
 import type {
@@ -9,6 +10,7 @@ import type {
   RemotePaneConnectionState,
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
+import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
@@ -21,7 +23,7 @@ type AnalyticsMainEvent = {
   properties?: JsonObject;
 };
 
-type ElectronApiMockOptions = {
+export type ElectronApiMockOptions = {
   analyticsConsentShown?: boolean;
   analyticsIdentity?: JsonObject;
   initialConfig?: JsonObject;
@@ -38,6 +40,18 @@ type ElectronApiMockOptions = {
   mainAnalyticsEvents?: AnalyticsMainEvent[];
   initialProjects?: JsonObject[];
   initialSessions?: JsonObject[];
+  /** remote-daemon:list-tailnet-machines answer. */
+  tailnetMachines?: TailnetMachineList;
+  /** Remote connections end in `error` with this message instead of connecting. */
+  remoteConnectError?: string;
+  initialArchiveProgress?: ArchiveProgressSnapshot;
+  archiveRetryError?: string;
+  /** git:identity answer; git:set-identity marks it configured. */
+  gitIdentity?: { configured: boolean; name: string; email: string };
+  /** Delay before git:identity answers with the identity as it was when called. */
+  gitIdentityDelayMs?: number;
+  /** git:commit answers, in order; success once they run out. */
+  gitCommitResults?: Array<{ success: boolean; error?: string; details?: string; code?: string }>;
   initialPanels?: JsonObject[];
   initialUiState?: Partial<{
     expandedProjects: number[];
@@ -139,6 +153,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         activeProfileId: null,
         mode: 'local',
       },
+    };
+    const workspaceAccess: WorkspaceAccessSummary = {
+      visibility: 'owner',
+      passwordProtected: false,
+      state: 'on',
+      machineName: 'devbox',
+      url: 'https://devbox.tail1234.ts.net:8443',
     };
     const remoteConnectionState: RemotePaneConnectionState = {
       mode: 'local',
@@ -287,6 +308,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const sessionDeleteCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
     const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
+    let gitIdentity = mockOptions.gitIdentity ? clone(mockOptions.gitIdentity) : null;
+    const gitCommitResults = clone(mockOptions.gitCommitResults ?? []);
     const invokeCalls = new Map<string, Array<{ channel: string; args: unknown[] }>>();
     let sessionsGetCount = 0;
     let terminalAckedBytes = 0;
@@ -307,6 +330,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
       };
     };
+
+    let archiveProgress = mockOptions.initialArchiveProgress ?? null;
 
     const emit = (channel: string, ...args: MockEventValue[]) => {
       const callbacks = listeners.get(channel);
@@ -363,6 +388,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onTerminalOutput') {
           return (callback: MockEventCallback) => subscribe('terminal-output', callback);
         }
+        if (prop === 'onTerminalCliReady') {
+          return (callback: MockEventCallback) => subscribe('terminal:cliReady', callback);
+        }
         if (prop === 'onTerminalFontUpdated') {
           return (callback: MockEventCallback) => subscribe('config:terminal-font-updated', callback);
         }
@@ -392,6 +420,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onPanelAgentStatus') {
           return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
+        }
+        if (prop === 'onArchiveProgress') {
+          return (callback: MockEventCallback) => subscribe('archive:progress', callback);
         }
         return () => unsubscribe;
       },
@@ -454,7 +485,22 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return success(clone(preferences));
       }
       if (channel === 'archive:get-progress') {
-        return success(null);
+        return success(clone(archiveProgress));
+      }
+      if (channel === 'archive:retry-cleanup' && mockOptions.archiveRetryError) {
+        return Promise.resolve({ success: false, error: mockOptions.archiveRetryError });
+      }
+      if (channel === 'git:identity' && gitIdentity) {
+        const snapshot = clone(gitIdentity);
+        return new Promise(resolve => setTimeout(resolve, mockOptions.gitIdentityDelayMs ?? 0))
+          .then(() => success(snapshot));
+      }
+      if (channel === 'git:set-identity' && gitIdentity) {
+        gitIdentity = { ...gitIdentity, configured: true };
+        return success();
+      }
+      if (channel === 'git:commit') {
+        return Promise.resolve(gitCommitResults.shift() ?? { success: true });
       }
       return success();
     };
@@ -1040,13 +1086,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const activeProfile = remoteDaemonConfig.client.profiles.find(
               (profile) => profile.id === remoteDaemonConfig.client.activeProfileId
             );
+            const failure = activeProfile ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
             setRemoteConnectionState({
               mode: 'remote',
-              status: activeProfile ? 'connected' : 'error',
+              status: failure ? 'error' : 'connected',
               activeProfileId: remoteDaemonConfig.client.activeProfileId,
               activeProfileLabel: activeProfile?.label ?? null,
               activeBaseUrl: activeProfile?.baseUrl ?? null,
-              lastError: activeProfile ? null : 'Missing remote profile',
+              lastError: failure,
             });
           } else {
             setRemoteConnectionState({
@@ -1061,6 +1108,39 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
 
           syncRemoteDaemonConfig();
           return success(clone(remoteDaemonConfig.client));
+        },
+        getWorkspaceAccess: () => success(clone(workspaceAccess)),
+        updateWorkspaceAccess: (update: { visibility?: 'off' | 'owner' | 'tailnet'; password?: string | null }) => {
+          if (update.visibility) workspaceAccess.visibility = update.visibility;
+          if (update.password !== undefined) workspaceAccess.passwordProtected = update.password !== null;
+          return success(clone(workspaceAccess));
+        },
+        listTailnetMachines: () => {
+          const list: TailnetMachineList = clone(mockOptions.tailnetMachines ?? { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [] });
+          if (list.ok) {
+            for (const machine of list.machines) {
+              const profile = remoteDaemonConfig.client.profiles.find((candidate) => candidate.tailnetMachine === machine.name);
+              if (profile) machine.profileId = profile.id;
+            }
+          }
+          return success(list);
+        },
+        saveTailnetMachine: (input: { name: string; password?: string }) => {
+          const profile = {
+            id: `tailnet-tail1234.ts.net-${input.name}`,
+            label: input.name,
+            baseUrl: `https://${input.name}.tail1234.ts.net:8443`,
+            token: input.password ?? '',
+            transport: 'http+sse' as const,
+            tailnetMachine: input.name,
+            tailnetDomain: 'tail1234.ts.net',
+          };
+          remoteDaemonConfig.client.profiles = [
+            ...remoteDaemonConfig.client.profiles.filter((candidate) => candidate.id !== profile.id),
+            profile,
+          ];
+          syncRemoteDaemonConfig();
+          return success(clone(profile));
         },
         onConnectionStateChanged: (callback: MockEventCallback) =>
           subscribe('remote-daemon:connection-state-changed', callback),
@@ -1151,6 +1231,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });
         },
+        setArchiveProgress(progress: ArchiveProgressSnapshot) {
+          archiveProgress = progress;
+        },
+        emitArchiveProgress(progress: ArchiveProgressSnapshot) {
+          archiveProgress = progress;
+          emit('archive:progress', clone(progress));
+        },
         getListenerCount(channel: string) {
           return listeners.get(channel)?.size ?? 0;
         },
@@ -1215,6 +1302,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitPanelTerminalOutput(sessionId: string, panelId: string, output: string) {
           emit('terminal-output', { sessionId, panelId, output });
+        },
+        emitTerminalCliReady(panelId: string) {
+          emit('terminal:cliReady', { panelId });
         },
         getTerminalAckedBytes() {
           return terminalAckedBytes;

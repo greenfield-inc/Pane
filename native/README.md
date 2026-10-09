@@ -22,7 +22,11 @@ iOS builds use Expo's scene lifecycle through `expo-build-properties` with `ios.
 
 ## Point it at a host
 
-The app pairs with a host through a one-time `pane-remote://` connection code, pasted or scanned from a QR code. For development, run an isolated host with its own data directory and port, so you never touch the Pane you use day to day:
+For your computers, sign in to Tailscale on the phone and computer, then open **Your computers** on the welcome screen (or **Settings → Your Computers** after connecting). Enter the **Address** shown in desktop **Settings → Remote Access → Access to this computer**, tap **Find Computers**, then **Connect**. Enter the computer's password when asked. **Use another computer** lets you change the address if that computer is unavailable or you switch tailnets. Saved profiles stay bound to their original tailnet.
+
+The phone asks a computer on its own Tailscale login for the tailnet list because it cannot run `tailscale status` itself. Other users cannot request that computer's discovery view, even when it allows everyone on the tailnet to connect. Native requests use the Workspaces listener on port 8443. Push notifications and shared integration keys require a code-based paired connection; codeless Settings offers **Connect with a Code** for alerts. Browsers and the PWA keep using connection codes: the Workspaces listener refuses requests with an `Origin` header.
+
+You can also pair with a host through a one-time `pane-remote://` connection code, pasted or scanned from a QR code. For development, run an isolated host with its own data directory and port, so you never touch the Pane you use day to day:
 
 ```bash
 # from the repo root
@@ -60,10 +64,24 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 ## The terminal page
 
-The pane screen runs xterm in a WebView. The page source is `terminal-web/page.ts`. `pnpm build:terminal-web` bundles it, with xterm and its CSS, into `src/features/terminal/terminalHtml.generated.ts`, so the WebView needs no network. Run it after changing the page or upgrading xterm, and commit the generated file. The page and the screen talk through the messages in `src/features/terminal/bridge.ts`.
+The pane screen runs xterm in a WebView. The page source is `terminal-web/page.ts`. `pnpm build:terminal-web` bundles it, with xterm and its CSS, into `src/features/terminal/terminalHtml.generated.ts`, so the WebView needs no network. Run it after changing the page or upgrading xterm, and commit the generated file. The page and the screen talk through the messages in `src/features/terminal/bridge.ts`. The scroll joystick scrolls the page's own buffer, except when a full-screen app is on the alternate screen or has asked for mouse events (Claude Code with `"tui": "fullscreen"`, less, vim, tmux): those keep no scrollback here, so the page sends them wheel input instead, as xterm does for a desktop mouse wheel.
 
 `panes.yaml` creates a pane, searches, pins, archives and deletes it; it needs at least one repository on the host. `permission.yaml` answers a permission request; queue one first with `node scripts/request-permission.mjs <pane-dir> <pane-id>`, which stands in for the agent's permission bridge.
 
+
+## The composer
+
+The pane screen's text box holds every action: Attach, Paste, Shortcuts and Copy on the left, the mic and one Send/Enter button on the right. An empty box sends a bare Enter, which answers an agent's menu; with text, the button sends the text and then Enter. Each terminal tab keeps its own unsent text on the phone (per host, pane and tab, in `composer-drafts.json` in the app's documents folder), so it survives leaving the pane and restarting the app; sending clears it. Stop (Ctrl+C) sits in the tab bar, and Clear scrollback in the "…" menu. Copy shows the terminal's recent output as selectable text. Last 300 lines copies the host's clean scrollback (`terminal:getScrollbackClean`) to the clipboard and shows it.
+
+Shortcuts live on the host, in its `terminalShortcuts` config, the same list desktop binds to ⌘⌥ (Ctrl+Alt) plus a letter. The bolt opens them as a filterable sheet; Settings › Shortcuts adds, edits, reorders, turns off and deletes them. The phone saves through `remote:settings:update`, which takes only `terminalShortcuts` (the whole list) and the voice keys, refuses any other field, and returns the refreshed `remote:pwa-affordances`. Every save emits `remote:settings-changed`, so open phones and desktop refetch. Hosts without the channel still serve the list to insert; saving there asks you to update Pane on the host.
+
+The mic records through the host. When the host has the key for a mode, tapping the mic records. When it lacks one, the mic opens a sheet that asks for the one key the mode needs (live mode: Deepgram; recorded mode: fal). A host before v2.4.159 also needs OpenRouter; there the sheet asks for it and says to update Pane on the host. OpenRouter is an optional row: with it the host cleans up the transcript, without it the host returns the words as heard. The sheet saves the keys with `remote:settings:update`, and starts recording in the same tap. A live start from the sheet waits 2.5 s for Deepgram to accept the key, so a refused key shows on the sheet. Keys travel only in that request's body; the phone clears them after the save, and the host reports them only as set (`src/features/voice/VoiceSetupSheet.tsx`). Settings › Voice shows each key as Set or Not set and replaces it through the same channel. The phone also carries keys between the hosts it is paired with: on open, on return to the foreground, after a key save and when a host reports a settings change, it reads each host's keys with `credentials:shared:get` and writes the newest to the rest with `credentials:shared:apply`, keeping no copy (`src/features/hosts/SharedCredentialSync.tsx`, [Shared integration keys](../docs/SHARED_CREDENTIALS.md)). A recording runs up to 15 minutes. In the last minute the timer beside the mic counts down, with one tone and one haptic as it starts. Recording stops by itself after 30 seconds below -50 dBFS, keeps the text so far, and says why (`src/features/voice/recordingLimits.ts`).
+
+The terminal's right edge carries the scroll joystick, a D-pad with Enter in its center, and Esc and Tab. They rest at 18% opacity; touching any of them makes all of them opaque, and 3 s after the last touch they fade back together (`src/features/terminal/FloatingController.tsx`). The D-pad sits five rows above the bottom, clear of an agent's input box and status line, and hides when the terminal is too short for that, as with the keyboard up (`controllerLayout.ts`). The controller button beside the mic shows or hides them; the choice is kept on the device.
+
+## Uploads
+
+The paperclip in the composer sends photos, camera shots and files (any type, up to 50 MB each) to the host and inserts each file's host path at the cursor, the same path desktop's upload button pastes. Files go up in 128 KB chunks over `POST /invoke` (`terminal:upload-start`, `-chunk`, `-commit`, `-cancel`), so a slow or flaky link only ever resends one chunk: every reply carries the bytes the host has, and after a drop the phone calls `upload-start` again and continues from there. The host stages partial uploads in `<pane-dir>/uploads/`, deletes ones untouched for a day, and lands finished files in `<pane-dir>/images/` or `<pane-dir>/files/` through the same code as a desktop paste (`main/src/services/chunkedUploadStore.ts`, `main/src/ipc/panels.ts`). Hosts without these channels get the old single request, capped at about 12 MB. The upload loop is `src/features/upload/chunkedUpload.ts`.
 
 ## Notifications and links
 
@@ -83,14 +101,24 @@ Tapping a notification opens `/open?host=…&paneId=…&panelId=…`. That scree
 ```bash
 cat > /tmp/pane-push.apns <<'JSON'
 { "Simulator Target Bundle": "com.dcouple.pane.mobile",
-  "aps": { "alert": { "title": "Pane needs attention", "body": "Open Pane to continue." }, "sound": "default" },
-  "eventId": "pane:demo:1", "hostProfileId": "<profile id or base URL>", "paneId": "<session id>", "panelId": "<panel id>" }
+  "aps": { "alert": { "title": "api-fix", "body": "api-fix is blocked" }, "sound": "default", "thread-id": "<session id>" },
+  "eventId": "pane:demo:1", "hostProfileId": "<profile id or base URL>", "paneId": "<session id>", "panelId": "<panel id>", "sessionPaneId": "<session id>" }
 JSON
 xcrun simctl push <simulator-udid> com.dcouple.pane.mobile /tmp/pane-push.apns
 xcrun simctl openurl <simulator-udid> 'pane://pane/<session id>?host=http%3A%2F%2F127.0.0.1%3A42157'
 ```
 
-**Needs a real device:** APNs delivery end to end (a signed build with the Push Notifications capability and a real `.p8` key on the host), and FCM on Android. FCM also needs a Firebase app for `com.dcouple.pane.mobile` and its `google-services.json` set as `android.googleServicesFile`. Without that file, Android registration reports an error in Settings, and the rest of the app works.
+**Needs a real device:** APNs delivery end to end (a signed build with the Push Notifications capability and a real `.p8` key on the host). FCM on Android works in an emulator with a Google Play system image. It needs the Firebase app config in `native/google-services.json`, which `app.config.js` sets as `android.googleServicesFile` when the file exists. It also needs a host set up to send FCM (see [Push delivery operator setup](../docs/NATIVE_MOBILE.md#push-delivery-operator-setup)). Without the file, Android registration reports an error in Settings, and the rest of the app works.
+
+### Firebase config (google-services.json)
+
+`native/google-services.json` is gitignored. It is the Firebase Android app config for `com.dcouple.pane.mobile` in the `pane-pwa-preview` project. It identifies the app and cannot send pushes. Get it locally from the Firebase console (Project settings, Your apps, Android) or with `firebase apps:sdkconfig ANDROID <app-id> --project pane-pwa-preview -o native/google-services.json`.
+
+CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base64-encoded. `.github/workflows/native-android.yml` decodes it into `native/google-services.json`, then builds the Android dev client. The step fails if the secret is missing or not for this package; fork PRs, which get no secrets, build without FCM. To rotate it:
+
+```bash
+base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R greenfield-inc/Pane
+```
 
 ## How the code is organised
 

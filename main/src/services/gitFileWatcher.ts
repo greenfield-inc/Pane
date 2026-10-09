@@ -99,7 +99,8 @@ export class GitFileWatcher extends EventEmitter {
   constructor(
     private logger?: Logger,
     private commandRunner?: CommandRunner,
-    private pathResolver?: PathResolver
+    private pathResolver?: PathResolver,
+    private spawnProcess: typeof spawn = spawn
   ) {
     super();
     this.setMaxListeners(100);
@@ -335,7 +336,11 @@ export class GitFileWatcher extends EventEmitter {
         "\${watch_args[@]}"
     `;
 
-    const child = spawn('wsl.exe', ['-d', distro, '--', 'bash', '-lc', script, 'pane-wsl-watch', worktreePath], {
+    // `--exec`, not `--`: with `--` wsl.exe re-parses the joined command line
+    // through the distro's default shell, which expands "$1" and "$(…)" inside
+    // the double-quoted script before our bash sees it. The watcher then ran
+    // in Pane's own cwd instead of the worktree and never reported a change.
+    const child = this.spawnProcess('wsl.exe', ['-d', distro, '--exec', 'bash', '-lc', script, 'pane-wsl-watch', worktreePath], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -371,12 +376,15 @@ export class GitFileWatcher extends EventEmitter {
     });
 
     child.on('exit', (code, signal) => {
-      const session = this.watchedSessions.get(sessionId);
-      if (session?.wslWatcher === child) {
-        this.watchedSessions.delete(sessionId);
-      }
-      if (code !== 0 && signal !== 'SIGTERM') {
-        this.logger?.warn(`[GitFileWatcher] WSL native watcher exited for ${sessionId} with code=${code} signal=${signal ?? 'none'}`);
+      // stopWatching removes the record before killing, so a record that still
+      // owns this child means the watcher died on its own: keep the session
+      // live by polling from Windows instead of silently dropping it.
+      if (this.watchedSessions.get(sessionId)?.wslWatcher === child) {
+        void this.transitionToPolling(
+          sessionId,
+          worktreePath,
+          new Error(`WSL native watcher exited with code=${code} signal=${signal ?? 'none'}`),
+        );
       }
     });
 

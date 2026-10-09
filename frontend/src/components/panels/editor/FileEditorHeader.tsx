@@ -6,12 +6,10 @@ interface FileEditorHeaderProps {
   filePath: string;
   hasUnsavedChanges: boolean;
   gitStatus: GitFileStatus;
-  /** HTML files get a "Preview as HTML" action (opens the browser tab). */
-  onPreviewHtml?: () => void;
-  /** Markdown / notebooks can switch between the editor and a rendered preview. */
+  /** Notebooks can switch between the editor and a rendered preview. */
   viewMode?: EditorViewMode;
   onViewModeChange?: (mode: EditorViewMode) => void;
-  /** Text files show the auto-save state; binary previews do not. */
+  /** Text files show the auto-save state; read-only previews do not. */
   showSaveState: boolean;
 }
 
@@ -19,7 +17,6 @@ export function FileEditorHeader({
   filePath,
   hasUnsavedChanges,
   gitStatus,
-  onPreviewHtml,
   viewMode,
   onViewModeChange,
   showSaveState,
@@ -27,18 +24,6 @@ export function FileEditorHeader({
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary border-b border-border-primary">
       <div className="flex min-w-0 items-center gap-2">
-        {onPreviewHtml && (
-          <button
-            type="button"
-            onClick={onPreviewHtml}
-            className="flex flex-shrink-0 items-center gap-1 rounded-lg border border-border-primary bg-surface-tertiary px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-            title="Preview file as HTML"
-            aria-label="Preview file as HTML"
-          >
-            <Eye className="w-3 h-3" />
-            Preview as HTML
-          </button>
-        )}
         <File className="w-4 h-4 text-text-tertiary" />
         <span className="select-text min-w-0 truncate text-sm text-text-primary">
           {filePath}

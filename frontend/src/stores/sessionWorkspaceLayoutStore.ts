@@ -7,6 +7,7 @@ import {
 import {
   createSessionWorkspaceLayout,
   reconcileSessionWorkspaceLayout,
+  showSessionInLayout,
 } from '../utils/sessionWorkspaceLayout';
 import { useConfigStore } from './configStore';
 
@@ -38,7 +39,7 @@ interface SessionWorkspaceLayoutState {
    * Resolves with the layout only on the call that actually hydrated this host,
    * so the caller can align the Session selection to it exactly once.
    */
-  hydrate: (liveSessionIds: readonly string[], fallbackSessionId?: string) => Promise<SessionWorkspaceLayout | null>;
+  hydrate: (liveSessionIds: readonly string[], fallbackSessionId?: string, preferFallback?: boolean) => Promise<SessionWorkspaceLayout | null>;
   /** Replace the layout after a user gesture and remember it. */
   apply: (layout: SessionWorkspaceLayout) => void;
   /** Fit the layout to a changed Session list. */
@@ -114,7 +115,7 @@ export const useSessionWorkspaceLayoutStore = create<SessionWorkspaceLayoutState
   hostId: undefined,
   loaded: false,
 
-  hydrate: async (liveSessionIds, fallbackSessionId) => {
+  hydrate: async (liveSessionIds, fallbackSessionId, preferFallback = false) => {
     const hostId = activeHostId();
     const current = get();
     if (hostId === undefined) {
@@ -128,7 +129,7 @@ export const useSessionWorkspaceLayoutStore = create<SessionWorkspaceLayoutState
 
     const generation = ++hydrateGeneration;
     const stored = await readStoredLayout(hostId);
-    if (generation !== hydrateGeneration) return null;
+    if (generation !== hydrateGeneration || activeHostId() !== hostId) return null;
 
     // A stored layout wins; failing that, keep whatever is already on screen.
     const base = stored ?? get().layout;
@@ -147,7 +148,10 @@ export const useSessionWorkspaceLayoutStore = create<SessionWorkspaceLayoutState
       return null;
     }
 
-    const layout = reconciled ?? fallbackLayout(liveSessionIds, fallbackSessionId);
+    let layout = reconciled ?? fallbackLayout(liveSessionIds, fallbackSessionId);
+    if (layout && preferFallback && fallbackSessionId && liveSessionIds.includes(fallbackSessionId)) {
+      layout = showSessionInLayout(layout, fallbackSessionId);
+    }
     set({ layout, hostId, loaded: true });
     // Only write back a layout the host did not already have in this shape.
     if (layout && JSON.stringify(layout) !== JSON.stringify(stored)) scheduleWrite(hostId, layout);
@@ -157,6 +161,7 @@ export const useSessionWorkspaceLayoutStore = create<SessionWorkspaceLayoutState
   apply: (layout) => {
     const { layout: current, hostId } = get();
     if (current && JSON.stringify(current) === JSON.stringify(layout)) return;
+    hydrateGeneration += 1;
     set({ layout, loaded: true });
     scheduleWrite(hostId, layout);
   },

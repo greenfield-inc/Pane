@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { API } from '../utils/api';
 import { useSessionStore } from '../stores/sessionStore';
 import type { Session } from '../types/session';
@@ -64,7 +65,15 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     addPanel,
     removePanel,
     updatePanelState,
-  } = usePanelStore();
+  } = usePanelStore(useShallow(state => ({
+    panels: state.panels,
+    activePanels: state.activePanels,
+    setPanels: state.setPanels,
+    setActivePanel: state.setActivePanel,
+    addPanel: state.addPanel,
+    removePanel: state.removePanel,
+    updatePanelState: state.updatePanelState,
+  })));
 
   // Detail panel state
   const [detailVisible, setDetailVisible] = useState(() => {

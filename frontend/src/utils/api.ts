@@ -26,6 +26,7 @@ import type {
   RemotePaneConnectionState,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
+import type { WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
 import type {
   PanePermissionResponse,
 } from '../../../shared/types/daemon';
@@ -696,6 +697,26 @@ export class API {
     async updateClientState(updates: Partial<Pick<RemoteDaemonClientSettings, 'activeProfileId' | 'mode'>>) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.updateClientState(updates);
+    },
+
+    async getWorkspaceAccess() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.getWorkspaceAccess();
+    },
+
+    async updateWorkspaceAccess(update: WorkspaceAccessUpdate) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.updateWorkspaceAccess(update);
+    },
+
+    async listTailnetMachines() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.listTailnetMachines();
+    },
+
+    async saveTailnetMachine(input: { name: string; password?: string }) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.saveTailnetMachine(input);
     },
 
     onConnectionStateChanged(callback: (state: RemotePaneConnectionState) => void) {

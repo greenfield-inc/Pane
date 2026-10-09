@@ -1,0 +1,61 @@
+name: Native Android Build
+
+# Builds the Expo app's Android dev client with the real Firebase config, so
+# push-capable Android builds work on any machine, not only where
+# native/google-services.json happens to exist.
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
+  pull_request:
+    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
+  workflow_dispatch:
+
+concurrency:
+  group: native-android-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android dev client
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Setup Java
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    # google-services.json is gitignored. The secret holds it base64-encoded.
+    # Fork PRs get no secrets and build without FCM (app.config.js skips it).
+    - name: Write Firebase Android config
+      env:
+        GOOGLE_SERVICES_JSON: ${{ secrets.PANE_ANDROID_GOOGLE_SERVICES_JSON }}
+        IS_FORK: ${{ github.event.pull_request.head.repo.fork == true }}
+      run: |
+        if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+          if [ "$IS_FORK" = true ]; then echo "::notice::No Firebase config for fork PRs; building without FCM."; exit 0; fi
+          echo "::error::PANE_ANDROID_GOOGLE_SERVICES_JSON is not set (see native/README.md)."; exit 1
+        fi
+        printf '%s' "$GOOGLE_SERVICES_JSON" | base64 --decode > native/google-services.json
+        jq -e '[.client[].client_info.android_client_info.package_name] | index("com.dcouple.pane.mobile")' native/google-services.json > /dev/null 2>&1 \
+          || { echo "::error::PANE_ANDROID_GOOGLE_SERVICES_JSON is not a google-services.json for com.dcouple.pane.mobile."; exit 1; }
+
+    - name: Generate Android project
+      working-directory: native
+      run: pnpm exec expo prebuild --platform android --no-install
+
+    - name: Build debug APK
+      working-directory: native/android
+      run: ./gradlew assembleDebug --no-daemon

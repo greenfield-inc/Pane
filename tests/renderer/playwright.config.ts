@@ -1,0 +1,2 @@
+import { defineConfig } from '@playwright/test';
+export default defineConfig({ testDir: '.', testMatch: 'selection.renderer.ts', timeout: 30000, workers: 1, use: { baseURL: 'http://127.0.0.1:4537', headless: true }, webServer: { command: 'pnpm --filter frontend exec vite --config vite.config.ts --host 127.0.0.1 --port 4537', url: 'http://127.0.0.1:4537/renderer-tests/selection.html', reuseExistingServer: !process.env.CI }, reporter: 'list' });

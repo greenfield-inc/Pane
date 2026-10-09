@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { secureStore } from '@/auth/secureStore';
+import { isPushForPane } from '@/features/links/links';
 
 import type { PermissionState, PushDeps } from './registration';
 
@@ -21,6 +22,14 @@ export const devicePush: Omit<PushDeps, 'invoke'> = {
   getDeviceToken: () => withTimeout(Notifications.getDevicePushTokenAsync().then(token => String(token.data)), TOKEN_TIMEOUT_MS),
   getInstallationId,
 };
+
+/** Removes a Pane's delivered alerts, and its workers' when it is a Session, from Notification Center or the shade. Best effort. */
+export async function clearPaneNotifications(paneId: string): Promise<void> {
+  const presented = await Notifications.getPresentedNotificationsAsync().catch(() => []);
+  await Promise.all(presented
+    .filter(notification => isPushForPane(notification.request, paneId))
+    .map(notification => Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => undefined)));
+}
 
 let installationId: Promise<string> | null = null;
 

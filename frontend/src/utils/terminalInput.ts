@@ -1,3 +1,5 @@
+import { terminalTiming } from './terminalTiming';
+
 /**
  * Sends keyboard input to a terminal without waiting for delivery.
  *
@@ -6,7 +8,12 @@
  * global unhandled-rejection alert, which would open a dialog per keystroke.
  */
 export function sendTerminalInput(panelId: string, data: string): void {
-  void window.electronAPI.invoke('terminal:input', panelId, data).catch(error => {
+  const started = terminalTiming ? performance.now() : 0;
+  const delivery = window.electronAPI.invoke('terminal:input', panelId, data);
+  if (terminalTiming) {
+    void delivery.then(() => terminalTiming?.record('inputRoundTrip', performance.now() - started), () => {});
+  }
+  void delivery.catch(error => {
     console.warn('[Terminal] Input was not delivered:', error);
   });
 }

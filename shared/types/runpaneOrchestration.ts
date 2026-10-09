@@ -420,6 +420,7 @@ export type RunpaneAgentDetection = 'declared' | 'command' | 'process' | 'screen
 export type RunpanePanelScreenSource = 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty';
 export type RunpanePanelWaitCondition = 'initialized' | 'ready' | 'idle' | 'text';
 export type RunpanePanelBlockerKind =
+  | 'first-run-dialog'
   | 'codex-update'
   | 'agent-prompt'
   | 'submission_unverified'
@@ -912,6 +913,8 @@ export interface RunpanePanelScreenResult {
 export interface RunpanePanelInputRequest {
   panelId: string;
   input: string;
+  /** `user` when a person typed it; their next finished turn notifies the phone. */
+  source?: 'user' | 'agent';
 }
 
 /** `runpane report`: a worker's structured hand-back for its panel. */
@@ -976,8 +979,12 @@ export interface RunpanePanelInputResult {
 export interface RunpanePanelSubmitRequest {
   panelId: string;
   input: string;
+  /** Stop the current turn and wait for an empty idle composer before sending. */
+  interrupt?: boolean;
   /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
   asFilePointer?: boolean;
+  /** `user` when a person typed it; their next finished turn notifies the phone. */
+  source?: 'user' | 'agent';
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';
@@ -992,6 +999,7 @@ export type RunpanePanelVerification = 'observed' | 'unverifiable';
 export interface RunpaneDelivery {
   state: 'taken' | 'queued' | 'in-composer' | 'unknown';
   evidence: 'transcript' | 'screen' | 'argv';
+  message?: string;
 }
 
 export interface RunpanePanelSubmitResult {

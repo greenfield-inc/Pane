@@ -1,7 +1,8 @@
 /**
  * State of one editor tab. A file load changes several fields at once
- * (file, content, blob, mode, loading, error), so they move together here.
+ * (file, content, preview, mode, loading, error), so they move together here.
  */
+import type { FilePreviewKind } from '../../../../../shared/utils/filePreview';
 import type { FileItem, GitFileStatus } from './editorFileIo';
 
 export type EditorViewMode = 'edit' | 'preview';
@@ -13,8 +14,7 @@ export interface FileEditorState {
   loading: boolean;
   error: string | null;
   gitStatus: GitFileStatus;
-  /** Object URL for an image/PDF; null while loading or for text files. */
-  binaryBlobUrl: string | null;
+  previewKind: FilePreviewKind | 'unsupported' | null;
   viewMode: EditorViewMode;
 }
 
@@ -25,7 +25,7 @@ export const initialFileEditorState: FileEditorState = {
   loading: false,
   error: null,
   gitStatus: 'clean',
-  binaryBlobUrl: null,
+  previewKind: null,
   viewMode: 'edit',
 };
 
@@ -33,7 +33,7 @@ export type FileEditorAction =
   | { type: 'load-start' }
   | { type: 'load-cancelled' }
   | { type: 'load-text'; file: FileItem; content: string }
-  | { type: 'load-binary'; file: FileItem; blobUrl: string | null; error?: string }
+  | { type: 'load-preview'; file: FileItem; previewKind: FileEditorState['previewKind']; error?: string }
   | { type: 'load-failed'; message: string }
   | { type: 'edit'; content: string }
   | { type: 'saved'; content: string }
@@ -51,17 +51,17 @@ export function fileEditorReducer(state: FileEditorState, action: FileEditorActi
         selectedFile: action.file,
         fileContent: action.content,
         originalContent: action.content,
-        binaryBlobUrl: null,
+        previewKind: null,
         viewMode: 'edit',
         loading: false,
       };
-    case 'load-binary':
+    case 'load-preview':
       return {
         ...state,
         selectedFile: action.file,
         fileContent: '',
         originalContent: '',
-        binaryBlobUrl: action.blobUrl,
+        previewKind: action.previewKind,
         error: action.error ?? null,
         viewMode: 'edit',
         loading: false,

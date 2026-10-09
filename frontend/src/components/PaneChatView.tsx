@@ -18,6 +18,7 @@ import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
 import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
+import { SelectionLoading } from './ui/SelectionLoading';
 import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
@@ -163,6 +164,7 @@ export function PaneChatView() {
 function SessionWorkspace() {
   const sessions = useOrchestrationSessionStore(state => state.sessions);
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
+  const selectionRevision = useOrchestrationSessionStore(state => state.selectionRevision);
   const select = useOrchestrationSessionStore(state => state.select);
   const layout = useSessionWorkspaceLayoutStore(state => state.layout);
   const applyLayout = useSessionWorkspaceLayoutStore(state => state.apply);
@@ -205,12 +207,14 @@ function SessionWorkspace() {
   // still a dependency, so learning the host re-runs the real hydrate.
   useEffect(() => {
     if (activeSessionIds.length === 0) return;
-    void hydrateLayout(activeSessionIds, selectedSessionId).then(hydrated => {
-      if (!hydrated) return;
+    let cancelled = false;
+    void hydrateLayout(activeSessionIds, selectedSessionId, selectionRevision > 0).then(hydrated => {
+      if (!hydrated || cancelled) return;
       const focused = focusedSessionId(hydrated);
       if (activeSessionIds.includes(focused)) selectSession(focused);
     });
-  }, [activeSessionIds, hydrateLayout, remoteHostId, selectSession, selectedSessionId]);
+    return () => { cancelled = true; };
+  }, [activeSessionIds, hydrateLayout, remoteHostId, selectSession, selectedSessionId, selectionRevision]);
 
   // Archiving or deleting a Session retires its tile.
   useEffect(() => {
@@ -348,11 +352,14 @@ function SessionWorkspace() {
     );
   }
 
+  // The displayed tree follows intent in this commit. The passive effect above
+  // only remembers it; it must never expose the outgoing focused workspace.
+  const displayedLayout = selectedSessionId ? showSessionInLayout(layout, selectedSessionId) : layout;
   return (
     <div data-testid="session-tile-layout" className="relative flex min-h-0 flex-1 overflow-hidden bg-bg-primary">
       <SessionTileLayout
-        layout={layout}
-        focusedTileId={focusedSessionTile(layout).id}
+        layout={displayedLayout}
+        focusedTileId={focusedSessionTile(displayedLayout).id}
         renderTile={renderTile}
         onSizesChange={resizeTiles}
       />
@@ -385,9 +392,15 @@ function SessionTile({
   onClose,
 }: SessionTileProps) {
   const sessionId = tile.sessionId;
+  const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  const visit = useOrchestrationSessionStore(state => state.selectionVisits[sessionId] ?? 0);
   const [view, setView] = useState<OrchestrationSessionView<Session> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingSessionId, setLoadingSessionId] = useState(sessionId);
+  const [loadingHostId, setLoadingHostId] = useState(hostId);
+  const [loadingVisit, setLoadingVisit] = useState(visit);
+  const selectionError = useOrchestrationSessionStore(state => state.selectedSessionId === sessionId ? state.selectionError : null);
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
   const requestGeneration = useRef(0);
   const agentReloadKey = useRef<string | null>(null);
@@ -395,6 +408,9 @@ function SessionTile({
 
   const load = useCallback(async () => {
     const generation = ++requestGeneration.current;
+    setLoadingSessionId(sessionId);
+    setLoadingHostId(hostId);
+    setLoadingVisit(visit);
     setIsLoading(true);
     setError(null);
     try {
@@ -410,7 +426,7 @@ function SessionTile({
     } finally {
       if (generation === requestGeneration.current) setIsLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, hostId, visit]);
 
   useEffect(() => {
     void load();
@@ -479,10 +495,12 @@ function SessionTile({
         'relative flex h-full w-full flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-bg-primary',
         tiled && isFocused && 'ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]',
       )}
+      data-session-tile={sessionId}
+      data-session-focused={isFocused}
       onMouseDownCapture={focusThisTile}
       onFocusCapture={focusThisTile}
     >
-      {view ? (
+      {view && view.session.id === sessionId && loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit && !isLoading && !selectionError && !error ? (
         <NamedSessionWorkspace
           // Changing which Session a tile shows starts that Session's workspace
           // fresh, exactly as switching Sessions always has: its inspector, its
@@ -497,10 +515,13 @@ function SessionTile({
       ) : (
         <SessionTileFallback
           name={record?.name}
-          error={error}
-          isLoading={isLoading}
+          error={loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit ? selectionError ?? error : null}
+          isLoading={!selectionError && (loadingSessionId !== sessionId || loadingHostId !== hostId || loadingVisit !== visit || isLoading)}
           chrome={chrome}
-          onRetry={() => void load()}
+          onRetry={() => {
+            if (selectionError) void useOrchestrationSessionStore.getState().select({ sessionId }).catch(() => undefined);
+            void load();
+          }}
         />
       )}
 
@@ -532,10 +553,7 @@ function SessionTileFallback({ name, error, isLoading, chrome, onRetry }: {
       <SessionTileHeader name={name ?? 'Session'} chrome={chrome} />
       <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
         {isLoading ? (
-          <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-text-secondary">
-            <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
-            <span>Opening {name ?? 'Session'}…</span>
-          </div>
+          <SelectionLoading name={name ?? 'Session'} />
         ) : (
           <div>
             <p role="alert" className="text-sm text-text-secondary">{error ?? 'This Session did not open.'}</p>
@@ -786,7 +804,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   );
 
   return (
-    <div className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
+    <div data-session-content-id={view.session.id} className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">
       <LiveRegion>{statusAnnouncement}</LiveRegion>
       <SessionTileHeader name={view.session.name} chrome={chrome} error={error} />
       {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={saveOverview} />}

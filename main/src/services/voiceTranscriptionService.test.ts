@@ -17,6 +17,7 @@ function partialMock<Contract>(implementation: Partial<Contract>): Contract {
 describe('VoiceTranscriptionService', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('accepts browser audio data URLs with MIME parameters', async () => {
@@ -167,6 +168,59 @@ describe('VoiceTranscriptionService', () => {
     }));
 
     await expect(service.getDeepgramStreamingToken()).rejects.toThrow('Deepgram API key is not configured');
+  });
+
+  it('returns the raw recorded transcript, trimmed, when no OpenRouter key is set', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '');
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const urlText = String(url);
+      expect(urlText).not.toContain('openrouter.ai');
+      if (urlText.includes('/storage/upload/initiate')) {
+        return Response.json({
+          file_url: 'https://v3b.fal.media/files/test/pane-voice.webm',
+          upload_url: 'https://v3b.fal.media/files/test/pane-voice.webm?upload=1',
+        });
+      }
+      if (urlText.includes('v3b.fal.media')) return new Response(null, { status: 200 });
+      return Response.json({ text: ' we should use type script ', chunks: [], languages: ['en'] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const service = new VoiceTranscriptionService(partialMock<ConfigManager>({
+      getConfig: () => ({ falApiKey: 'fal-test-key' }),
+      isVerbose: () => false,
+    }));
+
+    const result = await service.transcribe({
+      audioDataUrl: 'data:audio/webm;base64,AAAA',
+      mimeType: 'audio/webm',
+      durationMs: 1_000,
+      language: 'en',
+    });
+
+    expect(result).toMatchObject({ mode: 'recorded', text: 'we should use type script' });
+    expect(result.cleanupModel).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns the raw streaming transcript, trimmed, when no OpenRouter key is set', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const service = new VoiceTranscriptionService(partialMock<ConfigManager>({
+      getConfig: () => ({}),
+      isVerbose: () => false,
+    }));
+
+    await expect(service.finalizeStreaming({
+      rawText: '  i use gpt five point five  ',
+      durationMs: 2_000,
+      language: 'en',
+    })).resolves.toMatchObject({
+      mode: 'streaming',
+      rawText: '  i use gpt five point five  ',
+      text: 'i use gpt five point five',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('finalizes streaming transcripts through OpenRouter cleanup and tracks Deepgram metadata', async () => {

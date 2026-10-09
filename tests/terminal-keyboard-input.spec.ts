@@ -4,6 +4,8 @@ import { installElectronApiMock } from './electronApiMock';
 declare global {
   interface Window {
     __terminalInputMessages: string[];
+    __holdFontLoads?: Promise<void>;
+    __releaseFontLoads?: () => void;
   }
 }
 
@@ -90,3 +92,38 @@ for (const fullscreen of [false, true]) {
     });
   }
 }
+
+test('keys typed while the terminal is still opening reach the shell', async ({ page }) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: panels,
+    activeProjectId: project.id,
+  });
+  // TerminalPanel opens xterm, then awaits font loads before it subscribes to
+  // input. Park it there so typing lands in that window.
+  await page.addInitScript(() => {
+    const load = document.fonts.load.bind(document.fonts);
+    document.fonts.load = (...args) => (window.__holdFontLoads ?? Promise.resolve()).then(() => load(...args));
+  });
+  await page.goto('/');
+  await page.evaluate(() => {
+    const calls: string[] = [];
+    window.__terminalInputMessages = calls;
+    window.__holdFontLoads = new Promise(resolve => { window.__releaseFontLoads = resolve; });
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => {
+      if (channel === 'terminal:input') calls.push(String(args[1]));
+      return invoke(channel, ...args);
+    };
+  });
+  await page.getByRole('button', { name: 'Expand project Terminal input fixture', exact: true }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+  const terminal = page.getByRole('tabpanel');
+  const input = terminal.locator('.xterm-helper-textarea').first();
+  await expect(input).toBeAttached();
+  await input.focus();
+  await page.keyboard.type('pwd');
+
+  await page.evaluate(() => window.__releaseFontLoads?.());
+  await expect(terminal.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await expect.poll(() => inputMessages(page)).toEqual(['p', 'w', 'd']);
+});

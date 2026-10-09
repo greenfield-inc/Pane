@@ -6,7 +6,7 @@ interface ConfigStore {
   config: AppConfig | null;
   isLoading: boolean;
   error: string | null;
-  fetchConfig: () => Promise<AppConfig>;
+  fetchConfig: (ownsRequest?: () => boolean) => Promise<AppConfig>;
   updateConfig: (updates: UpdateConfigRequest) => Promise<AppConfig>;
 }
 
@@ -26,21 +26,21 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   isLoading: false,
   error: null,
 
-  fetchConfig: async () => {
-    set({ isLoading: true, error: null });
+  fetchConfig: async (ownsRequest = () => true) => {
+    if (ownsRequest()) set({ isLoading: true, error: null });
     try {
       const response = await API.config.get();
       if (response.success && response.data) {
-        set({ config: response.data, isLoading: false });
+        if (ownsRequest()) set({ config: response.data, isLoading: false });
         return response.data;
       } else {
         const message = response.error || 'Failed to fetch config';
-        set({ error: message, isLoading: false });
+        if (ownsRequest()) set({ error: message, isLoading: false });
         throw new Error(message);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch config';
-      set({ error: message, isLoading: false });
+      if (ownsRequest()) set({ error: message, isLoading: false });
       throw new Error(message);
     }
   },

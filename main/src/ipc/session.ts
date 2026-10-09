@@ -59,6 +59,7 @@ const DAEMON_SESSION_CHANNELS = [
   'sessions:resume-interrupted',
   'sessions:dismiss-interrupted',
   'archive:get-progress',
+  'archive:retry-cleanup',
 ] as const;
 
 const ACTIVE_SESSION_HINT_CHANNEL = 'sessions:set-active-session';
@@ -356,6 +357,23 @@ export function registerSessionHandlers(
     }
   });
 
+  const archiveProcessRoots = (sessionId: string): number[] => [
+      ...(terminalPanelManager.getSessionPids().get(sessionId) ?? []),
+      ...sessionManager.getArchiveProcessPids(sessionId),
+      ...runCommandManager.getArchiveProcessPids(sessionId),
+  ];
+  services.archiveCleanupManager?.setProcessRootsHandler(archiveProcessRoots);
+  const teardownArchivedSession = async (sessionId: string, tracker: import('../services/archiveProcessTracker').ArchiveProcessTracker): Promise<void> => {
+    await tracker.capture(archiveProcessRoots(sessionId));
+    if (databaseService.getSession(sessionId)) await sessionManager.archiveSession(sessionId, { trackedTeardown: true });
+    await terminalPanelManager.retireSessionTerminalsForArchive(sessionId);
+    await panelManager.cleanupSessionPanelsInMemory(sessionId);
+    gitStatusManager.clearSessionCache(sessionId);
+    await runCommandManager.retireRunCommandsForArchive(sessionId);
+    sessionImageCounters.delete(sessionId);
+  };
+  services.archiveCleanupManager?.setTeardownHandler(teardownArchivedSession);
+
   commandRegistry.register('sessions:delete', async (sessionId: string, options?: SessionDeleteOptions) => {
     try {
       // Get database session details before archiving (includes worktree_name and project_id)
@@ -389,6 +407,13 @@ export function registerSessionHandlers(
       }
 
       // Archive the session immediately to provide fast feedback to the user
+      if (services.archiveCleanupManager?.supports(dbSession)) {
+        const cleanup = services.archiveCleanupManager;
+        const job = await cleanup.prepare(dbSession, removesWorktree, options?.removeExternalWorktree === true);
+        if (!databaseService.archiveSession(sessionId, job)) throw new Error('Session not found');
+        cleanup.enqueue(job, tracker => teardownArchivedSession(sessionId, tracker));
+        return { success: true };
+      }
       await sessionManager.archiveSession(sessionId);
 
       // Add the archive message to session output
@@ -1622,6 +1647,7 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:restore', async (sessionId: string) => {
     try {
+      services.archiveCleanupManager?.assertRestorable(sessionId);
       const dbSession = databaseService.getSession(sessionId);
       if (!dbSession || !dbSession.archived) {
         return { success: false, error: 'Session not found or already active' };
@@ -1671,7 +1697,7 @@ export function registerSessionHandlers(
       return { success: true };
     } catch (error) {
       console.error('Failed to restore session:', error);
-      return { success: false, error: 'Failed to restore session' };
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to restore session' };
     }
   });
 
@@ -1693,6 +1719,16 @@ export function registerSessionHandlers(
     } catch (error) {
       console.error('Failed to get archive progress:', error);
       return { success: false, error: 'Failed to get archive progress' };
+    }
+  });
+
+  commandRegistry.register('archive:retry-cleanup', async (sessionId: string, skipInterruptedScript?: boolean) => {
+    try {
+      if (!services.archiveCleanupManager) throw new Error('Durable archive cleanup is unavailable');
+      services.archiveCleanupManager.retry(sessionId, skipInterruptedScript === true);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Cannot retry cleanup' };
     }
   });
 

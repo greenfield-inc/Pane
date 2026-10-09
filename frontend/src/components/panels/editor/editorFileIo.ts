@@ -1,8 +1,7 @@
 /**
- * IPC reads for a center editor tab: file bodies (text or a blob URL for
- * images/PDFs) and the per-file git status badge.
+ * IPC reads for a center editor tab: text bodies, streamed read-only previews, or a binary notice and the git status badge.
  */
-import { fileExtension, IMAGE_EXTENSIONS, PDF_EXTENSIONS } from './fileKinds';
+import { filePreviewKind, type FilePreviewKind } from '../../../../../shared/utils/filePreview';
 
 export interface FileItem {
   name: string;
@@ -14,35 +13,17 @@ export type GitFileStatus = 'clean' | 'modified' | 'untracked';
 
 export type EditorFileContent =
   | { kind: 'text'; content: string }
-  | { kind: 'binary'; blobUrl: string }
+  | { kind: 'media'; mediaKind: 'video' | 'audio' }
+  | { kind: 'unsupported' }
+  | { kind: 'preview'; previewKind: FilePreviewKind }
   | { kind: 'error'; message: string };
 
-export function isBinaryPath(filePath: string): boolean {
-  const ext = fileExtension(filePath);
-  return IMAGE_EXTENSIONS.has(ext) || PDF_EXTENSIONS.has(ext);
-}
-
-function binaryMimeType(ext: string): string {
-  if (!IMAGE_EXTENSIONS.has(ext)) return 'application/pdf';
-  if (ext === 'jpg') return 'image/jpeg';
-  if (ext === 'ico') return 'image/x-icon';
-  return `image/${ext}`;
-}
-
 export async function readEditorFile(sessionId: string, filePath: string): Promise<EditorFileContent> {
-  if (isBinaryPath(filePath)) {
-    const result = await window.electronAPI.invoke('file:read-binary', { sessionId, filePath });
-    if (!result.success || !result.contentBase64) {
-      return { kind: 'error', message: result.error || 'Failed to load binary file' };
-    }
-    const byteChars = atob(result.contentBase64);
-    const byteArray = new Uint8Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
-    const blob = new Blob([byteArray], { type: binaryMimeType(fileExtension(filePath)) });
-    return { kind: 'binary', blobUrl: URL.createObjectURL(blob) };
-  }
-
+  const previewKind = filePreviewKind(filePath);
+  if (previewKind === 'video' || previewKind === 'audio') return { kind: 'media', mediaKind: previewKind };
+  if (previewKind) return { kind: 'preview', previewKind };
   const result = await window.electronAPI.invoke('file:read', { sessionId, filePath });
+  if (result.binary) return { kind: 'unsupported' };
   if (!result.success) return { kind: 'error', message: result.error };
   return { kind: 'text', content: result.content };
 }

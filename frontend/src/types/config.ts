@@ -3,6 +3,7 @@ import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
+import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
 
 export interface TerminalShortcut {
@@ -60,6 +61,8 @@ export interface AppConfig {
   falApiKey?: string;
   openRouterApiKey?: string;
   deepgramApiKey?: string;
+  apns?: ApnsCredentialConfig;
+  sharedCredentials?: Partial<Record<SharedCredentialId, SharedCredentialMeta>>;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   // Legacy fields for backward compatibility
   gitRepoPath?: string;
@@ -79,9 +82,6 @@ export interface AppConfig {
   autoStartOnBoot?: boolean;
   // Keep the computer awake while any session is active
   keepAwakeWhileSessionsActive?: boolean;
-  // Stravu MCP integration
-  stravuApiKey?: string;
-  stravuServerUrl?: string;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -151,6 +151,7 @@ export interface AppConfig {
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
+  defaultSessionPinned?: boolean;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -181,6 +182,7 @@ export interface UpdateConfigRequest {
   falApiKey?: string;
   openRouterApiKey?: string;
   deepgramApiKey?: string;
+  apns?: ApnsCredentialConfig;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   claudeExecutablePath?: string;
   systemPromptAppend?: string;
@@ -190,8 +192,6 @@ export interface UpdateConfigRequest {
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;
-  stravuApiKey?: string;
-  stravuServerUrl?: string;
   theme?: AppConfig['theme'];
   appearanceMode?: AppearanceMode;
   systemLightTheme?: LightTheme;
@@ -212,6 +212,7 @@ export interface UpdateConfigRequest {
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
+  defaultSessionPinned?: boolean;
   terminalShortcuts?: TerminalShortcut[];
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;

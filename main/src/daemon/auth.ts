@@ -94,3 +94,71 @@ function safeTokenHashEquals(expectedHash: string, actualHash: string): boolean 
     return false;
   }
 }
+
+type WorkspaceAuthResult = { ok: true; client: null } | RemoteDaemonAuthFailure;
+
+/** Who may reach the workspace listener right now. */
+export interface WorkspaceAccessPolicy {
+  ownerLogin: string;
+  /** "owner": only `ownerLogin`. "tailnet": any login in `tailnetLogins`. */
+  visibility: 'owner' | 'tailnet';
+  /** Lowercased logins of the people with untagged devices in the current tailnet. */
+  tailnetLogins: ReadonlySet<string>;
+  /** Checks a presented password for a login; null when password protection is off. */
+  verifySecret: ((secret: string, login: string) => 'valid' | 'invalid' | 'throttled') | null;
+}
+
+/**
+ * The codeless access check: the login must be allowed by visibility, and then, when password
+ * protection is on, the request must carry the password. Visibility comes first, so a refused
+ * login learns nothing about the password.
+ *
+ * Tailscale Serve (proxy mode) sets `Tailscale-User-Login` for user-owned devices, including
+ * users a device was shared with, and strips any copy the caller sent; tagged devices get none.
+ */
+export function authenticateWorkspaceRequest(
+  loginHeader: string | string[] | undefined,
+  authorizationHeader: string | string[] | undefined,
+  policy: WorkspaceAccessPolicy | null,
+): WorkspaceAuthResult {
+  // Serve sends exactly one login; a repeated header is not Serve's.
+  const login = Array.isArray(loginHeader) ? '' : (loginHeader ?? '').trim().toLowerCase();
+  if (!login) {
+    return workspaceAuthFailure(
+      403,
+      'ERR_WORKSPACE_IDENTITY_REQUIRED',
+      'This machine accepts only requests that Tailscale Serve signs with a user login; tagged devices are refused.',
+    );
+  }
+  const allowed = policy !== null && (
+    login === policy.ownerLogin.toLowerCase()
+    || (policy.visibility === 'tailnet' && policy.tailnetLogins.has(login))
+  );
+  if (!allowed) {
+    return workspaceAuthFailure(
+      403,
+      'ERR_WORKSPACE_IDENTITY_REFUSED',
+      policy?.visibility === 'tailnet'
+        ? `This machine accepts people on its tailnet; ${login} is not one of them.`
+        : `This machine accepts only its owner's Tailscale login; ${login} is refused.`,
+    );
+  }
+  if (policy.verifySecret) {
+    const secret = extractBearerToken(authorizationHeader);
+    if (!secret) {
+      return workspaceAuthFailure(401, 'ERR_WORKSPACE_PASSWORD_REQUIRED', 'This machine is password protected; enter its password to connect.');
+    }
+    const check = policy.verifySecret(secret, login);
+    if (check === 'throttled') {
+      return workspaceAuthFailure(429, 'ERR_WORKSPACE_PASSWORD_THROTTLED', 'Too many wrong passwords for this machine; try again in a minute.');
+    }
+    if (check === 'invalid') {
+      return workspaceAuthFailure(401, 'ERR_WORKSPACE_PASSWORD_INVALID', 'The password for this machine is wrong.');
+    }
+  }
+  return { ok: true, client: null };
+}
+
+function workspaceAuthFailure(statusCode: number, code: string, message: string): RemoteDaemonAuthFailure {
+  return { ok: false, statusCode, error: { message, code } };
+}

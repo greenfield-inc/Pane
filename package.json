@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.152",
+  "version": "2.4.171",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -65,6 +65,8 @@
     "check:runpane-contract": "node scripts/generate-runpane-contract.js --check",
     "test:runpane-contract": "pnpm run check:runpane-contract && pnpm --filter runpane build && node scripts/test-runpane-contract.js",
     "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
+    "test:runpane-workspace": "pnpm --filter runpane build && node --test scripts/test-runpane-workspace.js",
+    "test:runpane-handoff": "pnpm --filter runpane build && node --test scripts/test-runpane-handoff.js",
     "test:runpane-package-smoke": "pnpm --filter runpane build && node scripts/test-runpane-package-smoke.js",
     "inject-build-info": "node scripts/inject-build-info.js",
     "release:mac": "pnpm run build:frontend && pnpm run build:main && pnpm run inject-build-info && pnpm run generate-notices && node scripts/configure-build.js && electron-builder --mac --publish always && node scripts/verify-mac-universal-binaries.js",
@@ -97,6 +99,7 @@
     "test": "playwright test",
     "test:ci": "playwright test --config=playwright.ci.config.ts",
     "test:ci:minimal": "playwright test --config=playwright.ci.minimal.config.ts",
+    "test:renderer-selection": "pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json && playwright test --config=tests/renderer/playwright.config.ts",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed"
   },

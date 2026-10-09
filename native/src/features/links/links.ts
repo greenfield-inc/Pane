@@ -23,13 +23,21 @@ export type ResolvedTarget =
  * only as `trigger.payload`; Android puts them in `remoteMessage.data`.
  */
 export function parsePushTarget(request: unknown): OpenTarget | null {
+  const data = pushData(request);
+  const host = stringField(data, 'hostProfileId');
+  return host ? withPane({ host }, stringField(data, 'paneId'), stringField(data, 'panelId')) : null;
+}
+
+/** Whether a Pane host's alert is about this Pane, or about a worker of the Session this Pane is. */
+export function isPushForPane(request: unknown, paneId: string): boolean {
+  const data = pushData(request);
+  return data !== undefined && (stringField(data, 'paneId') === paneId || stringField(data, 'sessionPaneId') === paneId);
+}
+
+function pushData(request: unknown): unknown {
   const trigger = field(request, 'trigger');
   const candidates = [field(trigger, 'payload'), field(field(trigger, 'remoteMessage'), 'data'), field(field(request, 'content'), 'data')];
-  for (const data of candidates) {
-    const host = stringField(data, 'hostProfileId');
-    if (host) return withPane({ host }, stringField(data, 'paneId'), stringField(data, 'panelId'));
-  }
-  return null;
+  return candidates.find(data => stringField(data, 'hostProfileId') !== undefined);
 }
 
 /**

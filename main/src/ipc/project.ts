@@ -301,8 +301,17 @@ export function registerProjectHandlers(
       // Invalidate cached PathResolver/CommandRunner in case WSL settings changed
       sessionManager.invalidateProjectContext(projectIdNum);
 
+      // A \\wsl.localhost\<distro>\... path is stored the way projects:create stores
+      // it: the Linux path plus the distro. Saved raw, every git call ran
+      // `cd '\\wsl.localhost\...'` inside WSL and failed. Any other path is kept as
+      // typed, so editing a WSL project to a plain Linux path doesn't drop its distro.
+      const location = updates.path !== undefined ? resolveProjectRegistration(updates.path) : null;
+      const normalizedUpdates = location?.wsl_enabled
+        ? { ...updates, path: location.path, wsl_enabled: true, wsl_distribution: location.wsl_distribution }
+        : updates;
+
       // Update the project
-      const project = databaseService.updateProject(projectIdNum, updates);
+      const project = databaseService.updateProject(projectIdNum, normalizedUpdates);
 
       // If run_script was updated, also update the run commands table
       if (updates.run_script !== undefined) {

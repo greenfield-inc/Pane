@@ -1,0 +1,25 @@
+.notes-surface {
+  container-type: inline-size;
+}
+
+.notes-document {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0 clamp(2.5rem, 7cqw, 4rem) 4rem;
+}
+
+.notes-title {
+  font-size: clamp(1.5rem, 5cqw, 2rem);
+  line-height: 1.3;
+}
+
+.notes-text {
+  font-size: 0.875rem;
+  min-height: 2rem;
+}
+
+@media (hover: none) {
+  .notes-block-add {
+    opacity: 1;
+  }
+}

@@ -32,6 +32,17 @@ export class ArchiveProgressManager extends EventEmitter {
   private activeTasks: Map<string, ArchiveTask> = new Map();
   private taskQueue: ArchiveTask[] = [];
   private isProcessing: boolean = false;
+  private executingTasks = new Set<string>();
+  private failures = new Map<string, string>();
+  private durableTasks?: () => ArchiveProgressTask[];
+
+  setDurableTasks(read: () => ArchiveProgressTask[]): void {
+    this.durableTasks = read;
+  }
+
+  publishDurableTasks(): void {
+    this.emitProgress();
+  }
 
   addTask(
     sessionId: string, 
@@ -78,18 +89,18 @@ export class ArchiveProgressManager extends EventEmitter {
       this.emitProgress();
 
       if (task.executeCallback) {
+        this.executingTasks.add(task.sessionId);
         try {
           console.log(`[ArchiveProgressManager] Starting archive for session ${task.sessionId}`);
           await task.executeCallback();
-          
-          // If the task wasn't explicitly marked as failed, mark it as completed
-          const currentTask = this.activeTasks.get(task.sessionId);
-          if (currentTask && currentTask.status !== 'failed') {
-            this.updateTaskStatus(task.sessionId, 'completed');
-          }
         } catch (error) {
           console.error(`[ArchiveProgressManager] Error processing archive for session ${task.sessionId}:`, error);
           this.updateTaskStatus(task.sessionId, 'failed', error instanceof Error ? error.message : 'Unknown error');
+        } finally {
+          this.executingTasks.delete(task.sessionId);
+          const failure = this.failures.get(task.sessionId);
+          this.failures.delete(task.sessionId);
+          this.updateTaskStatus(task.sessionId, failure === undefined ? 'completed' : 'failed', failure);
         }
       }
     }
@@ -101,6 +112,18 @@ export class ArchiveProgressManager extends EventEmitter {
   updateTaskStatus(sessionId: string, status: ArchiveTask['status'], error?: string): void {
     const task = this.activeTasks.get(sessionId);
     if (!task) return;
+
+    // A failure is a result, not the end of the callback: artifact cleanup
+    // still needs shutdown protection and must remain visible as active.
+    if (this.executingTasks.has(sessionId) && (status === 'failed' || status === 'completed')) {
+      if (status === 'failed') {
+        const failure = error ?? 'Archive cleanup failed';
+        this.failures.set(sessionId, failure);
+        task.error = failure;
+      }
+      this.emitProgress();
+      return;
+    }
 
     task.status = status;
     console.log(`[ArchiveProgressManager] status sessionId=${sessionId} status=${status}${error ? ` error=${JSON.stringify(error)}` : ''}`);
@@ -131,7 +154,7 @@ export class ArchiveProgressManager extends EventEmitter {
 
   getActiveTasks(): ArchiveProgressTask[] {
     // Return a serializable version without the executeCallback
-    return Array.from(this.activeTasks.values()).map(task => ({
+    const transient = Array.from(this.activeTasks.values()).map(task => ({
       sessionId: task.sessionId,
       sessionName: task.sessionName,
       worktreeName: task.worktreeName,
@@ -142,18 +165,22 @@ export class ArchiveProgressManager extends EventEmitter {
       error: task.error,
       trashDeletion: task.trashDeletion,
     }));
+    // Newest first by start time: running work sits above finished history, and a
+    // row moves only when a newer archive starts above it, never on a status change.
+    return [...transient, ...(this.durableTasks?.() ?? [])]
+      .sort((a, b) => Date.parse(b.startTime) - Date.parse(a.startTime));
   }
 
   hasActiveTasks(): boolean {
     // Consider both active tasks and queued tasks
-    const hasActive = Array.from(this.activeTasks.values()).some(
+    const hasActive = this.getActiveTasks().some(
       task => task.status !== 'completed' && task.status !== 'failed'
     );
     return hasActive || this.taskQueue.length > 0;
   }
 
   getActiveTaskCount(): number {
-    return this.activeTasks.size;
+    return this.getActiveTasks().length;
   }
 
   getQueuedTaskCount(): number {

@@ -352,6 +352,19 @@ test('seeded pane exposes separate compound actions and arrow-keyed panel tabs',
   await expect(archiveButton).toBeAttached();
   await expect(pinButton).toBeAttached();
   await expect(paneButton.locator('button, a, [role="button"]')).toHaveCount(0);
+  await page.mouse.move(800, 500);
+  await paneButton.focus();
+  await page.keyboard.press('Tab');
+  await expect(archiveButton).toBeFocused();
+  await expect(archiveButton.locator('..')).toHaveCSS('opacity', '1');
+  await expect(archiveButton).toHaveCSS('outline-style', 'solid');
+  await expect(archiveButton).toHaveCSS('outline-width', '2px');
+  await page.keyboard.press('Tab');
+  await expect(pinButton).toBeFocused();
+  await expect(pinButton.locator('..')).toHaveCSS('opacity', '1');
+  await expect(pinButton).toHaveCSS('outline-style', 'solid');
+  await expect(pinButton).toHaveCSS('outline-width', '2px');
+  await page.screenshot({ path: 'tmp/verify/sidebar-row-action-overlay/keyboard-focus.png' });
   await archiveButton.click();
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
   await expect.poll(() => page.evaluate(() => (

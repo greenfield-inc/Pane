@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Prepare a verified resumption brief when moving work to another agent, device, or session, including local-to-cloud coding handoffs. Use for "hand this off," "continue elsewhere," or "save where we are."
+description: Prepare a verified resumption brief when moving work to another agent, device, or session, including local-to-cloud coding handoffs, and start the receiving agent with `runpane handoff`. Use for "hand this off," "continue on my Mac," "give this to Codex," or "save where we are."
 ---
 
 # Handoff
@@ -22,6 +22,23 @@ You are the outgoing collaborator. Give the next person or agent the verified co
 - Record required tools, services, and credential setup references. Keep secret values in their approved secret store and check the receiving agent’s plugin, skill, and network prerequisites.
 - Keep private code and patches in access-controlled locations. Identify the next step needed to resolve any transfer or permission blocker.
 
+## Write the note
+
+Write the brief as the handoff note in [references/note-template.md](references/note-template.md): a compaction of your session, in nine required `##` sections, for a reader with none of your context.
+
+## Start the receiving agent
+
+When the person asks for another agent to continue, on this machine or another of theirs, use `runpane handoff`. It works the same from any harness. "Hand this to Claude on my Mac" authorizes starting that agent; it does not authorize pushing.
+
+1. Find the machine's name: `runpane workspace list` lists the person's machines (a unique prefix such as `macbook-pro` works). Ask when more than one fits.
+2. Get the template outside the checkout, so it is never committed: `runpane handoff --template > ~/handoff.md`. Fill in every section; write "None" where one does not apply. Leave the front matter alone, and don't add instructions for the receiver: the CLI rewrites the front matter and appends them when it sends.
+3. Make the work reachable. Commit the task's files yourself; leave unrelated edits uncommitted. If the branch is not pushed, ask before pushing, then push it or pass `--push` (it commits every remaining change except the note as WIP and pushes; it never forces).
+4. Check the destination: `runpane handoff "claude opus on <machine>" --note-file ~/handoff.md --dry-run`. The destination is freeform: the agent (claude, codex, cursor), and optionally the model, the effort and the machine, such as `"codex gpt-5 high on parsa-devbox"` or `"cursor on this machine"`. `--machine`, `--agent`, `--model` and `--effort` override the text. Effort is supported for Claude and Codex; Cursor effort is rejected before committing or sending.
+5. Send it: the same command without `--dry-run`. It finds the destination's saved repository with the same remote, writes the note to that machine's `~/.pane/handoffs/`, and starts the agent in a new Pane branched from yours. If it fails, relay its message; it names the fix (Pane not running there, repository not saved there, branch not pushed).
+6. Tell the person which Pane started on which machine, and give them the `agents status` command it printed. The receiver pushes to your branch and reports back to your panel, so stop changing that branch.
+
+The note is the handoff. Skip the two sections below unless the person also wants a saved page, a Grain workspace or a PR comment, or there is no receiving agent to start.
+
 ## Save one authoritative brief
 
 - Honor an explicit destination. Otherwise, when Grain is connected, read its installed skill and update the existing task workspace; if none exists, create a clearly named one in `Development Artifacts`. Retain its ID for subsequent updates.
@@ -38,3 +55,5 @@ You are the outgoing collaborator. Give the next person or agent the verified co
 - Read back the saved brief and check its links, revision, and sharing scope. Verify public links in a signed-out context when possible, and state the verification status of recipient access to private resources.
 - Return the brief's link and a paste-ready instruction to resume, naming the first action and any transfer/access blockers.
 - Tell the receiving agent to read repository instructions and reconcile this checkpoint with the current branch, issue/PR, and artifact state before acting.
+
+WSL handoff is currently unsupported and is rejected before committing or sending anything. Use a native repository. Remote shells must be Bash, Zsh, Sh, Fish, or PowerShell; cmd is unsupported. A staged note must be unstaged before using `--push`.

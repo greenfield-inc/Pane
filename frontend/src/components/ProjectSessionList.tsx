@@ -36,7 +36,7 @@ import {
 const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transition-colors';
 const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
 const SIDEBAR_ROW_GAP = 'gap-2';
-const SIDEBAR_SECTION_ROW = 'mt-3 flex w-full items-center justify-between gap-2 pl-4 pr-3 py-1';
+const SIDEBAR_SECTION_ROW = 'pane-sidebar-projects-header sticky bottom-0 z-30 mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1';
 const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
 const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
 
@@ -49,8 +49,6 @@ interface ProjectSessionListProps {
   repositoriesSectionExpanded: boolean;
   onPinnedSectionExpandedChange: (expanded: boolean) => void;
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
-  /** Lets the sidebar's "New project" button open this list's dialog. */
-  onRegisterAddRepository?: (open: () => void) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -65,7 +63,6 @@ export function ProjectSessionList({
   repositoriesSectionExpanded,
   onPinnedSectionExpandedChange,
   onRepositoriesSectionExpandedChange,
-  onRegisterAddRepository,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -79,9 +76,6 @@ export function ProjectSessionList({
 
   // Add project dialog state
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
-  useEffect(() => {
-    onRegisterAddRepository?.(() => setShowAddProjectDialog(true));
-  }, [onRegisterAddRepository]);
 
   // Drag-to-reorder state
   const [dragProjectId, setDragProjectId] = useState<number | null>(null);
@@ -326,6 +320,7 @@ export function ProjectSessionList({
   );
 
   const handleManagedPaneClick = useCallback(async (paneId: string, parentSessionId: string) => {
+    handleSessionClick(paneId, 'orchestration');
     try {
       // Keep the parent Session selected so the top-level Sessions shortcut
       // returns to the conversation that owns the focused Pane.
@@ -333,7 +328,6 @@ export function ProjectSessionList({
     } catch {
       // The Pane remains navigable if the orchestration selection cannot refresh.
     }
-    handleSessionClick(paneId, 'orchestration');
   }, [handleSessionClick, selectOrchestrationSession]);
 
   const renderManagedPane = useCallback((paneId: string, parentSessionId: string) => {
@@ -465,6 +459,16 @@ export function ProjectSessionList({
                 <ChevronRight className="h-3.5 w-3.5 text-current" />
               )}
             </span>
+          </button>
+          <button
+            type="button"
+            data-testid="new-project"
+            aria-label="New project"
+            title="New project"
+            onClick={() => setShowAddProjectDialog(true)}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+          >
+            <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
 
@@ -802,6 +806,13 @@ function SessionRow({
   const hasDiff = adds > 0 || dels > 0;
   const showActivity = agentDisplayStatus === 'working';
   const accessibleName = displayName || gs?.prTitle || session.name || 'Untitled';
+  // Composite translucent row tokens over an opaque base to mask the title.
+  const actionSurfaceClassName = cn(
+    'flex h-full items-center bg-surface-secondary transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100',
+    isActive
+      ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
+      : 'group-hover/session:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]'
+  );
 
   return (<>
     <div
@@ -842,27 +853,31 @@ function SessionRow({
         />
       </div>
 
-      {/* Quick actions stay out of the resting row and appear on hover or
-          keyboard focus; the right-click menu carries the full set. */}
-      <div className="relative z-10 flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100">
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onArchive(); }}
-          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
-          title="Archive"
-          aria-label={`Archive ${accessibleName}`}
-        >
-          <Archive className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
-          className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary"
-          title={session.isFavorite ? 'Unpin' : 'Pin'}
-          aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
-        >
-          <Pin className="h-3.5 w-3.5 rotate-45" />
-        </button>
+      {/* Each action masks only its own area. A pinned row shows just the pin
+          at rest; hover or keyboard focus reveals Archive as well. */}
+      <div className="absolute inset-y-0 right-2 z-10 flex items-center">
+        <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
+            title="Archive"
+            aria-label={`Archive ${accessibleName}`}
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
+            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary"
+            title={session.isFavorite ? 'Unpin' : 'Pin'}
+            aria-label={`${session.isFavorite ? 'Unpin' : 'Pin'} ${accessibleName}`}
+          >
+            <Pin className="h-3.5 w-3.5 rotate-45" />
+          </button>
+        </div>
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}

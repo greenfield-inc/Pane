@@ -19,6 +19,8 @@ interface CreateSessionRequest {
 interface SessionStore {
   sessions: Session[];
   activeSessionId: string | null;
+  selectionRevision: number;
+  selectionError: string | null;
   activeMainRepoSession: Session | null; // Special storage for main repo session
   isLoaded: boolean;
   terminalOutput: Record<string, string[]>; // sessionId -> terminal output lines
@@ -36,6 +38,7 @@ interface SessionStore {
   updateSession: (session: Session) => void;
   deleteSession: (session: Pick<Session, 'id'>) => void;
   setActiveSession: (sessionId: string | null) => Promise<void>;
+  invalidateHost: () => void;
   addSessionOutput: (output: SessionOutput) => void;
   setSessionOutput: (sessionId: string, output: string) => void;
   setSessionOutputs: (sessionId: string, outputs: SessionOutput[]) => void;
@@ -71,9 +74,15 @@ interface SessionStore {
   getSpotlightedSessionForProject: (projectId: number) => string | undefined;
 }
 
+// Every selection (including clearing it) supersedes pending session fetches.
+let selectionVersion = 0;
+let pendingSelectionFetch: { sessionId: string; promise: ReturnType<typeof API.sessions.get> } | null = null;
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
+  selectionRevision: 0,
+  selectionError: null,
   activeMainRepoSession: null,
   isLoaded: false,
   terminalOutput: {},
@@ -88,6 +97,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   activeSpotlights: new Map(),
   
   setSessions: (sessions) => set({ sessions: normalizeSessions(sessions) }),
+  invalidateHost: () => {
+    selectionVersion += 1;
+    pendingSelectionFetch = null;
+    const timer = get().gitStatusBatchTimer;
+    if (timer) clearTimeout(timer);
+    set({ sessions: [], activeSessionId: null, activeMainRepoSession: null,
+      selectionRevision: selectionVersion, selectionError: null, isLoaded: false,
+      terminalOutput: {}, deletingSessionIds: new Set(), activeSpotlights: new Map(), gitStatusLoading: new Set(),
+      pendingGitStatusLoading: new Map(), pendingGitStatusUpdates: new Map(), gitStatusBatchTimer: null });
+  },
   
   loadSessions: (sessions) => set({ sessions: normalizeSessions(sessions), isLoaded: true }),
   
@@ -167,7 +186,14 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   }),
   
   setActiveSession: async (sessionId) => {
-    
+    const version = ++selectionVersion;
+    set({ selectionRevision: version, selectionError: null });
+    const state = get();
+    const wasAlreadyActive = state.activeSessionId === sessionId;
+    const reusableFetch = wasAlreadyActive && pendingSelectionFetch?.sessionId === sessionId
+      ? pendingSelectionFetch : null;
+    pendingSelectionFetch = null;
+
     if (!sessionId) {
       set({ activeSessionId: null, activeMainRepoSession: null });
       // Notify backend about active session change for smart git status polling
@@ -180,20 +206,23 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     
     // Emit session-switched event for cleanup
-    if (get().activeSessionId !== sessionId) {
+    if (!wasAlreadyActive) {
       startSwitchPane(sessionId);
       window.dispatchEvent(new CustomEvent('session-switched', { detail: { sessionId } }));
       
       // Notify backend about active session change for smart git status polling
       try {
-        await window.electronAPI.invoke('sessions:set-active-session', sessionId);
+        // This is a polling hint, not permission to select the pane. Never
+        // let its reply order determine the renderer's selection order.
+        void window.electronAPI.invoke('sessions:set-active-session', sessionId).catch(error => {
+          console.warn('Failed to notify backend about active session change:', error);
+        });
       } catch (error) {
         console.warn('Failed to notify backend about active session change:', error);
       }
     }
     
     // First check if the session is already in our local store
-    const state = get();
     const existingSession = state.sessions.find(s => s.id === sessionId);
     
     if (existingSession) {
@@ -215,16 +244,24 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       
       // Only mark session as viewed if it wasn't already active
       // This prevents the blue dot from disappearing when the session completes while you're viewing it
-      const wasAlreadyActive = state.activeSessionId === sessionId;
       if (!wasAlreadyActive) {
         get().markSessionAsViewed(sessionId);
       }
       return;
     }
     
+    // Publish the intent now, even when its data needs fetching. This also
+    // lets a clear/delete/host reset invalidate the eventual fetch result.
+    set({ activeSessionId: sessionId, activeMainRepoSession: null });
+
     // If not in local store, fetch from backend (this might be a stale UI)
+    // Repeated clicks on this pending selection share its request. A different
+    // selection, including null, drops the reusable request above.
+    const fetch = reusableFetch ?? { sessionId, promise: API.sessions.get(sessionId) };
+    pendingSelectionFetch = fetch;
     try {
-      const response = await API.sessions.get(sessionId);
+      const response = await fetch.promise;
+      if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       
       if (response.success && response.data) {
         const session = normalizeSession(response.data);
@@ -256,18 +293,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
           // Regular session
           set({ activeSessionId: sessionId, activeMainRepoSession: null });
         }
-        // Only mark session as viewed if it wasn't already active
-        const currentState = get();
-        const wasAlreadyActive = currentState.activeSessionId === sessionId;
-        if (!wasAlreadyActive) {
-          get().markSessionAsViewed(sessionId);
-        }
+        // The data has only now become viewable. A second click while this
+        // fetch was pending must not lose the winning request's viewed hint.
+        get().markSessionAsViewed(sessionId);
       } else {
         console.error('[SessionStore] Failed to fetch session:', sessionId, response);
+        set({ selectionError: response.error || 'Failed to open Pane' });
       }
     } catch (error) {
+      if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       console.error('[SessionStore] Error setting active session:', error);
-      set({ activeSessionId: sessionId, activeMainRepoSession: null });
+      set({ selectionError: error instanceof Error ? error.message : 'Failed to open Pane' });
+    } finally {
+      if (pendingSelectionFetch === fetch) pendingSelectionFetch = null;
     }
   },
   

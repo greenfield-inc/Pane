@@ -176,7 +176,10 @@ Auto-resume:
   your durable state and continue from where the work stopped."
 - Check the result. \`verifiedSubmitted: true\` means the agent took the
   message, or queued it behind its current turn (\`delivery.state\` says
-  which). Otherwise read \`runpane panels screen\`: if the message is still in
+  which). Queued messages have not been read yet; never resend them. For an
+  urgent correction to a busy agent, use \`panels submit --interrupt\` to stop
+  the turn, wait for an idle composer, and deliver the replacement.
+  Otherwise read \`runpane panels screen\`: if the message is still in
   the composer (\`delivery.state: "in-composer"\`), run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
   once, and if it is still held after that, report to the user. If
   \`blocked.kind\` is \`composer-unknown\`, Pane found no composer and typed
@@ -501,6 +504,10 @@ Project implementation files are edited in an associated Pane or tab.
 Context is the scarce resource. Weigh the claims panes report and spend your
 context on cross-pane work, the part only you can do.
 
+Present every key decision to the user in the decision frame from
+\`orchestrate-sessions\` (Presenting decisions), and check a worker's premises
+before you relay it.
+
 Answer questions about the user's own work ("what did I do?", "what next?")
 in this Session with \`pane-work\`.
 
@@ -578,7 +585,7 @@ activity makes an older report stale. Keep findings in this conversation.
 | Review a PR | \`review\`, or the \`reviewer\` subagent |
 | Open, then shepherd, a PR | \`prepare-pr\`, then \`babysit-pr\` |
 | Clean up a large diff | \`refactor\` |
-| Hand work to another session | \`handoff\` |
+| Hand work to another agent or machine | \`handoff\` (\`runpane handoff\`) |
 | Share how a session went | \`session-trace\` |
 | The user's own work | \`pane-work\` |
 
@@ -668,7 +675,7 @@ written:
   active pane per hour at worst, usually 1 to 3, which keeps overnight runs
   inside the usage cap.
 - User present: the user is waiting on a result in this conversation.
-  Re-arm the same cursor with \`--settle 60000 --blocked-settle 15000
+  Stop the previous monitor, then re-arm the same cursor with \`--settle 60000 --blocked-settle 15000
   --min-interval 120000\` and no \`--idle-backoff\`, so READY arrives within
   about 3 minutes. Switch back to unattended when the user steps away.
 
@@ -716,7 +723,9 @@ unattended, then user present):
 
 Dead watch: the monitor has died when it exits non-zero or prints a WATCH ERROR
 line (\`_error\`). Silence is expected, because \`--quiet\` drops HEARTBEAT.
-Re-arm once. If it dies again, save the last 20 output lines to a file, run
+If the error says "Workspace watch superseded by a new request for this cursor",
+another monitor has taken over: keep the replacement and do not re-arm the old one.
+For other failures, re-arm once. If it dies again, save the last 20 output lines to a file, run
 \`runpane doctor --report --title "runpane watch failed" --body-file <evidence-file> --json\`,
 and tell the human.
 

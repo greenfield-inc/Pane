@@ -135,13 +135,20 @@ automatically; use an explicit resume command if you know their ID.
 ## Session sidebar and archive
 
 Pinned is the first sidebar category and can contain both Session chats and
-Panes. Right-click a Session to pin or unpin it. The pin preference survives
-restarts; an archived Session stays out of Pinned until it is restored.
+Panes. Right-click a Session to pin or unpin it, or turn on **Start pinned** in
+Create Session to pin it from the start. The dialog remembers that toggle for
+the next Session (on the desktop in Pane's config, in the remote web app on
+that device). The pin preference survives restarts; an archived Session stays
+out of Pinned until it is restored. RunPane can set the same preference with
+`sessions pin` or `sessions unpin --session <id|name>`. Create JSON accepts
+`isPinned` (default false), and update JSON accepts it without changing the
+preference when omitted.
 
-Click a Session row to open its chat and expand or collapse its associated
-Panes. Child Pane rows are indented beyond the Session chat icon and keep the
-ordinary Pane actions. Single-line Pane rows omit change counts and PR numbers;
-the optional two-row layout shows those details below the title. Session and Pane
+Click a Session row to open its chat. A Session with associated Panes shows a
+chevron that expands or collapses them; a Session without Panes shows none.
+Child Pane rows are indented beyond the Session chat icon and keep the ordinary
+Pane actions. Single-line Pane rows omit change counts and PR numbers; the
+optional two-row layout shows those details below the title. Session and Pane
 context menus use compact widths.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
@@ -264,6 +271,8 @@ runpane sessions get --session <session-id-or-name> --json
 runpane sessions overview --session <session-id-or-name> --json
 runpane sessions create --from-json <path|-> --json
 runpane sessions update --session <session-id-or-name> --from-json <path|-> --json
+runpane sessions pin --session <session-id-or-name> --json
+runpane sessions unpin --session <session-id-or-name> --json
 runpane sessions set-agent --session <session-id-or-name> --agent <agent> --json
 runpane sessions associate --session <session-id-or-name> --pane <pane-id> --json
 runpane sessions detach --session <session-id-or-name> --pane <pane-id> --json
@@ -454,7 +463,7 @@ composer text carry `heldInputPresent: true`, the JSON form of `STUCK`.
 | User present | Someone is waiting on the result | `--settle 60000 --blocked-settle 15000 --min-interval 120000`, no `--idle-backoff` | about 3 minutes |
 
 Both profiles use the same `--kinds` list, `--quiet`, and named cursor.
-Switch profiles by re-arming the same cursor.
+Switch profiles by stopping the previous monitor, then re-arming the same cursor. If a monitor reports that its cursor was superseded, keep the replacement and do not re-arm the old monitor.
 
 ## Worker reports
 
@@ -533,15 +542,18 @@ Sessions keeps their shells and files separate.
 ## Plans, pages, and split view
 
 Agents show pages and files with `runpane panels open --file <path>` or
-`--url <url>`. HTML files open as a browser tab; other files open in an editor
-tab. By default the tab opens in split view: the first one splits the stage to
-the right of the conversation, and later ones join that side group as tabs.
+`--url <url>`. Files open in an editor tab with read-only previews for supported
+formats; HTML opens as read-only source. Use `--url` with an HTTP, HTTPS or file
+URL for an intentional live browser tab. By default the tab opens in split view:
+the first one splits the stage to the right of the conversation, and later ones
+join that side group as tabs.
 `--tab` opens it as a plain tab instead. Reopening the same file or URL reuses
 and reloads its tab. This works the same in Sessions and in project Panes.
 
 Generated Session instructions ask the orchestrator to write plans, reports, and
 other documents as self-contained HTML files in its Session folder and open them
-this way. Opening a Session never submits a prompt or starts work just to write
+with `--url` when rendered HTML is intended, or `--file` to inspect the source.
+Opening a Session never submits a prompt or starts work just to write
 a document.
 
 While the stage is split, each group has its own tab strip, including the agent
@@ -599,8 +611,8 @@ Earlier development builds had an experimental progress view that rendered
 `.pane-progress.json` switch and leaves any HTML files in place.
 
 New worktrees launched from a Session default to unpinned. First association also
-clears a worktree's previous pin so it appears as a Session child. You can pin it
-manually afterward; repeated association does not undo that choice. Independent
+clears a worktree's previous pin, including an explicit `--pinned` creation pin,
+so it appears as a Session child. Use `panes pin` manually afterward; repeated association does not undo that choice. Independent
 worktree defaults and existing historical pins are unchanged.
 
 ### Generated instructions and Git

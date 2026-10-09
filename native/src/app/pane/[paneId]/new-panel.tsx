@@ -3,10 +3,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { ToolPanel } from '@shared/types/panels';
-import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
-import { useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useInvokeMutation } from '@/daemon';
 import { createPanelRequest, newPanelOptions, type NewPanelOption } from '@/features/terminal/panels';
+import { useAffordances } from '@/features/hosts/hostSettings';
 import { useTheme } from '@/theme';
 import { ErrorState, Icon, Sheet, Text } from '@/ui';
 
@@ -24,7 +24,7 @@ export default function NewPanelSheet() {
   const { paneId, sessionId } = useLocalSearchParams<{ paneId: string; sessionId?: string }>();
   const theme = useTheme();
   const { colors } = theme;
-  const affordances = useInvokeQuery<RemotePwaAffordances>('remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
+  const affordances = useAffordances();
   const create = useInvokeMutation<[ReturnType<typeof createPanelRequest>], ToolPanel>('panels:create', {
     invalidates: ['panels:list'],
   });

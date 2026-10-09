@@ -45,6 +45,12 @@ describe.skipIf(process.platform === 'win32')('shellPath', () => {
     expect(shellRuns()).toBe(1);
   });
 
+  it('joins simultaneous warmups instead of running user profiles repeatedly', async () => {
+    await Promise.all([warmShellPath(), warmShellPath(), warmShellPath()]);
+    expect(getShellPath().split(':').slice(0, 2)).toEqual(['/opt/fake-shell/bin', '/usr/bin']);
+    expect(shellRuns()).toBe(1);
+  });
+
   it.each([
     ['getShellPath', async () => getShellPath()],
     ['warmShellPath', async () => { await warmShellPath(); return getShellPath(); }],

@@ -5,7 +5,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { useTheme } from '@/theme';
+import { useTheme, withAlpha } from '@/theme';
 import { Icon } from '@/ui';
 
 import { JOYSTICK_TRAVEL, joystickLinesPerSecond } from './joystick';
@@ -16,8 +16,13 @@ const THUMB = 40;
  * Hold and drag the thumb up or down to scroll the terminal; the further it
  * goes, the faster it scrolls. It springs back to center when released.
  * Styled as the web app's vertical pill: a track with a center line and a round thumb.
+ * `onTouchStart` and `onTouchEnd` are worklets, run on the UI thread.
  */
-export function ScrollJoystick({ onScroll }: { onScroll: (lines: number) => void }) {
+export function ScrollJoystick({ onScroll, onTouchStart, onTouchEnd }: {
+  onScroll: (lines: number) => void;
+  onTouchStart?: () => void;
+  onTouchEnd?: () => void;
+}) {
   const theme = useTheme();
   const offset = useSharedValue(0);
   const loop = useRef<number | null>(null);
@@ -45,12 +50,16 @@ export function ScrollJoystick({ onScroll }: { onScroll: (lines: number) => void
 
   const pan = Gesture.Pan()
     .minDistance(0)
-    .onBegin(() => scheduleOnRN(startScrolling))
+    .onBegin(() => {
+      onTouchStart?.();
+      scheduleOnRN(startScrolling);
+    })
     .onUpdate(event => {
       offset.value = Math.max(-JOYSTICK_TRAVEL, Math.min(JOYSTICK_TRAVEL, event.translationY));
     })
     .onFinalize(() => {
       offset.value = withSpring(0, { damping: 18, stiffness: 260 });
+      onTouchEnd?.();
       scheduleOnRN(stopScrolling);
     });
 
@@ -76,12 +85,6 @@ export function ScrollJoystick({ onScroll }: { onScroll: (lines: number) => void
       </View>
     </GestureDetector>
   );
-}
-
-/** `#rrggbb` at `alpha` opacity. */
-function withAlpha(hex: string, alpha: number): string {
-  const value = Number.parseInt(hex.slice(1, 7), 16);
-  return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
 }
 
 // The web app's track: 44 wide, 160 tall, a 40 pt thumb.

@@ -23,7 +23,7 @@ const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT = 'https://openrouter.ai/api/v1/chat/
 const DEEPGRAM_AUTH_GRANT_ENDPOINT = 'https://api.deepgram.com/v1/auth/grant';
 const CLEANUP_MODEL = 'google/gemini-3.1-flash-lite' as const;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
-const MAX_AUDIO_DURATION_MS = 60_000;
+const MAX_AUDIO_DURATION_MS = 15 * 60_000;
 const MAX_PROVIDER_ERROR_LENGTH = 400;
 const DEEPGRAM_NOVA3_STREAMING_COST_PER_HOUR_USD = 0.462;
 
@@ -169,9 +169,6 @@ export class VoiceTranscriptionService {
     if (!falApiKey) {
       throw new Error('Fal API key is not configured. Add it in Settings under Voice Transcription.');
     }
-    if (!openRouterApiKey) {
-      throw new Error('OpenRouter API key is not configured. Add it in Settings under Voice Transcription.');
-    }
 
     const startedAt = Date.now();
     if (this.configManager.isVerbose()) {
@@ -179,15 +176,13 @@ export class VoiceTranscriptionService {
     }
     const raw = await this.transcribeWithFal(input, request.language ?? 'en', falApiKey);
     const cleanupStartedAt = Date.now();
-    const cleanText = raw.text.trim().length > 0
-      ? await this.cleanTranscript(raw.text, openRouterApiKey)
-      : { text: raw.text };
+    const cleanText = await this.cleanIfConfigured(raw.text, openRouterApiKey);
     const completedAt = Date.now();
 
     const result: VoiceTranscriptionResult = {
       mode: 'recorded',
       provider: 'fal-ai/wizper',
-      cleanupModel: CLEANUP_MODEL,
+      cleanupModel: cleanText.model,
       text: cleanText.text.trim(),
       rawText: raw.text,
       chunks: raw.chunks,
@@ -212,6 +207,16 @@ export class VoiceTranscriptionService {
       console.log('[VoiceTranscription] Recorded pipeline completed', result.timings);
     }
     return result;
+  }
+
+  /** Cleans the transcript through OpenRouter when a key is set; without one, returns it as heard. */
+  private async cleanIfConfigured(rawText: string, openRouterApiKey: string | undefined): Promise<{
+    text: string;
+    usage?: ProviderUsage;
+    model?: typeof CLEANUP_MODEL;
+  }> {
+    if (!openRouterApiKey || rawText.trim().length === 0) return { text: rawText };
+    return { ...await this.cleanTranscript(rawText, openRouterApiKey), model: CLEANUP_MODEL };
   }
 
   async getDeepgramStreamingToken(): Promise<VoiceDeepgramTokenResult> {
@@ -241,10 +246,6 @@ export class VoiceTranscriptionService {
   async finalizeStreaming(request: VoiceStreamingFinalizeRequest): Promise<VoiceTranscriptionResult> {
     const input = validateVoiceStreamingFinalizeRequest(request);
     const openRouterApiKey = this.getOpenRouterApiKey();
-    if (!openRouterApiKey) {
-      throw new Error('OpenRouter API key is not configured. Add it in Settings under Voice Transcription.');
-    }
-
     const cleanupStartedAt = Date.now();
     if (this.configManager.isVerbose()) {
       console.log('[VoiceTranscription] Streaming cleanup started', {
@@ -253,9 +254,7 @@ export class VoiceTranscriptionService {
         firstTranscriptMs: input.timings?.firstTranscriptMs,
       });
     }
-    const cleanText = input.rawText.trim().length > 0
-      ? await this.cleanTranscript(input.rawText, openRouterApiKey)
-      : { text: input.rawText };
+    const cleanText = await this.cleanIfConfigured(input.rawText, openRouterApiKey);
     const completedAt = Date.now();
     const cleanupMs = completedAt - cleanupStartedAt;
     const asrMs = Math.max(0, Math.round(input.timings?.asrMs ?? 0));
@@ -264,7 +263,7 @@ export class VoiceTranscriptionService {
     const result: VoiceTranscriptionResult = {
       mode: 'streaming',
       provider: 'deepgram/nova-3',
-      cleanupModel: CLEANUP_MODEL,
+      cleanupModel: cleanText.model,
       text: cleanText.text.trim(),
       rawText: input.rawText,
       languages: ['en-US'],
@@ -495,7 +494,7 @@ function validateVoiceTranscriptionRequest(request: VoiceTranscriptionRequest): 
   }
 
   if (request.durationMs !== undefined && request.durationMs > MAX_AUDIO_DURATION_MS + 1_000) {
-    throw new Error('Recording is too long. Keep voice clips under 60 seconds.');
+    throw new Error('Recording is too long. Keep voice clips under 15 minutes.');
   }
 
   if (request.language !== undefined && request.language !== 'en') {
@@ -533,7 +532,7 @@ function validateVoiceTranscriptionRequest(request: VoiceTranscriptionRequest): 
 
 function validateVoiceStreamingFinalizeRequest(request: VoiceStreamingFinalizeRequest): ValidatedStreamingFinalizeInput {
   if (request.durationMs !== undefined && request.durationMs > MAX_AUDIO_DURATION_MS + 5_000) {
-    throw new Error('Streaming recording is too long. Keep voice clips under 60 seconds.');
+    throw new Error('Streaming recording is too long. Keep voice clips under 15 minutes.');
   }
   if (request.language !== undefined && request.language !== 'en') {
     throw new Error('Voice transcription currently supports English only.');

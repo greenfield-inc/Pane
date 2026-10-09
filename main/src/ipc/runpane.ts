@@ -1,7 +1,12 @@
+import { paneCommandSignal } from '../daemon/commandRegistry';
+import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
+import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { browserFileContext } from '../services/browserFileContext';
+import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -20,10 +25,10 @@ import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
-import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
+import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
-import { getManifestForAgent } from '../services/agentStatus/manifests';
+import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
 import { detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import {
@@ -33,6 +38,7 @@ import {
   readPanelAgentReport,
 } from '../services/agentReport';
 import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
+import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -50,7 +56,6 @@ import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
 import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
-import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import {
@@ -163,6 +168,7 @@ import type {
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getAppDirectory } from '../utils/appDirectory';
 import { collectRemoteDaemonExecutableHealthAsync } from '../daemon/remoteDaemonExecutableHealth';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import {
   WorkspaceJournal,
   workspaceFilterKey,
@@ -249,7 +255,6 @@ const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
 const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
 const GH_PR_LOOKUP_TIMEOUT_MS = 10_000;
 const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
-const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
 // Named cursors are keys in workspace-cursors.json, never file names. 128 fits `session-<id>` for
 // any Session ID; runpane shortens the names it derives to 64 for older daemons.
@@ -290,6 +295,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
+  isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),
@@ -837,6 +843,7 @@ export function registerRunpaneHandlers(
         try {
           const validatedPath = await validateAdoptedWorktree(services, repo, item.path);
           storedWorktreePath = validatedPath.storagePath;
+          await services.archiveCleanupManager?.assertPathAvailable(validatedPath.pathResolver.toFileSystem(storedWorktreePath));
           const existing = findSessionByWorktreeIdentity(
             databaseService.getAllSessionsIncludingArchived({ includeHidden: true }),
             validatedPath.identityPath,
@@ -848,6 +855,9 @@ export function registerRunpaneHandlers(
           const tool = resolveToolSpec(item.tool, new PathResolver(repo).environment);
           if (item.resume && tool.launchMode === 'wrapped') {
             throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
+          }
+          if (item.resume !== undefined && tool.agent === 'opencode' && !isValidOpenCodeSessionId(item.resume)) {
+            throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
           }
           if (normalized.dryRun) {
             items.push({ ok: true, index, name: item.name, pinned: item.pinned !== false, worktreePath: storedWorktreePath, tool: describeTool(tool) });
@@ -1061,7 +1071,7 @@ export function registerRunpaneHandlers(
         throw new Error(`Pane ${pane.id} is archived; panels cannot be opened in it`);
       }
       const target = normalized.url !== undefined
-        ? resolvePanelOpenUrl(normalized.url)
+        ? await resolvePanelOpenUrl(normalized.url, services, pane)
         : await resolvePanelOpenFile(services, pane, normalized.filePath ?? '');
       const placement = normalized.placement ?? 'split';
       // Activates the tab inside its Pane; never raises or focuses the window.
@@ -1174,6 +1184,7 @@ export function registerRunpaneHandlers(
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
 
+      if (normalized.source === 'user') getMobilePushSender(configManager).observeInput(panel.id, normalized.input);
       terminalPanelManager.writeToTerminal(panel.id, normalized.input);
 
       return {
@@ -1211,6 +1222,16 @@ export function registerRunpaneHandlers(
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
+      if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
+
+      const blocked = (message: string): RunpanePanelSubmitResult => ({
+        ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
+        enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: { kind: 'agent-prompt', message, suggestedCommand: panelScreenCommand(panel.id) },
+        nextCommand: panelScreenCommand(panel.id),
+      });
+      if (normalized.interrupt && !normalized.input.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
 
       let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
       const promptFile = normalized.asFilePointer
@@ -1222,6 +1243,46 @@ export function registerRunpaneHandlers(
       // A CR inside the text would be Enter to an agent composer.
       const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
       const agentType = screenAgentType(beforeScreen);
+      if (normalized.interrupt) {
+        const ready = (screen: RunpanePanelScreenResult): boolean =>
+          screenAgentType(screen) === agentType && screen.state.activityStatus === 'idle' &&
+          (agentType === 'cursor'
+            ? detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle === true &&
+              /^\s*→\s+(?:Add a follow-up|Plan, search, build anything)\s*$/imu.test(screen.text)
+            : screen.composer.isPresent && !screen.composer.hasUndeliveredText);
+        if (agentType !== 'codex' && agentType !== 'claude' && agentType !== 'cursor') {
+          return blocked('Pane cannot safely interrupt this agent: composer readiness is not supported. No input was sent.');
+        }
+        if (beforeScreen.composer.hasUndeliveredText) {
+          return blocked('The composer already contains text. Resolve it before using --interrupt; no input was sent.');
+        }
+        if (beforeScreen.state.activityStatus === 'active') {
+          terminalPanelManager.writeToTerminal(panel.id, agentType === 'cursor' ? '\x03' : '\x1b');
+          // Activity stays working for 10 seconds after the final interrupt redraw.
+          beforeScreen = await waitForPanelScreen(panel, ready, DEFAULT_PANEL_WAIT_TIMEOUT_MS);
+        }
+        if (!ready(beforeScreen)) {
+          return blocked('The agent did not reach an empty idle composer. The replacement text was not sent; inspect the screen before retrying.');
+        }
+        if (agentType === 'cursor') {
+          const generation = terminalPanelManager.getOutputGeneration(panel.id);
+          const input = ensureSubmitEnter(stagedInput);
+          terminalPanelManager.writeToTerminal(panel.id, input);
+          const screen = await waitForPanelScreen(panel, current =>
+            panelHasFreshOutputSince(panel.id, generation) &&
+            detectAgentState(CURSOR_MANIFEST, { screen: current.text, oscTitle: '', oscProgress: '' }).visibleWorking === true,
+          );
+          const taken = panelHasFreshOutputSince(panel.id, generation) &&
+            detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleWorking === true;
+          return {
+            ...blocked('Pane sent the replacement, but could not verify that Cursor started it. Inspect the screen before retrying.'),
+            ok: taken, verifiedSubmitted: taken, inputBytes: Buffer.byteLength(input, 'utf8'),
+            delivery: { state: taken ? 'taken' : 'unknown', evidence: 'screen' },
+            blocked: taken ? undefined : { kind: 'submission_unverified', message: 'Pane sent the replacement but could not verify that Cursor started it. Inspect the screen before retrying.' },
+            promptFile,
+          };
+        }
+      }
       const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
       // Claude reads text and Enter arriving in one read as a paste and keeps
       // the Enter as a newline. Terminal readiness can precede Claude drawing
@@ -1243,12 +1304,12 @@ export function registerRunpaneHandlers(
         // Claude takes a separately written Enter while it works (it queues
         // the message), so staging never waits for it to be idle.
         const staged = await stageComposerText(panel, agentType, stagedInput);
-        const submission = await submitComposerForPanel(panel, 'auto', {
+        const submission = await submitComposerForPanel(panel, normalized.interrupt ? 'enter' : 'auto', {
           cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
           text: stagedInput,
         });
         return {
-          ok: submission.ok,
+          ok: normalized.interrupt ? submission.delivery?.state === 'taken' : submission.ok,
           panelId: panel.id,
           paneId: panel.sessionId,
           inputBytes: staged.inputBytes + submission.inputBytes,
@@ -1402,193 +1463,201 @@ export function registerRunpaneHandlers(
     }, result => ({ resultCount: result.entries.length }));
   });
 
+  const watchLeases = new WorkspaceWatchLeases();
   commandRegistry.register('runpane:workspace:wait', async (request: PaneCommandValue = {}): Promise<RunpaneWorkspaceWaitResult> => {
     return withRunpaneAction(services, 'workspace:wait', {}, async () => {
       const normalized = parseWorkspaceWaitRequest(request);
       const project = normalized.repo
         ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
         : undefined;
-      // Resolve the Session (id or exact name) once; its members are re-read on every journal read.
+      // Validate selectors before taking over a healthy cursor.
       const sessionRecord = normalized.session
         ? await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })
         : undefined;
-      const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
-      const filter: WorkspaceJournalFilter = {
-        kinds: normalized.kinds,
-        paneIds: normalized.paneIds,
-        sessionId: session?.id,
-        excludePaneIds: normalized.excludePaneIds,
-        repoId: project?.id,
-        nameContains: normalized.nameContains,
-        agentsOnly: normalized.agentsOnly,
-        includeHeldInput: normalized.includeHeldInput,
-        includeHeldInputPresence: normalized.includeHeldInputPresence,
-      };
-      const timeoutMs = Math.min(normalized.timeoutMs ?? DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS, MAX_WORKSPACE_WAIT_TIMEOUT_MS);
-      const limit = normalized.limit ?? DEFAULT_WORKSPACE_WAIT_LIMIT;
-      const idleSchedule: WorkspaceIdleSchedule = { idleAfterMs: normalized.idleAfterMs ?? 0, backoff: normalized.idleBackoff ?? false };
-      const requestStartedAt = Date.now();
-      // Take the consumer's in-memory record now; it is put back only on a non-reset exit.
-      const runtime = normalized.as ? consumerRuntime.get(normalized.as) : undefined;
-      if (normalized.as) consumerRuntime.delete(normalized.as);
-      let idleWindowStart = normalized.idleWindowStartMs ?? (normalized.as
-        ? runtime?.lastReadAt ?? 0
-        : normalized.since !== undefined ? 0 : requestStartedAt);
-      let cursor = normalized.since ?? workspaceJournal.generation;
-      let reset: RunpaneWorkspaceWaitResult['reset'];
-      const cadenceOptions = normalized.as ? workspaceCadenceOptions(normalized, filter, idleSchedule) : undefined;
-      const readFilter = cadenceOptions ? WatchCadence.observeFilter(filter) : filter;
-      const currentIdleEntries = (candidates: readonly WorkspaceIdleCandidate[]): RunpaneWorkspaceEntry[] => dueIdleEntries(
-        candidates,
-        idleSchedule,
-        idleWindowStart,
-        Date.now(),
-        workspaceJournal.generation,
-      )
-        .filter(workspaceJournal.matcher(filter))
-        .map(entry => projectWorkspaceEntry(entry, filter));
-      // Baseline entries restate current state after a reset; replay marks them so a consumer never
-      // reads a replayed agent.ready as a turn that just ended.
-      const baselineEntries = (): RunpaneWorkspaceEntry[] => workspaceStateReader.read(project?.id).entries
-        .filter(workspaceJournal.matcher(filter))
-        .map(entry => ({ ...projectWorkspaceEntry(entry, filter), replay: true as const }));
+      const lease = watchLeases.acquire(normalized.as, paneCommandSignal());
+      try {
+        const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
+        const filter: WorkspaceJournalFilter = {
+          kinds: normalized.kinds,
+          paneIds: normalized.paneIds,
+          sessionId: session?.id,
+          excludePaneIds: normalized.excludePaneIds,
+          repoId: project?.id,
+          nameContains: normalized.nameContains,
+          agentsOnly: normalized.agentsOnly,
+          includeHeldInput: normalized.includeHeldInput,
+          includeHeldInputPresence: normalized.includeHeldInputPresence,
+        };
+        const timeoutMs = Math.min(normalized.timeoutMs ?? DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS, MAX_WORKSPACE_WAIT_TIMEOUT_MS);
+        const limit = normalized.limit ?? DEFAULT_WORKSPACE_WAIT_LIMIT;
+        const idleSchedule: WorkspaceIdleSchedule = { idleAfterMs: normalized.idleAfterMs ?? 0, backoff: normalized.idleBackoff ?? false };
+        const requestStartedAt = Date.now();
+        // Take the consumer's in-memory record now; it is put back only on a non-reset exit.
+        const runtime = normalized.as ? consumerRuntime.get(normalized.as) : undefined;
+        if (normalized.as) consumerRuntime.delete(normalized.as);
+        let idleWindowStart = normalized.idleWindowStartMs ?? (normalized.as
+          ? runtime?.lastReadAt ?? 0
+          : normalized.since !== undefined ? 0 : requestStartedAt);
+        let cursor = normalized.since ?? workspaceJournal.generation;
+        let reset: RunpaneWorkspaceWaitResult['reset'];
+        const cadenceOptions = normalized.as ? workspaceCadenceOptions(normalized, filter, idleSchedule) : undefined;
+        const readFilter = cadenceOptions ? WatchCadence.observeFilter(filter) : filter;
+        const currentIdleEntries = (candidates: readonly WorkspaceIdleCandidate[]): RunpaneWorkspaceEntry[] => dueIdleEntries(
+          candidates,
+          idleSchedule,
+          idleWindowStart,
+          Date.now(),
+          workspaceJournal.generation,
+        )
+          .filter(workspaceJournal.matcher(filter))
+          .map(entry => projectWorkspaceEntry(entry, filter));
+        // Baseline entries restate current state after a reset; replay marks them so a consumer never
+        // reads a replayed agent.ready as a turn that just ended.
+        const baselineEntries = (): RunpaneWorkspaceEntry[] => workspaceStateReader.read(project?.id).entries
+          .filter(workspaceJournal.matcher(filter))
+          .map(entry => ({ ...projectWorkspaceEntry(entry, filter), replay: true as const }));
 
-      if (normalized.as) {
-        const evicted = workspaceCursorStore.evictStale();
-        for (const name of evicted) consumerRuntime.delete(name);
-        let named = workspaceCursorStore.get(normalized.as);
-        if (!named) {
-          cursor = normalized.from === 'earliest'
-            ? Math.max(0, workspaceJournal.oldestGeneration - 1)
-            : workspaceJournal.generation;
-          workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
-          reset = { reason: evicted.includes(normalized.as) ? 'unknown-consumer' : 'first-use' };
-        } else if (named.epoch !== workspaceJournal.epoch) {
-          cursor = workspaceJournal.generation;
-          workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
-          reset = { reason: 'epoch-changed' };
-        } else {
-          named = workspaceCursorStore.commitPending(normalized.as) ?? named;
-          cursor = named.gen;
+        if (normalized.as) {
+          const evicted = workspaceCursorStore.evictStale();
+          for (const name of evicted) consumerRuntime.delete(name);
+          let named = workspaceCursorStore.get(normalized.as);
+          if (!named) {
+            cursor = normalized.from === 'earliest'
+              ? Math.max(0, workspaceJournal.oldestGeneration - 1)
+              : workspaceJournal.generation;
+            workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
+            reset = { reason: evicted.includes(normalized.as) ? 'unknown-consumer' : 'first-use' };
+          } else if (named.epoch !== workspaceJournal.epoch) {
+            cursor = workspaceJournal.generation;
+            workspaceCursorStore.create(normalized.as, cursor, workspaceJournal.epoch);
+            reset = { reason: 'epoch-changed' };
+          } else {
+            named = workspaceCursorStore.commitPending(normalized.as) ?? named;
+            cursor = named.gen;
+          }
         }
-      }
 
-      if (reset) {
-        const silentBaseline = reset.reason === 'first-use' && normalized.from !== 'earliest';
-        const baseline = silentBaseline ? [] : baselineEntries()
-          .map(entry => reset?.reason === 'epoch-changed' ? { ...entry, changedWhileAway: true as const } : entry);
-        const entries = [...baseline, ...currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id))];
-        if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now() });
+        if (reset) {
+          const silentBaseline = reset.reason === 'first-use' && normalized.from !== 'earliest';
+          const baseline = silentBaseline ? [] : baselineEntries()
+            .map(entry => reset?.reason === 'epoch-changed' ? { ...entry, changedWhileAway: true as const } : entry);
+          const entries = [...baseline, ...currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id))];
+          if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now() });
+          return {
+            ok: true,
+            epoch: workspaceJournal.epoch,
+            generation: workspaceJournal.generation,
+            entries,
+            timedOut: false,
+            reset,
+            session,
+            nextCommand: workspaceNextCommand(normalized, workspaceJournal.generation, session),
+          };
+        }
+
+        let cadence: WatchCadence | undefined;
+        if (cadenceOptions) {
+          cadence = runtime?.cadence?.options.key === cadenceOptions.key ? runtime.cadence : new WatchCadence(cadenceOptions);
+          cursor = cadence.readCursor ?? cursor;
+        }
+
+        const deadlineAt = requestStartedAt + timeoutMs;
+        const startCursor = cursor;
+        let readAny = false;
+        let waited: Awaited<ReturnType<WorkspaceJournal['waitAfter']>>;
+        let entries: RunpaneWorkspaceEntry[];
+        for (;;) {
+          const idleCandidates = workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id);
+          const initial = workspaceJournal.readAfter(cursor, readFilter, limit);
+          let idleEntries = currentIdleEntries(idleCandidates);
+          if (initial.entries.length > 0 || initial.dropped !== undefined || idleEntries.length > 0) {
+            waited = { ...initial, timedOut: initial.entries.length === 0 };
+          } else {
+            const now = Date.now();
+            const parkUntil = Math.min(
+              deadlineAt,
+              nextIdleDeadline(idleCandidates, idleSchedule, now) ?? Number.POSITIVE_INFINITY,
+              cadence?.nextDeadline(now) ?? Number.POSITIVE_INFINITY,
+            );
+            waited = await workspaceJournal.waitAfter(
+              cursor,
+              readFilter,
+              Math.max(0, parkUntil - now),
+              limit,
+              normalized.as ?? 'anonymous',
+              lease.signal,
+            );
+            lease.signal.throwIfAborted();
+            idleEntries = currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id));
+          }
+          if (waited.dropped) {
+            reset = { reason: 'cursor-truncated' };
+          }
+          entries = [...reset ? baselineEntries() : waited.entries, ...idleEntries];
+
+          if (!cadence || reset) {
+            if (normalized.as && (!waited.timedOut || waited.dropped !== undefined)) {
+              workspaceCursorStore.advance(
+                normalized.as,
+                waited.generation,
+                workspaceJournal.epoch,
+                !normalized.ackNow,
+              );
+            }
+            break;
+          }
+
+          // Drain the rest of the backlog before flushing so a BUSY on a later page
+          // can still cancel a READY on an earlier one.
+          const now = Date.now();
+          if (waited.entries.length > 0) readAny = true;
+          cadence.ingest(entries, now);
+          idleWindowStart = now;
+          cursor = Math.max(cursor, waited.generation);
+          if (waited.entries.length > 0 && cursor < workspaceJournal.generation) {
+            const rest = workspaceJournal.readAfter(cursor, readFilter, Number.MAX_SAFE_INTEGER);
+            cadence.ingest(rest.entries, now);
+            cursor = Math.max(cursor, rest.generation);
+          }
+          cadence.readCursor = cursor;
+          entries = cadence.flush(now);
+          // Held lines are delivered under the Session's membership at flush time: a Pane detached
+          // while its READY settled drops out.
+          if (filter.sessionId !== undefined) entries = entries.filter(workspaceJournal.matcher(filter));
+          if (entries.length > 0 || now >= deadlineAt) break;
+        }
+        if (cadence && !reset && readAny) {
+          // The durable cursor never passes an entry still pending or held in memory. The
+          // instance resumes from its own read cursor, so nothing repeats while it lives. If
+          // the instance is discarded (request shape change, eviction, reset, or a call without
+          // cadence flags) the re-read from the durable cursor re-delivers the held entries under
+          // the new filter, and later entries already delivered may repeat: that is the accepted
+          // at-least-once contract.
+          const lowestUnflushed = cadence.lowestUnflushedGen();
+          const durableGen = Math.max(
+            startCursor,
+            Math.min(cursor, lowestUnflushed === undefined ? cursor : lowestUnflushed - 1),
+          );
+          workspaceCursorStore.advance(normalized.as ?? '', durableGen, workspaceJournal.epoch, !normalized.ackNow);
+        }
+        // A reset drops the cadence; the idle window still moves forward.
+        if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now(), cadence: reset ? undefined : cadence });
+
+        const generation = cadence && !reset ? cursor : waited.generation;
         return {
           ok: true,
           epoch: workspaceJournal.epoch,
-          generation: workspaceJournal.generation,
+          generation,
           entries,
-          timedOut: false,
+          timedOut: entries.length === 0 && (cadence !== undefined || waited.timedOut),
+          dropped: waited.dropped,
           reset,
           session,
-          nextCommand: workspaceNextCommand(normalized, workspaceJournal.generation, session),
+          nextCommand: workspaceNextCommand(normalized, generation, session),
         };
+      } finally {
+        lease.release();
       }
-
-      let cadence: WatchCadence | undefined;
-      if (cadenceOptions) {
-        cadence = runtime?.cadence?.options.key === cadenceOptions.key ? runtime.cadence : new WatchCadence(cadenceOptions);
-        cursor = cadence.readCursor ?? cursor;
-      }
-
-      const deadlineAt = requestStartedAt + timeoutMs;
-      const startCursor = cursor;
-      let readAny = false;
-      let waited: Awaited<ReturnType<WorkspaceJournal['waitAfter']>>;
-      let entries: RunpaneWorkspaceEntry[];
-      for (;;) {
-        const idleCandidates = workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id);
-        const initial = workspaceJournal.readAfter(cursor, readFilter, limit);
-        let idleEntries = currentIdleEntries(idleCandidates);
-        if (initial.entries.length > 0 || initial.dropped !== undefined || idleEntries.length > 0) {
-          waited = { ...initial, timedOut: initial.entries.length === 0 };
-        } else {
-          const now = Date.now();
-          const parkUntil = Math.min(
-            deadlineAt,
-            nextIdleDeadline(idleCandidates, idleSchedule, now) ?? Number.POSITIVE_INFINITY,
-            cadence?.nextDeadline(now) ?? Number.POSITIVE_INFINITY,
-          );
-          waited = await workspaceJournal.waitAfter(
-            cursor,
-            readFilter,
-            Math.max(0, parkUntil - now),
-            limit,
-            normalized.as ?? 'anonymous',
-          );
-          idleEntries = currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id));
-        }
-        if (waited.dropped) {
-          reset = { reason: 'cursor-truncated' };
-        }
-        entries = [...reset ? baselineEntries() : waited.entries, ...idleEntries];
-
-        if (!cadence || reset) {
-          if (normalized.as && (!waited.timedOut || waited.dropped !== undefined)) {
-            workspaceCursorStore.advance(
-              normalized.as,
-              waited.generation,
-              workspaceJournal.epoch,
-              !normalized.ackNow,
-            );
-          }
-          break;
-        }
-
-        // Drain the rest of the backlog before flushing so a BUSY on a later page
-        // can still cancel a READY on an earlier one.
-        const now = Date.now();
-        if (waited.entries.length > 0) readAny = true;
-        cadence.ingest(entries, now);
-        idleWindowStart = now;
-        cursor = Math.max(cursor, waited.generation);
-        if (waited.entries.length > 0 && cursor < workspaceJournal.generation) {
-          const rest = workspaceJournal.readAfter(cursor, readFilter, Number.MAX_SAFE_INTEGER);
-          cadence.ingest(rest.entries, now);
-          cursor = Math.max(cursor, rest.generation);
-        }
-        cadence.readCursor = cursor;
-        entries = cadence.flush(now);
-        // Held lines are delivered under the Session's membership at flush time: a Pane detached
-        // while its READY settled drops out.
-        if (filter.sessionId !== undefined) entries = entries.filter(workspaceJournal.matcher(filter));
-        if (entries.length > 0 || now >= deadlineAt) break;
-      }
-      if (cadence && !reset && readAny) {
-        // The durable cursor never passes an entry still pending or held in memory. The
-        // instance resumes from its own read cursor, so nothing repeats while it lives. If
-        // the instance is discarded (request shape change, eviction, reset, or a call without
-        // cadence flags) the re-read from the durable cursor re-delivers the held entries under
-        // the new filter, and later entries already delivered may repeat: that is the accepted
-        // at-least-once contract.
-        const lowestUnflushed = cadence.lowestUnflushedGen();
-        const durableGen = Math.max(
-          startCursor,
-          Math.min(cursor, lowestUnflushed === undefined ? cursor : lowestUnflushed - 1),
-        );
-        workspaceCursorStore.advance(normalized.as ?? '', durableGen, workspaceJournal.epoch, !normalized.ackNow);
-      }
-      // A reset drops the cadence; the idle window still moves forward.
-      if (normalized.as) consumerRuntime.set(normalized.as, { lastReadAt: Date.now(), cadence: reset ? undefined : cadence });
-
-      const generation = cadence && !reset ? cursor : waited.generation;
-      return {
-        ok: true,
-        epoch: workspaceJournal.epoch,
-        generation,
-        entries,
-        timedOut: entries.length === 0 && (cadence !== undefined || waited.timedOut),
-        dropped: waited.dropped,
-        reset,
-        session,
-        nextCommand: workspaceNextCommand(normalized, generation, session),
-      };
     }, result => ({ resultCount: result.entries.length, timedOut: result.timedOut }), result =>
       result.entries.length > 0 || result.reset !== undefined);
   });
@@ -1886,6 +1955,8 @@ async function createTerminalPanelForSession(
   }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
+  } else if (tool.agent === 'opencode' && tool.initialInput) {
+    initialState.initialInputMode = 'stdin';
   }
   if (initialInputFile) {
     initialState.initialInputFile = initialInputFile;
@@ -1943,16 +2014,17 @@ async function submitCreateInitialInput(
     const sentAt = optionalString(customState.initialInputSentAt);
     const deliveryError = optionalString(customState.initialInputError);
     const delivered = Boolean(sentAt) && !deliveryError;
+    const delivery: RunpaneDelivery = delivered && readiness?.ok === true
+      ? await argumentDelivery(panel, tool, cwd, sentAt)
+      : { state: 'unknown', evidence: 'argv' };
     const result: RunpaneInitialInputDeliveryResult = {
       delivered,
       submitted: delivered,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       strategy: 'argument',
       sequenceName: 'argument',
-      verifiedSubmitted: delivered,
-      delivery: delivered
-        ? await argumentDelivery(panel, tool, cwd, sentAt)
-        : { state: 'unknown', evidence: 'argv' },
+      verifiedSubmitted: delivery.state === 'taken' || delivery.state === 'queued',
+      delivery,
       sentAt,
       nextCommand: readiness?.nextCommand ?? panelWaitCommand(panel.id),
     };
@@ -1974,6 +2046,7 @@ async function submitCreateInitialInput(
     return {
       delivered: false,
       submitted: false,
+      verifiedSubmitted: false,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       error: { message: 'The agent is not ready yet, so initial input is queued and sent once it is.' },
       nextCommand: readiness.nextCommand ?? panelWaitCommand(panel.id),
@@ -1981,8 +2054,11 @@ async function submitCreateInitialInput(
   }
 
   if (tool.agent !== 'claude' && tool.agent !== 'codex') {
-    terminalPanelManager.writeToTerminal(panel.id, tool.initialInput);
+    const paste = tool.agent === 'opencode' && isLongPrompt(tool.initialInput)
+      && terminalPanelManager.isBracketedPasteEnabled(panel.id);
+    terminalPanelManager.writeToTerminal(panel.id, paste ? bracketedPaste(tool.initialInput) : tool.initialInput);
     await sleep(300);
+    if (paste) await waitForPanelOutputQuiet(panel.id);
     return submitCreateComposerInput(panel, tool, tool.initialInput);
   }
   const staged = await stageComposerText(panel, tool.agent, tool.initialInput);
@@ -1990,9 +2066,8 @@ async function submitCreateInitialInput(
 }
 
 /**
- * A launch-argument prompt reached the agent with its launch (`argv`); the
- * transcript upgrades that to `transcript` evidence once the agent has
- * recorded the turn. One read, no waiting: create has already waited for ready.
+ * Launch arguments prove routing, not acceptance. Verify the recorded turn or
+ * a visible queue acknowledgement. One read: create has already waited for ready.
  */
 async function argumentDelivery(
   panel: ToolPanel,
@@ -2006,7 +2081,11 @@ async function argumentDelivery(
     const check = await checkTranscriptDelivery({ ...probe, sentAtMs });
     if (check.delivery) return check.delivery;
   }
-  return { state: 'taken', evidence: 'argv' };
+  const screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  if (probe && screenShowsQueuedMessage(screen.text, probe.agentType, tool.initialInput ?? '')) {
+    return { state: 'queued', evidence: 'screen' };
+  }
+  return { state: 'unknown', evidence: 'argv' };
 }
 
 async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
@@ -2095,6 +2174,7 @@ async function submitCreateComposerInput(
         beforeText: beforeScreen.text,
         afterText: afterScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       });
 
       if (lastVerdict === 'cleared' && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) {
@@ -2117,11 +2197,13 @@ async function submitCreateComposerInput(
         beforeText: beforeScreen.text,
         afterText: confirmationScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       });
       const unchangedSinceFirstSample = assessComposerEvidence({
         beforeText: afterScreen.text,
         afterText: confirmationScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       }) === 'staged';
       const confirmationScreenHasFreshOutput = panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit);
       lastVerdict = confirmationVerdict;
@@ -2394,6 +2476,7 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
   let lastScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
   let condition = request.condition ?? defaultWaitCondition(lastScreen.state);
   let requiresFirstEvaluation = true;
+  let readyCandidate = false;
 
   while (requiresFirstEvaluation || Date.now() - startedAt <= timeoutMs) {
     requiresFirstEvaluation = false;
@@ -2402,14 +2485,20 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
     const blocked = detectPanelBlocker(lastScreen.text, lastScreen.state.agentType, panel.id);
     const matched = isWaitConditionMatched(condition, lastScreen, request.contains, blocked);
 
-    if (matched) {
+    // Codex briefly paints a usable-looking composer before its first-run menu.
+    // Confirm CLI readiness on the next poll instead of accepting that boot frame.
+    const requiresConfirmation = condition === 'ready' && lastScreen.state.isCliPanel;
+    if (matched && (!requiresConfirmation || readyCandidate)) {
       return panelWaitResult(panel, condition, true, false, startedAt, lastScreen);
     }
+    readyCandidate = matched;
     if (blocked && condition !== 'text') {
       return panelWaitResult(panel, condition, false, false, startedAt, lastScreen, blocked);
     }
 
-    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), remainingMs));
   }
 
   return panelWaitResult(panel, condition, false, true, startedAt, lastScreen);
@@ -2431,7 +2520,8 @@ function isWaitConditionMatched(
     case 'ready':
       if (blocked || !screen.state.initialized) return false;
       if (!screen.state.isCliPanel) return true;
-      // Claude and Codex are ready once their composer is on screen, not at their first output.
+      if (screen.state.agentType === 'codex' && !hasConfiguredCodexScreen(screen.text)) return false;
+      // A composer alone is enough for Claude; Codex also has a provisional one.
       return screen.state.isCliReady === true
         && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
     case 'idle':
@@ -2475,6 +2565,29 @@ function detectPanelBlocker(
   panelId: string,
 ): RunpanePanelBlockedState | undefined {
   if (!text) return undefined;
+
+  const daemonChoice = text.match(/^\s*[›❯>]?\s*(\d+)\.\s*Run without daemon this time/im);
+  if (daemonChoice && /cannot use the background server/i.test(text)) {
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: `runpane panels input --panel ${panelId} --keys ${daemonChoice[1]},enter --yes --json`,
+    };
+  }
+  const trustChoice = text.match(/^\s*([›❯>])?\s*(?:(\d+)\.\s*)?(?:Trust and continue|Yes, I trust this folder)\s*$/im);
+  if (trustChoice && /(?:trust this folder|folder access|quick safety check)/i.test(text)) {
+    // Claude's unnumbered menu defaults to No. Never suggest Enter on that option.
+    const keys = trustChoice[2] ? `${trustChoice[2]},enter`
+      : trustChoice[1] ? 'enter'
+      : /^[ \t]*[›❯>][ \t]*No, exit[ \t]*$/im.test(text) ? 'down,enter' : undefined;
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: keys
+        ? `runpane panels input --panel ${panelId} --keys ${keys} --yes --json`
+        : panelScreenCommand(panelId),
+    };
+  }
 
   if (
     (agentType === 'codex' || /codex/i.test(text)) &&
@@ -2761,7 +2874,9 @@ async function verifyComposerSubmitted(
     verification: 'observed',
     latestScreen,
     stagedTextVisible: false,
-    delivery,
+    delivery: delivery.state === 'queued'
+      ? { ...delivery, message: 'The agent sees this only after its current turn ends. Do not resend.' }
+      : delivery,
   });
 
   while (!clearedOnScreen && Date.now() - startedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
@@ -3010,13 +3125,43 @@ async function runAgentDoctor(
     }
   }
 
+  let sessionCapabilityOk = true;
+  if (agent === 'opencode' && executablePath) {
+    try {
+      const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
+      const result = await context.commandRunner.execAsync(helpCommand, repo.path, {
+        timeout: 5_000,
+        silent: true,
+      });
+      const helpOutput = `${result.stdout}\n${result.stderr}`;
+      const sessionFlagPattern = /(?:^|\s)--session(?:,|\s|$)/m;
+      sessionCapabilityOk = sessionFlagPattern.test(helpOutput)
+        && helpOutput.split(/\r?\n/u).some(line => /^\s*--session(?:,|\s|$)/u.test(line));
+      checks.push({
+        name: 'session-capability',
+        ok: sessionCapabilityOk,
+        message: sessionCapabilityOk
+          ? 'OpenCode supports explicit sessions with --session.'
+          : 'Upgrade OpenCode to v2.0.19 or newer; Pane requires the --session flag for reliable resume.',
+      });
+    } catch (error) {
+      sessionCapabilityOk = false;
+      warnings.push(commandErrorMessage(error, `${executable} --help failed.`));
+      checks.push({
+        name: 'session-capability',
+        ok: false,
+        message: 'Upgrade OpenCode to v2.0.19 or newer; Pane could not verify the required --session flag.',
+      });
+    }
+  }
+
   if (environment === 'wsl' && !executablePath) {
     warnings.push(`Repo ${repo.name} is a WSL repo; install ${executable} inside the WSL distro Pane uses, not only on Windows.`);
   }
 
   const available = Boolean(executablePath);
   return {
-    ok: available,
+    ok: available && sessionCapabilityOk,
     agent,
     command,
     repo: repoSummary,
@@ -3027,6 +3172,13 @@ async function runAgentDoctor(
     checks,
     warnings: warnings.length > 0 ? warnings : undefined,
   };
+}
+
+function quoteAgentDoctorExecutable(executablePath: string, environment: ProjectEnvironment): string {
+  if (environment === 'windows') {
+    return `"${executablePath.replaceAll('"', '""')}"`;
+  }
+  return `'${executablePath.replaceAll("'", "'\\''")}'`;
 }
 
 function outputToRecord(output: SessionOutput): RunpanePanelOutputRecord {
@@ -3400,6 +3552,11 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
       if (!worktreePath) throw new Error(`Pane adopt item ${index} must include path`);
       if (!name) throw new Error(`Pane adopt item ${index} must include name`);
       const tool = parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`);
+      const resumeProvided = Object.prototype.hasOwnProperty.call(entry, 'resume');
+      const resume = optionalString(entry.resume);
+      if (resumeProvided && 'agent' in tool && tool.agent === 'opencode' && resume === undefined) {
+        throw new Error('OpenCode --resume must be a string matching the required ses_* format (^ses_[A-Za-z0-9]+$).');
+      }
       const launch = optionalBoolean(entry.launch);
       if (tool.initialInput !== undefined && launch !== true) {
         throw new Error(`Pane adopt item ${index} has a prompt but no launch. Pass --launch (launch: true) so the agent starts and receives the prompt.`);
@@ -3411,7 +3568,7 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
         folder: optionalString(entry.folder),
         pinned: optionalBoolean(entry.pinned),
         tool,
-        resume: optionalString(entry.resume),
+        resume,
         launch,
       };
     }),
@@ -3614,9 +3771,8 @@ type PanelOpenTarget =
   | { type: 'editor'; title: string; filePath: string; customState: EditorPanelState };
 
 const PANEL_OPEN_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:']);
-const HTML_FILE_PATTERN = /\.html?$/iu;
 
-function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
+async function resolvePanelOpenUrl(rawUrl: string, services: AppServices, pane: Session): Promise<PanelOpenTarget> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -3625,6 +3781,19 @@ function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
   }
   if (!PANEL_OPEN_URL_PROTOCOLS.has(parsed.protocol)) {
     throw new Error(`Unsupported URL scheme ${parsed.protocol} (use http, https, or file)`);
+  }
+  if (parsed.protocol === 'file:' && process.platform === 'win32'
+    && (services.sessionManager.getProjectContext(pane.id) || (pane.isHidden && isOrchestrationInternalSessionId(pane.id)))) {
+    const { pathResolver, toFileSystem } = await browserFileContext(services, pane);
+    if (pathResolver.environment === 'wsl') {
+      const filePath = !parsed.hostname && !/^\/[a-z]:/i.test(parsed.pathname)
+        ? fileURLToPath(parsed, { windows: false })
+        : fileURLToPath(parsed);
+      const normalized = pathToFileURL(toFileSystem(filePath));
+      normalized.search = parsed.search;
+      normalized.hash = parsed.hash;
+      parsed = normalized;
+    }
   }
   const title = parsed.protocol === 'file:'
     ? path.basename(decodeURIComponent(parsed.pathname)) || 'Browser'
@@ -3638,19 +3807,11 @@ function resolvePanelOpenUrl(rawUrl: string): PanelOpenTarget {
  * project context, mirroring file.ts getFileContext.
  */
 async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPath: string): Promise<PanelOpenTarget> {
-  const context = services.sessionManager.getProjectContext(pane.id);
-  let pathResolver: PathResolver;
-  if (context) {
-    pathResolver = context.pathResolver;
-  } else if (pane.isHidden && isOrchestrationInternalSessionId(pane.id)) {
-    pathResolver = new PathResolver({ path: pane.worktreePath });
-  } else {
-    throw new Error(`No Pane repo found for pane ${pane.id}`);
-  }
+  const { pathResolver, toFileSystem } = await browserFileContext(services, pane);
 
-  const basePath = pathResolver.toFileSystem(pane.worktreePath);
+  const basePath = toFileSystem(pane.worktreePath);
   const requested = path.isAbsolute(rawPath)
-    ? path.relative(basePath, pathResolver.toFileSystem(rawPath))
+    ? path.relative(basePath, toFileSystem(rawPath))
     : rawPath;
   const relativePath = path.normalize(requested);
   if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
@@ -3667,9 +3828,6 @@ async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPat
 
   const filePath = relativePath.split(path.sep).join('/');
   const title = path.basename(relativePath);
-  if (HTML_FILE_PATTERN.test(relativePath)) {
-    return { type: 'browser', title, filePath, customState: { currentUrl: pathToFileURL(fullPath).href } };
-  }
   return { type: 'editor', title, filePath, customState: { filePath, isPreview: false, isDirty: false } };
 }
 
@@ -3717,6 +3875,7 @@ function parsePanelInputRequest(value: PaneCommandValue): RunpanePanelInputReque
   return {
     panelId,
     input,
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
 
@@ -3783,7 +3942,9 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
   return {
     panelId,
     input,
+    interrupt: optionalBoolean(value.interrupt),
     asFilePointer: optionalBoolean(value.asFilePointer),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
 
@@ -4049,8 +4210,8 @@ async function assertRemovableWorktree(services: AppServices, pane: Session, rem
 /**
  * Archives the Pane through `sessions:delete`, exactly like the UI, and waits
  * for its worktree to be removed. A large worktree reports `completed` with
- * `trashDeletion: 'pending'`: git has forgotten it and its path is free, and
- * its files are being deleted from the trash in the background.
+ * `trashDeletion: 'pending'`: git has forgotten it and its files are being
+ * deleted from quarantine. Durable cleanup reserves its path until finished.
  */
 async function archivePaneAndRemoveWorktree(
   services: AppServices,
@@ -4242,7 +4403,7 @@ function waitForArchiveProgressCompletion(
 
     const onProgress = (payload: { tasks: ArchiveProgressTask[] }) => {
       const task = payload.tasks.find(candidate => candidate.sessionId === paneId);
-      if (task?.status === 'completed') {
+      if (task?.status === 'completed' || (task?.cleanupId && task.trashDeletion === 'pending' && task.status !== 'failed')) {
         finish({ worktreeCleanup: 'completed', trashDeletion: task.trashDeletion });
       } else if (task?.status === 'failed') {
         finish({ worktreeCleanup: 'failed' });
@@ -4561,6 +4722,10 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
   }
 
   const declaredAgent = tool.agentType;
+  const commandAgent = resolveAgentTypeFromCommand(tool.command);
+  if (commandAgent === 'opencode' && (!declaredAgent || declaredAgent === 'opencode')) {
+    assertDirectOpenCodeLaunchCommand(tool.command, environment === 'windows' || (!environment && process.platform === 'win32'));
+  }
   if (!declaredAgent) {
     return {
       title: tool.title ?? 'Terminal',
@@ -4576,7 +4741,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
     title: tool.title ?? AGENT_TEMPLATES[declaredAgent].title,
     command: tool.command,
     agent: declaredAgent,
-    launchMode: resolveAgentTypeFromCommand(tool.command) === declaredAgent ? undefined : 'wrapped',
+    launchMode: commandAgent === declaredAgent ? undefined : 'wrapped',
     initialInput: tool.initialInput,
     initialInputAsFilePointer: tool.initialInputAsFilePointer,
   };
@@ -4701,10 +4866,13 @@ async function withRunpaneAction<T extends { ok: boolean }>(
       Object.assign(actionMetadata, resultMetadata(result));
     }
     if (shouldTrackResult(result)) {
-      trackRunpaneAction(services, action, 'success', Date.now() - startedAt, actionMetadata);
+      const cause = !commandOk && 'error' in result ? result.error : undefined;
+      trackRunpaneAction(services, action, 'success', Date.now() - startedAt, actionMetadata, cause);
     }
     return result;
   } catch (error) {
+    // Disconnect and cursor takeover are normal lifecycle events, not failed commands.
+    if (error instanceof WorkspaceWatchCancelledError) throw error;
     trackRunpaneAction(services, action, 'failure', Date.now() - startedAt, {
       ...metadata,
       ok: false,
@@ -4802,6 +4970,8 @@ function workspaceIdleCandidates(
   });
 }
 
+const runpaneFailureLimiters = new WeakMap<NonNullable<AppServices['analyticsManager']>, FailureLimiter>();
+
 function trackRunpaneAction(
   services: AppServices,
   action: string,
@@ -4813,26 +4983,31 @@ function trackRunpaneAction(
   const analyticsManager = services.analyticsManager;
   const paneIdHash = metadata.paneId && analyticsManager?.hashSessionId(metadata.paneId);
   const panelIdHash = metadata.panelId && analyticsManager?.hashSessionId(metadata.panelId);
-  const errorMessage = cause instanceof Error ? cause.message : cause ? String(cause) : undefined;
-  const errorType = cause instanceof Error ? cause.name : cause ? 'Error' : undefined;
+  const errorMessage = status === 'failure'
+    ? cause instanceof Error ? cause.message : cause ? String(cause) : undefined
+    : undefined;
 
-  analyticsManager?.track('runpane_local_control', {
-    action,
-    status,
-    command_ok: metadata.ok,
-    duration_ms: durationMs,
-    repo_id: metadata.repoId,
-    pane_id_hash: paneIdHash,
-    panel_id_hash: panelIdHash,
-    result_count: metadata.resultCount,
-    input_bytes: metadata.inputBytes,
-    limit: metadata.limit,
-    condition: metadata.condition,
-    timed_out: metadata.timedOut,
-    available: metadata.available,
-    environment: metadata.environment,
-    error_type: errorType,
-  });
+  // Handled CLI failures are product events, never Error Tracking exceptions.
+  // Poll deadlines and optional agent availability are normal control flow.
+  const failed = status === 'failure' || metadata.ok === false;
+  if (analyticsManager && analyticsManager.isEnabled() && failed &&
+      !(status === 'success' && (metadata.timedOut || metadata.available === false))) {
+    let limiter = runpaneFailureLimiters.get(analyticsManager);
+    if (!limiter) {
+      limiter = new FailureLimiter();
+      runpaneFailureLimiters.set(analyticsManager, limiter);
+    }
+    const details = failureDetails(cause);
+    if (limiter.allow(`${action}:${details.failure_category}:${details.error_code}`)) {
+      analyticsManager.track('runpane_local_control_failed', {
+        action,
+        status: 'failure',
+        command_ok: false,
+        failure_kind: status === 'failure' ? 'thrown' : 'handled',
+        ...details,
+      });
+    }
+  }
 
   const logPayload = {
     action,

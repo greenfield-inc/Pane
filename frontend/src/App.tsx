@@ -834,7 +834,7 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
-            onManageRemoteConnectionsClick={() => openSettings({ category: 'remote-access', subview: 'connections' })}
+            onManageRemoteConnectionsClick={() => openSettings({ category: 'remote-access' })}
             width={sidebarWidth}
             onResize={startResize}
             collapsed={sidebarCollapsed}

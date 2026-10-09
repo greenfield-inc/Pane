@@ -2,6 +2,7 @@ import * as claudeTranscripts from './claudeSessionTranscript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
+import { createFanoutEventSink } from '../core/eventSink';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
 import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
@@ -11,6 +12,9 @@ import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionCont
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ShellDetector } from '../utils/shellDetector';
 import { panelManager } from '../test/setup';
+import { RunCommandManager } from './runCommandManager';
+import type { DatabaseService } from '../database/database';
+import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -49,11 +53,12 @@ type TerminalUnderTest = {
   isVisible: boolean;
   isAlternateScreen: boolean;
   inSyncBlock: boolean;
-  agentType?: 'claude' | 'codex' | 'cursor';
+  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode';
   agentSessionScrapeBuffer: string;
   capturedAgentSessionId?: string;
   agentProbe?: unknown;
   bracketedPasteMode?: boolean;
+  heldInput?: string[];
 };
 
 type FlushOutputBufferAccess = {
@@ -126,7 +131,11 @@ type ShellPromptSchedulerAccess = {
   }, callback: () => void): void;
 };
 
-function testAccess<Access>(manager: TerminalPanelManager): Access {
+type HeldInputAccess = {
+  releaseHeldInput(terminal: TerminalUnderTest, first?: string): void;
+};
+
+function testAccess<Access>(manager: TerminalPanelManager | RunCommandManager): Access {
   // SAFETY: Each access type above mirrors the exact private members exercised
   // by its tests; this helper keeps that deliberate test-only seam in one place.
   return manager as Access;
@@ -180,6 +189,59 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
   };
 }
 
+describe('strict archive process teardown', () => {
+  it('retains surviving descendants after real terminal/run-command map retirement and retries them', async () => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal({ outputBuffer: '' });
+    terminal.pty.pid = 1000001;
+    terminal.outputFlushTimer = setTimeout(() => {}, 60000);
+    const dispose = vi.fn();
+    terminal.screenEmulator = partialMock<RemoteTerminalEmulator>({ dispose });
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+    const commands = new RunCommandManager(partialMock<DatabaseService>({}));
+    const runKill = vi.fn();
+    // SAFETY: This fixture supplies precisely the process members consumed by
+    // archive PID collection and retirement, without starting a real PTY host.
+    const access = testAccess<{ processes: Map<string, Array<{ process: { pid: number; kill: () => void } }>> }>(commands);
+    access.processes.set(terminal.sessionId, [{ process: { pid: 1000003, kill: runKill } }]);
+    const birth = (n: number) => process.platform === 'win32' ? String(100 + n) : `2026-10-03T00:00:0${n}Z`;
+    let table: ArchiveProcessObservation[] = [
+      { pid: 1000001, parent: 0, started: birth(1), exited: false },
+      { pid: 1000002, parent: 1000001, started: birth(2), exited: false },
+      { pid: 1000003, parent: 0, started: birth(3), exited: false },
+      { pid: 1000004, parent: 1000003, started: birth(4), exited: false },
+    ];
+    let persisted: ArchiveProcessIdentity[] = [];
+    const save = (identities: ArchiveProcessIdentity[]) => { persisted = structuredClone(identities); };
+    const read = async () => table;
+    const failedKill = vi.fn(async () => {});
+    const tracker = new ArchiveProcessTracker([], save, read, failedKill);
+    await tracker.capture([
+      ...(manager.getSessionPids().get(terminal.sessionId) ?? []),
+      ...commands.getArchiveProcessPids(terminal.sessionId),
+    ]);
+    expect(persisted).toHaveLength(4);
+    terminal.pty.kill.mockImplementation(() => { table = table.filter(item => item.pid !== 1000001); });
+    runKill.mockImplementation(() => { table = table.filter(item => item.pid !== 1000003); });
+    await manager.retireSessionTerminalsForArchive(terminal.sessionId);
+    await commands.retireRunCommandsForArchive(terminal.sessionId);
+    expect(manager.getSessionPids().size).toBe(0);
+    expect(commands.getArchiveProcessPids(terminal.sessionId)).toEqual([]);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(terminal.outputFlushTimer).toBeNull();
+    await tracker.terminateSurvivors();
+    await expect(tracker.verifyExited(0)).rejects.toThrow('1000002, 1000004');
+    expect(persisted.map(item => item.pid)).toEqual([1000002, 1000004]);
+    // Retry after restart has only persisted identities; maps are already empty.
+    const retryKill = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => { table = []; });
+    const retry = new ArchiveProcessTracker(persisted, save, read, retryKill);
+    await retry.terminateSurvivors();
+    await retry.verifyExited(0);
+    expect(retryKill.mock.calls[0][0].map((item: ArchiveProcessIdentity) => item.pid)).toEqual([1000004, 1000002]);
+    expect(persisted).toEqual([]);
+  });
+});
+
 describe('TerminalPanelManager keyboard input', () => {
   it.each([
     '\x1b[1;3A', '\x1b[1;2D', '\x1b[1;2A', '\x1b[17~',
@@ -191,6 +253,21 @@ describe('TerminalPanelManager keyboard input', () => {
     testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
     manager.writeToTerminal(terminal.panelId, data);
     expect(terminal.pty.write.mock.calls).toEqual([[data]]);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('holds input sent before the shell is ready and delivers it after the launch command', () => {
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal({ heldInput: [] });
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+
+    manager.writeToTerminal(terminal.panelId, 'p');
+    manager.writeToTerminal(terminal.panelId, 'wd\r');
+    expect(terminal.pty.write).not.toHaveBeenCalled();
+
+    testAccess<HeldInputAccess>(manager).releaseHeldInput(terminal, 'claude\r');
+    manager.writeToTerminal(terminal.panelId, 'ls\r');
+    expect(terminal.pty.write.mock.calls).toEqual([['claude\r'], ['pwd\r'], ['ls\r']]);
     disposeFlowControlRecord(terminal.flowControl);
   });
 });
@@ -278,6 +355,19 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
     expect(promptPty.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('detects a Git Bash prompt that ends with a window-title sequence', async () => {
+    vi.useFakeTimers();
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const promptPty = createPromptPty();
+    const callback = vi.fn();
+
+    manager.scheduleAfterShellPrompt(promptPty.pty, callback);
+    promptPty.emit('\x1b[32m\r\nme@host \x1b[35mMINGW64 \x1b[33m~\x1b[m\r\n$ \x1b]0;MINGW64:/c/Users/me\x07');
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back after five seconds when no prompt is detected', async () => {
     vi.useFakeTimers();
     const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
@@ -312,6 +402,73 @@ describe('TerminalPanelManager hidden output delivery', () => {
     vi.mocked(panelManager.getPanel).mockReset();
     vi.mocked(panelManager.updatePanel).mockReset();
     vi.useRealTimers();
+  });
+
+  it.each([true, false])('bounds interactive output scheduling with visibility=%s', (visible) => {
+    vi.useFakeTimers();
+    const send = vi.fn();
+    const daemonSend = vi.fn();
+    setPaneRuntime({
+      eventSink: { send }, daemonEventSink: { send: daemonSend },
+      getConfigManager: () => createConfigManagerStub(),
+      getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map(),
+    });
+    const manager = testAccess<HandlerAccess & TerminalPanelManager>(new TerminalPanelManager());
+    let emit: (data: string) => void = () => {};
+    const terminal = createTerminal({ outputBuffer: '', isVisible: visible });
+    Object.assign(terminal.pty, {
+      onData: (listener: (data: string) => void) => { emit = listener; return { dispose: vi.fn() }; },
+    });
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.setupTerminalHandlers(terminal);
+    const sink = visible ? send : daemonSend;
+    const outputs = () => sink.mock.calls.filter(call => call[0] === 'terminal:output');
+    emit('before input');
+    vi.advanceTimersByTime(4);
+    manager.writeToTerminal(terminal.panelId, 'x');
+    expect(outputs()).toHaveLength(visible ? 1 : 0);
+    emit('after input');
+    vi.advanceTimersByTime(7);
+    expect(outputs()).toHaveLength(visible ? 1 : 0);
+    vi.advanceTimersByTime(1);
+    expect(outputs()).toHaveLength(visible ? 2 : 0);
+    vi.advanceTimersByTime(250);
+    expect(outputs()).toHaveLength(visible ? 2 : 1);
+    emit('bulk output');
+    vi.advanceTimersByTime(8);
+    expect(outputs()).toHaveLength(visible ? 2 : 1);
+    vi.advanceTimersByTime(visible ? 24 : 242);
+    expect(outputs()).toHaveLength(visible ? 3 : 2);
+    if (!visible) expect(send).not.toHaveBeenCalledWith('terminal:output', expect.anything());
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('delivers keyboard input when a subscriber fails during the pending output flush', () => {
+    const healthySend = vi.fn();
+    setPaneRuntime({
+      eventSink: createFanoutEventSink([
+        { send: () => { throw new Error('output transport failed'); } },
+        { send: healthySend },
+      ]),
+      getConfigManager: () => createConfigManagerStub(),
+      getPtyHostRuntime: () => null,
+      getWebviewContextMap: () => new Map(),
+    });
+    const manager = new TerminalPanelManager();
+    const terminal = createTerminal({ outputBuffer: 'pending output', isVisible: true });
+    testAccess<SnapshotAccess>(manager).terminals.set(terminal.panelId, terminal);
+
+    expect(() => manager.writeToTerminal(terminal.panelId, 'x')).not.toThrow();
+    manager.writeToTerminal(terminal.panelId, 'y');
+
+    expect(terminal.pty.write.mock.calls).toEqual([['x'], ['y']]);
+    expect(healthySend).toHaveBeenCalledTimes(1);
+    expect(healthySend).toHaveBeenCalledWith('terminal:output', {
+      panelId: terminal.panelId,
+      sessionId: terminal.sessionId,
+      output: 'pending output',
+    });
+    disposeFlowControlRecord(terminal.flowControl);
   });
 
   it('keeps visible terminal output on the combined runtime sink', () => {
@@ -957,6 +1114,91 @@ describe('TerminalPanelManager hidden output delivery', () => {
         initialInputError: undefined,
       },
     });
+  });
+
+  it('allocates one stable selector for a fresh native OpenCode launch', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
+      agentType: 'opencode',
+    });
+
+    expect(result.customState.agentSessionId).toMatch(/^ses_[A-Za-z0-9]+$/);
+    expect(result.commandToRun).toBe(
+      `opencode --auto --session "${result.customState.agentSessionId}"`,
+    );
+    expect(result.commandToRun.match(/--session/g)).toHaveLength(1);
+    expect(result.customState).toMatchObject({
+      agentType: 'opencode',
+      isCliPanel: true,
+      isCliReady: false,
+      launchCommand: 'opencode --auto',
+      wasInterrupted: undefined,
+    });
+  });
+
+  it('reuses a persisted OpenCode id whether or not the panel was interrupted', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = 'ses_Persisted123';
+
+    for (const wasInterrupted of [undefined, true]) {
+      const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
+        agentType: 'opencode',
+        agentSessionId: sessionId,
+        wasInterrupted,
+      });
+      expect(result.commandToRun).toBe(`opencode --auto --session "${sessionId}"`);
+      expect(result.customState.agentSessionId).toBe(sessionId);
+      expect(result.customState.wasInterrupted).toBeUndefined();
+    }
+  });
+
+  it('adopts one explicit OpenCode selector without duplicating it', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'opencode --auto --session ses_Explicit123';
+
+    const result = manager.resolveCliLaunchCommand('panel-1', command, {});
+
+    expect(result.commandToRun).toBe(command);
+    expect(result.customState.agentSessionId).toBe('ses_Explicit123');
+    expect(result.commandToRun.match(/--session/g)).toHaveLength(1);
+  });
+
+  it('rejects conflicting OpenCode command and persisted selectors', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    expect(() => manager.resolveCliLaunchCommand(
+      'panel-1',
+      'opencode --session ses_Command123',
+      { agentType: 'opencode', agentSessionId: 'ses_Persisted123' },
+    )).toThrow('OpenCode command and persisted session ids differ');
+  });
+
+  it('keeps OpenCode initial input out of the launch command', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
+      agentType: 'opencode',
+      initialInputMode: 'argument',
+      initialInput: 'Review this change',
+    });
+
+    expect(result.commandToRun).not.toContain('Review this change');
+    expect(result.commandToRun).not.toContain('--prompt');
+    expect(result.customState.initialInputSentAt).toBeUndefined();
+  });
+
+  it('leaves wrapped OpenCode launches opaque without allocating an id', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const command = 'agent-farm run opencode';
+
+    const result = manager.resolveCliLaunchCommand('panel-1', command, {
+      agentType: 'opencode',
+      launchMode: 'wrapped',
+    });
+
+    expect(result.commandToRun).toBe(command);
+    expect(result.customState.agentSessionId).toBeUndefined();
   });
 
   it('escapes shell-sensitive startup prompt arguments without changing ordinary prompts', () => {

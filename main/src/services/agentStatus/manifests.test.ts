@@ -5,6 +5,7 @@ import {
   CODEX_MANIFEST,
   CURSOR_MANIFEST,
   GENERIC_MANIFEST,
+  OPENCODE_MANIFEST,
   getManifestForAgent,
 } from './manifests';
 
@@ -15,6 +16,7 @@ describe('getManifestForAgent', () => {
     expect(getManifestForAgent('claude')).toBe(CLAUDE_MANIFEST);
     expect(getManifestForAgent('codex')).toBe(CODEX_MANIFEST);
     expect(getManifestForAgent('cursor')).toBe(CURSOR_MANIFEST);
+    expect(getManifestForAgent('opencode')).toBe(OPENCODE_MANIFEST);
     expect(getManifestForAgent('aider')).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(undefined)).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(null)).toBe(GENERIC_MANIFEST);
@@ -48,6 +50,21 @@ describe('CLAUDE_MANIFEST', () => {
     ].join('\n');
     const r = detectAgentState(CLAUDE_MANIFEST, screen(s));
     expect(r.state).toBe('blocked');
+  });
+
+  // Claude Code 2.1.289 titles: "◐ Hi" / "◑ Hi" while a turn runs, "✳ Hi" between turns.
+  it.each(['◐ Hi', '◑ Hi'])('sees the half-circle title %s as visible work over an idle prompt box', title => {
+    const s = ['some prior output', '────────────', ' ❯ ', '────────────'].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s, title));
+    expect(r.state).toBe('working');
+    expect(r.visibleWorking).toBe(true);
+  });
+
+  it('keeps the star title between turns idle', () => {
+    const s = ['some prior output', '────────────', ' ❯ ', '────────────'].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s, '✳ Hi'));
+    expect(r.state).toBe('idle');
+    expect(r.visibleWorking).toBe(false);
   });
 
   it('classifies an empty prompt box as idle via live_prompt_box', () => {
@@ -398,6 +415,124 @@ describe('CURSOR_MANIFEST', () => {
     ].join('\n');
     const r = detectAgentState(CURSOR_MANIFEST, screen(s));
     expect(r.state).toBe('idle');
+  });
+});
+
+// Minimal fixtures distilled from isolated OpenCode v2.0.19 PTY captures.
+describe('OPENCODE_MANIFEST', () => {
+  const permissionChoices = '  ┃   Allow once   Always allow   Reject';
+  const permissionConfirmationFooter =
+    '  ┃   ctrl+f fullscreen  ⇆ select  enter confirm';
+  const permissionOneLineFooter =
+    '  ┃   Allow once   Always allow   Reject   ctrl+f fullscreen  ⇆ select  enter confirm';
+  const idleComposer = [
+    '  ┃',
+    '  ┃  Ask anything…',
+    '  ┃',
+    '  ┃  Build',
+    `  ╹${'▀'.repeat(44)}`,
+    '  [project]                          shift+tab agents  ctrl+p commands',
+  ].join('\n');
+
+  it('leaves the blank pre-render startup frame idle for monitor startup grace', () => {
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(''));
+    expect(r.state).toBe('idle');
+    expect(r.visibleIdle).toBe(false);
+    expect(r.matchedRuleId).toBeNull();
+  });
+
+  it('classifies the rendered startup composer as idle', () => {
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(idleComposer, 'OpenCode'));
+    expect(r.state).toBe('idle');
+    expect(r.visibleIdle).toBe(true);
+    expect(r.matchedRuleId).toBe('idle_composer');
+  });
+
+  it('recognizes a transparent-theme composer without an opaque bottom border', () => {
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(idleComposer.replace(/╹▀+/u, ' '), 'OpenCode'));
+    expect(r.visibleIdle).toBe(true);
+    expect(r.matchedRuleId).toBe('idle_composer');
+  });
+
+  it.each([
+    '  ⬝⬝■■■■ esc interrupt                    shift+tab agents  ctrl+p commands',
+    '  ■■⬝⬝⬝⬝ esc again to interrupt           shift+tab agents  ctrl+p commands',
+  ])('classifies a live working footer as working: %s', (footer) => {
+    const s = ['⠙ New session', '', '  ┃  Build', `  ╹${'▀'.repeat(44)}`, footer].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s, 'OpenCode'));
+    expect(r.state).toBe('working');
+    expect(r.visibleWorking).toBe(true);
+    expect(r.matchedRuleId).toBe('interruptible_composer');
+  });
+
+  it('classifies the split-line live permission action as blocked', () => {
+    const s = [
+      '  ┃  △ Permission required',
+      '  ┃',
+      '  ┃  $ sanitized-command',
+      '  ┃',
+      permissionChoices,
+      permissionConfirmationFooter,
+    ].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.visibleBlocker).toBe(true);
+    expect(r.matchedRuleId).toBe('live_permission_action');
+  });
+
+  it('classifies the captured one-line live permission action as blocked', () => {
+    const s = ['  ┃  △ Permission required', '  ┃  $ sanitized-command', permissionOneLineFooter].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('live_permission_action');
+  });
+
+  it('keeps a wrapped live permission action blocked beyond the old eight-line boundary', () => {
+    const s = [
+      '  ┃  △ Permission required',
+      '  ┃  $ sanitized-command --first',
+      '  ┃    --second',
+      '  ┃    --third',
+      '  ┃    --fourth',
+      '  ┃  Review the requested action.',
+      '  ┃  Only the displayed action is affected.',
+      '  ┃  Choose how to continue.',
+      permissionChoices,
+      permissionConfirmationFooter,
+    ].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('live_permission_action');
+  });
+
+  it('prioritizes the live permission footer over coexisting working and idle markers', () => {
+    const s = [
+      `  ╹${'▀'.repeat(44)}`,
+      '  ⬝⬝■■■■ esc interrupt                    shift+tab agents  ctrl+p commands',
+      permissionChoices,
+      permissionConfirmationFooter,
+    ].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('live_permission_action');
+  });
+
+  it('classifies a session error above the current idle composer as idle', () => {
+    const s = ['  Session failed  x', '  Error: fixture rejected request', '', idleComposer].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s));
+    expect(r.state).toBe('idle');
+    expect(r.matchedRuleId).toBe('idle_composer');
+  });
+
+  it('does not treat action-looking history at the old eight-line boundary as a live blocker', () => {
+    const s = [
+      permissionChoices,
+      permissionConfirmationFooter,
+      idleComposer,
+    ].join('\n');
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(s));
+    expect(r.state).toBe('idle');
+    expect(r.matchedRuleId).toBe('idle_composer');
   });
 });
 

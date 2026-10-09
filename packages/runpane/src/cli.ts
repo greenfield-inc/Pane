@@ -8,8 +8,10 @@ import { runAgentContext } from './agentContext';
 import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
 import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
+import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
-import { helpText, parseRunpaneArgs, type ParsedArgs, type RunpaneCommand } from './commands';
+import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
+import { routeDaemonCallsTo } from './daemonClient';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
@@ -53,6 +55,7 @@ import {
   runLockRelease,
   runSessionsSetAgent,
   runSessionsUpdate,
+  runSessionsPin,
   runReposAdd,
   runReposList,
   runWatch,
@@ -69,6 +72,18 @@ import {
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import {
+  readTailnet,
+  readWorkspaceSummary,
+  resolveMachine,
+  runWorkspaceExec,
+  runWorkspaceList,
+  runWorkspaceRead,
+  runWorkspaceSetEnabled,
+  runWorkspaceWrite,
+  workspaceHintFor,
+  workspaceTarget
+} from './workspace';
 
 const SOURCE = 'npm' as const;
 
@@ -76,6 +91,10 @@ export async function main(argv: string[]): Promise<number> {
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
     return runTrackedCommand(telemetryContext, () => runNoArgsEntrypoint(telemetryContext));
+  }
+  const passThrough = splitWorkspacePassThrough(argv);
+  if (passThrough) {
+    return runOnMachine(passThrough.machine, passThrough.command);
   }
 
   let parsed: ParsedArgs;
@@ -100,7 +119,43 @@ export async function main(argv: string[]): Promise<number> {
     return dispatchParsedCommand(parsed, telemetryContext);
   }
 
-  return runTrackedCommand(telemetryContext, () => dispatchParsedCommand(parsed, telemetryContext));
+  return runTrackedCommand(telemetryContext, () => dispatchWithWorkspaceHint(parsed, telemetryContext));
+}
+
+/** Commands that run on this machine only; everything else is a daemon call another machine can answer. */
+const THIS_MACHINE_ONLY = new Set<string>([
+  'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
+  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff',
+  // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
+  'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
+]);
+
+/** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
+async function runOnMachine(machineQuery: string, command: string[]): Promise<number> {
+  const parsed = parseRunpaneArgs(command);
+  if (THIS_MACHINE_ONLY.has(parsed.command)) {
+    throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
+  }
+  const tailnet = await readTailnet();
+  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale: ${tailnet.reason}. ${tailnet.fix}`);
+  routeDaemonCallsTo(workspaceTarget(resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines])));
+  try {
+    return await main(command);
+  } finally {
+    routeDaemonCallsTo(null);
+  }
+}
+
+async function dispatchWithWorkspaceHint(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
+  try {
+    return await dispatchParsedCommand(parsed, telemetryContext);
+  } catch (error) {
+    if (error instanceof Error) {
+      const hint = await workspaceHintFor(error, parsed).catch(() => null);
+      if (hint) error.message = `${error.message}\n${hint}`;
+    }
+    throw error;
+  }
 }
 
 type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext) => number | Promise<number>;
@@ -108,6 +163,9 @@ type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryCon
 const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'help': async (parsed, telemetryContext) => {
     console.log(helpText(parsed.helpTopic));
+    if (!parsed.helpTopic || parsed.helpTopic === 'workspace') {
+      console.log(['', ...(await readWorkspaceSummary(parsed.paneDir)).lines].join('\n'));
+    }
     return 0;
   },
   'setup': async (parsed, telemetryContext) => {
@@ -171,6 +229,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'sessions update': async (parsed, telemetryContext) => {
     return runSessionsUpdate(parsed);
   },
+  'sessions pin': async (parsed) => runSessionsPin(parsed, true),
+  'sessions unpin': async (parsed) => runSessionsPin(parsed, false),
   'sessions set-agent': async (parsed, telemetryContext) => {
     return runSessionsSetAgent(parsed);
   },
@@ -195,6 +255,13 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'workspace state': async (parsed, telemetryContext) => {
     return runWorkspaceState(parsed);
   },
+  'workspace list': async (parsed) => runWorkspaceList(parsed),
+  'workspace enable': async (parsed) => runWorkspaceSetEnabled(parsed, true),
+  'workspace disable': async (parsed) => runWorkspaceSetEnabled(parsed, false),
+  'workspace read': async (parsed) => runWorkspaceRead(parsed),
+  'workspace write': async (parsed) => runWorkspaceWrite(parsed),
+  'workspace exec': async (parsed) => runWorkspaceExec(parsed),
+  'handoff': async (parsed) => runHandoff(parsed),
   'watch': async (parsed, telemetryContext) => {
     return runWatch(parsed);
   },
@@ -346,13 +413,10 @@ async function runTrackedCommand(
   telemetryContext: WrapperTelemetryContext,
   execute: () => Promise<number>
 ): Promise<number> {
-  await trackWrapperEvent('runpane_wrapper_command_started', telemetryContext);
   try {
     const code = await execute();
     telemetryContext.exitCode = code;
-    if (code === 0) {
-      await trackWrapperEvent('runpane_wrapper_command_succeeded', telemetryContext);
-    } else {
+    if (code !== 0) {
       telemetryContext.failureStage ??= inferFailureStage(telemetryContext);
       telemetryContext.failureCategory ??= 'process_exit';
       await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
