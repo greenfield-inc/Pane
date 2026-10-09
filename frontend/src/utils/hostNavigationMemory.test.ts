@@ -90,6 +90,16 @@ beforeEach(() => {
 });
 
 describe('restoreHostNavigation', () => {
+  it('restores Mission Control for the incoming host and clears the active Pane', async () => {
+    storedMemories.set(REMOTE_HOST_ID, { view: 'mission-control', projectId: null, paneId: 'pane-1' });
+    const { restoreHostNavigation, useNavigationStore, useSessionStore } = await loadHostNavigationMemory();
+    useSessionStore.getState().loadSessions([paneFixture('pane-1')]);
+    await useSessionStore.getState().setActiveSession('pane-1');
+    await restoreHostNavigation();
+    expect(useNavigationStore.getState().activeView).toBe('mission-control');
+    expect(useSessionStore.getState().activeSessionId).toBeNull();
+  });
+
   it('reopens the Pane the host was left on', async () => {
     storedMemories.set(REMOTE_HOST_ID, { view: 'sessions', projectId: null, paneId: 'pane-2' });
     const { restoreHostNavigation, useNavigationStore, useSessionStore } = await loadHostNavigationMemory();

@@ -5,6 +5,7 @@ import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
 import { startOwnPaneCreation } from './ownPaneCreations';
+import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -170,6 +171,20 @@ export class API {
     async fetch(): Promise<IPCResponse<LeaderboardResponse>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.leaderboard.fetch();
+    },
+  };
+
+  // Mission Control
+  static missionControl = {
+    /** Every agent pane across all sessions and projects. */
+    async listAgents(options?: { includeArchived?: boolean }) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.missionControl.listAgents(options);
+    },
+    /** Batched plain-text screen snapshots for the visible tiles. */
+    async snapshots(request: MissionControlSnapshotRequest) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.missionControl.snapshots(request);
     },
   };
 

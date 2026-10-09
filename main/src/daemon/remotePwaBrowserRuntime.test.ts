@@ -482,6 +482,30 @@ describe('Remote PWA browser runtime', () => {
     });
   });
 
+  it('includes the terminal viewer id in remote acknowledgements', async () => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      headers: { 'Content-Type': 'application/json' },
+      status: 200,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new RemoteRuntimeAdapter({
+      id: 'profile-1',
+      baseUrl: 'https://host.example.test',
+      label: 'Remote Host',
+      token: 'secret-token',
+      transport: 'http+sse',
+    });
+
+    await adapter.ackTerminalOutput('panel-1', 8, 'viewer-1');
+
+    expect(readInvokeBody(fetchMock.mock.calls[0][1])).toMatchObject({
+      channel: 'terminal:ack',
+      args: ['panel-1', 8, 'viewer-1'],
+    });
+  });
+
   it('routes remote pane creation through project and session daemon commands', async () => {
     installBrowserGlobals();
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {

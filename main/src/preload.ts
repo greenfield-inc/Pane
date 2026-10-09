@@ -437,6 +437,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
+  // Mission Control — live overview of every agent pane across all sessions
+  missionControl: {
+    listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('mission-control:list-agents', options),
+    snapshots: (request: { panelIds: string[]; maxLines?: number }): Promise<IPCResponse> => invokeIpc('mission-control:snapshots', request),
+  },
+
   // Session management
   sessions: {
     getAll: (): Promise<IPCResponse> => invokeIpc('sessions:get-all'),

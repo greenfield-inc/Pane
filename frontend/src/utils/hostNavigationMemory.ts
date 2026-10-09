@@ -219,6 +219,12 @@ export async function restoreHostNavigation(ownsRuntime: () => boolean = () => t
     return;
   }
 
+  if (memory.view === 'mission-control') {
+    await setActiveSession(null);
+    navigation.navigateToMissionControl();
+    return;
+  }
+
   if (memory.view === 'pane-chat') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;
