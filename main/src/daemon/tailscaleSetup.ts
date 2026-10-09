@@ -452,8 +452,10 @@ function tailscaleCandidates(pathExists: (candidate: string) => boolean = exists
     // Snap and Nix installs sit outside the PATH a desktop launcher or relaunch may give Pane.
     for (const candidate of [
       '/snap/bin/tailscale',
+      '/var/lib/snapd/snap/bin/tailscale',
       '/run/current-system/sw/bin/tailscale',
       path.join(os.homedir(), '.nix-profile', 'bin', 'tailscale'),
+      path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state'), 'nix', 'profile', 'bin', 'tailscale'),
     ]) {
       if (pathExists(candidate)) commands.push({ command: candidate, displayCommand: quoteForPosix(candidate) });
     }

@@ -23,6 +23,8 @@ describe('Tailscale discovery with a desktop launcher PATH', () => {
 
   it.each([
     ['linux', '/snap/bin/tailscale'],
+    ['linux', '/var/lib/snapd/snap/bin/tailscale'],
+    ['linux', path.join(os.homedir(), '.local', 'state', 'nix', 'profile', 'bin', 'tailscale')],
     ['linux', '/run/current-system/sw/bin/tailscale'],
     ['linux', path.join(os.homedir(), '.nix-profile', 'bin', 'tailscale')],
     ['darwin', '/run/current-system/sw/bin/tailscale'],
@@ -35,6 +37,15 @@ describe('Tailscale discovery with a desktop launcher PATH', () => {
       command: installed,
       displayCommand: `'${installed}'`,
     });
+  });
+
+  it('finds a Nix profile under XDG_STATE_HOME', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    vi.stubEnv('XDG_STATE_HOME', '/home/me/state');
+    const installed = path.join('/home/me/state', 'nix', 'profile', 'bin', 'tailscale');
+    const { run, exists } = installedAt(installed);
+
+    await expect(resolveTailscaleCommandAsync(run, exists)).resolves.toMatchObject({ command: installed });
   });
 
   it('prefers the tailscale on PATH over an installed fallback', async () => {
