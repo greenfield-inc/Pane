@@ -38,10 +38,12 @@ function SshViewForHost() {
   const openHost = useSshHostsStore(state => state.open);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     void refreshHosts();
     let cancelled = false;
+    setError(null);
     // Tabs opened or closed while the saved list is in flight are newer than it.
     let loading = true;
     const createdWhileLoading = new Map<string, ToolPanel>();
@@ -62,7 +64,7 @@ function SshViewForHost() {
       }
       setLoaded(true);
     }).catch(() => {
-      if (!cancelled) setError('Could not load your SSH tabs');
+      if (!cancelled) setError('Could not load your SSH tabs.');
     });
     const events = window.electronAPI.events;
     const created = events.onPanelCreated(panel => {
@@ -84,7 +86,7 @@ function SshViewForHost() {
       updated();
       deleted();
     };
-  }, [refreshHosts]);
+  }, [refreshHosts, loadAttempt]);
 
   const tabs = useMemo(() => panels.filter(panel => panel.type === 'terminal'), [panels]);
   // The Session exists once a host has been opened; its terminals read it from context.
@@ -96,7 +98,7 @@ function SshViewForHost() {
     if (!hasTabs || session) return;
     let cancelled = false;
     setSessionError(null);
-    const fail = () => { if (!cancelled) setSessionError('Could not load the SSH view.'); };
+    const fail = () => { if (!cancelled) setSessionError('Could not load the SSH view. Retry, and if it keeps failing, check the connection to the machine this window controls.'); };
     API.sessions.get(SSH_HOSTS_SESSION_ID).then(response => {
       if (cancelled) return;
       if (response.success && response.data) setSession(response.data);
@@ -125,7 +127,8 @@ function SshViewForHost() {
 
   if (!loaded) {
     return <div className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
-      {error ? <p role="alert" className="p-6 text-text-secondary">{error}</p> : <SelectionLoading name="SSH" />}
+      {error ? <LoadFailure message={`${error} Retry, and if it keeps failing, check the connection to the machine this window controls.`} onRetry={() => setLoadAttempt(value => value + 1)} />
+        : <SelectionLoading name="SSH" />}
     </div>;
   }
 
@@ -141,11 +144,7 @@ function SshViewForHost() {
         <div className="relative min-h-0 flex-1">
           {/* Over the stage, so showing it never resizes a terminal. */}
           {alert && <p role="alert" className="absolute left-1/2 top-2 z-40 -translate-x-1/2 rounded border border-border-primary bg-surface-primary px-2 py-1 text-xs text-status-error shadow-sm">{alert}</p>}
-          {sessionError && <div role="alert" className="flex items-center gap-3 p-6 text-sm text-text-secondary">
-            {sessionError}
-            <button type="button" onClick={() => setSessionAttempt(value => value + 1)}
-              className="rounded bg-surface-secondary px-3 py-1.5 text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Retry</button>
-          </div>}
+          {sessionError && <LoadFailure message={sessionError} onRetry={() => setSessionAttempt(value => value + 1)} />}
           {session && <SessionProvider session={session}>
             <SplitLayout layout={layout} panels={tabs} focusedGroupId={GROUP_ID} isMainRepo={false}
               onSizesChange={noop} onPanelSelect={selectGroupPanel} onPanelClose={closePanel} onFocusGroup={noop}
@@ -155,6 +154,16 @@ function SshViewForHost() {
       ) : (
         <SshHostPicker hosts={hosts} onOpen={alias => { void openHost(alias); }} />
       )}
+    </div>
+  );
+}
+
+function LoadFailure({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex items-center gap-3 p-6 text-sm text-text-secondary">
+      {message}
+      <button type="button" onClick={onRetry}
+        className="flex-shrink-0 rounded bg-surface-secondary px-3 py-1.5 text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Retry</button>
     </div>
   );
 }

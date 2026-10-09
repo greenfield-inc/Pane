@@ -41,7 +41,7 @@ async function openSshHost(sessionManager: SessionManager, alias: string, newTab
     // An open tab stays reachable after its host leaves the config.
     const existing = newTab ? undefined : panelManager.getPanelsForSession(SSH_HOSTS_SESSION_ID).find(panel => sshHostOf(panel) === alias);
     // Only an alias the config lists right now is ever typed into a shell.
-    if (!existing && !hosts.includes(alias)) throw new Error('That host is no longer in your SSH config');
+    if (!existing && !hosts.includes(alias)) throw new Error(`${alias} is not a host in your SSH config, so Pane did not connect. Add a Host entry for it, or pick a host from the list.`);
     ensureSshSession(sessionManager);
     const panel = existing ?? await panelManager.createPanel({
       sessionId: SSH_HOSTS_SESSION_ID,
