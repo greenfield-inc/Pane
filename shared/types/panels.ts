@@ -253,7 +253,21 @@ export interface ToolPanelMetadata {
    * 'split' opens it beside the primary group (reusing an existing side group
    * as tabs). Ignored once the panel is in the stored layout.
    */
-  openPlacement?: 'split' | 'tab';
+  openPlacement?: PanelOpenPlacement;
+}
+
+export type PanelOpenPlacement = 'split' | 'tab';
+
+/**
+ * Payload of `panel:activeChanged`: the host or an agent asks clients to bring
+ * a tab forward. Only clients already showing `sessionId` follow it; a client's
+ * own tab click never produces one. `placement` is set when `runpane panels
+ * open` opens or reopens the tab.
+ */
+export interface PanelActivationRequest {
+  sessionId: string;
+  panelId: string;
+  placement?: PanelOpenPlacement;
 }
 
 export interface CreatePanelRequest {
@@ -264,6 +278,7 @@ export interface CreatePanelRequest {
   initialState?: TerminalPanelState | DiffPanelState | ExplorerPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | BrowserPanelState | { customState?: unknown };
   metadata?: Partial<ToolPanelMetadata>; // Optional metadata overrides
   activate?: boolean;            // Defaults to true; false creates the panel in the background.
+  announceActivation?: boolean;  // Host-initiated: also ask clients on this Pane to show it (panel:activeChanged).
 }
 
 export interface UpdatePanelRequest {

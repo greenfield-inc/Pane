@@ -7303,7 +7303,7 @@ describe('runpane IPC handlers', () => {
       const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, url: 'http://localhost:3000' }]);
 
       expect(panelManager.createPanel).not.toHaveBeenCalled();
-      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, 'existing-browser');
+      expect(panelManager.setActivePanel).toHaveBeenCalledWith(session.id, 'existing-browser', 'split');
       // Reopening stamps the tab so an open page reloads with the latest content.
       expect(panelManager.updatePanel).toHaveBeenCalledWith('existing-browser', expect.objectContaining({
         state: expect.objectContaining({ isActive: true, customState: expect.objectContaining({ currentUrl: 'http://localhost:3000/', reopenedAt: expect.any(String) }) }),
