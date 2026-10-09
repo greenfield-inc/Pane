@@ -372,8 +372,8 @@ async function installRemoteHostRoute(
         break;
       case 'orchestration-sessions:create': {
         // SAFETY: the create sheet sends an OrchestrationSessionCreateInput.
-        const input = args[0] as { name: string; agent?: 'claude' | 'codex' | 'cursor' };
-        const created = { ...buildOrchestrationSession(input.name, host.sessions.length + 10), agent: input.agent ?? 'claude' };
+        const input = args[0] as { name: string; agent?: 'claude' | 'codex' | 'cursor'; isPinned?: boolean };
+        const created = { ...buildOrchestrationSession(input.name, host.sessions.length + 10), agent: input.agent ?? 'claude', isPinned: input.isPinned ?? false };
         host.sessions.push(created);
         result = { success: true, data: orchestrationSessionView(created) };
         break;

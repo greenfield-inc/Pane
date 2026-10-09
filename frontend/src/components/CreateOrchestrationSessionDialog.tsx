@@ -1,5 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { Pin } from 'lucide-react';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import type { AppConfig } from '../types/config';
@@ -9,6 +11,7 @@ import { cn } from '../utils/cn';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 
 const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
@@ -26,12 +29,15 @@ function supportedSessionAgent(preferred?: PaneChatAgent): PaneChatAgent {
   return options[0]?.id ?? DEFAULT_PANE_CHAT_AGENT;
 }
 
+/** The name is left out when the person did not type one. */
+export type SessionCreateRequest = Omit<OrchestrationSessionCreateInput, 'name'> & { name?: string };
+
 interface CreateOrchestrationSessionDialogProps {
   onSubmittingChange?: (submitting: boolean) => void;
   header?: ReactNode;
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (agent: PaneChatAgent, name?: string, launchCommand?: string, profile?: string, customResume?: CustomCommandResume | null, wslDistribution?: string) => Promise<void>;
+  onCreate: (request: SessionCreateRequest) => Promise<void>;
 }
 
 interface SessionCreationForm {
@@ -40,6 +46,7 @@ interface SessionCreationForm {
   launchCommand: string;
   customResume: CustomCommandResume | null;
   profile: string;
+  startPinned: boolean;
   error: string | null;
 }
 
@@ -54,6 +61,7 @@ function initialSessionCreationForm(config: AppConfig | null): SessionCreationFo
     launchCommand: config?.defaultSessionCommand ?? '',
     customResume: config?.defaultSessionResume ?? null,
     profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
+    startPinned: config?.defaultSessionPinned ?? false,
     error: null,
   };
 }
@@ -81,13 +89,14 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [isOpen]);
-  const [{ agent, name, launchCommand, customResume, profile, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
+  const [{ agent, name, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
   const userEditedLaunch = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
   const fetchConfig = useConfigStore(state => state.fetchConfig);
   const updateConfig = useConfigStore(state => state.updateConfig);
   const userSelectedAgent = useRef(false);
+  const userToggledPinned = useRef(false);
 
   useEffect(() => {
     if (!isOpen || userSelectedAgent.current) return;
@@ -100,11 +109,13 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     if (!isOpen) return;
     userSelectedAgent.current = false;
     userEditedLaunch.current = false;
+    userToggledPinned.current = false;
     const savedConfig = useConfigStore.getState().config;
     dispatch({ type: 'reset', config: savedConfig });
     if (!savedConfig) {
       void fetchConfig().then(nextConfig => {
         if (!userSelectedAgent.current) dispatch({ type: 'update', values: { agent: supportedSessionAgent(nextConfig.defaultOrchestratorAgent) } });
+        if (!userToggledPinned.current) dispatch({ type: 'update', values: { startPinned: nextConfig.defaultSessionPinned ?? false } });
         if (!userEditedLaunch.current) {
           dispatch({ type: 'update', values: {
             launchCommand: nextConfig.defaultSessionCommand ?? '',
@@ -128,7 +139,16 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
       if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
       if (Object.keys(defaults).length > 0) await updateConfig(defaults);
-      await onCreate(agent, name.trim() || undefined, launchCommand, profile, customResume, wslDistribution || undefined);
+      await onCreate({
+        agent,
+        name: name.trim() || undefined,
+        launchCommand,
+        profile,
+        customResume,
+        runtime: wslDistribution ? 'wsl' : 'windows',
+        wslDistribution: wslDistribution || undefined,
+        isPinned: startPinned,
+      });
     } catch (cause) {
       dispatch({ type: 'update', values: { error: cause instanceof Error ? cause.message : 'Failed to create Session' } });
     } finally {
@@ -192,6 +212,23 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
               {wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
             </div>
           )}
+          <div className="flex items-center gap-3">
+            <Pin className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-text-primary">Start pinned</div>
+              <div className="mt-0.5 text-xs text-text-secondary">Show this Session in the pinned section immediately.</div>
+            </div>
+            <Toggle
+              checked={startPinned}
+              aria-label="Start pinned"
+              size="sm"
+              onChange={checked => {
+                userToggledPinned.current = true;
+                dispatch({ type: 'update', values: { startPinned: checked } });
+                void updateConfig({ defaultSessionPinned: checked }).catch(() => undefined);
+              }}
+            />
+          </div>
           <details className="space-y-3">
             <summary className="cursor-default text-sm font-medium text-text-secondary">Launch command and behavior</summary>
             <SessionLaunchFields

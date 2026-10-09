@@ -10,7 +10,9 @@ import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } f
 import type { RemotePwaSessionAgents } from '../../../../shared/types/remoteDaemon';
 import type { Session } from '../../types/session';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
+import { loadRemoteStartPinnedPreference, RemoteStartPinnedToggle, saveRemoteStartPinnedPreference } from './RemoteCreateSessionDialog';
 
+const START_PINNED_PREFERENCE_KEY = 'pane.remoteCreateOrchestrationSession.startPinned';
 const ALL_AGENTS: RemotePwaSessionAgents = { agents: ['claude', 'codex', 'cursor'], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
 
 interface RemoteCreateOrchestrationSessionDialogProps {
@@ -37,6 +39,7 @@ export function RemoteCreateOrchestrationSessionDialog({
   // Follows the host default, which can arrive after the sheet opens, until the person picks one.
   const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   const agent = pickedAgent ?? sessionAgents.defaultAgent;
+  const [startPinned, setStartPinned] = useState(() => loadRemoteStartPinnedPreference(START_PINNED_PREFERENCE_KEY));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const defaultName = nextOrchestrationSessionName(sessions);
@@ -47,7 +50,7 @@ export function RemoteCreateOrchestrationSessionDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const view = await adapter.createOrchestrationSession({ name: name.trim() || defaultName, agent });
+      const view = await adapter.createOrchestrationSession({ name: name.trim() || defaultName, agent, isPinned: startPinned });
       onCreated(view);
       onClose();
     } catch (createError) {
@@ -139,6 +142,15 @@ export function RemoteCreateOrchestrationSessionDialog({
                   ))}
                 </div>
               </fieldset>
+
+              <RemoteStartPinnedToggle
+                checked={startPinned}
+                description="Show this Session in the pinned section immediately."
+                onChange={(checked) => {
+                  setStartPinned(checked);
+                  saveRemoteStartPinnedPreference(checked, START_PINNED_PREFERENCE_KEY);
+                }}
+              />
 
               {error && (
                 <div role="alert" className="rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-status-error">

@@ -151,6 +151,7 @@ export interface AppConfig {
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
+  defaultSessionPinned?: boolean;
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -211,6 +212,7 @@ export interface UpdateConfigRequest {
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
+  defaultSessionPinned?: boolean;
   terminalShortcuts?: TerminalShortcut[];
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;

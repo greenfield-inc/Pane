@@ -363,29 +363,14 @@ export function RemoteCreateSessionDialog({
           </section>
 
           <section className="border-b border-border-primary p-5">
-            <label className="flex items-center justify-between gap-4">
-              <span className="flex min-w-0 gap-3">
-                <Pin className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-text-primary">Start pinned</span>
-                  <span className="mt-1 block text-sm text-text-secondary">Show this pane in the pinned section immediately.</span>
-                </span>
-              </span>
-              <span className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${startPinned ? 'bg-interactive' : 'bg-surface-tertiary'}`}>
-                <input
-                  type="checkbox"
-                  checked={startPinned}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setStartPinned(checked);
-                    saveRemoteStartPinnedPreference(checked);
-                  }}
-                  className="peer sr-only"
-                  aria-label="Start pinned"
-                />
-                <span className={`absolute top-1 h-5 w-5 rounded-full bg-text-on-interactive shadow-sm ring-1 ring-border-primary transition-transform ${startPinned ? 'translate-x-6' : 'translate-x-1'}`} />
-              </span>
-            </label>
+            <RemoteStartPinnedToggle
+              checked={startPinned}
+              description="Show this pane in the pinned section immediately."
+              onChange={(checked) => {
+                setStartPinned(checked);
+                saveRemoteStartPinnedPreference(checked);
+              }}
+            />
           </section>
 
           <section className="p-5">
@@ -442,18 +427,45 @@ export function RemoteCreateSessionDialog({
   );
 }
 
+export function RemoteStartPinnedToggle({ checked, description, onChange }: {
+  checked: boolean;
+  description: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-4">
+      <span className="flex min-w-0 gap-3">
+        <Pin className="mt-1 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-text-primary">Start pinned</span>
+          <span className="mt-1 block text-sm text-text-secondary">{description}</span>
+        </span>
+      </span>
+      <span className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${checked ? 'bg-interactive' : 'bg-surface-tertiary'}`}>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+          className="peer sr-only"
+          aria-label="Start pinned"
+        />
+        <span className={`absolute top-1 h-5 w-5 rounded-full bg-text-on-interactive shadow-sm ring-1 ring-border-primary transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+      </span>
+    </label>
+  );
+}
 
-function loadRemoteStartPinnedPreference(): boolean {
+export function loadRemoteStartPinnedPreference(key = REMOTE_START_PINNED_PREFERENCE_KEY): boolean {
   try {
-    return window.localStorage.getItem(REMOTE_START_PINNED_PREFERENCE_KEY) === 'true';
+    return window.localStorage.getItem(key) === 'true';
   } catch {
     return false;
   }
 }
 
-function saveRemoteStartPinnedPreference(value: boolean): void {
+export function saveRemoteStartPinnedPreference(value: boolean, key = REMOTE_START_PINNED_PREFERENCE_KEY): void {
   try {
-    window.localStorage.setItem(REMOTE_START_PINNED_PREFERENCE_KEY, value ? 'true' : 'false');
+    window.localStorage.setItem(key, value ? 'true' : 'false');
   } catch {
     // Ignore storage failures so the current create flow can still use local state.
   }

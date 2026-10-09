@@ -24,6 +24,23 @@ test('a phone creates a Session from the drawer and lands in its agent chat', as
   await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session New chat' })).toBeVisible();
 });
 
+test('Start pinned puts a new Session in Pinned and is remembered on this device', async ({ page }) => {
+  await openConnectedRemotePwa(page);
+  const sheet = page.getByRole('dialog', { name: 'Create Session' });
+  await page.getByRole('button', { name: 'New Session' }).click();
+  await expect(sheet.getByRole('checkbox', { name: 'Start pinned' })).not.toBeChecked();
+  await sheet.getByLabel('Name your chat (optional)').fill('Pinned at birth');
+  await sheet.getByText('Start pinned', { exact: true }).click();
+  await sheet.getByRole('button', { name: 'Create Session' }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByRole('group', { name: 'Pinned' }).getByRole('button', { name: 'Open Session Pinned at birth' })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('button', { name: 'New Session' }).click();
+  await expect(sheet.getByRole('checkbox', { name: 'Start pinned' })).toBeChecked();
+});
+
 test('New Pane without a repository starts in the default repository and keeps the picker', async ({ page }) => {
   await openConnectedRemotePwa(page);
   await page.getByRole('button', { name: 'New Pane', exact: true }).click();

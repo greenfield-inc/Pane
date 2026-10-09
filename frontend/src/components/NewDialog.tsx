@@ -55,12 +55,12 @@ export function NewDialog({ projects, defaultProjectId, onClose }: NewDialogProp
         </button>)}
       </ModalBody>
       <ModalFooter><Button variant="secondary" className="focus-visible:ring-interactive" onClick={onClose}>Cancel</Button></ModalFooter>
-    </> : step === 'session' ? <OrchestrationSessionForm isOpen header={header} onClose={onClose} onSubmittingChange={setIsSubmitting} onCreate={async (agent, requestedName, launchCommand, profile, customResume, wslDistribution) => {
+    </> : step === 'session' ? <OrchestrationSessionForm isOpen header={header} onClose={onClose} onSubmittingChange={setIsSubmitting} onCreate={async ({ name: requestedName, ...input }) => {
       if (!window.electronAPI?.orchestrationSessions) throw new Error('This host does not support Sessions.');
       const store = useOrchestrationSessionStore.getState();
       await store.load();
-      const name = requestedName?.trim() || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
-      await store.create({ name, agent, launchCommand, profile, customResume, runtime: wslDistribution ? 'wsl' : 'windows', wslDistribution });
+      const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+      await store.create({ ...input, name });
       useSessionStore.getState().setActiveSession(null);
       useNavigationStore.getState().navigateToPaneChat();
       onClose();
