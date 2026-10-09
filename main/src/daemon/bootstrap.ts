@@ -401,6 +401,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     if (latestPorts) getPaneEventSink().send('ports:changed', phonePreviews.decorate(latestPorts));
   };
   commandRegistry.register('ports:list', async () => phonePreviews.decorate(await listeningPortMonitor.refresh()));
+  // A phone opening a web port; its address arrives with the next ports:changed.
+  commandRegistry.register('ports:phone-address', async (port: number) => { await phonePreviews.request(port); });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager);

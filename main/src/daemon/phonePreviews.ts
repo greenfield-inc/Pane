@@ -40,7 +40,7 @@ export interface PhonePreviewHostOptions {
 }
 
 /**
- * Phone pages: one `tailscale serve --https=<n>` handler per web port, plus one for HTML files and
+ * Phone pages: one `tailscale serve --https=<n>` handler per web port a phone has opened, plus one for HTML files and
  * media, each pointing at a loopback preview proxy. Every handler target starts with
  * `/pane-<instance>/`, so a relaunch, even after kill -9, finds and removes this instance's
  * leftovers without touching handlers that belong to anyone else.
@@ -53,6 +53,8 @@ export class PhonePreviewHost {
   /** Serve HTTPS port for each forwarded port (by number) and for files. */
   private handlers = new Map<string, number>();
   private webPorts: number[] = [];
+  /** Web ports a phone has opened while they kept listening. */
+  private readonly requested = new Set<number>();
   private listeningPorts = new Set<number>();
   private lastError: string | null = null;
   /** What `decorate` last reflected, to publish only real changes. */
@@ -82,6 +84,19 @@ export class PhonePreviewHost {
   update(snapshot: ListeningPortsSnapshot): Promise<void> {
     this.webPorts = snapshot.ports.filter(port => port.kind === 'web').map(port => port.port);
     this.listeningPorts = new Set(snapshot.ports.map(port => port.port));
+    // A port that stopped listening must be asked for again once it is back.
+    for (const port of this.requested) if (!this.webPorts.includes(port)) this.requested.delete(port);
+    return this.reconcile();
+  }
+
+  /**
+   * A phone wants to open a web port: give it a handler. Handlers exist only for ports a phone
+   * opened, because Serve loses its whole config (other apps' handlers included) once a machine
+   * holds a few hundred of them.
+   */
+  request(port: number): Promise<void> {
+    if (!this.webPorts.includes(port) || this.requested.has(port)) return this.queue;
+    this.requested.add(port);
     return this.reconcile();
   }
 
@@ -129,6 +144,7 @@ export class PhonePreviewHost {
       ownerLogin: tailnet.ownerLogin,
       admits: (login: string) => authenticateWorkspaceRequest(login, undefined, policy).ok,
       // Detection revokes a port at once, before Serve confirms its handler is gone.
+      refusal: policy.verifySecret ? `${tailnet.machineName} is password protected, so its pages do not open on phones.` : undefined,
       ports: new Set([...this.handlers.keys()].filter(key => key !== FILES).map(Number).filter(port => detected.has(port))),
     };
   }
@@ -160,7 +176,9 @@ export class PhonePreviewHost {
     const next = new Map<string, number>();
     let failure: string | null = null;
     // Another Pane may pick ports from the same Serve config, so reading, choosing and writing happen under one machine-wide lock.
-    await withServeLock(this.stopped ? Math.max(0, this.removeUntil - Date.now()) : SERVE_LOCK_WAIT_MS, async () => {
+    const waitUntil = Date.now() + SERVE_LOCK_WAIT_MS;
+    // Read on every retry: quit shortens a wait that began before it.
+    await withServeLock(() => Math.min(waitUntil, this.removeUntil), async () => {
       const status = await serve(['status', '--json']);
       if (!status.ok) throw new Error(`tailscale serve status failed: ${firstLine(status.stderr || status.stdout)}`);
       const { ours, taken } = this.readServeConfig(status.stdout);
@@ -168,7 +186,7 @@ export class PhonePreviewHost {
       const proxyPort = this.proxy?.port;
       const target = (key: string) => `http://127.0.0.1:${proxyPort}${this.basePath}/${key}`;
       const passwordProtected = Boolean(this.options.workspace.getAccessPolicy()?.verifySecret);
-      const wanted = tailnet && proxyPort && !passwordProtected ? [FILES, ...this.webPorts.map(String)] : [];
+      const wanted = tailnet && proxyPort && !passwordProtected ? [FILES, ...[...this.requested].map(String)] : [];
 
       for (const handler of ours) {
         if (wanted.includes(handler.key) && handler.target === target(handler.key) && !next.has(handler.key)) {
@@ -241,8 +259,7 @@ const SERVE_LOCK_STALE_MS = 120_000;
  * Runs `work` while holding a lock every Pane on this machine shares: a directory created
  * atomically, holding the owner's pid. A dead owner's lock is taken over.
  */
-async function withServeLock(waitMs: number, work: () => Promise<void>): Promise<void> {
-  const giveUpAt = Date.now() + waitMs;
+async function withServeLock(giveUpAt: () => number, work: () => Promise<void>): Promise<void> {
   for (;;) {
     try {
       await fs.mkdir(SERVE_LOCK);
@@ -259,7 +276,7 @@ async function withServeLock(waitMs: number, work: () => Promise<void>): Promise
       await fs.rm(SERVE_LOCK, { recursive: true, force: true });
       continue;
     }
-    if (Date.now() >= giveUpAt) throw new Error('another Pane on this machine is changing Serve handlers');
+    if (Date.now() >= giveUpAt()) throw new Error('another Pane on this machine is changing Serve handlers');
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   try {

@@ -21,6 +21,8 @@ export interface PreviewGate {
   admits(login: string): boolean;
   /** Ports with a Serve handler; nothing else is forwarded. */
   ports: ReadonlySet<number>;
+  /** Shown to a refused login instead of naming the device to use, when no device can open pages. */
+  refusal?: string;
 }
 
 export interface PreviewFiles {
@@ -87,7 +89,7 @@ export async function startPreviewProxy(options: PreviewProxyOptions): Promise<P
     // Serve sends exactly one login and strips any the visitor sent.
     const login = singleHeader(request.headers['tailscale-user-login']).trim().toLowerCase();
     if (!login || !gate.admits(login)) {
-      return { kind: 'refused', status: 403, body: refusalPage(gate.machineName, gate.ownerLogin), html: true };
+      return { kind: 'refused', status: 403, body: refusalPage(gate.refusal ?? `This page runs on ${gate.machineName}. Open it from a device signed in as ${gate.ownerLogin}.`), html: true };
     }
     const rest = url.slice(options.basePath.length);
     const match = /^\/(\d+|files)(\/.*|\?.*)?$/u.exec(rest);
@@ -283,8 +285,8 @@ function framableHeaders(headers: http.IncomingHttpHeaders): http.OutgoingHttpHe
 }
 
 /** The Q9 notice: shown in the phone tab's frame when "Who can connect" refuses the visitor. */
-function refusalPage(machineName: string, ownerLogin: string): string {
-  const text = `This page runs on ${escapeHtml(machineName)}. Open it from a device signed in as ${escapeHtml(ownerLogin)}.`;
+function refusalPage(message: string): string {
+  const text = escapeHtml(message);
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Not available</title><style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center}</style></head><body><p>${text}</p></body></html>`;
 }
 
