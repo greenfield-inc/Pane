@@ -86,9 +86,10 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     const key = (socket: ListeningSocket) => `${socket.port}:${socket.pid ?? ''}:${socket.process}`;
     const unknownOwners = sockets.filter(socket => !owners.has(key(socket)));
     const provisional = new Map<string, Owner>();
+    const terminalPanes = options.terminalPanes();
     if (unknownOwners.length > 0) {
       const table = await readProcessTable();
-      const terminals = new Map(options.terminalPanes().map(terminal => [terminal.pid, terminal]));
+      const terminals = new Map(terminalPanes.map(terminal => [terminal.pid, terminal]));
       // An empty table means the read failed: use the answer once and ask again next poll.
       const target = table.length > 0 ? owners : provisional;
       for (const socket of unknownOwners) target.set(key(socket), classify(socket, table, terminals, panePid));
@@ -108,12 +109,17 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     for (const cached of [...owners.keys()]) if (!live.has(cached)) owners.delete(cached);
     for (const cached of [...kinds.keys()]) if (!live.has(cached)) kinds.delete(cached);
 
-    const ports = sockets.map((socket): ListeningPort => ({
-      ...socket,
+    // Pane names can change while a server runs, so they are read every poll;
+    // a Pane whose terminals are gone keeps the name it had.
+    const paneNames = new Map(terminalPanes.map(terminal => [terminal.sessionId, terminal.paneName]));
+    const ports = sockets.map((socket): ListeningPort => {
       // SAFETY: every live socket was classified and probed above.
-      ...(owners.get(key(socket)) ?? provisional.get(key(socket)))!,
-      kind: kinds.get(key(socket))!.kind,
-    }));
+      const owner = (owners.get(key(socket)) ?? provisional.get(key(socket)))!;
+      const port: ListeningPort = { ...socket, ...owner, kind: kinds.get(key(socket))!.kind };
+      const currentName = owner.sessionId === undefined ? undefined : paneNames.get(owner.sessionId);
+      if (currentName !== undefined) port.paneName = currentName;
+      return port;
+    });
     ports.sort((a, b) =>
       LISTENING_PORT_GROUP_ORDER.indexOf(a.group) - LISTENING_PORT_GROUP_ORDER.indexOf(b.group) || a.port - b.port);
     return { host: os.hostname(), ports };

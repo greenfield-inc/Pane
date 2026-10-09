@@ -64,13 +64,26 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
   });
 
   it('relabels a slow server as web once it answers in time', async () => {
-    // Answers its first request after 1.5 s, like a dev server compiling its first page.
-    const { port } = await startListener(`let first = true; require('http').createServer((_, res) => { setTimeout(() => res.end('ok'), first ? 1500 : 0); first = false; }).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`);
+    // Answers nothing until 1.5 s after it starts, like a dev server compiling its first page.
+    const { port } = await startListener(`const ready = Date.now() + 1500; require('http').createServer((_, res) => setTimeout(() => res.end('ok'), ready - Date.now())).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`);
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
 
     expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.kind).toBe('tcp');
     await new Promise(resolve => setTimeout(resolve, 1500));
     expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.kind).toBe('web');
+  });
+
+  it('shows a renamed Pane under its new name', async () => {
+    const { child, port } = await startListener(HTTP_SERVER);
+    let paneName = 'quick wins';
+    const monitor = createListeningPortMonitor({
+      panePid: NOT_PANE,
+      terminalPanes: () => [{ pid: child.pid ?? -1, sessionId: 'session-1', paneName }],
+    });
+    await monitor.refresh();
+
+    paneName = 'docs pass';
+    expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.paneName).toBe('docs pass');
   });
 
   it('labels a port that does not answer HTTP as tcp, under Other apps', async () => {

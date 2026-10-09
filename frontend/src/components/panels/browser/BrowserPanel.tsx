@@ -9,6 +9,7 @@ import { useResizable } from '../../../hooks/useResizable';
 import { normalizeUrl } from './browserUrl';
 import { hasFileProtocol } from '../../../../../shared/utils/browserUrl';
 import { useListeningPorts } from '../../../hooks/useListeningPorts';
+import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { TerminalPopover } from '../../terminal/TerminalPopover';
 import { PortsList } from './PortsList';
 
@@ -42,6 +43,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
   const [portsMenuAt, setPortsMenuAt] = useState<{ x: number; y: number } | null>(null);
   const ports = useListeningPorts();
+  const onHost = useRemoteRuntimeState().connectionState.mode !== 'remote';
   const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
@@ -530,7 +532,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         onClose={() => setPortsMenuAt(null)}
         className="w-96 max-h-[min(28rem,calc(100vh-20px))] py-0"
       >
-        <PortsList snapshot={ports} currentPort={localPortOf(inputUrl)} onOpen={openPort} />
+        <PortsList snapshot={ports} currentPort={localPortOf(inputUrl)} canOpen={onHost} onOpen={openPort} />
       </TerminalPopover>
 
       {/* Error feedback */}
@@ -548,10 +550,12 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
               Ports on {ports?.host ?? 'this machine'}
             </h2>
             <p className="px-3 mt-0.5 text-xs text-text-tertiary">
-              Open a web port here, or enter a URL above.
+              {onHost
+                ? 'Open a web port here, or enter a URL above.'
+                : `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`}
             </p>
             <div className="mt-2">
-              <PortsList snapshot={ports} onOpen={openPort} />
+              <PortsList snapshot={ports} canOpen={onHost} onOpen={openPort} />
             </div>
           </div>
         </div>
