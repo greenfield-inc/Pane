@@ -118,7 +118,7 @@ function delegationRules(sessionId: string, record?: OrchestrationSessionRecord)
     : path.join(appDirectory, 'skills', 'pane-chat', 'runtime-context.md');
   return `## Reaching Pane and delegating work
 At the start of each task that uses Pane, run runpane doctor --json --pane-dir "${appDirectory}". Pane terminals put runpane on PATH; if it does not resolve, use "$PANE_RUNPANE_BIN", then follow ${runtimeContext} for other ways to reach this Pane install.
-One Pane per feature: start new, independent work with runpane panes create (each Pane is a new worktree), and run every later agent for it (review, fixes, QA) as a new tab in that Pane with runpane panels create --pane <id>, never a new Pane. Panes you create or adopt here are associated with this Session automatically; confirm with runpane sessions overview --session ${sessionId} --json, and use runpane sessions associate for existing Panes.
+1 feature = 1 worktree = 1 branch = 1 Pane: start new, independent work with runpane panes create (each Pane is a new worktree), and run every later agent for it (review, fixes, QA) as a new tab in that Pane with runpane panels create --pane <id>, never a new Pane. Panes you create or adopt here are associated with this Session automatically; confirm with runpane sessions overview --session ${sessionId} --json, and use runpane sessions associate for existing Panes.
 Never substitute plain git worktrees or built-in or background subagents for work delegated to a Pane. If runpane cannot reach Pane, stop and tell the user what failed.
 Read ${guide} before coordinating Panes for the first time in a conversation.${record?.runtime === 'wsl' ? `\n${wslRouting(record)}` : ''}`;
 }

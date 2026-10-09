@@ -231,6 +231,8 @@ sharing of other conversations.
 
 ## One Pane per feature
 
+**1 feature = 1 worktree = 1 branch = 1 Pane.** Reviews, audits, fixes and QA for a feature happen in that Pane as tabs.
+
 A Pane is a git worktree. Creating one checks out the repository, installs
 dependencies and often builds, so it is expensive, and creating several at once
 can freeze the machine. An orchestrator creates one Pane per feature, with

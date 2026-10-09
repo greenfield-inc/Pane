@@ -29,7 +29,7 @@ they win where the two differ:
 - Workers end with `runpane report`. Its REPORT event (`agent.report`) is the
   completion and blocker signal; a READY without one is only a cue to look.
   `runpane` has the prompt line and how to read a report.
-- **One Pane per feature.** A Pane is a git worktree: creating one checks out,
+- **1 feature = 1 worktree = 1 branch = 1 Pane.** A Pane is a git worktree: creating one checks out,
   installs and often builds, so it is expensive. Create a Pane only for new,
   independent work on its own branch. Every later agent for that work
   (implementer, reviewer, follow-up reviewer, fix implementer, QA) opens as a
