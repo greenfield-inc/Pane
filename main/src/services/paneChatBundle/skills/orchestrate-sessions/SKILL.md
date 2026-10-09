@@ -29,12 +29,20 @@ they win where the two differ:
 - Workers end with `runpane report`. Its REPORT event (`agent.report`) is the
   completion and blocker signal; a READY without one is only a cue to look.
   `runpane` has the prompt line and how to read a report.
-- Review and QA run as `runpane` describes: fresh panels or the `reviewer` and
-  `qa-and-verify` subagents, returning findings to the implementation
-  authority.
+- **One Pane per feature.** A Pane is a git worktree: creating one checks out,
+  installs and often builds, so it is expensive. Create a Pane only for new,
+  independent work on its own branch. Every later agent for that work
+  (implementer, reviewer, follow-up reviewer, fix implementer, QA) opens as a
+  new agent tab in its Pane:
+  `runpane panels create --pane <feature Pane id> --tool-command "<agent command>" --source agent --no-focus --wait-ready --yes --json`.
+  Never create a Pane to review, fix or QA work that already has one, and keep
+  the feature's Pane until its PR merges or closes.
+- Review and QA run as `runpane` describes: fresh agent tabs in the feature's
+  Pane or the `reviewer` and `qa-and-verify` subagents, returning findings to
+  the implementation authority.
 - Durable records live where `runpane` says. The status board is optional,
   on request.
-- A new workspace on a named branch comes from
+- A new feature's workspace on a named branch comes from
   `runpane panes create --base <ref> --branch <name> --prompt-file <file>`,
   which replaces `git worktree add` plus `panes adopt`.
 - When workers share a resource only one may use at a time, such as a test

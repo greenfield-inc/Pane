@@ -3225,7 +3225,7 @@ function compareAgentContextParity() {
   assert.deepStrictEqual(pyDetail, nodeDetail);
   assert.strictEqual(nodeDetail.mode, 'command');
   assert.strictEqual(nodeDetail.command.name, 'panes create');
-  assert.ok(nodeDetail.command.summary.includes('Pane-managed worktrees'));
+  assert.ok(nodeDetail.command.summary.includes('One Pane per feature'));
   assert.ok(nodeDetail.command.details.includes('do not pre-create a git worktree'));
   assert.ok(nodeDetail.command.notes.some((note) => note.includes("not the agent's default private delegation mechanism")));
   assert.ok(nodeDetail.command.notes.some((note) => note.includes('panels create')));
@@ -3257,7 +3257,7 @@ function compareAgentContextParity() {
   const pyPanelsDetail = JSON.parse(runPython(['agent-context', '--command', 'panels create', '--json']));
   assert.deepStrictEqual(pyPanelsDetail, nodePanelsDetail);
   assert.strictEqual(nodePanelsDetail.command.name, 'panels create');
-  assert.ok(nodePanelsDetail.command.details.includes("shares the existing Pane's worktree"));
+  assert.ok(nodePanelsDetail.command.details.includes("shares the Pane's worktree"));
   assert.ok(nodePanelsDetail.command.notes.some((note) => note.includes("share the existing Pane's worktree")));
 
   const nodeOpenDetail = JSON.parse(runNode(['agent-context', '--command', 'panels open', '--json']));

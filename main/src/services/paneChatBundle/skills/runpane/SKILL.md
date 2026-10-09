@@ -71,8 +71,12 @@ While one workstream waits, continue the others.
 
 - Each workstream has one implementation authority. It owns every source edit,
   fix commit, rebase, push, and PR update.
-- Review and QA run on every new head, in fresh panels or through the
-  `reviewer` and `qa-and-verify` subagents. They return findings and post
+- One Pane per feature. A Pane is a new worktree, so create one only for new,
+  independent work. Every later agent for that work, including review, fixes
+  and QA, opens as a new agent tab in its Pane with
+  `runpane panels create --pane <id>`, never as a new Pane.
+- Review and QA run on every new head, in fresh agent tabs in the feature's
+  Pane or through the `reviewer` and `qa-and-verify` subagents. They return findings and post
   nothing. QA may run authorized tests and upload evidence under a grant, and it
   returns code defects to the implementation authority.
 - Only the implementation authority posts to GitHub (review replies, thread
@@ -81,7 +85,7 @@ While one workstream waits, continue the others.
 - Create panes and panels in the background with `--source agent` and
   `--no-focus` where supported. Check the returned focus state. If a pane
   steals focus anyway, report it with `runpane doctor --report`.
-- For work on a named branch,
+- For a new feature on a named branch,
   `runpane panes create --base <ref> --branch <name> --prompt-file <file>`
   replaces `git worktree add` plus `panes adopt`. Pane creates the worktree on
   exactly that branch, slashes included, and fails if the branch already

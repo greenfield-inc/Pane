@@ -399,7 +399,7 @@
     },
     {
       "name": "panes create",
-      "summary": "Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.",
+      "summary": "Create a new Pane (a new worktree and branch) for a new, independent feature or PR. One Pane per feature: review, QA and fixes for existing work run as a new tab in its Pane with `panels create --pane <id>`, never a new Pane.",
       "usage": [
         "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]",
         "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]",
@@ -524,7 +524,7 @@
     },
     {
       "name": "panels create",
-      "summary": "Create a terminal-backed tool panel inside an existing Pane session.",
+      "summary": "Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.",
       "usage": [
         "runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] --yes [--json] [--pane-dir <path>]",
         "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--focus|--no-focus] [--wait-ready] --yes [--json] [--pane-dir <path>]"
@@ -2253,7 +2253,7 @@
         "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
-        "Creates user-visible Panes (Pane sessions) for feature/PR work in a saved repository and opens a terminal-backed tool tab. Pane creates and owns the worktree/branch for each new Pane.",
+        "Creates a new Pane for a new, independent feature or PR in a saved repository and opens a terminal-backed tool tab. Each new Pane is a new worktree and branch, so create one per feature. Review, QA and fixes for existing work run as a new tab in that work's Pane: `runpane panels create --pane <id>`.",
         "",
         "A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
         "",
@@ -3464,7 +3464,7 @@
         "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
-        "Creates user-visible Panes (Pane sessions) for feature/PR work in a saved repository and opens a terminal-backed tool tab. Pane creates and owns the worktree/branch for each new Pane.",
+        "Creates a new Pane for a new, independent feature or PR in a saved repository and opens a terminal-backed tool tab. Each new Pane is a new worktree and branch, so create one per feature. Review, QA and fixes for existing work run as a new tab in that work's Pane: `runpane panels create --pane <id>`.",
         "",
         "A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
         "",
@@ -9861,7 +9861,7 @@
         "Happy path for any user request to use Pane/RunPane: run `runpane doctor --json`, read `runpane agent-context --json`, resolve or add the saved base repo, create the requested visible Pane with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` (the new Pane is pinned by default; add `--no-pinned` for a throwaway Pane, add `--base-branch <ref>` to branch from something other than the repository default, or use `--tool-command <command>` instead of `--agent <agent>`), then validate with `panels wait` or `panels screen`. For long-lived supervision, use `runpane watch --follow` instead of polling wait or screen.",
         "Treat Pane as the user's visible cockpit for watching/co-driving work. Do not create Panes or panels for private delegation unless the user asked for visible Pane orchestration or the result should appear in the Pane app.",
         "Register the saved base repository once with `repos add`; do not register a pre-created worktree as a separate repo unless the user explicitly asks.",
-        "Use `panes create` for separate visible Panes (Pane sessions) for feature/PR work. Pane creates and owns the worktree/branch for each new Pane.",
+        "One Pane per feature: use `panes create` only for new, independent work, since each Pane is a new worktree. Every later agent for that work (review, follow-up review, fixes, QA) opens as a new tab in its Pane with `panels create --pane <id>`, never a new Pane.",
         "Use `panels create` for reviewer/helper/clean-context tabs that should stay inside an existing Pane and share that Pane's worktree.",
         "For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
         "Skill routing: Pane's skills live in `<PANE_DIR>/skills/pane-chat/skills/`, and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`; read the skill that matches the request, such as `discussion`, `create-ticket`, `tdd`, `prepare-pr`, or `review`.",
@@ -9948,7 +9948,7 @@
         },
         {
           "name": "panes create",
-          "summary": "Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.",
+          "summary": "Create a new Pane (a new worktree and branch) for a new, independent feature or PR. One Pane per feature: review, QA and fixes for existing work run as a new tab in its Pane with `panels create --pane <id>`, never a new Pane.",
           "arguments": [
             "--repo <selector>",
             "--name <name>",
@@ -10029,7 +10029,7 @@
         },
         {
           "name": "panels create",
-          "summary": "Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.",
+          "summary": "Open reviewer, QA, fix or helper agent tabs inside an existing Pane; they share that Pane's worktree. The default for any later agent on existing work.",
           "arguments": [
             "--pane <pane-id>",
             "--agent <codex|claude|cursor>",
@@ -10627,8 +10627,8 @@
       },
       "panes create": {
         "name": "panes create",
-        "summary": "Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.",
-        "details": "Use this when the user wants separate visible Panes (Pane sessions) for feature or PR work. Select the saved base repository, choose a built-in agent or custom terminal command, and optionally send initial input after the tool starts. Pane creates and owns a git worktree/branch for each new Pane; do not pre-create a git worktree and register it as a separate repo unless the user explicitly asks. For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
+        "summary": "Create a new Pane (a new worktree and branch) for a new, independent feature or PR. One Pane per feature: review, QA and fixes for existing work run as a new tab in its Pane with `panels create --pane <id>`, never a new Pane.",
+        "details": "One Pane per feature. Use this only to start new, independent work on its own branch: each Pane is a new worktree that checks out, installs and often builds, so creating several at once can freeze the machine. For review, follow-up review, fixes, QA or any other agent on work that already has a Pane, use `runpane panels create --pane <id>` to open a new agent tab in that Pane instead. Select the saved base repository, choose a built-in agent or custom terminal command, and optionally send initial input after the tool starts. Pane creates and owns a git worktree/branch for each new Pane; do not pre-create a git worktree and register it as a separate repo unless the user explicitly asks. For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -10792,7 +10792,7 @@
         ],
         "notes": [
           "At least one of --agent or --tool-command is required unless --from-json is used.",
-          "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism.",
+          "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism. One Pane per feature: before creating one, check `runpane sessions overview` for the work's existing Pane and add a tab with `panels create --pane <id>` when it exists.",
           "Register the saved base repository once. Pane creates and owns the worktree/branch for each new Pane.",
           "`panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`: Pane creates the worktree on exactly that branch name. `--branch` is checked with `git check-ref-format --branch` and fails if the branch already exists; `--worktree-name` still names the directory.",
           "Use `panels create` instead when a reviewer/helper should share an existing Pane's worktree.",
@@ -11647,8 +11647,8 @@
       },
       "panels create": {
         "name": "panels create",
-        "summary": "Create a reviewer/helper terminal tab inside an existing Pane.",
-        "details": "Use this to add reviewer, helper, or clean-context tabs to an existing Pane. The new panel shares the existing Pane's worktree and branch; it does not create a separate Pane session. Use `panes create` instead when the user wants a separate visible Pane (Pane session) for feature/PR work. Agent/orchestrator-created panels should pass --source agent or --no-focus so the user stays in the implementation tab. The daemon initializes the terminal immediately and can wait for CLI readiness.",
+        "summary": "Open a new agent tab (reviewer, QA, fix or helper) inside an existing Pane, sharing its worktree. One Pane per feature: use this, not panes create, for any later agent on existing work.",
+        "details": "One Pane per feature: this is the default way to start any later agent on work that already has a Pane, including reviewers, follow-up reviewers, fix implementers, QA and clean-context helpers. The new tab is a fresh agent that shares the Pane's worktree and branch; it does not create a new worktree. Use `panes create` only to start new, independent work on its own branch. Agent/orchestrator-created panels should pass --source agent or --no-focus so the user stays in the implementation tab. The daemon initializes the terminal immediately and can wait for CLI readiness.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
