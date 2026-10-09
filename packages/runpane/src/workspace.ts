@@ -266,9 +266,13 @@ async function routePath(value: string, verb: string): Promise<TailnetMachine> {
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet();
   const local = await readLocalStatus(parsed.paneDir);
-  const rows = await Promise.all(tailnet.machines.map(async (machine, index) => ({
+  // Offline machines need no probe, so only online ones count toward the limit; mine come first.
+  const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
+  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
     machine,
-    probe: index < MAX_PROBED_MACHINES ? await probeMachine(machine) : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} machines)` },
+    probe: probed.has(machine) || !machine.online
+      ? await probeMachine(machine)
+      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` },
   })));
   if (parsed.json) {
     console.log(JSON.stringify({

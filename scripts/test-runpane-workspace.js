@@ -106,6 +106,20 @@ test('list shows a teammate\'s machines after mine, labeled with their owner', p
   assert.doesNotMatch(list.output, /guest-mac|ci-runner/);
 });
 
+test('list probes online machines first, so offline ones never use up the probe limit', posixOnly, () => {
+  const crowded = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-crowded-'));
+  const offline = Object.fromEntries(Array.from({ length: 70 }, (_, index) => [`o${index}`, peer(`old-box-${index}`, 'linux', false, `100.64.1.${index}`)]));
+  const crowdedStatus = { ...status, Peer: { ...offline, d: status.Peer.d } };
+  fs.writeFileSync(path.join(crowded, 'tailscale'), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(crowdedStatus)}\nEOF\n`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, ['--require', answers, cli, 'workspace', 'list'], {
+    cwd: crowded,
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: { ...process.env, PATH: `${crowded}${path.delimiter}${process.env.PATH}`, PANE_DIR: crowded, RUNPANE_TELEMETRY_DISABLED: '1' },
+  });
+  assert.match(result.stdout, /^tylers-mac-mini \(macOS, online, owner tbrownio@github\): joined, shell \/bin\/zsh$/m, result.stdout + result.stderr);
+});
+
 test('a teammate\'s machine shared with the tailnet answers commands by name', posixOnly, () => {
   const sessions = runpane('workspace', 'tylers-mac-mini', 'sessions', 'list', '--json');
   assert.equal(sessions.status, 0, sessions.output);
