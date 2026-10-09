@@ -241,12 +241,14 @@ export function OrchestrationSessionNav({
           'mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           activeView === 'pane-chat' && session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
-          <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
-            aria-expanded={expanded} aria-controls={panesId}
-            onClick={() => toggleSessionExpanded(session.id, expanded)}
-            className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
-            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          </button>
+          {paneRows.length > 0 ? (
+            <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} children`}
+              aria-expanded={expanded} aria-controls={panesId}
+              onClick={() => toggleSessionExpanded(session.id, expanded)}
+              className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
+              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </button>
+          ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />}
           <button
             type="button"
             data-testid={rowId}
@@ -266,11 +268,9 @@ export function OrchestrationSessionNav({
             <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
           </button>
         </div>
-        <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>
-          {paneRows.length > 0 ? paneRows : (
-            <p className="py-1 pl-2 text-[11px] text-text-tertiary">No child sessions</p>
-          )}
-        </div>
+        {paneRows.length > 0 && (
+          <div id={panesId} className={cn('ml-6', !expanded && 'hidden')}>{paneRows}</div>
+        )}
       </div>
     );
   };

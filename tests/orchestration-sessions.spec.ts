@@ -1047,16 +1047,9 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
-  const emptyChildren = page.locator('#orchestration-session-panes-sessions-alpha');
-  await expect(page.getByRole('button', { name: 'Expand Alpha children' })).toHaveAttribute('aria-expanded', 'false');
-  await expect(emptyChildren).toBeHidden();
-  await page.getByRole('button', { name: 'Expand Alpha children' }).click();
-  const collapseChildren = page.getByRole('button', { name: 'Collapse Alpha children' });
-  await expect(collapseChildren).toHaveAttribute('aria-expanded', 'true');
-  await expect(emptyChildren.getByText('No child sessions')).toBeVisible();
-  await collapseChildren.click();
-  await expect(page.getByRole('button', { name: 'Expand Alpha children' })).toHaveAttribute('aria-expanded', 'false');
-  await expect(emptyChildren).toBeHidden();
+  // A Session without Panes has nothing to expand.
+  await expect(page.getByRole('button', { name: /Alpha children/ })).toHaveCount(0);
+  await expect(page.locator('#orchestration-session-panes-sessions-alpha')).toHaveCount(0);
   await alphaRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin Session', exact: true }).click();
 

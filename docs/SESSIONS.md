@@ -144,10 +144,11 @@ out of Pinned until it is restored. RunPane can set the same preference with
 `isPinned` (default false), and update JSON accepts it without changing the
 preference when omitted.
 
-Click a Session row to open its chat and expand or collapse its associated
-Panes. Child Pane rows are indented beyond the Session chat icon and keep the
-ordinary Pane actions. Single-line Pane rows omit change counts and PR numbers;
-the optional two-row layout shows those details below the title. Session and Pane
+Click a Session row to open its chat. A Session with associated Panes shows a
+chevron that expands or collapses them; a Session without Panes shows none.
+Child Pane rows are indented beyond the Session chat icon and keep the ordinary
+Pane actions. Single-line Pane rows omit change counts and PR numbers; the
+optional two-row layout shows those details below the title. Session and Pane
 context menus use compact widths.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows linked
