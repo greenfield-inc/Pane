@@ -448,6 +448,16 @@ function tailscaleCandidates(pathExists: (candidate: string) => boolean = exists
       if (pathExists(candidate)) commands.push({ command: candidate, displayCommand: quoteForWindows(candidate) });
     }
   }
+  if (process.platform === 'linux' || process.platform === 'darwin') {
+    // Snap and Nix installs sit outside the PATH a desktop launcher or relaunch may give Pane.
+    for (const candidate of [
+      '/snap/bin/tailscale',
+      '/run/current-system/sw/bin/tailscale',
+      path.join(os.homedir(), '.nix-profile', 'bin', 'tailscale'),
+    ]) {
+      if (pathExists(candidate)) commands.push({ command: candidate, displayCommand: quoteForPosix(candidate) });
+    }
+  }
   return commands;
 }
 
