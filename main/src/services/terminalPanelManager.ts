@@ -3,6 +3,7 @@ import { sessionRuntimePath, sessionWSLContext } from './sessionRuntime';
 import { escapeForBash } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
+import { trustClaudeSessionFolder } from './claudeFolderTrust';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { noteContextPath } from './noteFiles';
@@ -1217,6 +1218,7 @@ export class TerminalPanelManager extends EventEmitter {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
         .read().sessions.find(item => item.id === sessionState.orchestrationSessionId);
       cwd = prepareSessionWorkspace(sessionState.orchestrationSessionId, record?.profile ?? sessionState.orchestrationProfile, record);
+      if (sessionState.agentType === 'claude' && record?.runtime !== 'wsl') trustClaudeSessionFolder(cwd);
       if (record?.runtime === 'wsl') {
         if (process.platform !== 'win32') throw new Error('WSL Sessions require Windows');
         wslContext = sessionWSLContext(record, cwd);
