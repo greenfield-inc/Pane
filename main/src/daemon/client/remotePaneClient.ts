@@ -655,8 +655,12 @@ export class RemotePaneClientController extends EventEmitter {
     }
 
     const client = this.activeClient;
-    let result: JsonValue | ListeningPortsSnapshot | undefined = await client.invoke(channel, args);
-    if (channel === PORTS_LIST_CHANNEL) result = await this.tunnelPorts(client, result) ?? result;
+    let result: JsonValue | ListeningPortsSnapshot | undefined;
+    if (channel === PORTS_LIST_CHANNEL) {
+      result = await this.listTunnelledPorts(client);
+    } else {
+      result = await client.invoke(channel, args);
+    }
     if (!this.remoteRuntimeUsageTracked) {
       this.remoteRuntimeUsageTracked = true;
       trackRemotePaneEvent(this.analyticsManager, 'remote_pane_remote_runtime_used', {
@@ -904,7 +908,12 @@ export class RemotePaneClientController extends EventEmitter {
     const snapshot = decodeListeningPortsSnapshot(value);
     const tunnel = this.portTunnel;
     if (!snapshot || !tunnel || this.activeClient !== client) return null;
-    const sync = this.portTunnelSync.then(() => tunnel.sync(snapshot.ports.map(port => port.port)));
+    // When host and client share a machine, the host also lists this desktop's own tunnel
+    // listeners; tunnelling those would connect each one back to itself.
+    const hostPorts = snapshot.ports
+      .filter(port => !(snapshot.host === getOsHostname() && port.pid === process.pid))
+      .map(port => port.port);
+    const sync = this.portTunnelSync.then(() => tunnel.sync(hostPorts));
     this.portTunnelSync = sync.catch(error => console.warn('[Pane port tunnel] sync_failed:', error));
     const localPorts = await sync;
     if (this.activeClient === client) this.tunnelledPorts = localPorts;
@@ -915,6 +924,21 @@ export class RemotePaneClientController extends EventEmitter {
         return localPort === undefined ? port : { ...port, localPort };
       }),
     };
+  }
+
+  /**
+   * The host's Ports list with local ports. A host that cannot list its ports, such as one older
+   * than port detection, gets an empty list so tabs stop waiting for one; the tunnel keeps what it has.
+   */
+  private async listTunnelledPorts(client: RemotePaneClient): Promise<JsonValue | ListeningPortsSnapshot | undefined> {
+    let listed: JsonValue | undefined;
+    try {
+      listed = await client.invoke(PORTS_LIST_CHANNEL, []);
+    } catch (error) {
+      console.warn('[Pane port tunnel] list_failed:', error);
+      return { host: client.profile.label, ports: [] };
+    }
+    return await this.tunnelPorts(client, listed) ?? listed;
   }
 
   private async publishTunnelledPorts<Value>(client: RemotePaneClient, value: Value): Promise<void> {

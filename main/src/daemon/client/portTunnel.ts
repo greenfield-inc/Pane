@@ -74,8 +74,7 @@ export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
         await shut(listener);
       }
       for (const hostPort of wanted) {
-        // When host and client share a machine, the host lists this tunnel's own listeners.
-        if (listeners.has(hostPort) || ownLocalPorts().has(hostPort)) continue;
+        if (listeners.has(hostPort)) continue;
         const listener = await open(hostPort);
         if (!listener) continue;
         // A disconnect while this port was opening: the tunnel is gone, so is this listener.

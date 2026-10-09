@@ -121,13 +121,17 @@ describe('port tunnel', () => {
     expect(await refuses(port)).toBe(true);
   });
 
-  it('does not tunnel its own listeners when the host lists them, as it does when host and client share a machine', async () => {
+  it('tunnels a host port whose number another host port moved to here', async () => {
     const host = await startEchoHost();
+    // The host serves A and A+1; this computer already uses A, so A moves up and A+1 must still get a listener.
     const taken = await listen(net.createServer(), '127.0.0.1');
     const tunnel = track(createPortTunnel(host.openStream));
 
-    const local = (await tunnel.sync([taken])).get(taken)!;
-    expect(await tunnel.sync([taken, local])).toEqual(new Map([[taken, local]]));
+    const localPorts = await tunnel.sync([taken, taken + 1]);
+    expect([...localPorts.keys()].sort()).toEqual([taken, taken + 1]);
+    expect(new Set(localPorts.values()).size).toBe(2);
+    expect(await echoThrough('127.0.0.1', localPorts.get(taken + 1)!, 'second app')).toBe('second app');
+    expect(host.requestedPorts).toEqual([taken + 1]);
   });
 
   it('closes every listener on close', async () => {
