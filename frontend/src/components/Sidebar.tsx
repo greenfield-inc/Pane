@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -33,6 +33,7 @@ import { createProjectById, getPinnedSessions, groupSessionsByProject } from '..
 import { DiscordIcon } from './DiscordIcon';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -110,7 +111,7 @@ interface SidebarProps {
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
 const REMOTE_DESKTOP_TOOLTIP = 'Use Remote Desktop to access the host device for Electron apps, native windows, and UI running on the remote machine.';
-type SidebarSection = 'pinned' | 'repositories';
+type SidebarSection = 'pinned' | 'repositories' | 'sshHosts';
 const COMPACT_RAIL_BUTTON = 'relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-2 focus:ring-interactive';
 const COMPACT_RAIL_IDLE = 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary';
 const COMPACT_RAIL_ACTIVE = 'bg-surface-selected text-text-primary';
@@ -135,6 +136,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
     pinned: true,
     repositories: true,
+    sshHosts: true,
   });
   const { connectionState: remoteConnectionState, hostState: remoteHostState } = useRemoteRuntimeState();
   const hydrateExpandedProjects = useNavigationStore(s => s.hydrateExpandedProjects);
@@ -152,6 +154,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           setSidebarSectionExpansion({
             pinned: result.data.pinnedSectionExpanded ?? true,
             repositories: result.data.repositoriesSectionExpanded ?? true,
+            sshHosts: result.data.sshHostsSectionExpanded ?? true,
           });
         }
       } catch (error) {
@@ -196,6 +199,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
   const handleRepositoriesSectionExpandedChange = useCallback((expanded: boolean) => {
     handleSidebarSectionExpandedChange('repositories', expanded);
+  }, [handleSidebarSectionExpandedChange]);
+
+  const handleSshHostsSectionExpandedChange = useCallback((expanded: boolean) => {
+    handleSidebarSectionExpandedChange('sshHosts', expanded);
   }, [handleSidebarSectionExpandedChange]);
 
 
@@ -264,6 +271,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
+  const navigateToSsh = useNavigationStore((state) => state.navigateToSsh);
+  const hasSshHosts = useSshHostsStore((state) => state.hosts.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
@@ -272,6 +281,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   /** Agents waiting on the user, anywhere — surfaced on the Mission Control rail button. */
   const blockedAgentCount = useBlockedAgentCount();
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
+  useSshHostsRefresh();
 
   useEffect(() => {
     void loadOrchestrationSessions();
@@ -557,6 +567,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </Tooltip>
             )}
 
+            {hasSshHosts && (
+              <Tooltip content="SSH hosts" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-ssh-hosts"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    void setActiveSession(null);
+                    navigateToSsh();
+                  }}
+                  aria-label="SSH hosts"
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'ssh' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <Server className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
+
             <OrchestrationSessionNav compact />
             {pinnedSessions.length > 0 && (
               <div role="group" aria-label="Pinned panes" className="flex w-full shrink-0 flex-col items-center gap-0.5">
@@ -758,6 +787,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             repositoriesSectionExpanded={sidebarSectionExpansion.repositories}
             onPinnedSectionExpandedChange={handlePinnedSectionExpandedChange}
             onRepositoriesSectionExpandedChange={handleRepositoriesSectionExpandedChange}
+            sshHostsSectionExpanded={sidebarSectionExpansion.sshHosts}
+            onSshHostsSectionExpandedChange={handleSshHostsSectionExpandedChange}
             showRemoteDesktopLink={showRemoteDesktopLink}
             onRemoteDesktopClick={handleOpenRemoteDesktop}
             remoteDesktopTooltip={REMOTE_DESKTOP_TOOLTIP}

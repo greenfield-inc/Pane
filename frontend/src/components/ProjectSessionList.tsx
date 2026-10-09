@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -24,6 +24,9 @@ import { usePanelStore } from '../stores/panelStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { useSshHostsStore } from '../stores/sshHostsStore';
+import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
+import type { TerminalPanelState } from '../../../shared/types/panels';
 import {
   isArchivedOrchestrationSession,
   useOrchestrationSessionStore,
@@ -52,6 +55,8 @@ interface ProjectSessionListProps {
   repositoriesSectionExpanded: boolean;
   onPinnedSectionExpandedChange: (expanded: boolean) => void;
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
+  sshHostsSectionExpanded: boolean;
+  onSshHostsSectionExpandedChange: (expanded: boolean) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -66,6 +71,8 @@ export function ProjectSessionList({
   repositoriesSectionExpanded,
   onPinnedSectionExpandedChange,
   onRepositoriesSectionExpandedChange,
+  sshHostsSectionExpanded,
+  onSshHostsSectionExpandedChange,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -471,6 +478,8 @@ export function ProjectSessionList({
           onPinnedSectionExpandedChange={onPinnedSectionExpandedChange}
         />
 
+        <SshHostsSection expanded={sshHostsSectionExpanded} onExpandedChange={onSshHostsSectionExpandedChange} />
+
         <div className={SIDEBAR_SECTION_ROW}>
           <button
             type="button"
@@ -684,6 +693,85 @@ export function ProjectSessionList({
 
 
 // --- Attention inbox footer ---
+
+/** Hosts from the SSH config; hidden when it lists none. A click shows the host's tab in the SSH view. */
+function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; onExpandedChange: (expanded: boolean) => void }) {
+  const hosts = useSshHostsStore(s => s.hosts);
+  const openHosts = useSshHostsStore(s => s.openHosts);
+  const openHost = useSshHostsStore(s => s.open);
+  const refresh = useSshHostsStore(s => s.refresh);
+  const activeView = useNavigationStore(s => s.activeView);
+  const activeHost = usePanelStore(s => {
+    const activePanelId = s.activePanels[SSH_HOSTS_SESSION_ID];
+    const panel = s.panels[SSH_HOSTS_SESSION_ID]?.find(candidate => candidate.id === activePanelId);
+    // SAFETY: SSH view tabs are terminal panels, whose custom state is TerminalPanelState.
+    return (panel?.state.customState as TerminalPanelState | undefined)?.sshHost;
+  });
+  const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
+
+  if (hosts.length === 0) return null;
+  const open = (alias: string, newTab: boolean) => {
+    setSidebarNavigationScope('repositories');
+    void openHost(alias, newTab);
+  };
+
+  return (
+    <div className="contents" role="group" aria-label="SSH hosts">
+      <div data-testid="ssh-hosts-section-header" className="mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 pl-4 pr-3 py-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => {
+            if (!expanded) void refresh();
+            onExpandedChange(!expanded);
+          }}
+          className={SIDEBAR_SECTION_TOGGLE}
+        >
+          <span className={SIDEBAR_SECTION_LABEL}>SSH hosts</span>
+          <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
+            {expanded ? <ChevronDown className="h-3.5 w-3.5 text-current" /> : <ChevronRight className="h-3.5 w-3.5 text-current" />}
+          </span>
+        </button>
+      </div>
+      {expanded && hosts.map(alias => (
+        <div key={alias} className="group/ssh-host relative">
+          <button
+            type="button"
+            data-testid="ssh-host-row"
+            title={`ssh ${alias}`}
+            onClick={() => open(alias, false)}
+            onContextMenu={event => {
+              event.preventDefault();
+              open(alias, true);
+            }}
+            className={cn(
+              SIDEBAR_ROW_BASE,
+              SIDEBAR_ROW_GAP,
+              SIDEBAR_ROW_PADDING,
+              'h-7 rounded-md pr-8 text-[13px] hover:bg-surface-hover hover:text-text-primary',
+              activeView === 'ssh' && activeHost === alias ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+            )}
+          >
+            <Server className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="min-w-0 flex-1 truncate">{alias}</span>
+            <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center group-hover/ssh-host:invisible">
+              {openHosts.has(alias) && <span data-testid="ssh-host-open-dot" aria-label="Open" className="h-1.5 w-1.5 rounded-full bg-interactive" />}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label={`New terminal on ${alias}`}
+            title={`New terminal on ${alias}`}
+            onClick={() => open(alias, true)}
+            className="invisible absolute right-3 top-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:visible focus:outline-none focus:ring-2 focus:ring-interactive group-hover/ssh-host:visible"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function AttentionInboxToggle({ sessions, members, showAll, onShowAllChange }: {
   sessions: readonly Session[];

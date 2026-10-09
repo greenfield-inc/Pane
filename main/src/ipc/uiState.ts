@@ -90,9 +90,9 @@ export function registerUIStateHandlers(services: AppServices) {
     }
   });
 
-  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories', expanded: boolean) => {
+  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean) => {
     try {
-      if (section !== 'pinned' && section !== 'repositories') {
+      if (section !== 'pinned' && section !== 'repositories' && section !== 'sshHosts') {
         throw new Error(`Invalid sidebar section: ${section}`);
       }
 

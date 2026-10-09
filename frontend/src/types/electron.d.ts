@@ -41,6 +41,7 @@ import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { SshHostList, SshHostOpenResult } from '../../../shared/types/sshHosts';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -154,6 +155,11 @@ interface ElectronAPI {
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;
     setAgent: (agent: PaneChatAgent) => Promise<IPCResponse<PaneChatState<Session>>>;
+  };
+
+  sshHosts: {
+    list: () => Promise<IPCResponse<SshHostList>>;
+    open: (alias: string, newTab: boolean) => Promise<IPCResponse<SshHostOpenResult>>;
   };
 
   orchestrationSessions: {
@@ -414,12 +420,13 @@ interface ElectronAPI {
       sessionSortAscending: boolean;
       pinnedSectionExpanded: boolean;
       repositoriesSectionExpanded: boolean;
+      sshHostsSectionExpanded: boolean;
     }>>;
     saveExpanded: (projectIds: number[], folderIds: string[]) => Promise<IPCResponse>;
     saveExpandedProjects: (projectIds: number[]) => Promise<IPCResponse>;
     saveExpandedFolders: (folderIds: string[]) => Promise<IPCResponse>;
     saveSessionSortAscending: (ascending: boolean) => Promise<IPCResponse>;
-    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean) => Promise<IPCResponse>;
+    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean) => Promise<IPCResponse>;
     getNavigationMemory: (hostId: string | null) => Promise<IPCResponse<HostNavigationMemory | null>>;
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
     getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;

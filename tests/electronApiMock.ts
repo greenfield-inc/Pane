@@ -85,6 +85,8 @@ export type ElectronApiMockOptions = {
   mainRepoSessionErrorByProjectId?: Record<number, string>;
   activeProjectId?: number | null;
   paneChatAgentChangeDelayMs?: number;
+  /** Host aliases the mocked SSH config lists. */
+  sshHosts?: string[];
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
 };
@@ -756,6 +758,38 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(createPaneChatState());
         },
       }),
+      sshHosts: namespace({
+        list: () => {
+          const hosts = mockOptions.sshHosts ?? [];
+          const open = new Set(mockPanels.filter(panel => panel.sessionId === '__ssh_hosts_session__')
+            // SAFETY: SSH tab fixtures carry a terminal custom state.
+            .map(panel => (panel.state as { customState?: { sshHost?: string } }).customState?.sshHost));
+          return success({ hosts, openHosts: hosts.filter(alias => open.has(alias)) });
+        },
+        open: (alias: string, newTab: boolean) => {
+          const sessionId = '__ssh_hosts_session__';
+          // SAFETY: SSH tab fixtures carry a terminal custom state.
+          const existing = newTab ? undefined : mockPanels.find(panel => panel.sessionId === sessionId
+            && (panel.state as { customState?: { sshHost?: string } }).customState?.sshHost === alias);
+          if (existing) {
+            setActiveMockPanel(sessionId, existing.id);
+            return success({ sessionId, panelId: existing.id });
+          }
+          const now = new Date().toISOString();
+          const panel = {
+            id: `mock-panel-${nextPanelId++}`,
+            sessionId,
+            type: 'terminal',
+            title: alias,
+            state: { isActive: false, customState: { initialCommand: `ssh ${alias}`, sshHost: alias } },
+            metadata: { createdAt: now, lastActiveAt: now, position: mockPanels.length },
+          };
+          mockPanels.push(panel);
+          setActiveMockPanel(sessionId, panel.id);
+          emit('panel:created', clone(panel));
+          return success({ sessionId, panelId: panel.id });
+        },
+      }),
       missionControl: namespace({
         listAgents: () => success(clone(mockOptions.initialMissionControlAgents ?? [])),
         snapshots: (request: { panelIds?: string[] }) => success({
@@ -1163,9 +1197,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           uiState.sessionSortAscending = ascending;
           return success();
         },
-        saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean) => {
+        saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean) => {
           if (section === 'pinned') uiState.pinnedSectionExpanded = expanded;
-          else uiState.repositoriesSectionExpanded = expanded;
+          else if (section === 'repositories') uiState.repositoriesSectionExpanded = expanded;
           return success();
         },
         getSessionWorkspaceLayout: (hostId: string | null) =>

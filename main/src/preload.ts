@@ -400,6 +400,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
     setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
   },
+  sshHosts: {
+    list: (): Promise<IPCResponse> => invokeIpc('ssh-hosts:list'),
+    open: (alias: string, newTab: boolean): Promise<IPCResponse> => invokeIpc('ssh-hosts:open', alias, newTab),
+  },
 
   orchestrationSessions: {
     runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
@@ -729,7 +733,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveExpandedProjects: (projectIds: number[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-projects', projectIds),
     saveExpandedFolders: (folderIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-folders', folderIds),
     saveSessionSortAscending: (ascending: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-session-sort-ascending', ascending),
-    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories', expanded: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-sidebar-section-expanded', section, expanded),
+    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-sidebar-section-expanded', section, expanded),
     // Per-host navigation memory. The caller names the host because the renderer
     // can still be showing the outgoing host while main has switched runtimes.
     getNavigationMemory: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-navigation-memory', hostId),
