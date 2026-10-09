@@ -142,7 +142,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       const panel = await this.ensurePanelForAgent(record);
       const internalSession = this.sessionManager.getSession(record.internalSessionId);
       if (!internalSession) throw new Error(`Session ${record.id} internal terminal session is missing`);
-      await panelManager.setActivePanel(internalSession.id, panel.id);
+      // A client opening its view: last used only, so other clients on this Session stay put.
+      await panelManager.rememberActivePanel(internalSession.id, panel.id);
       return {
         session: clone(record),
         internalSession,

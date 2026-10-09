@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
 import type { SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
+import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useConfigStore } from '../stores/configStore';
+import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
@@ -15,7 +19,6 @@ import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 import {
   activatePanelInLayout,
-  shouldActivateReopenedPanel,
   addPanelToGroup,
   createSingleGroupLayout,
   findGroup,
@@ -126,6 +129,26 @@ export function SessionWorkspacePanels({
     agentPanelIdsRef.current = agentPanelIdSet;
   }, [agentPanelIdSet]);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingLayout = useRef<{ sessionId: string; layout: SessionPanelLayout; hostId: string | null | undefined } | null>(null);
+  // Writes a debounced layout now. Leaving the Session flushes it, so the last
+  // tab or split shown is never lost; an archived Session stays forgotten.
+  const flushLayout = useCallback(() => {
+    clearTimeout(persistTimer.current);
+    const pending = pendingLayout.current;
+    pendingLayout.current = null;
+    if (!pending) return;
+    const record = useOrchestrationSessionStore.getState().sessions.find(session => session.internalSessionId === pending.sessionId);
+    if (record && isArchivedOrchestrationSession(record)) return;
+    // The host keeps it as the last-used layout; this desktop keeps its own.
+    panelApi.setLayout(pending.sessionId, pending.layout).catch(() => {});
+    rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
+  }, []);
+  const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  // The host this Session's layout was loaded from, so writes land in its memory.
+  const hostIdRef = useRef(hostId);
+  useEffect(() => {
+    hostIdRef.current = hostId;
+  }, [hostId]);
 
   // Every layout change funnels through here: store, focus mirror, and a
   // debounced save so sash drags do not write per frame.
@@ -143,11 +166,10 @@ export function SessionWorkspacePanels({
       void panelApi.setActivePanel(sessionId, focusedPanelId).catch(() => {});
     }
     clearTimeout(persistTimer.current);
-    persistTimer.current = setTimeout(() => {
-      panelApi.setLayout(sessionId, repaired).catch(() => {});
-    }, 300);
-  }, [sessionId]);
-  useEffect(() => () => clearTimeout(persistTimer.current), []);
+    pendingLayout.current = { sessionId, layout: repaired, hostId: hostIdRef.current };
+    persistTimer.current = setTimeout(flushLayout, 300);
+  }, [sessionId, flushLayout]);
+  useEffect(() => flushLayout, [sessionId, flushLayout]);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,13 +178,20 @@ export function SessionWorkspacePanels({
     void panelApi.loadPanelsForSession(sessionId).then(async saved => {
       if (cancelled) return;
       usePanelStore.getState().setPanels(sessionId, saved);
-      const stored = await panelApi.getLayout(sessionId);
+      // applyLayout below remembers whatever this desktop shows first.
+      const remembered = await readPaneLayout(hostIdRef.current, sessionId);
+      const stored = remembered ?? await panelApi.getLayout(sessionId);
       if (cancelled) return;
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
       const storedIds = layoutPanelIds(base);
       const stage = (usePanelStore.getState().panels[sessionId] ?? saved)
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
-      const splitIds = new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
+      // This desktop's own memory takes new tabs inactive into its own groups;
+      // the shared split placement only shapes the host's seed layout.
+      const splitIds = new Set<string>();
+      if (!remembered) {
+        for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
+      }
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
     }).catch(error => {
@@ -177,20 +206,18 @@ export function SessionWorkspacePanels({
       if (!current || !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
       const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
       // Agents open pages and files beside the conversation by default.
+      // Another client's new tab never moves this one; activation requests do.
       const root = panel.metadata?.openPlacement === 'split'
-        ? placePanelInSplit(current.root, panel.id, panel.state.isActive)
-        : addPanelToGroup(current.root, focused.id, panel.id, { activate: panel.state.isActive });
+        ? placePanelInSplit(current.root, panel.id, false)
+        : addPanelToGroup(current.root, focused.id, panel.id, { activate: false });
       if (root !== current.root) applyLayout({ ...current, root });
     });
     const updated = events.onPanelUpdated(panel => {
-      if (panel.sessionId !== sessionId) return;
-      const previous = usePanelStore.getState().panels[sessionId]?.find(saved => saved.id === panel.id);
-      const shouldFocus = shouldActivateReopenedPanel(panel, previous);
-      usePanelStore.getState().updatePanelState(panel);
-      const current = usePanelStore.getState().layouts[sessionId];
-      if (current && shouldFocus && isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) {
-        applyLayout(activatePanelInLayout(current, panel.id));
-      }
+      if (panel.sessionId === sessionId) usePanelStore.getState().updatePanelState(panel);
+    });
+    // Queued until this visit's layout has loaded (the effect below applies it).
+    const activation = events.onPanelActivationRequested(request => {
+      if (request.sessionId === sessionId) usePanelStore.getState().requestActivation(request);
     });
     const deleted = events.onPanelDeleted(event => {
       if (event.sessionId !== sessionId) return;
@@ -205,8 +232,25 @@ export function SessionWorkspacePanels({
       created();
       updated();
       deleted();
+      activation();
     };
   }, [sessionId, agentPanelId, applyLayout, retry]);
+
+  const activationRequest = usePanelStore(state => state.activationRequests[sessionId]);
+  useEffect(() => {
+    if (!activationRequest || !loaded) return;
+    const store = usePanelStore.getState();
+    store.clearActivationRequest(sessionId);
+    const current = store.layouts[sessionId];
+    const panel = store.panels[sessionId]?.find(saved => saved.id === activationRequest.panelId);
+    if (!current || !panel) return;
+    if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
+    const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
+    const root = activationRequest.placement === 'split'
+      ? placePanelInSplit(current.root, panel.id)
+      : addPanelToGroup(current.root, focused.id, panel.id);
+    applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
+  }, [activationRequest, loaded, sessionId, agentPanelId, applyLayout]);
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;
@@ -252,7 +296,8 @@ export function SessionWorkspacePanels({
       const target = (groupId && findGroup(current.root, groupId))
         || (current.focusedGroupId && findGroup(current.root, current.focusedGroupId))
         || primaryGroup(current.root);
-      applyLayout({ ...current, root: addPanelToGroup(current.root, target.id, panel.id, { activate: true }), focusedGroupId: target.id });
+      // The panel:created event may have inserted it inactive already.
+      applyLayout(activatePanelInLayout({ ...current, root: addPanelToGroup(current.root, target.id, panel.id, { activate: true }) }, panel.id));
     } catch {
       setError('Could not open the tool. Please try again.');
     }
