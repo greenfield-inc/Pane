@@ -198,7 +198,7 @@ The same connection code works in the Remote Pane PWA:
 https://runpane.com/app/
 ```
 
-Use the PWA for phone or tablet access to terminal-backed remote sessions:
+Use the PWA for phone or tablet access to remote terminals and browser tabs:
 
 1. Set up the remote host with Tailscale or a trusted HTTPS tunnel.
 2. Copy the full `pane-remote://...` code printed by setup.
@@ -209,6 +209,19 @@ For iPhone or iPad, open the URL in Safari, tap Share, then tap `Add to Home Scr
 For Android, open the URL in Chrome, open the browser menu, then tap `Add to Home screen` or `Install app`.
 
 SSH tunnel mode is mainly useful from desktop clients. For mobile browser access, prefer Tailscale or Manual HTTPS so the phone can reach the daemon URL directly.
+
+### Browser tabs on the phone
+
+Add Tool → Browser opens a browser tab on the phone. A new tab lists the host's listening ports, and the Ports button in the address bar opens the same list. Tap a `web` port to open it; `tcp` ports read "desktop only". The address bar is editable and reads the host's own address, such as `localhost:5173/ on <host>`. Copy URL copies the address the phone actually loads, and Open in Safari opens it outside the app. Use Open in Safari for sites that refuse to load in a frame, such as github.com: the tab cannot tell when that happens.
+
+How a host page reaches the phone:
+
+- Pane gives every `web` port its own HTTPS address on the host's tailnet name, `https://<host>.ts.net:<n>`, with a `tailscale serve` handler. Pane picks `n` from 44300 up, so it never takes the dev server's own port number.
+- Each handler points at a loopback preview proxy that checks the visitor's Tailscale login, sends the request to `localhost:<port>` as the dev server expects, carries live-reload WebSockets, and drops the headers that stop a page from loading in a frame.
+- HTML files opened in a browser tab (for example by `runpane panels open --url file://...`) load from one more Serve address, with the files beside them. Files outside the page's folder are refused.
+- Handlers appear when a port starts listening and go when it stops, when Pane quits, and at the next launch after a crash. Pane changes only handlers it created: their targets start with `/pane-<hash of the Pane data directory>/`, so a dev build and the installed app never remove each other's.
+
+Who can open these pages: the devices that **Who can connect to this machine** admits (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)). Phone pages need that setting on, Tailscale running on the host, and the phone on the same tailnet. A frame cannot send the machine's password, so with password protection on, only the machine owner's Tailscale login opens pages. A refused device sees "This page runs on <host>. Open it from a device signed in as <login>." A phone paired with a code from another Tailscale account, or over an SSH tunnel, cannot reach these addresses. Navigation inside a page stays on the phone; the tab saves only the addresses you enter or pick.
 
 ### Remote PWA Implementation Notes
 
