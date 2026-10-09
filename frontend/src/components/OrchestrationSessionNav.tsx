@@ -19,8 +19,7 @@ import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { cn } from '../utils/cn';
-import { useOrchestrationSessionActivity } from '../hooks/useAgentStatus';
-import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
+import { SessionActivityDot, SessionActivitySummary } from './SessionActivity';
 import { startSessionDrag } from '../utils/sessionDrag';
 
 interface OrchestrationSessionNavProps {
@@ -64,23 +63,6 @@ function statusLabel(session: OrchestrationSessionRecord): string {
   if (session.blockers.length > 0) return 'Blocked';
   if (session.report) return 'Report available';
   return 'No report yet';
-}
-
-/** Rolled-up agent status for a Session: its orchestrator plus child Panes. */
-function SessionActivityDot({ session, paneIds }: { session: OrchestrationSessionRecord; paneIds: readonly string[] }) {
-  const { status } = useOrchestrationSessionActivity(session.internalSessionId, paneIds);
-  return status === 'unknown'
-    ? <AgentActivityDot active={false} size="sm" className="flex-shrink-0" />
-    : <AgentStatusDot status={status} size="sm" className="flex-shrink-0" />;
-}
-
-/** How much delegated work is in flight, in place of the plain child count. */
-function SessionActivitySummary({ session, paneIds }: { session: OrchestrationSessionRecord; paneIds: readonly string[] }) {
-  const { working, blocked } = useOrchestrationSessionActivity(session.internalSessionId, paneIds);
-  if (blocked > 0) return <span className="pr-1 text-[10px] tabular-nums text-status-error">{blocked} need{blocked === 1 ? 's' : ''} input</span>;
-  if (working > 0) return <span className="pr-1 text-[10px] tabular-nums text-text-secondary">{working} working</span>;
-  if (paneIds.length === 0) return null;
-  return <span className="pr-1 text-[10px] tabular-nums text-text-muted">{paneIds.length}</span>;
 }
 
 function availabilityIsVisible(availability: OrchestrationSessionAvailability): boolean {

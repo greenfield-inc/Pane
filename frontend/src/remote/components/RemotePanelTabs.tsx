@@ -6,6 +6,7 @@ import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
 import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
 import { getPanelIcon } from '../../components/panels/panelIcon';
+import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
 import { getRemotePanelTabId, getRemotePanelTabPanelId } from './remotePanelTabIds';
 
 // The remote host executes these commands. Until its platform capabilities are
@@ -138,6 +139,7 @@ export function RemotePanelTabs({
                 : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
+            {panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
             <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">{getPanelIcon(panel.type, panel, 'h-4 w-4')}</span>
             <span className="truncate">{panel.title}</span>
           </button>
