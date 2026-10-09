@@ -10,10 +10,10 @@ import { normalizeUrl } from './browserUrl';
 import { hasFileProtocol, localTargetOf, loopbackPortOf, remapLoopbackPort, type LocalTarget } from '../../../../../shared/utils/browserUrl';
 import { useListeningPorts } from '../../../hooks/useListeningPorts';
 import { useConfigStore } from '../../../stores/configStore';
-import { TerminalPopover } from '../../terminal/TerminalPopover';
+import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
+import { Dropdown } from '../../ui/Dropdown';
 import { PortsList } from './PortsList';
 
-const PORTS_MENU_WIDTH = 384;
 const COPIED_FEEDBACK_MS = 1500;
 
 interface BrowserPanelProps {
@@ -31,12 +31,16 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
-  const [portsMenuAt, setPortsMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const ports = useListeningPorts();
   // Null until the config loads: until then this desktop may be remote.
   const remoteMode = useConfigStore((state) => (state.config ? state.config.remoteDaemon?.client.mode === 'remote' : null));
   const isRemoteMode = remoteMode === true;
+  const remoteRuntime = useRemoteRuntimeState();
+  const viewingRemoteHost = remoteRuntime.connectionState.mode === 'remote';
+  // Ports open on this computer's localhost, so only once local mode is confirmed; a remote
+  // desktop opens only the ports tunnelled to it (PortsList checks `localPort`).
+  const onHost = remoteRuntime.connectionKnown && !viewingRemoteHost;
   // Panel state keeps the host's own URLs (http://localhost:5173/...). A remote desktop reaches a
   // forwarded host port through its tunnel, sometimes on another local port, so it maps on load
   // and maps navigation back before saving.
@@ -301,19 +305,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => observer.disconnect();
   }, [devToolsOpen]);
 
-  const openPort = (port: number) => {
-    setPortsMenuAt(null);
-    navigateTo(`http://localhost:${port}`);
-  };
-
-  const togglePortsMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (portsMenuAt) {
-      setPortsMenuAt(null);
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPortsMenuAt({ x: rect.right - PORTS_MENU_WIDTH, y: rect.bottom + 4 });
-  };
+  const openPort = (port: number) => navigateTo(`http://localhost:${port}`);
 
   // The address this computer opens the page at, so it works pasted into a browser here.
   const handleCopyUrl = () => {
@@ -557,35 +549,41 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           {copied ? <Check className="w-3.5 h-3.5 text-status-success" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
         {url && (
-          <button
-            type="button"
-            // The popover closes on any mousedown outside it, which would let
-            // this click reopen it; the button toggles it instead.
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={togglePortsMenu}
-            aria-expanded={portsMenuAt !== null}
-            className={cn(
-              'flex flex-shrink-0 items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
-              'transition-colors hover:bg-surface-hover hover:text-text-primary',
-              portsMenuAt && 'bg-surface-hover text-text-primary'
+          <Dropdown
+            className="flex-shrink-0"
+            position="bottom-right"
+            width="auto"
+            menuClassName="w-96"
+            items={[]}
+            footer={({ close }) => (
+              <PortsList
+                snapshot={ports}
+                currentPort={loopbackPortOf(inputUrl)}
+                canOpen={onHost}
+                onOpen={port => {
+                  close();
+                  openPort(port);
+                }}
+              />
             )}
-            title={`Listening ports on ${ports?.host ?? 'this machine'}`}
-          >
-            Ports
-            <span className="tabular-nums text-text-tertiary">{ports?.ports.length ?? ''}</span>
-            <ChevronDown className="h-3 w-3" />
-          </button>
+            trigger={
+              <button
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
+                  'transition-colors hover:bg-surface-hover hover:text-text-primary',
+                  'aria-expanded:bg-surface-hover aria-expanded:text-text-primary'
+                )}
+                title={`Listening ports on ${viewingRemoteHost ? ports?.host ?? 'the host' : 'this machine'}`}
+              >
+                Ports
+                <span className="tabular-nums text-text-tertiary">{ports?.ports.length ?? ''}</span>
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            }
+          />
         )}
       </div>
-      <TerminalPopover
-        visible={portsMenuAt !== null}
-        x={portsMenuAt?.x ?? 0}
-        y={portsMenuAt?.y ?? 0}
-        onClose={() => setPortsMenuAt(null)}
-        className="w-96 max-h-[min(28rem,calc(100vh-20px))] py-0"
-      >
-        <PortsList snapshot={ports} currentPort={loopbackPortOf(inputUrl)} canOpen={!isRemoteMode} onOpen={openPort} />
-      </TerminalPopover>
 
       {/* Error feedback */}
       {urlError && (
@@ -602,12 +600,12 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
               Ports on {ports?.host ?? 'this machine'}
             </h2>
             <p className="px-3 mt-0.5 text-xs text-text-tertiary">
-              {!isRemoteMode || localToHost.size > 0
-                ? 'Open a web port here, or enter a URL above.'
-                : `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`}
+              {viewingRemoteHost && localToHost.size === 0
+                ? `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`
+                : 'Open a web port here, or enter a URL above.'}
             </p>
             <div className="mt-2">
-              <PortsList snapshot={ports} canOpen={!isRemoteMode} onOpen={openPort} />
+              <PortsList snapshot={ports} canOpen={onHost} onOpen={openPort} />
             </div>
           </div>
         </div>
