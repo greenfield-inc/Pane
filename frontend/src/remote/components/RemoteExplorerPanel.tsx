@@ -121,7 +121,8 @@ function rowIndent(depth: number): string {
 
 type TextState =
   | { kind: 'loading' }
-  | { kind: 'text'; saved: string; draft: string }
+  /** A text area holds `\n` line endings only; `lineEnding` is the file's own, restored on save. */
+  | { kind: 'text'; saved: string; draft: string; lineEnding: '\n' | '\r\n' }
   | { kind: 'notice'; message: string };
 
 /** A worktree text file in a text area; Save writes it to the host. */
@@ -146,9 +147,12 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
     adapter.readTextFile(sessionId, file.path).then(
       content => {
         if (cancelled) return;
-        setText(content === null
-          ? { kind: 'notice', message: `${file.name} is a binary file with no phone preview.` }
-          : { kind: 'text', saved: content, draft: content });
+        if (content === null) {
+          setText({ kind: 'notice', message: `${file.name} is a binary file with no phone preview.` });
+          return;
+        }
+        const normalized = content.replace(/\r\n/gu, '\n');
+        setText({ kind: 'text', saved: normalized, draft: normalized, lineEnding: normalized === content ? '\n' : '\r\n' });
       },
       (error: Error) => { if (!cancelled) setText({ kind: 'notice', message: error.message }); },
     );
@@ -160,7 +164,7 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
     const content = text.draft;
     setSaving(true);
     try {
-      await adapter.writeTextFile(sessionId, file.path, content);
+      await adapter.writeTextFile(sessionId, file.path, text.lineEnding === '\n' ? content : content.replace(/\n/gu, '\r\n'));
       setText(current => (current.kind === 'text' ? { ...current, saved: content } : current));
       setConfirmingDiscard(false);
     } catch (error) {

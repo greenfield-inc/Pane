@@ -38,6 +38,17 @@ test('a phone edits a worktree file and saves it to the host', async ({ page }) 
   await expect(page.getByRole('button', { name: 'app.css' })).toBeVisible();
 });
 
+test('saving keeps a file\'s Windows line endings', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { ports: PORTS, files: { 'notes.txt': 'one\r\ntwo\r\n' } });
+
+  await page.getByRole('tab', { name: 'Explorer' }).click();
+  await page.getByRole('button', { name: 'notes.txt' }).click();
+  await page.getByRole('textbox', { name: 'notes.txt' }).fill('one\ntwo\nthree\n');
+  await page.getByRole('button', { name: 'Save' }).click();
+
+  await expect.poll(() => host.files['notes.txt']).toBe('one\r\ntwo\r\nthree\r\n');
+});
+
 test('a phone previews worktree media from the host\'s files address', async ({ page }) => {
   await page.route(`${FILES_URL}/**/*.png`, route => route.fulfill({ contentType: 'image/png', body: PNG }));
   // Held open: an answer that is not a real video would swap the player for the "did not load" notice.
