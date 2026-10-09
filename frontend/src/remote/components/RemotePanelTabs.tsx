@@ -1,4 +1,4 @@
-import { ChevronDown, Plus, TerminalSquare } from 'lucide-react';
+import { ChevronDown, Globe, Plus, TerminalSquare } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
@@ -23,6 +23,7 @@ interface RemotePanelTabsProps {
   customCommands: RemotePwaCustomCommand[];
   onSelectPanel: (panelId: string) => void;
   onCreateTerminal: (options?: RemoteTerminalCreateOptions) => void;
+  onCreateBrowser: () => void;
 }
 
 export function RemotePanelTabs({
@@ -32,6 +33,7 @@ export function RemotePanelTabs({
   customCommands,
   onSelectPanel,
   onCreateTerminal,
+  onCreateBrowser,
 }: RemotePanelTabsProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -132,7 +134,9 @@ export function RemotePanelTabs({
                 : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
-            <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {panel.type === 'browser'
+              ? <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
+              : <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />}
             <span className="truncate">{panel.title}</span>
           </button>
         ))}
@@ -170,10 +174,20 @@ export function RemotePanelTabs({
               description="Start a shell on the remote host"
               onClick={() => addTerminal()}
             />
+            <AddToolMenuItem
+              buttonRef={(element) => { menuItemRefs.current[1] = element; }}
+              icon={<Globe className="h-4 w-4" />}
+              title="Browser"
+              description="Open the host's dev servers and pages"
+              onClick={() => {
+                onCreateBrowser();
+                setShowAddMenu(false);
+              }}
+            />
             {agentPresets.map((preset, presetIndex) => (
               <AddToolMenuItem
                 key={preset.id}
-                buttonRef={(element) => { menuItemRefs.current[presetIndex + 1] = element; }}
+                buttonRef={(element) => { menuItemRefs.current[presetIndex + 2] = element; }}
                 icon={getCliBrandIcon(preset.iconKey, 'h-4 w-4') ?? <TerminalSquare className="h-4 w-4" />}
                 title={preset.title}
                 description={`Run ${preset.command}`}
@@ -186,7 +200,7 @@ export function RemotePanelTabs({
             {customCommands.map((command, index) => (
               <AddToolMenuItem
                 key={`${command.name}-${index}`}
-                buttonRef={(element) => { menuItemRefs.current[index + 1 + agentPresets.length] = element; }}
+                buttonRef={(element) => { menuItemRefs.current[index + 2 + agentPresets.length] = element; }}
                 icon={getCliBrandIcon(command.command, 'h-4 w-4') ?? <TerminalSquare className="h-4 w-4" />}
                 title={command.name}
                 description={command.command}

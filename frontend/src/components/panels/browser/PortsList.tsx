@@ -21,11 +21,13 @@ interface PortsListProps {
   currentPort?: number | null;
   /** False on a remote desktop: these ports are on the host, which this computer cannot reach yet. */
   canOpen: boolean;
+  /** Shown on tcp rows when this client cannot open them at all (a phone: "desktop only"). */
+  tcpLabel?: string;
   onOpen(port: number): void;
 }
 
 /** The host's listening ports, grouped by who opened them. Web ports open in the tab. */
-export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, canOpen, onOpen }) => {
+export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, canOpen, tcpLabel, onOpen }) => {
   if (!snapshot) {
     return <p className="px-3 py-2 text-xs text-text-tertiary">Reading ports…</p>;
   }
@@ -44,7 +46,7 @@ export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, can
               <span>{ports.length}</span>
             </h3>
             {ports.map(port => (
-              <PortRow key={port.port} port={port} isCurrent={port.port === currentPort} canOpen={canOpen} onOpen={onOpen} />
+              <PortRow key={port.port} port={port} isCurrent={port.port === currentPort} canOpen={canOpen} tcpLabel={tcpLabel} onOpen={onOpen} />
             ))}
           </section>
         );
@@ -53,7 +55,7 @@ export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, can
   );
 };
 
-const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: boolean; onOpen(port: number): void }> = ({ port, isCurrent, canOpen, onOpen }) => {
+const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: boolean; tcpLabel?: string; onOpen(port: number): void }> = ({ port, isCurrent, canOpen, tcpLabel, onOpen }) => {
   const isWeb = port.kind === 'web';
   const opens = isWeb && canOpen;
   const content = (
@@ -69,9 +71,9 @@ const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: bool
         {port.kind}
       </span>
       <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{port.paneName}</span>
-      {/* One fixed slot for the swapping indicator: Open, the current-page check, or nothing. */}
-      <span className="flex w-10 flex-shrink-0 justify-end text-xs text-interactive">
-        {opens && (isCurrent ? <Check className="h-3.5 w-3.5" aria-label="Open in this tab" /> : 'Open')}
+      {/* One fixed slot for the swapping indicator: Open, the current-page check, the tcp label, or nothing. */}
+      <span className={cn('flex flex-shrink-0 justify-end text-xs', tcpLabel ? 'w-20' : 'w-10', opens ? 'text-interactive' : 'text-text-tertiary')}>
+        {opens ? (isCurrent ? <Check className="h-3.5 w-3.5" aria-label="Open in this tab" /> : 'Open') : !isWeb && tcpLabel}
       </span>
     </>
   );

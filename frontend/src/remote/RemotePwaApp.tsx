@@ -19,6 +19,8 @@ import { RemoteSessionList } from './components/RemoteSessionList';
 import { RemoteSidebar, type RemoteSidebarActions } from './components/RemoteSidebar';
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
+import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
+import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
@@ -231,6 +233,7 @@ export function RemotePwaApp() {
     [selectedPanels],
   );
   const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? selectedPanels[0] ?? null;
+  const listeningPorts = useRemoteListeningPorts(adapter);
 
   useEffect(() => {
     if (!selectedPanel || selectedPanel.type !== 'terminal') return;
@@ -507,6 +510,31 @@ export function RemotePwaApp() {
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
+  const createBrowser = useCallback(async () => {
+    if (!adapter || !selectedSessionId) return;
+    setCreatingTerminal(true);
+    try {
+      const panel = await adapter.createBrowserPanel(selectedSessionId);
+      upsertPanel(panel);
+      setSelectedPanel(panel.id);
+      await adapter.setActivePanel(selectedSessionId, panel.id);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : 'Failed to create browser tab');
+    } finally {
+      setCreatingTerminal(false);
+    }
+  }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
+
+  /** Shows the new address at once, then saves it on the host for every client. */
+  const navigateBrowser = useCallback((panel: ToolPanel, currentUrl: string) => {
+    if (!adapter) return;
+    const state = { ...panel.state, customState: { ...panel.state.customState, currentUrl } };
+    upsertPanel({ ...panel, state });
+    adapter.updatePanelState(panel.id, state).catch((error: Error) => {
+      setLastError(error instanceof Error ? error.message : 'Could not open this address.');
+    });
+  }, [adapter, upsertPanel, setLastError]);
+
   const selectRemoteSession = useCallback((sessionId: string) => {
     navigationRequestRef.current += 1;
     selectSession(sessionId);
@@ -780,6 +808,7 @@ export function RemotePwaApp() {
           customCommands={affordances.customCommands}
           onSelectPanel={selectPanel}
           onCreateTerminal={createTerminal}
+          onCreateBrowser={createBrowser}
         />
 
         <RemoteSessionList
@@ -824,7 +853,9 @@ export function RemotePwaApp() {
             tabIndex={0}
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
-            <UnsupportedPanel session={selectedSession} panel={selectedPanel} />
+            {selectedPanel.type === 'browser'
+              ? <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onError={setLastError} />
+              : <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}
       </section>
@@ -862,7 +893,7 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {panel.type} panels are visible in desktop Pane. Remote Pane PWA currently supports terminal panels for {session.name}.
+          {panel.type} panels are visible in desktop Pane. Remote Pane PWA shows terminal and browser tabs for {session.name}.
         </p>
       </div>
     </div>
