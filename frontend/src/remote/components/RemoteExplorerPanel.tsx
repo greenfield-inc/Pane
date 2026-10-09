@@ -140,7 +140,7 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
 
   useEffect(() => {
     if ((file.size ?? 0) > MAX_EDIT_BYTES) {
-      setText({ kind: 'notice', message: `${file.name} is ${formatSize(file.size ?? 0)}. Open files over ${formatSize(MAX_EDIT_BYTES)} on a desktop.` });
+      setText({ kind: 'notice', message: `${file.name} is larger than 1 MB. Open it on a desktop.` });
       return;
     }
     let cancelled = false;
@@ -281,8 +281,4 @@ function Notice({ message }: { message: string }) {
       <p className="max-w-sm text-center text-sm text-text-secondary">{message}</p>
     </div>
   );
-}
-
-function formatSize(bytes: number): string {
-  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
 }
