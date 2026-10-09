@@ -74,7 +74,9 @@ While one workstream waits, continue the others.
 - 1 feature = 1 worktree = 1 branch = 1 Pane. A Pane is a new worktree, so create one only for new,
   independent work. Every later agent for that work, including review, fixes
   and QA, opens as a new agent tab in its Pane with
-  `runpane panels create --pane <id>`, never as a new Pane.
+  `runpane panels create --pane <id>`, never as a new Pane. Before
+  `runpane panes create`, check `runpane sessions overview --json` or
+  `runpane panes list --json` for the work's existing Pane.
 - Review and QA run on every new head, in fresh agent tabs in the feature's
   Pane or through the `reviewer` and `qa-and-verify` subagents. They return findings and post
   nothing. QA may run authorized tests and upload evidence under a grant, and it

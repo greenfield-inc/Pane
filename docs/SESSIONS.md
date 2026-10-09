@@ -246,7 +246,9 @@ fresh agent with its own context, sharing the Pane's worktree and branch:
 runpane panels create --pane <feature-pane-id> --tool-command "<agent command>" --source agent --no-focus --wait-ready --yes --json
 ```
 
-Never create a Pane to review, fix or QA work that already has one. Keep the
+Before `runpane panes create`, check `runpane sessions overview --json` for the
+work's existing Pane and use it when it exists. Never create a Pane to review,
+fix or QA work that already has one. Keep the
 feature's Pane until its PR merges or closes, so later tabs still have the
 worktree; archive it then.
 
