@@ -1,6 +1,6 @@
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
+import { Info, Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
@@ -35,6 +35,7 @@ import {
 import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { usePanelStore } from '../stores/panelStore';
 import { useHotkey } from '../hooks/useHotkey';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import type { DropZone, LayoutDirection } from '../utils/layoutTree';
@@ -682,6 +683,8 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [statusAnnouncement, setStatusAnnouncement] = useState('');
+  const showsTrustPrompt = usePanelStore(state => state.agentStatus[view.panel.id] === 'blocked'
+    && state.agentStatusReason[view.panel.id] === 'workspace_trust_prompt');
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
   const isMounted = useRef(false);
@@ -813,6 +816,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
             toolbarActions={sessionControls}
+            stageNotice={showsTrustPrompt && <FolderTrustNotice />}
             chromeInline={chrome.tiled}
             focusWithin={chrome.isFocused}
             overviewContent={<SessionOverviewPanel
@@ -830,6 +834,19 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
             changesContent={<SessionChangesPanel overview={overview} error={overviewError} onRetry={onRetry} />} />
         </SessionProvider>
       </div>
+    </div>
+  );
+}
+
+const FOLDER_TRUST_NOTICE = 'The agent is asking whether to trust this folder. It is Pane\'s own folder for this Session\'s notes, with no project code, so it is safe to trust.';
+
+/** Overlays the top terminal row, which holds only the blank line and rule above the trust prompt, so the terminal keeps its size. */
+function FolderTrustNotice() {
+  return (
+    <div role="status" title={FOLDER_TRUST_NOTICE}
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 flex h-7 items-center gap-2 border-b border-interactive/30 bg-surface-secondary px-3 text-xs text-text-primary">
+      <Info className="h-3.5 w-3.5 flex-shrink-0 text-status-info" aria-hidden="true" />
+      <span className="min-w-0 truncate">{FOLDER_TRUST_NOTICE}</span>
     </div>
   );
 }

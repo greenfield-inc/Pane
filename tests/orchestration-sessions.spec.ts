@@ -1059,6 +1059,29 @@ test('Session rows show whether their child Panes are working or waiting', async
   await expect(row).not.toContainText('input');
 });
 
+test('a banner explains the folder-trust prompt only while the Session agent shows it', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', '', '', '2026-09-16T12:00:00.000Z')]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  await page.getByTestId('orchestration-session-alpha').click();
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  const emit = (state: string, reason: string) => page.evaluate(({ state, reason }) => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelAgentStatus: (panelId: string, sessionId: string, state: string, reason: string) => void } };
+    mockWindow.__paneTestElectronMock.emitPanelAgentStatus('__orchestration_panel_alpha_claude', '__orchestration_session_alphaterminal__', state, reason);
+  }, { state, reason });
+  const banner = page.getByRole('status').filter({ hasText: 'asking whether to trust this folder' });
+
+  await emit('blocked', 'live_selection_menu');
+  await expect(banner).toHaveCount(0);
+  await emit('blocked', 'workspace_trust_prompt');
+  await expect(banner).toBeVisible();
+  await expect(banner).toHaveAttribute('title', /Pane's own folder for this Session's notes/);
+  await emit('idle', 'live_prompt_box');
+  await expect(banner).toHaveCount(0);
+});
+
 test('Sessions can be pinned, persist across reload, and unpin back to the normal list', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [

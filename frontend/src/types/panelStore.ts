@@ -8,6 +8,7 @@ export interface PanelStore {
   activityStatus: Record<string, 'active' | 'idle'>; // panelId -> status
   agentStatus: Record<string, AgentState>;    // panelId -> detected agent state (blocked/working/idle)
   agentStatusSession: Record<string, string>; // panelId -> sessionId (so status rolls up without panels loaded)
+  agentStatusReason: Record<string, string | null>; // panelId -> rule id behind the last status event
   agentStatusSnapshotVersion: number; // Snapshots and terminal endings silently rebaseline notification subscribers
   lastActivityAt: Record<string, string>;     // panelId -> last PTY output timestamp
   unviewedCompletedActivity: Record<string, string>; // sessionId -> completion timestamp
@@ -25,7 +26,7 @@ export interface PanelStore {
   updatePanelState: (panel: ToolPanel) => void;
   setActivityStatus: (panelId: string, status: 'active' | 'idle', lastActivityAt?: string) => void;
   clearActivityStatus: (panelId: string) => void;
-  setAgentStatus: (panelId: string, sessionId: string, state: AgentState) => void;
+  setAgentStatus: (panelId: string, sessionId: string, state: AgentState, reason?: string | null) => void;
   clearAgentStatus: (panelId: string) => void;
   /** Drop every per-panel status entry, without needing the session id. */
   forgetPanel: (panelId: string) => void;
