@@ -90,7 +90,7 @@ test('an ambiguous or unknown name lists the tailnet\'s machines, other people\'
   assert.match(unknown.output, /No machine on your tailnet is called "nope"/);
   assert.match(unknown.output, new RegExp([
     'Machines: build-server \\(Linux, online\\), parsa-devbox \\(Windows, online\\), parsa-devbox-old \\(Windows, offline\\), ',
-    "tylers-mac-mini \\(macOS, online, tbrownio@github's\\), tylers-pc \\(Windows, online, tbrownio@github's\\)\\.",
+    "tylers-mac-mini \\(macOS, online, owner tbrownio@github\\), tylers-pc \\(Windows, online, owner tbrownio@github\\)\\.",
   ].join('')));
   assert.doesNotMatch(unknown.output, /ci-runner|iphone|guest-mac/);
 });
@@ -101,8 +101,8 @@ test('list shows a teammate\'s machines after mine, labeled with their owner', p
   const lines = list.output.split('\n');
   const index = (name) => lines.findIndex((line) => line.startsWith(`${name} (`));
   assert.ok(index('parsa-devbox') < index('tylers-mac-mini'), list.output);
-  assert.equal(lines[index('tylers-mac-mini')], "tylers-mac-mini (macOS, online, tbrownio@github's): joined, shell /bin/zsh");
-  assert.match(lines[index('tylers-pc')], /^tylers-pc \(Windows, online, tbrownio@github's\): not reachable: tylers-pc: This machine accepts only its owner's Tailscale login/);
+  assert.equal(lines[index('tylers-mac-mini')], "tylers-mac-mini (macOS, online, owner tbrownio@github): joined, shell /bin/zsh");
+  assert.match(lines[index('tylers-pc')], /^tylers-pc \(Windows, online, owner tbrownio@github\): not reachable: tylers-pc: This machine accepts only its owner's Tailscale login/);
   assert.doesNotMatch(list.output, /guest-mac|ci-runner/);
 });
 
@@ -116,7 +116,7 @@ test('a machine set to "Only me" refuses other logins and says how its owner can
   const refused = runpane('workspace', 'tylers-pc', 'sessions', 'list', '--json');
   assert.equal(refused.status, 1);
   assert.match(refused.output, /tylers-pc: This machine accepts only its owner's Tailscale login; parsa@github is refused\./);
-  assert.match(refused.output, /Its owner can let you in from Pane on that machine: Settings → Remote Access → Who can connect → Everyone on tailnet\./);
+  assert.match(refused.output, /Its owner can let you in from Pane on that machine: Settings → Remote Access → Access to this computer → Who can connect → Everyone on tailnet\./);
 });
 
 test('a path that cannot exist on this machine routes to the online machines whose OS fits it', posixOnly, () => {

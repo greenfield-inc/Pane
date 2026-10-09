@@ -14,7 +14,7 @@ runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 
 `<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP.
 
-`runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, tbrownio@github's)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
+`runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 

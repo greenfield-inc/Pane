@@ -178,7 +178,7 @@ export async function invokeRemoteDaemon<T>(
   if (!payload.ok) {
     // The machine's own visibility setting refused this login; only its owner can change that.
     const fix = payload.error.code === 'ERR_WORKSPACE_IDENTITY_REFUSED'
-      ? ' Its owner can let you in from Pane on that machine: Settings → Remote Access → Who can connect → Everyone on tailnet.'
+      ? ' Its owner can let you in from Pane on that machine: Settings → Remote Access → Access to this computer → Who can connect → Everyone on tailnet.'
       : '';
     throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}${fix}`, payload.error.code);
   }

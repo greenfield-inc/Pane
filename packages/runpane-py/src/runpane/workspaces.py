@@ -47,7 +47,7 @@ def read_workspace_summary(pane_dir: Optional[str] = None) -> Dict[str, Any]:
 
 
 def describe_machine(machine: Dict[str, Any]) -> str:
-    owner = "" if machine["mine"] else f", {machine['owner']}'s"
+    owner = "" if machine["mine"] else f", owner {machine['owner']}"
     return f"{machine['name']} ({machine['os']}, {'online' if machine['online'] else 'offline'}{owner})"
 
 

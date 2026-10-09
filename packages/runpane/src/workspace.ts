@@ -219,7 +219,7 @@ function describeMachines(machines: readonly TailnetMachine[]): string {
 
 /** "name (OS, online)", plus the owner's login for someone else's machine. */
 function describeMachine(machine: TailnetMachine): string {
-  return `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, ${machine.owner}'s`})`;
+  return `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
 }
 
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
