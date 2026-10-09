@@ -37,6 +37,16 @@ const server = net.createServer(socket => {
         const item = { index: 0, ...config.item };
         if (item.ok) { item.pinned = false; item.warnings = []; }
         result = { ok: item.ok, repo, items: [item] };
+      }
+      else if (frame.channel === 'runpane:panes:list') {
+        const owned = config.ownedPane ?? { id: 'sender-pane', worktreePath: config.repoPath };
+        result = { ok: true, panes: [{ id: owned.id, paneId: owned.id, name: 'sender', status: 'running', agentStatus: 'idle',
+          worktreePath: owned.worktreePath, repoId: 1, panelCount: 1, pinned: false, ownership: 'pane' }] };
+      }
+      else if (frame.channel === 'runpane:panels:create') {
+        const request = frame.args[0];
+        result = { ok: true, paneId: request.paneId, panelId: 'test-tab', title: 'Codex', active: false, focused: false,
+          tool: { title: 'Codex', command: 'codex' }, initialInput: config.item.initialInput, warnings: [] };
       } else {
         socket.write(JSON.stringify({ type: 'response', id: frame.id, ok: false, error: { message: `Unexpected fixture channel: ${frame.channel}` } }) + '\n');
         continue;

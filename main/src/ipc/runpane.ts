@@ -4288,8 +4288,11 @@ function isArchiveCleanupOk(worktreeCleanup: RunpaneWorktreeCleanupState): boole
 /**
  * `runpane panes archive --session <id|name> --merged`: archives every Pane
  * associated with the Session whose work is already safe on the remote (clean
- * and pushed, or merged via a PR whose head is HEAD). Everything else is
- * skipped with the same block code a single archive would report.
+ * and pushed, or merged via a PR whose head is HEAD) and whose PR is not still
+ * open. A Pane with an open PR is skipped as `pr-open`: 1 feature = 1 worktree
+ * = 1 branch = 1 Pane, and its later review, fix and QA tabs still need the
+ * worktree. Everything else is skipped with the same block code a single
+ * archive would report.
  */
 async function archiveSessionPanes(
   services: AppServices,
@@ -4330,6 +4333,18 @@ async function archiveSessionPanes(
           ...base,
           outcome: 'skipped',
           skipped: { code: blockCode, message: describeArchiveBlock(blockCode, safetyCheck) },
+          safetyCheck,
+        });
+        continue;
+      }
+      const prStatus = await findPrStatusForPane(services, paneId);
+      if (prStatus.state !== 'none') {
+        items.push({
+          ...base,
+          outcome: 'skipped',
+          skipped: prStatus.state === 'open'
+            ? { code: 'pr-open', message: `PR #${prStatus.number} is still open; keep the Pane for its review, fix and QA tabs until it merges or closes.` }
+            : { code: 'pr-status-unknown', message: `${prStatus.reason} Kept the Pane; check its PR and archive it by --pane once the PR has merged or closed.` },
           safetyCheck,
         });
         continue;
@@ -4382,6 +4397,35 @@ async function resolveUpstreamRemote(
     throw new Error(`Could not resolve remote for upstream ${upstream}`);
   }
   return remote;
+}
+
+const PR_STATUS_TIMEOUT_MS = 20_000;
+
+type PanePrStatus =
+  | { state: 'open'; number: number }
+  | { state: 'none' }
+  | { state: 'unknown'; reason: string };
+
+/**
+ * The Pane's PR state, read fresh from GitHub by its branch. Archive is destructive, so a
+ * failed, unavailable or slow lookup is `unknown`, never "no open PR".
+ */
+async function findPrStatusForPane(services: AppServices, paneId: string): Promise<PanePrStatus> {
+  const gitStatus = services.gitStatusManager;
+  try {
+    const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
+    if (projectPath) gitStatus.invalidatePrCache(projectPath);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), PR_STATUS_TIMEOUT_MS); });
+    const lookup = await Promise.race([gitStatus.lookupPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
+    if (lookup === 'timeout') return { state: 'unknown', reason: 'GitHub did not answer in time.' };
+    if (!lookup) return { state: 'none' };
+    if (!lookup.ok) return { state: 'unknown', reason: 'GitHub could not be reached.' };
+    if (lookup.pr?.prState === 'OPEN' && lookup.pr.prNumber !== undefined) return { state: 'open', number: lookup.pr.prNumber };
+    return { state: 'none' };
+  } catch {
+    return { state: 'unknown', reason: 'The PR lookup failed.' };
+  }
 }
 
 function classifyArchiveBlock(check: RunpanePaneArchiveSafetyCheck, applicable: boolean): RunpanePaneArchiveBlockCode | undefined {

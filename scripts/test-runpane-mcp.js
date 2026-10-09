@@ -349,7 +349,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
-    'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
+    'panels_create', 'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [
@@ -359,6 +359,23 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const readOnly = await names(['--toolsets', 'all', '--read-only']);
   assert.ok(readOnly.length > 0 && readOnly.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
+});
+
+test('agents start refuses --pane together with --repo or --name before changing anything, and says which form to use', () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-agents-start-'));
+  try {
+    const run = (args) => require('node:child_process').spawnSync(process.execPath, [dist('cli.js'), 'agents', 'start', ...args, '--prompt', 'Review it', '--agent', 'codex', '--yes', '--json', '--pane-dir', paneDir], {
+      encoding: 'utf8', input: '', env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' },
+    });
+    const mixed = run(['--pane', 'pane-1', '--repo', 'active', '--name', 'other']);
+    assert.notEqual(mixed.status, 0);
+    assert.match(mixed.stderr + mixed.stdout, /either --pane <id> \(a new tab in existing work\) or --repo and --name \(a new Pane for new work\), not both/);
+    const neither = run([]);
+    assert.notEqual(neither.status, 0);
+    assert.match(neither.stderr + neither.stdout, /needs --pane <id> to add a tab to existing work, or --repo and --name/);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
 });
 
 test('an unknown toolset stops the server with the valid names', () => {
