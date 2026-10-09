@@ -3,6 +3,7 @@ import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../..
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { Session } from '../../types/session';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
+import { readRemoteView, rememberRemoteView } from './remoteViewMemory';
 
 /** `unavailable` means the host predates Sessions, so the PWA hides them. */
 type RemoteOrchestrationAvailability = 'idle' | 'ready' | 'unavailable' | 'error';
@@ -12,6 +13,8 @@ type RemoteOrchestrationAvailability = 'idle' | 'ready' | 'unavailable' | 'error
  * switch or disconnect; the app refetches it after a reconnect.
  */
 interface RemoteHostState {
+  /** The saved connection this state belongs to; this client's view memory is kept per host. */
+  hostId: string | null;
   projects: RemoteProjectWithSessions[];
   /** The Pane whose panels are on screen. An open Session shows its own workspace Pane. */
   selectedSessionId: string | null;
@@ -27,7 +30,8 @@ interface RemoteHostState {
 }
 
 interface RemoteSessionState extends RemoteHostState {
-  reset: () => void;
+  /** Clears the previous host's state; `hostId` names the host about to connect. */
+  reset: (hostId?: string | null) => void;
   setProjects: (projects: RemoteProjectWithSessions[]) => void;
   selectSession: (sessionId: string | null) => void;
   openSession: (view: OrchestrationSessionView<Session>) => void;
@@ -41,6 +45,7 @@ interface RemoteSessionState extends RemoteHostState {
 }
 
 const INITIAL_HOST_STATE: RemoteHostState = {
+  hostId: null,
   projects: [],
   selectedSessionId: null,
   selectedPanelId: null,
@@ -52,27 +57,35 @@ const INITIAL_HOST_STATE: RemoteHostState = {
   archivedProjects: null,
 };
 
-export const useRemoteSessionStore = create<RemoteSessionState>((set) => ({
+export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
   ...INITIAL_HOST_STATE,
 
-  reset: () => set(INITIAL_HOST_STATE),
+  reset: (hostId = null) => set({ ...INITIAL_HOST_STATE, hostId }),
 
   setProjects: (projects) => set((state) => ({
     projects,
-    selectedSessionId: state.selectedSessionId ?? findFirstSessionId(projects),
+    selectedSessionId: state.selectedSessionId ?? findRememberedPaneId(state.hostId, projects) ?? findFirstSessionId(projects),
   })),
 
-  selectSession: (sessionId) => set({
-    selectedSessionId: sessionId,
-    selectedPanelId: null,
-    openOrchestrationSession: null,
-  }),
+  selectSession: (sessionId) => {
+    set({
+      selectedSessionId: sessionId,
+      selectedPanelId: null,
+      openOrchestrationSession: null,
+    });
+    const { hostId } = get();
+    if (hostId && sessionId) rememberRemoteView(hostId, { paneId: sessionId, sessionId: null });
+  },
 
-  openSession: (view) => set({
-    selectedSessionId: view.internalSession.id,
-    selectedPanelId: view.panel.id,
-    openOrchestrationSession: view,
-  }),
+  openSession: (view) => {
+    set({
+      selectedSessionId: view.internalSession.id,
+      selectedPanelId: view.panel.id,
+      openOrchestrationSession: view,
+    });
+    const { hostId } = get();
+    if (hostId) rememberRemoteView(hostId, { paneId: view.internalSession.id, sessionId: view.session.id, panelId: view.panel.id });
+  },
 
   setOrchestrationSessions: (orchestrationSessions) => set({
     orchestrationSessions,
@@ -95,7 +108,13 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set) => ({
     selectedPanelId: state.selectedPanelId ?? panels[0]?.id ?? null,
   })),
 
-  setSelectedPanel: (panelId) => set({ selectedPanelId: panelId }),
+  setSelectedPanel: (panelId) => {
+    set({ selectedPanelId: panelId });
+    const { hostId, selectedSessionId, openOrchestrationSession } = get();
+    if (hostId && selectedSessionId && panelId) {
+      rememberRemoteView(hostId, { paneId: selectedSessionId, sessionId: openOrchestrationSession?.session.id ?? null, panelId });
+    }
+  },
 
   upsertPanel: (panel) => set((state) => {
     const panels = state.panelsBySessionId[panel.sessionId] ?? [];
@@ -129,4 +148,10 @@ export function findFirstSessionId(projects: Array<{ sessions?: Session[] }>): s
     }
   }
   return null;
+}
+
+function findRememberedPaneId(hostId: string | null, projects: Array<{ sessions?: Session[] }>): string | null {
+  if (!hostId) return null;
+  const { paneId } = readRemoteView(hostId);
+  return paneId && projects.some(project => project.sessions?.some(session => session.id === paneId)) ? paneId : null;
 }

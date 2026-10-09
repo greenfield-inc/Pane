@@ -401,6 +401,7 @@ function RemotePaneRow({
       <button
         type="button"
         onClick={onSelect}
+        aria-current={selected ? 'page' : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>

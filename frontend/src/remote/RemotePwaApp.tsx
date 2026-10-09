@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
-import type { ToolPanel } from '../../../shared/types/panels';
+import type { PanelActivationRequest, ToolPanel } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
 import {
@@ -25,6 +25,7 @@ import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileS
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
+import { readRemoteView } from './stores/remoteViewMemory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ErrorDialog } from '../components/ErrorDialog';
 
@@ -279,13 +280,15 @@ export function RemotePwaApp() {
       ]);
       if (runtime !== activeRuntimeRef.current || request !== panelLoadRequestRef.current || useRemoteSessionStore.getState().selectedSessionId !== sessionId) return;
       // Read before setPanels, which fills an empty selection with the first panel.
-      const currentPanelId = useRemoteSessionStore.getState().selectedPanelId;
+      const { selectedPanelId: currentPanelId, hostId } = useRemoteSessionStore.getState();
+      const rememberedPanelId = hostId ? readRemoteView(hostId).panelIdByPaneId[sessionId] : undefined;
       setPanels(sessionId, panels);
       const routedPanel = pushRoutePanelRef.current;
       const routeMatches = routedPanel?.sessionId === sessionId && panels.some(panel => panel.id === routedPanel.panelId);
       if (routedPanel?.sessionId === sessionId) pushRoutePanelRef.current = null;
-      const keptPanelId = panels.some(panel => panel.id === currentPanelId) ? currentPanelId : null;
-      setSelectedPanel(routeMatches ? routedPanel.panelId : keptPanelId ?? activePanel?.id ?? panels[0]?.id ?? null);
+      const shown = (panelId: string | null | undefined) => panels.some(panel => panel.id === panelId) ? panelId : null;
+      // This client's own tab first; the host's last-used tab only for a Pane this client has not opened.
+      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? activePanel?.id ?? panels[0]?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
         setLastError('The notified panel is no longer available on this Pane host.');
       } else {
@@ -375,12 +378,12 @@ export function RemotePwaApp() {
     if (paneId && runtime === activeRuntimeRef.current) await loadPanels(paneId, runtime);
   }, [loadArchivedIfShown, loadPanels, refreshOrchestrationSessions, refreshProjects]);
 
-  /** Clears everything that belongs to the previous host. */
-  const resetHostState = useCallback(() => {
+  /** Clears everything that belongs to the previous host; `hostId` names the next one. */
+  const resetHostState = useCallback((hostId: string | null = null) => {
     pushRoutePanelRef.current = null;
     archivedLoadRequestRef.current += 1;
     navigationRequestRef.current += 1;
-    resetRemoteHost();
+    resetRemoteHost(hostId);
     setSidebarOpen(false);
     setSidebarActionId(null);
     setCreateSessionProject(null);
@@ -398,7 +401,7 @@ export function RemotePwaApp() {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = runtime;
     updateConnection({ ...INITIAL_CONNECTION, connectionStatus: 'connecting' });
-    resetHostState();
+    resetHostState(profile.id);
 
     try {
       await runtime.connect();
@@ -406,6 +409,11 @@ export function RemotePwaApp() {
       updateConnection({ adapter: runtime, activeProfile: profile });
       saveProfile(profile, setSavedProfiles);
       await Promise.all([refreshProjects(runtime), refreshOrchestrationSessions(runtime), loadAffordances(runtime)]);
+      // Reopen the Session this client had open; refreshProjects already restored a remembered Pane.
+      const { sessionId } = readRemoteView(profile.id);
+      if (sessionId && useRemoteSessionStore.getState().orchestrationSessions.some(session => session.id === sessionId && session.archived !== true)) {
+        await openRemoteOrchestrationSession(sessionId, runtime);
+      }
       return activeRuntimeRef.current === runtime ? runtime : null;
     } catch (error) {
       runtime.disconnect();
@@ -418,7 +426,7 @@ export function RemotePwaApp() {
       });
       throw error;
     }
-  }, [loadAffordances, refreshOrchestrationSessions, refreshProjects, resetHostState]);
+  }, [loadAffordances, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, resetHostState]);
 
   useEffect(() => {
     if (!pendingPushRoute || profilesLoading) return;
@@ -667,9 +675,11 @@ export function RemotePwaApp() {
         return;
       }
 
+      // The host or an agent asks clients to bring a tab forward; only a client showing that Pane follows.
+      // Other clients' tab clicks send nothing.
       if (event.channel === 'panel:activeChanged') {
         // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-        const payload = event.args[0] as { sessionId?: string; panelId?: string } | undefined;
+        const payload = event.args[0] as Partial<PanelActivationRequest> | undefined;
         if (payload?.sessionId === selectedSessionId && payload.panelId) {
           setSelectedPanel(payload.panelId);
         }
