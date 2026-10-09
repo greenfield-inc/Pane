@@ -15,7 +15,7 @@ import { useSessionStore } from './sessionStore';
 export const ATTENTION_INBOX_HOLD_MS = 1500;
 
 /**
- * `finished`: the agent went from working to idle during this run of Pane.
+ * `finished`: an agent in the Pane finished a turn during this run of Pane.
  * `dismissed`: the user hid the row; it returns once the agent works again.
  */
 type AttentionMark = 'finished' | 'dismissed';
@@ -75,6 +75,7 @@ function rollupBySession(agentStatus: Record<string, AgentState>, agentStatusSes
  * agent working again does. Returns the unsubscribe function.
  */
 export function subscribeAttentionInbox(): () => void {
+  let panelStates: Record<string, AgentState> = {};
   let rollups = new Map<string, AgentState>();
   let snapshotVersion = usePanelStore.getState().agentStatusSnapshotVersion;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -118,16 +119,24 @@ export function subscribeAttentionInbox(): () => void {
     const next = rollupBySession(agentStatus, agentStatusSession);
     const marks = { ...useAttentionInboxStore.getState().marks };
     let marksChanged = false;
-    for (const [sessionId, state] of next) {
-      const previous = rollups.get(sessionId);
-      if (state === 'working' && previous !== 'working' && marks[sessionId]) {
+    // Any agent in a Pane starting work clears its mark, even while another
+    // agent in the same Pane stays blocked and holds the rollup.
+    for (const [panelId, state] of Object.entries(agentStatus)) {
+      const sessionId = agentStatusSession[panelId];
+      if (state === 'working' && panelStates[panelId] !== 'working' && sessionId && marks[sessionId]) {
         delete marks[sessionId];
         marksChanged = true;
-      } else if (!rebaseline && previous === 'working' && state === 'idle' && !marks[sessionId]) {
+      }
+    }
+    // A turn ends when the Pane settles idle, including after a prompt midway.
+    for (const [sessionId, state] of next) {
+      const previous = rollups.get(sessionId);
+      if (!rebaseline && (previous === 'working' || previous === 'blocked') && state === 'idle' && !marks[sessionId]) {
         marks[sessionId] = 'finished';
         marksChanged = true;
       }
     }
+    panelStates = agentStatus;
     rollups = next;
     if (marksChanged) useAttentionInboxStore.setState({ marks });
     reconcile();

@@ -67,6 +67,25 @@ describe('attention inbox', () => {
     expect(inbox()).toEqual([]);
   });
 
+  it('counts a turn that waited on the user midway as finished', () => {
+    agent('a', 'working');
+    agent('a', 'blocked');
+    settle();
+    agent('a', 'idle');
+    settle();
+    expect(inbox()).toEqual(['a']);
+  });
+
+  it('brings back a dismissed Pane when a second agent in it finishes a turn', () => {
+    usePanelStore.getState().setAgentStatus('a-first', 'a', 'blocked');
+    settle();
+    useAttentionInboxStore.getState().dismiss('a');
+    usePanelStore.getState().setAgentStatus('a-second', 'a', 'working');
+    usePanelStore.getState().setAgentStatus('a-second', 'a', 'idle');
+    settle();
+    expect(inbox()).toEqual(['a']);
+  });
+
   it('removes a dismissed Pane at once and brings it back when its agent finishes another turn', () => {
     agent('a', 'working');
     agent('a', 'idle');
