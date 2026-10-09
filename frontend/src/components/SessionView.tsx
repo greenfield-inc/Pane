@@ -84,6 +84,13 @@ function isInspectorPanelType(type: ToolPanel['type']): boolean {
 
 export const SessionView = memo(() => {
   const { activeView, activeProjectId } = useNavigationStore();
+  // The repository view renders its own Pane through ProjectView, which owns
+  // that Pane's shown tab and memory; this view's layout stays out of it.
+  const projectViewShown = activeView === 'project' && !!activeProjectId;
+  const projectViewShownRef = useRef(projectViewShown);
+  useEffect(() => {
+    projectViewShownRef.current = projectViewShown;
+  }, [projectViewShown]);
   const [projectData, setProjectData] = useState<Project | null>(null);
   const [isProjectLoading, setIsProjectLoading] = useState(false);
   const [sessionProject, setSessionProject] = useState<Project | null>(null);
@@ -168,7 +175,7 @@ export const SessionView = memo(() => {
 
   // --- Layout debounced persist ---
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingLayoutRef = useRef<{ sessionId: string; layout: SessionPanelLayout; hostId: string | null | undefined } | null>(null);
+  const pendingLayoutRef = useRef<{ sessionId: string; layout: SessionPanelLayout; hostId: string | null | undefined; remember: boolean } | null>(null);
   // The host the open Pane was loaded from, so a write lands in that host's memory.
   const layoutHostRef = useRef<string | null | undefined>(undefined);
 
@@ -187,14 +194,15 @@ export const SessionView = memo(() => {
       // An archive or delete inside the debounce has already forgotten the
       // Pane; writing its layout back would revive the memory.
       const { sessions, activeMainRepoSession } = useSessionStore.getState();
-      if (activeMainRepoSession?.id === pending.sessionId || sessions.some(session => session.id === pending.sessionId)) {
+      const live = activeMainRepoSession?.id === pending.sessionId || sessions.some(session => session.id === pending.sessionId);
+      if (pending.remember && live) {
         rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
       }
     }
   }, []);
 
   const debouncedPersist = useCallback((sessionId: string, layout: SessionPanelLayout) => {
-    pendingLayoutRef.current = { sessionId, layout, hostId: layoutHostRef.current };
+    pendingLayoutRef.current = { sessionId, layout, hostId: layoutHostRef.current, remember: !projectViewShownRef.current };
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(flushLayoutPersist, 500);
   }, [flushLayoutPersist]);
@@ -259,7 +267,7 @@ export const SessionView = memo(() => {
   // Load panels AND layout when session changes
   useEffect(() => {
     let cancelled = false;
-    if (activeSession?.id) {
+    if (activeSession?.id && !projectViewShown) {
       const sid = activeSession.id;
       setPanelLoad(null);
       devLog.debug('[SessionView] Loading panels for session:', sid);
@@ -377,7 +385,7 @@ export const SessionView = memo(() => {
       cancelled = true;
       flushLayoutPersist();
     };
-  }, [activeSession?.id, selectionRevision, hostId, panelRetry, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
+  }, [activeSession?.id, projectViewShown, selectionRevision, hostId, panelRetry, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
   
   // Listen for panel updates from the backend
   useEffect(() => {
@@ -433,7 +441,7 @@ export const SessionView = memo(() => {
 
     // The host or an agent brought a tab forward in the Pane this desktop shows.
     const handleActivationRequested = (request: PanelActivationRequest) => {
-      if (request.sessionId === sid) usePanelStore.getState().requestActivation(request);
+      if (request.sessionId === sid && !projectViewShownRef.current) usePanelStore.getState().requestActivation(request);
     };
 
     // Handle panel deletion events (for backend-initiated deletes)
