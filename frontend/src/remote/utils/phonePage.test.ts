@@ -55,7 +55,7 @@ describe('phonePage', () => {
       reason: 'Nothing on parsas-macbook-pro listens on port 8080.',
     });
     expect(phonePage('http://localhost:5173/', { ...ports, phone: { state: 'off', reason: 'Tailscale is not installed' } }, 'panel-1')).toMatchObject({
-      reason: 'Phones open host pages through Tailscale, which is off on parsas-macbook-pro: Tailscale is not installed.',
+      reason: 'Phone pages from parsas-macbook-pro are unavailable right now (Tailscale is not installed). Pane checks again every minute.',
     });
   });
 });

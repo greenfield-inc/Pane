@@ -128,7 +128,7 @@ export function RemoteBrowserPanel({ panel, ports, onNavigate, onError }: Remote
               className="min-w-0 flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none"
             />
             {draft === null && page?.host && (
-              <span className="min-w-0 max-w-[45%] truncate text-xs text-text-tertiary" title={`on ${page.host}`}>on {page.host}</span>
+              <span className="min-w-0 max-w-[35%] truncate text-xs text-text-tertiary" title={`on ${page.host}`}>on {page.host}</span>
             )}
           </form>
           <button

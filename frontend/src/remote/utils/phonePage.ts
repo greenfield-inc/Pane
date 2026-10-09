@@ -41,6 +41,6 @@ export function phonePage(url: string, ports: ListeningPortsSnapshot | null, pan
 
 function offReason(ports: ListeningPortsSnapshot | null): string {
   if (!ports) return 'Reading the host\'s ports…';
-  const reason = ports.phone?.state === 'off' ? ports.phone.reason : 'it is starting';
-  return `Phones open host pages through Tailscale, which is off on ${ports.host}: ${reason}.`;
+  const reason = ports.phone?.state === 'off' ? ports.phone.reason : 'starting';
+  return `Phone pages from ${ports.host} are unavailable right now (${reason}). Pane checks again every minute.`;
 }
