@@ -635,7 +635,10 @@ Session instructions and documents live under `<PANE_DIR>/sessions/<id>/`,
 outside the project. Before launching a Claude Session agent, Pane marks that
 Session's folder as trusted in Claude's config (`projects["<folder>"].hasTrustDialogAccepted`
 in `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`), so Session chats open
-without Claude's folder-trust prompt. Only those Session folder entries change.
+without Claude's folder-trust prompt. Only those Session folder entries change,
+under the same `<config>.lock` Claude takes when it saves the file. A missing
+config is created with only that entry, and Claude still runs its onboarding. A
+malformed config, or a lock that stays busy, is left alone and Claude asks once.
 Session terminals set `GIT_CEILING_DIRECTORIES` to
 `<PANE_DIR>/sessions`, so git run in a Session folder never picks up a repository
 above it, such as a home directory tracked as a dotfiles repo. Do not configure

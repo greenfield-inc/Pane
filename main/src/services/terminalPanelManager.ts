@@ -1218,7 +1218,7 @@ export class TerminalPanelManager extends EventEmitter {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
         .read().sessions.find(item => item.id === sessionState.orchestrationSessionId);
       cwd = prepareSessionWorkspace(sessionState.orchestrationSessionId, record?.profile ?? sessionState.orchestrationProfile, record);
-      if (sessionState.agentType === 'claude' && record?.runtime !== 'wsl') trustClaudeSessionFolder(cwd);
+      if (sessionState.agentType === 'claude' && record?.runtime !== 'wsl') await trustClaudeSessionFolder(cwd);
       if (record?.runtime === 'wsl') {
         if (process.platform !== 'win32') throw new Error('WSL Sessions require Windows');
         wslContext = sessionWSLContext(record, cwd);
