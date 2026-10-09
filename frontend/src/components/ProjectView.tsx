@@ -7,6 +7,10 @@ import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
+import { useConfigStore } from '../stores/configStore';
+import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { createSingleGroupLayout } from '../utils/panelLayout';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { PanelActivationRequest, ToolPanel, ToolPanelType, TerminalPanelState } from '../../../shared/types/panels';
 import type { PanelCreateOptions } from '../types/panelComponents';
 import { SessionProvider } from '../contexts/SessionContext';
@@ -104,11 +108,34 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     enabled: detailVisible && !immersiveMode,
   });
 
+  // This desktop's own tab for the repository Pane, kept like a worktree
+  // Pane's layout memory as a single group.
+  const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  const shownPanelId = usePanelStore(state => mainRepoSessionId ? state.activePanels[mainRepoSessionId] : undefined);
+  // Read when the repository opens; the remembered tab belongs to that host.
+  const hostIdRef = useRef(hostId);
+  useEffect(() => {
+    hostIdRef.current = hostId;
+  }, [hostId]);
+  useEffect(() => {
+    if (!mainRepoSessionId || !shownPanelId) return;
+    rememberPaneLayout(hostIdRef.current, mainRepoSessionId, createSingleGroupLayout([shownPanelId], shownPanelId));
+  }, [mainRepoSessionId, shownPanelId]);
+
   // Load panels when main repo session changes (no auto-creation, matches worktree session behavior)
   useEffect(() => {
     if (mainRepoSessionId) {
       panelApi.loadPanelsForSession(mainRepoSessionId).then(async (loadedPanels) => {
         setPanels(mainRepoSessionId, loadedPanels);
+
+        // This desktop's remembered tab wins; the host's last-used tab and
+        // the default are only for a repository it has not shown.
+        const remembered = await readPaneLayout(hostIdRef.current, mainRepoSessionId);
+        const rememberedId = remembered?.root.type === 'group' ? remembered.root.activePanelId : null;
+        if (rememberedId && loadedPanels.some(p => p.id === rememberedId)) {
+          setActivePanelInStore(mainRepoSessionId, rememberedId);
+          return;
+        }
 
         // Pick default active: the first working panel (Explorer and Review
         // live in the inspector, not the stage).
