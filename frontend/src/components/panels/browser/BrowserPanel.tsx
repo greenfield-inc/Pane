@@ -505,6 +505,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         {url && (
           <button
             type="button"
+            // The popover closes on any mousedown outside it, which would let
+            // this click reopen it; the button toggles it instead.
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={togglePortsMenu}
             aria-expanded={portsMenuAt !== null}
             className={cn(

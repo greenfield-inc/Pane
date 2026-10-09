@@ -12,7 +12,7 @@ import {
 } from '../../../shared/types/listeningPorts';
 
 const POLL_INTERVAL_MS = 2_000;
-/** A read slower than this share of the interval stretches the interval, so polling stays cheap. */
+/** A socket read slower than this share of the interval stretches the interval, so polling stays cheap. */
 const MAX_POLL_DUTY = 0.1;
 const READ_TIMEOUT_MS = 5_000;
 const WEB_PROBE_TIMEOUT_MS = 500;
@@ -55,6 +55,8 @@ interface ListeningSocket {
 
 interface Owner {
   group: ListeningPortGroup;
+  /** Set when the socket table did not name the program (Windows `netstat`). */
+  process?: string;
   sessionId?: string;
   paneName?: string;
 }
@@ -73,9 +75,14 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
   let inFlight: Promise<ListeningPortsSnapshot> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running = false;
+  // Only the socket read paces polling: probes wait on other programs, and
+  // the process table is read only when a new owner appears.
+  let socketReadMs = 0;
 
   const read = async (): Promise<ListeningPortsSnapshot> => {
+    const readStartedAt = Date.now();
     const sockets = await readListeningSockets();
+    socketReadMs = Date.now() - readStartedAt;
     const key = (socket: ListeningSocket) => `${socket.port}:${socket.pid ?? ''}:${socket.process}`;
     const unknownOwners = sockets.filter(socket => !owners.has(key(socket)));
     const provisional = new Map<string, Owner>();
@@ -125,11 +132,10 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
 
   const schedule = (delayMs: number) => {
     timer = setTimeout(() => {
-      const startedAt = Date.now();
       void refresh().catch(error => {
         console.warn('[ListeningPorts] refresh_failed:', error);
       }).finally(() => {
-        if (running) schedule(Math.max(POLL_INTERVAL_MS, (Date.now() - startedAt) / MAX_POLL_DUTY));
+        if (running) schedule(Math.max(POLL_INTERVAL_MS, socketReadMs / MAX_POLL_DUTY));
       });
     }, delayMs);
     timer.unref?.();
@@ -158,17 +164,18 @@ function classify(
 ): Owner {
   if (socket.pid === null) return { group: 'system' };
   const rows = new Map(table.map(row => [row.pid, row]));
+  const row = rows.get(socket.pid);
+  const named = socket.process || !row ? {} : { process: path.win32.basename(row.executable).replace(/\.exe$/iu, '') };
   // Walk up from the owner: the nearest terminal or Pane ancestor decides.
   // Terminals descend from Pane, so a terminal is always reached first.
   const seen = new Set<number>();
   for (let pid: number | undefined = socket.pid; pid !== undefined && pid > 0 && !seen.has(pid); pid = rows.get(pid)?.parentPid) {
     seen.add(pid);
     const terminal = terminals.get(pid);
-    if (terminal) return { group: 'pane-terminal', sessionId: terminal.sessionId, paneName: terminal.paneName };
-    if (pid === panePid) return { group: 'pane' };
+    if (terminal) return { ...named, group: 'pane-terminal', sessionId: terminal.sessionId, paneName: terminal.paneName };
+    if (pid === panePid) return { ...named, group: 'pane' };
   }
-  const row = rows.get(socket.pid);
-  return row && isSystemProcess(row) ? { group: 'system' } : { group: 'other' };
+  return { ...named, group: row && isSystemProcess(row) ? 'system' : 'other' };
 }
 
 /** An OS service: another user's process, or a program shipped with the OS. */
@@ -263,19 +270,19 @@ async function readSsSockets(): Promise<ListeningSocket[]> {
   return sockets;
 }
 
+/**
+ * Windows: `netstat` starts in milliseconds where PowerShell takes over a
+ * second. It names no program; the process table supplies that for new pids.
+ * A listening socket's remote address is all zeros, which holds in every
+ * Windows language, unlike the localized state column.
+ */
 async function readWindowsSockets(): Promise<ListeningSocket[]> {
-  const stdout = await run('powershell', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    '$names = @{}; Get-Process | ForEach-Object { $names[$_.Id] = $_.ProcessName }; '
-      + 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object { "$($_.LocalPort)`t$($_.OwningProcess)`t$($names[[int]$_.OwningProcess])" }',
-  ]);
+  const stdout = (await Promise.all([run('netstat', ['-ano', '-p', 'TCP']), run('netstat', ['-ano', '-p', 'TCPv6'])])).join('\n');
   const sockets: ListeningSocket[] = [];
   for (const line of stdout.split(/\r?\n/u)) {
-    const [port, pid, name = ''] = line.split('\t');
-    if (!pid) continue;
-    sockets.push({ port: Number.parseInt(port, 10), pid: Number.parseInt(pid, 10), process: name });
+    const [proto, local, remote, , pid] = line.trim().split(/\s+/u);
+    if (proto !== 'TCP' || (remote !== '0.0.0.0:0' && remote !== '[::]:0') || !pid) continue;
+    sockets.push({ port: portOf(local), pid: Number.parseInt(pid, 10), process: '' });
   }
   return sockets;
 }
