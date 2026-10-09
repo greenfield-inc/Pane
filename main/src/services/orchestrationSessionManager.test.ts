@@ -298,6 +298,7 @@ describe('OrchestrationSessionManager', () => {
     fixture.manager.observeInput(panelId, 'now update the docs\r');
     await new Promise(resolve => setTimeout(resolve, 20));
     expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please');
+    expect((await fixture.manager.get(selector)).activity.at(-1)).toMatchObject({ message: 'Renamed to “fix the flaky checkout test please”.', source: 'system' });
   });
 
   it('names the Session from a later message when the first rename fails', async () => {

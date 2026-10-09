@@ -340,7 +340,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (nextRecord.archived === true && nextRecord.agent !== current.agent) {
         throw new Error(`Session ${current.name} is archived; restore it before changing its agent`);
       }
-      const updateActivity = this.activity(input.report ? 'report' : 'updated', input.report ? `Reported: ${input.report.summary}` : 'Updated Session context.', input.source ?? 'user');
+      const renamed = input.name !== undefined && nextRecord.name !== current.name;
+      const updateMessage = input.report ? `Reported: ${input.report.summary}` : renamed ? `Renamed to “${nextRecord.name}”.` : 'Updated Session context.';
+      const updateActivity = this.activity(input.report ? 'report' : 'updated', updateMessage, input.source ?? 'user');
       nextRecord.activity.push(updateActivity);
       if (input.report) {
         nextRecord.reportActivityId = updateActivity.id;

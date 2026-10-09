@@ -885,7 +885,10 @@ export function RemotePwaApp() {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <RemoteStatusBar
           profile={activeProfile}
-          openName={openOrchestrationSession ? openOrchestrationSession.session.name || 'Untitled' : selectedSession ? selectedSession.name || 'Untitled' : null}
+          openName={openOrchestrationSession
+            // The list carries renames (such as a first-message name); the open snapshot does not.
+            ? (orchestrationSessions.find(session => session.id === openOrchestrationSession.session.id)?.name ?? openOrchestrationSession.session.name) || 'Untitled'
+            : selectedSession ? selectedSession.name || 'Untitled' : null}
           status={connectionStatus}
           lastError={lastError}
           lastSeenAt={lastSeenAt}
