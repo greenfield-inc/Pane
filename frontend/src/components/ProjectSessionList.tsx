@@ -698,6 +698,7 @@ export function ProjectSessionList({
 function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; onExpandedChange: (expanded: boolean) => void }) {
   const hosts = useSshHostsStore(s => s.hosts);
   const rows = useSshHostsStore(s => s.rows);
+  const configured = useMemo(() => new Set(hosts), [hosts]);
   const openHosts = useSshHostsStore(s => s.openHosts);
   const openHost = useSshHostsStore(s => s.open);
   const refresh = useSshHostsStore(s => s.refresh);
@@ -743,7 +744,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
             onClick={() => open(alias, false)}
             onContextMenu={event => {
               event.preventDefault();
-              if (hosts.includes(alias)) open(alias, true);
+              if (configured.has(alias)) open(alias, true);
             }}
             className={cn(
               SIDEBAR_ROW_BASE,
@@ -756,7 +757,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
             <Server className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="min-w-0 flex-1 truncate">{alias}</span>
           </button>
-          {hosts.includes(alias) && <button
+          {configured.has(alias) && <button
             type="button"
             aria-label={`New terminal on ${alias}`}
             title={`New terminal on ${alias}`}

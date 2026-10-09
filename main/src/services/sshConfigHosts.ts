@@ -9,7 +9,8 @@ import { glob } from 'glob';
  *
  * Reads only `<home>/.ssh/config` and the files it Includes, in the order
  * OpenSSH would: Include globs expand in lexical order, relative paths resolve
- * against `<home>/.ssh`, and an Include cycle stops. Patterns (`*`, `?`, `!`)
+ * against `<home>/.ssh`, and an Include cycle stops. Only Includes that apply
+ * to every host are followed (top level or under `Host *`). Patterns (`*`, `?`, `!`)
  * and aliases outside a shell-safe character set are skipped, because each
  * alias is later typed into a shell. A missing or unreadable file lists
  * nothing. Key files are never opened.
@@ -55,15 +56,22 @@ async function readConfigFile(file: string, context: ReadContext): Promise<void>
     return;
   }
 
+  // Lines before the first Host or Match, and under `Host *`, apply to every host.
+  let appliesToAll = true;
   for (const line of text.split(/\r?\n/)) {
     const parsed = parseLine(line);
     if (!parsed) continue;
     const keyword = parsed.keyword.toLowerCase();
     if (keyword === 'host') {
+      appliesToAll = parsed.args.every(pattern => pattern === '*');
       for (const alias of parsed.args) {
         if (SAFE_ALIAS.test(alias)) context.hosts.add(alias);
       }
-    } else if (keyword === 'include') {
+    } else if (keyword === 'match') {
+      appliesToAll = false;
+    } else if (keyword === 'include' && appliesToAll) {
+      // An Include inside a narrower block only applies to that block's hosts,
+      // so the hosts it defines are not reachable by a plain `ssh <alias>`.
       for (const pattern of parsed.args) {
         for (const included of await expandInclude(pattern, context)) {
           await readConfigFile(included, context);

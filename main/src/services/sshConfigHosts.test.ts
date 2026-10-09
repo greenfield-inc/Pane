@@ -24,10 +24,11 @@ async function homeWith(files: Record<string, string>): Promise<string> {
 }
 
 describe('listSshConfigHosts', () => {
-  it('lists concrete aliases in file order, following Include and skipping patterns', async () => {
+  it('lists concrete aliases in the order ssh reads them, following Include and skipping patterns', async () => {
     const home = await homeWith({
       config: [
         '# personal machines',
+        'Include conf.d/*',
         'Host mini',
         '  HostName 100.64.0.7',
         '  IdentityFile ~/.ssh/id_mini',
@@ -36,28 +37,27 @@ describe('listSshConfigHosts', () => {
         '  ServerAliveInterval 30',
         'Host *.internal',
         'Host !c',
-        'Include conf.d/*',
       ].join('\n'),
       'conf.d/web': 'Host web-1\n  User deploy\n',
     });
 
-    expect(await listSshConfigHosts(home)).toEqual(['mini', 'a', 'b', 'web-1']);
+    expect(await listSshConfigHosts(home)).toEqual(['web-1', 'mini', 'a', 'b']);
   });
 
   it('accepts any keyword case, Host=alias syntax, quoted values, comments, tabs and CRLF line endings', async () => {
     const home = await homeWith({
       config: [
+        'Include "extra"',
         'HOST one',
         'host=two',
         'Host = three',
         '\tHost\t"four"',
         'Host five # a trailing comment',
-        'Include "extra"',
       ].join('\r\n'),
       extra: 'host six\r\n',
     });
 
-    expect(await listSshConfigHosts(home)).toEqual(['one', 'two', 'three', 'four', 'five', 'six']);
+    expect(await listSshConfigHosts(home)).toEqual(['six', 'one', 'two', 'three', 'four', 'five']);
   });
 
   it('skips aliases that a shell would interpret and keeps the safe character set', async () => {
@@ -74,26 +74,32 @@ describe('listSshConfigHosts', () => {
 
   it('lists each alias once even when it appears again', async () => {
     const home = await homeWith({
-      config: 'Host mini\nInclude dup\nHost mini web\n',
+      config: 'Include dup\nHost mini\nHost mini web\n',
       dup: 'Host web mini\n',
     });
 
-    expect(await listSshConfigHosts(home)).toEqual(['mini', 'web']);
+    expect(await listSshConfigHosts(home)).toEqual(['web', 'mini']);
   });
 
-  it('ignores Match blocks but still follows Includes inside Host and Match blocks', async () => {
+  it('follows only Includes that apply to every host, as ssh skips the rest', async () => {
     const home = await homeWith({
       config: [
-        'Match host matched-only',
-        '  Include in-match',
+        'Include top',
+        'Host *',
+        '  Include for-all',
         'Host gate',
-        '  Include in-host',
+        '  Include only-for-gate',
+        'Match host matched-only',
+        '  Include only-for-match',
       ].join('\n'),
-      'in-match': 'Host from-match\n',
-      'in-host': 'Host from-host\n',
+      top: 'Include nested\nHost from-top\n',
+      nested: 'Host from-nested\n',
+      'for-all': 'Host from-star\n',
+      'only-for-gate': 'Host behind-gate\n',
+      'only-for-match': 'Host behind-match\n',
     });
 
-    expect(await listSshConfigHosts(home)).toEqual(['from-match', 'gate', 'from-host']);
+    expect(await listSshConfigHosts(home)).toEqual(['from-nested', 'from-top', 'from-star', 'gate']);
   });
 
   it('expands Include globs in lexical order and resolves ~ and absolute paths', async () => {
@@ -115,12 +121,12 @@ describe('listSshConfigHosts', () => {
 
   it('stops at an Include cycle', async () => {
     const home = await homeWith({
-      config: 'Host top\nInclude loop-a\n',
-      'loop-a': 'Host in-a\nInclude loop-b\n',
-      'loop-b': 'Host in-b\nInclude loop-a config\n',
+      config: 'Include loop-a\nHost top\n',
+      'loop-a': 'Include loop-b\nHost in-a\n',
+      'loop-b': 'Include loop-a config\nHost in-b\n',
     });
 
-    expect(await listSshConfigHosts(home)).toEqual(['top', 'in-a', 'in-b']);
+    expect(await listSshConfigHosts(home)).toEqual(['in-b', 'in-a', 'top']);
   });
 
   it('skips malformed lines and keeps listing', async () => {
@@ -139,7 +145,7 @@ describe('listSshConfigHosts', () => {
 
   it('opens only the config and its Included files, never an IdentityFile', async () => {
     const home = await homeWith({
-      config: 'Host mini\n  IdentityFile ~/.ssh/id_mini\n  CertificateFile ~/.ssh/id_mini-cert.pub\nInclude conf.d/*\n',
+      config: 'Include conf.d/*\nHost mini\n  IdentityFile ~/.ssh/id_mini\n  CertificateFile ~/.ssh/id_mini-cert.pub\n',
       'conf.d/web': 'Host web-1\n  IdentityFile ~/.ssh/id_web\n',
       id_mini: 'PRIVATE KEY',
       'id_mini-cert.pub': 'CERT',
