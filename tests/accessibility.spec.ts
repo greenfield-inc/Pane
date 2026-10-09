@@ -248,7 +248,7 @@ test('Home and About are axe-clean and the modal contains and restores focus', a
   await expectNoAxeViolations(page);
 
   // About lives in the sidebar's Home footer menu; the menu trigger is what focus returns to.
-  const menuButton = page.getByRole('button', { name: 'Home menu' });
+  const menuButton = page.getByRole('button', { name: 'More', exact: true });
   await menuButton.focus();
   await menuButton.click();
   const aboutItem = page.getByRole('menuitem', { name: /About Pane/i });
@@ -306,7 +306,7 @@ test('seeded Create Pane dialog is keyboard reachable and axe-clean', async ({ p
   await expect(dialog).toBeVisible();
   // The dialog moves focus to the name input 100 ms after opening; let that
   // land before taking focus elsewhere, or it steals it back mid-test.
-  await expect(page.getByRole('textbox', { name: 'Enter a name for your pane' })).toBeFocused();
+  await expect(dialog.getByRole('textbox', { name: 'Pane Name', exact: true })).toBeFocused();
   const branchCombobox = page.getByRole('combobox', { name: /Base Branch/i });
   await expect(branchCombobox).toBeVisible();
   await branchCombobox.click();

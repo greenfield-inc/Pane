@@ -119,7 +119,7 @@ test.describe('Smoke Tests', () => {
     await expect(sidebar).toBeVisible({ timeout: 10000 });
 
     // The expanded sidebar's menu opens from its Home footer button.
-    const sidebarMenuButton = page.getByRole('button', { name: 'Home menu' });
+    const sidebarMenuButton = page.getByRole('button', { name: 'More', exact: true });
     await expect(sidebarMenuButton).toBeVisible();
   });
 

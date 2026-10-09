@@ -29,7 +29,7 @@ test('Start pinned puts a new Session in Pinned and is remembered on this device
   const sheet = page.getByRole('dialog', { name: 'Create Session' });
   await page.getByRole('button', { name: 'New Session' }).click();
   await expect(sheet.getByRole('checkbox', { name: 'Start pinned' })).not.toBeChecked();
-  await sheet.getByLabel('Name your chat (optional)').fill('Pinned at birth');
+  await sheet.getByLabel('Session name (optional)').fill('Pinned at birth');
   await sheet.getByText('Start pinned', { exact: true }).click();
   await sheet.getByRole('button', { name: 'Create Session' }).click();
   await expect(sheet).toBeHidden();
@@ -61,8 +61,8 @@ test('pinned Sessions and pinned panes share the Pinned section', async ({ page 
   await page.getByRole('button', { name: 'Pin Session Release prep' }).click();
   await expect(pinned.getByRole('button', { name: 'Open Session Release prep' })).toBeVisible();
   await page.getByRole('group', { name: 'Repositories' }).getByRole('button', { name: 'Pin pane' }).first().click();
-  // Pinned panes are labelled with their repository, as on desktop.
-  await expect(paneRow(page, 'pane/scrub Sentry request bodies')).toBeVisible();
+  // Pinned panes keep their own name and show the repository beside it, as on desktop.
+  await expect(pinned.getByRole('button', { name: /^scrub Sentry request bodies/ })).toContainText('pane');
   await pinned.getByRole('button', { name: 'Open Session Release prep' }).click();
   await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
@@ -76,13 +76,13 @@ test('archived Sessions and panes are restored from the Archived section', async
   await page.getByRole('group', { name: 'Repositories' }).getByRole('button', { name: 'Archive pane' }).first().click();
   await expect(paneRow(page, 'scrub Sentry request bodies')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Archived', exact: true }).click();
+  await page.getByRole('button', { name: /^Archived/ }).click();
   await page.getByRole('button', { name: 'Restore Session Release prep' }).click();
   await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' })).toBeVisible();
   await page.getByRole('button', { name: 'Restore scrub Sentry request bodies' }).click();
 
   await expect(page.getByRole('group', { name: 'Repositories' }).getByRole('button', { name: /^scrub Sentry request bodies/ })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Archived' })).toContainText('No archived panes');
+  await expect(page.getByRole('group', { name: 'Archived' })).toContainText('Nothing archived');
 });
 
 test('collapsed sections stay collapsed on this device after a reload', async ({ page }) => {
