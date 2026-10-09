@@ -50,15 +50,21 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   async function changeMembership(sessionId: string, action: 'add' | 'remove') {
     if (!paneId) return;
     close();
-    const result = action === 'add'
-      ? await API.orchestrationSessions.associate({ sessionId }, { paneId })
-      : await API.orchestrationSessions.detach({ sessionId }, paneId);
-    if (!result.success) showError({ title: 'Session update failed', error: result.error || 'Could not update the Session' });
+    try {
+      const result = action === 'add'
+        ? await API.orchestrationSessions.associate({ sessionId }, { paneId })
+        : await API.orchestrationSessions.detach({ sessionId }, paneId);
+      if (!result.success) showError({ title: 'Session update failed', error: result.error || 'Could not update the Session' });
+    } catch (failure) {
+      showError({ title: 'Session update failed', error: failure instanceof Error ? failure.message : 'Could not update the Session' });
+    }
     await refreshOrchestrationSessions();
   }
 
   return (<>
     <TerminalPopover
+      // Remounting on the swap re-measures the menu, so a long Session list repositions to fit the viewport.
+      key={picking ? 'picker' : 'actions'}
       visible={menu !== null}
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
