@@ -32,7 +32,7 @@ async function startEchoServer(host = '127.0.0.1'): Promise<number> {
   return (server.address() as net.AddressInfo).port;
 }
 
-async function startPairingServer(forwarded: () => readonly number[]): Promise<PaneRemoteHttpApiServer> {
+function pairedConfig() {
   const config = createDefaultRemoteDaemonConfig();
   config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
   config.host.clients = [{
@@ -41,8 +41,19 @@ async function startPairingServer(forwarded: () => readonly number[]): Promise<P
     createdAt: new Date('2026-10-09T00:00:00.000Z').toISOString(),
     tokenHash: hashRemoteDaemonToken('secret-token'),
   }];
+  return config;
+}
+
+// Short heartbeats, so a revoked client's streams close within a test's patience.
+const HEARTBEAT_MS = 50;
+
+async function startPairingServer(
+  forwarded: () => readonly number[],
+  config = pairedConfig(),
+): Promise<PaneRemoteHttpApiServer> {
   const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), { getConfig: () => ({ remoteDaemon: config }) }, {
     isForwardedPort: port => forwarded().includes(port),
+    heartbeatIntervalMs: HEARTBEAT_MS,
   });
   await server.start();
   cleanups.push(() => server.stop());
@@ -52,16 +63,21 @@ async function startPairingServer(forwarded: () => readonly number[]): Promise<P
 const owner = 'owner@example.com';
 const teammate = 'teammate@example.com';
 
-async function startWorkspaceServer(forwarded: () => readonly number[]): Promise<PaneRemoteHttpApiServer> {
-  const access: WorkspaceAccessPolicy = {
-    ownerLogin: owner,
-    visibility: 'owner',
-    tailnetLogins: new Set([owner, teammate]),
-    verifySecret: null,
-  };
+const ownerOnly: WorkspaceAccessPolicy = {
+  ownerLogin: owner,
+  visibility: 'owner',
+  tailnetLogins: new Set([owner, teammate]),
+  verifySecret: null,
+};
+
+async function startWorkspaceServer(
+  forwarded: () => readonly number[],
+  access: () => WorkspaceAccessPolicy | null = () => ownerOnly,
+): Promise<PaneRemoteHttpApiServer> {
   const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), { getConfig: () => ({}) }, {
-    workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => access },
+    workspace: { listenPort: 0, pathSecret: 'serve-secret', access },
     isForwardedPort: port => forwarded().includes(port),
+    heartbeatIntervalMs: HEARTBEAT_MS,
   });
   await server.start();
   cleanups.push(() => server.stop());
@@ -84,6 +100,20 @@ function openStream(server: PaneRemoteHttpApiServer, path: string, headers: Reco
       socket.terminate();
     });
     socket.once('error', reject);
+  });
+}
+
+/** Resolves once the host closes the stream; a stream still open after a second fails the test. */
+function closedByHost(result: StreamResult): Promise<void> {
+  if (!('opened' in result)) throw new Error(`stream refused with ${result.statusCode}`);
+  const socket = result.opened;
+  return new Promise((resolve, reject) => {
+    if (socket.readyState === WebSocket.CLOSED) return resolve();
+    const timer = setTimeout(() => reject(new Error('stream stayed open')), 1000);
+    socket.once('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
 }
 
@@ -110,12 +140,15 @@ describe('port stream through the pairing-code door', () => {
     expect(await roundTrip(await openStream(server, `/ports/${port}`, bearer), 'hello host')).toBe('hello host');
   });
 
-  it('reaches a service that listens only on IPv6 loopback, as Vite does on macOS', async () => {
+  it('reaches a service that listens only on IPv6 loopback, as Vite does on macOS', async (context) => {
     let port: number;
     try {
       port = await startEchoServer('::1');
-    } catch {
-      return; // This machine has no IPv6 loopback.
+    } catch (error) {
+      // SAFETY: net.Server reports listen failures as system errors.
+      const { code } = error as NodeJS.ErrnoException;
+      if (code === 'EADDRNOTAVAIL' || code === 'EAFNOSUPPORT') context.skip();
+      throw error;
     }
     const server = await startPairingServer(() => [port]);
     expect(await roundTrip(await openStream(server, `/ports/${port}`, bearer), 'v6')).toBe('v6');
@@ -125,6 +158,27 @@ describe('port stream through the pairing-code door', () => {
     const port = await startEchoServer();
     const server = await startPairingServer(() => [port]);
     expect(await openStream(server, `/ports/${port}`)).toEqual({ statusCode: 401 });
+  });
+
+  it('closes an open stream once its pairing code is removed', async () => {
+    const port = await startEchoServer();
+    const config = pairedConfig();
+    const server = await startPairingServer(() => [port], config);
+    const stream = await openStream(server, `/ports/${port}`, bearer);
+    expect(await roundTrip(stream, 'before')).toBe('before');
+
+    config.host.clients = [];
+    await closedByHost(stream);
+  });
+
+  it('closes a client\'s open streams when the host disconnects that client', async () => {
+    const port = await startEchoServer();
+    const server = await startPairingServer(() => [port]);
+    const stream = await openStream(server, `/ports/${port}`, bearer);
+    expect(await roundTrip(stream, 'before')).toBe('before');
+
+    expect(server.disconnectClients(['client-1'])).toBeGreaterThan(0);
+    await closedByHost(stream);
   });
 
   it('refuses a port that is not in the forwarded list, even when something listens on it', async () => {
@@ -140,6 +194,17 @@ describe('port stream through the Tailscale login door', () => {
     const server = await startWorkspaceServer(() => [port]);
     const result = await openStream(server, `/serve-secret/ports/${port}`, { 'Tailscale-User-Login': owner });
     expect(await roundTrip(result, 'over serve')).toBe('over serve');
+  });
+
+  it('closes an open stream once "Who can connect" no longer admits its login', async () => {
+    const port = await startEchoServer();
+    let access: WorkspaceAccessPolicy | null = ownerOnly;
+    const server = await startWorkspaceServer(() => [port], () => access);
+    const stream = await openStream(server, `/serve-secret/ports/${port}`, { 'Tailscale-User-Login': owner });
+    expect(await roundTrip(stream, 'before')).toBe('before');
+
+    access = null;
+    await closedByHost(stream);
   });
 
   it('answers 404 without the per-launch path, even with a forged login header', async () => {

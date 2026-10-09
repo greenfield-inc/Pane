@@ -60,6 +60,9 @@ interface ConnectedRemoteEventClient {
   workspaceCredentials: WorkspaceCredentials | null;
 }
 
+/** Who signed in, kept so access can be checked again after the request was admitted. */
+type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'workspaceCredentials'>;
+
 interface WorkspaceRefusal {
   statusCode: number;
   error: { message: string; code: string };
@@ -225,6 +228,9 @@ export class PaneRemoteHttpApiServer {
   private server: http.Server | null = null;
   private voiceDeepgramWss: WebSocketServer | null = null;
   private portStreamWss: WebSocketServer | null = null;
+  /** Open port streams and who opened them; each one closes when its caller loses access. */
+  private readonly portStreams = new Map<WebSocket, AdmittedIdentity>();
+  private portStreamCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
   private readonly daemonEventSink: PaneEventSink;
   private address: RemoteHttpAddress | null = null;
@@ -257,7 +263,7 @@ export class PaneRemoteHttpApiServer {
           };
 
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (!this.shouldKeepEventClient(client)) {
+            if (!this.isStillAdmitted(client)) {
               this.dropEventClient(clientConnectionId);
               continue;
             }
@@ -296,7 +302,14 @@ export class PaneRemoteHttpApiServer {
       this.dropEventClient(clientConnectionId);
     }
 
-    return clientConnectionIds.length;
+    const streams = [...this.portStreams.entries()]
+      .filter(([, identity]) => !clientIdSet || (identity.remoteClientId !== null && clientIdSet.has(identity.remoteClientId)))
+      .map(([stream]) => stream);
+    for (const stream of streams) {
+      stream.terminate();
+    }
+
+    return clientConnectionIds.length + streams.length;
   }
 
   async start(): Promise<void> {
@@ -386,6 +399,8 @@ export class PaneRemoteHttpApiServer {
     const server = this.server;
     this.server = null;
     this.address = null;
+    if (this.portStreamCheckTimer) clearInterval(this.portStreamCheckTimer);
+    this.portStreamCheckTimer = null;
     const webSocketServers = [this.voiceDeepgramWss, this.portStreamWss];
     this.voiceDeepgramWss = null;
     this.portStreamWss = null;
@@ -471,7 +486,20 @@ export class PaneRemoteHttpApiServer {
       writeRawHttpError(socket, 503, 'Port forwarding is not available');
       return;
     }
+    const identity: AdmittedIdentity = {
+      remoteClientId: auth.client?.id ?? null,
+      remoteClientTokenHash: auth.client?.tokenHash ?? null,
+      workspaceCredentials: this.workspace
+        ? {
+          login: request.headers['tailscale-user-login'],
+          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
+        }
+        : null,
+    };
     wss.handleUpgrade(request, socket, head, (client) => {
+      this.portStreams.set(client, identity);
+      this.portStreamCheckTimer ??= setInterval(() => this.closeRevokedPortStreams(), this.heartbeatIntervalMs);
+      this.portStreamCheckTimer.unref?.();
       // By name, so a service on either IPv4 or IPv6 loopback answers.
       const upstream = net.connect({ host: 'localhost', port });
       const stream = createWebSocketStream(client);
@@ -479,7 +507,22 @@ export class PaneRemoteHttpApiServer {
         upstream.destroy();
         client.terminate();
       });
+      client.once('close', () => {
+        upstream.destroy();
+        this.portStreams.delete(client);
+        if (this.portStreams.size === 0 && this.portStreamCheckTimer) {
+          clearInterval(this.portStreamCheckTimer);
+          this.portStreamCheckTimer = null;
+        }
+      });
     });
+  }
+
+  /** A removed pairing code, narrower visibility or a new password closes streams already open. */
+  private closeRevokedPortStreams(): void {
+    for (const [stream, identity] of this.portStreams) {
+      if (!this.isStillAdmitted(identity)) stream.terminate();
+    }
   }
 
   private handleDeepgramProxySocket(client: WebSocket, deepgramApiKey: string): void {
@@ -902,7 +945,7 @@ export class PaneRemoteHttpApiServer {
     }));
   }
 
-  private shouldKeepEventClient(client: ConnectedRemoteEventClient): boolean {
+  private isStillAdmitted(client: AdmittedIdentity): boolean {
     const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.
