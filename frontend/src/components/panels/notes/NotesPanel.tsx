@@ -7,6 +7,7 @@ import { noteSchema, sameNoteScope } from '../../../../../shared/types/notes';
 
 import { decodeBoundary } from '../../../../../shared/validation/boundaryDecoder';
 import { useConfigStore } from '../../../stores/configStore';
+import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 
 const DrawingEditor = lazy(() => import('./NotesDrawing'));
 const scopeLabels = { feature: 'Feature Notes', project: 'Project Notes', global: 'Global Notes', session: 'Session Notes' };
@@ -45,7 +46,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
           setContext(ctx);
           setScope(previous => previous && ctx.scopes.some(item => sameNoteScope(item.scope, previous)) ? previous : ctx.defaultScope);
         }
-      }).catch(cause => { if (active) setError(String(cause)); });
+      }).catch(cause => { if (active) setError(ipcErrorMessage(cause, 'Pane did not say why.')); });
     };
     load();
     const unsubscribe = window.electronAPI.events.onOrchestrationSessionsChanged?.(load);
@@ -58,7 +59,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
     try {
       const list = await window.electronAPI.invoke('notes:list', paneId, scope);
       if (generation === request.current) setNotes(list);
-    } catch (cause) { setError(String(cause)); }
+    } catch (cause) { setError(ipcErrorMessage(cause, 'Pane did not say why.')); }
   }, [paneId, scope]);
   useEffect(() => { void refresh(); return window.electronAPI.onNotesChanged(() => { void refresh(); }); }, [refresh]);
 
@@ -75,7 +76,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
       setExports(result.exports);
       await refresh();
       setSelected(result.note?.id);
-    } catch (cause) { setError(String(cause)); }
+    } catch (cause) { setError(ipcErrorMessage(cause, 'Pane did not say why.')); }
   };
   const current = notes.find(note => note.id === selected) ?? notes[0];
   const scopes = context?.scopes.slice().sort((a, b) => {
@@ -105,7 +106,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
     {!current && exports.some(result => result.error) && <div role="alert" className="px-6 py-2 text-xs text-status-error">
       <p>Agent exports need attention.</p>
       {exports.filter(result => result.error).map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
-      <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => setExports(result.exports)).catch(cause => setError(String(cause))); }}>Retry exports</button>
+      <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => setExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); }}>Retry exports</button>
     </div>}
     <div className="min-h-0 flex-1 overflow-auto">
       {current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${viewId}:${current.id}`} capture={capture}
@@ -171,7 +172,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
       setStatus(dirty.current ? 'Unsaved' : 'Saved');
       onExports(result.exports);
       return true;
-    }).catch(cause => { setError(String(cause)); setStatus('Not saved'); return false; }).finally(() => { saving.current = null; });
+    }).catch(cause => { setError(ipcErrorMessage(cause, 'Pane did not say why.')); setStatus('Not saved'); return false; }).finally(() => { saving.current = null; });
     saving.current = pending;
     const success = await pending;
     return success && dirty.current ? save() : success;
@@ -195,7 +196,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
       onExports(result.exports);
       if (result.note) { draftRef.current = result.note; setDraft(result.note); }
       await onRefresh();
-    } catch (cause) { setError(String(cause)); }
+    } catch (cause) { setError(ipcErrorMessage(cause, 'Pane did not say why.')); }
   };
   const projects = context.scopes.filter(item => item.scope.kind === 'project');
   const addText = (after?: string) => {
@@ -224,7 +225,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
         footer={failedExports.length > 0 ? <div role="alert" className="space-y-2 p-3 text-xs text-status-error">
           <p>Note saved. Agent exports need attention.</p>
           {failedExports.map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
-          <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(String(cause))); }}>Retry exports</button>
+          <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); }}>Retry exports</button>
         </div> : undefined} />
     </div>
     {recoveryWarning && <p role="status" className="mb-3 text-xs text-status-error">{recoveryWarning}</p>}

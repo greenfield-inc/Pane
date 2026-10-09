@@ -6,3 +6,8 @@ it('shows the backend reason instead of Electron\'s IPC wrapper', () => {
   expect(ipcErrorMessage(error, 'Unable to open file')).toBe('Reveal in folder works only on the host');
   expect(ipcErrorMessage(new Error("Error invoking remote method 'file:preview-action': "), 'Unable to open file')).toBe('Unable to open file');
 });
+
+it('reads a failed response\'s error string, and falls back when there is no reason', () => {
+  expect(ipcErrorMessage('Worktree is locked by another Pane', 'Pane did not say why.')).toBe('Worktree is locked by another Pane');
+  expect(ipcErrorMessage(undefined, 'Pane did not say why.')).toBe('Pane did not say why.');
+});

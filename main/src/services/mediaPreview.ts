@@ -129,7 +129,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
       `Could not copy ${basename(file.filePath)} from the host to open it here: ${reason}. Nothing was changed. Check the connection to the host, then try again.`,
     );
     const response = await host.fetchMedia(file, new Request('pane-media://preview/open'))
-      .catch((error: unknown) => { throw copyFailed(reasonOf(error)); });
+      .catch((cause: unknown) => { throw copyFailed(reasonOf(cause)); });
     if (response.status !== 200 || !response.body) throw copyFailed(`the host answered HTTP ${response.status}`);
     const directory = await mkdtemp(join(tmpdir(), 'pane-remote-open-'));
     const target = join(directory, clientSafeName(file.filePath));

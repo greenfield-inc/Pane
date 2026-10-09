@@ -16,6 +16,7 @@ import type { DropdownItem } from './ui/Dropdown';
 import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
+import { showActionError } from '../stores/errorStore';
 import { cn } from '../utils/cn';
 import type { Session, GitStatus } from '../types/session';
 import type { AgentDisplayStatus } from '../../../shared/types/agentStatus';
@@ -230,28 +231,37 @@ export function ProjectSessionList({
   // Session operations
   const handleArchiveSession = useCallback(async (sessionId: string) => {
     try {
-      await API.sessions.delete(sessionId);
+      const response = await API.sessions.delete(sessionId);
+      if (!response.success) showActionError('Could not archive the Pane', response.error);
     } catch (e) {
       console.error('Failed to archive session:', e);
+      showActionError('Could not archive the Pane', e);
     }
   }, []);
 
   const handleTogglePinnedSession = useCallback(async (sessionId: string) => {
     try {
-      await API.sessions.toggleFavorite(sessionId);
+      const response = await API.sessions.toggleFavorite(sessionId);
+      if (!response.success) showActionError('Could not pin or unpin the Pane', response.error);
     } catch (e) {
       console.error('Failed to toggle pinned session:', e);
+      showActionError('Could not pin or unpin the Pane', e);
     }
   }, []);
 
   // Project operations
   const handleDeleteProject = async (projectId: number) => {
     try {
-      await API.projects.delete(String(projectId));
+      const response = await API.projects.delete(String(projectId));
+      if (!response.success) {
+        showActionError('Could not delete the project', response.error);
+        return;
+      }
       onProjectsRefresh();
       window.dispatchEvent(new Event('project-changed'));
     } catch (e) {
       console.error('Failed to delete project:', e);
+      showActionError('Could not delete the project', e);
     }
   };
 
@@ -1080,10 +1090,15 @@ export function ArchivedSessions() {
 
   const handleRestoreSession = async (sessionId: string) => {
     try {
-      await API.sessions.restore(sessionId);
+      const response = await API.sessions.restore(sessionId);
+      if (!response.success) {
+        showActionError('Could not restore the Pane', response.error);
+        return;
+      }
       loadArchivedSessions();
     } catch (e) {
       console.error('Failed to restore session:', e);
+      showActionError('Could not restore the Pane', e);
     }
   };
 
@@ -1114,6 +1129,7 @@ export function ArchivedSessions() {
       const response = await API.sessions.permanentDelete(session.id);
       if (!response.success) {
         console.error('Failed to permanently delete session:', response.error);
+        showActionError('Could not delete the Pane', response.error);
         return;
       }
       if (activeSessionId === session.id) {
@@ -1123,6 +1139,7 @@ export function ArchivedSessions() {
       loadArchivedSessions();
     } catch (e) {
       console.error('Failed to permanently delete session:', e);
+      showActionError('Could not delete the Pane', e);
     }
   };
 
@@ -1138,6 +1155,7 @@ export function ArchivedSessions() {
       const response = await API.sessions.permanentDeleteArchived();
       if (!response.success) {
         console.error('Failed to permanently delete archived sessions:', response.error);
+        showActionError('Could not delete the archived Panes', response.error);
         return;
       }
       const deletedActiveSession = archivedProjects.some(project =>
@@ -1150,6 +1168,7 @@ export function ArchivedSessions() {
       loadArchivedSessions();
     } catch (e) {
       console.error('Failed to permanently delete archived sessions:', e);
+      showActionError('Could not delete the archived Panes', e);
     }
   };
 

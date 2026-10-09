@@ -4,6 +4,7 @@ import { useSession } from '../../contexts/SessionContext';
 import { panelApi } from '../../services/panelApi';
 import { API } from '../../utils/api';
 import { devLog } from '../../utils/console';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { SetupTasksPanelState } from '../../../../shared/types/panels';
 import { CreateSessionDialog } from '../CreateSessionDialog';
 
@@ -97,7 +98,7 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
       setShowSessionDialog(true);
     } catch (error) {
       console.error('Error updating project settings:', error);
-      alert(`Error updating project settings: ${error}`);
+      alert(`Could not update project settings: ${ipcErrorMessage(error, 'Pane did not say why.')}`);
     }
   }, [projectId]);
 
@@ -234,7 +235,7 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
       }
     } catch (error) {
       console.error('[SetupTasksPanel] Error updating .gitignore:', error);
-      alert(`Error updating .gitignore: ${error}`);
+      alert(`Could not update .gitignore: ${ipcErrorMessage(error, 'Pane did not say why.')}`);
     }
   }, [projectId]);
 

@@ -108,7 +108,7 @@ export class PaneDaemonClientError extends Error {
 }
 
 /** Decodes a daemon result; a shape this runpane does not know is a version mismatch, reported as one. */
-function decodeResult<T>(channel: string, result: unknown, resultSchema: BoundarySchema<T>): T {
+function decodeResult<T>(channel: string, result: JsonValue | undefined, resultSchema: BoundarySchema<T>): T {
   try {
     return decodeBoundary(result, resultSchema);
   } catch (error) {

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { ipcErrorMessage, stripIpcWrapper } from '../utils/ipcErrorMessage';
 
 interface ErrorInfo {
   title?: string;
@@ -18,10 +19,21 @@ export const useErrorStore = create<ErrorStore>((set) => ({
   
   showError: (error) => {
     console.error('[ErrorStore] Showing error:', error);
-    set({ currentError: error });
+    set({
+      currentError: {
+        ...error,
+        error: stripIpcWrapper(error.error),
+        details: error.details === undefined ? undefined : stripIpcWrapper(error.details),
+      },
+    });
   },
   
   clearError: () => {
     set({ currentError: null });
   },
 }));
+
+/** A user action failed: `title` says what, the reason comes from the thrown error or the failed response's `error`. */
+export function showActionError(title: string, cause: unknown): void {
+  useErrorStore.getState().showError({ title, error: ipcErrorMessage(cause, 'Pane did not say why.') });
+}
