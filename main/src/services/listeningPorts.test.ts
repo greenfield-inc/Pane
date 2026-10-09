@@ -14,8 +14,8 @@ afterEach(() => {
   for (const child of children.splice(0)) child.kill('SIGKILL');
 });
 
-async function startListener(source: string): Promise<{ child: ChildProcess; port: number }> {
-  const child = spawn(process.execPath, ['-e', source], { stdio: ['ignore', 'pipe', 'inherit'] });
+async function startListener(source: string, stdin: 'ignore' | 'pipe' = 'ignore'): Promise<{ child: ChildProcess; port: number }> {
+  const child = spawn(process.execPath, ['-e', source], { stdio: [stdin, 'pipe', 'inherit'] });
   children.push(child);
   const port = await new Promise<number>((resolve, reject) => {
     child.once('error', reject);
@@ -64,12 +64,12 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
   });
 
   it('relabels a slow server as web once it answers in time', async () => {
-    // Answers nothing until 1.5 s after it starts, like a dev server compiling its first page.
-    const { port } = await startListener(`const ready = Date.now() + 1500; require('http').createServer((_, res) => setTimeout(() => res.end('ok'), ready - Date.now())).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`);
+    // Holds every answer until told to go, like a dev server compiling its first page.
+    const { child, port } = await startListener(`let ready = false; const waiting = []; process.stdin.once('data', () => { ready = true; waiting.splice(0).forEach(res => res.end('ok')); }); require('http').createServer((_, res) => ready ? res.end('ok') : waiting.push(res)).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`, 'pipe');
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
 
     expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.kind).toBe('tcp');
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    child.stdin?.write('go\n');
     expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.kind).toBe('web');
   });
 
