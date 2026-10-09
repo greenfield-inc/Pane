@@ -35,7 +35,9 @@ they win where the two differ:
   (implementer, reviewer, follow-up reviewer, fix implementer, QA) opens as a
   new agent tab in its Pane:
   `runpane panels create --pane <feature Pane id> --tool-command "<agent command>" --source agent --no-focus --wait-ready --yes --json`.
-  Never create a Pane to review, fix or QA work that already has one, and keep
+  Before any `runpane panes create`, check `runpane sessions overview --json`
+  and the ledger for the feature's Pane. Never create a Pane to review, fix or
+  QA work that already has one, and keep
   the feature's Pane until its PR merges or closes.
 - Review and QA run as `runpane` describes: fresh agent tabs in the feature's
   Pane or the `reviewer` and `qa-and-verify` subagents, returning findings to
