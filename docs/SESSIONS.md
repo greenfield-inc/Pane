@@ -229,6 +229,25 @@ within its scope. An independent Pane works locally unless coordination is
 requested. Tool availability does not authorize unrelated work or automatic
 sharing of other conversations.
 
+## One Pane per feature
+
+A Pane is a git worktree. Creating one checks out the repository, installs
+dependencies and often builds, so it is expensive, and creating several at once
+can freeze the machine. An orchestrator creates one Pane per feature, with
+`runpane panes create`, and only for new, independent work on its own branch.
+
+Every later agent for that feature runs inside its Pane as a new agent tab:
+implementer, reviewer, follow-up reviewer, fix implementer and QA. Each tab is a
+fresh agent with its own context, sharing the Pane's worktree and branch:
+
+```text
+runpane panels create --pane <feature-pane-id> --tool-command "<agent command>" --source agent --no-focus --wait-ready --yes --json
+```
+
+Never create a Pane to review, fix or QA work that already has one. Keep the
+feature's Pane until its PR merges or closes, so later tabs still have the
+worktree; archive it then.
+
 ## Pane association before delegation
 
 Management is a Pane-level relationship; tabs inherit the relationship and

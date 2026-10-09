@@ -268,14 +268,14 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `handoff`: Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
-- `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
+- `panes create`: Create a new Pane (a new worktree and branch) for a new, independent feature or PR. One Pane per feature: review, QA and fixes for existing work run as a new tab in its Pane with `panels create --pane <id>`, never a new Pane.
 - `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
 - `panes archive`: Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.
 - `panes pin`: Declaratively pin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
 - `panes unpin`: Declaratively unpin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
 - `panes focus`: Raise the Pane window and select a Pane (and optionally one of its panels) on explicit user request.
-- `panels create`: Create a terminal-backed tool panel inside an existing Pane session.
+- `panels create`: Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.
 - `panels open`: Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
@@ -446,13 +446,13 @@ Brief tools:
 - `repos add`: Register an existing git repository with the running Pane app.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
-- `panes create`: Create user-visible Panes (Pane sessions) backed by Pane-managed worktrees for feature/PR work and open terminal-backed tool tabs.
+- `panes create`: Create a new Pane (a new worktree and branch) for a new, independent feature or PR. One Pane per feature: review, QA and fixes for existing work run as a new tab in its Pane with `panels create --pane <id>`, never a new Pane.
 - `panes archive`: Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.
 - `panes pin`: Declaratively pin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes unpin`: Declaratively unpin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
 - `panes focus`: Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.
-- `panels create`: Create reviewer/helper terminal tabs inside an existing Pane; they share that Pane's worktree.
+- `panels create`: Open reviewer, QA, fix or helper agent tabs inside an existing Pane; they share that Pane's worktree. The default for any later agent on existing work.
 - `panels open`: Show the user an HTML page, plan, report, dev server URL, or file as a tab in split view beside the agent.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.

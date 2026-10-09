@@ -278,8 +278,10 @@ of it through the \`runpane\` CLI.
 ## Common commands
 
 - Find a repository: \`runpane repos list --json\`
-- Delegate work in a new Pane:
+- Start a new, independent feature in a new Pane (one Pane per feature; each Pane is a new worktree):
   \`runpane panes create --repo <repo> --name <name> --agent <codex|claude|cursor> --prompt "<task>" --source agent --no-focus --wait-ready --yes --json\`
+- Review, fix or QA work that already has a Pane in a new agent tab there, never a new Pane:
+  \`runpane panels create --pane <pane-id> --agent <codex|claude|cursor> --initial-input "<task>" --source agent --no-focus --wait-ready --yes --json\`
 - When \`runpane agent-context --command "panels open" --json\` lists the
   command, show the user a page or file with
   \`runpane panels open --file <path> --source agent --yes --json\` or
