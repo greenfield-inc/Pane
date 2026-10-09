@@ -16,6 +16,7 @@ import { registerScriptHandlers } from './script';
 import { registerSessionHandlers } from './session';
 import { registerVoiceHandlers } from './voice';
 import { registerUsageHandlers } from './usage';
+import { registerMissionControlHandlers } from './missionControl';
 import type { AppServices } from './types';
 import { isDaemonOwnedChannel } from '../../../shared/types/daemon';
 
@@ -24,6 +25,11 @@ const USAGE_CHANNELS = [
   'usage:get-status',
   'usage:rescan',
 ] as const;
+const MISSION_CONTROL_CHANNELS = [
+  'mission-control:list-agents',
+  'mission-control:snapshots',
+] as const;
+
 const PROJECT_CHANNELS = [
   'projects:get-all',
   'projects:get-active',
@@ -128,6 +134,7 @@ const PANEL_CHANNELS = [
   'panels:get-layout',
   'panels:set-layout',
   'terminal:input',
+  'terminal:reply',
   'terminal:resize',
   'terminal:getState',
   'terminal:saveState',
@@ -388,6 +395,16 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...USAGE_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...USAGE_CHANNELS].sort());
+  });
+
+  it('binds daemon-owned missionControl channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    registerMissionControlHandlers(ipcMain, createServicesStub(), registry);
+
+    expect(registry.listChannels()).toEqual([...MISSION_CONTROL_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...MISSION_CONTROL_CHANNELS].sort());
   });
 
   it('binds daemon-owned prompt channels through the shared registry', () => {
