@@ -253,7 +253,9 @@ export function OrchestrationSessionNav({
       await update({ sessionId }, { archived: false } satisfies OrchestrationSessionUpdateInput);
       if (hostChanged()) return;
       await refresh();
-      if (wasOpen && !hostChanged()) await openSession(sessionId);
+      // Reopen only if the person is still on Home where the archive left them.
+      const stillHome = useNavigationStore.getState().activeView === 'sessions' && !useSessionStore.getState().activeSessionId;
+      if (wasOpen && stillHome && !hostChanged()) await openSession(sessionId);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to restore Session');
     }

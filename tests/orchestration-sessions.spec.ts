@@ -1227,6 +1227,33 @@ test('an Undo still refreshing when the host changes does not reopen the Session
   await expect(page.getByRole('heading', { name: 'Remote twin', exact: true })).toHaveCount(0);
 });
 
+test('Undo restores an archived Session without pulling the person off where they went next', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+
+  const alphaRow = page.getByTestId('orchestration-session-alpha');
+  await expect(alphaRow).toBeVisible({ timeout: 10_000 });
+  await alphaRow.click();
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await alphaRow.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
+
+  await page.getByTestId('orchestration-session-beta').click();
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
+  await page.getByRole('status').filter({ hasText: 'Archived Alpha' }).getByRole('button', { name: 'Undo', exact: true }).click();
+
+  await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toHaveCount(0);
+});
+
 test('Session rows archive and restore without losing selection or associated Panes', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
