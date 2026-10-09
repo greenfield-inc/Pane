@@ -49,7 +49,6 @@ export const useSshHostsStore = create<SshHostsState>((set, get) => ({
     usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, response.data.panelId);
     void useSessionStore.getState().setActiveSession(null);
     useNavigationStore.getState().navigateToSsh();
-    void get().refresh();
   },
 }));
 

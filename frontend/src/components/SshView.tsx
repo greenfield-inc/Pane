@@ -6,7 +6,9 @@ import { SessionProvider } from '../contexts/SessionProvider';
 import { panelApi } from '../services/panelApi';
 import type { Session } from '../types/session';
 import { API } from '../utils/api';
+import { useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
@@ -19,8 +21,15 @@ const noop = () => {};
 /**
  * The built-in SSH view: one terminal tab per opened host, owned by a hidden
  * project-free Session. With no tabs open it lists the hosts to pick from.
+ * Each Pane this window drives has its own SSH Session, so a host switch
+ * starts the view over.
  */
 export function SshView() {
+  const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  return <SshViewForHost key={hostId ?? 'local'} />;
+}
+
+function SshViewForHost() {
   const panels = usePanelStore(state => state.panels[SSH_HOSTS_SESSION_ID] ?? EMPTY_PANELS);
   const storedActiveId = usePanelStore(state => state.activePanels[SSH_HOSTS_SESSION_ID]);
   const hosts = useSshHostsStore(state => state.hosts);
@@ -91,9 +100,8 @@ export function SshView() {
   const closePanel = useCallback((panel: ToolPanel) => {
     void panelApi.deletePanel(panel.id).then(() => {
       usePanelStore.getState().removePanel(SSH_HOSTS_SESSION_ID, panel.id);
-      void refreshHosts();
     }).catch(() => setError('Could not close the tab. Please try again.'));
-  }, [refreshHosts]);
+  }, []);
 
   if (!loaded) {
     return <div className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
