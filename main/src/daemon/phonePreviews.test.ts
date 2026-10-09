@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PaneCommandRegistry } from './commandRegistry';
 import { PaneWorkspaceHostController } from './workspaceHost';
 import { PhonePreviewHost } from './phonePreviews';
-import { createFakeTailscale } from './__fixtures__/fakeTailscale';
+import { createFakeTailscale, TAILNET_B } from './__fixtures__/fakeTailscale';
 import type { ListeningPort, ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -27,7 +27,7 @@ function snapshot(ports: ListeningPort[]): ListeningPortsSnapshot {
 
 async function startHost(
   tailscale: ReturnType<typeof createFakeTailscale>,
-  options: { paneDir?: string; enabled?: boolean } = {},
+  options: { paneDir?: string; enabled?: boolean; onChange?: () => void } = {},
 ) {
   const workspace = new PaneWorkspaceHostController(
     new PaneCommandRegistry(),
@@ -40,6 +40,7 @@ async function startHost(
     paneDir: options.paneDir ?? '/Users/owner/.pane',
     files: NO_FILES,
     run: tailscale.run,
+    onChange: options.onChange,
   });
   await workspace.start();
   await previews.start();
@@ -154,6 +155,21 @@ describe('phone previews', () => {
     await previews.update(snapshot([port(5173)]));
 
     expect(previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl).toMatch(/^https:\/\//u);
+  });
+
+  it('publishes the new phone addresses after the host switches tailnets', async () => {
+    const tailscale = createFakeTailscale();
+    let published = 0;
+    const { workspace, previews } = await startHost(tailscale, { onChange: () => { published += 1; } });
+    await previews.update(snapshot([port(5173)]));
+    const before = published;
+
+    tailscale.switchTailnet(TAILNET_B);
+    await workspace.sync();
+    await previews.update(snapshot([port(5173)]));
+
+    expect(published).toBeGreaterThan(before);
+    expect(previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl).toContain('.tail3c2c57.ts.net:');
   });
 
   it('says why phones cannot open pages while workspaces are off', async () => {

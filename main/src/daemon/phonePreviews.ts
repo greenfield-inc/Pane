@@ -51,6 +51,8 @@ export class PhonePreviewHost {
   private webPorts: number[] = [];
   private listeningPorts = new Set<number>();
   private lastError: string | null = null;
+  /** What `decorate` last reflected, to publish only real changes. */
+  private published = '';
   /** Serve holds none of this instance's handlers, so a pass with nothing wanted has nothing to do. */
   private serveClear = false;
   private queue: Promise<void> = Promise.resolve();
@@ -134,13 +136,15 @@ export class PhonePreviewHost {
 
   /** Makes Serve hold exactly this instance's wanted handlers, starting from what Serve reports. */
   private async applyHandlers(): Promise<void> {
-    const before = JSON.stringify([...this.handlers]);
     const tailnet = this.stopped ? null : this.options.workspace.getTailnet();
-    if (!tailnet && this.serveClear) return;
+    if (!tailnet && this.serveClear) {
+      this.publishIfChanged();
+      return;
+    }
     const tailscale: ResolvedCommand | null = tailnet?.tailscale ?? await resolveTailscaleCommandAsync(this.run);
     if (!tailscale) {
       this.handlers.clear();
-      this.notifyIfChanged(before);
+      this.publishIfChanged();
       return;
     }
     const serve = (args: string[]) => runTailscaleServe(this.run, tailscale, args);
@@ -179,11 +183,15 @@ export class PhonePreviewHost {
     this.handlers = next;
     this.lastError = failure;
     this.serveClear = next.size === 0 && failure === null;
-    this.notifyIfChanged(before);
+    this.publishIfChanged();
   }
 
-  private notifyIfChanged(before: string): void {
-    if (JSON.stringify([...this.handlers]) !== before) this.options.onChange?.();
+  /** Phone addresses are the tailnet name plus the handler ports, so either changing republishes. */
+  private publishIfChanged(): void {
+    const published = JSON.stringify([this.options.workspace.getTailnet()?.dnsName ?? null, ...this.handlers]);
+    if (published === this.published) return;
+    this.published = published;
+    this.options.onChange?.();
   }
 
   /** This instance's handlers (any launch's), and every Serve port in use. */
