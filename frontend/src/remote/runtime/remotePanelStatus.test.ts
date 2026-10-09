@@ -22,10 +22,8 @@ const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 const paneStatus = (sessionId: string) => usePanelStore.getState().getSessionAgentState(sessionId);
 const isDone = (sessionId: string) => usePanelStore.getState().hasUnviewedCompletedActivity(sessionId);
 
-beforeEach(() => {
-  usePanelStore.setState({ agentStatus: {}, agentStatusSession: {}, activityStatus: {}, unviewedCompletedActivity: {} });
-  useRemoteSessionStore.getState().reset();
-  useRemoteSessionStore.getState().selectSession('P');
+// Like the real client, the adapter reports its current connection on subscribe.
+function subscribe(initial: RemoteBrowserConnectionState['status']) {
   replies = [];
   const listeners: Array<typeof emit> = [];
   emit = event => listeners.forEach(listener => listener(event));
@@ -33,12 +31,20 @@ beforeEach(() => {
     onEvent: (listener: typeof emit) => { listeners.push(listener); return vi.fn(); },
     onStatus: (listener: (state: RemoteBrowserConnectionState) => void) => {
       setConnection = status => listener({ status, lastError: null, lastSeenAt: null });
+      setConnection(initial);
       return vi.fn();
     },
     // The adapter unwraps the host's { success, data } envelope.
     invoke: vi.fn((): Promise<JsonValue> => new Promise(resolve => replies.push(resolve))),
   };
   cleanup = subscribeRemotePanelStatus(adapter);
+}
+
+beforeEach(() => {
+  usePanelStore.setState({ agentStatus: {}, agentStatusSession: {}, activityStatus: {}, unviewedCompletedActivity: {} });
+  useRemoteSessionStore.getState().reset();
+  useRemoteSessionStore.getState().selectSession('P');
+  subscribe('connected');
 });
 
 afterEach(() => cleanup());
@@ -66,6 +72,17 @@ describe('remote panel status', () => {
     replies[1]([{ sessionId: 'P', panelId: 'p1', state: 'idle' }]);
     await flush();
     expect(paneStatus('P')).toBe('idle');
+  });
+
+  it('rereads the baseline once the first stream opens, so a change before it opened shows', async () => {
+    cleanup();
+    subscribe('connecting');
+    replies[0]([{ sessionId: 'P', panelId: 'p1', state: 'working' }]);
+    await flush();
+    setConnection('connected');
+    replies[1]([{ sessionId: 'P', panelId: 'p1', state: 'blocked' }]);
+    await flush();
+    expect(paneStatus('P')).toBe('blocked');
   });
 
   it('marks a Pane done only on a client that was elsewhere, until that client opens it', async () => {

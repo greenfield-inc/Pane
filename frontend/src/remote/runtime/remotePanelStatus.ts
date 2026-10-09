@@ -24,8 +24,8 @@ type StatusAdapter = Pick<RemoteRuntimeAdapter, 'onEvent' | 'onStatus'> & {
 
 /**
  * Keeps the shared panel store's agent status in step with a remote host, the
- * same way the desktop does: a baseline on connect and after every dropped
- * stream, with live events winning over a read in flight. "Done" belongs to
+ * same way the desktop does: a baseline on subscribe and whenever a stream
+ * opens, with live events winning over a read in flight. "Done" belongs to
  * this client: it clears when this client opens the Pane.
  */
 export function subscribeRemotePanelStatus(adapter: StatusAdapter): () => void {
@@ -42,10 +42,12 @@ export function subscribeRemotePanelStatus(adapter: StatusAdapter): () => void {
     onPanelDeleted: callback => on('panel:deleted', panelRefSchema, callback),
     onPanelCreated: callback => on('panel:created', createdPanelSchema, callback),
     onResync: callback => {
-      let streamDropped = false;
+      // The first report is the state at subscribe; a stream opening after it
+      // may have missed events (the host replays none), so reread then.
+      let previous: string | null = null;
       return adapter.onStatus(state => {
-        if (state.status === 'connected' && streamDropped) callback();
-        if (state.status !== 'connecting') streamDropped = state.status !== 'connected';
+        if (state.status === 'connected' && previous !== null && previous !== 'connected') callback();
+        previous = state.status;
       });
     },
     readStatuses: async () => decodeBoundary(await adapter.invoke('panels:agent-statuses'), panelStatusesSchema),
