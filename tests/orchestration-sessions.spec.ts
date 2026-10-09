@@ -199,6 +199,7 @@ async function installSessionsFixture(
     let heldLists: Promise<void> | null = null;
     let releaseHeldLists = () => {};
     let selectCalls = 0;
+    const selectedIds: string[] = [];
     let overviewCalls = 0;
     let nextOrchestrationUpdateError: string | null = null;
     let nextMembershipRejection: string | null = null;
@@ -277,6 +278,7 @@ async function installSessionsFixture(
       select: async (selector: Selector) => {
         selectCalls += 1;
         const record = find(selector);
+        selectedIds.push(record.id);
         if (record.archived) return { success: false, error: 'Archived Sessions cannot be opened' };
         selectedSessionId = record.id;
         persistState();
@@ -413,6 +415,7 @@ async function installSessionsFixture(
       holdOrchestrationLists: () => { heldLists = new Promise(resolve => { releaseHeldLists = resolve; }); },
       releaseOrchestrationLists: () => { heldLists = null; releaseHeldLists(); },
       getOrchestrationSelectCalls: () => selectCalls,
+      getOrchestrationSelectedIds: () => [...selectedIds],
       getOrchestrationViewRequests: () => clone(viewRequests),
       getOrchestrationOverviewCalls: () => overviewCalls,
       setOrchestrationOverviewPanes: (sessionId: string, panes: UiPaneOverviewFixture[]) => {
@@ -1185,14 +1188,14 @@ test('an Undo still refreshing when the host changes does not reopen the Session
   type HostSwitchMock = {
     holdOrchestrationLists: () => void;
     releaseOrchestrationLists: () => void;
-    getOrchestrationSelectCalls: () => number;
+    getOrchestrationSelectedIds: () => string[];
     getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null;
     replaceOrchestrationSessions: (sessions: UiSessionFixture[]) => void;
     emitRemoteDaemonResyncRequested: (event: { hostChanged: boolean }) => void;
   };
   // SAFETY: installSessionsFixture and installElectronApiMock add these controls before the app loads.
-  const selectCalls = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock.getOrchestrationSelectCalls());
-  const selectCallsBeforeUndo = await selectCalls();
+  const selectedIds = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock.getOrchestrationSelectedIds());
+  const selectionsBeforeUndo = (await selectedIds()).length;
   await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     (window as typeof window & { __paneTestElectronMock: HostSwitchMock }).__paneTestElectronMock.holdOrchestrationLists();
@@ -1218,7 +1221,8 @@ test('an Undo still refreshing when the host changes does not reopen the Session
   await expect(page.getByTestId('orchestration-session-remote')).toBeVisible();
   await expect(page.getByTestId('orchestration-session-shared-id')).toBeVisible();
   await page.waitForTimeout(500);
-  expect(await selectCalls()).toBe(selectCallsBeforeUndo);
+  // The app may auto-select another Session; it must never select the restored id on the new host.
+  expect((await selectedIds()).slice(selectionsBeforeUndo)).not.toContain('shared-id');
   await expect(home).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Remote twin', exact: true })).toHaveCount(0);
 });
