@@ -123,17 +123,26 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   }, [mainRepoSessionId, shownPanelId]);
 
   // Load panels when main repo session changes (no auto-creation, matches worktree session behavior)
+  // The repository whose tab this visit has restored; activation requests wait for it.
+  const [restoredSessionId, setRestoredSessionId] = useState<string | null>(null);
   useEffect(() => {
+    let cancelled = false;
+    setRestoredSessionId(null);
     if (mainRepoSessionId) {
+      const loadHostId = hostIdRef.current;
+      const ownsLoad = () => !cancelled && hostIdRef.current === loadHostId;
       panelApi.loadPanelsForSession(mainRepoSessionId).then(async (loadedPanels) => {
+        if (!ownsLoad()) return;
         setPanels(mainRepoSessionId, loadedPanels);
 
         // This desktop's remembered tab wins; the host's last-used tab and
         // the default are only for a repository it has not shown.
-        const remembered = await readPaneLayout(hostIdRef.current, mainRepoSessionId);
+        const remembered = await readPaneLayout(loadHostId, mainRepoSessionId);
+        if (!ownsLoad()) return;
         const rememberedId = remembered?.root.type === 'group' ? remembered.root.activePanelId : null;
         if (rememberedId && loadedPanels.some(p => p.id === rememberedId)) {
           setActivePanelInStore(mainRepoSessionId, rememberedId);
+          setRestoredSessionId(mainRepoSessionId);
           return;
         }
 
@@ -142,15 +151,30 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         const fallback = loadedPanels.find(p => p.type !== 'diff' && p.type !== 'explorer');
 
         const activePanel = await panelApi.getActivePanel(mainRepoSessionId);
+        if (!ownsLoad()) return;
         if (activePanel) {
           setActivePanelInStore(mainRepoSessionId, activePanel.id);
         } else if (fallback) {
           setActivePanelInStore(mainRepoSessionId, fallback.id);
           await panelApi.setActivePanel(mainRepoSessionId, fallback.id);
         }
+        setRestoredSessionId(mainRepoSessionId);
       });
     }
+    return () => { cancelled = true; };
   }, [mainRepoSessionId, setPanels, setActivePanelInStore]);
+
+  // A tab the host or an agent brought forward applies after this visit's
+  // restore, so a slower memory read cannot replace it.
+  const activationRequest = usePanelStore(state => mainRepoSessionId ? state.activationRequests[mainRepoSessionId] : undefined);
+  useEffect(() => {
+    if (!activationRequest || !mainRepoSessionId || restoredSessionId !== mainRepoSessionId) return;
+    const store = usePanelStore.getState();
+    store.clearActivationRequest(mainRepoSessionId);
+    if (store.panels[mainRepoSessionId]?.some(p => p.id === activationRequest.panelId)) {
+      setActivePanelInStore(mainRepoSessionId, activationRequest.panelId);
+    }
+  }, [activationRequest, mainRepoSessionId, restoredSessionId, setActivePanelInStore]);
   
   // Get panels for current main repo session
   const sessionPanels = useMemo(
@@ -422,7 +446,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
     // The host or an agent brought a tab forward, as `runpane panels open` does.
     const handleActivationRequested = (request: PanelActivationRequest) => {
-      if (request.sessionId === mainRepoSessionId) setActivePanelInStore(mainRepoSessionId, request.panelId);
+      if (request.sessionId === mainRepoSessionId) usePanelStore.getState().requestActivation(request);
     };
 
     // Listen for panel events
