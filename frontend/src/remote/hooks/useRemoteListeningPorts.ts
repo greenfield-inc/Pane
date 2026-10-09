@@ -10,9 +10,12 @@ export function useRemoteListeningPorts(adapter: RemoteRuntimeAdapter | null): L
   useEffect(() => {
     if (!adapter) return;
     let cancelled = false;
+    // Each read or event bumps this; a read that returns after a newer one is dropped.
+    let latest = 0;
     const load = () => {
+      const asked = ++latest;
       adapter.getListeningPorts().then(
-        next => { if (!cancelled) setRead({ adapter, snapshot: next }); },
+        next => { if (!cancelled && asked === latest) setRead({ adapter, snapshot: next }); },
         (error: Error) => console.error('[Ports] Failed to list host ports:', error),
       );
     };
@@ -21,6 +24,7 @@ export function useRemoteListeningPorts(adapter: RemoteRuntimeAdapter | null): L
       if (event.channel !== 'ports:changed' || !event.args[0]) return;
       // SAFETY: the host publishes ports:changed with one ListeningPortsSnapshot.
       const next = event.args[0] as ListeningPortsSnapshot;
+      latest += 1;
       setRead({ adapter, snapshot: next });
     });
     // Events sent while the stream was down are lost: read again once it is back.

@@ -513,25 +513,35 @@ export function RemotePwaApp() {
   const createBrowser = useCallback(async () => {
     if (!adapter || !selectedSessionId) return;
     setCreatingTerminal(true);
+    const runtime = adapter;
+    const sessionId = selectedSessionId;
     try {
-      const panel = await adapter.createBrowserPanel(selectedSessionId);
+      const panel = await runtime.createBrowserPanel(sessionId);
+      // The host or the open Pane may have changed while the tab was created.
+      if (runtime !== activeRuntimeRef.current) return;
       upsertPanel(panel);
+      if (useRemoteSessionStore.getState().selectedSessionId !== sessionId) return;
       setSelectedPanel(panel.id);
-      await adapter.setActivePanel(selectedSessionId, panel.id);
+      await runtime.setActivePanel(sessionId, panel.id);
     } catch (error) {
-      setLastError(error instanceof Error ? error.message : 'Failed to create browser tab');
+      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to create browser tab');
     } finally {
       setCreatingTerminal(false);
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
-  /** Shows the new address at once, then saves it on the host for every client. */
+  /** Shows the new address at once, then saves it on the host for every client; a refused save goes back. */
   const navigateBrowser = useCallback((panel: ToolPanel, currentUrl: string) => {
     if (!adapter) return;
     const state = { ...panel.state, customState: { ...panel.state.customState, currentUrl } };
-    upsertPanel({ ...panel, state });
+    const shown = { ...panel, state };
+    upsertPanel(shown);
     adapter.updatePanelState(panel.id, state).catch((error: Error) => {
+      if (adapter !== activeRuntimeRef.current) return;
       setLastError(error instanceof Error ? error.message : 'Could not open this address.');
+      // Only undo this save: a newer address or a host update since then stays.
+      const current = useRemoteSessionStore.getState().panelsBySessionId[panel.sessionId]?.find(candidate => candidate.id === panel.id);
+      if (current === shown) upsertPanel(panel);
     });
   }, [adapter, upsertPanel, setLastError]);
 

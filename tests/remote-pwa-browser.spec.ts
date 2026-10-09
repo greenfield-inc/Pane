@@ -36,3 +36,32 @@ test('a phone opens a host dev server from a new browser tab\'s Ports list', asy
   await expect(page.getByText('on MacBook Pro')).toBeVisible();
   await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Hello from the host' })).toBeVisible();
 });
+
+test('a phone browser tab goes back to its saved address when the host refuses the new one', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openConnectedRemotePwa(page, {
+    browserPanels: [{ title: 'Browser', url: '' }],
+    activePanelIndex: 2,
+    ports: {
+      host: 'MacBook Pro',
+      ports: [{ port: 5173, pid: 1, process: 'node', group: 'pane-terminal', kind: 'web', phoneUrl: PHONE_URL }],
+      phone: { state: 'on', filesUrl: 'http://phone-pages.test:44300' },
+    },
+  });
+  await expect(page.getByRole('heading', { name: 'Ports on MacBook Pro' })).toBeVisible();
+  let refuse = true;
+  await page.route('http://anim-pane.test/**', async route => {
+    if (!refuse || !route.request().postData()?.includes('"panels:update"')) return route.fallback();
+    await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { message: 'database is locked' } }) });
+  });
+
+  await page.getByTitle('Open localhost:5173').click();
+
+  await expect(page.getByText('database is locked')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Ports on MacBook Pro' })).toBeVisible();
+
+  refuse = false;
+  const saved = page.waitForRequest(request => request.postData()?.includes('"panels:update"') ?? false);
+  await page.getByTitle('Open localhost:5173').click();
+  expect((await saved).postData()).toContain('"currentUrl":"http://localhost:5173"');
+});
