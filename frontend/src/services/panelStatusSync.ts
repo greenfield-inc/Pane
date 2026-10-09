@@ -1,26 +1,56 @@
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { usePanelStore } from '../stores/panelStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 
-const statusSnapshotSchema = boundary.object({
-  success: boundary.literal(true),
-  data: boundary.array(boundary.object({
-    sessionId: boundary.string,
-    panelId: boundary.string,
-    state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
-  })),
-});
+/** The data of a `panels:agent-statuses` response. */
+export const panelStatusesSchema = boundary.array(boundary.object({
+  sessionId: boundary.string,
+  panelId: boundary.string,
+  state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
+}));
+const statusSnapshotSchema = boundary.object({ success: boundary.literal(true), data: panelStatusesSchema });
+type PanelStatuses = ReturnType<typeof panelStatusesSchema.decode>;
+
+type Unsubscribe = (() => void) | undefined;
+
+/** Where a client hears the host's panel status: the desktop's IPC, or a phone's event stream. */
+export interface PanelStatusSource {
+  onAgentStatus: (callback: (event: PanelAgentStatusEvent) => void) => Unsubscribe;
+  onActivityStatus: (callback: (event: { panelId: string; status: 'active' | 'idle'; lastActivityAt?: string }) => void) => Unsubscribe;
+  onPanelDeleted: (callback: (event: { panelId: string; sessionId: string }) => void) => Unsubscribe;
+  onPanelCreated: (callback: (panel: { id: string }) => void) => Unsubscribe;
+  /** Fires when events may have been missed, so the baseline is read again. */
+  onResync: (callback: () => void) => Unsubscribe;
+  /** Reads and decodes the host's `panels:agent-statuses` baseline. */
+  readStatuses: () => Promise<PanelStatuses>;
+  /** The Pane this client shows; an agent finishing anywhere else reads as done. */
+  viewedSessionId: () => string | null;
+}
+
+function desktopStatusSource(): PanelStatusSource {
+  const api = window.electronAPI;
+  return {
+    onAgentStatus: callback => api.events.onPanelAgentStatus?.(callback),
+    onActivityStatus: callback => api.events.onPanelActivityStatus?.(callback),
+    onPanelDeleted: callback => api.events.onPanelDeleted?.(callback),
+    onPanelCreated: callback => api.events.onPanelCreated?.(callback),
+    onResync: callback => api.events.onRemoteDaemonResyncRequested?.(() => callback()),
+    readStatuses: async () => decodeBoundary(await api.invoke('panels:agent-statuses'), statusSnapshotSchema).data,
+    viewedSessionId: () => useSessionStore.getState().activeSessionId,
+  };
+}
 
 /** Subscribe before requesting the baseline; events during a read always win. */
-export function subscribePanelStatus(): () => void {
-  const api = window.electronAPI;
+export function subscribePanelStatus(source: PanelStatusSource = desktopStatusSource()): () => void {
   let disposed = false;
   let requestId = 0;
   let changedDuringRead = new Set<string>();
   const deleted = new Set<string>();
 
-  const unsubscribeStatus = api.events.onPanelAgentStatus?.(data => {
+  const unsubscribeStatus = source.onAgentStatus(data => {
     changedDuringRead.add(data.panelId);
     if (deleted.has(data.panelId)) return;
     if (data.reason === 'exit' || data.reason === 'destroyed') {
@@ -36,26 +66,30 @@ export function subscribePanelStatus(): () => void {
     const store = usePanelStore.getState();
     const prevState = store.agentStatus[data.panelId];
     store.setAgentStatus(data.panelId, data.sessionId, data.state);
+    // Visible work before idle is a real turn; startup and stray output are not.
+    if (data.state === 'idle' && data.workedVisibly) {
+      useAttentionInboxStore.getState().markFinished(data.sessionId);
+    }
     if (prevState === 'working' && data.state === 'idle') {
       const next = usePanelStore.getState();
-      const activeSessionId = useSessionStore.getState().activeSessionId;
+      const viewedSessionId = source.viewedSessionId();
       const sessionSettled = rollupSessionAgentState(next.agentStatus, next.agentStatusSession, data.sessionId) === 'idle';
-      if (sessionSettled && activeSessionId !== data.sessionId) {
+      if (sessionSettled && viewedSessionId !== data.sessionId) {
         next.markUnviewedCompletedActivity(data.sessionId);
       }
     }
   });
-  const unsubscribeActivity = api.events.onPanelActivityStatus?.(data => {
+  const unsubscribeActivity = source.onActivityStatus(data => {
     if (!deleted.has(data.panelId)) {
       usePanelStore.getState().setActivityStatus(data.panelId, data.status, data.lastActivityAt);
     }
   });
-  const unsubscribeDeleted = api.events.onPanelDeleted?.(data => {
+  const unsubscribeDeleted = source.onPanelDeleted(data => {
     changedDuringRead.add(data.panelId);
     deleted.add(data.panelId);
     usePanelStore.getState().removePanel(data.sessionId, data.panelId);
   });
-  const unsubscribeCreated = api.events.onPanelCreated?.(panel => {
+  const unsubscribeCreated = source.onPanelCreated(panel => {
     changedDuringRead.add(panel.id);
     deleted.delete(panel.id);
   });
@@ -64,8 +98,7 @@ export function subscribePanelStatus(): () => void {
     const currentRequest = ++requestId;
     changedDuringRead = new Set();
     try {
-      const response: unknown = await api.invoke('panels:agent-statuses');
-      const snapshot = decodeBoundary(response, statusSnapshotSchema);
+      const snapshot = await source.readStatuses();
       if (disposed || currentRequest !== requestId) return;
       usePanelStore.setState(state => {
         const agentStatus = { ...state.agentStatus };
@@ -78,7 +111,7 @@ export function subscribePanelStatus(): () => void {
             delete activityStatus[panelId];
           }
         }
-        for (const panel of snapshot.data) {
+        for (const panel of snapshot) {
           if (changedDuringRead.has(panel.panelId)) continue;
           deleted.delete(panel.panelId);
           agentStatus[panel.panelId] = panel.state;
@@ -91,7 +124,7 @@ export function subscribePanelStatus(): () => void {
       if (!disposed && currentRequest === requestId) console.error('[panelStatusSync] Failed to refresh agent statuses:', error);
     }
   };
-  const unsubscribeResync = api.events.onRemoteDaemonResyncRequested?.(() => { void refresh(); });
+  const unsubscribeResync = source.onResync(() => { void refresh(); });
   void refresh();
 
   return () => {

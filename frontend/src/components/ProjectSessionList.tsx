@@ -1,9 +1,10 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
+import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
@@ -12,7 +13,7 @@ import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
 import { AgentStatusDot } from './ui/AgentStatusDot';
 import type { DropdownItem } from './ui/Dropdown';
-import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
+import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
@@ -20,6 +21,8 @@ import type { Session, GitStatus } from '../types/session';
 import type { AgentDisplayStatus } from '../../../shared/types/agentStatus';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
+import { useAttentionInboxStore } from '../stores/attentionInboxStore';
+import { rollupSessionAgentState } from '../utils/agentStatus';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import {
   isArchivedOrchestrationSession,
@@ -94,12 +97,20 @@ export function ProjectSessionList({
   const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  const navigateToMissionControl = useNavigationStore(s => s.navigateToMissionControl);
+  const missionControlEnabled = useConfigStore(s => isMissionControlEnabled(s.config));
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
   // Expansion state lives in the navigation store so the always-mounted
   // session hotkeys (useSessionNavigationHotkeys) see the same visible ordering
   const expandedProjects = useNavigationStore(s => s.expandedProjects);
   const toggleProjectExpanded = useNavigationStore(s => s.toggleProjectExpanded);
   const expandProject = useNavigationStore(s => s.expandProject);
+  const inboxEnabled = useAttentionInboxStore(s => s.enabled);
+  const inboxShowAll = useAttentionInboxStore(s => s.showAll);
+  const inboxMembers = useAttentionInboxStore(s => s.members);
+  const dismissInboxPane = useAttentionInboxStore(s => s.dismiss);
+  const setInboxShowAll = useAttentionInboxStore(s => s.setShowAll);
+  const inboxActive = inboxEnabled && !inboxShowAll;
 
   useEffect(() => {
     let cancelled = false;
@@ -141,6 +152,9 @@ export function ProjectSessionList({
   );
 
   const projectById = useMemo(() => createProjectById(projects), [projects]);
+
+  /** Agents across every session that are waiting on the user — the Mission Control badge. */
+  const blockedAgentCount = useBlockedAgentCount();
 
   const pinnedSessions = useMemo(() => {
     return getPinnedSessions(sessions, projectById);
@@ -296,14 +310,25 @@ export function ProjectSessionList({
     setDragOverProjectId(null);
   };
 
+  const allProjectSessions = useMemo(
+    () => flattenSessionsByProjects(projects, sessionsByProject),
+    [projects, sessionsByProject],
+  );
+
+  const inboxSessions = useMemo(
+    () => allProjectSessions.filter(session => inboxMembers.has(session.id)),
+    [allProjectSessions, inboxMembers],
+  );
+
   // Compute global index for each session (for hotkey labels in tooltips)
   const globalSessionIndex = useMemo(() => {
     const map = new Map<string, number>();
-    flattenSessionsByProjects(projects, sessionsByProject, expandedProjects).forEach((session, index) => {
+    const numbered = inboxActive ? inboxSessions : flattenSessionsByProjects(projects, sessionsByProject, expandedProjects);
+    numbered.forEach((session, index) => {
       map.set(session.id, index);
     });
     return map;
-  }, [projects, expandedProjects, sessionsByProject]);
+  }, [projects, expandedProjects, sessionsByProject, inboxActive, inboxSessions]);
 
   const paneById = useMemo(
     () => new Map(sessions.map(session => [session.id, session])),
@@ -329,6 +354,7 @@ export function ProjectSessionList({
   const renderManagedPane = useCallback((paneId: string, parentSessionId: string) => {
     const pane = paneById.get(paneId);
     if (!pane || pane.archived || pane.isHidden) return null;
+    if (inboxActive && !inboxMembers.has(pane.id)) return null;
 
     return (
       <SessionRow
@@ -339,10 +365,11 @@ export function ProjectSessionList({
         onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
         onArchive={() => void handleArchiveSession(pane.id)}
         onTogglePinned={() => void handleTogglePinnedSession(pane.id)}
+        onDismiss={inboxActive ? () => dismissInboxPane(pane.id) : undefined}
         rowLayout={sidebarPaneRowLayout}
       />
     );
-  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout]);
+  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
 
   const pinnedPaneRows = pinnedSessions.length > 0 ? (
     <div>
@@ -389,6 +416,39 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
+        {missionControlEnabled && (
+          <button
+            type="button"
+            data-testid="mission-control-nav"
+            onClick={() => {
+              setSidebarNavigationScope('repositories');
+              navigateToMissionControl();
+            }}
+            className={cn(
+              SIDEBAR_ROW_BASE,
+              SIDEBAR_ROW_GAP,
+              SIDEBAR_ROW_PADDING,
+              'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+              activeView === 'mission-control'
+                ? 'bg-surface-hover text-text-primary'
+                : 'text-text-secondary',
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span>Mission Control</span>
+            {/* Agents waiting on an answer are worth seeing without opening the grid. */}
+            {blockedAgentCount > 0 && (
+              <span
+                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error"
+                title={`${blockedAgentCount} ${blockedAgentCount === 1 ? 'agent needs' : 'agents need'} input`}
+              >
+                <AgentStatusDot status="blocked" size="sm" />
+                {blockedAgentCount}
+              </span>
+            )}
+          </button>
+        )}
+
         {showRemoteDesktopLink && onRemoteDesktopClick && (
           <Tooltip content={remoteDesktopTooltip} side="right" className="block w-full">
             <button
@@ -416,7 +476,7 @@ export function ProjectSessionList({
             onClick={() => onRepositoriesSectionExpandedChange(!repositoriesSectionExpanded)}
             className={SIDEBAR_SECTION_TOGGLE}
           >
-            <span className={SIDEBAR_SECTION_LABEL}>Projects</span>
+            <span className={SIDEBAR_SECTION_LABEL}>{inboxActive ? 'Inbox' : 'Projects'}</span>
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
               {repositoriesSectionExpanded ? (
                 <ChevronDown className="h-3.5 w-3.5 text-current" />
@@ -437,8 +497,38 @@ export function ProjectSessionList({
           </button>
         </div>
 
+        {repositoriesSectionExpanded && inboxActive && (
+          <div data-testid="attention-inbox">
+            {inboxSessions.length === 0 && (
+              <p className="mx-2 px-2 py-1 text-[12px] text-text-tertiary">Nothing needs you</p>
+            )}
+            {inboxSessions.map(session => (
+              <SessionRow
+                key={`inbox-${session.id}`}
+                session={session}
+                isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
+                globalIndex={globalSessionIndex.get(session.id) ?? -1}
+                onClick={() => handleSessionClick(session.id, 'repositories')}
+                onArchive={() => handleArchiveSession(session.id)}
+                onTogglePinned={() => handleTogglePinnedSession(session.id)}
+                onDismiss={() => dismissInboxPane(session.id)}
+                rowLayout={sidebarPaneRowLayout}
+              />
+            ))}
+          </div>
+        )}
+
+        {repositoriesSectionExpanded && inboxEnabled && (
+          <AttentionInboxToggle
+            sessions={allProjectSessions}
+            members={inboxMembers}
+            showAll={inboxShowAll}
+            onShowAllChange={setInboxShowAll}
+          />
+        )}
+
         {/* Projects */}
-        {repositoriesSectionExpanded && projects.map((project) => {
+        {repositoriesSectionExpanded && !inboxActive && projects.map((project) => {
           const isExpanded = expandedProjects.has(project.id);
           const projectSessions = sessionsByProject.get(project.id) || [];
 
@@ -592,6 +682,37 @@ export function ProjectSessionList({
 
 
 
+// --- Attention inbox footer ---
+
+function AttentionInboxToggle({ sessions, members, showAll, onShowAllChange }: {
+  sessions: readonly Session[];
+  members: ReadonlySet<string>;
+  showAll: boolean;
+  onShowAllChange: (showAll: boolean) => void;
+}) {
+  const hidden = sessions.filter(session => !members.has(session.id));
+  // Only this footer subscribes to live status, so background status changes
+  // rerender one row, not the list.
+  const running = usePanelStore(state => hidden.filter(session => (
+    rollupSessionAgentState(state.agentStatus, state.agentStatusSession, session.id) === 'working'
+  )).length);
+  const idle = hidden.length - running;
+  const summary = [running > 0 && `${running} running`, idle > 0 && `${idle} idle`].filter(Boolean).join(' · ');
+
+  return (
+    <button
+      type="button"
+      data-testid="attention-inbox-toggle"
+      aria-label={showAll ? 'Show only Panes that need you' : 'Show all Panes'}
+      onClick={() => onShowAllChange(!showAll)}
+      className={cn(SIDEBAR_ROW_BASE, SIDEBAR_ROW_GAP, SIDEBAR_ROW_PADDING, 'h-7 rounded-md text-[12px] text-text-tertiary hover:bg-surface-hover hover:text-text-primary')}
+    >
+      <span className="min-w-0 flex-1 truncate tabular-nums">{showAll ? `${members.size} need you` : summary}</span>
+      <span className="flex-shrink-0 font-medium">{showAll ? 'Inbox only' : 'Show all'}</span>
+    </button>
+  );
+}
+
 // --- Session row button content ---
 
 function SessionRowContent({
@@ -690,6 +811,8 @@ interface SessionRowProps {
   onClick: () => void;
   onArchive: () => void;
   onTogglePinned: () => void;
+  /** Attention inbox only: hide the row until the agent works again. */
+  onDismiss?: () => void;
   displayName?: string;
   rowLayout: SidebarPaneRowLayout;
   nested?: boolean;
@@ -702,7 +825,7 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, displayName, rowLayout, nested = false,
+  onArchive, onTogglePinned, onDismiss, displayName, rowLayout, nested = false,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
   const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
@@ -821,6 +944,19 @@ function SessionRow({
       {/* Each action masks only its own area. A pinned row shows just the pin
           at rest; hover or keyboard focus reveals Archive as well. */}
       <div className="absolute inset-y-0 right-2 z-10 flex items-center">
+        {onDismiss && (
+          <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+              className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-primary"
+              title="Dismiss"
+              aria-label={`Dismiss ${accessibleName}`}
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
           <button
             type="button"

@@ -69,6 +69,15 @@ export interface TerminalPanelState {
   alternateScreenBuffer?: string;         // Recent TUI/alternate-screen output, kept separate from shell scrollback
   isAlternateScreen?: boolean;            // Whether the live terminal is currently in alternate-screen/TUI mode
   serializedBuffer?: string;             // xterm.js serialized terminal state (includes full visual buffer)
+  /**
+   * The emulator's plain-text view of the screen at the last save.
+   *
+   * `alternateScreenBuffer` is the raw PTY byte stream, and a full-screen TUI
+   * paints it with absolute cursor positioning, so stripping its escapes
+   * concatenates every glyph. Anything that wants to *read* a stopped panel
+   * (Mission Control tiles, `runpane panels screen`) wants this instead.
+   */
+  screenText?: string;
   environmentVars?: Record<string, string>; // Modified env vars
   dimensions?: { cols: number; rows: number }; // Terminal size
   cursorPosition?: { x: number; y: number }; // Cursor location

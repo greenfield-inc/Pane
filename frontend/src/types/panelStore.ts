@@ -27,6 +27,10 @@ export interface PanelStore {
   clearActivityStatus: (panelId: string) => void;
   setAgentStatus: (panelId: string, sessionId: string, state: AgentState) => void;
   clearAgentStatus: (panelId: string) => void;
+  /** Drop every per-panel status entry, without needing the session id. */
+  forgetPanel: (panelId: string) => void;
+  /** Drop every per-panel status entry belonging to a deleted or archived session. */
+  forgetSession: (sessionId: string) => void;
   markUnviewedCompletedActivity: (sessionId: string, completedAt?: string) => void;
   clearUnviewedCompletedActivity: (sessionId: string) => void;
 

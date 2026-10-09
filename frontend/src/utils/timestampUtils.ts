@@ -13,6 +13,24 @@
  * @returns Localized date and time string
  */
 /**
+ * Short "time ago" for dense surfaces: `just now`, `5m ago`, `3h ago`, `2d ago`.
+ *
+ * Returns an empty string for an absent, unparseable or future timestamp, so a
+ * caller can render it unconditionally.
+ */
+export function formatTimeAgo(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
  * Formats the distance between a timestamp and now
  * @param date - The date to compare
  * @returns Human-readable time distance
