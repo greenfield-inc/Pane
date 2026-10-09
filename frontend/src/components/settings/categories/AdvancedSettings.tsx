@@ -49,7 +49,7 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
   };
 
   return (
-    <SettingsPage title="Advanced" description="Application diagnostics, terminal backend isolation, and process environment.">
+    <SettingsPage title="Advanced" description="Application diagnostics, terminal backend isolation, process environment, and experiments.">
       <SettingsSection title="Diagnostics">
         <SettingRow
           settingId="verbose-logging"
@@ -144,6 +144,21 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
               <Button type="button" size="sm" disabled={!dirty} onClick={applyPaths}>Apply</Button>
             </div>
           </div>
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Experimental">
+        <SettingRow
+          settingId="attention-inbox"
+          label="Attention inbox"
+          description="List only the Panes that need you in the sidebar: waiting on you, finished, or errored. Running Panes are counted below the list, and Show all lists every Pane."
+          saveState={persistence.saveStates['attention-inbox']}
+        >
+          <ImmediateToggle
+            label="Attention inbox"
+            value={persistence.preferences.sidebarAttentionInbox}
+            onSave={(value) => persistence.savePreference('sidebarAttentionInbox', value)}
+          />
         </SettingRow>
       </SettingsSection>
     </SettingsPage>
