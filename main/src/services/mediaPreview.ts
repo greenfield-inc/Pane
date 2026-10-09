@@ -10,10 +10,10 @@ import { ipcMain, protocol, shell, type WebContents } from 'electron';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { filePreviewKind } from '../../../shared/utils/filePreview';
 import { listArchive, listSqlite } from './filePreviewListing';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { rejectWithPaneErrorText, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { previewPathSchema, streamMediaFile, type PreviewFile } from './mediaStream';
-import { reasonOf } from '../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 import { revealInFileManager } from '../utils/revealInFileManager';
 
 const requestSchema = boundary.object({ sessionId: boundary.string, filePath: boundary.string });
@@ -44,7 +44,7 @@ export interface MediaPreviewRuntime {
 }
 
 const electronRuntime: MediaPreviewRuntime = {
-  handleIpc: (channel, handler) => ipcMain.handle(channel, handler),
+  handleIpc: (channel, handler) => ipcMain.handle(channel, (event, ...args) => rejectWithPaneErrorText(Promise.resolve().then(() => handler(event, ...args)))),
   handleProtocol: handler => protocol.handle('pane-media', handler),
   openPath: filePath => shell.openPath(filePath),
   connection: () => {
@@ -83,7 +83,9 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   const currentHost = () => {
     const connection = runtime.connection();
     if (connection.kind === 'local') return null;
-    if (!connection.host) throw new Error('The remote host is not connected, so Pane cannot reach this file. Nothing was changed. Reconnect to the host, then try again.');
+    if (!connection.host) {
+      throw new PaneError('ERR_PREVIEW_HOST_DISCONNECTED', 'The remote host is not connected, so Pane cannot reach this file. Nothing was changed.', 'Reconnect to the host, then try again.');
+    }
     return connection.host;
   };
   // Reuse the worktree boundary, symlink checks and Windows/WSL conversion.
@@ -125,8 +127,10 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   });
   /** System apps run where the file is, so a remote host's file is opened from a client copy. */
   const copyFromHost = async (host: RemoteMediaHost, file: PreviewFile) => {
-    const copyFailed = (reason: string) => new Error(
-      `Could not copy ${basename(file.filePath)} from the host to open it here: ${reason}. Nothing was changed. Check the connection to the host, then try again.`,
+    const copyFailed = (reason: string) => new PaneError(
+      'ERR_PREVIEW_COPY_FAILED',
+      `Could not copy ${basename(file.filePath)} from the host to open it here: ${reason}. Nothing was changed.`,
+      'Check the connection to the host, then try again.',
     );
     const response = await host.fetchMedia(file, new Request('pane-media://preview/open'))
       .catch((cause: unknown) => { throw copyFailed(reasonOf(cause)); });
@@ -147,7 +151,11 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
     const request = decodeBoundary(raw, requestSchema);
     const host = currentHost();
     if (host && action === 'reveal') {
-      throw new Error('Reveal in folder works only on the host, because this file is on another machine. Nothing was changed. Use Open to view a copy here, or reveal it from Pane on the host.');
+      throw new PaneError(
+        'ERR_PREVIEW_REVEAL_REMOTE',
+        'Reveal in folder works only on the host, because this file is on another machine. Nothing was changed.',
+        'Use Open to view a copy here, or reveal it from Pane on the host.',
+      );
     }
     if (action === 'open') {
       const target = host ? await copyFromHost(host, request) : (await resolve(request)).path;
@@ -155,7 +163,11 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
       if (error) {
         // A successful copy stays for the system app; a failed open leaves nothing behind.
         if (host) await rm(dirname(target), { recursive: true, force: true });
-        throw new Error(`Could not open ${basename(request.filePath)} with the default app: ${reasonOf(error)}. ${host ? 'The copy made for it was removed.' : 'Nothing was changed.'} Set a default app for this file type, then try again.`);
+        throw new PaneError(
+          'ERR_PREVIEW_OPEN_FAILED',
+          `Could not open ${basename(request.filePath)} with the default app: ${reasonOf(error)}. ${host ? 'The copy made for it was removed.' : 'Nothing was changed.'}`,
+          'Set a default app for this file type, then try again.',
+        );
       }
     } else {
       await revealInFileManager((await resolve(request)).path);

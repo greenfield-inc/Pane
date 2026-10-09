@@ -141,9 +141,11 @@ it('opens a remote host\'s file with a system app on the client from a local cop
   expect(opened).toHaveLength(1);
   expect(path.basename(opened[0])).toBe('clip.mp4');
   expect(await fs.readFile(opened[0], 'utf8')).toBe('HOST-BYTES');
-  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'reveal')).rejects.toThrow(
-    'Reveal in folder works only on the host, because this file is on another machine. Nothing was changed. Use Open to view a copy here, or reveal it from Pane on the host.',
-  );
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'reveal')).rejects.toMatchObject({
+    code: 'ERR_PREVIEW_REVEAL_REMOTE',
+    message: 'Reveal in folder works only on the host, because this file is on another machine. Nothing was changed.',
+    next: 'Use Open to view a copy here, or reveal it from Pane on the host.',
+  });
   await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: '../outside.mp4' }, 'open')).rejects.toThrow();
   expect(opened).toHaveLength(1);
 });
@@ -171,18 +173,22 @@ it('explains a failed copy when the host is unreachable', async () => {
     fetchMedia: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:47983'); },
   };
   connection = { kind: 'remote', host: unreachable };
-  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toThrow(
-    'Could not copy clip.mp4 from the host to open it here: connect ECONNREFUSED 127.0.0.1:47983. Nothing was changed. Check the connection to the host, then try again.',
-  );
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toMatchObject({
+    code: 'ERR_PREVIEW_COPY_FAILED',
+    message: 'Could not copy clip.mp4 from the host to open it here: connect ECONNREFUSED 127.0.0.1:47983. Nothing was changed.',
+    next: 'Check the connection to the host, then try again.',
+  });
   expect(opened).toEqual([]);
 });
 
 it('removes the client copy when the system app cannot open it', async () => {
   connection = (await connectToHost()).remote;
   openError = 'No application knows how to open this file';
-  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toThrow(
-    'Could not open clip.mp4 with the default app: No application knows how to open this file. The copy made for it was removed. Set a default app for this file type, then try again.',
-  );
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toMatchObject({
+    code: 'ERR_PREVIEW_OPEN_FAILED',
+    message: 'Could not open clip.mp4 with the default app: No application knows how to open this file. The copy made for it was removed.',
+    next: 'Set a default app for this file type, then try again.',
+  });
   await expect(fs.stat(path.dirname(opened[0]))).rejects.toThrow('ENOENT');
 });
 
