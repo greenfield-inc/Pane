@@ -1848,11 +1848,14 @@ export class TerminalPanelManager extends EventEmitter {
         terminal.exitDuringDestroy ??= exitCode;
         return;
       }
-      terminal.exitDuringDestroy ??= exitCode;
-      // Drain the persisted snapshot before retiring this terminal lifetime.
-      void this.destroyTerminal(terminal.panelId).catch(error => {
-        console.error('[TerminalPanelManager] Failed to save exiting terminal', error);
-      });
+      let retired = false;
+      try {
+        this.retireTerminal(terminal, exitCode);
+        retired = true;
+      } finally {
+        if (!retired) terminal.screenEmulator?.dispose();
+      }
+      void this.persistExitScreenText(terminal);
 
       // Notify frontend (include signal for crash detection)
       this.sendRendererEvent('terminal:exited', {
@@ -2093,6 +2096,29 @@ export class TerminalPanelManager extends EventEmitter {
     
   }
   
+  /**
+   * Record the screen an exited terminal finished on, then dispose its
+   * emulator. A stopped panel's readers (Mission Control tiles, `runpane
+   * panels screen`) fall back to this persisted copy, so the emulator drains
+   * the last output before its screen is read.
+   */
+  private async persistExitScreenText(terminal: TerminalProcess): Promise<void> {
+    const emulator = terminal.screenEmulator;
+    try {
+      await emulator?.refresh();
+      const screenText = emulator?.state.screenText;
+      const panel = panelManager.getPanel(terminal.panelId);
+      if (!screenText || !panel) return;
+      const state = panel.state;
+      state.customState = { ...terminalCustomState(state), screenText };
+      await panelManager.updatePanel(panel.id, { state });
+    } catch (error) {
+      console.error(`[TerminalPanelManager] Failed to save exit screen for ${terminal.panelId}:`, error);
+    } finally {
+      emulator?.dispose();
+    }
+  }
+
   private async getProcessCwd(pid: number): Promise<string> {
     // This is platform-specific and simplified
     // In production, you'd use more robust methods
