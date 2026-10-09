@@ -716,7 +716,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
   };
 
   return (
-    <div className="contents" role="group" aria-label="SSH hosts">
+    <div className="contents ph-no-capture" role="group" aria-label="SSH hosts">
       <div data-testid="ssh-hosts-section-header" className="mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 pl-4 pr-3 py-1">
         <button
           type="button"
@@ -754,19 +754,20 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
           >
             <Server className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="min-w-0 flex-1 truncate">{alias}</span>
-            <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center group-hover/ssh-host:invisible">
-              {openHosts.has(alias) && <span data-testid="ssh-host-open-dot" aria-label="Open" className="h-1.5 w-1.5 rounded-full bg-interactive" />}
-            </span>
           </button>
           <button
             type="button"
             aria-label={`New terminal on ${alias}`}
             title={`New terminal on ${alias}`}
             onClick={() => open(alias, true)}
-            className="invisible absolute right-3 top-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:visible focus:outline-none focus:ring-2 focus:ring-interactive group-hover/ssh-host:visible"
+            className="invisible absolute right-3 top-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary peer focus:outline-none focus-visible:visible focus-visible:ring-2 focus-visible:ring-interactive group-hover/ssh-host:visible"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
+          {/* The open-tab dot and the hover "+" share one fixed box, so neither shifts the row. */}
+          {openHosts.has(alias) && <span className="pointer-events-none absolute right-3 top-0.5 flex h-6 w-6 items-center justify-center group-hover/ssh-host:invisible peer-focus-visible:invisible">
+            <span data-testid="ssh-host-open-dot" role="img" aria-label="Open tab" className="h-1.5 w-1.5 rounded-full bg-interactive" />
+          </span>}
         </div>
       ))}
     </div>

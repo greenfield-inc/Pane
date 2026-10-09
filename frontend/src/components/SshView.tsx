@@ -103,7 +103,7 @@ export function SshView() {
 
   const alert = error ?? openError;
   return (
-    <div data-testid="ssh-view" className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
+    <div data-testid="ssh-view" className="ph-no-capture flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
       {hasTabs && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome px-2">
         <PanelTabStrip panels={tabs} activePanelId={activePanelId} idNamespace="top" alwaysShowClose
           onPanelSelect={selectPanel} onPanelClose={closePanel} />

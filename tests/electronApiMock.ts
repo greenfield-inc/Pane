@@ -258,6 +258,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
+    const sshHostOf = (panel: { sessionId?: string; state?: unknown }) => {
+      if (panel.sessionId !== '__ssh_hosts_session__') return undefined;
+      // SAFETY: SSH view tabs are terminal panels whose custom state is TerminalPanelState.
+      return (panel.state as { customState?: { sshHost?: string } } | undefined)?.customState?.sshHost;
+    };
     const mockLayouts = new Map<string, unknown>();
     const setActiveMockPanel = (sessionId: string, panelId: string | null) => {
       for (const panel of mockPanels) {
@@ -761,16 +766,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       sshHosts: namespace({
         list: () => {
           const hosts = mockOptions.sshHosts ?? [];
-          const open = new Set(mockPanels.filter(panel => panel.sessionId === '__ssh_hosts_session__')
-            // SAFETY: SSH tab fixtures carry a terminal custom state.
-            .map(panel => (panel.state as { customState?: { sshHost?: string } }).customState?.sshHost));
+          const open = new Set(mockPanels.map(sshHostOf));
           return success({ hosts, openHosts: hosts.filter(alias => open.has(alias)) });
         },
         open: (alias: string, newTab: boolean) => {
           const sessionId = '__ssh_hosts_session__';
-          // SAFETY: SSH tab fixtures carry a terminal custom state.
-          const existing = newTab ? undefined : mockPanels.find(panel => panel.sessionId === sessionId
-            && (panel.state as { customState?: { sshHost?: string } }).customState?.sshHost === alias);
+          const existing = newTab ? undefined : mockPanels.find(panel => sshHostOf(panel) === alias);
           if (existing) {
             setActiveMockPanel(sessionId, existing.id);
             return success({ sessionId, panelId: existing.id });
