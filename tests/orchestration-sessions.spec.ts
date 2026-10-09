@@ -1372,6 +1372,37 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toHaveCount(0);
 });
 
+
+test('a Pane opened from a Session names it in the title bar as a way back', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // The window title bar renders on macOS without the overlay flag.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+  });
+  await installSessionsFixture(page, [
+    sessionFixture(
+      'launch',
+      'Checkout launch',
+      '',
+      '',
+      '2026-09-16T12:00:00.000Z',
+      [{ paneId: 'pane-checkout', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' }],
+    ),
+  ], [paneFixture('pane-checkout', 'checkout-redesign')]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+
+  await page.getByRole('button', { name: 'checkout-redesign', exact: true }).click();
+  const label = page.getByTestId('window-title-bar-label');
+  await expect(label).toHaveText('Checkout launch›checkout-redesign');
+  const back = label.getByRole('button', { name: 'Back to Session Checkout launch', exact: true });
+  await expect(back).toHaveCSS('-webkit-app-region', 'no-drag');
+
+  await back.click();
+  await expect(page.getByRole('heading', { name: 'Checkout launch', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(label).toHaveText('Session·Checkout launch');
+});
+
 test('a Pane row menu adds the Pane to a Session and removes it again', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [

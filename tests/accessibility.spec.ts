@@ -239,7 +239,6 @@ async function openConnectedRemote(page: Page): Promise<void> {
   });
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Remote accessibility pane' })).toBeVisible({ timeout: 10_000 });
 }
 
