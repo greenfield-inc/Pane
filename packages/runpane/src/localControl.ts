@@ -545,8 +545,10 @@ interface PaneArchiveBulkItem {
   paneId: string;
   name?: string;
   outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
-  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo' | 'pr-open' | 'pr-status-unknown'; message: string };
+  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo' | 'pr-open'; message: string };
   error?: string;
+  pr?: { state: 'open' | 'none' | 'unknown'; number?: number; reason?: string };
+  warning?: string;
   safetyCheck?: PaneArchiveSafetyCheck;
   worktreeCleanup?: WorktreeCleanupState;
   trashDeletion?: WorktreeTrashDeletion;
@@ -1466,11 +1468,16 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
         'already-archived',
         'main-repo',
         'pr-open',
-        'pr-status-unknown',
       ),
       message: boundary.string,
     })),
     error: boundary.optional(boundary.string),
+    pr: boundary.optional(boundary.object({
+      state: boundary.enumeration('open', 'none', 'unknown'),
+      number: boundary.optional(boundary.number),
+      reason: boundary.optional(boundary.string),
+    })),
+    warning: boundary.optional(boundary.string),
     safetyCheck: boundary.optional(archiveSafetySchema),
     worktreeCleanup: boundary.optional(worktreeCleanupSchema),
     trashDeletion: boundary.optional(trashDeletionSchema),
@@ -3498,9 +3505,11 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
       console.error(`  failed ${label}: ${item.error ?? 'unknown error'}`);
     } else {
       const merged = item.safetyCheck?.mergedViaPr ? ` merged via PR #${item.safetyCheck.mergedViaPr.number}` : '';
+      const pr = item.pr?.state === 'none' ? ', no open PR' : '';
       const trash = item.trashDeletion === 'pending' ? ', files deleting in background' : '';
       const cleanup = item.worktreeCleanup ? ` worktree ${item.worktreeCleanup}${trash}` : '';
-      console.log(`  ${item.outcome} ${label}${merged}${cleanup}`);
+      console.log(`  ${item.outcome} ${label}${merged}${pr}${cleanup}`);
+      if (item.warning) console.log(`    warning: ${item.warning}`);
     }
   }
 }

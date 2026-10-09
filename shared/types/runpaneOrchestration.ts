@@ -749,8 +749,13 @@ export type RunpanePaneArchiveBulkSkipCode =
   | 'missing-pane'
   | 'already-archived'
   | 'main-repo'
-  | 'pr-open'
-  | 'pr-status-unknown';
+  | 'pr-open';
+
+/** Advisory: archive safety comes from local git, so `unknown` never blocks. */
+export type RunpanePaneArchivePrStatus =
+  | { state: 'open'; number: number }
+  | { state: 'none' }
+  | { state: 'unknown'; reason: string };
 
 export interface RunpanePaneArchiveBulkItem {
   paneId: string;
@@ -758,6 +763,10 @@ export interface RunpanePaneArchiveBulkItem {
   outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
   skipped?: { code: RunpanePaneArchiveBulkSkipCode; message: string };
   error?: string;
+  /** Set once local safety passed and the PR was looked up. */
+  pr?: RunpanePaneArchivePrStatus;
+  /** What the archive could not confirm, why, and the next step. */
+  warning?: string;
   safetyCheck?: RunpanePaneArchiveSafetyCheck;
   worktreeCleanup?: RunpaneWorktreeCleanupState;
   trashDeletion?: RunpaneWorktreeTrashDeletion;

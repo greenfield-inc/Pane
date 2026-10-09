@@ -72,6 +72,7 @@ import type {
   RunpanePaneArchiveBlockCode,
   RunpanePaneArchiveBlockedResult,
   RunpanePaneArchiveBulkItem,
+  RunpanePaneArchivePrStatus,
   RunpanePaneArchiveBulkRequest,
   RunpanePaneArchiveBulkResult,
   RunpanePaneArchiveMergedPr,
@@ -4288,11 +4289,12 @@ function isArchiveCleanupOk(worktreeCleanup: RunpaneWorktreeCleanupState): boole
 /**
  * `runpane panes archive --session <id|name> --merged`: archives every Pane
  * associated with the Session whose work is already safe on the remote (clean
- * and pushed, or merged via a PR whose head is HEAD) and whose PR is not still
- * open. A Pane with an open PR is skipped as `pr-open`: 1 feature = 1 worktree
- * = 1 branch = 1 Pane, and its later review, fix and QA tabs still need the
- * worktree. Everything else is skipped with the same block code a single
- * archive would report.
+ * and pushed, or merged via a PR whose head is HEAD). Local git alone decides
+ * whether removing the worktree is safe; everything it blocks is skipped with
+ * the same block code a single archive would report. The PR state is advisory:
+ * a Pane with a known-open PR is skipped as `pr-open` (1 feature = 1 worktree =
+ * 1 branch = 1 Pane, and its review, fix and QA tabs still need the worktree),
+ * and an unknown PR state archives with a warning.
  */
 async function archiveSessionPanes(
   services: AppServices,
@@ -4337,20 +4339,22 @@ async function archiveSessionPanes(
         });
         continue;
       }
-      const prStatus = await findPrStatusForPane(services, paneId);
-      if (prStatus.state !== 'none') {
+      const pr = await findPrStatusForPane(services, paneId);
+      if (pr.state === 'open') {
         items.push({
           ...base,
           outcome: 'skipped',
-          skipped: prStatus.state === 'open'
-            ? { code: 'pr-open', message: `PR #${prStatus.number} is still open; keep the Pane for its review, fix and QA tabs until it merges or closes.` }
-            : { code: 'pr-status-unknown', message: `${prStatus.reason} Kept the Pane; check its PR and archive it by --pane once the PR has merged or closed.` },
+          skipped: { code: 'pr-open', message: `PR #${pr.number} is still open, so the Pane was kept for its review, fix and QA tabs. Archive it by --pane after the PR merges or closes.` },
+          pr,
           safetyCheck,
         });
         continue;
       }
+      const warning = pr.state === 'unknown'
+        ? `${pr.reason} Archived on local safety alone: the worktree has no uncommitted or unpushed work. Check the PR; if it is still open, create a Pane for its branch to keep working on it.`
+        : undefined;
       if (request.dryRun) {
-        items.push({ ...base, outcome: 'would-archive', safetyCheck });
+        items.push({ ...base, outcome: 'would-archive', pr, warning, safetyCheck });
         continue;
       }
       const cleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, removesWorktree);
@@ -4359,6 +4363,8 @@ async function archiveSessionPanes(
         ...base,
         outcome: cleanupOk ? 'archived' : 'failed',
         error: cleanupOk ? undefined : 'Pane was archived but its worktree could not be removed.',
+        pr,
+        warning,
         safetyCheck,
         ...cleanup,
       });
@@ -4401,29 +4407,28 @@ async function resolveUpstreamRemote(
 
 const PR_STATUS_TIMEOUT_MS = 20_000;
 
-type PanePrStatus =
-  | { state: 'open'; number: number }
-  | { state: 'none' }
-  | { state: 'unknown'; reason: string };
-
 /**
- * The Pane's PR state, read fresh from GitHub by its branch. Archive is destructive, so a
- * failed, unavailable or slow lookup is `unknown`, never "no open PR".
+ * The Pane's PR state by its branch, after dropping cached PR results. Advisory only:
+ * archive safety comes from local git, so a failed, unavailable or slow lookup is `unknown`.
  */
-async function findPrStatusForPane(services: AppServices, paneId: string): Promise<PanePrStatus> {
+async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
+  const gitStatus = services.gitStatusManager;
   try {
+    const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
+    if (projectPath) gitStatus.invalidatePrCache(projectPath);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), PR_STATUS_TIMEOUT_MS); });
-    const lookup = await Promise.race([services.gitStatusManager.lookupFreshPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
-    if (lookup === 'timeout') return { state: 'unknown', reason: 'GitHub did not answer in time.' };
+    const lookup = await Promise.race([gitStatus.lookupPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
+    if (lookup === 'timeout') return { state: 'unknown', reason: 'The PR state is unknown because GitHub did not answer within 20 seconds.' };
+    if (!lookup) return { state: 'unknown', reason: 'The PR state is unknown because the Pane\'s branch could not be read.' };
     if (!lookup.ok) {
       const detail = lookup.error instanceof Error ? ` (${lookup.error.message})` : '';
-      return { state: 'unknown', reason: `The PR state could not be confirmed${detail}.` };
+      return { state: 'unknown', reason: `The PR state is unknown because GitHub could not be reached${detail}.` };
     }
     if (lookup.pr?.prState === 'OPEN' && lookup.pr.prNumber !== undefined) return { state: 'open', number: lookup.pr.prNumber };
     return { state: 'none' };
   } catch {
-    return { state: 'unknown', reason: 'The PR lookup failed.' };
+    return { state: 'unknown', reason: 'The PR state is unknown because the PR lookup failed.' };
   }
 }
 

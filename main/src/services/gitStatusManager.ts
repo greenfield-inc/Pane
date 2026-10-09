@@ -634,11 +634,10 @@ export class GitStatusManager extends EventEmitter {
   private async fetchPrForSessionResult(
     branchName: string,
     projectPath: string,
-    commandRunner: CommandRunner,
-    { fresh = false }: { fresh?: boolean } = {},
+    commandRunner: CommandRunner
   ): Promise<PrLookupResult> {
     const cacheKey = `${projectPath}:${branchName}`;
-    const cached = fresh ? undefined : this.prCache.get(cacheKey);
+    const cached = this.prCache.get(cacheKey);
     const cacheTtl = cached?.prNumber !== undefined ? this.PR_HIT_CACHE_TTL : this.PR_MISS_CACHE_TTL;
     if (cached && Date.now() - cached.fetchedAt < cacheTtl) {
       return {
@@ -746,31 +745,6 @@ export class GitStatusManager extends EventEmitter {
    */
   async lookupPrForPane(sessionId: string): Promise<PrLookupResult | undefined> {
     return this.executePrEnrichmentWithLimit(() => this.enrichWithPrData(sessionId));
-  }
-
-  /**
-   * The Pane's PR for a destructive decision such as archiving: read fresh from GitHub inside
-   * the one-at-a-time GitHub slot, so no cached or in-flight result can stand in for it. Fails
-   * (`ok: false`) when the Pane has no worktree, its current branch can't be read, or GitHub
-   * can't answer; it never falls back to the worktree folder name.
-   */
-  async lookupFreshPrForPane(sessionId: string): Promise<PrLookupResult> {
-    return this.executePrEnrichmentWithLimit(async () => {
-      const session = await this.sessionManager.getSession(sessionId);
-      const project = this.sessionManager.getProjectForSession(sessionId);
-      const ctx = this.sessionManager.getProjectContext(sessionId);
-      if (!session?.worktreePath || !project?.path || !ctx) {
-        return { ok: false, error: new Error('The Pane has no worktree or repository to look its PR up from.') };
-      }
-      let branchName: string;
-      try {
-        branchName = (await ctx.commandRunner.execFile('git', ['branch', '--show-current'], session.worktreePath, { silent: true })).stdout.trim();
-      } catch (error) {
-        return { ok: false, error };
-      }
-      if (!branchName) return { ok: false, error: new Error('The Pane is not on a branch, so its PR cannot be looked up.') };
-      return this.fetchPrForSessionResult(branchName, project.path, ctx.commandRunner, { fresh: true });
-    });
   }
 
   private async enrichWithPrData(sessionId: string): Promise<PrLookupResult | undefined> {

@@ -284,11 +284,11 @@ completion. Archiving preserves the association.
 To close out finished work, `runpane panes archive --session <id|name> --merged
 [--remove-worktree] [--dry-run] --yes --json` archives every associated Pane
 whose work is clean and pushed, or whose branch was merged through a pull
-request whose head is the Pane's `HEAD`, and whose PR is not still open. A
-Pane whose PR is open is skipped as `pr-open`, because its review, fix and QA
-tabs still need the worktree; when GitHub can't confirm the PR state, the Pane
-is kept as `pr-status-unknown`. Every other Pane is skipped with a reason
-(`skipped.code`). `--remove-worktree` also removes adopted worktrees;
+request whose head is the Pane's `HEAD`. Local git alone decides whether
+removing the worktree is safe. The PR state (`pr`) is advisory: a Pane whose
+PR is open is skipped as `pr-open`, because its review, fix and QA tabs still
+need the worktree, and a Pane whose PR state GitHub can't confirm is archived
+with a `warning`. Every other Pane is skipped with a reason (`skipped.code`). `--remove-worktree` also removes adopted worktrees;
 local branches are always kept. Run it with `--dry-run` first.
 
 Before mutating, use `runpane agent-context --command 'sessions associate'
