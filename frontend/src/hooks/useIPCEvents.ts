@@ -401,6 +401,12 @@ export function useIPCEvents() {
     });
     if (unsubscribeOrchestrationChanged) unsubscribeFunctions.push(unsubscribeOrchestrationChanged);
 
+    // Every project create or delete (dialogs, onboarding, runpane CLI, MCP) reaches the project-changed listeners.
+    const unsubscribeProjectListChanged = window.electronAPI.events.onProjectListChanged?.(() => {
+      window.dispatchEvent(new Event('project-changed'));
+    });
+    if (unsubscribeProjectListChanged) unsubscribeFunctions.push(unsubscribeProjectListChanged);
+
     const unsubscribeOrchestrationOverview = window.electronAPI.events.onOrchestrationSessionsOverviewUpdated?.((change) => {
       window.dispatchEvent(new CustomEvent('orchestration-sessions-overview-updated', { detail: change }));
     });

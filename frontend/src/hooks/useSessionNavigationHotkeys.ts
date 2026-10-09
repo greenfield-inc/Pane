@@ -226,13 +226,16 @@ export function useSessionNavigationHotkeys({
   ]);
 
   // One palette command per active Session, selected the way its sidebar row is.
-  const orchestrationSessions = useOrchestrationSessionStore(s => s.sessions);
+  // A string key, so store refreshes that keep the same ids and names don't re-register.
+  const orchestrationSessionsKey = useOrchestrationSessionStore(s => JSON.stringify(
+    s.sessions.filter(session => !isArchivedOrchestrationSession(session)).map(session => [session.id, session.name]),
+  ));
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
 
   useEffect(() => {
     const ids: string[] = [];
-    for (const session of orchestrationSessions) {
+    for (const session of useOrchestrationSessionStore.getState().sessions) {
       if (isArchivedOrchestrationSession(session)) continue;
       const id = `switch-orchestration-session-${session.id}`;
       ids.push(id);
@@ -250,5 +253,5 @@ export function useSessionNavigationHotkeys({
       });
     }
     return () => ids.forEach(id => unregister(id));
-  }, [navigateToPaneChat, orchestrationSessions, register, selectOrchestrationSession, setActiveSession, unregister]);
+  }, [navigateToPaneChat, orchestrationSessionsKey, register, selectOrchestrationSession, setActiveSession, unregister]);
 }

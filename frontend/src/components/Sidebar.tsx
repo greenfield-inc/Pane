@@ -305,12 +305,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     };
   }, [loadProjects]);
 
-  // Projects added or removed outside this window (runpane CLI, MCP) reach every
-  // project-changed listener, the same way the in-app dialogs announce them.
-  useEffect(() => window.electronAPI.events.onProjectListChanged?.(() => {
-    window.dispatchEvent(new Event('project-changed'));
-  }), []);
-
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
     return projects.find(p => p.active) || projects[0];

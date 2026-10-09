@@ -326,7 +326,7 @@ export function OrchestrationSessionNav({
           )}>
             <button
               type="button"
-              aria-label="Session actions"
+              aria-label={`Actions for ${label}`}
               aria-haspopup="menu"
               title="Session actions"
               onClick={event => {

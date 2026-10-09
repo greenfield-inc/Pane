@@ -753,9 +753,7 @@ export function CreatePaneForm({
       <ModalFooter>
         <Button
           type="button"
-          onClick={() => {
-                    onClose();
-          }}
+          onClick={onClose}
           variant="ghost"
           disabled={isSubmitting}
         >

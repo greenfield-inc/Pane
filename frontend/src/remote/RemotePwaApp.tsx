@@ -326,23 +326,27 @@ export function RemotePwaApp() {
     }
   }, [adapter, setArchivedProjects, setLastError]);
 
-  const openRemoteOrchestrationSession = useCallback(async (sessionId: string, runtime: RemoteRuntimeAdapter | null = adapter) => {
-    if (!runtime) return;
+  /** Resolves false when the Session failed to open. */
+  const openRemoteOrchestrationSession = useCallback(async (sessionId: string, runtime: RemoteRuntimeAdapter | null = adapter): Promise<boolean> => {
+    if (!runtime) return false;
     const request = ++navigationRequestRef.current;
     try {
       const view = await runtime.openOrchestrationSession(sessionId);
-      if (runtime !== activeRuntimeRef.current || request !== navigationRequestRef.current) return;
+      if (runtime !== activeRuntimeRef.current || request !== navigationRequestRef.current) return true;
       openSession(view);
       setLastError(null);
+      return true;
     } catch (error) {
-      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to open Session');
+      if (runtime !== activeRuntimeRef.current) return true;
+      setLastError(error instanceof Error ? error.message : 'Failed to open Session');
+      return false;
     }
   }, [adapter, openSession, setLastError]);
 
   const historyView: RemoteHistoryView = openOrchestrationSession
     ? `session:${openOrchestrationSession.session.id}`
     : selectedSessionId ? `pane:${selectedSessionId}` : null;
-  const { requestView } = useRemoteBrowserHistory({
+  const { requestView, cancelRequest } = useRemoteBrowserHistory({
     enabled: adapter !== null && !isNativeMobile(),
     view: historyView,
     overlayOpen: sidebarOpen || createSessionProject !== null || createOrchestrationOpen,
@@ -593,7 +597,7 @@ export function RemotePwaApp() {
     openSession: (sessionId) => {
       requestView(`session:${sessionId}`);
       setSidebarOpen(false);
-      void openRemoteOrchestrationSession(sessionId);
+      void openRemoteOrchestrationSession(sessionId).then(opened => { if (!opened) cancelRequest(); });
     },
     createSession: openCreateOrchestrationSession,
     toggleSessionPinned: (session) => void runSidebarAction(session.id, 'Failed to update Session pin', async (runtime) => {
@@ -607,7 +611,7 @@ export function RemotePwaApp() {
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
     refresh: () => void resyncHost(adapter),
-  }), [adapter, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
+  }), [adapter, cancelRequest, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
 
   const handleRemoteSessionCreated = useCallback(async (projectId: number, sessionName: string) => {
     if (!adapter) return;

@@ -468,7 +468,7 @@ function RemotePaneRow({
   );
 }
 
-/** A pinned row shows its unpin action in the accent colour; both glyphs share one box. */
+/** Unpin glyph for a pinned row, pin glyph otherwise; both share one box. */
 function PinIcon({ pinned }: { pinned: boolean }) {
   return pinned
     ? <PinOff className="h-3.5 w-3.5" aria-hidden="true" />

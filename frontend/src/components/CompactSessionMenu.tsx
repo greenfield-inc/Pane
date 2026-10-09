@@ -3,6 +3,7 @@ import { Modal, ModalBody, ModalHeader, ModalFooter } from './ui/Modal';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
 import { useSessionStore } from '../stores/sessionStore';
+import { useErrorStore } from '../stores/errorStore';
 import { useState } from 'react';
 import { PromotePaneDialog } from './PromotePaneDialog';
 import { Archive, Pin, ArrowUpRight, Pencil, FolderPlus, FolderMinus, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -27,7 +28,7 @@ interface CompactSessionMenuProps {
 export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }: CompactSessionMenuProps) {
   const [promoting, setPromoting] = useState<Session | null>(null);
   const [renaming, setRenaming] = useState<Session | null>(null);
-  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const showError = useErrorStore(state => state.showError);
   const orchestrationSessions = useOrchestrationSessionStore(state => state.sessions);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(state => state.refresh);
   const paneId = menu?.session.id;
@@ -35,22 +36,20 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   const memberOf = activeSessions.filter(session => session.associations.some(association => association.paneId === paneId));
   const addableTo = activeSessions.filter(session => !memberOf.includes(session));
   // "Add to Session" swaps the menu to a Session list in place, so the menu stays short however many Sessions exist.
-  const [pickingFor, setPickingFor] = useState<string | null>(null);
-  const picking = paneId !== undefined && pickingFor === paneId;
+  const [picking, setPicking] = useState(false);
 
   function close() {
-    setPickingFor(null);
+    setPicking(false);
     onClose();
   }
 
   async function changeMembership(sessionId: string, action: 'add' | 'remove') {
     if (!paneId) return;
     close();
-    setMembershipError(null);
     const result = action === 'add'
       ? await API.orchestrationSessions.associate({ sessionId }, { paneId })
       : await API.orchestrationSessions.detach({ sessionId }, paneId);
-    if (!result.success) setMembershipError(result.error || 'Could not update the Session');
+    if (!result.success) showError({ title: 'Session update failed', error: result.error || 'Could not update the Session' });
     await refreshOrchestrationSessions();
   }
 
@@ -63,7 +62,7 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
     >
       {picking ? (
         <div role="menu" aria-label={`Add ${menu?.session.name || 'Untitled'} to a Session`}>
-          <PopoverButton role="menuitem" onClick={() => setPickingFor(null)}>
+          <PopoverButton role="menuitem" onClick={() => setPicking(false)}>
             <span className="flex items-center gap-2"><ChevronLeft className="h-4 w-4" />Back</span>
           </PopoverButton>
           <div className="my-1 border-t border-border-primary" />
@@ -89,7 +88,7 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
         </PopoverButton>
         {(addableTo.length > 0 || memberOf.length > 0) && <div className="my-1 border-t border-border-primary" />}
         {addableTo.length > 0 && (
-          <PopoverButton role="menuitem" aria-haspopup="menu" onClick={() => { if (paneId) setPickingFor(paneId); }}>
+          <PopoverButton role="menuitem" aria-haspopup="menu" onClick={() => setPicking(true)}>
             <span className="flex items-center gap-2"><FolderPlus className="h-4 w-4" />Add to Session<ChevronRight className="ml-auto h-4 w-4" /></span>
           </PopoverButton>
         )}
@@ -110,13 +109,6 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
       </div>
       )}
     </TerminalPopover>
-    {membershipError && (
-      <Modal isOpen onClose={() => setMembershipError(null)} ariaLabel="Session update failed">
-        <ModalHeader title="Session update failed" />
-        <ModalBody><p role="alert" className="text-sm text-status-error">{membershipError}</p></ModalBody>
-        <ModalFooter><Button type="button" onClick={() => setMembershipError(null)}>OK</Button></ModalFooter>
-      </Modal>
-    )}
     {renaming && <RenameWorktreeDialog key={renaming.id} session={renaming} onClose={() => setRenaming(null)} />}
     {promoting && <PromotePaneDialog key={promoting.id} paneId={promoting.id} paneName={promoting.name} onClose={() => setPromoting(null)} />}
   </>);

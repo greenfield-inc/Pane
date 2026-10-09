@@ -58,21 +58,25 @@ interface RemoteBrowserHistoryOptions {
 /**
  * Gives browser back a step inside the PWA: it closes the open drawer or sheet,
  * else returns to the previous Pane or Session. Returns `requestView`, which marks
- * the next view the person opens so it gets its own history entry.
+ * the next view the person opens so it gets its own history entry, and
+ * `cancelRequest`, which drops that mark when the view fails to open.
  */
 export function useRemoteBrowserHistory({ enabled, view, overlayOpen, onNavigate, onCloseOverlays }: RemoteBrowserHistoryOptions) {
   const pendingViewRef = useRef<RemoteHistoryView | undefined>(undefined);
-  const latestRef = useCommittedRef({ view, overlayOpen, onNavigate, onCloseOverlays });
+  const latestRef = useCommittedRef({ enabled, view, overlayOpen, onNavigate, onCloseOverlays });
 
-  useEffect(() => {
-    if (!enabled) return;
-    const current: RemoteHistoryEntry = { view, overlay: overlayOpen };
+  const syncHistory = useCallback(() => {
+    const latest = latestRef.current;
+    if (!latest.enabled) return;
+    const current: RemoteHistoryEntry = { view: latest.view, overlay: latest.overlayOpen };
     const action = nextHistoryAction(decodeOptionalBoundary(window.history.state, HISTORY_STATE)?.[STATE_KEY] ?? null, current, pendingViewRef.current);
-    if (pendingViewRef.current === view) pendingViewRef.current = undefined;
+    if (pendingViewRef.current === latest.view) pendingViewRef.current = undefined;
     if (action === 'push') window.history.pushState({ [STATE_KEY]: current }, '');
     else if (action === 'replace') window.history.replaceState({ [STATE_KEY]: current }, '');
     else if (action === 'back') window.history.back();
-  }, [enabled, overlayOpen, view]);
+  }, [latestRef]);
+
+  useEffect(() => { syncHistory(); }, [enabled, overlayOpen, view, syncHistory]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -88,6 +92,13 @@ export function useRemoteBrowserHistory({ enabled, view, overlayOpen, onNavigate
     return () => window.removeEventListener('popstate', handlePopState);
   }, [enabled, latestRef]);
 
-  const requestView = useCallback((next: RemoteHistoryView) => { pendingViewRef.current = next; }, []);
-  return { requestView };
+  const requestView = useCallback((next: RemoteHistoryView) => {
+    pendingViewRef.current = next === latestRef.current.view ? undefined : next;
+  }, [latestRef]);
+  const cancelRequest = useCallback(() => {
+    if (pendingViewRef.current === undefined) return;
+    pendingViewRef.current = undefined;
+    syncHistory();
+  }, [syncHistory]);
+  return { requestView, cancelRequest };
 }

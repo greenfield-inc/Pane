@@ -239,7 +239,7 @@ export function setupEventListeners(services: AppServices): void {
     sendRendererEvent('project:updated', project);
   });
 
-  // Projects can be added or removed outside the window (runpane CLI, MCP, daemon).
+  // Fires on every project create or delete: dialogs, onboarding, runpane CLI, MCP.
   sessionManager.on('project:list-changed', () => {
     sendRendererEvent('project:list-changed');
   });
