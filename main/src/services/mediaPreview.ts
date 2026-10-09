@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { createWriteStream } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
-import { dirname, extname, join } from 'path';
+import { basename, dirname, extname, join } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
@@ -82,7 +82,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   const currentHost = () => {
     const connection = runtime.connection();
     if (connection.kind === 'local') return null;
-    if (!connection.host) throw new Error('The remote host is not connected');
+    if (!connection.host) throw new Error('The remote host is not connected, so Pane cannot reach this file. Nothing was changed. Reconnect to the host, then try again.');
     return connection.host;
   };
   // Reuse the worktree boundary, symlink checks and Windows/WSL conversion.
@@ -124,9 +124,12 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   });
   /** System apps run where the file is, so a remote host's file is opened from a client copy. */
   const copyFromHost = async (host: RemoteMediaHost, file: PreviewFile) => {
-    const copyFailed = new Error('Could not copy this file from the host');
-    const response = await host.fetchMedia(file, new Request('pane-media://preview/open')).catch(() => { throw copyFailed; });
-    if (response.status !== 200 || !response.body) throw copyFailed;
+    const copyFailed = (reason: string) => new Error(
+      `Could not copy ${basename(file.filePath)} from the host to open it here: ${reason}. Nothing was changed. Check the connection to the host, then try again.`,
+    );
+    const response = await host.fetchMedia(file, new Request('pane-media://preview/open'))
+      .catch((error: unknown) => { throw copyFailed(error instanceof Error ? error.message : String(error)); });
+    if (response.status !== 200 || !response.body) throw copyFailed(`the host answered HTTP ${response.status}`);
     const directory = await mkdtemp(join(tmpdir(), 'pane-remote-open-'));
     const target = join(directory, clientSafeName(file.filePath));
     try {
@@ -142,14 +145,16 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
     const action = decodeBoundary(rawAction, boundary.enumeration('open', 'reveal'));
     const request = decodeBoundary(raw, requestSchema);
     const host = currentHost();
-    if (host && action === 'reveal') throw new Error('Reveal in folder works only on the host');
+    if (host && action === 'reveal') {
+      throw new Error('Reveal in folder works only on the host, because this file is on another machine. Nothing was changed. Use Open to view a copy here, or reveal it from Pane on the host.');
+    }
     if (action === 'open') {
       const target = host ? await copyFromHost(host, request) : (await resolve(request)).path;
       const error = await runtime.openPath(target);
       if (error) {
         // A successful copy stays for the system app; a failed open leaves nothing behind.
         if (host) await rm(dirname(target), { recursive: true, force: true });
-        throw new Error(error);
+        throw new Error(`Could not open ${basename(request.filePath)} with the default app: ${error}. ${host ? 'The copy made for it was removed.' : 'Nothing was changed.'} Set a default app for this file type, then try again.`);
       }
     } else {
       await revealInFileManager((await resolve(request)).path);

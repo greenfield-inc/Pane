@@ -21,9 +21,11 @@ export interface PaneDaemonSuccessResponseFrame {
   result?: JsonValue;
 }
 
+/** What happened and why in `message`; the step to take in `next`. See shared/paneError.ts. */
 export interface PaneDaemonError {
   message: string;
   code?: string;
+  next?: string;
 }
 
 export interface PaneDaemonErrorResponseFrame {
@@ -68,6 +70,7 @@ const responseFrameSchema: BoundarySchema<PaneDaemonResponseFrame> = boundary.un
     error: boundary.object({
       message: boundary.string,
       code: boundary.optional(boundary.string),
+      next: boundary.optional(boundary.string),
     }),
   }),
 );

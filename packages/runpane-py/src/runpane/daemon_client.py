@@ -16,10 +16,16 @@ DAEMON_SOCKET_FILENAME = "daemon.sock"
 DEFAULT_TIMEOUT_MS = 130_000
 
 
+CONNECT_NEXT = "Open Pane on this machine, then check the connection with `runpane doctor`."
+
+
 class PaneDaemonClientError(RuntimeError):
-    def __init__(self, message: str, code: Optional[str] = None) -> None:
+    """What happened and why in the message; the step to take in `next`."""
+
+    def __init__(self, message: str, code: Optional[str] = None, next: Optional[str] = None) -> None:
         super().__init__(message)
         self.code = code
+        self.next = next
 
 
 def resolve_pane_directory(pane_dir: Optional[str] = None) -> str:
@@ -79,8 +85,9 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
                 raise
             except OSError as error:
                 raise PaneDaemonClientError(
-                    f"Could not connect to Pane daemon at {socket_path}: {error}",
+                    f"Could not connect to Pane daemon at {socket_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+                    CONNECT_NEXT,
                 ) from error
 
             client.sendall(encoded_request)
@@ -138,8 +145,9 @@ def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: floa
                     return response
     except OSError as error:
         raise PaneDaemonClientError(
-            f"Could not connect to Pane daemon at {pipe_path}: {error}",
+            f"Could not connect to Pane daemon at {pipe_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
             "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+            CONNECT_NEXT,
         ) from error
 
 
@@ -150,7 +158,7 @@ def first_matching_response(frames: List[Dict[str, Any]]) -> Optional[Any]:
         if frame.get("ok") is True:
             return frame.get("result")
         error = frame.get("error") or {}
-        raise PaneDaemonClientError(error.get("message", "Pane daemon request failed"), error.get("code"))
+        raise PaneDaemonClientError(error.get("message", "Pane daemon request failed"), error.get("code"), error.get("next"))
     return None
 
 

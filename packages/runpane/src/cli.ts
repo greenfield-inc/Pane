@@ -12,6 +12,7 @@ import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
 import { routeDaemonCallsTo } from './daemonClient';
+import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
 import { runDoctor } from './doctor';
@@ -150,11 +151,10 @@ async function dispatchWithWorkspaceHint(parsed: ParsedArgs, telemetryContext: W
   try {
     return await dispatchParsedCommand(parsed, telemetryContext);
   } catch (error) {
-    if (error instanceof Error) {
-      const hint = await workspaceHintFor(error, parsed).catch(() => null);
-      if (hint) error.message = `${error.message}\n${hint}`;
-    }
-    throw error;
+    const hint = error instanceof Error ? await workspaceHintFor(error, parsed).catch(() => null) : null;
+    if (!hint) throw error;
+    const failure = describeFailure(error);
+    throw new RunpaneError(failure.code, failure.next ? `${failure.message} ${failure.next}` : failure.message, hint);
   }
 }
 
@@ -695,7 +695,7 @@ if (require.main === module) {
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    printFailure(error, process.argv.includes('--json'));
     process.exitCode = 1;
   });
 }

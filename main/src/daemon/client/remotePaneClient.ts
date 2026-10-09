@@ -27,6 +27,7 @@ import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
+import { PaneError } from '../../../../shared/paneError';
 
 interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
@@ -61,6 +62,7 @@ interface RemoteInvokeErrorPayload {
   error: {
     message: string;
     code?: string;
+    next?: string;
   };
 }
 
@@ -87,6 +89,7 @@ const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = 
     error: boundary.object({
       message: boundary.string,
       code: boundary.optional(boundary.string),
+      next: boundary.optional(boundary.string),
     }),
   }),
 );
@@ -330,7 +333,7 @@ export class RemotePaneClient {
     );
 
     if (!payload.ok) {
-      throw new Error(payload.error.message);
+      throw new PaneError(payload.error.code ?? 'ERR_REMOTE_DAEMON_REQUEST_FAILED', payload.error.message, payload.error.next);
     }
 
     return payload.result;

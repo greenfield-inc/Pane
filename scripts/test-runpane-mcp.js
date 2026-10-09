@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Behavior tests for `runpane mcp`: tool generation from the contract and
-// stdio round-trips to a stubbed Pane daemon. Run after `pnpm --filter runpane build`.
+// Behavior tests for `runpane mcp`: tool generation from the contract,
+// stdio round-trips to a stubbed Pane daemon, and the CLI errors tools relay. Run after `pnpm --filter runpane build`.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const net = require('node:net');
@@ -81,6 +81,9 @@ async function exchangeRaw(messages) {
 
 /** A stub result that never answers, to hold a tool call open. */
 const HOLD = Symbol('hold');
+/** A stub result the daemon answers with an error frame: `fail({ code, message, next })`. */
+const FAILED = Symbol('failed');
+const fail = (error) => ({ [FAILED]: error });
 
 const MODERN_META = {
   'io.modelcontextprotocol/protocolVersion': '2026-07-28',
@@ -116,7 +119,8 @@ async function withStubDaemon(paneDir, results, action) {
         requests.push({ channel: frame.channel, args: frame.args, socket });
         if (answer === HOLD) continue;
         const result = answer instanceof Function ? answer(frame.args) : answer;
-        socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result })}\n`);
+        const response = result?.[FAILED] ? { ok: false, error: result[FAILED] } : { ok: true, result };
+        socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ...response })}\n`);
       }
     });
   });
@@ -316,6 +320,71 @@ test('a failing command returns isError with the CLI message', async () => {
     assert.equal(result.isError, true);
     assert.ok(result.content[0].text.length > 0);
     assert.equal(result.structuredContent, undefined);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+const REPO_GONE = {
+  code: 'ERR_RUNPANE_REPO_NOT_FOUND',
+  message: 'Repository 7 is not saved in Pane. Nothing was changed.',
+  next: 'List the saved repositories with `runpane repos list`.',
+};
+
+/** Runs the CLI without blocking, so an in-process stub daemon can answer it. */
+function runCli(args) {
+  const child = spawn(process.execPath, [dist('cli.js'), ...args], { env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' } });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+  return new Promise((resolve) => child.once('close', (status) => resolve({ status, stdout, stderr })));
+}
+
+test('a daemon error prints as {ok:false, error:{code, message, next}} under --json and as a Next line for people', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
+  try {
+    await withStubDaemon(paneDir, { 'runpane:repos:list': fail(REPO_GONE) }, async () => {
+      const json = await runCli(['repos', 'list', '--pane-dir', paneDir, '--json']);
+      assert.equal(json.status, 1);
+      assert.deepEqual(JSON.parse(json.stdout), { ok: false, error: REPO_GONE });
+
+      const human = await runCli(['repos', 'list', '--pane-dir', paneDir]);
+      assert.equal(human.status, 1);
+      assert.equal(human.stderr.trim(), 'Repository 7 is not saved in Pane. Nothing was changed.\nNext: List the saved repositories with `runpane repos list`.');
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('when Pane is not running, the CLI keeps the connection error and says what to do', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
+  try {
+    const result = await runCli(['repos', 'list', '--pane-dir', paneDir, '--json']);
+    assert.equal(result.status, 1);
+    const { ok, error } = JSON.parse(result.stdout);
+    assert.equal(ok, false);
+    assert.equal(error.code, 'ENOENT');
+    assert.match(error.message, /Could not connect to Pane daemon at .*ENOENT.*Pane is not running for .* Nothing was changed\./s);
+    assert.match(error.next, /Open Pane.*`runpane doctor`/);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('a tool error reads as the message, the next step in tool names, and the code', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
+  try {
+    await withStubDaemon(paneDir, { 'runpane:repos:list': fail(REPO_GONE) }, async () => {
+      const result = await withMcpClient((client) => client.callTool({ name: 'repos_list', arguments: { paneDir } }));
+      assert.equal(result.isError, true);
+      assert.equal(result.content[0].text, [
+        'Repository 7 is not saved in Pane. Nothing was changed.',
+        'Next: List the saved repositories with `repos_list`.',
+        'Code: ERR_RUNPANE_REPO_NOT_FOUND',
+      ].join('\n'));
+    });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });
   }

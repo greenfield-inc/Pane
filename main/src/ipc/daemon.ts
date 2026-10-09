@@ -1,5 +1,5 @@
 import { isDaemonOwnedChannel } from '../daemon/daemonChannels';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { rejectWithPaneErrorText, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -40,6 +40,6 @@ export function registerDaemonBridgeHandlers(
       throw new Error(`Channel "${decodedChannel}" is not daemon-owned`);
     }
 
-    return bridgeRouter.invoke(decodedChannel, args);
+    return rejectWithPaneErrorText(bridgeRouter.invoke(decodedChannel, args));
   });
 }

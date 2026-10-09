@@ -27,6 +27,7 @@ interface PaneDaemonErrorResponseFrame {
   error: {
     message: string;
     code?: string;
+    next?: string;
   };
 }
 
@@ -84,6 +85,7 @@ const paneDaemonFrameSchema: BoundarySchema<PaneDaemonFrame> = boundary.union(
     error: boundary.object({
       message: boundary.string,
       code: boundary.optional(boundary.string),
+      next: boundary.optional(boundary.string),
     }),
   }),
   boundary.object({
@@ -98,6 +100,7 @@ export class PaneDaemonClientError extends Error {
     message: string,
     readonly code?: string,
     readonly connectionFailure = false,
+    readonly next?: string,
   ) {
     super(message);
     this.name = 'PaneDaemonClientError';
@@ -132,7 +135,7 @@ export interface RemoteDaemonTarget {
 
 const remoteInvokeResponseSchema = boundary.union(
   boundary.object({ ok: boundary.literal(true), result: boundary.optional(boundary.json) }),
-  boundary.object({ ok: boundary.literal(false), error: boundary.object({ message: boundary.string, code: boundary.optional(boundary.string) }) }),
+  boundary.object({ ok: boundary.literal(false), error: boundary.object({ message: boundary.string, code: boundary.optional(boundary.string), next: boundary.optional(boundary.string) }) }),
 );
 
 let routedTarget: RemoteDaemonTarget | null = null;
@@ -180,7 +183,7 @@ export async function invokeRemoteDaemon<T>(
     const fix = payload.error.code === 'ERR_WORKSPACE_IDENTITY_REFUSED'
       ? ' Its owner can let you in from Pane on that machine: Settings → Remote Access → Access to this computer → Who can connect → Everyone on tailnet.'
       : '';
-    throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}${fix}`, payload.error.code);
+    throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}${fix}`, payload.error.code, false, payload.error.next);
   }
   return decodeBoundary(payload.result, resultSchema);
 }
@@ -194,7 +197,8 @@ export async function invokeDaemon<T>(
   if (routedTarget) {
     return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
   }
-  const endpoint = getPaneDaemonEndpoint(resolvePaneDirectory(options.paneDir));
+  const appDirectory = resolvePaneDirectory(options.paneDir);
+  const endpoint = getPaneDaemonEndpoint(appDirectory);
   const request: PaneDaemonRequestFrame = {
     type: 'request',
     id: 1,
@@ -250,7 +254,7 @@ export async function invokeDaemon<T>(
             settle({ result: decodeBoundary(frame.result, resultSchema) });
             return;
           }
-          settle({ error: new PaneDaemonClientError(frame.error.message, frame.error.code) });
+          settle({ error: new PaneDaemonClientError(frame.error.message, frame.error.code, false, frame.error.next) });
           return;
         }
       } catch (error) {
@@ -260,7 +264,12 @@ export async function invokeDaemon<T>(
 
     socket.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code ?? 'ERR_RUNPANE_DAEMON_CONNECT_FAILED';
-      settle({ error: new PaneDaemonClientError(`Could not connect to Pane daemon at ${endpoint.path}: ${error.message}`, code, true) });
+      settle({ error: new PaneDaemonClientError(
+        `Could not connect to Pane daemon at ${endpoint.path}: ${error.message}. Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
+        code,
+        true,
+        'Open Pane on this machine, then check the connection with `runpane doctor`.',
+      ) });
     });
 
     socket.once('close', () => {

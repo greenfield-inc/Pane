@@ -7,6 +7,7 @@ import type { PaneDaemonFrame } from '../../../shared/types/daemon';
 import { PaneCommandRegistry } from './commandRegistry';
 import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from './socketFraming';
 import { PaneDaemonServer } from './server';
+import { PaneError } from '../../../shared/paneError';
 
 interface TestClient {
   socket: net.Socket;
@@ -155,8 +156,33 @@ describe('PaneDaemonServer', () => {
       id: 2,
       ok: false,
       error: {
-        message: 'No Pane daemon command registered for channel "sessions:missing"',
+        message: 'No Pane daemon command registered for channel "sessions:missing". This Pane does not have that command, usually because it is older than the runpane CLI or app that asked. Nothing was changed.',
         code: 'ERR_UNKNOWN_CHANNEL',
+        next: 'Update Pane with `runpane update`, then restart it.',
+      },
+    });
+  });
+
+  it('keeps the code and next step a handler reports', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('sessions:get-all', () => {
+      throw new PaneError('ERR_PANE_NOT_FOUND', 'Pane abc is not on this machine. Nothing was changed.', 'List Panes with `runpane panes list`.');
+    });
+    const server = new PaneDaemonServer(registry, createTempAppDirectory());
+    activeServers.push(server);
+    await server.start();
+
+    const client = await connectClient(server);
+    client.socket.write(encodePaneDaemonFrame({ type: 'request', id: 3, channel: 'sessions:get-all', args: [] }));
+
+    await expect(client.nextFrame()).resolves.toEqual({
+      type: 'response',
+      id: 3,
+      ok: false,
+      error: {
+        code: 'ERR_PANE_NOT_FOUND',
+        message: 'Pane abc is not on this machine. Nothing was changed.',
+        next: 'List Panes with `runpane panes list`.',
       },
     });
   });
@@ -493,14 +519,11 @@ describe('PaneDaemonServer', () => {
       args: [],
     }));
 
-    await expect(client.nextFrame()).resolves.toEqual({
+    await expect(client.nextFrame()).resolves.toMatchObject({
       type: 'response',
       id: 9,
       ok: false,
-      error: {
-        message: 'No Pane daemon command registered for channel "sessions:get-all"',
-        code: 'ERR_UNKNOWN_CHANNEL',
-      },
+      error: { code: 'ERR_UNKNOWN_CHANNEL' },
     });
   });
 

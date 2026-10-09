@@ -5358,6 +5358,7 @@ export const RUNPANE_CONTRACT = {
   "jsonSchemas": {
     "error": {
       "type": "object",
+      "description": "A failed command under --json, printed on stdout with a non-zero exit. The same message, plus a Next line, goes to stderr.",
       "required": [
         "ok",
         "error"
@@ -5369,14 +5370,21 @@ export const RUNPANE_CONTRACT = {
         "error": {
           "type": "object",
           "required": [
+            "code",
             "message"
           ],
           "properties": {
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "What happened, why, and what was or was not changed."
             },
             "code": {
-              "type": "string"
+              "type": "string",
+              "description": "Stable identifier to branch on, such as ENOENT or ERR_UNKNOWN_CHANNEL. ERR_RUNPANE_FAILED when the failure has no specific code."
+            },
+            "next": {
+              "type": "string",
+              "description": "The step to take next, when one is known."
             }
           },
           "additionalProperties": false

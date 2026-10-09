@@ -1,6 +1,7 @@
 import { isDaemonOwnedChannel } from './daemonChannels';
 import type { IpcMainInvokeEvent } from 'electron';
 import { AsyncLocalStorage } from 'async_hooks';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
 
 const invocationSignal = new AsyncLocalStorage<AbortSignal>();
 
@@ -65,7 +66,11 @@ export class PaneCommandRegistry {
   async invoke(channel: string, args: readonly PaneCommandValue[] = []): Promise<PaneCommandValue> {
     const handler = this.handlers.get(channel);
     if (!handler) {
-      throw new Error(`No Pane daemon command registered for channel "${channel}"`);
+      throw new PaneError(
+        'ERR_UNKNOWN_CHANNEL',
+        `No Pane daemon command registered for channel "${channel}". This Pane does not have that command, usually because it is older than the runpane CLI or app that asked. Nothing was changed.`,
+        'Update Pane with `runpane update`, then restart it.',
+      );
     }
 
     return handler(...args);
@@ -90,7 +95,7 @@ export class PaneCommandRegistry {
       throw new Error(`Pane daemon command "${channel}" is already bound to IPC`);
     }
 
-    ipcMain.handle(channel, (_event, ...args) => this.invoke(channel, args));
+    ipcMain.handle(channel, (_event, ...args) => rejectWithPaneErrorText(this.invoke(channel, args)));
     this.boundChannels.add(channel);
   }
 
@@ -98,5 +103,14 @@ export class PaneCommandRegistry {
     for (const channel of channels) {
       this.bindChannel(ipcMain, channel);
     }
+  }
+}
+
+/** Electron IPC keeps only an error's message, so a PaneError's next step joins its message. */
+export async function rejectWithPaneErrorText<T>(result: Promise<T>): Promise<T> {
+  try {
+    return await result;
+  } catch (error) {
+    throw error instanceof PaneError ? new Error(paneErrorText(error)) : error;
   }
 }
