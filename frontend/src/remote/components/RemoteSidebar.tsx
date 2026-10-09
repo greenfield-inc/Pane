@@ -182,12 +182,6 @@ export function RemoteSidebar({
               itemClassName="min-h-11 md:min-h-[1.75rem]"
               items={[
                 {
-                  id: 'pin',
-                  label: session.isPinned ? 'Unpin Session' : 'Pin Session',
-                  icon: session.isPinned ? PinOff : Pin,
-                  onClick: () => actions.toggleSessionPinned(session),
-                },
-                {
                   id: 'archive',
                   label: 'Archive Session',
                   icon: Archive,

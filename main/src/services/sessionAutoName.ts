@@ -1,7 +1,7 @@
 const MAX_NAME_LENGTH = 40;
 const MAX_DRAFT_LENGTH = 4_000;
 /* oxlint-disable eslint/no-control-regex -- Terminal input parsing needs control-character patterns. */
-const BRACKETED_PASTE_MARKERS = /\x1b\[20[01]~/g;
+const BRACKETED_PASTE = /\x1b\[200~([\s\S]*?)(?:\x1b\[201~|$)/g;
 const PROMPT_NEWLINE = /\x1b\r/g;
 const ESCAPE_SEQUENCE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|O.|.)/g;
 /* oxlint-enable eslint/no-control-regex */
@@ -15,11 +15,14 @@ export interface TypedInput {
 
 /**
  * Replays raw terminal keystrokes onto the line being typed. Enter submits the
- * line; ESC CR is a newline inside a prompt; Backspace, Ctrl-U and Ctrl-C edit
- * or clear it. Cursor movement and other escape sequences are dropped.
+ * line; ESC CR and a CR inside a bracketed paste are newlines; Backspace, Ctrl-U
+ * and Ctrl-C edit or clear it. Cursor movement and other escape sequences are dropped.
  */
 export function applyTerminalInput(draft: string, data: string): TypedInput {
-  const text = data.replace(BRACKETED_PASTE_MARKERS, '').replace(PROMPT_NEWLINE, '\n').replace(ESCAPE_SEQUENCE, '');
+  const text = data
+    .replace(PROMPT_NEWLINE, '\n')
+    .replace(BRACKETED_PASTE, (_match, pasted: string) => pasted.replace(/\r\n?/g, '\n'))
+    .replace(ESCAPE_SEQUENCE, '');
   const submitted: string[] = [];
   let line = draft;
   for (const char of text) {
@@ -34,7 +37,7 @@ export function applyTerminalInput(draft: string, data: string): TypedInput {
       line += char;
     }
   }
-  return { draft: line.slice(-MAX_DRAFT_LENGTH), submitted };
+  return { draft: line.slice(0, MAX_DRAFT_LENGTH), submitted };
 }
 
 /**

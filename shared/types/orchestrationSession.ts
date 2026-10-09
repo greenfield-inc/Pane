@@ -220,7 +220,7 @@ export interface OrchestrationSessionUpdateInput {
   outputs?: OrchestrationLink[];
   report?: OrchestrationReport | null;
   expectedRevision?: number;
-  source?: 'user' | 'agent';
+  source?: OrchestrationActivity['source'];
 }
 
 export interface OrchestrationSessionSelector {

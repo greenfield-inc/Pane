@@ -117,6 +117,8 @@ export function RemotePwaApp() {
   const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionRecord | null>(null);
   /** The saved profile being reconnected to on open, until that attempt ends. */
   const [reconnectingProfile, setReconnectingProfile] = useState<RemotePaneConnectionProfile | null>(null);
+  /** Whether the notification tap that launched the app, if any, has been read; reconnecting waits for it. */
+  const [pushRouteChecked, setPushRouteChecked] = useState(() => !isNativeMobile());
   /** Menus opened from the drawer render inside it, so the drawer's focus trap and outside-click dismissal leave them alone. */
   const [drawerElement, setDrawerElement] = useState<HTMLDivElement | null>(null);
   const autoConnectStartedRef = useRef(false);
@@ -141,8 +143,17 @@ export function RemotePwaApp() {
     let mounted = true;
     void installNativePushRouting()
       .then(consumeNativePushRoute)
-      .then(route => { if (mounted && route) setPendingPushRoute(route); })
-      .catch(error => { if (mounted) setLastError(error instanceof Error ? error.message : 'Native notification setup failed.'); });
+      .then(route => {
+        if (!mounted) return;
+        // Set together so the reconnect effect sees the route in the same render.
+        if (route) setPendingPushRoute(route);
+        setPushRouteChecked(true);
+      })
+      .catch(error => {
+        if (!mounted) return;
+        setLastError(error instanceof Error ? error.message : 'Native notification setup failed.');
+        setPushRouteChecked(true);
+      });
     return () => { mounted = false; };
   }, [setLastError]);
   useEffect(() => {
@@ -519,14 +530,14 @@ export function RemotePwaApp() {
 
   // Reconnects to the last used host once on open; a notification tap picks its own host instead.
   useEffect(() => {
-    if (profilesLoading || autoConnectStartedRef.current) return;
+    if (profilesLoading || !pushRouteChecked || autoConnectStartedRef.current) return;
     autoConnectStartedRef.current = true;
     // saveProfile keeps the last connected profile first.
     const profile = savedProfiles[0];
     if (!profile || pendingPushRoute || isAutoConnectPaused()) return;
     setReconnectingProfile(profile);
     void connectProfile(profile).catch(() => {}).finally(() => setReconnectingProfile(null));
-  }, [connectProfile, pendingPushRoute, profilesLoading, savedProfiles]);
+  }, [connectProfile, pendingPushRoute, profilesLoading, pushRouteChecked, savedProfiles]);
 
   const connectCode = useCallback(async (code: string) => {
     setLastError(null);

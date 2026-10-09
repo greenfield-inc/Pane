@@ -474,12 +474,6 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
-  /**
-   * What a phone alert about a Pane is titled and grouped under: a Session's own pane is the
-   * Session, a worker is "Session › Pane", and any other Pane stands alone. `groupPaneId` is the
-   * Session's workspace pane, which the phone opens a Session by. Reads the in-memory store, like
-   * `workspaceMembership`.
-   */
   /** Terminal input a person typed. The first message to a Session agent renames a Session that still has its default name. */
   observeInput(panelId: string, data: string): void {
     if (!panelId.startsWith(ORCHESTRATION_SESSION_PANEL_PREFIX) || this.namedPanelIds.has(panelId)) return;
@@ -492,6 +486,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     this.firstMessageDrafts.delete(panelId);
     this.namedPanelIds.add(panelId);
     void this.nameFromFirstMessage(panelId, name).catch(error => {
+      this.namedPanelIds.delete(panelId);
       console.warn('[OrchestrationSessionManager] Could not name the Session from its first message:', error);
     });
   }
@@ -503,9 +498,15 @@ export class OrchestrationSessionManager extends EventEmitter {
     const taken = new Set(sessions.filter(session => session.id !== record.id).map(session => normalizeSessionName(session.name)));
     let uniqueName = name;
     for (let suffix = 2; taken.has(normalizeSessionName(uniqueName)); suffix += 1) uniqueName = `${name} ${suffix}`;
-    await this.update({ sessionId: record.id }, { name: uniqueName, expectedRevision: record.revision });
+    await this.update({ sessionId: record.id }, { name: uniqueName, expectedRevision: record.revision, source: 'system' });
   }
 
+  /**
+   * What a phone alert about a Pane is titled and grouped under: a Session's own pane is the
+   * Session, a worker is "Session › Pane", and any other Pane stands alone. `groupPaneId` is the
+   * Session's workspace pane, which the phone opens a Session by. Reads the in-memory store, like
+   * `workspaceMembership`.
+   */
   alertSubject(paneId: string): MobileAlertSubject {
     const sessions = this.store.read().sessions;
     const own = sessions.find(session => session.internalSessionId === paneId);

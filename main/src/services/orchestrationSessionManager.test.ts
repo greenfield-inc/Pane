@@ -300,6 +300,20 @@ describe('OrchestrationSessionManager', () => {
     expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please');
   });
 
+  it('names the Session from a later message when the first rename fails', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    vi.spyOn(fixture.manager, 'update').mockRejectedValueOnce(new Error('Session changed'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fixture.manager.observeInput(panelId, 'fix the flaky checkout test please\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('New chat');
+    fixture.manager.observeInput(panelId, 'now update the docs\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('now update the docs'));
+  });
+
   it('keeps a name the person chose', async () => {
     const fixture = createFixture();
     const typed = await fixture.manager.create({ name: 'Release prep', agent: 'claude' });

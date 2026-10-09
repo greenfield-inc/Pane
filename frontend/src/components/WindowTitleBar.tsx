@@ -137,7 +137,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
 
   if (!isMac() && !isWindowControlsOverlayEnabled()) return null;
 
-  const parentSessionName = parentSession ? parentSession.name || 'Pane Chat' : null;
+  const parentSessionName = parentSession?.name ?? null;
   // Opens the Session the way its sidebar row does.
   const openParentSession = () => {
     if (!parentSession) return;
@@ -179,7 +179,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
             data-testid="window-title-bar-label"
-            title={windowTitle}
+            title={parentSessionName && title.pane ? `${parentSessionName} › ${title.pane}` : windowTitle}
           >
             {parentSessionName ? (
               <button

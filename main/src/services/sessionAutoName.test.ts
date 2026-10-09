@@ -44,4 +44,15 @@ describe('applyTerminalInput', () => {
     expect(applyTerminalInput('', '\x1b[200~first line\x1b\rsecond\x1b[201~\r'))
       .toEqual({ draft: '', submitted: ['first line\nsecond'] });
   });
+
+  it('keeps CR newlines inside a bracketed paste in the draft', () => {
+    expect(applyTerminalInput('', '\x1b[200~first line\rsecond line\r\nthird\x1b[201~'))
+      .toEqual({ draft: 'first line\nsecond line\nthird', submitted: [] });
+  });
+
+  it('keeps the start of a draft longer than 4000 characters', () => {
+    const { draft } = applyTerminalInput('', `fix the build ${'x'.repeat(5_000)}`);
+    expect(draft).toHaveLength(4_000);
+    expect(draft.startsWith('fix the build ')).toBe(true);
+  });
 });

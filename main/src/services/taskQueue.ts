@@ -576,14 +576,10 @@ export class TaskQueue {
     }
   }
 
-  /** Resolves with the created Pane once a queued creation job finishes. */
-  waitForCreatedSession(job: SessionCreationJob, timeoutMs = 120_000): Promise<CreateSessionQueueResult> {
-    return this.waitForSessionCreationJob(job, timeoutMs);
-  }
-
-  private async waitForSessionCreationJob(
+  /** Resolves with the created Pane once a queued creation job finishes, or rejects after `timeoutMs`. */
+  async waitForSessionCreationJob(
     job: SessionCreationJob,
-    timeoutMs: number,
+    timeoutMs = 120_000,
   ): Promise<CreateSessionQueueResult> {
     if (job.finished) {
       return this.withSessionCreationTimeout(

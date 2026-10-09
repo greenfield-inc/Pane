@@ -261,7 +261,7 @@ export function registerSessionHandlers(
     const manager = services.orchestrationSessionManager;
     if (!orchestrationSessionId || !manager || !taskQueue) return;
     for (const job of jobs) {
-      void taskQueue.waitForCreatedSession(job)
+      void taskQueue.waitForSessionCreationJob(job)
         .then(({ sessionId: paneId }) => manager.associate({ sessionId: orchestrationSessionId }, { paneId }))
         .catch(error => console.warn('[IPC] Could not add the new Pane to its Session:', error));
     }

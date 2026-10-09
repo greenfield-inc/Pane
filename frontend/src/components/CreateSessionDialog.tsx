@@ -3,7 +3,7 @@ import { API } from '../utils/api';
 import type { CreateSessionRequest } from '../types/session';
 import type { Project } from '../types/project';
 import { useErrorStore } from '../stores/errorStore';
-import { GitBranch, ChevronRight, ChevronDown, X, Search, Check, GitFork, Pin } from 'lucide-react';
+import { GitBranch, ChevronRight, ChevronDown, X, Search, Check, GitFork, MessageSquare, Pin } from 'lucide-react';
 import { Toggle } from './ui/Toggle';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -39,7 +39,6 @@ interface CreateSessionDialogProps {
   onSessionCreated?: () => void;
 }
 
-/** Adds each Pane this form creates to the Session as its creation event arrives; returns a function that stops listening. */
 export function CreateSessionDialog(props: CreateSessionDialogProps) {
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   return <Modal isOpen={props.isOpen} onClose={props.onClose} size="lg" closeOnOverlayClick={false} closeOnEscape={!branchDropdownOpen}>
@@ -83,6 +82,8 @@ export function CreatePaneForm({
   const openSession = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId && session.archived !== true));
   const sessionViewShowing = useNavigationStore(state => state.activeView === 'pane-chat');
   const targetSession = sessionViewShowing ? openSession : undefined;
+  // A Pane that joins a Session is listed under it, so it cannot start pinned.
+  const joiningSession = addToSession && targetSession !== undefined;
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSessionOptions, setShowSessionOptions] = useState(false);
   const [branchSearch, setBranchSearch] = useState('');
@@ -384,8 +385,8 @@ export function CreatePaneForm({
         folderId,
         isMainRepo: !useWorktree,
         baseBranch: formData.baseBranch,
-        startPinned,
-        associateSessionId: addToSession && targetSession ? targetSession.id : undefined
+        startPinned: joiningSession ? undefined : startPinned,
+        associateSessionId: joiningSession ? targetSession.id : undefined
       });
 
       if (!response.success) {
@@ -631,15 +632,19 @@ export function CreatePaneForm({
                 </p>
               )}
               {targetSession && (
-                <label className="mt-3 flex min-w-0 items-center gap-2 text-sm text-text-primary">
-                  <input
-                    type="checkbox"
+                <div className="mt-3 flex items-center gap-4 rounded-lg border border-border-primary px-5 py-4">
+                  <MessageSquare className="w-4 h-4 text-text-tertiary shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm font-medium text-text-primary">Add to {targetSession.name}</div>
+                    <div className="text-xs text-text-secondary mt-0.5">List this pane under the Session.</div>
+                  </div>
+                  <Toggle
                     checked={addToSession}
-                    onChange={(e) => setAddToSession(e.target.checked)}
-                    className="flex-shrink-0"
+                    aria-label={`Add to ${targetSession.name}`}
+                    onChange={setAddToSession}
+                    size="sm"
                   />
-                  <span className="truncate min-w-0">Add to {targetSession.name}</span>
-                </label>
+                </div>
               )}
             </div>
 
@@ -672,10 +677,13 @@ export function CreatePaneForm({
                     <Pin className="w-4 h-4 text-text-tertiary shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-text-primary">Start pinned</div>
-                      <div className="text-xs text-text-secondary mt-0.5">Show this pane in the pinned section immediately.</div>
+                      <div className="text-xs text-text-secondary mt-0.5">
+                        {joiningSession ? 'Panes in a Session are listed under it.' : 'Show this pane in the pinned section immediately.'}
+                      </div>
                     </div>
                     <Toggle
-                      checked={startPinned}
+                      checked={startPinned && !joiningSession}
+                      disabled={joiningSession}
                       aria-label="Start pinned"
                       onChange={(checked) => {
                         setStartPinned(checked);
