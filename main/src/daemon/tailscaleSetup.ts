@@ -450,12 +450,15 @@ function tailscaleCandidates(pathExists: (candidate: string) => boolean = exists
   }
   if (process.platform === 'linux' || process.platform === 'darwin') {
     // Snap and Nix installs sit outside the PATH a desktop launcher or relaunch may give Pane.
+    // XDG ignores a relative XDG_STATE_HOME; probing it would run a file from the working directory.
+    const xdgStateHome = process.env.XDG_STATE_HOME;
+    const stateHome = xdgStateHome && path.isAbsolute(xdgStateHome) ? xdgStateHome : path.join(os.homedir(), '.local', 'state');
     for (const candidate of [
       '/snap/bin/tailscale',
       '/var/lib/snapd/snap/bin/tailscale',
       '/run/current-system/sw/bin/tailscale',
       path.join(os.homedir(), '.nix-profile', 'bin', 'tailscale'),
-      path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state'), 'nix', 'profile', 'bin', 'tailscale'),
+      path.join(stateHome, 'nix', 'profile', 'bin', 'tailscale'),
     ]) {
       if (pathExists(candidate)) commands.push({ command: candidate, displayCommand: quoteForPosix(candidate) });
     }

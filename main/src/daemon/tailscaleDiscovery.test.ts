@@ -14,6 +14,7 @@ function installedAt(installed: string) {
 describe('Tailscale discovery with a desktop launcher PATH', () => {
   beforeEach(() => {
     vi.stubEnv('PATH', '/usr/bin:/bin:/usr/sbin:/sbin');
+    vi.stubEnv('XDG_STATE_HOME', '');
   });
 
   afterEach(() => {
@@ -46,6 +47,18 @@ describe('Tailscale discovery with a desktop launcher PATH', () => {
     const { run, exists } = installedAt(installed);
 
     await expect(resolveTailscaleCommandAsync(run, exists)).resolves.toMatchObject({ command: installed });
+  });
+
+  it('ignores a relative XDG_STATE_HOME', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    vi.stubEnv('XDG_STATE_HOME', 'state');
+    const relative = path.join('state', 'nix', 'profile', 'bin', 'tailscale');
+    const fallback = path.join(os.homedir(), '.local', 'state', 'nix', 'profile', 'bin', 'tailscale');
+    const run = vi.fn<RemoteSetupCommandRunner>(async command => ({ ok: command !== 'tailscale', stdout: '', stderr: '' }));
+
+    await expect(resolveTailscaleCommandAsync(run, candidate => candidate === relative || candidate === fallback))
+      .resolves.toMatchObject({ command: fallback });
+    expect(run).not.toHaveBeenCalledWith(relative, expect.anything(), expect.anything());
   });
 
   it('prefers the tailscale on PATH over an installed fallback', async () => {
