@@ -43,6 +43,7 @@ import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
 import { InterceptorToast } from '../terminal/InterceptorToast';
 import { usePanelStore } from '../../stores/panelStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import '@xterm/xterm/css/xterm.css';
@@ -1607,10 +1608,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                 } catch (err) {
                   console.error('[TerminalPanel] Failed to upload file:', err);
                   if (!disposed && terminal) {
-                    // Strip Electron's IPC wrapper so the user sees the backend reason
-                    const raw = err instanceof Error ? err.message : String(err);
-                    const reason = raw.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, '');
-                    terminal.paste(`[Upload failed] ${reason || 'Unknown error'}\n`);
+                    terminal.paste(`[Upload failed] ${err instanceof Error ? ipcErrorMessage(err, 'Unknown error') : String(err)}\n`);
                   }
                 }
               }

@@ -1,4 +1,11 @@
 import { randomUUID } from 'crypto';
+import { createWriteStream } from 'fs';
+import { mkdtemp } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
 import { ipcMain, protocol, shell, type WebContents } from 'electron';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { filePreviewKind } from '../../../shared/utils/filePreview';
@@ -28,11 +35,14 @@ export interface MediaPreviewRuntime {
   handleIpc(channel: string, handler: PreviewHandler): void;
   handleProtocol(handler: (request: Request) => Promise<Response>): void;
   remoteHost(): RemoteMediaHost | null;
+  /** Resolves to an error message, empty on success, like Electron's shell.openPath. */
+  openPath(filePath: string): Promise<string>;
 }
 
 const electronRuntime: MediaPreviewRuntime = {
   handleIpc: (channel, handler) => ipcMain.handle(channel, handler),
   handleProtocol: handler => protocol.handle('pane-media', handler),
+  openPath: filePath => shell.openPath(filePath),
   remoteHost: () => {
     const client = remotePaneClientController.getActiveRemoteClient();
     if (!client) return null;
@@ -88,15 +98,26 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
     if (kind === 'sqlite') return listSqlite(file.path);
     throw new Error('No listing for this file type');
   });
+  /** System apps run where the file is, so a remote host's file is opened from a client copy. */
+  const copyFromHost = async (host: RemoteMediaHost, file: PreviewFile) => {
+    const response = await host.fetchMedia(file, new Request('pane-media://preview/open'));
+    if (response.status !== 200 || !response.body) throw new Error('Could not copy this file from the host');
+    const name = file.filePath.split(/[\\/]/).pop() || 'file';
+    const target = join(await mkdtemp(join(tmpdir(), 'pane-remote-open-')), name);
+    // SAFETY: the DOM and Node typings describe the same WHATWG ReadableStream.
+    await pipeline(Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), createWriteStream(target));
+    return target;
+  };
   runtime.handleIpc('file:preview-action', async (_event, raw: PaneCommandValue, rawAction: PaneCommandValue) => {
     const action = decodeBoundary(rawAction, boundary.enumeration('open', 'reveal'));
-    if (runtime.remoteHost()) throw new Error('Open and reveal work only on the host');
-    const file = await resolve(decodeBoundary(raw, requestSchema));
+    const request = decodeBoundary(raw, requestSchema);
+    const host = runtime.remoteHost();
+    if (host && action === 'reveal') throw new Error('Reveal in folder works only on the host');
     if (action === 'open') {
-      const error = await shell.openPath(file.path);
+      const error = await runtime.openPath(host ? await copyFromHost(host, request) : (await resolve(request)).path);
       if (error) throw new Error(error);
     } else {
-      await revealInFileManager(file.path);
+      await revealInFileManager((await resolve(request)).path);
     }
   });
   runtime.handleProtocol(async request => {

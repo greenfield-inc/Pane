@@ -6,6 +6,7 @@ import { MonacoErrorBoundary } from '../../MonacoErrorBoundary';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
 import { FilePreviewActions, FilePreviewNotice } from './MediaFilePreview';
 import { usePreviewUrl } from './usePreviewUrl';
+import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { fileExtension, getLanguageFromPath } from './fileKinds';
 import { parseDelimitedPreview, readPreviewText } from './documentPreviewData';
 
@@ -77,7 +78,7 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
           if (!controller.signal.aborted) setListing(result);
         }
       } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Cannot preview this file.');
+        if (!controller.signal.aborted) setError(reason instanceof Error ? ipcErrorMessage(reason, 'Cannot preview this file.') : 'Cannot preview this file.');
       }
     };
     void load();

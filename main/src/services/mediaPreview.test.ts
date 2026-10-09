@@ -20,7 +20,9 @@ const adapters = {
   protocols: new Map<string, (request: Request) => Promise<Response>>(),
 };
 let remoteHost: RemoteMediaHost | null = null;
+const opened: string[] = [];
 const runtime: MediaPreviewRuntime = {
+  openPath: async filePath => { opened.push(filePath); return ''; },
   handleIpc: (name, handler) => { adapters.handlers.set(name, handler); },
   handleProtocol: handler => { adapters.protocols.set('pane-media', handler); },
   remoteHost: () => remoteHost,
@@ -39,7 +41,7 @@ const sessionId = '__pane_chat_session__';
 const servers: PaneRemoteHttpApiServer[] = [];
 
 beforeEach(async () => {
-  adapters.handlers.clear(); adapters.protocols.clear(); remoteHost = null;
+  adapters.handlers.clear(); adapters.protocols.clear(); remoteHost = null; opened.length = 0;
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-capabilities-'));
   worktree = path.join(directory, 'worktree');
   await fs.mkdir(worktree);
@@ -121,6 +123,18 @@ it('streams byte ranges of a remote host\'s file through the client\'s capabilit
   const url = await acquire(new Owner(1));
   expect(await fetchPreview(url)).toEqual({ status: 206, body: '2345', range: 'bytes 2-5/10' });
   expect(await fetchPreview(url, 'bytes=8-')).toEqual({ status: 206, body: '89', range: 'bytes 8-9/10' });
+});
+
+it('opens a remote host\'s file with a system app on the client from a local copy', async () => {
+  remoteHost = (await connectToHost()).host;
+  await invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open');
+  expect(opened).toHaveLength(1);
+  expect(path.basename(opened[0])).toBe('clip.mp4');
+  expect(opened[0].startsWith(worktree)).toBe(false);
+  expect(await fs.readFile(opened[0], 'utf8')).toBe('0123456789');
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'reveal')).rejects.toThrow('host');
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: '../outside.mp4' }, 'open')).rejects.toThrow();
+  expect(opened).toHaveLength(1);
 });
 
 it('binds a capability to the host that issued it', async () => {

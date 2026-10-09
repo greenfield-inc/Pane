@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useConfigStore } from '../../../stores/configStore';
+import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { usePreviewUrl } from './usePreviewUrl';
 
 interface FileLocation {
@@ -7,24 +8,23 @@ interface FileLocation {
   filePath: string;
 }
 
-/** System apps run on the host, so a remote desktop has none to offer. */
+/** A remote desktop opens a copy of the host's file; revealing it needs the host's file manager. */
 export function FilePreviewActions({ sessionId, filePath }: FileLocation) {
   const isRemoteMode = useConfigStore(state => state.config?.remoteDaemon?.client.mode === 'remote');
   const [actionError, setActionError] = useState<string | null>(null);
-  if (isRemoteMode) return null;
   const act = async (action: 'open' | 'reveal') => {
     try {
       await window.electronAPI.invoke('file:preview-action', { sessionId, filePath }, action);
       setActionError(null);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Unable to open file');
+      setActionError(error instanceof Error ? ipcErrorMessage(error, 'Unable to open file') : 'Unable to open file');
     }
   };
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-3">
         <button type="button" className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('open')}>Open with system app</button>
-        <button type="button" className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('reveal')}>Reveal in folder</button>
+        {!isRemoteMode && <button type="button" className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('reveal')}>Reveal in folder</button>}
       </div>
       {actionError && <p role="alert" className="text-status-error">{actionError}</p>}
     </div>
