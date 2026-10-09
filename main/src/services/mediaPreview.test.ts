@@ -7,7 +7,7 @@ import { ipcMain } from 'electron';
 import type { AppServices } from '../ipc/types';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { registerFileHandlers } from '../ipc/file';
-import { registerMediaPreview, type MediaPreviewRuntime, type RemoteMediaHost } from './mediaPreview';
+import { registerMediaPreview, type MediaConnection, type MediaPreviewRuntime, type RemoteMediaHost } from './mediaPreview';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { hashRemoteDaemonToken } from '../daemon/auth';
@@ -19,13 +19,14 @@ const adapters = {
   handlers: new Map<string, PreviewHandler>(),
   protocols: new Map<string, (request: Request) => Promise<Response>>(),
 };
-let remoteHost: RemoteMediaHost | null = null;
+let connection: MediaConnection = { kind: 'local' };
 const opened: string[] = [];
+let openError = '';
 const runtime: MediaPreviewRuntime = {
-  openPath: async filePath => { opened.push(filePath); return ''; },
+  openPath: async filePath => { opened.push(filePath); return openError; },
   handleIpc: (name, handler) => { adapters.handlers.set(name, handler); },
   handleProtocol: handler => { adapters.protocols.set('pane-media', handler); },
-  remoteHost: () => remoteHost,
+  connection: () => connection,
 };
 
 class Owner extends EventEmitter {
@@ -36,24 +37,28 @@ class Owner extends EventEmitter {
 }
 let directory: string;
 let worktree: string;
+let hostWorktree: string;
 let registry: PaneCommandRegistry;
+let hostRegistry: PaneCommandRegistry;
 const sessionId = '__pane_chat_session__';
 const servers: PaneRemoteHttpApiServer[] = [];
 
 beforeEach(async () => {
-  adapters.handlers.clear(); adapters.protocols.clear(); remoteHost = null; opened.length = 0;
+  adapters.handlers.clear(); adapters.protocols.clear(); connection = { kind: 'local' }; opened.length = 0; openError = '';
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-capabilities-'));
   worktree = path.join(directory, 'worktree');
+  hostWorktree = path.join(directory, 'host', 'worktree');
   await fs.mkdir(worktree);
+  await fs.mkdir(hostWorktree, { recursive: true });
+  // The client has a same-named file, so a remote request that fell back to local disk would show it.
   await fs.writeFile(path.join(worktree, 'clip.mp4'), '0123456789');
+  await fs.writeFile(path.join(hostWorktree, 'clip.mp4'), 'HOST-BYTES');
   await fs.writeFile(path.join(directory, 'outside.mp4'), 'private outside data');
+  await fs.writeFile(path.join(directory, 'host', 'outside.mp4'), 'private outside data');
   registry = new PaneCommandRegistry();
-  // SAFETY: File handlers only need the hidden Session's root and project lookup.
-  const services = { sessionManager: {
-    getSession: (id: string) => ({ id, isHidden: true, worktreePath: worktree }),
-    getProjectContext: () => undefined,
-  } } as AppServices;
-  registerFileHandlers(ipcMain, services, registry);
+  hostRegistry = new PaneCommandRegistry();
+  registerFileHandlers(ipcMain, servicesFor(worktree), registry);
+  registerFileHandlers(ipcMain, servicesFor(hostWorktree), hostRegistry);
   registerMediaPreview(registry, runtime);
 });
 afterEach(async () => {
@@ -61,6 +66,14 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop();
   await fs.rm(directory, { recursive: true, force: true });
 });
+
+function servicesFor(root: string): AppServices {
+  // SAFETY: File handlers only need the hidden Session's root and project lookup.
+  return { sessionManager: {
+    getSession: (id: string) => ({ id, isHidden: true, worktreePath: root }),
+    getProjectContext: () => undefined,
+  } } as AppServices;
+}
 
 async function invoke(channel: string, owner: Owner, ...args: PaneCommandValue[]) {
   const handler = adapters.handlers.get(channel);
@@ -78,22 +91,20 @@ async function fetchPreview(url: string, range = 'bytes=2-5') {
   return { status: response.status, body: await response.text(), range: response.headers.get('Content-Range') };
 }
 
-/** The same process serves as host (HTTP API over the real file commands) and as remote client. */
-async function connectToHost(id = 'host-1'): Promise<{ host: RemoteMediaHost; baseUrl: string }> {
+/** A host with its own worktree behind the real HTTP API, and a client connected to it. */
+async function connectToHost(id = 'host-1'): Promise<{ remote: MediaConnection; baseUrl: string }> {
   const config = createDefaultRemoteDaemonConfig();
   config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
   config.host.clients = [{ id: 'client-1', label: 'Laptop', createdAt: new Date(0).toISOString(), tokenHash: hashRemoteDaemonToken('secret-token') }];
-  const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) });
+  const server = new PaneRemoteHttpApiServer(hostRegistry, { getConfig: () => ({ remoteDaemon: config }) });
   servers.push(server);
   await server.start();
   const address = server.getAddress();
   if (!address) throw new Error('Host is not listening');
   const baseUrl = `http://${address.host}:${address.port}`;
   const client = new RemotePaneClient({ id, label: 'Host', baseUrl, token: 'secret-token', transport: 'http+sse' });
-  return {
-    baseUrl,
-    host: { id, invoke: (channel, args) => client.invoke(channel, args), fetchMedia: (file, request) => client.fetchMedia(file, request) },
-  };
+  const host: RemoteMediaHost = { id, invoke: (channel, args) => client.invoke(channel, args), fetchMedia: (file, request) => client.fetchMedia(file, request) };
+  return { baseUrl, remote: { kind: 'remote', host } };
 }
 
 it('issues a working range capability that only its owner can release', async () => {
@@ -118,48 +129,72 @@ it('revokes all grants for a destroyed owner without revoking another renderer',
 });
 
 it('streams byte ranges of a remote host\'s file through the client\'s capability', async () => {
-  const { host } = await connectToHost();
-  remoteHost = host;
+  connection = (await connectToHost()).remote;
   const url = await acquire(new Owner(1));
-  expect(await fetchPreview(url)).toEqual({ status: 206, body: '2345', range: 'bytes 2-5/10' });
-  expect(await fetchPreview(url, 'bytes=8-')).toEqual({ status: 206, body: '89', range: 'bytes 8-9/10' });
+  expect(await fetchPreview(url)).toEqual({ status: 206, body: 'ST-B', range: 'bytes 2-5/10' });
+  expect(await fetchPreview(url, 'bytes=8-')).toEqual({ status: 206, body: 'ES', range: 'bytes 8-9/10' });
 });
 
 it('opens a remote host\'s file with a system app on the client from a local copy', async () => {
-  remoteHost = (await connectToHost()).host;
+  connection = (await connectToHost()).remote;
   await invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open');
   expect(opened).toHaveLength(1);
   expect(path.basename(opened[0])).toBe('clip.mp4');
-  expect(opened[0].startsWith(worktree)).toBe(false);
-  expect(await fs.readFile(opened[0], 'utf8')).toBe('0123456789');
+  expect(await fs.readFile(opened[0], 'utf8')).toBe('HOST-BYTES');
   await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'reveal')).rejects.toThrow('host');
   await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: '../outside.mp4' }, 'open')).rejects.toThrow();
   expect(opened).toHaveLength(1);
 });
 
+it('names the client copy so every desktop OS can open it', async () => {
+  connection = (await connectToHost()).remote;
+  for (const name of ['CON.pdf', 'report?.pdf', 'notes. .pdf']) await fs.writeFile(path.join(hostWorktree, name), 'pdf');
+  for (const name of ['CON.pdf', 'report?.pdf', 'notes. .pdf', 'clip.mp4']) {
+    await invoke('file:preview-action', new Owner(1), { sessionId, filePath: name }, 'open');
+  }
+  expect(opened.map(file => path.basename(file))).toEqual(['preview.pdf', 'preview.pdf', 'preview.pdf', 'clip.mp4']);
+});
+
+it('removes the client copy when the system app cannot open it', async () => {
+  connection = (await connectToHost()).remote;
+  openError = 'No application knows how to open this file';
+  await expect(invoke('file:preview-action', new Owner(1), { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toThrow(openError);
+  await expect(fs.stat(path.dirname(opened[0]))).rejects.toThrow('ENOENT');
+});
+
+it('refuses previews and Open while remote mode has no connected host, never reading client files', async () => {
+  const owner = new Owner(1);
+  const local = await acquire(owner);
+  connection = { kind: 'remote', host: null };
+  expect(await fetchPreview(local)).toMatchObject({ status: 404, body: '' });
+  await expect(acquire(owner)).rejects.toThrow('not connected');
+  await expect(invoke('file:preview-action', owner, { sessionId, filePath: 'clip.mp4' }, 'open')).rejects.toThrow('not connected');
+  await expect(invoke('file:preview-action', owner, { sessionId, filePath: 'clip.mp4' }, 'reveal')).rejects.toThrow('not connected');
+  expect(opened).toEqual([]);
+});
+
 it('binds a capability to the host that issued it', async () => {
   const owner = new Owner(1);
   const local = await acquire(owner);
-  const first = await connectToHost('host-1');
-  remoteHost = first.host;
+  connection = (await connectToHost('host-1')).remote;
   expect((await fetchPreview(local)).status).toBe(403);
   const remote = await acquire(owner);
-  remoteHost = (await connectToHost('host-2')).host;
+  connection = (await connectToHost('host-2')).remote;
   expect((await fetchPreview(remote)).status).toBe(403);
-  remoteHost = null;
+  connection = { kind: 'local' };
   expect((await fetchPreview(remote)).status).toBe(403);
 });
 
 it('keeps the host\'s worktree boundary for remote previews', async () => {
-  const { host, baseUrl } = await connectToHost();
-  remoteHost = host;
+  const { remote, baseUrl } = await connectToHost();
+  connection = remote;
   await expect(acquire(new Owner(1), '../outside.mp4')).rejects.toThrow();
   const media = (filePath: string, headers: Record<string, string> = { Authorization: 'Bearer secret-token' }) =>
     fetch(`${baseUrl}/media?sessionId=${sessionId}&filePath=${encodeURIComponent(filePath)}`, { headers }).then(response => response.status);
   expect(await media('clip.mp4')).toBe(200);
   expect(await media('clip.mp4', {})).toBe(401);
   expect(await media('../outside.mp4')).toBe(404);
-  await fs.writeFile(path.join(worktree, 'notes.txt'), 'not a preview kind');
+  await fs.writeFile(path.join(hostWorktree, 'notes.txt'), 'not a preview kind');
   expect(await media('notes.txt')).toBe(404);
 });
 

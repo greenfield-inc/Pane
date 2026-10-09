@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import { createWriteStream } from 'fs';
-import { mkdtemp } from 'fs/promises';
+import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, extname, join } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
@@ -30,11 +30,14 @@ export interface RemoteMediaHost {
   fetchMedia(file: PreviewFile, request: Request): Promise<Response>;
 }
 
+/** Remote mode without a connected host is its own state, so it never falls back to local files. */
+export type MediaConnection = { kind: 'local' } | { kind: 'remote'; host: RemoteMediaHost | null };
+
 /** Electron registration and host-state boundary; file validation/streaming stay real. */
 export interface MediaPreviewRuntime {
   handleIpc(channel: string, handler: PreviewHandler): void;
   handleProtocol(handler: (request: Request) => Promise<Response>): void;
-  remoteHost(): RemoteMediaHost | null;
+  connection(): MediaConnection;
   /** Resolves to an error message, empty on success, like Electron's shell.openPath. */
   openPath(filePath: string): Promise<string>;
 }
@@ -43,16 +46,29 @@ const electronRuntime: MediaPreviewRuntime = {
   handleIpc: (channel, handler) => ipcMain.handle(channel, handler),
   handleProtocol: handler => protocol.handle('pane-media', handler),
   openPath: filePath => shell.openPath(filePath),
-  remoteHost: () => {
+  connection: () => {
+    if (!remotePaneClientController.isRemoteModeActive()) return { kind: 'local' };
     const client = remotePaneClientController.getActiveRemoteClient();
-    if (!client) return null;
     return {
-      id: `${client.profile.id}\n${client.profile.baseUrl}`,
-      invoke: async (channel, args) => (await client.invoke(channel, args)) ?? null,
-      fetchMedia: (file, request) => client.fetchMedia(file, request),
+      kind: 'remote',
+      host: client && {
+        id: `${client.profile.id}\n${client.profile.baseUrl}`,
+        invoke: async (channel, args) => (await client.invoke(channel, args)) ?? null,
+        fetchMedia: (file, request) => client.fetchMedia(file, request),
+      },
     };
   },
 };
+
+/** Host file names can be invalid on the client's OS, such as CON.pdf or report?.pdf on Windows. */
+function clientSafeName(filePath: string): string {
+  const name = filePath.split(/[\\/]/).pop() ?? '';
+  const extension = extname(name);
+  const stem = name.slice(0, name.length - extension.length);
+  const safe = /^[\p{L}\p{N}_-][\p{L}\p{N}_ .()-]{0,99}$/u.test(stem) && !/[ .]$/.test(stem)
+    && !/^(con|prn|aux|nul|com\d|lpt\d)$/i.test(stem);
+  return (safe ? stem : 'preview') + (/^\.[A-Za-z0-9]{1,10}$/.test(extension) ? extension : '');
+}
 
 /**
  * Capabilities are scoped to the issuing renderer and to the host they were issued for, and
@@ -61,6 +77,13 @@ const electronRuntime: MediaPreviewRuntime = {
 export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runtime: MediaPreviewRuntime = electronRuntime): void {
   const grants = new Map<string, { owner: number; host: string | null } & PreviewFile>();
   const owners = new Set<number>();
+  /** The host to read from, or null when this machine is the host. */
+  const currentHost = () => {
+    const connection = runtime.connection();
+    if (connection.kind === 'local') return null;
+    if (!connection.host) throw new Error('The remote host is not connected');
+    return connection.host;
+  };
   // Reuse the worktree boundary, symlink checks and Windows/WSL conversion.
   const resolve = async (request: PreviewFile, host: RemoteMediaHost | null = null) =>
     decodeBoundary(await (host ?? commandRegistry).invoke('file:getPath', [request]), previewPathSchema);
@@ -68,7 +91,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   runtime.handleIpc('file:preview-url', async (event, raw: PaneCommandValue) => {
     const request = decodeBoundary(raw, requestSchema);
     if (!filePreviewKind(request.filePath)) throw new Error('No preview for this file type');
-    const host = runtime.remoteHost();
+    const host = currentHost();
     await resolve(request, host);
     if (event.sender.isDestroyed()) throw new Error('Preview closed');
     const token = randomUUID();
@@ -102,20 +125,30 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
   const copyFromHost = async (host: RemoteMediaHost, file: PreviewFile) => {
     const response = await host.fetchMedia(file, new Request('pane-media://preview/open'));
     if (response.status !== 200 || !response.body) throw new Error('Could not copy this file from the host');
-    const name = file.filePath.split(/[\\/]/).pop() || 'file';
-    const target = join(await mkdtemp(join(tmpdir(), 'pane-remote-open-')), name);
-    // SAFETY: the DOM and Node typings describe the same WHATWG ReadableStream.
-    await pipeline(Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), createWriteStream(target));
+    const directory = await mkdtemp(join(tmpdir(), 'pane-remote-open-'));
+    const target = join(directory, clientSafeName(file.filePath));
+    try {
+      // SAFETY: the DOM and Node typings describe the same WHATWG ReadableStream.
+      await pipeline(Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), createWriteStream(target));
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
     return target;
   };
   runtime.handleIpc('file:preview-action', async (_event, raw: PaneCommandValue, rawAction: PaneCommandValue) => {
     const action = decodeBoundary(rawAction, boundary.enumeration('open', 'reveal'));
     const request = decodeBoundary(raw, requestSchema);
-    const host = runtime.remoteHost();
+    const host = currentHost();
     if (host && action === 'reveal') throw new Error('Reveal in folder works only on the host');
     if (action === 'open') {
-      const error = await runtime.openPath(host ? await copyFromHost(host, request) : (await resolve(request)).path);
-      if (error) throw new Error(error);
+      const target = host ? await copyFromHost(host, request) : (await resolve(request)).path;
+      const error = await runtime.openPath(target);
+      if (error) {
+        // A successful copy stays for the system app; a failed open leaves nothing behind.
+        if (host) await rm(dirname(target), { recursive: true, force: true });
+        throw new Error(error);
+      }
     } else {
       await revealInFileManager((await resolve(request)).path);
     }
@@ -125,7 +158,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
       if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
       const url = new URL(request.url);
       const grant = url.hostname === 'preview' ? grants.get(url.pathname.slice(1)) : undefined;
-      const host = runtime.remoteHost();
+      const host = currentHost();
       if (!grant || grant.host !== (host?.id ?? null)) return new Response(null, { status: 403 });
       const file = { sessionId: grant.sessionId, filePath: grant.filePath };
       if (host) return await host.fetchMedia(file, request);
