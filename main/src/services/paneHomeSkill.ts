@@ -250,7 +250,7 @@ const decodeErrorCode = (error: Parameters<typeof decodeBoundary>[0]): string | 
 export function buildPaneHomeSkill(): string {
   return `---
 name: pane
-description: Use Pane from inside a Pane terminal (PANE_SESSION_ID is set) through the runpane CLI. Use when delegating work to agents in their own Panes and worktrees, showing a page or file when supported, reading or sending input to another panel, or coordinating Panes from a Session orchestrator.
+description: Use Pane from inside a Pane terminal (PANE_SESSION_ID is set) through the runpane CLI. Use when starting new features in their own Panes, adding agent tabs (review, audit, fix, QA) to an existing Pane, showing a page or file when supported, reading or sending input to another panel, or coordinating Panes from a Session orchestrator.
 ---
 ${PANE_MANAGED_SKILL_MARKER}
 

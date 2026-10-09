@@ -132,6 +132,7 @@ runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note "cal
 runpane lock release --name testing-account --json
 runpane lock list --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
+runpane agents start --pane <pane-id> --agent codex --prompt "Review the PR from this branch and report findings" --yes --json
 runpane agents status --pane <pane-id> --json
 runpane agents send --pane <pane-id> --text "Also add a test" --yes --json
 runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json
@@ -227,7 +228,7 @@ A watch releases its pending slot when its client socket or named pipe disconnec
 
 `runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.
 
-`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task in a repository, check on it, and send it a follow-up.
+`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.
 
 `runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`.
 
@@ -305,7 +306,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `links open`: Open a pane:// link in the running Pane app.
 - `docs search`: Search Pane's docs, runpane help, and the Pane Chat skills.
 - `docs read`: Read one Pane doc, help topic, or skill in full.
-- `agents start`: Start an agent on a task: create a Pane in a repository, launch the agent with the prompt, and wait until it is ready.
+- `agents start`: Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.
 - `agents status`: Check on an agent: whether it is working, ready, blocked, or idle, plus its current screen.
 - `agents send`: Send a follow-up message to an agent and confirm it was submitted.
 - `report`: Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.
@@ -395,7 +396,7 @@ runpane links create --session <session-id> [--json]
 runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
 runpane docs search --query <text> [--limit <count>] [--json]
 runpane docs read --doc <path> [--json]
-runpane agents start --repo <selector> --name <name> (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> [--base-branch <branch>] --yes [--json] [--pane-dir <path>]
+runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] --yes [--json] [--pane-dir <path>]
 runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
@@ -469,6 +470,8 @@ Managed AGENTS.md block body:
 ## Pane
 
 This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.
+
+1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 

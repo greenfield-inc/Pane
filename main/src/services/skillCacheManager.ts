@@ -527,8 +527,10 @@ When a pane finishes something a human will read, have it run the
    and acceptance criteria (\`options\` for trade-offs, \`brief\` for a
    write-up). Revise the same ticket and brief as intent changes.
 4. After the ticket is ready and the user explicitly authorizes implementation,
-   dispatch an implementation session in an appropriate existing Pane or tab,
-   or create one when needed. Choose the agent and the skills that fit the
+   dispatch an implementation session as a tab in the feature's existing Pane,
+   or create a Pane only when the feature's branch has none yet
+   (1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA
+   for it are tabs in that Pane). Choose the agent and the skills that fit the
    work, usually \`tdd\`, \`quick-verify\`, \`prepare-pr\`, and
    \`babysit-pr\`, and name them by absolute path (see \`runpane\`). Pass the
    ticket, the stable Session ID, and the associated Pane and tab IDs so
