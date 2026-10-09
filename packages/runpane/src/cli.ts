@@ -691,11 +691,17 @@ function printDryRun(
   }
 }
 
+/** `--json` for runpane itself; anything after `--` belongs to the command it runs elsewhere. */
+function wantsJson(argv: string[]): boolean {
+  const end = argv.indexOf('--');
+  return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
+}
+
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error) => {
-    printFailure(error, process.argv.includes('--json'));
+    printFailure(error, wantsJson(process.argv.slice(2)));
     process.exitCode = 1;
   });
 }

@@ -246,7 +246,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(line, flush=True)
             print(line, file=sys.stderr, flush=True)
             return 2
-        print_failure(error, "--json" in effective_argv)
+        own_args = effective_argv[: effective_argv.index("--")] if "--" in effective_argv else effective_argv
+        print_failure(error, "--json" in own_args)
         return 1
 
 

@@ -373,6 +373,13 @@ test('when Pane is not running, the CLI keeps the connection error and says what
   }
 });
 
+test('a --json after -- belongs to the remote command, so a failure prints for people only', async () => {
+  const result = await runCli(['workspace', 'no-such-machine-qa999', 'exec', '--', 'echo', '--json']);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.notEqual(result.stderr.trim(), '');
+});
+
 test('a result this runpane cannot read says the command ran and how to line up versions', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
   try {
