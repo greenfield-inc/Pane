@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
 import type { SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
+import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useConfigStore } from '../stores/configStore';
 import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
@@ -128,6 +129,20 @@ export function SessionWorkspacePanels({
     agentPanelIdsRef.current = agentPanelIdSet;
   }, [agentPanelIdSet]);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingLayout = useRef<{ sessionId: string; layout: SessionPanelLayout; hostId: string | null | undefined } | null>(null);
+  // Writes a debounced layout now. Leaving the Session flushes it, so the last
+  // tab or split shown is never lost; an archived Session stays forgotten.
+  const flushLayout = useCallback(() => {
+    clearTimeout(persistTimer.current);
+    const pending = pendingLayout.current;
+    pendingLayout.current = null;
+    if (!pending) return;
+    const record = useOrchestrationSessionStore.getState().sessions.find(session => session.internalSessionId === pending.sessionId);
+    if (record && isArchivedOrchestrationSession(record)) return;
+    // The host keeps it as the last-used layout; this desktop keeps its own.
+    panelApi.setLayout(pending.sessionId, pending.layout).catch(() => {});
+    rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
+  }, []);
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
   // The host this Session's layout was loaded from, so writes land in its memory.
   const hostIdRef = useRef(hostId);
@@ -151,14 +166,10 @@ export function SessionWorkspacePanels({
       void panelApi.setActivePanel(sessionId, focusedPanelId).catch(() => {});
     }
     clearTimeout(persistTimer.current);
-    const layoutHostId = hostIdRef.current;
-    persistTimer.current = setTimeout(() => {
-      // The host keeps it as the last-used layout; this desktop keeps its own.
-      panelApi.setLayout(sessionId, repaired).catch(() => {});
-      rememberPaneLayout(layoutHostId, sessionId, repaired);
-    }, 300);
-  }, [sessionId]);
-  useEffect(() => () => clearTimeout(persistTimer.current), []);
+    pendingLayout.current = { sessionId, layout: repaired, hostId: hostIdRef.current };
+    persistTimer.current = setTimeout(flushLayout, 300);
+  }, [sessionId, flushLayout]);
+  useEffect(() => flushLayout, [sessionId, flushLayout]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,13 +179,18 @@ export function SessionWorkspacePanels({
       if (cancelled) return;
       usePanelStore.getState().setPanels(sessionId, saved);
       // applyLayout below remembers whatever this desktop shows first.
-      const stored = await readPaneLayout(hostIdRef.current, sessionId) ?? await panelApi.getLayout(sessionId);
+      const remembered = await readPaneLayout(hostIdRef.current, sessionId);
+      const stored = remembered ?? await panelApi.getLayout(sessionId);
       if (cancelled) return;
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
       const storedIds = layoutPanelIds(base);
       const stage = (usePanelStore.getState().panels[sessionId] ?? saved)
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
-      const splitIds = new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
+      // This desktop's own memory takes new tabs inactive into its own groups;
+      // the shared split placement only shapes the host's seed layout.
+      const splitIds = remembered
+        ? new Set<string>()
+        : new Set(stage.filter(panel => panel.metadata?.openPlacement === 'split').map(panel => panel.id));
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
     }).catch(error => {

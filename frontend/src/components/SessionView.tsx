@@ -360,7 +360,9 @@ export const SessionView = memo(() => {
           sortedLive.filter(p => !splitIdsNow.has(p.id)).map(p => p.id),
           fallbackActiveId,
         );
-        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, splitIdsNow);
+        // This desktop's own memory takes new tabs inactive into its own groups;
+        // the shared split placement only shapes the host's seed layout.
+        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, remembered ? new Set<string>() : splitIdsNow);
         const layout = fallbackActiveId
           ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
           : reconciledLayout;
