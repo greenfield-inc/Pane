@@ -20,7 +20,12 @@ export async function readPaneLayout(hostId: string | null | undefined, paneId: 
 /** A null layout forgets the Pane. */
 export function rememberPaneLayout(hostId: string | null | undefined, paneId: string, layout: SessionPanelLayout | null): void {
   if (hostId === undefined) return;
-  window.electronAPI.uiState.savePaneLayout(hostId, paneId, layout).catch(error => {
-    console.warn('[paneLayoutMemory] Failed to remember the layout:', error);
-  });
+  // Memory is best effort: a failed write never interrupts opening a Pane.
+  void (async () => {
+    try {
+      await window.electronAPI.uiState.savePaneLayout(hostId, paneId, layout);
+    } catch (error) {
+      console.warn('[paneLayoutMemory] Failed to remember the layout:', error);
+    }
+  })();
 }
