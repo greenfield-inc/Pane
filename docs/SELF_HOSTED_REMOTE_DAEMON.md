@@ -210,23 +210,23 @@ For Android, open the URL in Chrome, open the browser menu, then tap `Add to Hom
 
 SSH tunnel mode is mainly useful from desktop clients. For mobile browser access, prefer Tailscale or Manual HTTPS so the phone can reach the daemon URL directly.
 
-## Forwarded ports
-
-A desktop connected to a remote host reaches every port listening on the host as if it were local. Pane lists the host's ports in a new browser tab and in the address bar's **Ports** button, and the desktop listens for each one on its own `127.0.0.1` and `::1`.
-
-- A browser tab at `localhost:5173` loads the host's dev server, live reload included. The address bar reads `localhost:5173` with **on &lt;host&gt;**.
-- When something on the desktop already answers on 5173, the desktop uses the next free port. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**.
-- **Copy URL** copies the address that works on the desktop, for its system browser.
-- A `localhost` link clicked in a terminal opens the host's server in the system browser, at the local port when it differs.
-- The list follows the host: a port that stops listening there stops listening here, and disconnecting closes them all.
-
-Each connection the desktop accepts travels over the Pane connection as a WebSocket to `/ports/<port>` on the host, which connects to `localhost:<port>` there. The host accepts it only with the same sign-in as every other request, and only for a port in its current list.
-
-Who can reach the ports: every client signed in to the host, meaning anyone holding a pairing code or, through Workspaces, any login "Who can connect" admits. They reach every listening service, including databases that trust `localhost` and debugging ports such as a Node `--inspect` port, which runs code as you. Pane's own ports are forwarded too and keep their own sign-in. Turn remote access off on a host where that is too much.
-
 ### Remote PWA Implementation Notes
 
 The Remote Pane PWA is a browser runtime. It does not have `window.electronAPI`, so client-side PWA preferences must use browser-safe storage such as `localStorage` or explicit daemon adapter calls. Do not reuse desktop renderer preference stores that persist through Electron IPC unless the call path is guarded for browser mode.
+
+## Forwarded ports
+
+A desktop connected to a remote host reaches every port listening on the host as if it were local. Pane lists the host's ports on a new, empty browser tab and under the address bar's **Ports** button, and the desktop opens a matching listener on its own `127.0.0.1` and `::1` for each one. Only the desktop app sets up these listeners; the browser app and phones don't yet.
+
+- A browser tab at `localhost:5173` loads the host's dev server, live reload included. The address bar reads `localhost:5173` with **on &lt;host name&gt;**.
+- When something on the desktop already answers on 5173, the desktop uses the next free port, up to 19 numbers higher. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**. When all 20 are taken, that port is not forwarded and its row has no **Open**.
+- **Copy URL** copies the address that works on the desktop, for its system browser.
+- Clicking a `localhost` link in a terminal opens the host's server in your system browser, using the local port number if it moved.
+- When a port closes on the host, the desktop closes its listener. Disconnecting closes all of them.
+
+Each connection the desktop accepts travels over the Pane connection as a WebSocket to `/ports/<port>` on the host, which connects to `localhost:<port>` there. The host accepts it only with the same sign-in as every other request, and only for a port in its current list. Listeners stay on loopback on both machines.
+
+Every client signed in to the host can reach these ports through that route: anyone holding a pairing code, and any Tailscale login that the Workspaces "Who can connect" setting allows. They reach every listening service, including databases that trust `localhost` and debugging ports such as a Node `--inspect` port, which runs code as you. Pane's own ports are forwarded too, and its remote API keeps its own sign-in. Forwarding can't be limited to some ports. If that is more access than you want, turn off the remote daemon listener in `Settings > Remote Access` and set "Who can connect" to Off.
 
 ## Security Model
 
@@ -234,7 +234,7 @@ The Remote Pane PWA is a browser runtime. It does not have `window.electronAPI`,
 - Direct public or LAN binding is intentionally rejected.
 - Use SSH local forwarding, Tailscale Serve, or a trusted HTTPS reverse proxy that forwards to loopback.
 - Treat the generated `pane-remote://...` code like a secret. It contains the bearer token needed by the local client.
-- A signed-in desktop client can open a TCP connection to any port listening on the host. See [Forwarded ports](#forwarded-ports).
+- Any signed-in client can open a TCP connection to any port listening on the host. See [Forwarded ports](#forwarded-ports).
 
 Tailscale Serve example generated by setup:
 
