@@ -148,7 +148,7 @@ Tools are generated from [`contracts/runpane/contract.json`](../contracts/runpan
 - The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings; flags without one are booleans. Daemon commands also accept `paneDir`.
 - The description combines the command's summary, details, and notes from `agentContext`. The title is `runpane <command>`.
 - The output schema is the command's `*Result` JSON schema. Every call runs `runpane <command> … --json` and returns its JSON output unchanged, both as `structuredContent` and as a text block for older clients.
-- A non-zero exit returns the output as a tool error (`isError: true`), and so do bad arguments, so the model can correct them. An unknown tool name is a JSON-RPC Invalid Params error (`-32602`).
+- A non-zero exit returns a tool error (`isError: true`). A CLI failure reads as its message, a `Next:` line that names tools instead of CLI commands, and a `Code:` line; a command's own `ok: false` result comes back as its JSON. Bad arguments are tool errors too, so the model can correct them. An unknown tool name is a JSON-RPC Invalid Params error (`-32602`).
 - Annotations come from the contract. `readOnlyHint` is the inverse of `mutates`. A mutating tool is `destructiveHint: true` unless the command is marked `additive`. `idempotentHint` and `openWorldHint` follow the `idempotent` and `openWorld` fields.
 - Values are passed as `--flag=value`, so a value may start with `-` (for example `- [ ] item`).
 

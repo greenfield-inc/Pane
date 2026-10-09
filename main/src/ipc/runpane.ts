@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
-import { reasonOf } from '../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -641,7 +641,7 @@ export function registerRunpaneHandlers(
           panes = [pane];
         } else {
           const session = databaseService.getSession(normalized.paneId);
-          if (!session) throw new Error(`No Pane pane found with id ${normalized.paneId}. Run \`runpane panes list\` to see Pane ids.`);
+          if (!session) throw paneNotFound(normalized.paneId);
           panes = [{
             paneId: session.id,
             paneName: session.name,
@@ -3301,11 +3301,11 @@ async function resolveLockOwner(
   allowAnonymous = false,
 ): Promise<{ owner: RunpaneLockOwner; sessionId?: string }> {
   const panel = input.panelId ? panelManager.getPanel(input.panelId) : undefined;
-  if (input.panelId && !panel) throw new Error(`No Pane panel found with id ${input.panelId}. Run \`runpane panels list --pane <pane-id>\` to see panel ids.`);
+  if (input.panelId && !panel) throw panelNotFound(input.panelId);
   const paneId = input.paneId ?? panel?.sessionId;
   if (paneId) {
     const pane = services.sessionManager.getSession(paneId);
-    if (!pane) throw new Error(`No Pane pane found with id ${paneId}. Run \`runpane panes list\` to see Pane ids.`);
+    if (!pane) throw paneNotFound(paneId);
     if (pane.archived) throw new Error(`Pane ${paneId} is archived and cannot hold locks.`);
     if (panel && panel.sessionId !== paneId) throw new Error(`Panel ${input.panelId} does not belong to Pane ${paneId}.`);
     const owner: RunpaneLockOwner = { kind: 'pane', paneId };
@@ -4083,7 +4083,7 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
 function resolvePane(sessionManager: AppServices['sessionManager'], paneId: string): Session {
   const session = sessionManager.getSession(paneId);
   if (!session) {
-    throw new Error(`No Pane pane found with id ${paneId}. Run \`runpane panes list\` to see Pane ids.`);
+    throw paneNotFound(paneId);
   }
   return session;
 }
@@ -4627,7 +4627,7 @@ function parsePaneFocusRequest(value: PaneCommandValue): RunpanePaneFocusRequest
 function resolvePanel(panelId: string): ToolPanel {
   const panel = panelManager.getPanel(panelId);
   if (!panel) {
-    throw new Error(`No Pane panel found with id ${panelId}. Run \`runpane panels list --pane <pane-id>\` to see panel ids.`);
+    throw panelNotFound(panelId);
   }
   return panel;
 }
@@ -4741,7 +4741,7 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   if (selectorObject.id !== undefined) {
     const project = projects.find(candidate => candidate.id === selectorObject.id);
     if (!project) {
-      throw new Error(`No Pane repo found with id ${selectorObject.id}. Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
+      throw repoNotFound(`with id ${selectorObject.id}`);
     }
     return project;
   }
@@ -4749,7 +4749,7 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   if (selectorObject.path !== undefined) {
     const project = resolveProjectByPath(projects, selectorObject.path);
     if (!project) {
-      throw new Error(`No Pane repo found at path ${selectorObject.path}. Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
+      throw repoNotFound(`at path ${selectorObject.path}`);
     }
     return project;
   }
@@ -4761,10 +4761,24 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   return resolveActiveProject(projects);
 }
 
+const REPO_NEXT = 'Pick a saved repo from `runpane repos list`, or add one with `runpane repos add --path <absolute path> --yes`.';
+
+function paneNotFound(paneId: string): PaneError {
+  return new PaneError('ERR_RUNPANE_PANE_NOT_FOUND', `No Pane found with id ${paneId}. Nothing was changed.`, 'See Pane ids with `runpane panes list`.');
+}
+
+function panelNotFound(panelId: string): PaneError {
+  return new PaneError('ERR_RUNPANE_PANEL_NOT_FOUND', `No Pane panel found with id ${panelId}. Nothing was changed.`, 'See panel ids with `runpane panels list --pane <pane-id>`.');
+}
+
+function repoNotFound(selector: string): PaneError {
+  return new PaneError('ERR_RUNPANE_REPO_NOT_FOUND', `No Pane repo found ${selector}. Nothing was changed.`, REPO_NEXT);
+}
+
 function resolveActiveProject(projects: Project[]): Project {
   const active = projects.find(project => Boolean(project.active));
   if (!active) {
-    throw new Error('No active Pane repo found');
+    throw new PaneError('ERR_RUNPANE_REPO_NOT_FOUND', 'No Pane repo is active, so there is no default repo for this command. Nothing was changed.', REPO_NEXT);
   }
   return active;
 }
@@ -4777,7 +4791,7 @@ function resolveProjectByPath(projects: Project[], selectorPath: string): Projec
 function resolveProjectByName(projects: Project[], selectorName: string): Project {
   const matches = projects.filter(project => project.name.toLowerCase() === selectorName.toLowerCase());
   if (matches.length === 0) {
-    throw new Error(`No Pane repo found named "${selectorName}". Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
+    throw repoNotFound(`named "${selectorName}"`);
   }
   if (matches.length > 1) {
     throw new Error(`Multiple Pane repos are named "${selectorName}". Use --repo-id or an exact path.`);

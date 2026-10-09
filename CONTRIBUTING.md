@@ -178,6 +178,30 @@ Background browser timer throttling can affect event-loop samples.
   for React components and types, `kebab-case` for other filenames.
 - There is no formatter or commit hook; follow the surrounding code.
 
+## How Pane reports errors
+
+Every failure, refusal, skip or fallback tells a person or an agent what
+happened, why, what changed, and what to do next.
+
+- `message` is sentences: what happened, the underlying reason (quoted, not
+  replaced), and what was or was not changed ("Nothing was changed.", "The
+  Pane was kept."). `next` is the step to take: the exact command or setting.
+- When a destructive step is unsure, keep the data and say so.
+- Main and daemon handlers throw `PaneError(code, message, next)` from
+  `shared/paneError.ts`; `reasonOf(error)` quotes a cause inside a sentence.
+  The daemon socket and HTTP API send `{ code, message, next }`. Electron IPC
+  keeps only text, so the renderer gets `<message> Next: <next>`.
+- The `runpane` CLI throws `RunpaneError` (`packages/runpane/src/errors.ts`)
+  and prints every failure one way: the message and a `Next:` line on stderr,
+  and with `--json` also `{ "ok": false, "error": { "code", "message", "next" } }`
+  on stdout, exit 1. MCP tools return the message, `Next:` and `Code:` lines.
+- A fallback that changes behavior says so in its result, for example with a
+  `reason` field.
+- The renderer shows a reason without Electron's "Error invoking remote
+  method" wrapper (`ipcErrorMessage`, `useErrorStore.showError`), and a user
+  action that fails shows an error instead of only logging it.
+- Messages never include secrets or environment values.
+
 ## Making Changes
 
 ### Before You Start

@@ -2161,8 +2161,11 @@ describe('runpane IPC handlers', () => {
       } as AppServices['databaseService'],
     });
 
-    await expect(createRegistry(services).invoke('runpane:panes:cost', [{ paneId: 'missing' }]))
-      .rejects.toThrow('No Pane pane found with id missing');
+    await expect(createRegistry(services).invoke('runpane:panes:cost', [{ paneId: 'missing' }])).rejects.toMatchObject({
+      code: 'ERR_RUNPANE_PANE_NOT_FOUND',
+      message: 'No Pane found with id missing. Nothing was changed.',
+      next: 'See Pane ids with `runpane panes list`.',
+    });
   });
 
   it('scopes pane costs to a repository and omits workspace totals', async () => {
@@ -4526,7 +4529,7 @@ describe('runpane IPC handlers', () => {
     const registry = createRegistry(services);
 
     await expect(registry.invoke('runpane:panes:rename', [{ paneId: 'missing-pane', name: 'new name' }]))
-      .rejects.toThrow('No Pane pane found with id missing-pane');
+      .rejects.toThrow('No Pane found with id missing-pane');
   });
 
   it('serializes multi-pane session creation before enqueueing the next pane', async () => {
@@ -6035,7 +6038,7 @@ describe('runpane IPC handlers', () => {
 
       await expect(registry.invoke('runpane:panes:archive', [{
         paneId: 'no-such-pane',
-      }])).rejects.toThrow(/No Pane pane found/);
+      }])).rejects.toThrow(/No Pane found/);
     });
 
     it('refuses to archive a dirty pane without --force', async () => {
@@ -7120,7 +7123,7 @@ describe('runpane IPC handlers', () => {
 
       await expect(registry.invoke('runpane:panes:focus', [{
         paneId: 'no-such-pane',
-      }])).rejects.toThrow(/No Pane pane found/);
+      }])).rejects.toThrow(/No Pane found/);
 
       expect(window.show).not.toHaveBeenCalled();
       expect(sentEvents).not.toHaveBeenCalled();
@@ -7257,7 +7260,7 @@ describe('runpane IPC handlers', () => {
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: {} }]))
         .rejects.toThrow(/pass --note/);
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: { paneId: 'missing' } }]))
-        .rejects.toThrow(/No Pane pane found/);
+        .rejects.toThrow(/No Pane found/);
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: { paneId: session.id, panelId: otherPanel.id } }]))
         .rejects.toThrow(/does not belong to Pane/);
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'bad name', ttlMs: 60_000, owner: { label: 'me' } }]))
