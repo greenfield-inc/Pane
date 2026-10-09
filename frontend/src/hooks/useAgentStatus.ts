@@ -54,3 +54,17 @@ export function useOrchestrationSessionActivity(internalSessionId: string, paneI
   // SAFETY: The snapshot's first field is always produced by rollupAgentDisplayStatus above.
   return { status: status as AgentDisplayStatus, working: Number(working), blocked: Number(blocked) };
 }
+
+/**
+ * Agents waiting on the user, anywhere. Both sidebars badge Mission Control with
+ * this, so it lives here rather than being recomputed in each of them.
+ */
+export function useBlockedAgentCount(): number {
+  return usePanelStore((s) => {
+    let count = 0;
+    for (const state of Object.values(s.agentStatus)) {
+      if (state === 'blocked') count += 1;
+    }
+    return count;
+  });
+}

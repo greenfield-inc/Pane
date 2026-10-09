@@ -5,6 +5,7 @@ import { useHotkeyStore } from '../stores/hotkeyStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import {
   chooseSidebarCycleSessions,
@@ -58,12 +59,17 @@ export function useSessionNavigationHotkeys({
     }
   }, [projects, registerProjectIds]);
 
+  const inboxActive = useAttentionInboxStore(s => s.enabled && !s.showAll);
+  const inboxMembers = useAttentionInboxStore(s => s.members);
+
   // Sessions in the exact order ProjectSessionList renders them: projects in
-  // display order, collapsed projects skipped, sessions in display order.
-  // Pinned rows are excluded, matching the list's hotkey numbering.
+  // display order, collapsed projects skipped, sessions in display order; or
+  // the attention inbox rows while it is on. Pinned rows are excluded,
+  // matching the list's hotkey numbering.
   const visibleSessions = useMemo(() => {
+    if (inboxActive) return allActiveSessions.filter(session => inboxMembers.has(session.id));
     return flattenSessionsByProjects(projects, sessionsByProject, expandedProjects);
-  }, [projects, expandedProjects, sessionsByProject]);
+  }, [allActiveSessions, expandedProjects, inboxActive, inboxMembers, projects, sessionsByProject]);
 
   const pinnedSessions = useMemo(() => {
     return getPinnedSessions(sessions, projectById).map(item => item.session);

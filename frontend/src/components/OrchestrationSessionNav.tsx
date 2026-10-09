@@ -295,7 +295,8 @@ export function OrchestrationSessionNav({
         .map((association, index) => renderPane(association.paneId, session.id, index))
         .filter((row): row is ReactNode => row !== null && row !== undefined)
       : [];
-    const visiblePaneIds = paneRows.length > 0 ? visibleAssociations.map(association => association.paneId) : [];
+    // Rows the attention inbox hides still count toward the Session's activity.
+    const visiblePaneIds = renderPane ? visibleAssociations.map(association => association.paneId) : [];
     const expanded = sessionExpansionOverrides.get(session.id) ?? paneRows.length > 0;
     const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
     const label = session.name || 'Pane Chat';

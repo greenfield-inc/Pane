@@ -359,6 +359,22 @@ describe('terminal status events', () => {
     }) });
   });
 
+  it('records the screen an exited agent finished on', async () => {
+    const fixture = attach('codex');
+    const panel: ToolPanel = {
+      id: 'p', sessionId: 's', type: 'terminal', title: 'Codex',
+      state: { isActive: true, customState: { initialInput: 'task' } },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    };
+    panelManager.getPanel.mockReturnValue(panel);
+    panelManager.updatePanel.mockResolvedValue(undefined);
+    fixture.data('All tests passed');
+    fixture.exit();
+    await vi.waitFor(() => expect(panelManager.updatePanel).toHaveBeenCalledWith('p', { state: expect.objectContaining({
+      customState: expect.objectContaining({ initialInput: 'task', screenText: expect.stringContaining('All tests passed') }),
+    }) }));
+  });
+
   it('discards a terminal state read after the terminal was replaced', async () => {
     const old = attach('codex');
     old.data('old terminal output');
