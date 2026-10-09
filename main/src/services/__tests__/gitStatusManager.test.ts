@@ -661,6 +661,26 @@ describe('GitStatusManager', () => {
       await expect(gitStatusManager.lookupPrForPane('test-session')).resolves.toEqual({ ok: false, error: failure });
     });
 
+    it('reads a fresh PR for archive decisions, ignoring a cached miss', async () => {
+      vi.mocked(projectGitOutput).mockReturnValue('feature-branch\n');
+      projectGithubCommand.mockResolvedValue({ stdout: '[]', stderr: '' });
+      await expect(gitStatusManager.lookupPrForPane('test-session')).resolves.toEqual({ ok: true, pr: undefined });
+
+      projectGithubCommand.mockResolvedValue({
+        stdout: JSON.stringify([{ number: 44, url: 'https://github.com/example/repo/pull/44', state: 'OPEN' }]),
+        stderr: '',
+      });
+      await expect(gitStatusManager.lookupFreshPrForPane('test-session')).resolves.toMatchObject({ ok: true, pr: { prNumber: 44, prState: 'OPEN' } });
+    });
+
+    it('fails a fresh PR lookup when the branch cannot be read, instead of guessing from the folder name', async () => {
+      vi.mocked(projectGitOutput).mockImplementation(() => { throw new Error('not a git repository'); });
+      projectGithubCommand.mockResolvedValue({ stdout: '[]', stderr: '' });
+
+      await expect(gitStatusManager.lookupFreshPrForPane('test-session')).resolves.toMatchObject({ ok: false });
+      expect(projectGithubCommand).not.toHaveBeenCalled();
+    });
+
     it('schedules staggered PR enrichment for non-active relevant initial-load status', async () => {
       const privates = managerPrivates(gitStatusManager);
       privates.initialLoadQueue.push('test-session');

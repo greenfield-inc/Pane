@@ -6641,7 +6641,7 @@ describe('runpane IPC handlers', () => {
             associations: [{ paneId: session.id, panelIds: [], attachedAt: '2026-01-01T00:00:00.000Z' }],
           }));
           // SAFETY: This test fixture supplies the Sessions manager method and the PR lookup (no PR) the bulk archive calls.
-          const bulkServices: AppServices = { ...services, orchestrationSessionManager: { get } as never, gitStatusManager: { lookupPrForPane: vi.fn(async () => ({ ok: true })), invalidatePrCache: vi.fn() } as never };
+          const bulkServices: AppServices = { ...services, orchestrationSessionManager: { get } as never, gitStatusManager: { lookupFreshPrForPane: vi.fn(async () => ({ ok: true })) } as never };
           const bulkRegistry = createRegistry(bulkServices);
           registerSessionsDeleteStub(bulkRegistry, bulkServices);
           await expect(bulkRegistry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, dryRun: true }])).resolves.toMatchObject({
@@ -6840,7 +6840,7 @@ describe('runpane IPC handlers', () => {
     });
 
     describe('--session --merged', () => {
-      function createBulkServices(panes: Session[], associations: string[], lookupPr: AppServices['gitStatusManager']['lookupPrForPane'] = vi.fn(async () => ({ ok: true as const }))) {
+      function createBulkServices(panes: Session[], associations: string[], lookupPr: AppServices['gitStatusManager']['lookupFreshPrForPane'] = vi.fn(async () => ({ ok: true as const }))) {
         const byId = new Map(panes.map(pane => [pane.id, pane]));
         const get = vi.fn(async () => ({
           id: 'orchestration-1',
@@ -6858,7 +6858,7 @@ describe('runpane IPC handlers', () => {
           // SAFETY: This test fixture intentionally supplies the minimal Sessions manager surface exercised by archive.
           orchestrationSessionManager: { get } as never,
           // SAFETY: This test fixture supplies the PR lookup the bulk archive consults; by default no Pane has a PR.
-          gitStatusManager: { lookupPrForPane: lookupPr, invalidatePrCache: vi.fn() } as never,
+          gitStatusManager: { lookupFreshPrForPane: lookupPr } as never,
           archiveProgressManager: new ArchiveProgressManager(),
         } as never);
         return { services, get };

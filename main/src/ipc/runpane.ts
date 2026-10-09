@@ -4411,16 +4411,15 @@ type PanePrStatus =
  * failed, unavailable or slow lookup is `unknown`, never "no open PR".
  */
 async function findPrStatusForPane(services: AppServices, paneId: string): Promise<PanePrStatus> {
-  const gitStatus = services.gitStatusManager;
   try {
-    const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
-    if (projectPath) gitStatus.invalidatePrCache(projectPath);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), PR_STATUS_TIMEOUT_MS); });
-    const lookup = await Promise.race([gitStatus.lookupPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
+    const lookup = await Promise.race([services.gitStatusManager.lookupFreshPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
     if (lookup === 'timeout') return { state: 'unknown', reason: 'GitHub did not answer in time.' };
-    if (!lookup) return { state: 'none' };
-    if (!lookup.ok) return { state: 'unknown', reason: 'GitHub could not be reached.' };
+    if (!lookup.ok) {
+      const detail = lookup.error instanceof Error ? ` (${lookup.error.message})` : '';
+      return { state: 'unknown', reason: `The PR state could not be confirmed${detail}.` };
+    }
     if (lookup.pr?.prState === 'OPEN' && lookup.pr.prNumber !== undefined) return { state: 'open', number: lookup.pr.prNumber };
     return { state: 'none' };
   } catch {
