@@ -8,13 +8,15 @@ import { AreaChart } from '../ui/charts/AreaChart';
 import { BarChart } from '../ui/charts/BarChart';
 import { DonutChart } from '../ui/charts/DonutChart';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
-import { LimitBar, LimitStatusBanners, CreditsLine } from './ProviderLimits';
+import { ProviderLimitsPanel } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
+import { USAGE_PROVIDERS, joinLabels } from './usageProviders';
 import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
+  USAGE_PROVIDER_CATALOG,
   type UsageByPane,
   type UsagePaneCostSlice,
   type UsageProvider,
@@ -34,14 +36,11 @@ const RANGE_OPTIONS = [
 
 const PROVIDER_OPTIONS: Array<{ value: UsageProvider | 'all'; label: string }> = [
   { value: 'all', label: 'All' },
-  { value: 'claude', label: 'Claude' },
-  { value: 'codex', label: 'Codex' },
+  ...USAGE_PROVIDERS,
 ];
 
-const PROVIDER_META = {
-  claude: { label: 'Anthropic', color: '#e0913a' },
-  codex: { label: 'OpenAI', color: '#37b877' },
-} satisfies Record<UsageProvider, { label: string; color: string }>;
+const CLI_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.cliLabel));
+const VENDOR_NAMES = joinLabels(USAGE_PROVIDERS.map(entry => entry.vendorLabel));
 
 /** Chart palette, matching the graph view's lane colours. */
 const SERIES_COLORS = {
@@ -330,7 +329,7 @@ export function UsageView() {
       label: entry.model,
       value: entry.totalTokens,
       color: MODEL_COLORS[index % MODEL_COLORS.length],
-      tag: PROVIDER_META[entry.provider].label,
+      tag: USAGE_PROVIDER_CATALOG[entry.provider].vendorLabel,
       share: total > 0 ? entry.totalTokens / total : 0,
       detail: entry.costIncomplete ? 'n/a' : formatUsd(entry.estimatedCostUsd),
       note: entry.costIncomplete ? 'no price' : 'at API rates',
@@ -380,7 +379,7 @@ export function UsageView() {
     }));
   }, []);
 
-  /** Anthropic vs OpenAI roll-up — the split the model list alone doesn't show. */
+  /** Per-vendor roll-up — the split the model list alone doesn't show. */
   const providerBars = useMemo(() => {
     const byProvider = new Map<UsageProvider, { tokens: number; cost: number; incomplete: boolean }>();
     for (const entry of report?.byModel ?? []) {
@@ -395,9 +394,9 @@ export function UsageView() {
     return [...byProvider.entries()]
       .sort((a, b) => b[1].tokens - a[1].tokens)
       .map(([key, value]) => ({
-        label: PROVIDER_META[key].label,
+        label: USAGE_PROVIDER_CATALOG[key].vendorLabel,
         value: value.tokens,
-        color: PROVIDER_META[key].color,
+        color: USAGE_PROVIDER_CATALOG[key].color,
         share: total > 0 ? value.tokens / total : 0,
       }));
   }, [report]);
@@ -413,7 +412,9 @@ export function UsageView() {
     ];
   }, [report]);
 
-  const bothRootsMissing = (report?.index.missingRoots.length ?? 0) >= 2;
+  const missingRoots = report?.index.missingRoots ?? [];
+  const rootsChecked = report?.index.rootsChecked ?? 0;
+  const allRootsMissing = rootsChecked > 0 && missingRoots.length === rootsChecked;
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -577,14 +578,17 @@ export function UsageView() {
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
             {error}
           </div>
-        ) : bothRootsMissing ? (
+        ) : allRootsMissing ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
-              Usage is read from the Claude Code and Codex transcript files in your home directory.
-              Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
-              <code className="font-mono">~/.codex/sessions</code> exists yet — run an agent once and
-              come back.
+              Usage is read from the {CLI_NAMES} transcript files in your home directory.
+              None of these exist yet: {missingRoots.map((root, index) => (
+                <span key={root}>
+                  {index > 0 && ', '}
+                  <code className="font-mono">{root}</code>
+                </span>
+              ))}. Run an agent once and come back.
             </p>
           </div>
         ) : report ? (
@@ -691,29 +695,10 @@ export function UsageView() {
               </section>
 
               {/* Provider-reported limits */}
-              <section className="rounded border border-border-primary bg-surface-secondary p-3">
-                <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-                  Provider limits
-                </h2>
-
-                <LimitStatusBanners limits={report.rateLimits} />
-
-                {report.rateLimits.length > 0 ? (
-                  <ul className="mt-2 space-y-2">
-                    {report.rateLimits.map(limit => (
-                      <li key={`${limit.provider}-${limit.limitId}-${limit.scope}`}>
-                        <LimitBar limit={limit} />
-                      </li>
-                    ))}
-                    <CreditsLine limits={report.rateLimits} />
-                  </ul>
-                ) : (
-                  <p className="mt-2 text-[11px] text-text-muted">
-                    No provider-reported limits available. Codex writes quota state
-                    into its transcripts; Anthropic does not expose plan limits locally.
-                  </p>
-                )}
-              </section>
+              <ProviderLimitsPanel
+                limits={report.rateLimits}
+                className="rounded border border-border-primary bg-surface-secondary p-3"
+              />
             </div>
 
             <div className="grid gap-4 lg:grid-cols-3">
@@ -744,7 +729,7 @@ export function UsageView() {
                 <BarChart
                   data={providerBars}
                   formatValue={formatTokens}
-                  ariaLabel="Token usage split between Anthropic and OpenAI"
+                  ariaLabel={`Token usage split between ${VENDOR_NAMES}`}
                 />
 
                 <h2 className="mb-2 mt-4 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">

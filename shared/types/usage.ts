@@ -7,7 +7,55 @@
  * Pane reads read-only and indexes incrementally.
  */
 
-export type UsageProvider = 'claude' | 'codex';
+interface UsageProviderMeta {
+  /** Agent name, used by filters. */
+  label: string;
+  /** The CLI that writes the transcripts Pane reads. */
+  cliLabel: string;
+  /** Vendor name, used for reported usage and limits. */
+  vendorLabel: string;
+  color: string;
+  /** Where (or whether) the provider's plan limits can be read locally. */
+  limitsNote: string;
+}
+
+/** Ties each entry's `value` to its key. */
+function defineUsageProviders<const Catalog extends { [Id in keyof Catalog]: UsageProviderMeta & { value: Id } }>(
+  catalog: Catalog,
+): Catalog {
+  return catalog;
+}
+
+/**
+ * The one place a usage provider is added. Filters, labels, colors, the
+ * leaderboard decoder and usage copy all derive from it. Transcript roots are
+ * the exception: main's `transcriptRoots()` lists where each provider is read.
+ */
+export const USAGE_PROVIDER_CATALOG = defineUsageProviders({
+  claude: {
+    value: 'claude',
+    label: 'Claude',
+    cliLabel: 'Claude Code',
+    vendorLabel: 'Anthropic',
+    color: '#e0913a',
+    limitsNote: 'Anthropic does not expose plan limits locally.',
+  },
+  codex: {
+    value: 'codex',
+    label: 'Codex',
+    cliLabel: 'Codex',
+    vendorLabel: 'OpenAI',
+    color: '#37b877',
+    limitsNote: 'Codex writes quota state into its transcripts.',
+  },
+});
+
+export type UsageProvider = keyof typeof USAGE_PROVIDER_CATALOG;
+
+export const USAGE_PROVIDER_IDS =
+  // SAFETY: the catalog is a literal object, so its own keys are exactly UsageProvider;
+  // Object.keys just loses that in its return type.
+  Object.keys(USAGE_PROVIDER_CATALOG) as UsageProvider[];
 
 /** One assistant message's token accounting, normalised across providers. */
 export interface UsageEvent {
@@ -123,7 +171,9 @@ export interface UsageIndexStatus {
   lastScanFinishedMs: number | null;
   filesTracked: number;
   eventsIndexed: number;
-  /** Transcript roots that do not exist — drives the empty state. */
+  /** Transcript roots the last scan checked; with `missingRoots`, drives the empty state. */
+  rootsChecked: number;
+  /** Transcript roots that do not exist. */
   missingRoots: string[];
   scanning: boolean;
   /** Files scanned so far in the current pass, for a progress indicator. */

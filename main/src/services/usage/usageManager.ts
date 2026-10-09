@@ -85,6 +85,7 @@ export class UsageManager {
     lastScanFinishedMs: null,
     filesTracked: 0,
     eventsIndexed: 0,
+    rootsChecked: 0,
     missingRoots: [],
     scanning: false,
     filesScanned: 0,
@@ -216,6 +217,7 @@ export class UsageManager {
 
     try {
       const roots = this.dependencies.roots?.() ?? transcriptRoots();
+      this.status.rootsChecked = roots.length;
       this.status.missingRoots = roots.filter(root => !existsSync(root.path)).map(root => root.path);
 
       const files: Array<{ path: string; provider: UsageProvider }> = [];
