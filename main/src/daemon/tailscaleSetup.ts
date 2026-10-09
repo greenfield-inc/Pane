@@ -241,8 +241,9 @@ export function installTailscaleCommandOrThrow(
 
 export function resolveTailscaleCommand(
   dependencies: TailscaleSetupDependencies = defaultTailscaleSetupDependencies,
+  pathExists: (candidate: string) => boolean = existsSync,
 ): ResolvedCommand | null {
-  return tailscaleCandidates().find(command => commandExistsWithArgs(command, ['version'], dependencies)) ?? null;
+  return tailscaleCandidates(pathExists).find(command => commandExistsWithArgs(command, ['version'], dependencies)) ?? null;
 }
 
 export async function resolveTailscaleCommandAsync(
@@ -450,6 +451,10 @@ export function getTailscaleServeSetupInstructions(port?: number): string {
 function tailscaleCandidates(pathExists: (candidate: string) => boolean = existsSync): ResolvedCommand[] {
   const commands: ResolvedCommand[] = [{ command: 'tailscale', displayCommand: 'tailscale' }];
   if (process.platform === 'darwin') {
+    // GUI and updater relaunches may omit Homebrew from PATH.
+    for (const candidate of ['/opt/homebrew/bin/tailscale', '/usr/local/bin/tailscale']) {
+      if (pathExists(candidate)) commands.push({ command: candidate, displayCommand: quoteForPosix(candidate) });
+    }
     for (const candidate of [
       '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
       path.join(os.homedir(), 'Applications', 'Tailscale.app', 'Contents', 'MacOS', 'Tailscale'),
