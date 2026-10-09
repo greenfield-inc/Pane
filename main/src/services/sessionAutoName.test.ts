@@ -35,9 +35,22 @@ describe('applyTerminalInput', () => {
     expect(applyTerminalInput(typed.draft, ' it\r')).toEqual({ draft: '', submitted: ['fix it'] });
   });
 
-  it('applies Backspace and Ctrl-U and drops arrow keys', () => {
-    expect(applyTerminalInput('', 'fox\x7f\x7fix\x1b[D\r')).toEqual({ draft: '', submitted: ['fix'] });
+  it('applies Backspace and Ctrl-U', () => {
+    expect(applyTerminalInput('', 'fox\x7f\x7fix\r')).toEqual({ draft: '', submitted: ['fix'] });
     expect(applyTerminalInput('', 'oops\x15hello\r')).toEqual({ draft: '', submitted: ['hello'] });
+  });
+
+  it('submits no text for a line edited with cursor keys, until the next clean line', () => {
+    // The composer would send "fix cuts"; replaying at the end would give "fix catu".
+    const edited = applyTerminalInput('', 'fix cats\x1b[D\x1b[D\x7fu');
+    expect(edited.draft).toBeNull();
+    expect(applyTerminalInput(edited.draft, '\rnext message\r')).toEqual({ draft: '', submitted: ['next message'] });
+    expect(applyTerminalInput('', 'fix\x1b[3~ it\r').submitted).toEqual([]);
+    expect(applyTerminalInput('', 'oops\x1b[H\x15hello\r').submitted).toEqual(['hello']);
+  });
+
+  it('ignores focus reports', () => {
+    expect(applyTerminalInput('', 'fix\x1b[O\x1b[I it\r')).toEqual({ draft: '', submitted: ['fix it'] });
   });
 
   it('reads a bracketed paste with ESC CR newlines as one message', () => {

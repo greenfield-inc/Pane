@@ -4,40 +4,47 @@ const MAX_DRAFT_LENGTH = 4_000;
 const BRACKETED_PASTE = /\x1b\[200~([\s\S]*?)(?:\x1b\[201~|$)/g;
 const PROMPT_NEWLINE = /\x1b\r/g;
 const ESCAPE_SEQUENCE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|O.|.)/g;
+const FOCUS_REPORT = /^\x1b\[[IO]$/;
 /* oxlint-enable eslint/no-control-regex */
 
 export interface TypedInput {
-  /** The line still being typed. */
-  draft: string;
-  /** Lines submitted with Enter, oldest first. */
+  /** The line still being typed, or null once an edit made it unknown. */
+  draft: string | null;
+  /** Lines submitted with Enter whose text is known, oldest first. */
   submitted: string[];
 }
 
 /**
  * Replays raw terminal keystrokes onto the line being typed. Enter submits the
  * line; ESC CR and a CR inside a bracketed paste are newlines; Backspace, Ctrl-U
- * and Ctrl-C edit or clear it. Cursor movement and other escape sequences are dropped.
+ * and Ctrl-C edit or clear it. Any other key that edits or moves the cursor
+ * (arrows, Home, Delete, Tab, Ctrl-W, ...) makes the line unknown until Enter,
+ * Ctrl-U or Ctrl-C.
  */
-export function applyTerminalInput(draft: string, data: string): TypedInput {
+export function applyTerminalInput(draft: string | null, data: string): TypedInput {
   const text = data
     .replace(PROMPT_NEWLINE, '\n')
     .replace(BRACKETED_PASTE, (_match, pasted: string) => pasted.replace(/\r\n?/g, '\n'))
-    .replace(ESCAPE_SEQUENCE, '');
+    .replace(ESCAPE_SEQUENCE, sequence => FOCUS_REPORT.test(sequence) ? '' : '\x1b');
   const submitted: string[] = [];
   let line = draft;
   for (const char of text) {
     if (char === '\r') {
-      submitted.push(line);
+      if (line !== null) submitted.push(line);
       line = '';
-    } else if (char === '\x7f' || char === '\b') {
-      line = line.slice(0, -1);
     } else if (char === '\x15' || char === '\x03') {
       line = '';
+    } else if (line === null) {
+      continue;
+    } else if (char === '\x7f' || char === '\b') {
+      line = line.slice(0, -1);
     } else if (char === '\n' || char >= ' ') {
       line += char;
+    } else {
+      line = null;
     }
   }
-  return { draft: line.slice(0, MAX_DRAFT_LENGTH), submitted };
+  return { draft: line?.slice(0, MAX_DRAFT_LENGTH) ?? null, submitted };
 }
 
 /**

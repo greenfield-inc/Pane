@@ -60,7 +60,7 @@ export function NewDialog({ projects, defaultProjectId, onClose }: NewDialogProp
       const store = useOrchestrationSessionStore.getState();
       await store.load();
       const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
-      await store.create({ ...input, name });
+      await store.create({ ...input, name, nameFromFirstMessage: !requestedName });
       useSessionStore.getState().setActiveSession(null);
       useNavigationStore.getState().navigateToPaneChat();
       onClose();

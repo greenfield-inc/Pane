@@ -25,11 +25,6 @@ export function nextOrchestrationSessionName(sessions: readonly { name: string }
   return `New chat ${suffix}`;
 }
 
-/** Whether a name has the shape `nextOrchestrationSessionName` gives. */
-export function isDefaultOrchestrationSessionName(name: string): boolean {
-  return /^new chat(?: \d+)?$/i.test(name.trim());
-}
-
 export type OrchestrationSessionStatus = 'working' | 'blocked' | 'idle' | 'unknown' | 'unassociated';
 
 export interface OrchestrationLink {
@@ -189,6 +184,8 @@ export interface OrchestrationSessionCreateInput {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
+  /** The person left the name blank; the first message they send renames the Session once. */
+  nameFromFirstMessage?: boolean;
   isPinned?: boolean;
   agent?: PaneChatAgent;
   launchCommand?: string;

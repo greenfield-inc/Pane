@@ -52,7 +52,7 @@ export function RemoteCreateOrchestrationSessionDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const view = await adapter.createOrchestrationSession({ name: name.trim() || defaultName, goal: goal.trim() || undefined, agent, isPinned: startPinned });
+      const view = await adapter.createOrchestrationSession({ name: name.trim() || defaultName, nameFromFirstMessage: !name.trim(), goal: goal.trim() || undefined, agent, isPinned: startPinned });
       onCreated(view);
       onClose();
     } catch (createError) {

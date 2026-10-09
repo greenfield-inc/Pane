@@ -26,7 +26,6 @@ import {
   MAX_ORCHESTRATION_ITEMS,
   MAX_ORCHESTRATION_TEXT_LENGTH,
   ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX,
-  isDefaultOrchestrationSessionName,
   type OrchestrationActivity,
   type OrchestrationAssociation,
   type OrchestrationAssociationInput,
@@ -79,7 +78,7 @@ function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
 export class OrchestrationSessionManager extends EventEmitter {
   private initialized = false;
   /** The line a person is typing into each Session agent panel, until its first message names the Session. */
-  private readonly firstMessageDrafts = new Map<string, string>();
+  private readonly firstMessageDrafts = new Map<string, string | null>();
   private readonly namedPanelIds = new Set<string>();
 
   constructor(
@@ -222,7 +221,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         wslDistribution: input.wslDistribution,
         id,
         name,
-        nameIsDefault: !sourcePanel && isDefaultOrchestrationSessionName(name) ? true : undefined,
+        nameIsDefault: !sourcePanel && input.nameFromFirstMessage ? true : undefined,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
         isPinned: input.isPinned ?? false,
@@ -479,7 +478,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** Terminal input a person typed. The first message to a Session agent renames a Session that still has its default name. */
   observeInput(panelId: string, data: string): void {
     if (!panelId.startsWith(ORCHESTRATION_SESSION_PANEL_PREFIX) || this.namedPanelIds.has(panelId)) return;
-    const { draft, submitted } = applyTerminalInput(this.firstMessageDrafts.get(panelId) ?? '', data);
+    const previous = this.firstMessageDrafts.get(panelId);
+    const { draft, submitted } = applyTerminalInput(previous === undefined ? '' : previous, data);
     const name = submitted.map(sessionNameFromMessage).find(Boolean);
     if (!name) {
       this.firstMessageDrafts.set(panelId, draft);
