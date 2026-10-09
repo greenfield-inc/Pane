@@ -303,7 +303,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace list",
-      "summary": "List your machines on Tailscale and whether each has joined workspaces.",
+      "summary": "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
       "usage": [
         "runpane workspace list [--json] [--pane-dir <path>]"
       ],
@@ -338,7 +338,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace read",
-      "summary": "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+      "summary": "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
       "usage": [
         "runpane workspace [<machine>] read <path> [--json]"
       ],
@@ -349,7 +349,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace write",
-      "summary": "Write stdin to a file on one of your machines, creating parent folders.",
+      "summary": "Write stdin to a file on a machine on your tailnet, creating parent folders.",
       "usage": [
         "runpane workspace [<machine>] write <path> [--json]"
       ],
@@ -2192,7 +2192,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane workspace <machine> <runpane command>      (any command that talks to Pane, e.g. sessions list --json)",
         "  runpane workspace enable|disable",
         "",
-        "<machine> is a Tailscale name, unique prefix, or IP. Only machines signed in to your own Tailscale login are reachable.",
+        "<machine> is a Tailscale name, unique prefix, or IP. Your own machines are reachable, and a teammate's machine when its owner set Who can connect to Everyone on tailnet.",
         "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits.",
         "Commands that only run here (doctor, agent-context, mcp, docs) run there with: runpane workspace <machine> exec -- 'runpane doctor'"
       ],
@@ -3066,7 +3066,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane workspace list [--json] [--pane-dir <path>]",
         "",
-        "List your machines on Tailscale and whether each has joined workspaces.",
+        "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
         "",
         "Options:",
         "  --json                          Print machine-readable output."
@@ -3093,7 +3093,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane workspace [<machine>] read <path> [--json]",
         "",
-        "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
         "",
         "Options:",
         "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
@@ -3104,7 +3104,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane workspace [<machine>] write <path> [--json]",
         "",
-        "Write stdin to a file on one of your machines, creating parent folders.",
+        "Write stdin to a file on a machine on your tailnet, creating parent folders.",
         "",
         "Options:",
         "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
@@ -13566,8 +13566,8 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace list": {
         "name": "workspace list",
-        "summary": "List your machines on Tailscale and whether each has joined workspaces.",
-        "details": "Shows this machine's workspace state, then each of your other Mac, Windows, and Linux machines with its OS, online state, and shell. Only machines signed in to your own Tailscale login appear.",
+        "summary": "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
+        "details": "Shows this machine's workspace state, then each other Mac, Windows, and Linux machine on your tailnet with its OS, online state, and shell. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -13587,7 +13587,7 @@ export const RUNPANE_CONTRACT = {
       "workspace enable": {
         "name": "workspace enable",
         "summary": "Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).",
-        "details": "Serves this Pane's daemon with tailscale serve on port 8443 in HTTP proxy mode. Only your own Tailscale login is accepted; nothing is opened to the internet.",
+        "details": "Serves this Pane's daemon with tailscale serve on port 8443 in HTTP proxy mode. Only your own Tailscale login is accepted unless you set Who can connect to Everyone on tailnet; nothing is opened to the internet.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -13626,7 +13626,7 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace read": {
         "name": "workspace read",
-        "summary": "Print a file from one of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "summary": "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
         "details": "Reads the same way on every OS. On Windows, /mnt/c/... reaches C:\\... and WSL paths such as /home/<user>/... are read through \\\\wsl.localhost\\<distro>\\. Directories list their entries.",
         "requiresPaneDaemon": false,
         "mutates": false,
@@ -13657,7 +13657,7 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace write": {
         "name": "workspace write",
-        "summary": "Write stdin to a file on one of your machines, creating parent folders.",
+        "summary": "Write stdin to a file on a machine on your tailnet, creating parent folders.",
         "details": "Takes the same path forms as workspace read. Content comes from stdin and replaces the file.",
         "requiresPaneDaemon": false,
         "mutates": true,
