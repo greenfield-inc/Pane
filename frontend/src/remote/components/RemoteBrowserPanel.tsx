@@ -180,6 +180,8 @@ export function RemoteBrowserPanel({ panel, ports, onNavigate, onError }: Remote
           key={`${src}#${reloadKey}`}
           src={src}
           title={panel.title}
+          // Each page keeps its own origin; leaving out allow-top-navigation stops it from navigating Pane away.
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
           allow="clipboard-read; clipboard-write; fullscreen"
           onLoad={() => setLoading(false)}
           className="min-h-0 w-full flex-1 border-0"
