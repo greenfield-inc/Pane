@@ -439,7 +439,7 @@ export function reconcile(
   for (const id of unassigned) {
     if (!splitPanelIds.has(id)) continue;
     changed = true;
-    root = placePanelInSplit(root, id);
+    root = placePanelInSplit(root, id, false);
   }
   if (orphans.length > 0) {
     changed = true;
