@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Server } from 'lucide-react';
+import { Server, X } from 'lucide-react';
 import type { SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import { SessionProvider } from '../contexts/SessionProvider';
@@ -133,6 +133,10 @@ function SshViewForHost() {
   }
 
   const alert = error ?? openError;
+  const dismissAlert = () => {
+    setError(null);
+    useSshHostsStore.setState({ error: null });
+  };
   return (
     <div data-testid="ssh-view" className="ph-no-capture flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
       {hasTabs && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome px-2">
@@ -143,7 +147,13 @@ function SshViewForHost() {
       {hasTabs ? (
         <div className="relative min-h-0 flex-1">
           {/* Over the stage, so showing it never resizes a terminal. */}
-          {alert && <p role="alert" className="absolute left-1/2 top-2 z-40 -translate-x-1/2 rounded border border-border-primary bg-surface-primary px-2 py-1 text-xs text-status-error shadow-sm">{alert}</p>}
+          {alert && <div role="alert" className="absolute left-1/2 top-2 z-40 flex max-w-[min(36rem,90%)] -translate-x-1/2 items-start gap-2 rounded border border-border-primary bg-surface-primary py-1 pl-2 pr-1 text-xs text-status-error shadow-sm">
+            <span>{alert}</span>
+            <button type="button" aria-label="Dismiss" onClick={dismissAlert}
+              className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive">
+              <X className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>}
           {sessionError && <LoadFailure message={sessionError} onRetry={() => setSessionAttempt(value => value + 1)} />}
           {session && <SessionProvider session={session}>
             <SplitLayout layout={layout} panels={tabs} focusedGroupId={GROUP_ID} isMainRepo={false}
