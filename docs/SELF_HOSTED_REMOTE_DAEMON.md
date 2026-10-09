@@ -222,7 +222,7 @@ A desktop connected to a remote host reaches every port listening on the host as
 - When something on the desktop already answers on 5173, the desktop uses the next free port, or any free port when the next 19 are taken too. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**.
 - A tab never loads the desktop's own service in the host's place. While the host's Ports list is loading it waits, and when a port stops listening on the host it says the port isn't reachable, then loads once the port is back.
 - **Copy URL** copies the address that works on the desktop, for its system browser.
-- Clicking a `localhost` link in a terminal opens the host's server in your system browser, using the local port number if it moved.
+- Clicking a `localhost` link in a terminal opens the host's server in your system browser, using the local port number if it moved. A link to a port that isn't forwarded right now doesn't open, so it never reaches the desktop's own service on that port.
 - When a port closes on the host, the desktop closes its listener. Disconnecting closes all of them.
 
 Each connection the desktop accepts travels over the Pane connection as a WebSocket to `/ports/<port>` on the host, which connects to `localhost:<port>` there. The host accepts it only with the same sign-in as every other request, and only for a port in its current list. Listeners stay on loopback on both machines.

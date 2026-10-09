@@ -639,14 +639,13 @@ export class RemotePaneClientController extends EventEmitter {
 
   /**
    * Points a host link to a forwarded port, such as one in terminal output, at where this desktop
-   * reaches it. Null for a port the host lists but this desktop has no tunnel for: opening it here
-   * would reach this computer's own service instead.
+   * reaches it. Null for a host loopback port without a tunnel here, including before the host's
+   * Ports list arrives: opening it would reach this computer's own service instead.
    */
   toLocalUrl(url: string): string | null {
     if (!this.isRemoteModeActive()) return url;
     const target = localTargetOf(url, this.tunnelledSnapshot);
-    if (target.kind === 'load') return target.url;
-    return target.kind === 'unreachable' && target.listed ? null : url;
+    return target.kind === 'load' ? target.url : null;
   }
 
   shouldForwardLocalRendererEvent(channel: string): boolean {
