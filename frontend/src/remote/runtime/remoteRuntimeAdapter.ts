@@ -6,6 +6,7 @@ import type {
   OrchestrationSessionView,
 } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
+import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import type { RemoteDaemonEventEnvelope, RemotePaneConnectionProfile, RemotePwaAffordances } from '../../../../shared/types/remoteDaemon';
 import type {
   VoiceDeepgramTokenResult,
@@ -189,6 +190,23 @@ export class RemoteRuntimeAdapter {
       title: options.title ?? 'Terminal',
       initialState,
     }]);
+  }
+
+  createBrowserPanel(sessionId: string): Promise<ToolPanel> {
+    return this.invoke<ToolPanel>('panels:create', [{ sessionId, type: 'browser', title: 'Browser' }]);
+  }
+
+  updatePanelState(panelId: string, state: ToolPanel['state']): Promise<void> {
+    return this.invoke<void>('panels:update', [panelId, { state }]);
+  }
+
+  /** Asks the host for a web port's phone address; it arrives with the next ports:changed. */
+  requestPhoneAddress(port: number): Promise<void> {
+    return this.invoke<void>('ports:phone-address', [port]);
+  }
+
+  getListeningPorts(): Promise<ListeningPortsSnapshot> {
+    return this.invoke<ListeningPortsSnapshot>('ports:list');
   }
 
   checkPanelInitialized(panelId: string): Promise<boolean> {

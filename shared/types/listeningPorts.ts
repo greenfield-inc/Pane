@@ -23,6 +23,8 @@ export interface ListeningPort {
   /** The Pane whose terminal started the process, for `pane-terminal` ports. */
   sessionId?: string;
   paneName?: string;
+  /** The HTTPS address phones open this web port at; absent until its Serve handler exists. */
+  phoneUrl?: string;
   /**
    * Where a remote desktop reaches this host port on its own loopback: the same number when it
    * was free there, otherwise another. Set only by a desktop connected to a remote host.
@@ -30,11 +32,17 @@ export interface ListeningPort {
   localPort?: number;
 }
 
+/** Whether phones can open pages from this host, and where its HTML files and media are served. */
+export type PhonePreviewStatus =
+  | { state: 'on'; filesUrl: string }
+  | { state: 'off'; reason: string };
+
 export interface ListeningPortsSnapshot {
   /** The host machine's name, for "Ports on <host>". */
   host: string;
   /** Sorted by group order, then port. */
   ports: ListeningPort[];
+  phone?: PhonePreviewStatus;
   /**
    * Set by a remote desktop when its host is too old to list ports: nothing is tunnelled, and
    * loopback URLs open this computer's own ports.

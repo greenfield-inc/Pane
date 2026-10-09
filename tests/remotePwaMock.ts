@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import type { OrchestrationSessionRecord } from '../shared/types/orchestrationSession';
 import { PANE_CHAT_AGENT_LABELS } from '../shared/types/paneChat';
 import type { JsonValue } from '../shared/validation/boundaryDecoder';
+import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
 
 // Test harness for the Remote Pane PWA — the browser-served surface at
 // `/remote.html`, which talks to a remote Pane daemon over HTTP+SSE rather than
@@ -21,6 +22,10 @@ export interface RemotePwaMockOptions {
   activePanelIndex?: number;
   /** Orchestration Sessions the mock host reports. */
   orchestrationSessionNames?: string[];
+  /** Browser panels after the terminals, by title and saved URL ('' for a new tab). */
+  browserPanels?: Array<{ title: string; url: string }>;
+  /** What `ports:list` answers. */
+  ports?: ListeningPortsSnapshot;
   /** Agent statuses the host already reports when the PWA connects. */
   agentStatuses?: RemotePwaMockHost['agentStatuses'];
 }
@@ -115,19 +120,25 @@ function buildFixtures(options: RemotePwaMockOptions) {
     sessions,
   };
 
-  // Every Pane has the same tab titles; the first Pane keeps the historic ids.
-  const panelsFor = (paneId: string) => panelTitles.map((title, index) => ({
+  // Every Pane has the same tabs; the first Pane keeps the historic ids.
+  const panel = (paneId: string, type: string, title: string, index: number, customState?: { currentUrl: string }) => ({
     id: paneId === sessions[0].id ? `anim-panel-${index}` : `${paneId}-panel-${index}`,
     sessionId: paneId,
-    type: options.panelTypes?.[index] ?? 'terminal',
+    type,
     title,
-    state: { isActive: index === 0, hasBeenViewed: index === 0 },
+    state: { isActive: index === 0, hasBeenViewed: index === 0, customState },
     metadata: {
       createdAt: new Date(0).toISOString(),
       lastActiveAt: new Date(0).toISOString(),
       position: index,
     },
-  }));
+  });
+  const panelsFor = (paneId: string) => [
+    ...panelTitles.map((title, index) => panel(paneId, options.panelTypes?.[index] ?? 'terminal', title, index)),
+    ...(options.browserPanels ?? []).map((browser, index) => (
+      panel(paneId, 'browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
+    )),
+  ];
 
   const affordances = {
     terminalShortcuts: options.shortcuts ?? [
@@ -164,7 +175,8 @@ function buildFixtures(options: RemotePwaMockOptions) {
     agentStatuses: options.agentStatuses ?? [],
   };
 
-  return { project, panelsByPane, affordances, host };
+  const ports = options.ports ?? { host: 'MacBook Pro', ports: [] };
+  return { project, panelsByPane, panel, affordances, host, ports };
 }
 
 function buildOrchestrationSession(name: string, index: number): OrchestrationSessionRecord {
@@ -413,7 +425,7 @@ async function installRemoteHostRoute(
     const sessionId = (args[0] as { sessionId?: string } | null)?.sessionId;
     const session = host.sessions.find(candidate => candidate.id === sessionId);
     const ownerSession = host.sessions.find(candidate => candidate.internalSessionId === args[0]);
-    let result: JsonValue = null;
+    let result: JsonValue | ListeningPortsSnapshot = null;
     if (body.channel) await host.held[body.channel];
 
     switch (body.channel) {
@@ -492,6 +504,16 @@ async function installRemoteHostRoute(
       case 'projects:detect-branch':
         result = 'main';
         break;
+      case 'ports:list':
+        result = fixtures.ports;
+        break;
+      case 'panels:create': {
+        // SAFETY: the PWA sends a CreatePanelRequest first.
+        const request = args[0] as { sessionId: string; type: string; title: string };
+        const existing = fixtures.panelsByPane[request.sessionId] ?? [];
+        result = fixtures.panel(request.sessionId, request.type, request.title, existing.length, request.type === 'browser' ? { currentUrl: '' } : undefined);
+        break;
+      }
       case 'panels:checkInitialized':
         result = true;
         break;

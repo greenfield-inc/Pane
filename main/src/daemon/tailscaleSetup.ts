@@ -191,6 +191,26 @@ export function readTailscaleServeHandlers(serveStatusJson: string): TailscaleSe
   };
 }
 
+const SERVE_BUSY_RETRIES = 4;
+
+/**
+ * Runs `tailscale serve <args>`. Serve accepts one writer at a time and refuses the others with
+ * "Another client is changing the serve config", so a refused change is retried after a pause.
+ */
+export async function runTailscaleServe(
+  run: RemoteSetupCommandRunner,
+  tailscale: ResolvedCommand,
+  args: string[],
+  timeoutMs?: number,
+): ReturnType<RemoteSetupCommandRunner> {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await run(tailscale.command, ['serve', ...args], { env: tailscale.env, timeoutMs });
+    const busy = !result.ok && /another client is changing the serve config/iu.test(`${result.stderr}\n${result.stdout}`);
+    if (!busy || attempt === SERVE_BUSY_RETRIES) return result;
+    await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+  }
+}
+
 export function isIpv4Address(value: string): boolean {
   const parts = value.split('.');
   return parts.length === 4 && parts.every((part) => {

@@ -19,6 +19,8 @@ import { RemoteSessionList } from './components/RemoteSessionList';
 import { RemoteSidebar, type RemoteSidebarActions } from './components/RemoteSidebar';
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
+import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
+import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
@@ -269,6 +271,7 @@ export function RemotePwaApp() {
     [selectedPanels],
   );
   const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? firstSupportedPanel(selectedPanels);
+  const listeningPorts = useRemoteListeningPorts(adapter);
 
   useEffect(() => {
     if (!selectedPanel || selectedPanel.type !== 'terminal') return;
@@ -327,7 +330,7 @@ export function RemotePwaApp() {
       const shown = (panelId: string | null | undefined) => strip.some(panel => panel.id === panelId) ? panelId : null;
       // This client's own tab first; the host's last-used tab only for a Pane this client has not opened,
       // and only when the phone can show it; else the first tab it can.
-      const hostPanelId = activePanel?.type === 'terminal' ? shown(activePanel.id) : null;
+      const hostPanelId = activePanel && phoneShows(activePanel) ? shown(activePanel.id) : null;
       setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? hostPanelId ?? firstSupportedPanel(strip)?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
         setLastError('The notified panel is no longer available on this Pane host.');
@@ -618,6 +621,48 @@ export function RemotePwaApp() {
       setCreatingTerminal(false);
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
+
+  const createBrowser = useCallback(async () => {
+    if (!adapter || !selectedSessionId) return;
+    setCreatingTerminal(true);
+    const runtime = adapter;
+    const sessionId = selectedSessionId;
+    try {
+      const panel = await runtime.createBrowserPanel(sessionId);
+      // The host or the open Pane may have changed while the tab was created.
+      if (runtime !== activeRuntimeRef.current) return;
+      upsertPanel(panel);
+      if (useRemoteSessionStore.getState().selectedSessionId !== sessionId) return;
+      setSelectedPanel(panel.id);
+      await runtime.setActivePanel(sessionId, panel.id);
+    } catch (error) {
+      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to create browser tab');
+    } finally {
+      setCreatingTerminal(false);
+    }
+  }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
+
+  /** Shows the new address at once, then saves it on the host for every client; a refused save goes back. */
+  const navigateBrowser = useCallback((panel: ToolPanel, currentUrl: string) => {
+    if (!adapter) return;
+    const state = { ...panel.state, customState: { ...panel.state.customState, currentUrl } };
+    const shown = { ...panel, state };
+    upsertPanel(shown);
+    adapter.updatePanelState(panel.id, state).catch((error: Error) => {
+      if (adapter !== activeRuntimeRef.current) return;
+      setLastError(error instanceof Error ? error.message : 'Could not open this address.');
+      // Only undo this save: a newer address or a host update since then stays.
+      const current = useRemoteSessionStore.getState().panelsBySessionId[panel.sessionId]?.find(candidate => candidate.id === panel.id);
+      if (current === shown) upsertPanel(panel);
+    });
+  }, [adapter, upsertPanel, setLastError]);
+
+  const requestPhoneAddress = useCallback((port: number) => {
+    if (!adapter) return;
+    adapter.requestPhoneAddress(port).catch((error: Error) => {
+      if (adapter === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Could not open this port.');
+    });
+  }, [adapter, setLastError]);
 
   const selectRemoteSession = useCallback((sessionId: string, scope: string) => {
     navigationRequestRef.current += 1;
@@ -939,6 +984,7 @@ export function RemotePwaApp() {
           customCommands={affordances.customCommands}
           onSelectPanel={selectPanel}
           onCreateTerminal={createTerminal}
+          onCreateBrowser={createBrowser}
         />
 
         <RemoteSessionList
@@ -983,7 +1029,9 @@ export function RemotePwaApp() {
             tabIndex={0}
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
-            <UnsupportedPanel session={selectedSession} panel={selectedPanel} />
+            {selectedPanel.type === 'browser'
+              ? <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
+              : <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}
       </section>
@@ -1049,16 +1097,20 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA currently supports terminal panels for {session.name}.
+          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal and browser tabs for {session.name}.
         </p>
       </div>
     </div>
   );
 }
 
-/** The phone shows terminal panels only; other types open a card pointing to desktop Pane. */
+/** The phone shows terminal and browser panels; other types open a card pointing to desktop Pane. */
+function phoneShows(panel: ToolPanel): boolean {
+  return panel.type === 'terminal' || panel.type === 'browser';
+}
+
 function firstSupportedPanel(panels: ToolPanel[]): ToolPanel | null {
-  return panels.find(panel => panel.type === 'terminal') ?? panels[0] ?? null;
+  return panels.find(phoneShows) ?? panels[0] ?? null;
 }
 
 function findSessionName(projects: Array<{ sessions?: Session[] }>, sessionId: string): string | null {
