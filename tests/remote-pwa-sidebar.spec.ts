@@ -170,7 +170,7 @@ test('a Session shows its recorded blockers on its row and above its chat', asyn
   await page.getByRole('button', { name: 'Refresh remote sessions' }).click();
 
   const row = page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' });
-  await expect(row).toContainText('Blocked');
+  await expect(row).toContainText('Blocked: Waiting on the signing certificate');
   await row.click();
   await expect(page.getByRole('region', { name: 'Blockers' })).toContainText('Waiting on the signing certificate');
 });

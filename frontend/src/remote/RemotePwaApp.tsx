@@ -909,7 +909,7 @@ export function RemotePwaApp() {
 const PANEL_TYPE_LABELS = {
   terminal: 'Terminal',
   diff: 'Diff',
-  explorer: 'Files',
+  explorer: 'Explorer',
   editor: 'Editor',
   logs: 'Logs',
   dashboard: 'Dashboard',

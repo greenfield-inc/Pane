@@ -152,12 +152,15 @@ export function RemoteSidebar({
                 <MessageSquare className="h-3.5 w-3.5" />
               </span>
             )}
-            <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-            {session.blockers.length > 0 && (
-              <span className="shrink-0 text-[10px] font-medium tabular-nums text-status-error" title={session.blockers.join('\n')}>
-                {session.blockers.length === 1 ? 'Blocked' : `${session.blockers.length} blockers`}
-              </span>
-            )}
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate font-medium">{name}</span>
+              {/* Phones have no hover, so the first blocker shows as text under the name. */}
+              {session.blockers.length > 0 && (
+                <span className="truncate text-[11px] text-status-error">
+                  {session.blockers.length === 1 ? `Blocked: ${session.blockers[0]}` : `${session.blockers.length} blockers: ${session.blockers[0]}`}
+                </span>
+              )}
+            </span>
             {panes.length > 0 && <span className="shrink-0 text-[10px] tabular-nums text-text-muted">{panes.length}</span>}
           </button>
           <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">
