@@ -287,6 +287,31 @@ describe('OrchestrationSessionManager', () => {
     expect((await fixture.manager.get(selector)).isPinned).toBe(true);
   });
 
+  it('names a default-named Session from its first message, once', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    fixture.manager.observeInput(panelId, '1\r');
+    fixture.manager.observeInput(panelId, 'fix the flaky checkout test please\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please'));
+    fixture.manager.observeInput(panelId, 'now update the docs\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please');
+  });
+
+  it('keeps a name the person chose', async () => {
+    const fixture = createFixture();
+    const typed = await fixture.manager.create({ name: 'Release prep', agent: 'claude' });
+    const renamed = await fixture.manager.create({ name: 'New chat', agent: 'claude' });
+    await fixture.manager.update({ sessionId: renamed.session.id }, { name: 'Billing' });
+    fixture.manager.observeInput(typed.session.panelIds.claude, 'fix the flaky checkout test please\r');
+    fixture.manager.observeInput(renamed.session.panelIds.claude, 'fix the flaky checkout test please\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get({ sessionId: typed.session.id })).name).toBe('Release prep');
+    expect((await fixture.manager.get({ sessionId: renamed.session.id })).name).toBe('Billing');
+  });
+
   it('reopens WSL Sessions with Linux paths, native commands, and durable distro choice', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.spyOn(wslUtils, 'validateWSLAvailable').mockResolvedValue(null);

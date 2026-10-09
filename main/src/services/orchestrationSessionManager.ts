@@ -26,6 +26,7 @@ import {
   MAX_ORCHESTRATION_ITEMS,
   MAX_ORCHESTRATION_TEXT_LENGTH,
   ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX,
+  isDefaultOrchestrationSessionName,
   type OrchestrationActivity,
   type OrchestrationAssociation,
   type OrchestrationAssociationInput,
@@ -57,6 +58,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
+import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
@@ -76,6 +78,9 @@ function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
 
 export class OrchestrationSessionManager extends EventEmitter {
   private initialized = false;
+  /** The line a person is typing into each Session agent panel, until its first message names the Session. */
+  private readonly firstMessageDrafts = new Map<string, string>();
+  private readonly namedPanelIds = new Set<string>();
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -217,6 +222,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         wslDistribution: input.wslDistribution,
         id,
         name,
+        nameIsDefault: !sourcePanel && isDefaultOrchestrationSessionName(name) ? true : undefined,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
         isPinned: input.isPinned ?? false,
@@ -326,6 +332,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         updatedAt: new Date().toISOString(),
         activity: [...current.activity],
       };
+      if (input.name !== undefined) delete nextRecord.nameIsDefault;
       if (input.name !== undefined && data.sessions.some(session => session.id !== current.id && normalizeSessionName(session.name) === normalizeSessionName(nextRecord.name))) {
         throw new Error(`A Session named ${nextRecord.name} already exists`);
       }
@@ -473,6 +480,32 @@ export class OrchestrationSessionManager extends EventEmitter {
    * Session's workspace pane, which the phone opens a Session by. Reads the in-memory store, like
    * `workspaceMembership`.
    */
+  /** Terminal input a person typed. The first message to a Session agent renames a Session that still has its default name. */
+  observeInput(panelId: string, data: string): void {
+    if (!panelId.startsWith(ORCHESTRATION_SESSION_PANEL_PREFIX) || this.namedPanelIds.has(panelId)) return;
+    const { draft, submitted } = applyTerminalInput(this.firstMessageDrafts.get(panelId) ?? '', data);
+    const name = submitted.map(sessionNameFromMessage).find(Boolean);
+    if (!name) {
+      this.firstMessageDrafts.set(panelId, draft);
+      return;
+    }
+    this.firstMessageDrafts.delete(panelId);
+    this.namedPanelIds.add(panelId);
+    void this.nameFromFirstMessage(panelId, name).catch(error => {
+      console.warn('[OrchestrationSessionManager] Could not name the Session from its first message:', error);
+    });
+  }
+
+  private async nameFromFirstMessage(panelId: string, name: string): Promise<void> {
+    const { sessions } = await this.list();
+    const record = sessions.find(session => session.panelIds[session.agent] === panelId);
+    if (!record?.nameIsDefault) return;
+    const taken = new Set(sessions.filter(session => session.id !== record.id).map(session => normalizeSessionName(session.name)));
+    let uniqueName = name;
+    for (let suffix = 2; taken.has(normalizeSessionName(uniqueName)); suffix += 1) uniqueName = `${name} ${suffix}`;
+    await this.update({ sessionId: record.id }, { name: uniqueName, expectedRevision: record.revision });
+  }
+
   alertSubject(paneId: string): MobileAlertSubject {
     const sessions = this.store.read().sessions;
     const own = sessions.find(session => session.internalSessionId === paneId);

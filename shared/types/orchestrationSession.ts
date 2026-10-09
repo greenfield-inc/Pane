@@ -25,6 +25,11 @@ export function nextOrchestrationSessionName(sessions: readonly { name: string }
   return `New chat ${suffix}`;
 }
 
+/** Whether a name has the shape `nextOrchestrationSessionName` gives. */
+export function isDefaultOrchestrationSessionName(name: string): boolean {
+  return /^new chat(?: \d+)?$/i.test(name.trim());
+}
+
 export type OrchestrationSessionStatus = 'working' | 'blocked' | 'idle' | 'unknown' | 'unassociated';
 
 export interface OrchestrationLink {
@@ -80,6 +85,8 @@ export interface OrchestrationSessionRecord {
   promotedFrom?: { paneId: string; panelId: string };
   id: string;
   name: string;
+  /** The name is the default one; the first message the person sends renames the Session once. */
+  nameIsDefault?: boolean;
   /** Durable UI archive marker. Older records omit this field and read as active. */
   archived?: boolean;
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
