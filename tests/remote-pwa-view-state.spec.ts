@@ -42,6 +42,41 @@ test('follows a host activation only on the Pane it shows', async ({ page }) => 
   await expect(selectedTab(page)).toHaveText('claude');
 });
 
+test('stays on its tab when the host brings forward a tab phones cannot show, and never remembers one', async ({ page }, testInfo) => {
+  const host = await openConnectedRemotePwa(page, {
+    sessionNames: ['Pane P', 'Pane Q'],
+    panelTitles: ['claude', 'shell', 'notes.md'],
+    panelTypes: ['terminal', 'terminal', 'editor'],
+  });
+  await page.getByRole('tab', { name: 'shell', exact: true }).click();
+
+  // An agent opens an editor in P. Events arrive in order, so the rename landing means the activation was handled.
+  host.activePanelIds[P] = 'anim-panel-2';
+  await emitRemoteHostEvent(page, 'panel:activeChanged', { sessionId: P, panelId: 'anim-panel-2', placement: 'split' });
+  await emitRemoteHostEvent(page, 'panel:updated', {
+    id: 'anim-panel-0', sessionId: P, type: 'terminal', title: 'claude (renamed)',
+    state: { isActive: false }, metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+  });
+  await expect(page.getByRole('tab', { name: 'claude (renamed)', exact: true })).toBeVisible();
+  await expect(selectedTab(page)).toHaveText('shell');
+  const screenshot = testInfo.outputPath('phone-stays-on-terminal.png');
+  await page.screenshot({ path: screenshot });
+  await testInfo.attach('phone-stays-on-terminal.png', { path: screenshot, contentType: 'image/png' });
+
+  // Another browser tab of this profile moves to Q. Tapping the editor here shows its desktop-only card;
+  // a reload returns to this Pane and the last tab the phone can show.
+  const second = await page.context().newPage();
+  await connectAnotherRemoteClient(second, host);
+  await paneButton(second, 'Pane Q').click();
+  await expect(shownPane(second)).toHaveText(/^Pane Q/);
+  await page.getByRole('tab', { name: 'notes.md', exact: true }).click();
+  await expect(selectedTab(page)).toHaveText('notes.md');
+  await page.reload();
+  await reconnected(page);
+  await expect(shownPane(page)).toHaveText(/^Pane P/);
+  await expect(selectedTab(page)).toHaveText('shell');
+});
+
 test('remembers its Pane and tab across a reload and a dropped connection', async ({ page }) => {
   const host = await openConnectedRemotePwa(page, { sessionNames: ['Pane P', 'Pane Q'] });
   await paneButton(page, 'Pane Q').click();

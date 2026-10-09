@@ -2,7 +2,7 @@ import type { CustomCommandResume } from '../shared/types/customCommandResume';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import type { ToolPanel } from '../shared/types/panels';
+import type { PanelActivationRequest, ToolPanel } from '../shared/types/panels';
 
 type UiAssociationFixture = {
   paneId: string;
@@ -2096,14 +2096,17 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
   const openPage = (id: string, title: string, active = true, reused = false) => page.evaluate(({ id, title, active, reused }) => {
     // SAFETY: installElectronApiMock adds these controls before the app loads.
-    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelUpdated: (panel: ToolPanel) => void } };
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelUpdated: (panel: ToolPanel) => void; emitPanelActivation: (request: PanelActivationRequest) => void } };
+    const mock = mockWindow.__paneTestElectronMock;
     const now = new Date(0).toISOString();
-    const emit = reused ? mockWindow.__paneTestElectronMock.emitPanelUpdated : mockWindow.__paneTestElectronMock.emitPanelCreated;
-    emit({
-      id, sessionId: '__orchestration_session_plansterminal__', type: 'browser', title,
-      state: { isActive: active, hasBeenViewed: false, customState: { currentUrl: 'about:blank', reopenedAt: reused ? new Date().toISOString() : undefined, reopenedWithFocus: reused && active } },
+    const sessionId = '__orchestration_session_plansterminal__';
+    // As the host does: the tab is created or reopened, then brought forward when the agent asked for focus.
+    (reused ? mock.emitPanelUpdated : mock.emitPanelCreated)({
+      id, sessionId, type: 'browser', title,
+      state: { isActive: active, hasBeenViewed: false, customState: { currentUrl: 'about:blank', reopenedAt: reused ? new Date().toISOString() : undefined } },
       metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
     });
+    if (active) mock.emitPanelActivation({ sessionId, panelId: id, placement: 'split' });
   }, { id, title, active, reused });
 
   await openPage('plan-page', 'plan.html');
@@ -2138,7 +2141,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
     const now = new Date().toISOString();
     controls.__paneTestElectronMock.emitPanelUpdated({
       id: 'plan-page', sessionId: '__orchestration_session_plansterminal__', type: 'browser', title: 'plan.html',
-      state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank', reopenedAt: now, reopenedWithFocus: false } },
+      state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank', reopenedAt: now } },
       metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
     });
   });
