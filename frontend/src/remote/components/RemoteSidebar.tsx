@@ -123,7 +123,7 @@ export function RemoteSidebar({
     const name = session.name || 'Untitled';
     return (
       <div key={nestedKey}>
-        <div className={`flex w-full items-center gap-1 rounded-md py-1.5 pl-1 pr-3 text-sm transition-colors md:py-2 ${
+        <div className={`flex w-full items-stretch gap-1 rounded-md pl-1 pr-3 text-sm transition-colors ${
           openSessionId === session.id
             ? 'bg-interactive-surface text-text-primary'
             : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -135,12 +135,12 @@ export function RemoteSidebar({
               aria-expanded={nestedExpanded}
               aria-controls={nestedId}
               aria-label={`${nestedExpanded ? 'Hide' : 'Show'} panes in ${name}`}
-              className={`${ROW_ACTION} text-text-muted hover:text-text-primary`}
+              className={`${ROW_ACTION} self-center text-text-muted hover:text-text-primary`}
             >
               {nestedExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </button>
           ) : (
-            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-text-tertiary md:h-8 md:w-8" aria-hidden="true">
+            <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center self-center text-text-tertiary md:h-8 md:w-8" aria-hidden="true">
               <MessageSquare className="h-3.5 w-3.5" />
             </span>
           )}
@@ -148,12 +148,12 @@ export function RemoteSidebar({
             type="button"
             onClick={() => actions.openSession(session.id)}
             aria-label={`Open Session ${name}`}
-            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left"
+            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
           >
             <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
             {panes.length > 0 && <span className="shrink-0 text-[10px] tabular-nums text-text-muted">{panes.length}</span>}
           </button>
-          <span className="flex shrink-0 items-center gap-0.5">
+          <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">
             <button
               type="button"
               disabled={actionId === session.id}
@@ -420,7 +420,7 @@ function RemotePaneRow({
 }: RemotePaneRowProps) {
   return (
     <div
-      className={`group flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors md:py-2 ${
+      className={`group flex w-full items-stretch justify-between gap-2 rounded-md px-3 text-left text-sm transition-colors ${
         selected
           ? 'bg-interactive-surface text-text-primary'
           : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -429,7 +429,7 @@ function RemotePaneRow({
       <button
         type="button"
         onClick={onSelect}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
       >
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium">{label}</span>
@@ -441,7 +441,7 @@ function RemotePaneRow({
           </span>
         )}
       </button>
-      <span className="flex shrink-0 items-center gap-0.5">
+      <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">
         <button
           type="button"
           disabled={busy}

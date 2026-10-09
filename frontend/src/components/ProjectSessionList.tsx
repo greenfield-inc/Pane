@@ -626,9 +626,9 @@ function SessionRowContent({
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
-  // The repository yields space before the Pane name does.
+  // The repository yields all its space before the Pane name gives up any.
   const repositoryLabel = repositoryName ? (
-    <span className="min-w-0 shrink-[4] truncate text-[11px] text-text-muted">{repositoryName}</span>
+    <span className="min-w-0 shrink-[9999] truncate text-[11px] text-text-muted">{repositoryName}</span>
   ) : null;
 
   if (rowLayout === 'single') {
@@ -797,8 +797,10 @@ function SessionRow({
     <div
       onContextMenu={event => { event.preventDefault(); setContextMenu({ session, x: event.clientX, y: event.clientY }); }}
       className={cn(
-        'group/session relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md pr-2 text-left transition-colors',
+        'group/session relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md text-left transition-colors',
         nested ? 'pl-6' : 'pl-2',
+        // A pinned row's pin stays visible, so its text ends before the pin.
+        session.isFavorite ? 'pr-9' : 'pr-2',
         rowLayout === 'single' ? 'py-1' : 'py-1.5',
         isActive ? 'bg-surface-selected' : 'hover:bg-surface-hover'
       )}

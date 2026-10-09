@@ -430,12 +430,14 @@ export class OrchestrationSessionManager extends EventEmitter {
       const current = this.findSession(data, selector);
       const removed = paneId ? current.associations.filter(item => item.paneId === paneId) : current.associations;
       if (paneId && removed.length === 0) throw new Error(`Session ${current.name} is not associated with Pane ${paneId}`);
+      const paneName = paneId ? this.sessionManager.getSession(paneId)?.name : undefined;
+      const message = !paneId ? 'Detached all Panes.' : paneName ? `Detached Pane “${paneName}”.` : `Detached Pane ${paneId}.`;
       const nextRecord = {
         ...current,
         associations: paneId ? current.associations.filter(item => item.paneId !== paneId) : [],
         revision: current.revision + 1,
         updatedAt: new Date().toISOString(),
-        activity: [...current.activity, this.activity('detached', paneId ? `Detached Pane ${paneId}.` : 'Detached all Panes.', 'user', paneId)],
+        activity: [...current.activity, this.activity('detached', message, 'user', paneId)],
       };
       trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));

@@ -983,7 +983,7 @@ describe('OrchestrationSessionManager', () => {
 
     const detached = await fixture.manager.detach({ sessionId: first.session.id }, pane.id);
     expect(detached.associations).toEqual([]);
-    expect(detached.activity.at(-1)?.kind).toBe('detached');
+    expect(detached.activity.at(-1)).toMatchObject({ kind: 'detached', message: 'Detached Pane “Feature Pane”.' });
     const reassigned = await fixture.manager.associate({ sessionId: second.session.id }, { paneId: pane.id });
     expect(reassigned.associations).toEqual([expect.objectContaining({ paneId: pane.id, panelIds: [] })]);
   });

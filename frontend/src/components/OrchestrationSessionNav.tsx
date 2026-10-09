@@ -1,5 +1,6 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { create as createStore } from 'zustand';
 import { Archive, ChevronDown, ChevronRight, MoreHorizontal, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -40,6 +41,8 @@ interface SessionContextMenuState {
   isPinned: boolean;
   x: number;
   y: number;
+  /** The ⋯ button that opened the menu; focus moves into the menu and returns here on Escape. */
+  trigger?: HTMLElement;
 }
 
 type SessionRowPlacement = 'pinned' | 'sessions';
@@ -49,6 +52,11 @@ interface ArchivedSessionToast {
   sessionName: string;
   wasOpen: boolean;
 }
+
+/** The pending archive Undo, shared so the toast survives a switch between the rail and the tree. */
+const useArchivedSessionToastStore = createStore<{ toast: ArchivedSessionToast | null }>(() => ({ toast: null }));
+const setArchivedToast = (toast: ArchivedSessionToast | null) => useArchivedSessionToastStore.setState({ toast });
+const clearArchivedToast = () => setArchivedToast(null);
 
 function statusLabel(session: OrchestrationSessionRecord): string {
   if (session.blockers.length > 0) return 'Blocked';
@@ -114,7 +122,7 @@ export function OrchestrationSessionNav({
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [archivedToast, setArchivedToast] = useState<ArchivedSessionToast | null>(null);
+  const archivedToast = useArchivedSessionToastStore(state => state.toast);
   const compactError = actionError ?? sessionError;
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
@@ -178,13 +186,14 @@ export function OrchestrationSessionNav({
     });
   }, []);
 
-  const openSessionMenu = useCallback((session: OrchestrationSessionRecord, x: number, y: number) => {
+  const openSessionMenu = useCallback((session: OrchestrationSessionRecord, x: number, y: number, trigger?: HTMLElement) => {
     setSessionMenu({
       sessionId: session.id,
       sessionName: session.name || 'Pane Chat',
       isPinned: session.isPinned === true,
       x,
       y,
+      trigger,
     });
   }, []);
 
@@ -225,8 +234,6 @@ export function OrchestrationSessionNav({
     }
   }, [navigateToSessions, refresh, sessionMenu, setActiveSession, update]);
 
-  const dismissArchivedToast = useCallback(() => setArchivedToast(null), []);
-
   const undoArchive = useCallback(async () => {
     if (!archivedToast) return;
     const { sessionId, wasOpen } = archivedToast;
@@ -246,7 +253,7 @@ export function OrchestrationSessionNav({
       key={archivedToast.sessionId}
       message={`Archived ${archivedToast.sessionName}`}
       onUndo={() => void undoArchive()}
-      onDismiss={dismissArchivedToast}
+      onDismiss={clearArchivedToast}
     />
   );
 
@@ -332,7 +339,7 @@ export function OrchestrationSessionNav({
               onClick={event => {
                 event.stopPropagation();
                 const bounds = event.currentTarget.getBoundingClientRect();
-                openSessionMenu(session, bounds.left, bounds.bottom);
+                openSessionMenu(session, bounds.left, bounds.bottom, event.currentTarget);
               }}
               className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
             >
@@ -541,6 +548,26 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (menu?.trigger) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [menu]);
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      // TerminalPopover's document listener closes the menu.
+      menu?.trigger?.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const list = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const index = list.findIndex(item => item === document.activeElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    list[(index + step + list.length) % list.length]?.focus();
+  };
+
   return (<>
     <TerminalPopover
       visible={menu !== null}
@@ -549,7 +576,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin }: SessionContextM
       onClose={onClose}
       className="w-48"
     >
-      <div role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`}>
+      <div ref={menuRef} role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`} onKeyDown={handleMenuKeyDown}>
         <PopoverButton role="menuitem" onClick={onPin}>
           <span className="flex items-center gap-2">
             {menu?.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}

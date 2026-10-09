@@ -1201,6 +1201,46 @@ test('Session rows archive and restore without losing selection or associated Pa
   });
 });
 
+test('the Session actions menu works by keyboard, and its archive Undo survives collapsing the sidebar', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible({ timeout: 10_000 });
+
+  const actions = page.getByRole('button', { name: 'Actions for Alpha', exact: true });
+  await actions.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menuitem', { name: 'Pin Session', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitem', { name: 'Archive Session', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Pin Session', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(actions).toBeFocused();
+
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('orchestration-session-alpha')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  const toast = page.getByRole('status').filter({ hasText: 'Archived Alpha' });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(toast).toHaveCount(0);
+  await expect(page.getByTestId('compact-orchestration-session-alpha')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: installSessionsFixture adds this control before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationRecord: (sessionId: string) => UiSessionFixture | null } };
+    return mockWindow.__paneTestElectronMock.getOrchestrationRecord('alpha')?.archived;
+  })).toBe(false);
+});
+
 test('a Pane row menu adds the Pane to a Session and removes it again', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
