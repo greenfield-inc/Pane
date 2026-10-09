@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
-import type { ToolPanel } from '../../../shared/types/panels';
+import type { ToolPanel, ToolPanelType } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
 import {
@@ -352,6 +352,9 @@ export function RemotePwaApp() {
     view: historyView,
     overlayOpen: sidebarOpen || createSessionProject !== null || createOrchestrationOpen,
     onNavigate: (view) => {
+      // Back and Forward retire a Session still opening, even when they land on the view on screen.
+      navigationRequestRef.current += 1;
+      if (view === historyView) return;
       const state = useRemoteSessionStore.getState();
       if (view?.startsWith('session:')) {
         const sessionId = view.slice('session:'.length);
@@ -362,7 +365,6 @@ export function RemotePwaApp() {
       }
       const paneId = view?.slice('pane:'.length) ?? null;
       if (paneId && !state.projects.some(project => project.sessions?.some(session => session.id === paneId))) return;
-      navigationRequestRef.current += 1;
       selectSession(paneId);
     },
     onCloseOverlays: () => {
@@ -819,6 +821,8 @@ export function RemotePwaApp() {
           </details>
         )}
 
+        {openOrchestrationSession && <SessionBlockers sessionId={openOrchestrationSession.session.id} fallback={openOrchestrationSession.session.blockers} />}
+
         <RemotePanelTabs
           panels={selectedPanels}
           selectedPanelId={selectedPanel?.id ?? null}
@@ -902,13 +906,39 @@ export function RemotePwaApp() {
   );
 }
 
+const PANEL_TYPE_LABELS = {
+  terminal: 'Terminal',
+  diff: 'Diff',
+  explorer: 'Files',
+  editor: 'Editor',
+  logs: 'Logs',
+  dashboard: 'Dashboard',
+  'setup-tasks': 'Setup task',
+  browser: 'Browser',
+  notes: 'Notes',
+} satisfies Record<ToolPanelType, string>;
+
+/** The open Session's recorded blockers, from the latest Session list. */
+function SessionBlockers({ sessionId, fallback }: { sessionId: string; fallback: string[] }) {
+  const blockers = useRemoteSessionStore(state => state.orchestrationSessions.find(session => session.id === sessionId)?.blockers) ?? fallback;
+  if (blockers.length === 0) return null;
+  return (
+    <section aria-label="Blockers" className="max-h-28 shrink-0 overflow-y-auto border-b border-border-primary bg-surface-secondary px-4 py-2 text-sm">
+      <p className="font-medium text-status-error">Blocked</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-text-secondary">
+        {blockers.map((blocker, index) => <li key={`${index}:${blocker}`}>{blocker}</li>)}
+      </ul>
+    </section>
+  );
+}
+
 function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPanel }) {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center bg-bg-primary p-6">
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {panel.type} panels are visible in desktop Pane. Remote Pane PWA currently supports terminal panels for {session.name}.
+          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA currently supports terminal panels for {session.name}.
         </p>
       </div>
     </div>

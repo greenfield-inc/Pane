@@ -5,6 +5,7 @@ import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaem
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
 import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
+import { getPanelIcon } from '../../components/panels/panelIcon';
 import { getRemotePanelTabId, getRemotePanelTabPanelId } from './remotePanelTabIds';
 
 // The remote host executes these commands. Until its platform capabilities are
@@ -132,7 +133,7 @@ export function RemotePanelTabs({
                 : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
-            <TerminalSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">{getPanelIcon(panel.type, panel, 'h-4 w-4')}</span>
             <span className="truncate">{panel.title}</span>
           </button>
         ))}

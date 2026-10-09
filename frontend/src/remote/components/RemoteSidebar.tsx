@@ -153,6 +153,11 @@ export function RemoteSidebar({
               </span>
             )}
             <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+            {session.blockers.length > 0 && (
+              <span className="shrink-0 text-[10px] font-medium tabular-nums text-status-error" title={session.blockers.join('\n')}>
+                {session.blockers.length === 1 ? 'Blocked' : `${session.blockers.length} blockers`}
+              </span>
+            )}
             {panes.length > 0 && <span className="shrink-0 text-[10px] tabular-nums text-text-muted">{panes.length}</span>}
           </button>
           <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">

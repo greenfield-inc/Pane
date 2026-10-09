@@ -53,6 +53,7 @@ interface RemoteBrowserHistoryOptions {
   host: string;
   view: RemoteHistoryView;
   overlayOpen: boolean;
+  /** Runs on every Back or Forward within this host, including to the view on screen, so a view still opening is retired. */
   onNavigate: (view: RemoteHistoryView) => void;
   onCloseOverlays: () => void;
 }
@@ -96,7 +97,7 @@ export function useRemoteBrowserHistory({ enabled, host, view, overlayOpen, onNa
       }
       pendingViewRef.current = undefined;
       if (latest.overlayOpen) latest.onCloseOverlays();
-      if (entry.view !== latest.view) latest.onNavigate(entry.view);
+      latest.onNavigate(entry.view);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
