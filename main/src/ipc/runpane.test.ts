@@ -508,6 +508,33 @@ describe('runpane IPC handlers', () => {
       expect(panelManager.createPanel).not.toHaveBeenCalled();
     });
 
+    it('keeps an adopted Pane when the --focus request cannot be delivered', async () => {
+      const repoPath = createTempGitRepo('adopt-focus-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'adopt-focus-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'feature', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      setPaneRuntime({
+        eventSink: { send: (channel: string) => { if (channel === 'pane:focus-requested') throw new Error('sink closed'); } },
+        getConfigManager: () => { throw new Error('unused'); },
+        getPtyHostRuntime: () => null,
+        getWebviewContextMap: () => new Map(),
+      });
+      try {
+        const services = adoptionServices(repoPath, worktreePath);
+        const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+          repo: { id: project.id },
+          focus: true,
+          panes: [{ path: worktreePath, name: 'Adopted', tool: { command: 'bash' } }],
+        }]);
+
+        expect(result).toMatchObject({ ok: true, items: [{ ok: true, paneId: session.id }] });
+        expect(services.sessionManager.archiveSession).not.toHaveBeenCalled();
+      } finally {
+        resetPaneRuntimeForTests();
+      }
+    });
+
     it('refuses paths outside the selected repo and duplicate canonical paths', async () => {
       const repoPath = createTempGitRepo('guard-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });

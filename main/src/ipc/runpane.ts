@@ -2355,7 +2355,12 @@ function requestHostDesktopFocus(item: { paneId?: string; panelId?: string }): v
   // Failed items carry no panel, and their Pane may already be rolled back.
   if (!item.paneId || !item.panelId) return;
   const focusEvent: RunpanePaneFocusRequestedEvent = { paneId: item.paneId, panelId: item.panelId };
-  getPaneEventSink().send('pane:focus-requested', focusEvent);
+  // Best effort: the Pane is already created, and a missed switch never undoes it.
+  try {
+    getPaneEventSink().send('pane:focus-requested', focusEvent);
+  } catch (error) {
+    console.error('[Runpane] Failed to request host desktop focus:', error);
+  }
 }
 
 function resolvePaneCreateActivation(
