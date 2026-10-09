@@ -9,6 +9,7 @@ import { PromotePaneDialog } from './PromotePaneDialog';
 import { Archive, Pin, ArrowUpRight, Pencil, FolderPlus, FolderMinus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import type { Session } from '../types/session';
+import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 
 export interface CompactSessionMenuState {
@@ -32,9 +33,12 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   const orchestrationSessions = useOrchestrationSessionStore(state => state.sessions);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(state => state.refresh);
   const paneId = menu?.session.id;
-  const activeSessions = orchestrationSessions.filter(session => !isArchivedOrchestrationSession(session));
-  const memberOf = activeSessions.filter(session => session.associations.some(association => association.paneId === paneId));
-  const addableTo = activeSessions.filter(session => !memberOf.includes(session));
+  const memberOf: OrchestrationSessionRecord[] = [];
+  const addableTo: OrchestrationSessionRecord[] = [];
+  for (const session of orchestrationSessions) {
+    if (isArchivedOrchestrationSession(session)) continue;
+    (session.associations.some(association => association.paneId === paneId) ? memberOf : addableTo).push(session);
+  }
   // "Add to Session" swaps the menu to a Session list in place, so the menu stays short however many Sessions exist.
   const [picking, setPicking] = useState(false);
 

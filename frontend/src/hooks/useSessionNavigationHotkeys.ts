@@ -228,7 +228,7 @@ export function useSessionNavigationHotkeys({
   // One palette command per active Session, selected the way its sidebar row is.
   // A string key, so store refreshes that keep the same ids and names don't re-register.
   const orchestrationSessionsKey = useOrchestrationSessionStore(s => JSON.stringify(
-    s.sessions.filter(session => !isArchivedOrchestrationSession(session)).map(session => [session.id, session.name]),
+    s.sessions.flatMap(session => isArchivedOrchestrationSession(session) ? [] : [[session.id, session.name]]),
   ));
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
