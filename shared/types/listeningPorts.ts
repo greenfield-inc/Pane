@@ -35,6 +35,11 @@ export interface ListeningPortsSnapshot {
   host: string;
   /** Sorted by group order, then port. */
   ports: ListeningPort[];
+  /**
+   * Set by a remote desktop when its host is too old to list ports: nothing is tunnelled, and
+   * loopback URLs open this computer's own ports.
+   */
+  unsupportedHost?: true;
 }
 
 const listeningPortsSnapshotSchema: BoundarySchema<ListeningPortsSnapshot> = boundary.object({
@@ -49,6 +54,7 @@ const listeningPortsSnapshotSchema: BoundarySchema<ListeningPortsSnapshot> = bou
     paneName: boundary.optional(boundary.string),
     localPort: boundary.optional(boundary.number),
   })),
+  unsupportedHost: boundary.optional(boundary.literal(true)),
 });
 
 /** A Ports list that crossed a process or network boundary, or null when it has another shape. */

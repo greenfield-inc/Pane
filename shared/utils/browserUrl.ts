@@ -1,3 +1,5 @@
+import type { ListeningPortsSnapshot } from '../types/listeningPorts';
+
 /** Match the browser's URL parser, including scheme casing and whitespace. */
 export function hasFileProtocol(value: string | undefined): boolean {
   if (!value) return false;
@@ -32,4 +34,27 @@ export function remapLoopbackPort(url: string, ports: ReadonlyMap<number, number
   const parsed = new URL(url);
   parsed.port = String(mapped);
   return parsed.toString();
+}
+
+/** Where a remote desktop loads a host URL. */
+export type LocalTarget =
+  | { kind: 'load'; url: string }
+  /** The host's Ports list is not known yet. */
+  | { kind: 'waiting' }
+  /** A host loopback port with no tunnel here; `listed` when the host still lists it. */
+  | { kind: 'unreachable'; port: number; listed: boolean };
+
+/**
+ * Resolves a host URL against the Ports list a remote desktop received (null while unknown).
+ * A tunnelled port loads at its local number. Any other host loopback port is unreachable, so the
+ * desktop never loads its own service in the host's place. URLs off loopback load as they are.
+ */
+export function localTargetOf(hostUrl: string, snapshot: ListeningPortsSnapshot | null): LocalTarget {
+  const port = loopbackPortOf(hostUrl);
+  if (port === null) return { kind: 'load', url: hostUrl };
+  if (!snapshot) return { kind: 'waiting' };
+  if (snapshot.unsupportedHost) return { kind: 'load', url: hostUrl };
+  const listed = snapshot.ports.find(candidate => candidate.port === port);
+  if (listed?.localPort === undefined) return { kind: 'unreachable', port, listed: listed !== undefined };
+  return { kind: 'load', url: remapLoopbackPort(hostUrl, new Map([[port, listed.localPort]])) };
 }

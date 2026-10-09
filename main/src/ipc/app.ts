@@ -115,6 +115,9 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
   // System utilities
   ipcMain.handle('openExternal', async (_event, hostUrl: string) => {
     const url = remotePaneClientController.toLocalUrl(hostUrl);
+    if (url === null) {
+      return { success: false, error: 'That port on the host is not reachable from this computer right now.' };
+    }
     try {
       if (process.platform === 'darwin') {
         // On macOS, shell.openExternal can fail silently due to permission/entitlement issues.

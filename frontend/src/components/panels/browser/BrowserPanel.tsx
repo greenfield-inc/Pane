@@ -7,7 +7,7 @@ import { usePanelStore } from '../../../stores/panelStore';
 import { useSessionStore } from '../../../stores/sessionStore';
 import { useResizable } from '../../../hooks/useResizable';
 import { normalizeUrl } from './browserUrl';
-import { hasFileProtocol, loopbackPortOf, remapLoopbackPort } from '../../../../../shared/utils/browserUrl';
+import { hasFileProtocol, localTargetOf, loopbackPortOf, remapLoopbackPort, type LocalTarget } from '../../../../../shared/utils/browserUrl';
 import { useListeningPorts } from '../../../hooks/useListeningPorts';
 import { useConfigStore } from '../../../stores/configStore';
 import { TerminalPopover } from '../../terminal/TerminalPopover';
@@ -40,24 +40,27 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // Panel state keeps the host's own URLs (http://localhost:5173/...). A remote desktop reaches a
   // forwarded host port through its tunnel, sometimes on another local port, so it maps on load
   // and maps navigation back before saving.
-  const { hostToLocal, localToHost } = useMemo(() => {
-    const tunnelled = (ports?.ports ?? []).flatMap(port => (port.localPort === undefined ? [] : [[port.port, port.localPort] as const]));
-    return {
-      hostToLocal: new Map(tunnelled),
-      localToHost: new Map(tunnelled.map(([hostPort, localPort]) => [localPort, hostPort] as const)),
-    };
-  }, [ports]);
-  const toLocalUrl = useCallback((hostUrl: string) => remapLoopbackPort(hostUrl, hostToLocal), [hostToLocal]);
+  const localToHost = useMemo(
+    () => new Map((ports?.ports ?? []).flatMap(port => (port.localPort === undefined ? [] : [[port.localPort, port.port] as const]))),
+    [ports],
+  );
+  // Where this desktop loads a host URL. A remote desktop never loads its own service in the
+  // host's place: it waits for the Ports list, or shows the port as unreachable.
+  // A host switch remounts its panels, so `ports` never holds another host's list here.
+  const targetOf = useCallback((hostUrl: string): LocalTarget => {
+    if (remoteMode === false) return { kind: 'load', url: hostUrl };
+    if (remoteMode === null && loopbackPortOf(hostUrl) !== null) return { kind: 'waiting' };
+    return localTargetOf(hostUrl, remoteMode ? ports : null);
+  }, [remoteMode, ports]);
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
   useEffect(() => {
     toHostUrlRef.current = toHostUrl;
   }, [toHostUrl]);
-  const urlPort = loopbackPortOf(url);
-  // Until the host's Ports list arrives, a loopback URL would load this computer's own port.
-  // A host switch remounts its panels, so `ports` never holds another host's list here.
-  const waitingForTunnel = urlPort !== null && (remoteMode === null || (remoteMode && ports === null));
-  const tunnelHost = urlPort !== null && hostToLocal.has(urlPort) ? ports?.host : undefined;
+  const target = targetOf(url);
+  const tunnelHost = isRemoteMode && target.kind === 'load' && loopbackPortOf(url) !== null && !ports?.unsupportedHost
+    ? ports?.host
+    : undefined;
   const isFileUrl = hasFileProtocol(url);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const currentUrlFromPanelState = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
@@ -181,7 +184,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       // Following a link changes the guest URL without changing its src attribute.
       // An explicit return to that src still needs a navigation request.
       try {
-        void webview.loadURL(toLocalUrl(normalized)).catch(() => setUrlError('Unable to load this page'));
+        const normalizedTarget = targetOf(normalized);
+        if (normalizedTarget.kind === 'load') {
+          void webview.loadURL(normalizedTarget.url).catch(() => setUrlError('Unable to load this page'));
+        }
       } catch {
         // Before dom-ready, the initial src load is already targeting this URL.
       }
@@ -190,7 +196,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     setUrl(normalized);
     setInputUrl(normalized);
     persistState(normalized);
-  }, [persistState, toLocalUrl]);
+  }, [persistState, targetOf]);
 
   useEffect(() => {
     // A navigation's debounced persistence is an echo, not a new load request.
@@ -312,7 +318,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // The address this computer opens the page at, so it works pasted into a browser here.
   const handleCopyUrl = () => {
     const guestUrl = webviewRef.current?.getURL();
-    void navigator.clipboard.writeText(guestUrl || toLocalUrl(url)).then(() => {
+    void navigator.clipboard.writeText(guestUrl || (target.kind === 'load' ? target.url : url)).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
     }, (error: Error) => console.error('[BrowserPanel] Failed to copy URL:', error));
@@ -376,7 +382,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('did-stop-loading', onDidStopLoading);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run when url becomes non-empty (webview mounts); persistState reads from refs
-  }, [panel.id, url, fileSession, waitingForTunnel]);
+  }, [panel.id, url, fileSession, target.kind]);
 
   // Listen for popup-requested events from the main process.
   // Uses stopImmediatePropagation so only the originating browser panel handles the event,
@@ -596,7 +602,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
               Ports on {ports?.host ?? 'this machine'}
             </h2>
             <p className="px-3 mt-0.5 text-xs text-text-tertiary">
-              {!isRemoteMode || hostToLocal.size > 0
+              {!isRemoteMode || localToHost.size > 0
                 ? 'Open a web port here, or enter a URL above.'
                 : `These ports are on ${ports?.host ?? 'the host'}, so this computer can't open them.`}
             </p>
@@ -608,15 +614,27 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       ) : (
         <div className="flex-1 flex flex-row min-h-0">
           {/* Page webview */}
-          {waitingForTunnel && (
+          {target.kind === 'waiting' && (
             <div className="flex flex-1 items-center justify-center text-xs text-text-tertiary">
               Connecting to the host's ports…
             </div>
           )}
-          {!waitingForTunnel && ((!isFileUrl && !isHostFileUrl) || fileSession?.panelId === panel.id) && <webview
+          {target.kind === 'unreachable' && (
+            <div role="status" className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
+              <p className="text-sm text-text-secondary">
+                Port {target.port} on {ports?.host ?? 'the host'} isn't reachable from this computer.
+              </p>
+              <p className="text-xs text-text-tertiary">
+                {target.listed
+                  ? 'Pane could not open a local port for it here.'
+                  : 'Nothing listens on it on the host right now. The page loads when it starts again.'}
+              </p>
+            </div>
+          )}
+          {target.kind === 'load' && ((!isFileUrl && !isHostFileUrl) || fileSession?.panelId === panel.id) && <webview
             key={fileSession?.partition ?? 'local'}
             ref={webviewRef}
-            src={toLocalUrl(url)}
+            src={target.url}
             partition={fileSession?.partition ?? `persist:project-${projectId ?? panel.sessionId}`}
             allowpopups
             className="flex-1 border-0"

@@ -24,7 +24,7 @@ import type { BoundarySchema, JsonValue } from '../../../../shared/validation/bo
 import { PaneSseParser } from './sseParser';
 import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
-import { remapLoopbackPort } from '../../../../shared/utils/browserUrl';
+import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
 
 interface RemoteConnectionStateMetadata {
@@ -114,6 +114,8 @@ const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const TAILSCALE_MAGIC_DNS_SERVER = '100.100.100.100';
 const PORTS_LIST_CHANNEL = 'ports:list';
 const PORTS_CHANGED_CHANNEL = 'ports:changed';
+/** How a host's command registry refuses a command it does not have (`commandRegistry.ts`). */
+const UNKNOWN_COMMAND_MESSAGE = 'No Pane daemon command registered';
 const REMOTE_RUNTIME_ID = createRemoteRuntimeId();
 
 type RemoteRequestOptions = RequestOptions & {
@@ -584,8 +586,8 @@ export class RemotePaneClientController extends EventEmitter {
   private portTunnel: PortTunnel | null = null;
   /** Tunnel syncs run one at a time, in the order the host's lists arrived. */
   private portTunnelSync: Promise<unknown> = Promise.resolve();
-  /** Host port to where this desktop reaches it, from the last sync. */
-  private tunnelledPorts: ReadonlyMap<number, number> = new Map();
+  /** The host's last Ports list, with where this desktop reaches each port. */
+  private tunnelledSnapshot: ListeningPortsSnapshot | null = null;
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
   private remoteRuntimeUsageTracked = false;
@@ -632,9 +634,16 @@ export class RemotePaneClientController extends EventEmitter {
     return this.state.mode === 'remote';
   }
 
-  /** Points a host link to a forwarded port, such as one in terminal output, at where this desktop reaches it. */
-  toLocalUrl(url: string): string {
-    return this.isRemoteModeActive() ? remapLoopbackPort(url, this.tunnelledPorts) : url;
+  /**
+   * Points a host link to a forwarded port, such as one in terminal output, at where this desktop
+   * reaches it. Null for a port the host lists but this desktop has no tunnel for: opening it here
+   * would reach this computer's own service instead.
+   */
+  toLocalUrl(url: string): string | null {
+    if (!this.isRemoteModeActive()) return url;
+    const target = localTargetOf(url, this.tunnelledSnapshot);
+    if (target.kind === 'load') return target.url;
+    return target.kind === 'unreachable' && target.listed ? null : url;
   }
 
   shouldForwardLocalRendererEvent(channel: string): boolean {
@@ -916,27 +925,30 @@ export class RemotePaneClientController extends EventEmitter {
     const sync = this.portTunnelSync.then(() => tunnel.sync(hostPorts));
     this.portTunnelSync = sync.catch(error => console.warn('[Pane port tunnel] sync_failed:', error));
     const localPorts = await sync;
-    if (this.activeClient === client) this.tunnelledPorts = localPorts;
-    return {
+    const tunnelled: ListeningPortsSnapshot = {
       ...snapshot,
       ports: snapshot.ports.map(port => {
         const localPort = localPorts.get(port.port);
         return localPort === undefined ? port : { ...port, localPort };
       }),
     };
+    if (this.activeClient === client) this.tunnelledSnapshot = tunnelled;
+    return tunnelled;
   }
 
   /**
-   * The host's Ports list with local ports. A host that cannot list its ports, such as one older
-   * than port detection, gets an empty list so tabs stop waiting for one; the tunnel keeps what it has.
+   * The host's Ports list with local ports. A host older than port detection gets an empty list
+   * marked `unsupportedHost`, so its tabs load as before instead of waiting for a list.
    */
   private async listTunnelledPorts(client: RemotePaneClient): Promise<JsonValue | ListeningPortsSnapshot | undefined> {
     let listed: JsonValue | undefined;
     try {
       listed = await client.invoke(PORTS_LIST_CHANNEL, []);
     } catch (error) {
-      console.warn('[Pane port tunnel] list_failed:', error);
-      return { host: client.profile.label, ports: [] };
+      if (!(error instanceof Error) || !error.message.includes(UNKNOWN_COMMAND_MESSAGE)) throw error;
+      const unsupported: ListeningPortsSnapshot = { host: client.profile.label, ports: [], unsupportedHost: true };
+      if (this.activeClient === client) this.tunnelledSnapshot = unsupported;
+      return unsupported;
     }
     return await this.tunnelPorts(client, listed) ?? listed;
   }
@@ -953,9 +965,9 @@ export class RemotePaneClientController extends EventEmitter {
   /** Tunnels the host's ports on every (re)connect, before any tab asks for them. */
   private async refreshTunnelledPorts(client: RemotePaneClient): Promise<void> {
     try {
-      await this.publishTunnelledPorts(client, await client.invoke(PORTS_LIST_CHANNEL, []));
+      const snapshot = decodeListeningPortsSnapshot(await this.listTunnelledPorts(client));
+      if (snapshot && this.activeClient === client) this.rendererEventSink.send(PORTS_CHANGED_CHANNEL, snapshot);
     } catch (error) {
-      // A host older than port detection has no Ports list; it simply forwards nothing.
       console.warn('[Pane port tunnel] list_failed:', error);
     }
   }
@@ -965,7 +977,7 @@ export class RemotePaneClientController extends EventEmitter {
     this.activeClient = null;
     const tunnel = this.portTunnel;
     this.portTunnel = null;
-    this.tunnelledPorts = new Map();
+    this.tunnelledSnapshot = null;
     await tunnel?.close();
     if (client) {
       await client.disconnect();
