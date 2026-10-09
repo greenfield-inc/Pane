@@ -13,6 +13,8 @@ interface RemoteBrowserPanelProps {
   ports: ListeningPortsSnapshot | null;
   /** Saves the host-relative URL every client shows for this panel. */
   onNavigate(url: string): void;
+  /** Asks the host for a web port's phone address. */
+  onRequestAddress(port: number): void;
   onError(message: string): void;
 }
 
@@ -23,7 +25,7 @@ const TOOL_BUTTON = 'flex h-8 w-8 flex-shrink-0 items-center justify-center roun
  * address, with the host-relative address in the bar. A cross-origin frame cannot report a page
  * that refuses framing, so "Open in Safari" is always offered.
  */
-export function RemoteBrowserPanel({ panel, ports, onNavigate, onError }: RemoteBrowserPanelProps) {
+export function RemoteBrowserPanel({ panel, ports, onNavigate, onRequestAddress, onError }: RemoteBrowserPanelProps) {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const url = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl ?? '';
   const [draft, setDraft] = useState<string | null>(null);
@@ -42,6 +44,11 @@ export function RemoteBrowserPanel({ panel, ports, onNavigate, onError }: Remote
     }
   }
   const src = page?.kind === 'frame' ? page.src : null;
+  const requestPort = page?.kind === 'unavailable' ? page.request : undefined;
+
+  useEffect(() => {
+    if (requestPort !== undefined) onRequestAddress(requestPort);
+  }, [requestPort, onRequestAddress]);
 
   useEffect(() => {
     if (src) setLoading(true);

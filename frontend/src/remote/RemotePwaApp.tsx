@@ -545,6 +545,13 @@ export function RemotePwaApp() {
     });
   }, [adapter, upsertPanel, setLastError]);
 
+  const requestPhoneAddress = useCallback((port: number) => {
+    if (!adapter) return;
+    adapter.requestPhoneAddress(port).catch((error: Error) => {
+      if (adapter === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Could not open this port.');
+    });
+  }, [adapter, setLastError]);
+
   const selectRemoteSession = useCallback((sessionId: string) => {
     navigationRequestRef.current += 1;
     selectSession(sessionId);
@@ -864,7 +871,7 @@ export function RemotePwaApp() {
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
             {selectedPanel.type === 'browser'
-              ? <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onError={setLastError} />
+              ? <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
               : <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}

@@ -6,7 +6,7 @@ import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningP
  */
 export type PhonePage =
   | { kind: 'frame'; src: string; address: string; host?: string }
-  | { kind: 'unavailable'; address: string; host: string; reason: string };
+  | { kind: 'unavailable'; address: string; host: string; reason: string; /** Ask the host for this port's phone address. */ request?: number };
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 
@@ -35,7 +35,7 @@ export function phonePage(url: string, ports: ListeningPortsSnapshot | null, pan
   const listening = ports.ports.find(candidate => candidate.port === port);
   if (!listening) return unavailable(address, `Nothing on ${host} listens on port ${port}.`);
   if (listening.kind !== 'web') return unavailable(address, `localhost:${port} does not answer HTTP, so it opens only on desktops.`);
-  if (!listening.phoneUrl) return unavailable(address, `Pane is still giving localhost:${port} a phone address.`);
+  if (!listening.phoneUrl) return { kind: 'unavailable', address, host, reason: `Pane is giving localhost:${port} a phone address…`, request: port };
   return { kind: 'frame', src: `${listening.phoneUrl}${path}`, address, host };
 }
 

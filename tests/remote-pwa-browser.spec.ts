@@ -37,6 +37,24 @@ test('a phone opens a host dev server from a new browser tab\'s Ports list', asy
   await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Hello from the host' })).toBeVisible();
 });
 
+test('a phone browser tab asks the host for a port\'s phone address when it has none yet', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openConnectedRemotePwa(page, {
+    browserPanels: [{ title: 'Browser', url: 'http://localhost:3000/' }],
+    activePanelIndex: 2,
+    ports: {
+      host: 'MacBook Pro',
+      ports: [{ port: 3000, pid: 1, process: 'next-server', group: 'pane-terminal', kind: 'web' }],
+      phone: { state: 'on', filesUrl: 'http://phone-pages.test:44300' },
+    },
+  });
+
+  const asked = await page.waitForRequest(request => request.postData()?.includes('"ports:phone-address"') ?? false);
+
+  expect(JSON.parse(asked.postData() ?? '{}').args).toEqual([3000]);
+  await expect(page.getByText('Pane is giving localhost:3000 a phone address…')).toBeVisible();
+});
+
 test('a phone browser tab goes back to its saved address when the host refuses the new one', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openConnectedRemotePwa(page, {

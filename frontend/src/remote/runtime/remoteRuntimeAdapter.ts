@@ -200,6 +200,11 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('panels:update', [panelId, { state }]);
   }
 
+  /** Asks the host for a web port's phone address; it arrives with the next ports:changed. */
+  requestPhoneAddress(port: number): Promise<void> {
+    return this.invoke<void>('ports:phone-address', [port]);
+  }
+
   getListeningPorts(): Promise<ListeningPortsSnapshot> {
     return this.invoke<ListeningPortsSnapshot>('ports:list');
   }

@@ -46,7 +46,8 @@ describe('phonePage', () => {
       kind: 'unavailable',
       address: 'localhost:3000/',
       host: 'parsas-macbook-pro',
-      reason: 'Pane is still giving localhost:3000 a phone address.',
+      reason: 'Pane is giving localhost:3000 a phone address…',
+      request: 3000,
     });
     expect(phonePage('http://localhost:5432/', ports, 'panel-1')).toMatchObject({
       reason: 'localhost:5432 does not answer HTTP, so it opens only on desktops.',
