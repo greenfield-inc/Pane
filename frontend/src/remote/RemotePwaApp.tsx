@@ -25,6 +25,7 @@ import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileS
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, useRemoteSessionStore } from './stores/remoteSessionStore';
+import { useRemoteBrowserHistory, type RemoteHistoryView } from './remoteBrowserHistory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ErrorDialog } from '../components/ErrorDialog';
 
@@ -95,6 +96,8 @@ export function RemotePwaApp() {
   const [createOrchestrationOpen, setCreateOrchestrationOpen] = useState(false);
   const [creationFailure, setCreationFailure] = useState<{ name: string; error: string } | null>(null);
   const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
+  /** The sidebar row the open Pane was tapped in, so only that copy is highlighted. */
+  const [selectedPaneScope, setSelectedPaneScope] = useState<{ paneId: string; scope: string } | null>(null);
   const profilesLoadedRef = useRef(false);
   const activeRuntimeRef = useRef<RemoteRuntimeAdapter | null>(null);
   const panelLoadRequestRef = useRef(0);
@@ -336,6 +339,34 @@ export function RemotePwaApp() {
     }
   }, [adapter, openSession, setLastError]);
 
+  const historyView: RemoteHistoryView = openOrchestrationSession
+    ? `session:${openOrchestrationSession.session.id}`
+    : selectedSessionId ? `pane:${selectedSessionId}` : null;
+  const { requestView } = useRemoteBrowserHistory({
+    enabled: adapter !== null && !isNativeMobile(),
+    view: historyView,
+    overlayOpen: sidebarOpen || createSessionProject !== null || createOrchestrationOpen,
+    onNavigate: (view) => {
+      const state = useRemoteSessionStore.getState();
+      if (view?.startsWith('session:')) {
+        const sessionId = view.slice('session:'.length);
+        if (state.orchestrationSessions.some(session => session.id === sessionId && session.archived !== true)) {
+          void openRemoteOrchestrationSession(sessionId);
+        }
+        return;
+      }
+      const paneId = view?.slice('pane:'.length) ?? null;
+      if (paneId && !state.projects.some(project => project.sessions?.some(session => session.id === paneId))) return;
+      navigationRequestRef.current += 1;
+      selectSession(paneId);
+    },
+    onCloseOverlays: () => {
+      setSidebarOpen(false);
+      setCreateSessionProject(null);
+      setCreateOrchestrationOpen(false);
+    },
+  });
+
   const refreshOrchestrationSessions = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
     try {
@@ -391,6 +422,7 @@ export function RemotePwaApp() {
     setAffordances(EMPTY_AFFORDANCES);
     setAffordancesLoading(false);
     setMountedTerminalPanelIds([]);
+    setSelectedPaneScope(null);
   }, [resetRemoteHost]);
 
   const connectProfile = useCallback(async (profile: RemotePaneConnectionProfile) => {
@@ -439,6 +471,7 @@ export function RemotePwaApp() {
           return;
         }
         pushRoutePanelRef.current = route.panelId ? { sessionId: route.paneId, panelId: route.panelId } : null;
+        requestView(`pane:${route.paneId}`);
         selectSession(route.paneId);
         // Selecting the same pane does not rerun the panel-loading effect.
         if (state.selectedSessionId === route.paneId) void loadPanels(route.paneId, runtime);
@@ -449,7 +482,7 @@ export function RemotePwaApp() {
       return;
     }
     void connectProfile(profile).then(applyRoute).catch(() => {});
-  }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, savedProfiles, selectSession, setLastError]);
+  }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
   const connectCode = useCallback(async (code: string) => {
     setLastError(null);
@@ -507,11 +540,13 @@ export function RemotePwaApp() {
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
-  const selectRemoteSession = useCallback((sessionId: string) => {
+  const selectRemoteSession = useCallback((sessionId: string, scope: string) => {
     navigationRequestRef.current += 1;
+    setSelectedPaneScope({ paneId: sessionId, scope });
+    requestView(`pane:${sessionId}`);
     selectSession(sessionId);
     setSidebarOpen(false);
-  }, [selectSession]);
+  }, [requestView, selectSession]);
 
   /** Runs one pin, archive or restore at a time, marking its row busy. */
   const runSidebarAction = useCallback(async (id: string, failure: string, action: (runtime: RemoteRuntimeAdapter) => Promise<void>) => {
@@ -531,9 +566,10 @@ export function RemotePwaApp() {
     // The create request can finish after a switch to another host.
     if (adapter !== activeRuntimeRef.current) return;
     navigationRequestRef.current += 1;
+    requestView(`session:${view.session.id}`);
     openSession(view);
     void refreshOrchestrationSessions(adapter);
-  }, [adapter, openSession, refreshOrchestrationSessions]);
+  }, [adapter, openSession, refreshOrchestrationSessions, requestView]);
 
   const sidebarActions = useMemo<RemoteSidebarActions>(() => ({
     selectPane: selectRemoteSession,
@@ -555,6 +591,7 @@ export function RemotePwaApp() {
     }),
     createPane: openCreateSession,
     openSession: (sessionId) => {
+      requestView(`session:${sessionId}`);
       setSidebarOpen(false);
       void openRemoteOrchestrationSession(sessionId);
     },
@@ -570,7 +607,7 @@ export function RemotePwaApp() {
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
     refresh: () => void resyncHost(adapter),
-  }), [adapter, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, resyncHost, runSidebarAction, selectRemoteSession]);
+  }), [adapter, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
 
   const handleRemoteSessionCreated = useCallback(async (projectId: number, sessionName: string) => {
     if (!adapter) return;
@@ -579,6 +616,7 @@ export function RemotePwaApp() {
       const nextProjects = await refreshProjects(adapter);
       const createdSessionId = nextProjects ? findSessionIdByName(nextProjects, projectId, sessionName) : null;
       if (createdSessionId) {
+        requestView(`pane:${createdSessionId}`);
         selectSession(createdSessionId);
         setSidebarOpen(false);
         return;
@@ -587,7 +625,7 @@ export function RemotePwaApp() {
     }
 
     setSidebarOpen(false);
-  }, [adapter, refreshProjects, selectSession]);
+  }, [adapter, refreshProjects, requestView, selectSession]);
 
   const selectPanel = useCallback((panelId: string) => {
     if (!adapter || !selectedSessionId) return;
@@ -735,6 +773,7 @@ export function RemotePwaApp() {
               loading={loading}
               actionId={sidebarActionId}
               actions={sidebarActions}
+              selectedPane={selectedPaneScope}
               onClose={() => setSidebarOpen(false)}
               className="flex h-full w-full shadow-2xl"
             />
@@ -746,11 +785,13 @@ export function RemotePwaApp() {
         loading={loading}
         actionId={sidebarActionId}
         actions={sidebarActions}
+        selectedPane={selectedPaneScope}
         className="hidden w-80 shrink-0 md:flex"
       />
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <RemoteStatusBar
           profile={activeProfile}
+          openName={openOrchestrationSession ? openOrchestrationSession.session.name || 'Untitled' : selectedSession ? selectedSession.name || 'Untitled' : null}
           status={connectionStatus}
           lastError={lastError}
           lastSeenAt={lastSeenAt}

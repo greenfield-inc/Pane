@@ -102,7 +102,7 @@ export function RemoteCreateOrchestrationSessionDialog({
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
               <div>
                 <label htmlFor="remote-create-session-name" className="mb-2 block text-sm font-semibold text-text-primary">
-                  Name your chat (optional)
+                  Session name (optional)
                 </label>
                 <input
                   id="remote-create-session-name"
