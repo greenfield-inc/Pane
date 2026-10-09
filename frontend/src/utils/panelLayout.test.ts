@@ -421,6 +421,12 @@ describe('reconcile', () => {
     expect(groups.map(g => g.panelIds)).toEqual([['agent', 'tab'], ['page']]);
   });
 
+  it('adds a page opened elsewhere to the side group without replacing its tab', () => {
+    const layout = layoutOf(split('s1', 'row', [group('g1', ['agent']), group('g2', ['v'], 'v')]));
+    const { layout: result } = reconcile(layout, ['agent', 'v', 'page'], new Set(['page']));
+    expect(allGroups(result.root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['agent'], 'agent'], [['v', 'page'], 'v']]);
+  });
+
   it('rebuilds an empty layout with agent-opened pages beside the conversation', () => {
     const { layout: result } = reconcile(createSingleGroupLayout([], null), ['plan', 'agent', 'report'], new Set(['plan', 'report']));
     expect(allGroups(result.root).map(g => g.panelIds)).toEqual([['agent'], ['plan', 'report']]);

@@ -172,27 +172,33 @@ describe('sessionStore', () => {
     vi.useRealTimers();
   });
 
-  it('keeps the current active pane when a background-created session arrives', () => {
+  it('keeps the current pane when another client or an agent creates one', () => {
     useSessionStore.setState({ activeSessionId: 'session-existing' });
 
-    useSessionStore.getState().addSession(session({
-      id: 'session-background',
-      activateOnCreate: false,
-    }));
+    useSessionStore.getState().addSession(session({ id: 'session-elsewhere', activateOnCreate: true }));
+    useSessionStore.getState().addSession(session({ id: 'session-foreign', activateOnCreate: true, clientRequestId: 'another-client' }));
 
     const state = useSessionStore.getState();
-    expect(state.sessions[0].id).toBe('session-background');
+    expect(state.sessions.map(created => created.id)).toEqual(['session-foreign', 'session-elsewhere']);
     expect(state.activeSessionId).toBe('session-existing');
   });
 
-  it('activates newly created sessions by default', () => {
-    useSessionStore.setState({ activeSessionId: 'session-existing' });
+  it('switches to a pane this desktop created', async () => {
+    const create = vi.fn().mockResolvedValue({ success: true, data: { jobId: 1 } });
+    vi.stubGlobal('window', { electronAPI: { sessions: { create } } });
+    vi.stubGlobal('crypto', { randomUUID: () => 'request-1' });
+    try {
+      useSessionStore.setState({ activeSessionId: 'session-existing' });
+      await useSessionStore.getState().createSession({ prompt: '', worktreeTemplate: 'mine', count: 1 });
 
-    useSessionStore.getState().addSession(session({
-      id: 'session-foreground',
-    }));
+      // The host echoes the request id on session:created.
+      useSessionStore.getState().addSession(session({ id: 'session-mine', clientRequestId: 'request-1' }));
 
-    expect(useSessionStore.getState().activeSessionId).toBe('session-foreground');
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ clientRequestId: 'request-1' }));
+      expect(useSessionStore.getState().activeSessionId).toBe('session-mine');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('retains the latest output and JSON messages independently in chronological order', () => {

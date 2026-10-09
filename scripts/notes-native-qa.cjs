@@ -110,6 +110,9 @@ async function addCanvasText(text, x, y) {
     return Boolean(session?.worktreePath);
   }, { timeout: 30000 }).toBe(true);
   const pane = session.id;
+  // A Pane created outside the renderer's own create flow does not switch the
+  // window to it; open it from Recent Panes on the home view.
+  await page.getByText('notes-qa', { exact: true }).click();
   const featureScope = { kind: 'feature', id: pane };
   const projectScope = { kind: 'project', id: String(project.data.id) };
   const globalScope = { kind: 'global', id: 'user' };
@@ -191,7 +194,7 @@ async function addCanvasText(text, x, y) {
   assert.deepEqual(drafts, [], 'Successful saves clear renderer recovery drafts before quit');
   await stop();
   await launch();
-  await page.getByRole('button', { name: 'notes-qa', exact: true }).click();
+  await page.getByText('notes-qa', { exact: true }).click();
   await selectScope('Global Notes');
   await choose('Native checkout');
   await expect(page.getByRole('textbox', { name: 'Note title', exact: true })).toHaveValue('Native checkout');

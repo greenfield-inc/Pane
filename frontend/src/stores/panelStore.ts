@@ -17,6 +17,7 @@ export const usePanelStore = create<PanelStore>()(
     unviewedCompletedActivity: {},
     layouts: {},
     focusedGroupIds: {},
+    activationRequests: {},
 
     // Pure synchronous state updates
     removeBrowserPanelsForHostSwitch: () => {
@@ -56,9 +57,6 @@ export const usePanelStore = create<PanelStore>()(
         const existing = state.panels[panel.sessionId].find((p: ToolPanel) => p.id === panel.id);
         if (!existing) {
           state.panels[panel.sessionId].push(panel);
-        }
-        if (panel.state.isActive) {
-          state.activePanels[panel.sessionId] = panel.id;
         }
       });
     },
@@ -178,6 +176,18 @@ export const usePanelStore = create<PanelStore>()(
     setFocusedGroup: (sessionId, groupId) => {
       set((state) => {
         state.focusedGroupIds[sessionId] = groupId;
+      });
+    },
+
+    requestActivation: (request) => {
+      set((state) => {
+        state.activationRequests[request.sessionId] = request;
+      });
+    },
+
+    clearActivationRequest: (sessionId) => {
+      set((state) => {
+        delete state.activationRequests[sessionId];
       });
     },
 

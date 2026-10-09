@@ -105,6 +105,8 @@ export interface Session {
   baseBranch?: string;
   activateOnCreate?: boolean;
   createDefaultTerminalOnCreate?: boolean;
+  /** Echoes the creating request's clientRequestId, so only that client switches to the new Pane. */
+  clientRequestId?: string;
 }
 
 export interface GitStatus {
@@ -146,6 +148,8 @@ export interface CreateSessionRequest {
   isMainRepo?: boolean;
   baseBranch?: string;
   startPinned?: boolean;
+  /** Chosen by the creating client and echoed on session:created. */
+  clientRequestId?: string;
   toolType?: 'claude' | 'none';
   claudeConfig?: {
     model?: string;

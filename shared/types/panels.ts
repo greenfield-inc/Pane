@@ -1,5 +1,7 @@
 import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
+import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
+import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
 
 /**
  * Panel and session types for Pane.
@@ -490,4 +492,45 @@ export interface SessionPanelLayout {
   focusedGroupId?: string;
   /** Id of the group that is zoomed (fills the stage); null/undefined when not zoomed. */
   zoomedGroupId?: string | null;
+}
+
+const panelGroupSchema: BoundarySchema<PanelGroupNode> = boundary.object({
+  type: boundary.literal('group'),
+  id: boundary.string,
+  panelIds: boundary.array(boundary.string),
+  activePanelId: boundary.nullable(boundary.string),
+});
+
+// The tree is recursive, so the node schema is a thunk: `decodePanelLayoutNode`
+// is hoisted and only called once both schemas below it have initialized.
+const panelLayoutNodeSchema: BoundarySchema<PanelLayoutNode> = {
+  decode(current: BoundaryCursor): PanelLayoutNode {
+    return decodePanelLayoutNode(current);
+  },
+};
+
+const panelSplitSchema: BoundarySchema<PanelSplitNode> = boundary.object({
+  type: boundary.literal('split'),
+  id: boundary.string,
+  direction: boundary.enumeration('row', 'column'),
+  children: boundary.array(panelLayoutNodeSchema),
+  sizes: boundary.array(boundary.number),
+});
+
+const panelLayoutNodeUnion = boundary.union(panelGroupSchema, panelSplitSchema);
+
+function decodePanelLayoutNode(current: BoundaryCursor): PanelLayoutNode {
+  return panelLayoutNodeUnion.decode(current);
+}
+
+const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.object({
+  version: boundary.literal(1),
+  root: panelLayoutNodeSchema,
+  focusedGroupId: boundary.optional(boundary.string),
+  zoomedGroupId: boundary.optional(boundary.nullable(boundary.string)),
+});
+
+/** Returns null for anything that is not a version 1 layout tree. */
+export function decodeSessionPanelLayout<Value>(value: Value): SessionPanelLayout | null {
+  return decodeOptionalBoundary(value, sessionPanelLayoutSchema) ?? null;
 }

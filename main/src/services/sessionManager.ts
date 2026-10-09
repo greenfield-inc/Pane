@@ -594,12 +594,13 @@ export class SessionManager extends EventEmitter {
 
   emitSessionCreated(
     session: Session,
-    options: { activateOnCreate?: boolean; createDefaultTerminalOnCreate?: boolean } = {},
+    options: { activateOnCreate?: boolean; createDefaultTerminalOnCreate?: boolean; clientRequestId?: string } = {},
   ): void {
     this.emit('session-created', {
       ...session,
       activateOnCreate: options.activateOnCreate !== false,
       createDefaultTerminalOnCreate: options.createDefaultTerminalOnCreate !== false,
+      clientRequestId: options.clientRequestId,
     });
   }
 

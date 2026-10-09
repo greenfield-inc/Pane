@@ -508,6 +508,33 @@ describe('runpane IPC handlers', () => {
       expect(panelManager.createPanel).not.toHaveBeenCalled();
     });
 
+    it('keeps an adopted Pane when the --focus request cannot be delivered', async () => {
+      const repoPath = createTempGitRepo('adopt-focus-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'adopt-focus-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'feature', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      setPaneRuntime({
+        eventSink: { send: (channel: string) => { if (channel === 'pane:focus-requested') throw new Error('sink closed'); } },
+        getConfigManager: () => { throw new Error('unused'); },
+        getPtyHostRuntime: () => null,
+        getWebviewContextMap: () => new Map(),
+      });
+      try {
+        const services = adoptionServices(repoPath, worktreePath);
+        const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+          repo: { id: project.id },
+          focus: true,
+          panes: [{ path: worktreePath, name: 'Adopted', tool: { command: 'bash' } }],
+        }]);
+
+        expect(result).toMatchObject({ ok: true, items: [{ ok: true, paneId: session.id }] });
+        expect(services.sessionManager.archiveSession).not.toHaveBeenCalled();
+      } finally {
+        resetPaneRuntimeForTests();
+      }
+    });
+
     it('refuses paths outside the selected repo and duplicate canonical paths', async () => {
       const repoPath = createTempGitRepo('guard-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -7004,6 +7031,27 @@ describe('runpane IPC handlers', () => {
 
       expect(sentEvents).toHaveBeenCalledWith('pane:focus-requested', { paneId: session.id, panelId: undefined });
       expect(result).toMatchObject({ ok: true, paneId: session.id });
+    });
+
+    it.each([
+      [{ focus: true }, true],
+      [{ source: 'agent' }, false],
+      [{}, false],
+    ])('panes create %o asks the host desktop to switch: %s', async (flags, switches) => {
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const services = createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        taskQueue: { createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })) } as never,
+      });
+
+      await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: 'active',
+        ...flags,
+        panes: [{ name: 'new-pane', tool: { command: 'bash' } }],
+      }]);
+
+      const focusRequests = sentEvents.mock.calls.filter(([channel]) => channel === 'pane:focus-requested');
+      expect(focusRequests).toEqual(switches ? [['pane:focus-requested', { paneId: session.id, panelId: terminalPanel.id }]] : []);
     });
 
     it('refuses to focus an archived pane and never touches the window', async () => {

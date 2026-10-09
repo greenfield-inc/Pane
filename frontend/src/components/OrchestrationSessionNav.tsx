@@ -111,13 +111,12 @@ export function OrchestrationSessionNav({
       const detail = event instanceof CustomEvent
         ? event.detail as { kind?: string; selectionChanged?: boolean }
         : undefined;
-      // Reconnection snapshots can still contain the selection preceding a failed click.
-      // A new host clears selectionError during invalidation; explicit selection events
-      // remain authoritative on the current host.
-      const retainFailedIntent = detail?.kind === 'runtime-resync'
-        && useOrchestrationSessionStore.getState().selectionError !== null;
-      const adoptServerSelection = !retainFailedIntent
-        && (detail?.kind === 'selected' || detail?.selectionChanged === true);
+      // Another client's selection never moves this desktop. Only a resync
+      // adopts one, and only when this desktop has none of its own for the host.
+      // Reconnection snapshots can still contain the selection preceding a failed
+      // click; a new host clears selectionError during invalidation.
+      const retainFailedIntent = useOrchestrationSessionStore.getState().selectionError !== null;
+      const adoptServerSelection = !retainFailedIntent && detail?.kind === 'runtime-resync';
       void refresh({ adoptServerSelection });
     };
     window.addEventListener('orchestration-sessions-changed', handleSessionsChanged);
