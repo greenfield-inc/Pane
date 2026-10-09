@@ -51,6 +51,37 @@ test('an unsaved edit survives switching to another tab and back', async ({ page
   await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
 });
 
+test('a save still running when the tab is left lands before a newer one', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { ports: PORTS, files: { 'notes.txt': 'start\n' } });
+  // Hold the first write on the wire, the way a slow connection does.
+  let releaseFirstWrite: (() => Promise<void>) | null = null;
+  await page.route('http://anim-pane.test/**', async route => {
+    if (!releaseFirstWrite && route.request().postData()?.includes('"file:write"')) {
+      releaseFirstWrite = () => route.fallback();
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.getByRole('tab', { name: 'Explorer' }).click();
+  await page.getByRole('button', { name: 'notes.txt' }).click();
+  const editor = page.getByRole('textbox', { name: 'notes.txt' });
+  await editor.fill('first\n');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => releaseFirstWrite !== null).toBe(true);
+
+  await page.getByRole('tab', { name: 'shell' }).click();
+  await page.getByRole('tab', { name: 'Explorer' }).click();
+  await editor.fill('second\n');
+  await expect(page.getByRole('button', { name: 'Saving' })).toBeDisabled();
+
+  await releaseFirstWrite!();
+  await expect.poll(() => host.files['notes.txt']).toBe('first\n');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect.poll(() => host.files['notes.txt']).toBe('second\n');
+  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+});
+
 test('saving keeps a file\'s Windows line endings', async ({ page }) => {
   const host = await openConnectedRemotePwa(page, { ports: PORTS, files: { 'notes.txt': 'one\r\ntwo\r\n' } });
 

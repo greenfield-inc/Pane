@@ -22,9 +22,32 @@ const MEDIA_KINDS: ReadonlySet<FilePreviewKind> = new Set(['image', 'pdf', 'vide
 const MAX_EDIT_BYTES = 1024 * 1024;
 
 // Switching tabs or panes unmounts the Explorer. These keep its open file, by panel, and its
-// unsaved drafts, by pane and path, until the app closes.
+// unsaved drafts and in-flight saves, by pane and path, until the app closes.
 const openFiles = new Map<string, RemoteFileEntry>();
 const unsavedDrafts = new Map<string, TextState>();
+/** Resolves to null once `content` is on the host, or to the reason it is not. */
+const pendingSaves = new Map<string, { content: string; done: Promise<string | null> }>();
+
+/**
+ * Writes `content` and, when it lands, marks it saved in the cached draft, so a save that
+ * outlives its editor still updates what the next editor shows.
+ */
+function startSave(key: string, content: string, write: () => Promise<void>) {
+  const done = write().then(
+    () => {
+      const cached = unsavedDrafts.get(key);
+      if (cached?.kind === 'text') {
+        if (cached.draft === content) unsavedDrafts.delete(key);
+        else unsavedDrafts.set(key, { ...cached, saved: content });
+      }
+      return null;
+    },
+    (error: Error) => error.message || 'Could not save the file.',
+  ).finally(() => pendingSaves.delete(key));
+  const pending = { content, done };
+  pendingSaves.set(key, pending);
+  return pending;
+}
 
 /**
  * The phone's Explorer tab: the pane's worktree as a tree, a text editor that saves to the host,
@@ -67,6 +90,8 @@ export function RemoteExplorerPanel({ adapter, panelId, sessionId, ports, onErro
 
   const refresh = async () => {
     setRefreshing(true);
+    // Collapsed folders load again when next opened.
+    setFolders(previous => Object.fromEntries(Object.entries(previous).filter(([path]) => path === '' || expanded.has(path))));
     try {
       await Promise.all(['', ...expanded].map(loadFolder));
     } finally {
@@ -78,7 +103,7 @@ export function RemoteExplorerPanel({ adapter, panelId, sessionId, ports, onErro
     const kind = filePreviewKind(openFile.path);
     const close = () => setOpenFile(null);
     return kind && MEDIA_KINDS.has(kind)
-      ? <MediaFileView file={openFile} kind={kind} media={phoneMediaUrl(openFile.path, ports, sessionId)} onBack={close} />
+      ? <MediaFileView file={openFile} kind={kind} media={phoneMediaUrl(openFile.path, ports, sessionId)} onBack={close} onError={onError} />
       : <TextFileView adapter={adapter} sessionId={sessionId} file={openFile} onBack={close} onError={onError} />;
   }
 
@@ -146,9 +171,31 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
 }) {
   const draftKey = `${sessionId}\0${file.path}`;
   const [text, setText] = useState<TextState>(() => unsavedDrafts.get(draftKey) ?? { kind: 'loading' });
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(() => pendingSaves.has(draftKey));
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const dirty = text.kind === 'text' && text.draft !== text.saved;
+
+  /** Waits for a save, this editor's or one an earlier visit started, and shows how it ended. */
+  const follow = useCallback((pending: { content: string; done: Promise<string | null> }) => {
+    let active = true;
+    setSaving(true);
+    void pending.done.then(error => {
+      if (!active) return;
+      setSaving(false);
+      if (error) {
+        onError(error);
+        return;
+      }
+      setText(current => (current.kind === 'text' ? { ...current, saved: pending.content } : current));
+      setConfirmingDiscard(false);
+    });
+    return () => { active = false; };
+  }, [onError]);
+
+  useEffect(() => {
+    const pending = pendingSaves.get(draftKey);
+    return pending ? follow(pending) : undefined;
+  }, [draftKey, follow]);
 
   useEffect(() => {
     if (dirty) unsavedDrafts.set(draftKey, text);
@@ -178,28 +225,21 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
     return () => { cancelled = true; };
   }, [adapter, sessionId, file, draftKey]);
 
-  const save = async () => {
-    if (text.kind !== 'text') return;
+  const save = () => {
+    // One write per file at a time, so an older save can never land after a newer one.
+    if (text.kind !== 'text' || pendingSaves.has(draftKey)) return;
     const content = text.draft;
-    setSaving(true);
-    try {
-      await adapter.writeTextFile(sessionId, file.path, text.lineEnding === '\n' ? content : content.replace(/\n/gu, '\r\n'));
-      setText(current => (current.kind === 'text' ? { ...current, saved: content } : current));
-      setConfirmingDiscard(false);
-    } catch (error) {
-      onError(error instanceof Error ? error.message : 'Could not save the file.');
-    } finally {
-      setSaving(false);
-    }
+    const onDisk = text.lineEnding === '\n' ? content : content.replace(/\n/gu, '\r\n');
+    follow(startSave(draftKey, content, () => adapter.writeTextFile(sessionId, file.path, onDisk)));
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg-primary">
-      <FileHeader file={file} dirty={dirty} onBack={() => (dirty && !confirmingDiscard ? setConfirmingDiscard(true) : onBack())}>
+      <FileHeader file={file} dirty={dirty} onBack={() => (dirty ? setConfirmingDiscard(true) : onBack())}>
         <button
           type="button"
           disabled={!dirty || saving}
-          onClick={() => void save()}
+          onClick={save}
           className="flex h-8 w-16 flex-shrink-0 items-center justify-center rounded-md bg-interactive text-sm font-medium text-text-on-interactive hover:bg-interactive-hover disabled:bg-surface-secondary disabled:text-text-tertiary"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" /> : 'Save'}
@@ -237,17 +277,21 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
 }
 
 /** An image, PDF, video or audio file, streamed from the host's files address with Range support. */
-function MediaFileView({ file, kind, media, onBack }: {
+function MediaFileView({ file, kind, media, onBack, onError }: {
   file: RemoteFileEntry;
   kind: FilePreviewKind;
   media: { url: string } | { reason: string };
   onBack(): void;
+  onError(message: string): void;
 }) {
-  const [failed, setFailed] = useState(false);
   const url = 'url' in media ? media.url : null;
+  // Kept by address, so a new files address after phone pages recover loads again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = url !== null && failedUrl === url;
+  const setFailed = () => setFailedUrl(url);
   const openOutside = () => {
     if (!url) return;
-    if (isNativeMobile()) void openNativeExternalUrl(url);
+    if (isNativeMobile()) openNativeExternalUrl(url).catch(() => onError('Could not open the file outside Pane.'));
     else window.open(url, '_blank', 'noopener,noreferrer');
   };
 
@@ -259,10 +303,10 @@ function MediaFileView({ file, kind, media, onBack }: {
   else {
     body = (
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-surface-primary p-3">
-        {kind === 'image' && <img src={url} alt={file.path} onError={() => setFailed(true)} className="max-h-full max-w-full object-contain" />}
+        {kind === 'image' && <img src={url} alt={file.path} onError={setFailed} className="max-h-full max-w-full object-contain" />}
         {/* Worktree media has no caption files to offer. */}
-        {kind === 'video' && <video src={url} aria-label={file.path} controls playsInline preload="metadata" onError={() => setFailed(true)} className="max-h-full w-full" />}
-        {kind === 'audio' && <audio src={url} aria-label={file.path} controls preload="metadata" onError={() => setFailed(true)} className="w-full" />}
+        {kind === 'video' && <video src={url} aria-label={file.path} controls playsInline preload="metadata" onError={setFailed} className="max-h-full w-full" />}
+        {kind === 'audio' && <audio src={url} aria-label={file.path} controls preload="metadata" onError={setFailed} className="w-full" />}
       </div>
     );
   }
