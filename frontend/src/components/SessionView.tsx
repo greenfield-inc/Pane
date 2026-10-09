@@ -184,7 +184,12 @@ export const SessionView = memo(() => {
       panelApi.setLayout(pending.sessionId, pending.layout).catch(err => {
         console.warn('[SessionView] Failed to persist layout:', err);
       });
-      rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
+      // An archive or delete inside the debounce has already forgotten the
+      // Pane; writing its layout back would revive the memory.
+      const { sessions, activeMainRepoSession } = useSessionStore.getState();
+      if (activeMainRepoSession?.id === pending.sessionId || sessions.some(session => session.id === pending.sessionId)) {
+        rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
+      }
     }
   }, []);
 
