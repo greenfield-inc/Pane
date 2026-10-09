@@ -116,6 +116,7 @@ const PORTS_LIST_CHANNEL = 'ports:list';
 const PORTS_CHANGED_CHANNEL = 'ports:changed';
 /** How a host's command registry refuses a command it does not have (`commandRegistry.ts`). */
 const UNKNOWN_COMMAND_MESSAGE = 'No Pane daemon command registered';
+const PORTS_LIST_RETRY_MS = 5_000;
 const REMOTE_RUNTIME_ID = createRemoteRuntimeId();
 
 type RemoteRequestOptions = RequestOptions & {
@@ -588,6 +589,8 @@ export class RemotePaneClientController extends EventEmitter {
   private portTunnelSync: Promise<unknown> = Promise.resolve();
   /** The host's last Ports list, with where this desktop reaches each port. */
   private tunnelledSnapshot: ListeningPortsSnapshot | null = null;
+  /** One pending re-read after the host failed to list its ports. */
+  private portsListRetry: NodeJS.Timeout | null = null;
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
   private remoteRuntimeUsageTracked = false;
@@ -938,17 +941,26 @@ export class RemotePaneClientController extends EventEmitter {
 
   /**
    * The host's Ports list with local ports. A host older than port detection gets an empty list
-   * marked `unsupportedHost`, so its tabs load as before instead of waiting for a list.
+   * marked `unsupportedHost`, so its tabs load as before. When a current host fails to read its
+   * ports, tabs keep the last list, or an empty one until a retry succeeds; the tunnel is untouched.
    */
   private async listTunnelledPorts(client: RemotePaneClient): Promise<JsonValue | ListeningPortsSnapshot | undefined> {
     let listed: JsonValue | undefined;
     try {
       listed = await client.invoke(PORTS_LIST_CHANNEL, []);
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes(UNKNOWN_COMMAND_MESSAGE)) throw error;
-      const unsupported: ListeningPortsSnapshot = { host: client.profile.label, ports: [], unsupportedHost: true };
-      if (this.activeClient === client) this.tunnelledSnapshot = unsupported;
-      return unsupported;
+      if (error instanceof Error && error.message.includes(UNKNOWN_COMMAND_MESSAGE)) {
+        const unsupported: ListeningPortsSnapshot = { host: client.profile.label, ports: [], unsupportedHost: true };
+        if (this.activeClient === client) this.tunnelledSnapshot = unsupported;
+        return unsupported;
+      }
+      console.warn('[Pane port tunnel] list_failed:', error);
+      this.portsListRetry ??= setTimeout(() => {
+        this.portsListRetry = null;
+        if (this.activeClient === client) void this.refreshTunnelledPorts(client);
+      }, PORTS_LIST_RETRY_MS);
+      this.portsListRetry.unref?.();
+      return this.tunnelledSnapshot ?? { host: client.profile.label, ports: [] };
     }
     return await this.tunnelPorts(client, listed) ?? listed;
   }
