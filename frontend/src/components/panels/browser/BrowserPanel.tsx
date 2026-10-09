@@ -518,7 +518,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
                   'transition-colors hover:bg-surface-hover hover:text-text-primary',
                   'aria-expanded:bg-surface-hover aria-expanded:text-text-primary'
                 )}
-                title="Listening ports on this machine"
+                title={`Listening ports on ${viewingRemoteHost ? ports?.host ?? 'the host' : 'this machine'}`}
               >
                 Ports
                 <span className="tabular-nums text-text-tertiary">{ports?.ports.length ?? ''}</span>

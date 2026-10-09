@@ -83,7 +83,7 @@ const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: bool
     <button
       type="button"
       onClick={() => onOpen(port.port)}
-      className={cn(rowClass, 'transition-colors hover:bg-surface-hover focus:bg-surface-hover focus:outline-none', isCurrent && 'bg-surface-selected')}
+      className={cn(rowClass, 'transition-colors hover:bg-surface-hover focus:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring-subtle', isCurrent && 'bg-surface-selected')}
       title={`Open localhost:${port.port}`}
     >
       {content}
