@@ -731,6 +731,7 @@ export function registerPanelHandlers(
   commandRegistry.register('terminal:input', async (panelId: string, data: string) => {
     // Desktop, phone and remote web all type through here, so it is always a person.
     getMobilePushSender(services.configManager).observeInput(panelId, data);
+    services.orchestrationSessionManager?.observeInput(panelId, data);
     return terminalPanelManager.writeToTerminal(panelId, data);
   });
   

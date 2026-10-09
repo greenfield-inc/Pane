@@ -301,6 +301,62 @@ describe('OrchestrationSessionManager', () => {
     expect((await fixture.manager.get(selector)).isPinned).toBe(true);
   });
 
+  it('names a Session created without a typed name from its first message, once', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    fixture.manager.observeInput(panelId, '1\r');
+    fixture.manager.observeInput(panelId, 'fix the flaky checkout test please\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please'));
+    fixture.manager.observeInput(panelId, 'now update the docs\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('fix the flaky checkout test please');
+    expect((await fixture.manager.get(selector)).activity.at(-1)).toMatchObject({ message: 'Renamed to “fix the flaky checkout test please”.', source: 'system' });
+  });
+
+  it('does not name the Session from a message edited with cursor keys', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    // The composer sends "fix cuts"; Pane cannot follow the cursor, so it skips this message.
+    for (const key of ['fix cats', '\x1b[D', '\x1b[D', '\x7f', 'u', '\r']) fixture.manager.observeInput(panelId, key);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('New chat');
+    fixture.manager.observeInput(panelId, 'update the docs\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('update the docs'));
+  });
+
+  it('names the Session from a later message when the first rename fails', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    const selector = { sessionId: created.session.id };
+    const panelId = created.session.panelIds.claude;
+    vi.spyOn(fixture.manager, 'update').mockRejectedValueOnce(new Error('Session changed'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fixture.manager.observeInput(panelId, 'fix the flaky checkout test please\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get(selector)).name).toBe('New chat');
+    fixture.manager.observeInput(panelId, 'now update the docs\r');
+    await vi.waitFor(async () => expect((await fixture.manager.get(selector)).name).toBe('now update the docs'));
+  });
+
+  it('keeps a name the person chose', async () => {
+    const fixture = createFixture();
+    const typed = await fixture.manager.create({ name: 'Release prep', agent: 'claude' });
+    const typedNewChat = await fixture.manager.create({ name: 'New chat 42', agent: 'claude' });
+    const renamed = await fixture.manager.create({ name: 'New chat', nameFromFirstMessage: true, agent: 'claude' });
+    await fixture.manager.update({ sessionId: renamed.session.id }, { name: 'Billing' });
+    for (const session of [typed, typedNewChat, renamed]) {
+      fixture.manager.observeInput(session.session.panelIds.claude, 'fix the flaky checkout test please\r');
+    }
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect((await fixture.manager.get({ sessionId: typed.session.id })).name).toBe('Release prep');
+    expect((await fixture.manager.get({ sessionId: typedNewChat.session.id })).name).toBe('New chat 42');
+    expect((await fixture.manager.get({ sessionId: renamed.session.id })).name).toBe('Billing');
+  });
+
   it('reopens WSL Sessions with Linux paths, native commands, and durable distro choice', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.spyOn(wslUtils, 'validateWSLAvailable').mockResolvedValue(null);

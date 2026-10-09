@@ -57,6 +57,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
+import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
@@ -76,6 +77,9 @@ function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
 
 export class OrchestrationSessionManager extends EventEmitter {
   private initialized = false;
+  /** The line a person is typing into each Session agent panel, until its first message names the Session. */
+  private readonly firstMessageDrafts = new Map<string, string | null>();
+  private readonly namedPanelIds = new Set<string>();
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -218,6 +222,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         wslDistribution: input.wslDistribution,
         id,
         name,
+        nameIsDefault: !sourcePanel && input.nameFromFirstMessage ? true : undefined,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
         isPinned: input.isPinned ?? false,
@@ -327,6 +332,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         updatedAt: new Date().toISOString(),
         activity: [...current.activity],
       };
+      if (input.name !== undefined) delete nextRecord.nameIsDefault;
       if (input.name !== undefined && data.sessions.some(session => session.id !== current.id && normalizeSessionName(session.name) === normalizeSessionName(nextRecord.name))) {
         throw new Error(`A Session named ${nextRecord.name} already exists`);
       }
@@ -334,7 +340,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (nextRecord.archived === true && nextRecord.agent !== current.agent) {
         throw new Error(`Session ${current.name} is archived; restore it before changing its agent`);
       }
-      const updateActivity = this.activity(input.report ? 'report' : 'updated', input.report ? `Reported: ${input.report.summary}` : 'Updated Session context.', input.source ?? 'user');
+      const renamed = input.name !== undefined && nextRecord.name !== current.name;
+      const updateMessage = input.report ? `Reported: ${input.report.summary}` : renamed ? `Renamed to “${nextRecord.name}”.` : 'Updated Session context.';
+      const updateActivity = this.activity(input.report ? 'report' : 'updated', updateMessage, input.source ?? 'user');
       nextRecord.activity.push(updateActivity);
       if (input.report) {
         nextRecord.reportActivityId = updateActivity.id;
@@ -466,6 +474,34 @@ export class OrchestrationSessionManager extends EventEmitter {
         refreshedAt: new Date().toISOString(),
       };
     });
+  }
+
+  /** Terminal input a person typed. The first message to a Session agent renames a Session that still has its default name. */
+  observeInput(panelId: string, data: string): void {
+    if (!panelId.startsWith(ORCHESTRATION_SESSION_PANEL_PREFIX) || this.namedPanelIds.has(panelId)) return;
+    const previous = this.firstMessageDrafts.get(panelId);
+    const { draft, submitted } = applyTerminalInput(previous === undefined ? '' : previous, data);
+    const name = submitted.map(sessionNameFromMessage).find(Boolean);
+    if (!name) {
+      this.firstMessageDrafts.set(panelId, draft);
+      return;
+    }
+    this.firstMessageDrafts.delete(panelId);
+    this.namedPanelIds.add(panelId);
+    void this.nameFromFirstMessage(panelId, name).catch(error => {
+      this.namedPanelIds.delete(panelId);
+      console.warn('[OrchestrationSessionManager] Could not name the Session from its first message:', error);
+    });
+  }
+
+  private async nameFromFirstMessage(panelId: string, name: string): Promise<void> {
+    const { sessions } = await this.list();
+    const record = sessions.find(session => session.panelIds[session.agent] === panelId);
+    if (!record?.nameIsDefault) return;
+    const taken = new Set(sessions.filter(session => session.id !== record.id).map(session => normalizeSessionName(session.name)));
+    let uniqueName = name;
+    for (let suffix = 2; taken.has(normalizeSessionName(uniqueName)); suffix += 1) uniqueName = `${name} ${suffix}`;
+    await this.update({ sessionId: record.id }, { name: uniqueName, expectedRevision: record.revision, source: 'system' });
   }
 
   /**

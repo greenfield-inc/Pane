@@ -36,7 +36,6 @@ test('Start pinned puts a new Session in Pinned and is remembered on this device
   await expect(page.getByRole('group', { name: 'Pinned' }).getByRole('button', { name: 'Open Session Pinned at birth' })).toBeVisible();
 
   await page.reload();
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await page.getByRole('button', { name: 'New Session' }).click();
   await expect(sheet.getByRole('checkbox', { name: 'Start pinned' })).toBeChecked();
 });
@@ -80,11 +79,57 @@ test('a phone opens a Session by tapping its icon, not only its name', async ({ 
   await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 
+const archiveSession = async (page: Page, name: string) => {
+  await page.getByRole('button', { name: `More actions for ${name}` }).click();
+  await page.getByRole('menuitem', { name: 'Archive Session' }).click();
+};
+
+test('a pane opens on the host\'s active tab only when the phone can show it, with desktop-only tabs last', async ({ page }) => {
+  await openConnectedRemotePwa(page, {
+    panelTitles: ['Explorer', 'claude', 'Diff', 'shell'],
+    panelTypes: ['explorer', 'terminal', 'diff', 'terminal'],
+    activePanelIndex: 0,
+  });
+  await expect(page.getByRole('tab')).toHaveText(['claude', 'shell', 'Explorer', 'Diff']);
+  await expect(page.getByRole('tab', { name: 'claude', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('archiving a Session from its row menu can be undone from the toast', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
+  await page.getByRole('button', { name: 'Open remote panes' }).click();
+
+  await archiveSession(page, 'Release prep');
+  await expect(page.getByRole('button', { name: 'Open Session Release prep' })).toHaveCount(0);
+  await page.getByRole('status').filter({ hasText: 'Archived Release prep' }).getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' })).toBeVisible();
+});
+
+test('reopening reconnects to the last host, and shows the connect form when that fails or after Disconnect', async ({ page }) => {
+  await openConnectedRemotePwa(page);
+  await page.reload();
+  await expect(page.getByRole('tablist', { name: 'Remote tool panels' })).toBeVisible();
+
+  const health = 'http://anim-pane.test/remote/browser/health';
+  await page.route(health, route => route.abort());
+  await page.reload();
+  await expect(page.getByRole('status').filter({ hasText: 'Reconnecting to MacBook Pro' })).toBeVisible();
+  // The client retries the health check for about 20 seconds before giving up.
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('alert')).toBeVisible();
+
+  await page.unroute(health);
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('button', { name: 'Disconnect' }).click();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+});
+
 test('archived Sessions and panes are restored from the Archived section', async ({ page }) => {
   page.on('dialog', dialog => void dialog.accept());
   await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
 
-  await page.getByRole('button', { name: 'Archive Session Release prep' }).click();
+  await archiveSession(page, 'Release prep');
   await expect(page.getByRole('button', { name: 'Open Session Release prep' })).toHaveCount(0);
   await page.getByRole('group', { name: 'Repositories' }).getByRole('button', { name: 'Archive pane' }).first().click();
   await expect(paneRow(page, 'scrub Sentry request bodies')).toHaveCount(0);
@@ -104,7 +149,6 @@ test('collapsed sections stay collapsed on this device after a reload', async ({
   await expect(paneRow(page, 'scrub Sentry request bodies')).toBeHidden();
 
   await page.reload();
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Repositories', exact: true })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('button', { name: 'Sessions', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(paneRow(page, 'scrub Sentry request bodies')).toBeHidden();

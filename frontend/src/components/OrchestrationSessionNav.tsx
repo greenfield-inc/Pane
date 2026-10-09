@@ -116,7 +116,7 @@ export function OrchestrationSessionNav({
   const createSession = useCallback(async ({ name: requestedName, ...input }: SessionCreateRequest) => {
     await load();
     const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ ...input, name });
+    await create({ ...input, name, nameFromFirstMessage: !requestedName });
     setShowCreate(false);
     setActiveSession(null);
     navigateToPaneChat();

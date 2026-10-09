@@ -34,7 +34,7 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     useOrchestrationSessionStore.getState().invalidateHost();
     useSessionStore.getState().invalidateHost();
     usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {}, activationRequests: {},
-      agentStatus: {}, agentStatusSession: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
+      agentStatus: {}, agentStatusSession: {}, agentStatusReason: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
     useSessionWorkspaceLayoutStore.getState().reset();
     // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
     const uiState = await window.electronAPI.uiState.getExpanded();

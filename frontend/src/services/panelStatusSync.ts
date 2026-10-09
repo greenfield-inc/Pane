@@ -59,13 +59,14 @@ export function subscribePanelStatus(source: PanelStatusSource = desktopStatusSo
       usePanelStore.setState(state => ({
         agentStatus: { ...state.agentStatus, [data.panelId]: data.state },
         agentStatusSession: { ...state.agentStatusSession, [data.panelId]: data.sessionId },
+        agentStatusReason: { ...state.agentStatusReason, [data.panelId]: data.reason },
         agentStatusSnapshotVersion: state.agentStatusSnapshotVersion + 1,
       }));
       return;
     }
     const store = usePanelStore.getState();
     const prevState = store.agentStatus[data.panelId];
-    store.setAgentStatus(data.panelId, data.sessionId, data.state);
+    store.setAgentStatus(data.panelId, data.sessionId, data.state, data.reason);
     // Visible work before idle is a real turn; startup and stray output are not.
     if (data.state === 'idle' && data.workedVisibly) {
       useAttentionInboxStore.getState().markFinished(data.sessionId);
@@ -103,11 +104,14 @@ export function subscribePanelStatus(source: PanelStatusSource = desktopStatusSo
       usePanelStore.setState(state => {
         const agentStatus = { ...state.agentStatus };
         const agentStatusSession = { ...state.agentStatusSession };
+        // The snapshot carries no reason; keep only reasons from events seen during the read.
+        const agentStatusReason = { ...state.agentStatusReason };
         const activityStatus = { ...state.activityStatus };
         for (const panelId of Object.keys(agentStatus)) {
           if (!changedDuringRead.has(panelId)) {
             delete agentStatus[panelId];
             delete agentStatusSession[panelId];
+            delete agentStatusReason[panelId];
             delete activityStatus[panelId];
           }
         }
@@ -118,7 +122,7 @@ export function subscribePanelStatus(source: PanelStatusSource = desktopStatusSo
           agentStatusSession[panel.panelId] = panel.sessionId;
           activityStatus[panel.panelId] = panel.state === 'working' || panel.state === 'blocked' ? 'active' : 'idle';
         }
-        return { agentStatus, agentStatusSession, activityStatus, agentStatusSnapshotVersion: state.agentStatusSnapshotVersion + 1 };
+        return { agentStatus, agentStatusSession, agentStatusReason, activityStatus, agentStatusSnapshotVersion: state.agentStatusSnapshotVersion + 1 };
       });
     } catch (error) {
       if (!disposed && currentRequest === requestId) console.error('[panelStatusSync] Failed to refresh agent statuses:', error);

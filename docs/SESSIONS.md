@@ -6,11 +6,13 @@ optional overview keeps the Session name, associated Panes, and recent
 activity together while the chat remains the focused work surface. A tab
 shares its parent Pane's worktree.
 
-In the sidebar, `+` opens an agent picker and an optional Session name field. Pane
-remembers the chosen agent as the default for future Sessions while existing
-Sessions keep their own agent. A blank name receives a generated name such as
-`New chat` or `New chat 2`; each new Session opens as one Pane Chat and can be
-renamed later from the optional read-only overview. Expand a Session to see
+In the sidebar, `+` opens an agent picker, an optional Session name field, and
+an optional "What is this Session for?" field that becomes the Session's goal.
+Pane remembers the chosen agent as the default for future Sessions while
+existing Sessions keep their own agent. A blank name starts as `New chat` or
+`New chat 2` and is renamed once from the first message you send the Session
+agent; a name you type or set later is kept. Each new Session opens as one Pane
+Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
 The Sessions section below the divider can be collapsed from its header; the
@@ -148,7 +150,11 @@ Click a Session row to open its chat, or use **Switch to Session: <name>** in th
 command palette (`⌘⇧P` / `Ctrl+Shift+P`), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
 Child Pane rows are indented beyond the Session chat icon and keep the ordinary
-Pane actions. To file a Pane under a Session, right-click the Pane, choose
+Pane actions. Create Pane, opened while a Session is showing, has an
+**Add to <Session>** checkbox, on by default, that files the new Pane under that
+Session. A Pane that belongs to a Session names it in the window title bar as
+"<Session> › <Pane>"; click the Session name to go back to it. To file an
+existing Pane under a Session, right-click the Pane, choose
 **Add to Session**, then pick the Session. **Remove from <Session>** in the same
 menu takes it out again; the Pane and its worktree are unchanged. Pinned Pane
 rows show the Pane name with its repository muted beside it. Single-line Pane rows omit change counts and PR numbers; the
@@ -637,7 +643,9 @@ worktree defaults and existing historical pins are unchanged.
 ### Generated instructions and Git
 
 Session instructions and documents live under `<PANE_DIR>/sessions/<id>/`,
-outside the project. Session terminals set `GIT_CEILING_DIRECTORIES` to
+outside the project. While the Session agent shows its folder-trust prompt, a
+banner across the top of the chat says the folder is Pane's own, holding the
+Session's notes and no project code. Session terminals set `GIT_CEILING_DIRECTORIES` to
 `<PANE_DIR>/sessions`, so git run in a Session folder never picks up a repository
 above it, such as a home directory tracked as a dotfiles repo. Do not configure
 PANE_DIR inside a project repository.

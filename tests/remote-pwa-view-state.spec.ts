@@ -12,8 +12,9 @@ const paneButton = (page: Page, name: string) => page.getByRole('button', { name
 const shownPane = (page: Page) => page.locator('[aria-current="page"]');
 const selectedTab = (page: Page) => page.getByRole('tab', { selected: true });
 
-async function connect(page: Page) {
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+/** A reload reconnects to the saved host on its own. */
+async function reconnected(page: Page) {
+  await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor({ state: 'attached' });
 }
 
 test('follows a host activation only on the Pane it shows', async ({ page }) => {
@@ -49,7 +50,7 @@ test('remembers its Pane and tab across a reload and a dropped connection', asyn
   host.activePanelIds[Q] = `${Q}-panel-0`;
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(shownPane(page)).toHaveText(/^Pane Q/);
   await expect(selectedTab(page)).toHaveText('shell');
 
@@ -76,7 +77,7 @@ test('two browser tabs of one profile stay independent and a reload restores the
   await expect(selectedTab(page)).toHaveText('shell');
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(shownPane(page)).toHaveText(/^Pane Q/);
   await expect(selectedTab(page)).toHaveText('shell');
 });
@@ -89,7 +90,7 @@ test('falls back to the first Pane when the remembered Pane is gone', async ({ p
   host.panes = host.panes.filter(pane => pane.id !== Q);
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(shownPane(page)).toHaveText(/^Pane P/);
 });
 
@@ -115,7 +116,7 @@ test('works without remembering when browser storage is blocked', async ({ page 
   await expect(selectedTab(page)).toHaveText('shell');
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(shownPane(page)).toHaveText(/^Pane P/);
   expect(errors).toEqual([]);
 });
@@ -126,7 +127,7 @@ test('reopens the Session it had open after a reload', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(shownPane(page)).toHaveCount(0);
 });
@@ -149,7 +150,7 @@ test('moves to a neighbouring tab when another client closes the one it shows, a
   await expect(selectedTab(page)).toHaveText('logs');
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(selectedTab(page)).toHaveText('logs');
 });
 
@@ -162,7 +163,7 @@ test('reopens a remembered Session even when a Pane loads first during startup',
   let release = () => {};
   host.held['orchestration-sessions:list'] = new Promise<void>(resolve => { release = resolve; });
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await page.waitForTimeout(1000);
   release();
   delete host.held['orchestration-sessions:list'];
@@ -183,7 +184,7 @@ test('keeps the tool tab it chose in a Session across reopening and reload', asy
   await expect(selectedTab(page)).toHaveText('Tool A');
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(selectedTab(page)).toHaveText('Tool A');
 });
 
@@ -199,6 +200,6 @@ test('moves to the next visible Session tab when another client closes the one i
   await expect(selectedTab(page)).toHaveText('Tool B');
 
   await page.reload();
-  await connect(page);
+  await reconnected(page);
   await expect(selectedTab(page)).toHaveText('Tool B');
 });

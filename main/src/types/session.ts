@@ -77,6 +77,8 @@ export interface CreateSessionRequest {
   isMainRepo?: boolean;
   baseBranch?: string;
   startPinned?: boolean;
+  /** Orchestration Session each new Pane joins once it exists. */
+  associateSessionId?: string;
   /** Chosen by the creating client and echoed on session:created. */
   clientRequestId?: string;
   model?: string;

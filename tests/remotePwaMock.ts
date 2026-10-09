@@ -11,8 +11,10 @@ import type { JsonValue } from '../shared/validation/boundaryDecoder';
 export interface RemotePwaMockOptions {
   /** Panes the mock host reports, in sidebar order. */
   sessionNames?: string[];
-  /** Terminal panels the selected pane reports, in tab order. */
+  /** Panels the selected pane reports, in host order. */
   panelTitles?: string[];
+  /** Each panel's type, by index into panelTitles; terminal when absent. */
+  panelTypes?: string[];
   /** Host-defined terminal shortcuts offered in the mobile input bar. */
   shortcuts?: Array<{ id: string; key: string; label: string; text: string }>;
   /** Index of the panel the host reports as active. */
@@ -117,7 +119,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
   const panelsFor = (paneId: string) => panelTitles.map((title, index) => ({
     id: paneId === sessions[0].id ? `anim-panel-${index}` : `${paneId}-panel-${index}`,
     sessionId: paneId,
-    type: 'terminal',
+    type: options.panelTypes?.[index] ?? 'terminal',
     title,
     state: { isActive: index === 0, hasBeenViewed: index === 0 },
     metadata: {
@@ -305,8 +307,8 @@ function installClientMocks(profile: typeof PROFILE): void {
 
 /**
  * Stands up a fake remote Pane host and drives the PWA to its connected state.
- * The saved profile is seeded into localStorage so the connection screen offers
- * a one-click Connect rather than needing a pasted code.
+ * The saved profile is seeded into localStorage, so the PWA reconnects to it on
+ * open rather than needing a pasted code.
  */
 export async function openConnectedRemotePwa(
   page: Page,
@@ -320,7 +322,7 @@ export async function openConnectedRemotePwa(
   await installRemoteHostRoute(page, fixtures);
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
   return fixtures.host;
 }
 
@@ -354,7 +356,7 @@ export async function connectAnotherRemoteClient(page: Page, host: RemotePwaMock
   await page.addInitScript(installClientMocks, PROFILE);
   await installRemoteHostRoute(page, fixtures);
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
 }
 
 /** Sends one host event to this client, the way the daemon's event stream does. */

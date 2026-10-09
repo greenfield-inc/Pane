@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import type { OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 import type { PanelActivationRequest, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
@@ -30,6 +30,8 @@ import { useRemoteBrowserHistory, type RemoteHistoryView } from './remoteBrowser
 import { subscribeRemotePanelStatus } from './runtime/remotePanelStatus';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ErrorDialog } from '../components/ErrorDialog';
+import { UndoToast } from '../components/ui/UndoToast';
+import { PortalContainerProvider } from '../contexts/PortalContainerContext';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
   terminalShortcuts: [],
@@ -63,6 +65,20 @@ const EMPTY_AFFORDANCES: RemotePwaAffordances = {
 };
 
 const DEFAULT_PUSH_CONTROLS = { needsInputEnabled: true, completedEnabled: true };
+
+/** Set by Disconnect so the next open shows the connect form; cleared by the next successful connect. */
+const AUTO_CONNECT_PAUSED_KEY = 'pane.remotePwa.autoConnectPaused';
+function setAutoConnectPaused(paused: boolean): void {
+  try {
+    if (paused) window.localStorage.setItem(AUTO_CONNECT_PAUSED_KEY, '1');
+    else window.localStorage.removeItem(AUTO_CONNECT_PAUSED_KEY);
+  } catch {
+    // Without storage the PWA reconnects on every open, which is the default.
+  }
+}
+function isAutoConnectPaused(): boolean {
+  try { return window.localStorage.getItem(AUTO_CONNECT_PAUSED_KEY) === '1'; } catch { return false; }
+}
 
 interface ConnectionState {
   adapter: RemoteRuntimeAdapter | null;
@@ -100,6 +116,14 @@ export function RemotePwaApp() {
   const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
   /** The sidebar row the open Pane was tapped in, so only that copy is highlighted. */
   const [selectedPaneScope, setSelectedPaneScope] = useState<{ paneId: string; scope: string } | null>(null);
+  const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionRecord | null>(null);
+  /** The saved profile being reconnected to on open, until that attempt ends. */
+  const [reconnectingProfile, setReconnectingProfile] = useState<RemotePaneConnectionProfile | null>(null);
+  /** Whether the notification tap that launched the app, if any, has been read; reconnecting waits for it. */
+  const [pushRouteChecked, setPushRouteChecked] = useState(() => !isNativeMobile());
+  /** Menus opened from the drawer render inside it, so the drawer's focus trap and outside-click dismissal leave them alone. */
+  const [drawerElement, setDrawerElement] = useState<HTMLDivElement | null>(null);
+  const autoConnectStartedRef = useRef(false);
   const profilesLoadedRef = useRef(false);
   const activeRuntimeRef = useRef<RemoteRuntimeAdapter | null>(null);
   const panelLoadRequestRef = useRef(0);
@@ -121,8 +145,17 @@ export function RemotePwaApp() {
     let mounted = true;
     void installNativePushRouting()
       .then(consumeNativePushRoute)
-      .then(route => { if (mounted && route) setPendingPushRoute(route); })
-      .catch(error => { if (mounted) setLastError(error instanceof Error ? error.message : 'Native notification setup failed.'); });
+      .then(route => {
+        if (!mounted) return;
+        // Set together so the reconnect effect sees the route in the same render.
+        if (route) setPendingPushRoute(route);
+        setPushRouteChecked(true);
+      })
+      .catch(error => {
+        if (!mounted) return;
+        setLastError(error instanceof Error ? error.message : 'Native notification setup failed.');
+        setPushRouteChecked(true);
+      });
     return () => { mounted = false; };
   }, [setLastError]);
   useEffect(() => {
@@ -235,7 +268,7 @@ export function RemotePwaApp() {
     () => selectedPanels.filter(panel => panel.type === 'terminal'),
     [selectedPanels],
   );
-  const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? selectedPanels[0] ?? null;
+  const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? firstSupportedPanel(selectedPanels);
 
   useEffect(() => {
     if (!selectedPanel || selectedPanel.type !== 'terminal') return;
@@ -292,8 +325,10 @@ export function RemotePwaApp() {
       if (routedPanel?.sessionId === sessionId) pushRoutePanelRef.current = null;
       const strip = visibleTabs(openView, sessionId, panels);
       const shown = (panelId: string | null | undefined) => strip.some(panel => panel.id === panelId) ? panelId : null;
-      // This client's own tab first; the host's last-used tab only for a Pane this client has not opened.
-      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? shown(activePanel?.id) ?? strip[0]?.id ?? null);
+      // This client's own tab first; the host's last-used tab only for a Pane this client has not opened,
+      // and only when the phone can show it; else the first tab it can.
+      const hostPanelId = activePanel?.type === 'terminal' ? shown(activePanel.id) : null;
+      setSelectedPanel(routeMatches ? routedPanel.panelId : shown(currentPanelId) ?? shown(rememberedPanelId) ?? hostPanelId ?? firstSupportedPanel(strip)?.id ?? null);
       if (routedPanel?.sessionId === sessionId && !routeMatches) {
         setLastError('The notified panel is no longer available on this Pane host.');
       } else {
@@ -435,6 +470,7 @@ export function RemotePwaApp() {
     setAffordancesLoading(false);
     setMountedTerminalPanelIds([]);
     setSelectedPaneScope(null);
+    setArchivedSessionToast(null);
   }, [resetRemoteHost]);
 
   const connectProfile = useCallback(async (profile: RemotePaneConnectionProfile) => {
@@ -448,6 +484,7 @@ export function RemotePwaApp() {
       await runtime.connect();
       if (activeRuntimeRef.current !== runtime) return null;
       updateConnection({ adapter: runtime, activeProfile: profile });
+      setAutoConnectPaused(false);
       saveProfile(profile, setSavedProfiles);
       await Promise.all([refreshProjects(runtime), refreshOrchestrationSessions(runtime), loadAffordances(runtime)]);
       // Reopen the Session this client had open, unless the person already went elsewhere.
@@ -506,6 +543,17 @@ export function RemotePwaApp() {
     void connectProfile(profile).then(applyRoute).catch(() => {});
   }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
+  // Reconnects to the last used host once on open; a notification tap picks its own host instead.
+  useEffect(() => {
+    if (profilesLoading || !pushRouteChecked || autoConnectStartedRef.current) return;
+    autoConnectStartedRef.current = true;
+    // saveProfile keeps the last connected profile first.
+    const profile = savedProfiles[0];
+    if (!profile || pendingPushRoute || isAutoConnectPaused()) return;
+    setReconnectingProfile(profile);
+    void connectProfile(profile).catch(() => {}).finally(() => setReconnectingProfile(null));
+  }, [connectProfile, pendingPushRoute, profilesLoading, pushRouteChecked, savedProfiles]);
+
   const connectCode = useCallback(async (code: string) => {
     setLastError(null);
     updateConnection({ connectionErrorKind: null });
@@ -525,9 +573,18 @@ export function RemotePwaApp() {
   const disconnect = useCallback(() => {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = null;
+    setAutoConnectPaused(true);
     updateConnection(INITIAL_CONNECTION);
     resetHostState();
   }, [resetHostState]);
+
+  /** Stops the reconnect on open and shows the connect form, without pausing the next one. */
+  const cancelReconnect = useCallback(() => {
+    activeRuntimeRef.current?.disconnect();
+    activeRuntimeRef.current = null;
+    setReconnectingProfile(null);
+    updateConnection(INITIAL_CONNECTION);
+  }, []);
 
   const forgetProfile = useCallback((profileId: string) => {
     const profile = savedProfiles.find(candidate => candidate.id === profileId);
@@ -624,12 +681,23 @@ export function RemotePwaApp() {
     }),
     setSessionArchived: (session, archived) => void runSidebarAction(session.id, archived ? 'Failed to archive Session' : 'Failed to restore Session', async (runtime) => {
       await runtime.updateOrchestrationSession(session.id, { archived });
+      setArchivedSessionToast(current => archived ? session : current?.id === session.id ? null : current);
       await refreshOrchestrationSessions(runtime);
     }),
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
     refresh: () => void resyncHost(adapter),
   }), [adapter, cancelRequest, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
+
+  const dismissArchivedSessionToast = useCallback(() => setArchivedSessionToast(null), []);
+  const archivedSessionToastElement = archivedSessionToast && (
+    <UndoToast
+      key={archivedSessionToast.id}
+      message={`Archived ${archivedSessionToast.name || 'Untitled'}`}
+      onUndo={() => sidebarActions.setSessionArchived(archivedSessionToast, false)}
+      onDismiss={dismissArchivedSessionToast}
+    />
+  );
 
   const handleRemoteSessionCreated = useCallback(async (projectId: number, sessionName: string) => {
     if (!adapter) return;
@@ -758,6 +826,20 @@ export function RemotePwaApp() {
   }, [adapter, loadPanels, selectedSessionId]);
 
   if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
+  if (reconnectingProfile && (!adapter || !activeProfile)) {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg-primary px-4 text-center text-text-secondary">
+        <p role="status" className="min-w-0 max-w-full truncate">Reconnecting to {reconnectingProfile.label}…</p>
+        <button
+          type="button"
+          onClick={cancelReconnect}
+          className="min-h-11 rounded-md px-3 text-sm font-medium text-text-tertiary hover:bg-surface-hover hover:text-text-primary md:min-h-9"
+        >
+          Cancel
+        </button>
+      </main>
+    );
+  }
   if (!adapter || !activeProfile) {
     return (
       <RemoteConnectionScreen
@@ -792,17 +874,22 @@ export function RemotePwaApp() {
                 if (sidebarOpenerRef.current?.isConnected) sidebarOpenerRef.current.focus();
               });
             }}
+            ref={setDrawerElement}
             className="pane-drawer fixed inset-y-0 left-0 z-50 w-[min(22rem,calc(100vw-2rem))] max-w-full shadow-2xl outline-none md:hidden"
           >
             <Dialog.Title className="sr-only">Remote panes</Dialog.Title>
-            <RemoteSidebar
-              loading={loading}
-              actionId={sidebarActionId}
-              actions={sidebarActions}
-              selectedPane={selectedPaneScope}
-              onClose={() => setSidebarOpen(false)}
-              className="flex h-full w-full shadow-2xl"
-            />
+            <PortalContainerProvider value={drawerElement}>
+              <RemoteSidebar
+                loading={loading}
+                actionId={sidebarActionId}
+                actions={sidebarActions}
+                selectedPane={selectedPaneScope}
+                onClose={() => setSidebarOpen(false)}
+                className="flex h-full w-full shadow-2xl"
+              />
+            </PortalContainerProvider>
+            {/* Inside the drawer while it is open, or the scrim would cover it. */}
+            {archivedSessionToastElement}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -817,7 +904,10 @@ export function RemotePwaApp() {
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <RemoteStatusBar
           profile={activeProfile}
-          openName={openOrchestrationSession ? openOrchestrationSession.session.name || 'Untitled' : selectedSession ? selectedSession.name || 'Untitled' : null}
+          openName={openOrchestrationSession
+            // The list carries renames (such as a first-message name); the open snapshot does not.
+            ? (orchestrationSessions.find(session => session.id === openOrchestrationSession.session.id)?.name ?? openOrchestrationSession.session.name) || 'Untitled'
+            : selectedSession ? selectedSession.name || 'Untitled' : null}
           status={connectionStatus}
           lastError={lastError}
           lastSeenAt={lastSeenAt}
@@ -921,6 +1011,8 @@ export function RemotePwaApp() {
           onCreated={handleOrchestrationSessionCreated}
         />
       )}
+
+      {!sidebarOpen && archivedSessionToastElement}
     </div>
   );
 }
@@ -962,6 +1054,11 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       </div>
     </div>
   );
+}
+
+/** The phone shows terminal panels only; other types open a card pointing to desktop Pane. */
+function firstSupportedPanel(panels: ToolPanel[]): ToolPanel | null {
+  return panels.find(panel => panel.type === 'terminal') ?? panels[0] ?? null;
 }
 
 function findSessionName(projects: Array<{ sessions?: Session[] }>, sessionId: string): string | null {

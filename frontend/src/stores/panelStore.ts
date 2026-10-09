@@ -12,6 +12,7 @@ export const usePanelStore = create<PanelStore>()(
     activityStatus: {},
     agentStatus: {},
     agentStatusSession: {},
+    agentStatusReason: {},
     agentStatusSnapshotVersion: 0,
     lastActivityAt: {},
     unviewedCompletedActivity: {},
@@ -33,6 +34,7 @@ export const usePanelStore = create<PanelStore>()(
           if (owner === sessionId && !panelIds.has(panelId)) {
             delete state.agentStatus[panelId];
             delete state.agentStatusSession[panelId];
+            delete state.agentStatusReason[panelId];
             delete state.activityStatus[panelId];
             delete state.lastActivityAt[panelId];
           }
@@ -73,6 +75,7 @@ export const usePanelStore = create<PanelStore>()(
         delete state.activityStatus[panelId];
         delete state.agentStatus[panelId];
         delete state.agentStatusSession[panelId];
+        delete state.agentStatusReason[panelId];
         delete state.lastActivityAt[panelId];
       });
     },
@@ -105,10 +108,11 @@ export const usePanelStore = create<PanelStore>()(
       });
     },
 
-    setAgentStatus: (panelId, sessionId, agentState) => {
+    setAgentStatus: (panelId, sessionId, agentState, reason = null) => {
       set((state) => {
         state.agentStatus[panelId] = agentState;
         state.agentStatusSession[panelId] = sessionId;
+        state.agentStatusReason[panelId] = reason;
       });
     },
 
@@ -116,6 +120,7 @@ export const usePanelStore = create<PanelStore>()(
       set((state) => {
         delete state.agentStatus[panelId];
         delete state.agentStatusSession[panelId];
+        delete state.agentStatusReason[panelId];
       });
     },
 
@@ -129,6 +134,7 @@ export const usePanelStore = create<PanelStore>()(
         delete state.activityStatus[panelId];
         delete state.agentStatus[panelId];
         delete state.agentStatusSession[panelId];
+        delete state.agentStatusReason[panelId];
         delete state.lastActivityAt[panelId];
       });
     },
@@ -148,6 +154,7 @@ export const usePanelStore = create<PanelStore>()(
           delete state.activityStatus[panelId];
           delete state.agentStatus[panelId];
           delete state.agentStatusSession[panelId];
+          delete state.agentStatusReason[panelId];
           delete state.lastActivityAt[panelId];
         }
         delete state.unviewedCompletedActivity[sessionId];

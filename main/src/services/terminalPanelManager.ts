@@ -293,6 +293,8 @@ interface TerminalProcess {
   agentProbe?: AgentProbe;
   /** The agent showed its own working signal since it last went idle. */
   workedVisibly?: boolean;
+  /** Reason sent with the last `panel:agentStatus` event. */
+  lastStatusReason?: string | null;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
@@ -2296,6 +2298,7 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private emitAgentStatus(terminal: TerminalProcess, state: AgentState, reason: string | null): void {
+    terminal.lastStatusReason = reason;
     const payload: PanelAgentStatusEvent = {
       panelId: terminal.panelId,
       sessionId: terminal.sessionId,
@@ -2356,6 +2359,13 @@ export class TerminalPanelManager extends EventEmitter {
         if (detection.visibleWorking) terminal.workedVisibly = true;
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
         if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId);
+        // A new blocking screen (folder trust giving way to another prompt) keeps
+        // the state but carries a new reason, which the Session view reads.
+        else if (
+          detection.state === 'blocked'
+          && this.agentStatusMonitor.getState(terminal.panelId) === 'blocked'
+          && detection.matchedRuleId !== terminal.lastStatusReason
+        ) this.emitAgentStatus(terminal, 'blocked', detection.matchedRuleId);
         if (
           terminal.agentType === 'opencode'
           && detection.matchedRuleId === 'idle_composer'

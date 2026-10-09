@@ -69,11 +69,14 @@ export function SessionWorkspacePanels({
   overviewContent,
   changesContent,
   toolbarActions,
+  stageNotice,
   chromeInline = false,
   focusWithin = true,
 }: {
   agentPanel: ToolPanel; agentPanelIds: string[];
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
+  /** Absolutely positioned over the top of the stage, so showing it never resizes a terminal. */
+  stageNotice?: ReactNode;
   /**
    * Keep this Session's toolbar in its own tile instead of the window title
    * bar. The title bar has one trailing slot, so tiled Sessions would otherwise
@@ -390,6 +393,7 @@ export function SessionWorkspacePanels({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <div className="relative min-h-0 flex-1">
+            {stageNotice}
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
               onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups

@@ -40,7 +40,7 @@ export function UndoToast({ message, onUndo, onDismiss, durationMs = 6000 }: Und
       <button
         type="button"
         onClick={onUndo}
-        className="flex-shrink-0 rounded px-1 font-medium text-interactive hover:underline focus:outline-none focus:ring-2 focus:ring-interactive"
+        className="min-h-11 flex-shrink-0 rounded px-1 font-medium md:min-h-0 text-interactive hover:underline focus:outline-none focus:ring-2 focus:ring-interactive"
       >
         Undo
       </button>
