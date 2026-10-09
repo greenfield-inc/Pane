@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentState } from '../../../shared/types/agentStatus';
+import type { AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { Session } from '../types/session';
+import { subscribePanelStatus } from '../services/panelStatusSync';
 import { usePanelStore } from './panelStore';
 import { useSessionStore } from './sessionStore';
 import { ATTENTION_INBOX_HOLD_MS, subscribeAttentionInbox, useAttentionInboxStore } from './attentionInboxStore';
@@ -9,7 +10,10 @@ const pane = (id: string, status: Session['status'] = 'running'): Session => ({
   id, name: id, worktreePath: `/tmp/${id}`, prompt: '', status, createdAt: '2026-10-09T00:00:00Z', output: [], jsonMessages: [],
 });
 
-const agent = (sessionId: string, state: AgentState) => usePanelStore.getState().setAgentStatus(`${sessionId}-panel`, sessionId, state);
+let emit: (event: PanelAgentStatusEvent) => void;
+/** A status event from the main process. Idle reports whether the agent showed working chrome since its last idle. */
+const agent = (sessionId: string, state: AgentState, { panel = `${sessionId}-panel`, workedVisibly = true } = {}) =>
+  emit({ panelId: panel, sessionId, state, reason: null, ...(state === 'idle' ? { workedVisibly } : {}) });
 const inbox = () => [...useAttentionInboxStore.getState().members].sort();
 const settle = () => vi.advanceTimersByTime(ATTENTION_INBOX_HOLD_MS);
 
@@ -17,14 +21,21 @@ let stop: () => void;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  usePanelStore.setState({ agentStatus: {}, agentStatusSession: {}, agentStatusSnapshotVersion: 0 });
+  vi.stubGlobal('window', { electronAPI: {
+    invoke: vi.fn(() => new Promise(() => undefined)),
+    events: { onPanelAgentStatus: (callback: typeof emit) => { emit = callback; return vi.fn(); } },
+  } });
+  usePanelStore.setState({ agentStatus: {}, agentStatusSession: {}, agentStatusSnapshotVersion: 0, unviewedCompletedActivity: {} });
   useSessionStore.setState({ sessions: [pane('a'), pane('b'), pane('c')], activeSessionId: null });
   useAttentionInboxStore.setState({ members: new Set(), marks: {} });
-  stop = subscribeAttentionInbox();
+  const stopStatus = subscribePanelStatus();
+  const stopInbox = subscribeAttentionInbox();
+  stop = () => { stopInbox(); stopStatus(); };
 });
 
 afterEach(() => {
   stop();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -48,9 +59,22 @@ describe('attention inbox', () => {
     expect(inbox()).toEqual([]);
   });
 
+  it('keeps a freshly started agent out until it completes a real turn', () => {
+    // Startup publishes working, then idle at the prompt, with no visible work.
+    agent('a', 'working');
+    agent('a', 'idle', { workedVisibly: false });
+    settle();
+    expect(inbox()).toEqual([]);
+
+    agent('a', 'working');
+    agent('a', 'idle');
+    settle();
+    expect(inbox()).toEqual(['a']);
+  });
+
   it('shows Panes waiting on the user and Panes that errored, but not Panes idle since launch', () => {
     agent('a', 'blocked');
-    agent('b', 'idle');
+    agent('b', 'idle', { workedVisibly: false });
     useSessionStore.setState({ sessions: [pane('a'), pane('b'), pane('c', 'error')] });
     settle();
     expect(inbox()).toEqual(['a', 'c']);
@@ -77,11 +101,11 @@ describe('attention inbox', () => {
   });
 
   it('brings back a dismissed Pane when a second agent in it finishes a turn', () => {
-    usePanelStore.getState().setAgentStatus('a-first', 'a', 'blocked');
+    agent('a', 'blocked', { panel: 'a-first' });
     settle();
     useAttentionInboxStore.getState().dismiss('a');
-    usePanelStore.getState().setAgentStatus('a-second', 'a', 'working');
-    usePanelStore.getState().setAgentStatus('a-second', 'a', 'idle');
+    agent('a', 'working', { panel: 'a-second' });
+    agent('a', 'idle', { panel: 'a-second' });
     settle();
     expect(inbox()).toEqual(['a']);
   });

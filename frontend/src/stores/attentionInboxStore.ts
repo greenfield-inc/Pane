@@ -15,7 +15,8 @@ import { useSessionStore } from './sessionStore';
 export const ATTENTION_INBOX_HOLD_MS = 1500;
 
 /**
- * `finished`: an agent in the Pane finished a turn during this run of Pane.
+ * `finished`: an agent in the Pane completed a real turn (it showed visible work
+ * before going idle) during this run of Pane. Startup alone never counts.
  * `dismissed`: the user hid the row; it returns once the agent works again.
  */
 type AttentionMark = 'finished' | 'dismissed';
@@ -31,6 +32,7 @@ interface AttentionInboxState {
   setEnabled: (enabled: boolean) => void;
   setShowAll: (showAll: boolean) => void;
   dismiss: (sessionId: string) => void;
+  markFinished: (sessionId: string) => void;
   loadEnabled: () => Promise<void>;
 }
 
@@ -46,6 +48,7 @@ export const useAttentionInboxStore = create<AttentionInboxState>((set) => ({
     members.delete(sessionId);
     return { members, marks: { ...state.marks, [sessionId]: 'dismissed' } };
   }),
+  markFinished: (sessionId) => set(state => ({ marks: { ...state.marks, [sessionId]: 'finished' } })),
   loadEnabled: async () => {
     try {
       // SAFETY: The named IPC/API channel contract establishes this response payload type.
@@ -77,7 +80,6 @@ function rollupBySession(agentStatus: Record<string, AgentState>, agentStatusSes
 export function subscribeAttentionInbox(): () => void {
   let panelStates: Record<string, AgentState> = {};
   let rollups = new Map<string, AgentState>();
-  let snapshotVersion = usePanelStore.getState().agentStatusSnapshotVersion;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const needsYou = (sessionId: string, sessionsById = new Map(useSessionStore.getState().sessions.map(item => [item.id, item]))): boolean => {
@@ -112,11 +114,7 @@ export function subscribeAttentionInbox(): () => void {
   };
 
   const onAgentStatus = () => {
-    const { agentStatus, agentStatusSession, agentStatusSnapshotVersion } = usePanelStore.getState();
-    // A snapshot or process exit rebaselines status; it is not a finished turn.
-    const rebaseline = agentStatusSnapshotVersion !== snapshotVersion;
-    snapshotVersion = agentStatusSnapshotVersion;
-    const next = rollupBySession(agentStatus, agentStatusSession);
+    const { agentStatus, agentStatusSession } = usePanelStore.getState();
     const marks = { ...useAttentionInboxStore.getState().marks };
     let marksChanged = false;
     // Any agent in a Pane starting work clears its mark, even while another
@@ -128,16 +126,8 @@ export function subscribeAttentionInbox(): () => void {
         marksChanged = true;
       }
     }
-    // A turn ends when the Pane settles idle, including after a prompt midway.
-    for (const [sessionId, state] of next) {
-      const previous = rollups.get(sessionId);
-      if (!rebaseline && (previous === 'working' || previous === 'blocked') && state === 'idle' && !marks[sessionId]) {
-        marks[sessionId] = 'finished';
-        marksChanged = true;
-      }
-    }
     panelStates = agentStatus;
-    rollups = next;
+    rollups = rollupBySession(agentStatus, agentStatusSession);
     if (marksChanged) useAttentionInboxStore.setState({ marks });
     reconcile();
   };
