@@ -237,8 +237,8 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('terminal:setVisibility', [panelId, visible, viewerId]);
   }
 
-  ackTerminalOutput(panelId: string, bytes: number): Promise<void> {
-    return this.invoke<void>('terminal:ack', [panelId, bytes]);
+  ackTerminalOutput(panelId: string, bytes: number, viewerId: string): Promise<void> {
+    return this.invoke<void>('terminal:ack', [panelId, bytes, viewerId]);
   }
 }
 

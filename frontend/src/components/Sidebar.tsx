@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -17,7 +17,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { SessionStatusBadge } from './SessionStatusBadge';
 import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
-import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
+import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
 import type { Project } from '../types/project';
@@ -28,7 +28,7 @@ import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus, getRemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
-import { useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -254,10 +254,14 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToProject = useNavigationStore((state) => state.navigateToProject);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
+  const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
+  const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
   const setSidebarNavigationScope = useNavigationStore((state) => state.setSidebarNavigationScope);
+  /** Agents waiting on the user, anywhere — surfaced on the Mission Control rail button. */
+  const blockedAgentCount = useBlockedAgentCount();
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
 
   useEffect(() => {
@@ -527,6 +531,30 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 >
                   <MessageSquare className="h-4 w-4" />
                   <AgentStatusDot status={paneChatStatus} size="sm" className="absolute right-0 top-0" />
+                </button>
+              </Tooltip>
+            )}
+
+            {missionControlEnabled && (
+              <Tooltip content="Mission Control" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-mission-control"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    navigateToMissionControl();
+                  }}
+                  aria-label={blockedAgentCount > 0
+                    ? `Mission Control — ${blockedAgentCount} waiting for input`
+                    : 'Mission Control'}
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'mission-control' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  {/* Same affordance as Pane Chat above: an agent is waiting. */}
+                  {blockedAgentCount > 0 && (
+                    <AgentStatusDot status="blocked" size="sm" className="absolute right-0 top-0" />
+                  )}
                 </button>
               </Tooltip>
             )}
