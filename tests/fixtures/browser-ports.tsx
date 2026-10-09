@@ -3,6 +3,8 @@ import BrowserPanel from '../../frontend/src/components/panels/browser/BrowserPa
 import type { ToolPanel } from '../../shared/types/panels';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type { RemotePaneConnectionState } from '../../shared/types/remoteDaemon';
+import { useConfigStore } from '../../frontend/src/stores/configStore';
+import type { AppConfig } from '../../frontend/src/types/config';
 
 /** Requests wait for the test's answers; an answer given before its request waits for it. */
 function answeredByTest<T>() {
@@ -27,6 +29,8 @@ export interface PortsTest {
   answerConnectionState(mode: 'local' | 'remote'): void;
   /** Delivers a `ports:changed` event. */
   emitPorts(snapshot: ListeningPortsSnapshot): void;
+  /** Loads the app config, which says whether this desktop is connected to a remote host. */
+  loadConfig(mode: 'local' | 'remote'): void;
 }
 
 declare global {
@@ -46,6 +50,10 @@ const portsTest: PortsTest = {
     activeBaseUrl: null, lastError: null, lastSeenAt: null,
   }),
   emitPorts: snapshot => emitPorts(snapshot),
+  loadConfig: mode => useConfigStore.setState({
+    // SAFETY: the panel reads only the remote client mode from the config.
+    config: { remoteDaemon: { client: { mode } } } as AppConfig,
+  }),
 };
 
 Object.assign(window, {

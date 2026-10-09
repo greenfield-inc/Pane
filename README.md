@@ -149,6 +149,8 @@ The easiest setup path is in the app:
 4. On another desktop, open Pane, go to `Settings > Remote Access`, paste the code under **Add connection**, and connect.
 5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
 
+A connected desktop reaches the host's dev servers at their usual `localhost` address: browser tabs, terminal links and live reload work as on the host. See [Forwarded ports](docs/SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports).
+
 For a headless VM or server, run the guided setup in its terminal:
 
 ```bash
