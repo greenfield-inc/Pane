@@ -146,14 +146,20 @@ it('opens a remote host\'s file with a system app on the client from a local cop
   expect(opened).toHaveLength(1);
 });
 
-// These host names exist only on macOS and Linux hosts; Windows cannot create them.
-it.skipIf(process.platform === 'win32')('names the client copy so every desktop OS can open it', async () => {
-  connection = (await connectToHost()).remote;
-  for (const name of ['CON.pdf', 'report?.pdf', 'notes. .pdf']) await fs.writeFile(path.join(hostWorktree, name), 'pdf');
-  for (const name of ['CON.pdf', 'report?.pdf', 'notes. .pdf', 'clip.mp4']) {
-    await invoke('file:preview-action', new Owner(1), { sessionId, filePath: name }, 'open');
-  }
-  expect(opened.map(file => path.basename(file))).toEqual(['preview.pdf', 'preview.pdf', 'preview.pdf', 'clip.mp4']);
+it('names the client copy so every desktop OS can open it', async () => {
+  // A macOS or Linux host can serve names Windows cannot store, so this host answers without a disk.
+  const host: RemoteMediaHost = {
+    id: 'posix-host',
+    invoke: async () => ({ success: true, path: '/srv/worktree/file', url: 'file:///srv/worktree/file' }),
+    fetchMedia: async () => new Response('pdf'),
+  };
+  connection = { kind: 'remote', host };
+  const names = ['CON.pdf', 'report?.pdf', 'notes. .pdf', 'NUL.backup.pdf', 'con .pdf', 'COM\u00b9.pdf', 'lpt\u00b2.pdf', 'Q3 report (final).pdf', 'console.pdf'];
+  for (const name of names) await invoke('file:preview-action', new Owner(1), { sessionId, filePath: name }, 'open');
+  expect(opened.map(file => path.basename(file))).toEqual([
+    'preview.pdf', 'preview.pdf', 'preview.pdf', 'preview.pdf', 'preview.pdf', 'preview.pdf', 'preview.pdf',
+    'Q3 report (final).pdf', 'console.pdf',
+  ]);
 });
 
 it('removes the client copy when the system app cannot open it', async () => {

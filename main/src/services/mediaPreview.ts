@@ -60,13 +60,14 @@ const electronRuntime: MediaPreviewRuntime = {
   },
 };
 
-/** Host file names can be invalid on the client's OS, such as CON.pdf or report?.pdf on Windows. */
+/** Host file names can be invalid on the client's OS, such as CON.pdf, NUL.backup.pdf or report?.pdf on Windows. */
 function clientSafeName(filePath: string): string {
   const name = filePath.split(/[\\/]/).pop() ?? '';
   const extension = extname(name);
   const stem = name.slice(0, name.length - extension.length);
   const safe = /^[\p{L}\p{N}_-][\p{L}\p{N}_ .()-]{0,99}$/u.test(stem) && !/[ .]$/.test(stem)
-    && !/^(con|prn|aux|nul|com\d|lpt\d)$/i.test(stem);
+    // Windows reserves device names before the first dot, including COM¹ to LPT³.
+    && !/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]) *$/iu.test(stem.split('.')[0]);
   return (safe ? stem : 'preview') + (/^\.[A-Za-z0-9]{1,10}$/.test(extension) ? extension : '');
 }
 
