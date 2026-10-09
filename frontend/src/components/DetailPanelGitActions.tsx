@@ -4,6 +4,7 @@ import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Button } from './ui/Button';
 import { Kbd } from './ui/Kbd';
 import { Tooltip } from './ui/Tooltip';
+import { formatTimeAgo } from '../utils/timestampUtils';
 
 interface GitBranchAction {
   id: string;
@@ -29,16 +30,6 @@ type ActionRow =
   | { type: 'pair'; left: GitBranchAction; right: GitBranchAction };
 
 const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
-
-function formatTimeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 function actionTooltip(action: GitBranchAction, disabled: boolean) {
   const message = disabled ? action.disabledReason ?? action.description : action.description;
