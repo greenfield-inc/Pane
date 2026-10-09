@@ -6905,6 +6905,24 @@ describe('runpane IPC handlers', () => {
         });
       });
 
+      it('keeps a clean Pane whose PR is still open, since its review, fix and QA tabs need the worktree', async () => {
+        const panes = createBulkPanes();
+        const { services } = createBulkServices(panes, ['pane-clean']);
+        // SAFETY: This test fixture supplies the one PR lookup the bulk archive calls.
+        const withOpenPr = { ...services, gitStatusManager: { ...services.gitStatusManager, lookupPrForPane: vi.fn(async () => ({ ok: true, pr: { prNumber: 51, prState: 'OPEN' } })) } } as never as AppServices;
+        const registry = createRegistry(withOpenPr);
+        const sessionsDelete = registerSessionsDeleteStub(registry, withOpenPr);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          archived: 0,
+          skipped: 1,
+          items: [{ paneId: 'pane-clean', outcome: 'skipped', skipped: { code: 'pr-open' } }],
+        });
+      });
+
       it('archives only the safe Panes of the Session', async () => {
         const panes = createBulkPanes();
         const { services } = createBulkServices(panes, ['pane-clean', 'pane-dirty']);

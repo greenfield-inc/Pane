@@ -6,9 +6,11 @@ import { describeReport } from './watchLines';
 import {
   type AgentReport,
   buildPaneCreateRequest,
+  buildPanelCreateRequest,
   buildPanelInputRequest,
   markSuggestionLine,
   paneCreateResultSchema,
+  panelCreateResultSchema,
   panelListResultSchema,
   panelScreenResultSchema,
   panelSubmitResultSchema,
@@ -47,10 +49,18 @@ const STATUS_BY_KIND = new Map<string, AgentStatus>([
   ['agent.unknown', 'unknown'],
 ]);
 
-/** `agents start`: panes create in the background, wait for the agent, send the task, return ids and a link. */
+/**
+ * `agents start`: start an agent on a task and return ids and a link.
+ * With `--pane <id>` the agent opens as a new tab in that existing Pane (same worktree and branch);
+ * without it, Pane creates a new Pane for new work. 1 feature = 1 worktree = 1 branch = 1 Pane.
+ */
 export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
   if (!parsed.initialInput) throw new Error('runpane agents start requires --prompt <task>.');
   await confirmMutation(parsed);
+  if (parsed.paneId) return startAgentInPane(parsed);
+  if (!parsed.repo || !parsed.name) {
+    throw new Error('runpane agents start needs --pane <id> to add a tab to existing work, or --repo and --name to start new work in a new Pane.');
+  }
   const request = await buildPaneCreateRequest({ ...parsed, source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true });
   const created = await invokeDaemon('runpane:panes:create', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
@@ -78,6 +88,32 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
       : `The agent started but the task may not have reached it. Run \`runpane agents status --pane ${paneId}\`, then \`runpane agents send --pane ${paneId} --text <task> --yes\` if needed.`,
   };
   print(parsed, result, `Started ${result.name ?? result.paneId}: ${result.link}\n${result.next}`);
+  return result.ok ? 0 : 1;
+}
+
+/** `agents start --pane`: a new agent tab in an existing Pane; it shares the Pane's worktree and branch. */
+async function startAgentInPane(parsed: ParsedArgs): Promise<number> {
+  const paneId = parsed.paneId as string;
+  const request = await buildPanelCreateRequest({ ...parsed, source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true });
+  const created = await invokeDaemon('runpane:panels:create', [request], panelCreateResultSchema, {
+    paneDir: parsed.paneDir,
+    timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
+  });
+  const ready = created.readiness?.ok ?? false;
+  const promptDelivered = created.initialInput?.delivered ?? false;
+  const result = {
+    ok: ready && promptDelivered,
+    paneId,
+    panelId: created.panelId,
+    name: created.title,
+    link: buildPaneLink({ kind: 'pane', id: paneId, panelId: created.panelId }),
+    ready,
+    promptDelivered,
+    next: ready && promptDelivered
+      ? `Check on it with \`runpane agents status --panel ${created.panelId}\`.`
+      : `The agent started but the task may not have reached it. Run \`runpane agents status --panel ${created.panelId}\`, then \`runpane agents send --panel ${created.panelId} --text <task> --yes\` if needed.`,
+  };
+  print(parsed, result, `Started ${result.name} in Pane ${paneId}: ${result.link}\n${result.next}`);
   return result.ok ? 0 : 1;
 }
 
@@ -157,7 +193,7 @@ async function resolveAgentPanel(parsed: ParsedArgs): Promise<{ paneId: string; 
   const paneId = parsed.paneId ?? '';
   const { panels } = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema, { paneDir: parsed.paneDir });
   const panel = panels.find((candidate) => candidate.isCliPanel || candidate.agentType) ?? panels[0];
-  if (!panel) throw new Error(`Pane ${paneId} has no panels. Start an agent with \`runpane agents start\`.`);
+  if (!panel) throw new Error(`Pane ${paneId} has no panels. Start an agent in it with \`runpane agents start --pane ${paneId} --agent <agent> --prompt <task> --yes\`.`);
   return { paneId, panelId: panel.panelId };
 }
 

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemoteDaemon } from './daemonClient';
-import { buildPaneCreateRequest, paneCreateResultSchema, repoListResultSchema } from './localControl';
+import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, repoListResultSchema } from './localControl';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
 
@@ -554,18 +554,41 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
 
   const toolCommand = agentCommand(destination, remote.shell);
   const prompt = `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
-  const request = await buildPaneCreateRequest({
-    ...parsed, repo: String(repo.id), name, baseBranch: state.head, agent: destination.agent,
-    toolCommand, initialInput: prompt, source: 'agent', noFocus: true, focus: false,
-    waitReady: true, yes: true, noAssociate: true, fromJson: undefined,
-  });
+  // 1 feature = 1 worktree = 1 branch = 1 Pane: on this machine, from inside a
+  // Pane, the receiver opens as a new tab in the sender's Pane on the same
+  // branch. Another machine has no worktree for it, so it gets a new Pane.
+  const senderPane = !target ? process.env.PANE_SESSION_ID : undefined;
   let created: ReturnType<typeof paneCreateResultSchema.decode>;
-  try {
-    // Workspace control carries JSON directly to the reached daemon, without
-    // passing prompt arguments through the host shell or needing a host CLI.
-    created = await remote.create(request);
-  } catch (error) {
-    throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
+  if (senderPane) {
+    const panelRequest = await buildPanelCreateRequest({
+      ...parsed, paneId: senderPane, agent: destination.agent, toolCommand, initialInput: prompt,
+      source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true,
+    });
+    try {
+      const panel = await invokeDaemon('runpane:panels:create', [panelRequest], panelCreateResultSchema, {
+        paneDir: parsed.paneDir,
+        timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
+      });
+      created = {
+        ok: panel.ok,
+        items: [{ ok: true, sessionId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput }],
+      } as unknown as ReturnType<typeof paneCreateResultSchema.decode>;
+    } catch (error) {
+      throw new Error(`runpane panels create failed in Pane ${senderPane}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}.`);
+    }
+  } else {
+    const request = await buildPaneCreateRequest({
+      ...parsed, repo: String(repo.id), name, baseBranch: state.head, agent: destination.agent,
+      toolCommand, initialInput: prompt, source: 'agent', noFocus: true, focus: false,
+      waitReady: true, yes: true, noAssociate: true, fromJson: undefined,
+    });
+    try {
+      // Workspace control carries JSON directly to the reached daemon, without
+      // passing prompt arguments through the host shell or needing a host CLI.
+      created = await remote.create(request);
+    } catch (error) {
+      throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
+    }
   }
   const item = created.items[0];
   if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);

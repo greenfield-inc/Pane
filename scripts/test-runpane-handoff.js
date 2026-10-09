@@ -167,6 +167,17 @@ test('receiver starts at immutable sender commit and uses selected local Pane di
   for(const call of [create,list]) assert.equal(call.paneDir,path.join(f.root,'isolated pane'));
 });
 
+test('a handoff on this machine from inside a Pane opens the receiver as a tab in that Pane, not a new Pane', (t) => {
+  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled());
+  const calls=receiver(f); f.env.PANE_SESSION_ID='sender-pane';
+  const result=f.run();
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(calls().some(a=>a.channel==='runpane:panes:create'),false);
+  const tab=calls().find(a=>a.channel==='runpane:panels:create');
+  assert.equal(tab.args[0].paneId,'sender-pane');
+  assert.match(tab.args[0].tool.initialInput,/^Read the handoff note at .* and continue the work it describes/);
+});
+
 test('WSL is rejected before push, note transfer, or receiver launch', (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); fs.writeFileSync(path.join(f.root,'code.txt'),'dirty');
  const head=f.git('rev-parse','HEAD'); const result=spawnSync(process.execPath,[cli,'handoff','codex here wsl','--note-file','note.md','--push'],{cwd:f.root,encoding:'utf8',env:f.env});

@@ -545,7 +545,7 @@ interface PaneArchiveBulkItem {
   paneId: string;
   name?: string;
   outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
-  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo'; message: string };
+  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo' | 'pr-open'; message: string };
   error?: string;
   safetyCheck?: PaneArchiveSafetyCheck;
   worktreeCleanup?: WorktreeCleanupState;
@@ -1465,6 +1465,7 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
         'missing-pane',
         'already-archived',
         'main-repo',
+        'pr-open',
       ),
       message: boundary.string,
     })),
@@ -1512,7 +1513,7 @@ export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.o
   paneId: boundary.string,
   panels: boundary.array(panelSummarySchema),
 });
-const panelCreateResultSchema: BoundarySchema<PanelCreateResult> = boundary.object({
+export const panelCreateResultSchema: BoundarySchema<PanelCreateResult> = boundary.object({
   ok: boundary.boolean,
   generation: boundary.optional(boundary.number),
   paneId: boundary.string,
@@ -2391,7 +2392,7 @@ async function runPanesArchiveSession(parsed: ParsedArgs, sessionId: string): Pr
   if (parsed.dryRun) request.dryRun = true;
   if (parsed.removeWorktree) request.removeWorktree = true;
 
-  await confirmPaneArchive(parsed, `Archive every merged or pushed Pane in Session ${sessionId}`);
+  await confirmPaneArchive(parsed, `Archive every Pane in Session ${sessionId} whose work is pushed and whose PR is not still open`);
 
   const result = await invokeDaemon('runpane:panes:archive', [request], paneArchiveBulkResultSchema, {
     paneDir: parsed.paneDir,
@@ -2902,7 +2903,7 @@ function keysToBytes(keys: string[]): string {
   }).join('');
 }
 
-async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateRequest> {
+export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<PanelCreateRequest> {
   if (!parsed.paneId) {
     throw new Error('runpane panels create requires --pane.');
   }
