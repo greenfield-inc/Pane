@@ -4132,7 +4132,15 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
     // state, not a snapshot from moments-ago that predates a recent commit.
     const workingDirectory = await fastCheckWorkingDirectory(pane.worktreePath, ctx.commandRunner.wslContext);
     const hasUncommittedChanges = workingDirectory.hasModified || workingDirectory.hasStaged || workingDirectory.hasConflicts;
-    const hasUntrackedFiles = workingDirectory.hasUntracked;
+    let hasUntrackedFiles = workingDirectory.hasUntracked;
+    if (hasUntrackedFiles) {
+      // Agent setup is disposable; ordinary untracked work must still block archive.
+      const { stdout } = await ctx.commandRunner.execFile('git', [
+        'ls-files', '--others', '--exclude-standard', '-z',
+        '--exclude=/.codex/', '--exclude=/.claude/', '--exclude=/.agent-farm/',
+      ], pane.worktreePath, { silent: true, timeout: 10_000 });
+      hasUntrackedFiles = stdout.length > 0;
+    }
 
     const upstream = await services.worktreeManager.getUpstream(pane.worktreePath, ctx.commandRunner);
     let upstreamGone = false;
@@ -4219,16 +4227,12 @@ async function findMergedPullRequestForHead(
   commandRunner: CommandRunner,
 ): Promise<RunpanePaneArchiveMergedPr | undefined> {
   try {
-    const [branchResult, headResult] = await Promise.all([
-      commandRunner.execFile('git', ['branch', '--show-current'], worktreePath, { silent: true, timeout: 10_000 }),
-      commandRunner.execFile('git', ['rev-parse', 'HEAD'], worktreePath, { silent: true, timeout: 10_000 }),
-    ]);
-    const branch = branchResult.stdout.trim();
+    const headResult = await commandRunner.execFile('git', ['rev-parse', 'HEAD'], worktreePath, { silent: true, timeout: 10_000 });
     const head = headResult.stdout.trim();
-    if (!branch || !head) return undefined;
+    if (!head) return undefined;
     const { stdout } = await commandRunner.execFile(
       'gh',
-      ['pr', 'list', '--head', branch, '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20'],
+      ['pr', 'list', '--search', head, '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20'],
       worktreePath,
       { silent: true, timeout: GH_PR_LOOKUP_TIMEOUT_MS },
     );

@@ -6648,8 +6648,9 @@ describe('runpane IPC handlers', () => {
         } as never);
       }
 
-      it('counts a squash-merged branch with no upstream as safe when a merged PR has HEAD as its head', async () => {
+      it.each(['renamed-local-branch', null])('finds a merged PR by SHA with local branch %s', async (branch) => {
         const { repoPath, head } = createFeatureBranchRepo('squash-merged-repo');
+        execFileSync('git', branch ? ['branch', '-m', branch] : ['checkout', '--detach', '-q'], { cwd: repoPath, stdio: 'ignore' });
         const { commandRunner, ghCalls } = createRunnerWithGh(repoPath, {
           stdout: JSON.stringify([{ number: 7, headRefOid: 'a'.repeat(40) }, { number: 42, headRefOid: head }]),
         });
@@ -6660,7 +6661,7 @@ describe('runpane IPC handlers', () => {
         const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }]);
 
         expect(sessionsDelete).not.toHaveBeenCalled();
-        expect(ghCalls).toEqual([['pr', 'list', '--head', 'feature', '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20']]);
+        expect(ghCalls).toEqual([['pr', 'list', '--search', head, '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20']]);
         expect(result).toMatchObject({
           ok: true,
           wouldArchive: true,
@@ -6673,6 +6674,40 @@ describe('runpane IPC handlers', () => {
           },
         });
         expect(JSON.parse(JSON.stringify(result))).not.toHaveProperty('blocked');
+      });
+
+      it.each(['agent-config-only', 'ordinary-untracked', 'nested-agent-config', 'tracked-agent-config'])('checks archive dirtiness with %s', async (scenario) => {
+        const { repoPath, head } = createFeatureBranchRepo('agent-config-repo');
+        for (const directory of ['.codex', '.claude', '.agent-farm']) {
+          fs.mkdirSync(path.join(repoPath, directory));
+          fs.writeFileSync(path.join(repoPath, directory, 'config.json'), '{}');
+        }
+        if (scenario === 'ordinary-untracked') fs.writeFileSync(path.join(repoPath, 'work.txt'), 'unsaved work');
+        if (scenario === 'nested-agent-config') {
+          fs.mkdirSync(path.join(repoPath, 'src', '.codex'), { recursive: true });
+          fs.writeFileSync(path.join(repoPath, 'src', '.codex', 'work.txt'), 'unsaved work');
+        }
+        if (scenario === 'tracked-agent-config') {
+          execFileSync('git', ['add', '.codex/config.json'], { cwd: repoPath, stdio: 'ignore' });
+        }
+        const { commandRunner } = createRunnerWithGh(repoPath, {
+          stdout: JSON.stringify([{ number: 42, headRefOid: head }]),
+        });
+        const services = createMergedServices({ ...session, worktreePath: repoPath }, commandRunner);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          wouldArchive: scenario === 'agent-config-only',
+          safetyCheck: {
+            hasUntrackedFiles: scenario === 'ordinary-untracked' || scenario === 'nested-agent-config',
+            hasUncommittedChanges: scenario === 'tracked-agent-config',
+            unpushedCommits: 0,
+          },
+        });
       });
 
       it('treats an upstream deleted on the remote as gone and archives with merged PR evidence', async () => {
