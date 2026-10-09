@@ -153,7 +153,7 @@ describe('withHostNavigationWritesPaused', () => {
       stop();
 
       expect(savedMemories).toEqual([
-        { hostId: REMOTE_HOST_ID, memory: { view: 'pane-chat', projectId: null, paneId: null } },
+        { hostId: REMOTE_HOST_ID, memory: { view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: null } },
       ]);
     } finally {
       vi.useRealTimers();
@@ -174,7 +174,7 @@ describe('withHostNavigationWritesPaused', () => {
       stop();
 
       expect(savedMemories).toEqual([
-        { hostId: REMOTE_HOST_ID, memory: { view: 'pane-chat', projectId: null, paneId: null } },
+        { hostId: REMOTE_HOST_ID, memory: { view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: null } },
       ]);
     } finally {
       vi.useRealTimers();

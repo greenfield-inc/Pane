@@ -812,13 +812,17 @@ export function registerRunpaneHandlers(
 
       const items = await mapSequentially(
         normalized.panes,
-        (item, index) => createPaneItem(services, repo, item, index, {
-          timeoutMs: normalized.timeoutMs,
-          waitReady: normalized.waitReady,
-          readyTimeoutMs: normalized.readyTimeoutMs,
-          activate: resolvePaneCreateActivation(normalized, item),
-          associateSession: normalized.associateSession,
-        }),
+        async (item, index) => {
+          const created = await createPaneItem(services, repo, item, index, {
+            timeoutMs: normalized.timeoutMs,
+            waitReady: normalized.waitReady,
+            readyTimeoutMs: normalized.readyTimeoutMs,
+            activate: resolvePaneCreateActivation(normalized, item),
+            associateSession: normalized.associateSession,
+          });
+          if (normalized.focus === true) requestHostDesktopFocus(created);
+          return created;
+        },
       );
 
       return {
@@ -920,6 +924,7 @@ export function registerRunpaneHandlers(
             initialInput,
             nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
           });
+          if (normalized.focus === true) requestHostDesktopFocus({ paneId: session.id, panelId: panel.id });
         } catch (error) {
           let failureSessionId = createdSessionId;
           if (createdSessionId) {
@@ -2340,6 +2345,17 @@ async function validateRequestedBranch(services: AppServices, repo: Project, bra
 
 function isPaneCreateItemSuccessful(item: RunpanePaneCreateResultItem): boolean {
   return item.ok && (!item.readiness || item.readiness.ok) && (!('initialInput' in item) || !item.initialInput || item.initialInput.submitted);
+}
+
+/**
+ * `--focus` on a new Pane switches the desktop attached to this host, the way
+ * `panes focus` does. Other clients only switch to Panes they create.
+ */
+function requestHostDesktopFocus(item: { paneId?: string; panelId?: string }): void {
+  // Failed items carry no panel, and their Pane may already be rolled back.
+  if (!item.paneId || !item.panelId) return;
+  const focusEvent: RunpanePaneFocusRequestedEvent = { paneId: item.paneId, panelId: item.panelId };
+  getPaneEventSink().send('pane:focus-requested', focusEvent);
 }
 
 function resolvePaneCreateActivation(

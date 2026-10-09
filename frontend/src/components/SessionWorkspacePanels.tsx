@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
 import type { SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
+import { useConfigStore } from '../stores/configStore';
+import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
@@ -15,7 +18,6 @@ import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 import {
   activatePanelInLayout,
-  shouldActivateReopenedPanel,
   addPanelToGroup,
   createSingleGroupLayout,
   findGroup,
@@ -126,6 +128,12 @@ export function SessionWorkspacePanels({
     agentPanelIdsRef.current = agentPanelIdSet;
   }, [agentPanelIdSet]);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
+  // The host this Session's layout was loaded from, so writes land in its memory.
+  const hostIdRef = useRef(hostId);
+  useEffect(() => {
+    hostIdRef.current = hostId;
+  }, [hostId]);
 
   // Every layout change funnels through here: store, focus mirror, and a
   // debounced save so sash drags do not write per frame.
@@ -143,8 +151,11 @@ export function SessionWorkspacePanels({
       void panelApi.setActivePanel(sessionId, focusedPanelId).catch(() => {});
     }
     clearTimeout(persistTimer.current);
+    const layoutHostId = hostIdRef.current;
     persistTimer.current = setTimeout(() => {
+      // The host keeps it as the last-used layout; this desktop keeps its own.
       panelApi.setLayout(sessionId, repaired).catch(() => {});
+      rememberPaneLayout(layoutHostId, sessionId, repaired);
     }, 300);
   }, [sessionId]);
   useEffect(() => () => clearTimeout(persistTimer.current), []);
@@ -156,7 +167,7 @@ export function SessionWorkspacePanels({
     void panelApi.loadPanelsForSession(sessionId).then(async saved => {
       if (cancelled) return;
       usePanelStore.getState().setPanels(sessionId, saved);
-      const stored = await panelApi.getLayout(sessionId);
+      const stored = await readPaneLayout(hostIdRef.current, sessionId) ?? await panelApi.getLayout(sessionId);
       if (cancelled) return;
       const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
       const storedIds = layoutPanelIds(base);
@@ -177,20 +188,27 @@ export function SessionWorkspacePanels({
       if (!current || !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
       const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
       // Agents open pages and files beside the conversation by default.
+      // Another client's new tab never moves this one; activation requests do.
       const root = panel.metadata?.openPlacement === 'split'
-        ? placePanelInSplit(current.root, panel.id, panel.state.isActive)
-        : addPanelToGroup(current.root, focused.id, panel.id, { activate: panel.state.isActive });
+        ? placePanelInSplit(current.root, panel.id, false)
+        : addPanelToGroup(current.root, focused.id, panel.id, { activate: false });
       if (root !== current.root) applyLayout({ ...current, root });
     });
     const updated = events.onPanelUpdated(panel => {
-      if (panel.sessionId !== sessionId) return;
-      const previous = usePanelStore.getState().panels[sessionId]?.find(saved => saved.id === panel.id);
-      const shouldFocus = shouldActivateReopenedPanel(panel, previous);
-      usePanelStore.getState().updatePanelState(panel);
+      if (panel.sessionId === sessionId) usePanelStore.getState().updatePanelState(panel);
+    });
+    const activation = events.onPanelActivationRequested(request => {
+      if (request.sessionId !== sessionId) return;
       const current = usePanelStore.getState().layouts[sessionId];
-      if (current && shouldFocus && isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) {
-        applyLayout(activatePanelInLayout(current, panel.id));
-      }
+      const panel = usePanelStore.getState().panels[sessionId]?.find(saved => saved.id === request.panelId);
+      if (!current || !panel) return;
+      const inLayoutNow = layoutPanelIds(current);
+      if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, inLayoutNow)) return;
+      const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
+      const root = request.placement === 'split'
+        ? placePanelInSplit(current.root, panel.id)
+        : addPanelToGroup(current.root, focused.id, panel.id);
+      applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
     });
     const deleted = events.onPanelDeleted(event => {
       if (event.sessionId !== sessionId) return;
@@ -205,6 +223,7 @@ export function SessionWorkspacePanels({
       created();
       updated();
       deleted();
+      activation();
     };
   }, [sessionId, agentPanelId, applyLayout, retry]);
 
@@ -252,7 +271,8 @@ export function SessionWorkspacePanels({
       const target = (groupId && findGroup(current.root, groupId))
         || (current.focusedGroupId && findGroup(current.root, current.focusedGroupId))
         || primaryGroup(current.root);
-      applyLayout({ ...current, root: addPanelToGroup(current.root, target.id, panel.id, { activate: true }), focusedGroupId: target.id });
+      // The panel:created event may have inserted it inactive already.
+      applyLayout(activatePanelInLayout({ ...current, root: addPanelToGroup(current.root, target.id, panel.id, { activate: true }) }, panel.id));
     } catch {
       setError('Could not open the tool. Please try again.');
     }

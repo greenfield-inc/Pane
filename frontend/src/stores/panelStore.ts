@@ -57,9 +57,6 @@ export const usePanelStore = create<PanelStore>()(
         if (!existing) {
           state.panels[panel.sessionId].push(panel);
         }
-        if (panel.state.isActive) {
-          state.activePanels[panel.sessionId] = panel.id;
-        }
       });
     },
 

@@ -15,8 +15,7 @@ export type PaneNavigationView = (typeof PANE_NAVIGATION_VIEWS)[number];
  * per-host ids, so a memory is only ever meaningful for the host it was saved
  * under, and every id in it still has to be revalidated before it is restored.
  *
- * The tab inside a Pane is deliberately absent: the host itself records that as
- * `panel.state.isActive`, so loading the restored Pane's panels brings it back.
+ * The tabs and split inside a Pane live in their own per-Pane memory.
  */
 export interface HostNavigationMemory {
   view: PaneNavigationView;
@@ -24,12 +23,15 @@ export interface HostNavigationMemory {
   projectId: number | null;
   /** Active Pane, or null when the Panes home view was showing. */
   paneId: string | null;
+  /** Selected Session on this desktop. Absent in memories saved before it was kept. */
+  orchestrationSessionId?: string | null;
 }
 
 const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundary.object({
   view: boundary.enumeration(...PANE_NAVIGATION_VIEWS),
   projectId: boundary.nullable(boundary.number),
   paneId: boundary.nullable(boundary.string),
+  orchestrationSessionId: boundary.optional(boundary.nullable(boundary.string)),
 });
 
 /** Returns null for anything that is not a usable memory, including older shapes. */

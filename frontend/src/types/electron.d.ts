@@ -32,6 +32,7 @@ import type {
   CreatePanelRequest,
   PanelEventType,
   ResumableSession,
+  PanelActivationRequest,
   SessionPanelLayout,
   ToolPanel,
 } from '../../../shared/types/panels';
@@ -415,6 +416,8 @@ interface ElectronAPI {
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
     getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;
     saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null) => Promise<IPCResponse>;
+    getPaneLayout: (hostId: string | null, paneId: string) => Promise<IPCResponse<SessionPanelLayout | null>>;
+    savePaneLayout: (hostId: string | null, paneId: string, layout: SessionPanelLayout | null) => Promise<IPCResponse>;
   };
 
   // Event listeners for real-time updates
@@ -451,6 +454,7 @@ interface ElectronAPI {
     onFolderDeleted: (callback: (folderId: string) => void) => () => void;
     
     // Panel events
+    onPanelActivationRequested: (callback: (request: PanelActivationRequest) => void) => () => void;
     onPanelCreated: (callback: (panel: ToolPanel) => void) => () => void;
     onPanelUpdated: (callback: (panel: ToolPanel) => void) => () => void;
     onPanelDeleted: (callback: (data: { panelId: string; sessionId: string }) => void) => () => void;

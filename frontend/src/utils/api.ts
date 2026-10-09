@@ -4,6 +4,7 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import { startOwnPaneCreation } from './ownPaneCreations';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -201,7 +202,7 @@ export class API {
 
     async create(request: CreateSessionRequest) {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.sessions.create(request);
+      return window.electronAPI.sessions.create({ ...request, clientRequestId: startOwnPaneCreation() });
     },
 
     async delete(sessionId: string) {

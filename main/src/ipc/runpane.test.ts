@@ -6933,6 +6933,27 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: true, paneId: session.id });
     });
 
+    it.each([
+      [{ focus: true }, true],
+      [{ source: 'agent' }, false],
+      [{}, false],
+    ])('panes create %o asks the host desktop to switch: %s', async (flags, switches) => {
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const services = createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        taskQueue: { createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })) } as never,
+      });
+
+      await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: 'active',
+        ...flags,
+        panes: [{ name: 'new-pane', tool: { command: 'bash' } }],
+      }]);
+
+      const focusRequests = sentEvents.mock.calls.filter(([channel]) => channel === 'pane:focus-requested');
+      expect(focusRequests).toEqual(switches ? [['pane:focus-requested', { paneId: session.id, panelId: terminalPanel.id }]] : []);
+    });
+
     it('refuses to focus an archived pane and never touches the window', async () => {
       const window = createMockWindow();
       const services = createWindowServices(window, {
