@@ -255,15 +255,16 @@ export function registerSessionHandlers(
     }
   });
 
-  // Create Pane's "Add to <Session>": each Pane joins the Session once its job finishes.
-  // A failed creation or association is logged and never undoes the Pane.
+  // Create Pane's "Add to <Session>": each Pane joins the Session as soon as it exists,
+  // even if its setup later fails. A failed association is logged and never undoes the Pane.
   const associateWhenCreated = (jobs: SessionCreationJob[], orchestrationSessionId: string | undefined) => {
     const manager = services.orchestrationSessionManager;
     if (!orchestrationSessionId || !manager || !taskQueue) return;
     for (const job of jobs) {
-      void taskQueue.waitForSessionCreationJob(job)
-        .then(({ sessionId: paneId }) => manager.associate({ sessionId: orchestrationSessionId }, { paneId }))
-        .catch(error => console.warn('[IPC] Could not add the new Pane to its Session:', error));
+      taskQueue.whenSessionCreated(job, paneId => {
+        manager.associate({ sessionId: orchestrationSessionId }, { paneId })
+          .catch(error => console.warn('[IPC] Could not add the new Pane to its Session:', error));
+      });
     }
   };
 

@@ -173,6 +173,7 @@ export class TaskQueue {
     
     this.sessionQueue.on('failed', (job: { id: string | number }, err: Error) => {
       console.error(`[TaskQueue] Job ${job.id} failed:`, err);
+      this.sessionCreatedListeners.delete(String(job.id));
     });
     
     this.sessionQueue.on('error', (error: Error) => {
@@ -576,8 +577,19 @@ export class TaskQueue {
     }
   }
 
-  /** Resolves with the created Pane once a queued creation job finishes, or rejects after `timeoutMs`. */
-  async waitForSessionCreationJob(
+  /**
+   * Calls `listener` once with the job's Pane id as soon as the Pane exists, even if the job
+   * later fails during setup. A job that fails before creating its Pane drops the listener.
+   */
+  whenSessionCreated(job: SessionCreationJob, listener: (sessionId: string) => void): void {
+    const jobId = String(job.id);
+    this.sessionCreatedListeners.set(jobId, sessionId => {
+      this.sessionCreatedListeners.delete(jobId);
+      listener(sessionId);
+    });
+  }
+
+  private async waitForSessionCreationJob(
     job: SessionCreationJob,
     timeoutMs = 120_000,
   ): Promise<CreateSessionQueueResult> {
