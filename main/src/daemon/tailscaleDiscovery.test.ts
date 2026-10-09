@@ -1,4 +1,5 @@
 import os from 'os';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteSetupCommandRunner } from './remote-setup-command';
 import { resolveTailscaleCommandAsync } from './tailscaleSetup';
@@ -23,9 +24,9 @@ describe('Tailscale discovery with a desktop launcher PATH', () => {
   it.each([
     ['linux', '/snap/bin/tailscale'],
     ['linux', '/run/current-system/sw/bin/tailscale'],
-    ['linux', `${os.homedir()}/.nix-profile/bin/tailscale`],
+    ['linux', path.join(os.homedir(), '.nix-profile', 'bin', 'tailscale')],
     ['darwin', '/run/current-system/sw/bin/tailscale'],
-    ['darwin', `${os.homedir()}/.nix-profile/bin/tailscale`],
+    ['darwin', path.join(os.homedir(), '.nix-profile', 'bin', 'tailscale')],
   ])('finds the %s CLI installed at %s', async (platform, installed) => {
     Object.defineProperty(process, 'platform', { value: platform });
     const { run, exists } = installedAt(installed);
