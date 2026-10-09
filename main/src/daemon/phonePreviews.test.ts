@@ -5,6 +5,8 @@ import { PaneCommandRegistry } from './commandRegistry';
 import { PaneWorkspaceHostController } from './workspaceHost';
 import { PhonePreviewHost } from './phonePreviews';
 import { createFakeTailscale, TAILNET_B } from './__fixtures__/fakeTailscale';
+import { hashWorkspacePassword } from './workspacePassword';
+import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import type { ListeningPort, ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -27,11 +29,11 @@ function snapshot(ports: ListeningPort[]): ListeningPortsSnapshot {
 
 async function startHost(
   tailscale: ReturnType<typeof createFakeTailscale>,
-  options: { paneDir?: string; enabled?: boolean; onChange?: () => void } = {},
+  options: { paneDir?: string; enabled?: boolean; workspaces?: WorkspaceAccessConfig; onChange?: () => void } = {},
 ) {
   const workspace = new PaneWorkspaceHostController(
     new PaneCommandRegistry(),
-    { getConfig: () => ({ workspaces: { enabled: options.enabled ?? true } }), on: () => ({}), off: () => ({}) },
+    { getConfig: () => ({ workspaces: options.workspaces ?? { enabled: options.enabled ?? true } }), on: () => ({}), off: () => ({}) },
     true,
     tailscale.run,
   );
@@ -58,6 +60,26 @@ async function serveTargets(tailscale: ReturnType<typeof createFakeTailscale>): 
   // SAFETY: the fake Tailscale writes its Serve config in this shape.
   const web = (JSON.parse(status.stdout) as { Web?: Record<string, { Handlers: Record<string, { Proxy: string }> }> }).Web ?? {};
   return Object.fromEntries(Object.entries(web).map(([key, value]) => [key.split(':').pop(), value.Handlers['/'].Proxy]));
+}
+
+/**
+ * Requests a phone address the way Serve does: the visitor's path appended to the handler's
+ * target, with the visitor's login signed in.
+ */
+async function visit(targets: Record<string, string>, phoneUrl: string, path = '/', login = 'owner@example.com') {
+  const target = new URL(`${targets[new URL(phoneUrl).port]}${path}`);
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    http.get({
+      host: target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
+      headers: { host: new URL(phoneUrl).host, 'tailscale-user-login': login },
+    }, response => {
+      let body = '';
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, body }));
+    }).on('error', reject);
+  });
 }
 
 describe('phone previews', () => {
@@ -88,22 +110,9 @@ describe('phone previews', () => {
 
     await previews.update(snapshot([port(devPort)]));
     const phoneUrl = previews.decorate(snapshot([port(devPort)])).ports[0].phoneUrl ?? '';
-    // Serve appends the visitor's path to the handler's target and signs the visitor's login.
-    const target = new URL(`${(await serveTargets(tailscale))[new URL(phoneUrl).port]}/app?x=1`);
-    const body = await new Promise<string>((resolve, reject) => {
-      http.get({
-        host: target.hostname,
-        port: target.port,
-        path: `${target.pathname}${target.search}`,
-        headers: { host: new URL(phoneUrl).host, 'tailscale-user-login': 'owner@example.com' },
-      }, response => {
-        let text = '';
-        response.on('data', chunk => { text += chunk; });
-        response.on('end', () => resolve(text));
-      }).on('error', reject);
-    });
+    const page = await visit(await serveTargets(tailscale), phoneUrl, '/app?x=1');
 
-    expect(body).toBe('dev server saw /app?x=1');
+    expect(page.body).toBe('dev server saw /app?x=1');
   });
 
   it('removes a port\'s handler when the port stops listening', async () => {
@@ -154,7 +163,8 @@ describe('phone previews', () => {
     tailscale.busyServe(2);
     await previews.update(snapshot([port(5173)]));
 
-    expect(previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl).toMatch(/^https:\/\//u);
+    const phoneUrl = previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl ?? '';
+    expect((await serveTargets(tailscale))[new URL(phoneUrl).port]).toMatch(/\/5173$/u);
   });
 
   it('publishes the new phone addresses after the host switches tailnets', async () => {
@@ -170,6 +180,66 @@ describe('phone previews', () => {
 
     expect(published).toBeGreaterThan(before);
     expect(previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl).toContain('.tail3c2c57.ts.net:');
+  });
+
+  it('stops forwarding a port the moment it stops listening, even when Serve cannot be updated', async () => {
+    const tailscale = createFakeTailscale();
+    const upstream = http.createServer((_request, response) => response.end('still here'));
+    await new Promise<void>(resolve => upstream.listen(0, 'localhost', resolve));
+    cleanups.push(() => new Promise<void>(resolve => upstream.close(() => resolve())));
+    // SAFETY: a TCP server that is listening reports an AddressInfo.
+    const devPort = (upstream.address() as AddressInfo).port;
+    const { previews } = await startHost(tailscale);
+    await previews.update(snapshot([port(devPort)]));
+    const phoneUrl = previews.decorate(snapshot([port(devPort)])).ports[0].phoneUrl ?? '';
+
+    const targets = await serveTargets(tailscale);
+
+    tailscale.failServeStatus('tailscaled is restarting');
+    await previews.update(snapshot([]));
+
+    expect((await visit(targets, phoneUrl)).status).toBe(404);
+  });
+
+  it('opens no phone pages on a password-protected machine, since a frame cannot send the password', async () => {
+    const tailscale = createFakeTailscale();
+    const { previews } = await startHost(tailscale, { workspaces: { enabled: true, password: hashWorkspacePassword('correct horse') } });
+
+    await previews.update(snapshot([port(5173)]));
+
+    const decorated = previews.decorate(snapshot([port(5173)]));
+    expect(decorated.ports[0].phoneUrl).toBeUndefined();
+    expect(decorated.phone).toEqual({ state: 'off', reason: expect.stringContaining('password') });
+    expect(Object.values(await serveTargets(tailscale)).some(target => target.includes('/pane-'))).toBe(false);
+  });
+
+  it('removes only its own mount when someone added another route on the same Serve port', async () => {
+    const tailscale = createFakeTailscale();
+    const { previews } = await startHost(tailscale);
+    await previews.update(snapshot([port(5173)]));
+    const servePort = new URL(previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl ?? '').port;
+    await tailscale.run('tailscale', ['serve', '--bg', `--https=${servePort}`, '--set-path=/docs', 'http://127.0.0.1:8']);
+
+    await previews.update(snapshot([]));
+
+    // SAFETY: the fake Tailscale writes its Serve config in this shape.
+    const status = JSON.parse((await tailscale.run('tailscale', ['serve', 'status', '--json'])).stdout) as { Web: Record<string, { Handlers: Record<string, { Proxy: string }> }> };
+    expect(status.Web[`${tailscale.dnsName()}:${servePort}`].Handlers).toEqual({ '/docs': { Proxy: 'http://127.0.0.1:8' } });
+  });
+
+  it('gives two Pane instances updating at once different Serve ports', async () => {
+    const tailscale = createFakeTailscale();
+    const installed = await startHost(tailscale, { paneDir: '/Users/owner/.pane' });
+    const dev = await startHost(tailscale, { paneDir: '/Users/owner/.pane_dev' });
+
+    await Promise.all([installed.previews.update(snapshot([port(5173)])), dev.previews.update(snapshot([port(3000)]))]);
+
+    const installedUrl = installed.previews.decorate(snapshot([port(5173)])).ports[0].phoneUrl ?? '';
+    const devUrl = dev.previews.decorate(snapshot([port(3000)])).ports[0].phoneUrl ?? '';
+    const targets = await serveTargets(tailscale);
+    expect(installedUrl).not.toBe(devUrl);
+    expect(targets[new URL(installedUrl).port]).toMatch(/\/5173$/u);
+    expect(targets[new URL(devUrl).port]).toMatch(/\/3000$/u);
   });
 
   it('says why phones cannot open pages while workspaces are off', async () => {

@@ -30,7 +30,7 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
   const cli = options.cli ?? 'tailscale';
   const serveByTailnet = new Map<string, ServeConfig>();
   const calls: FakeTailscaleCall[] = [];
-  const state = { tailnet: options.tailnet ?? TAILNET_A, serveFails: '', statusFails: '', backend: 'Running', serveIgnored: false, busyWrites: 0 };
+  const state = { tailnet: options.tailnet ?? TAILNET_A, serveFails: '', statusFails: '', backend: 'Running', serveIgnored: false, busyWrites: 0, serveStatusFails: '' };
 
   const dnsName = () => `${machine}.${state.tailnet.suffix}`;
   const serveConfig = (): ServeConfig => {
@@ -59,6 +59,7 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
     }
     if (args[0] !== 'serve') return { ok: false, stdout: '', stderr: `unknown command ${args.join(' ')}` };
     if (args.join(' ') === 'serve status --json') {
+      if (state.serveStatusFails) return { ok: false, stdout: '', stderr: state.serveStatusFails };
       const config = serveConfig();
       return ok(Object.keys(config.TCP).length === 0 ? '{}\n' : JSON.stringify(config));
     }
@@ -71,17 +72,24 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
     const config = serveConfig();
     const tls = args.find(arg => arg.startsWith('--tls-terminated-tcp='));
     const https = args.find(arg => arg.startsWith('--https='));
+    const mount = args.find(arg => arg.startsWith('--set-path='))?.split('=')[1];
     const target = args[args.length - 1];
     if (tls) {
       config.TCP[tls.split('=')[1]] = { TCPForward: `127.0.0.1:${target}`, TerminateTLS: dnsName() };
     } else if (https && target === 'off') {
       const port = https.split('=')[1];
-      delete config.TCP[port];
-      delete config.Web[`${dnsName()}:${port}`];
+      const handlers = config.Web[`${dnsName()}:${port}`]?.Handlers ?? {};
+      // Like the real CLI, --set-path removes one mount; without it, every mount on the port.
+      if (mount) delete handlers[mount];
+      if (!mount || Object.keys(handlers).length === 0) {
+        delete config.TCP[port];
+        delete config.Web[`${dnsName()}:${port}`];
+      }
     } else if (https) {
       const port = https.split('=')[1];
       config.TCP[port] = { HTTPS: true };
-      config.Web[`${dnsName()}:${port}`] = { Handlers: { '/': { Proxy: target } } };
+      const web = config.Web[`${dnsName()}:${port}`] ??= { Handlers: {} };
+      web.Handlers[mount ?? '/'] = { Proxy: target };
     }
     return ok();
   };
@@ -96,6 +104,8 @@ export function createFakeTailscale(options: { machine?: string; cli?: string; t
     /** Makes `status --json` fail, as it does when tailscaled is not running. */
     failStatus: (stderr: string) => { state.statusFails = stderr; },
     setBackendState: (backend: 'Running' | 'NeedsLogin' | 'Stopped' | 'Starting' | 'NeedsMachineAuth') => { state.backend = backend; },
+    /** Makes `serve status --json` fail. */
+    failServeStatus: (stderr: string) => { state.serveStatusFails = stderr; },
     /** The next `count` Serve changes fail as they do while another process writes the config. */
     busyServe: (count: number) => { state.busyWrites = count; },
     /** `serve --bg` reports success but changes nothing. */

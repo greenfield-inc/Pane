@@ -201,9 +201,10 @@ export async function runTailscaleServe(
   run: RemoteSetupCommandRunner,
   tailscale: ResolvedCommand,
   args: string[],
+  timeoutMs?: number,
 ): ReturnType<RemoteSetupCommandRunner> {
   for (let attempt = 0; ; attempt += 1) {
-    const result = await run(tailscale.command, ['serve', ...args], { env: tailscale.env });
+    const result = await run(tailscale.command, ['serve', ...args], { env: tailscale.env, timeoutMs });
     const busy = !result.ok && /another client is changing the serve config/iu.test(`${result.stderr}\n${result.stdout}`);
     if (!busy || attempt === SERVE_BUSY_RETRIES) return result;
     await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));

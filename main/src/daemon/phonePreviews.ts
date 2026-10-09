@@ -1,4 +1,7 @@
 import { createHash, randomBytes } from 'crypto';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { authenticateWorkspaceRequest } from './auth';
@@ -10,6 +13,7 @@ import type { PaneWorkspaceHostController } from './workspaceHost';
 /** Serve ports Pane picks for phone pages start here, clear of common dev server ports. */
 const FIRST_SERVE_PORT = 44300;
 const FILES = 'files';
+const PASSWORD_REASON = 'this machine is password protected, and a page in a frame cannot send the password';
 /**
  * Quit removes handlers one `tailscale serve` call at a time, inside Pane's 10 s shutdown budget.
  * Whatever is left after this long is removed at the next launch.
@@ -85,6 +89,9 @@ export class PhonePreviewHost {
   decorate(snapshot: ListeningPortsSnapshot): ListeningPortsSnapshot {
     const tailnet = this.options.workspace.getTailnet();
     const filesPort = this.handlers.get(FILES);
+    if (this.options.workspace.getAccessPolicy()?.verifySecret) {
+      return { ...snapshot, phone: { state: 'off', reason: PASSWORD_REASON } };
+    }
     if (!tailnet || filesPort === undefined) {
       const status = this.options.workspace.getStatus();
       const reason = this.lastError ?? (status.state === 'off' ? status.reason ?? 'starting' : 'starting');
@@ -114,14 +121,15 @@ export class PhonePreviewHost {
     const tailnet = this.options.workspace.getTailnet();
     const policy = this.options.workspace.getAccessPolicy();
     if (!tailnet || !policy) return null;
-    // A frame cannot send the machine's password, so password protection admits the owner only.
-    const pagePolicy = { ...policy, visibility: policy.verifySecret ? 'owner' as const : policy.visibility, verifySecret: null };
+    // A frame sends no password, so on a password-protected machine every page request fails here.
+    const detected = new Set(this.webPorts);
     return {
       dnsName: tailnet.dnsName,
       machineName: tailnet.machineName,
       ownerLogin: tailnet.ownerLogin,
-      admits: (login: string) => authenticateWorkspaceRequest(login, undefined, pagePolicy).ok,
-      ports: new Set([...this.handlers.keys()].filter(key => key !== FILES).map(Number)),
+      admits: (login: string) => authenticateWorkspaceRequest(login, undefined, policy).ok,
+      // Detection revokes a port at once, before Serve confirms its handler is gone.
+      ports: new Set([...this.handlers.keys()].filter(key => key !== FILES).map(Number).filter(port => detected.has(port))),
     };
   }
 
@@ -147,38 +155,44 @@ export class PhonePreviewHost {
       this.publishIfChanged();
       return;
     }
-    const serve = (args: string[]) => runTailscaleServe(this.run, tailscale, args);
-    const status = await serve(['status', '--json']);
-    if (!status.ok) throw new Error(`tailscale serve status failed: ${firstLine(status.stderr || status.stdout)}`);
-    const { ours, taken } = this.readServeConfig(status.stdout);
-
-    const proxyPort = this.proxy?.port;
-    const target = (key: string) => `http://127.0.0.1:${proxyPort}${this.basePath}/${key}`;
-    const wanted = tailnet && proxyPort ? [FILES, ...this.webPorts.map(String)] : [];
+    // At quit, no single call may outlast the removal budget.
+    const serve = (args: string[]) => runTailscaleServe(this.run, tailscale, args, this.stopped ? Math.max(500, this.removeUntil - Date.now()) : undefined);
     const next = new Map<string, number>();
     let failure: string | null = null;
+    // Another Pane may pick ports from the same Serve config, so reading, choosing and writing happen under one machine-wide lock.
+    await withServeLock(this.stopped ? Math.max(0, this.removeUntil - Date.now()) : SERVE_LOCK_WAIT_MS, async () => {
+      const status = await serve(['status', '--json']);
+      if (!status.ok) throw new Error(`tailscale serve status failed: ${firstLine(status.stderr || status.stdout)}`);
+      const { ours, taken } = this.readServeConfig(status.stdout);
 
-    for (const handler of ours) {
-      if (wanted.includes(handler.key) && handler.target === target(handler.key) && !next.has(handler.key)) {
-        next.set(handler.key, handler.servePort);
-        continue;
+      const proxyPort = this.proxy?.port;
+      const target = (key: string) => `http://127.0.0.1:${proxyPort}${this.basePath}/${key}`;
+      const passwordProtected = Boolean(this.options.workspace.getAccessPolicy()?.verifySecret);
+      const wanted = tailnet && proxyPort && !passwordProtected ? [FILES, ...this.webPorts.map(String)] : [];
+
+      for (const handler of ours) {
+        if (wanted.includes(handler.key) && handler.target === target(handler.key) && !next.has(handler.key)) {
+          next.set(handler.key, handler.servePort);
+          continue;
+        }
+        if (Date.now() > this.removeUntil) {
+          failure ??= 'quit ran out of time; the next launch removes the remaining Serve handlers';
+          break;
+        }
+        // --set-path=/ removes only Pane's mount; other routes on the same port stay.
+        const removal = await serve([`--https=${handler.servePort}`, '--set-path=/', 'off']);
+        if (!removal.ok) failure ??= `could not remove the Serve handler on ${handler.servePort}: ${firstLine(removal.stderr || removal.stdout)}`;
       }
-      if (Date.now() > this.removeUntil) {
-        failure ??= 'quit ran out of time; the next launch removes the remaining Serve handlers';
-        break;
+      for (const key of wanted) {
+        if (next.has(key)) continue;
+        let servePort = FIRST_SERVE_PORT;
+        while (taken.has(servePort) || this.listeningPorts.has(servePort)) servePort += 1;
+        taken.add(servePort);
+        const added = await serve(['--bg', `--https=${servePort}`, target(key)]);
+        if (added.ok) next.set(key, servePort);
+        else failure ??= `tailscale serve could not add a handler on ${servePort}: ${firstLine(added.stderr || added.stdout)}`;
       }
-      const removal = await serve([`--https=${handler.servePort}`, 'off']);
-      if (!removal.ok) failure ??= `could not remove the Serve handler on ${handler.servePort}: ${firstLine(removal.stderr || removal.stdout)}`;
-    }
-    for (const key of wanted) {
-      if (next.has(key)) continue;
-      let servePort = FIRST_SERVE_PORT;
-      while (taken.has(servePort) || this.listeningPorts.has(servePort)) servePort += 1;
-      taken.add(servePort);
-      const added = await serve(['--bg', `--https=${servePort}`, target(key)]);
-      if (added.ok) next.set(key, servePort);
-      else failure ??= `tailscale serve could not add a handler on ${servePort}: ${firstLine(added.stderr || added.stdout)}`;
-    }
+    });
 
     this.handlers = next;
     this.lastError = failure;
@@ -215,6 +229,54 @@ export class PhonePreviewHost {
       ours.push({ servePort, key: path.slice(path.lastIndexOf('/') + 1), target });
     }
     return { ours, taken };
+  }
+}
+
+const SERVE_LOCK = path.join(os.tmpdir(), 'pane-tailscale-serve.lock');
+const SERVE_LOCK_WAIT_MS = 30_000;
+/** A lock older than this is left from a crash, even if its pid was reused. */
+const SERVE_LOCK_STALE_MS = 120_000;
+
+/**
+ * Runs `work` while holding a lock every Pane on this machine shares: a directory created
+ * atomically, holding the owner's pid. A dead owner's lock is taken over.
+ */
+async function withServeLock(waitMs: number, work: () => Promise<void>): Promise<void> {
+  const giveUpAt = Date.now() + waitMs;
+  for (;;) {
+    try {
+      await fs.mkdir(SERVE_LOCK);
+      break;
+    } catch (error) {
+      // SAFETY: fs.mkdir rejects with a Node system error carrying `code`.
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const owner = Number(await fs.readFile(path.join(SERVE_LOCK, 'pid'), 'utf8').catch(() => ''));
+    const age = Date.now() - ((await fs.stat(SERVE_LOCK).catch(() => null))?.mtimeMs ?? Date.now());
+    // A lock with no pid yet is being taken; give its owner a moment to write one.
+    const abandoned = age > SERVE_LOCK_STALE_MS || (owner > 0 ? !isRunning(owner) : age > 2_000);
+    if (abandoned) {
+      await fs.rm(SERVE_LOCK, { recursive: true, force: true });
+      continue;
+    }
+    if (Date.now() >= giveUpAt) throw new Error('another Pane on this machine is changing Serve handlers');
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  try {
+    await fs.writeFile(path.join(SERVE_LOCK, 'pid'), String(process.pid));
+    await work();
+  } finally {
+    await fs.rm(SERVE_LOCK, { recursive: true, force: true });
+  }
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // SAFETY: process.kill throws a Node system error carrying `code`.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 
