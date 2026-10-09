@@ -653,6 +653,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
       // Set as active project
       databaseService.setActiveProject(project.id);
       sessionManager.setActiveProject(project);
+      sessionManager.emit('project:list-changed');
 
       // Track onboarding
       if (analyticsManager) {

@@ -444,6 +444,7 @@ interface ElectronAPI {
     
     // Project events
     onProjectUpdated: (callback: (project: Project) => void) => () => void;
+    onProjectListChanged?: (callback: () => void) => () => void;
     
     // Folder events
     onFolderCreated: (callback: (folder: Folder) => void) => () => void;

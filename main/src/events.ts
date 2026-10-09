@@ -239,6 +239,11 @@ export function setupEventListeners(services: AppServices): void {
     sendRendererEvent('project:updated', project);
   });
 
+  // Projects can be added or removed outside the window (runpane CLI, MCP, daemon).
+  sessionManager.on('project:list-changed', () => {
+    sendRendererEvent('project:list-changed');
+  });
+
   // Listen to claudeCodeManager events
   claudeCodeManager.on('output', (output: {
     panelId: string;

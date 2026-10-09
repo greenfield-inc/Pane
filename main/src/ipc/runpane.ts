@@ -477,6 +477,7 @@ export function registerRunpaneHandlers(
         registration.wsl_enabled || undefined,
         registration.wsl_distribution,
       );
+      sessionManager.emit('project:list-changed');
 
       try {
         await ensureProjectAgentContext(project, configManager.getConfig());
