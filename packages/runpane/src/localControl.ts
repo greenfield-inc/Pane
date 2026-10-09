@@ -545,7 +545,7 @@ interface PaneArchiveBulkItem {
   paneId: string;
   name?: string;
   outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
-  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo' | 'pr-open'; message: string };
+  skipped?: { code: PaneArchiveBlockCode | 'missing-pane' | 'already-archived' | 'main-repo' | 'pr-open' | 'pr-status-unknown'; message: string };
   error?: string;
   safetyCheck?: PaneArchiveSafetyCheck;
   worktreeCleanup?: WorktreeCleanupState;
@@ -1107,7 +1107,7 @@ const repoAddResultSchema: BoundarySchema<RepoAddResult> = boundary.object({
   repo: boundary.optional(repoSummarySchema),
   preview: boundary.optional(repoAddPreviewSchema),
 });
-const paneListResultSchema: BoundarySchema<PaneListResult> = boundary.object({
+export const paneListResultSchema: BoundarySchema<PaneListResult> = boundary.object({
   ok: boundary.literal(true),
   repo: boundary.optional(repoSummarySchema),
   panes: boundary.array(paneSummarySchema),
@@ -1466,6 +1466,7 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
         'already-archived',
         'main-repo',
         'pr-open',
+        'pr-status-unknown',
       ),
       message: boundary.string,
     })),

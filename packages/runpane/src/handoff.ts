@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemoteDaemon } from './daemonClient';
-import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, repoListResultSchema } from './localControl';
+import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, repoListResultSchema } from './localControl';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
 
@@ -432,6 +432,8 @@ interface HandoffResult {
   repo?: { id: number; name: string; path: string; environment: string };
   notePath?: string;
   pane?: { id: string; panelId: string; name?: string; worktreePath?: string };
+  /** Where the receiver runs and why: a tab in the sender's Pane (same checkout) or its own new Pane. */
+  receiver?: { route: 'tab' | 'new-pane'; reason: string };
   reportBack?: string;
 }
 
@@ -514,7 +516,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const recovery = (...args: string[]): string => [...controlPrefix, ...args].map(arg => quote(arg, senderShell)).join(' ');
   const receiverStatus = (sessionId: string, panelId?: string): string => target
     ? (panelId ? recovery('panels', 'screen', '--panel', panelId) : recovery('sessions', 'list'))
-    : recovery('agents', 'status', '--pane', sessionId);
+    : (panelId ? recovery('agents', 'status', '--panel', panelId) : recovery('agents', 'status', '--pane', sessionId));
   say(step('repo', `${repo.name} (${repo.path}), ${repo.environment ?? 'native'}, ${remote.os}, remote ${repoRemote}`));
   if (parsed.handoffPush && !parsed.dryRun && (!state.pushed || state.dirty.length)) {
     state = pushWork(state, machineLabel, parsed.handoffNoteFile);
@@ -554,11 +556,22 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
 
   const toolCommand = agentCommand(destination, remote.shell);
   const prompt = `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
-  // 1 feature = 1 worktree = 1 branch = 1 Pane: on this machine, from inside a
-  // Pane, the receiver opens as a new tab in the sender's Pane on the same
-  // branch. Another machine has no worktree for it, so it gets a new Pane.
-  const senderPane = !target ? process.env.PANE_SESSION_ID : undefined;
-  let created: ReturnType<typeof paneCreateResultSchema.decode>;
+  // 1 feature = 1 worktree = 1 branch = 1 Pane: on this machine, from inside the
+  // Pane that owns this checkout, the receiver opens as a new tab in that Pane.
+  // Otherwise (another machine, or a checkout the sender's Pane does not own) it
+  // gets a new Pane.
+  const senderPane = target ? undefined : await senderPaneForCheckout(parsed, state.root);
+  if (senderPane) {
+    result.receiver = { route: 'tab', reason: `A new tab in Pane ${senderPane}, which owns this checkout. The receiver shares this worktree and branch; stop changing the branch yourself.` };
+    say(step('receiver', result.receiver.reason));
+  } else if (!target && process.env.PANE_SESSION_ID) {
+    result.receiver = { route: 'new-pane', reason: `Pane ${process.env.PANE_SESSION_ID} does not own ${state.root}, so the receiver gets its own new Pane instead of a tab. Run handoff from a terminal in the Pane that owns this checkout to keep one Pane per feature.` };
+    warnings.push(result.receiver.reason);
+    say(step('receiver', result.receiver.reason, false));
+  } else {
+    result.receiver = { route: 'new-pane', reason: target ? `${remote.name} has no worktree for this branch, so the receiver gets a new Pane there.` : 'Not run from inside a Pane, so the receiver gets a new Pane.' };
+  }
+  let receiver: Receiver;
   if (senderPane) {
     const panelRequest = await buildPanelCreateRequest({
       ...parsed, paneId: senderPane, agent: destination.agent, toolCommand, initialInput: prompt,
@@ -569,10 +582,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
         paneDir: parsed.paneDir,
         timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
       });
-      created = {
-        ok: panel.ok,
-        items: [{ ok: true, sessionId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput }],
-      } as unknown as ReturnType<typeof paneCreateResultSchema.decode>;
+      receiver = { ok: panel.ok, paneId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput, newTab: true };
     } catch (error) {
       throw new Error(`runpane panels create failed in Pane ${senderPane}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}.`);
     }
@@ -582,6 +592,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       toolCommand, initialInput: prompt, source: 'agent', noFocus: true, focus: false,
       waitReady: true, yes: true, noAssociate: true, fromJson: undefined,
     });
+    let created: ReturnType<typeof paneCreateResultSchema.decode>;
     try {
       // Workspace control carries JSON directly to the reached daemon, without
       // passing prompt arguments through the host shell or needing a host CLI.
@@ -589,31 +600,61 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     } catch (error) {
       throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
     }
+    const item = created.items[0];
+    if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
+    receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: item.initialInput, newTab: false };
   }
-  const item = created.items[0];
-  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
 
   result.notePath = notePath;
-  result.pane = { id: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath };
+  result.pane = { id: receiver.paneId, panelId: receiver.panelId, name: receiver.name, worktreePath: receiver.worktreePath };
   result.reportBack = noteOrigin.originPanel ? `${self} panel ${noteOrigin.originPanel}` : undefined;
-  const inspect = recovery('panels', 'screen', '--panel', item.panelId);
-  const input = item.initialInput;
+  const inspect = recovery('panels', 'screen', '--panel', receiver.panelId);
+  const input = receiver.initialInput;
   const verified = input?.verifiedSubmitted === true
     && (input.delivery?.state === 'taken' || input.delivery?.state === 'queued')
     && !input.blocked && !input.error;
-  if (!verified || !created.ok) {
+  if (!verified || !receiver.ok) {
     result.ok = false;
-    warnings.push(`Receiver prompt is not verified submitted on panel ${item.panelId}${input?.blocked?.message || input?.error?.message ? `: ${input.blocked?.message ?? input.error?.message}` : ` (${input?.delivery?.state ?? 'missing delivery evidence'})`}. Pane ${item.sessionId} was created; do not retry blindly. Inspect it: ${inspect}`);
+    warnings.push(`Receiver prompt is not verified submitted on panel ${receiver.panelId}${input?.blocked?.message || input?.error?.message ? `: ${input.blocked?.message ?? input.error?.message}` : ` (${input?.delivery?.state ?? 'missing delivery evidence'})`}. ${receiver.newTab ? `A new tab was opened in Pane ${receiver.paneId}` : `Pane ${receiver.paneId} was created`}; do not retry blindly. Inspect it: ${inspect}`);
     for (const warning of warnings) say(`  ! ${warning}`);
     if (parsed.json) console.log(JSON.stringify(result, null, 2));
     return 1;
   }
-  say(step('started', `${item.name ?? name} on ${remote.name}${item.worktreePath ? ` (${item.worktreePath})` : ''}`));
-  const check = receiverStatus(item.sessionId, item.panelId);
+  say(step('started', receiver.newTab ? `${receiver.name ?? name} as a new tab in Pane ${receiver.paneId}` : `${receiver.name ?? name} on ${remote.name}${receiver.worktreePath ? ` (${receiver.worktreePath})` : ''}`));
+  const check = receiverStatus(receiver.paneId, receiver.panelId);
   say(result.reportBack ? `The receiver reports back to ${result.reportBack}.` : 'No sender panel to report to; the receiver reports on the branch.');
   say(`Check on it: ${check}`);
   if (parsed.json) console.log(JSON.stringify(result, null, 2));
   return 0;
+}
+
+interface Receiver {
+  ok: boolean;
+  paneId: string;
+  panelId: string;
+  name?: string;
+  worktreePath?: string;
+  initialInput?: ReturnType<typeof panelCreateResultSchema.decode>['initialInput'];
+  newTab: boolean;
+}
+
+/**
+ * The sender's Pane when it owns this checkout: PANE_SESSION_ID names a Pane in the
+ * selected local Pane whose worktree is this git root. Anything else (no Pane, a
+ * different checkout, an unreachable daemon) returns undefined, so the receiver
+ * gets its own Pane instead of a tab in the wrong worktree.
+ */
+async function senderPaneForCheckout(parsed: ParsedArgs, gitRoot: string): Promise<string | undefined> {
+  const paneId = process.env.PANE_SESSION_ID;
+  if (!paneId) return undefined;
+  try {
+    const listed = await invokeDaemon('runpane:panes:list', [{}], paneListResultSchema, { paneDir: parsed.paneDir });
+    const pane = listed.panes.find(candidate => candidate.id === paneId);
+    if (!pane?.worktreePath) return undefined;
+    return fs.realpathSync.native(pane.worktreePath) === fs.realpathSync.native(gitRoot) ? paneId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function tryReadGitState(cwd: string): GitState | null {

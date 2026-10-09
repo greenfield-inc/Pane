@@ -56,11 +56,15 @@ const STATUS_BY_KIND = new Map<string, AgentStatus>([
  */
 export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
   if (!parsed.initialInput) throw new Error('runpane agents start requires --prompt <task>.');
-  await confirmMutation(parsed);
-  if (parsed.paneId) return startAgentInPane(parsed);
-  if (!parsed.repo || !parsed.name) {
+  const paneId = parsed.paneId;
+  if (paneId && (parsed.repo || parsed.name || parsed.baseBranch)) {
+    throw new Error('runpane agents start takes either --pane <id> (a new tab in existing work) or --repo and --name (a new Pane for new work), not both. Drop --repo, --name and --base-branch, or drop --pane.');
+  }
+  if (!paneId && (!parsed.repo || !parsed.name)) {
     throw new Error('runpane agents start needs --pane <id> to add a tab to existing work, or --repo and --name to start new work in a new Pane.');
   }
+  await confirmMutation(parsed);
+  if (paneId) return startAgentInPane(parsed, paneId);
   const request = await buildPaneCreateRequest({ ...parsed, source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true });
   const created = await invokeDaemon('runpane:panes:create', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
@@ -71,34 +75,39 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
     const reason = item && 'error' in item ? item.error.message : 'Pane did not report a created panel.';
     throw new Error(`Could not start the agent: ${reason}`);
   }
-  const paneId = item.sessionId;
+  const newPaneId = item.sessionId;
   const ready = item.readiness?.ok ?? false;
   const promptDelivered = item.initialInput?.delivered ?? false;
   const result = {
     ok: ready && promptDelivered,
-    paneId: paneId,
+    paneId: newPaneId,
     panelId: item.panelId,
     name: item.name,
     worktreePath: item.worktreePath,
-    link: buildPaneLink({ kind: 'pane', id: paneId, panelId: item.panelId }),
+    link: buildPaneLink({ kind: 'pane', id: newPaneId, panelId: item.panelId }),
     ready,
     promptDelivered,
     next: ready && promptDelivered
-      ? `Check on it with \`runpane agents status --pane ${paneId}\`.`
-      : `The agent started but the task may not have reached it. Run \`runpane agents status --pane ${paneId}\`, then \`runpane agents send --pane ${paneId} --text <task> --yes\` if needed.`,
+      ? `Check on it with \`runpane agents status --pane ${newPaneId}\`.`
+      : `The agent started but the task may not have reached it. Run \`runpane agents status --pane ${newPaneId}\`, then \`runpane agents send --pane ${newPaneId} --text <task> --yes\` if needed.`,
   };
   print(parsed, result, `Started ${result.name ?? result.paneId}: ${result.link}\n${result.next}`);
   return result.ok ? 0 : 1;
 }
 
 /** `agents start --pane`: a new agent tab in an existing Pane; it shares the Pane's worktree and branch. */
-async function startAgentInPane(parsed: ParsedArgs): Promise<number> {
-  const paneId = parsed.paneId as string;
+async function startAgentInPane(parsed: ParsedArgs, paneId: string): Promise<number> {
   const request = await buildPanelCreateRequest({ ...parsed, source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true });
-  const created = await invokeDaemon('runpane:panels:create', [request], panelCreateResultSchema, {
-    paneDir: parsed.paneDir,
-    timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
-  });
+  let created: ReturnType<typeof panelCreateResultSchema.decode>;
+  try {
+    created = await invokeDaemon('runpane:panels:create', [request], panelCreateResultSchema, {
+      paneDir: parsed.paneDir,
+      timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not open the agent as a tab in Pane ${paneId}: ${reason} Nothing else was changed. Check the Pane id with \`runpane panes list --json\`; if the work's branch has no Pane yet, start it with --repo and --name instead.`);
+  }
   const ready = created.readiness?.ok ?? false;
   const promptDelivered = created.initialInput?.delivered ?? false;
   const result = {

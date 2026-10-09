@@ -749,7 +749,8 @@ export type RunpanePaneArchiveBulkSkipCode =
   | 'missing-pane'
   | 'already-archived'
   | 'main-repo'
-  | 'pr-open';
+  | 'pr-open'
+  | 'pr-status-unknown';
 
 export interface RunpanePaneArchiveBulkItem {
   paneId: string;

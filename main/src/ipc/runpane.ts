@@ -4337,12 +4337,14 @@ async function archiveSessionPanes(
         });
         continue;
       }
-      const openPr = await findOpenPrForPane(services, paneId);
-      if (openPr !== undefined) {
+      const prStatus = await findPrStatusForPane(services, paneId);
+      if (prStatus.state !== 'none') {
         items.push({
           ...base,
           outcome: 'skipped',
-          skipped: { code: 'pr-open', message: `PR #${openPr} is still open; keep the Pane for its review, fix and QA tabs until it merges or closes.` },
+          skipped: prStatus.state === 'open'
+            ? { code: 'pr-open', message: `PR #${prStatus.number} is still open; keep the Pane for its review, fix and QA tabs until it merges or closes.` }
+            : { code: 'pr-status-unknown', message: `${prStatus.reason} Kept the Pane; check its PR and archive it by --pane once the PR has merged or closed.` },
           safetyCheck,
         });
         continue;
@@ -4397,16 +4399,33 @@ async function resolveUpstreamRemote(
   return remote;
 }
 
-/** The Pane's open PR number, looked up by its branch; undefined when it has none or GitHub can't be reached. */
-async function findOpenPrForPane(services: AppServices, paneId: string): Promise<number | undefined> {
-  let lookup: Awaited<ReturnType<AppServices['gitStatusManager']['lookupPrForPane']>> | undefined;
+const PR_STATUS_TIMEOUT_MS = 20_000;
+
+type PanePrStatus =
+  | { state: 'open'; number: number }
+  | { state: 'none' }
+  | { state: 'unknown'; reason: string };
+
+/**
+ * The Pane's PR state, read fresh from GitHub by its branch. Archive is destructive, so a
+ * failed, unavailable or slow lookup is `unknown`, never "no open PR".
+ */
+async function findPrStatusForPane(services: AppServices, paneId: string): Promise<PanePrStatus> {
+  const gitStatus = services.gitStatusManager;
   try {
-    lookup = await services.gitStatusManager.lookupPrForPane?.(paneId);
+    const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
+    if (projectPath) gitStatus.invalidatePrCache(projectPath);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), PR_STATUS_TIMEOUT_MS); });
+    const lookup = await Promise.race([gitStatus.lookupPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
+    if (lookup === 'timeout') return { state: 'unknown', reason: 'GitHub did not answer in time.' };
+    if (!lookup) return { state: 'none' };
+    if (!lookup.ok) return { state: 'unknown', reason: 'GitHub could not be reached.' };
+    if (lookup.pr?.prState === 'OPEN' && lookup.pr.prNumber !== undefined) return { state: 'open', number: lookup.pr.prNumber };
+    return { state: 'none' };
   } catch {
-    return undefined;
+    return { state: 'unknown', reason: 'The PR lookup failed.' };
   }
-  if (!lookup?.ok) return undefined;
-  return lookup.pr?.prState === 'OPEN' ? lookup.pr.prNumber : undefined;
 }
 
 function classifyArchiveBlock(check: RunpanePaneArchiveSafetyCheck, applicable: boolean): RunpanePaneArchiveBlockCode | undefined {

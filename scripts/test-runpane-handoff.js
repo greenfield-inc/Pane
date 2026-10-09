@@ -138,7 +138,7 @@ function receiver(f, options = {}) {
   const config = path.join(bin, 'daemon.json');
   const paneDir = options.paneDir ?? f.env.PANE_DIR;
   fs.writeFileSync(config, JSON.stringify({ paneDir, log, ready, repoPath: options.repoPath ?? f.root,
-    createError: options.createError, reposError: options.reposError, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
+    createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-daemon.cjs'),
     path.join(dist, 'daemonClient.js'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
@@ -176,6 +176,17 @@ test('a handoff on this machine from inside a Pane opens the receiver as a tab i
   const tab=calls().find(a=>a.channel==='runpane:panels:create');
   assert.equal(tab.args[0].paneId,'sender-pane');
   assert.match(tab.args[0].tool.initialInput,/^Read the handoff note at .* and continue the work it describes/);
+  assert.equal(JSON.parse(result.stdout).receiver.route,'tab');
+});
+
+test('a handoff from a Pane that does not own this checkout gets its own Pane and says why', (t) => {
+  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled());
+  const calls=receiver(f,{ownedPane:{id:'sender-pane',worktreePath:path.join(os.tmpdir())}}); f.env.PANE_SESSION_ID='sender-pane';
+  const result=f.run();
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(calls().some(a=>a.channel==='runpane:panels:create'),false);
+  assert.ok(calls().some(a=>a.channel==='runpane:panes:create'));
+  const out=JSON.parse(result.stdout); assert.equal(out.receiver.route,'new-pane'); assert.match(out.receiver.reason,/does not own .* so the receiver gets its own new Pane/);
 });
 
 test('WSL is rejected before push, note transfer, or receiver launch', (t) => {
@@ -461,7 +472,7 @@ test('partial Windows receiver recovery routes directly from the sender without 
 test('successful local receiver status preserves explicit Pane directory', (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); const selected=path.join(f.root,'selected pane'); receiver(f,{paneDir:selected});
  const result=spawnSync(process.execPath,[cli,'handoff','codex here','--note-file','note.md','--pane-dir',selected],{cwd:f.root,encoding:'utf8',env:f.env});
- assert.equal(result.status,0,result.stderr); assert.match(result.stdout,/Check on it: runpane --pane-dir/); assert.equal(result.stdout.split('Check on it:')[1].includes(selected),true); assert.match(result.stdout,/agents status --pane test-pane/);
+ assert.equal(result.status,0,result.stderr); assert.match(result.stdout,/Check on it: runpane --pane-dir/); assert.equal(result.stdout.split('Check on it:')[1].includes(selected),true); assert.match(result.stdout,/agents status --panel test-panel/);
 });
 test('successful Windows receiver status routes directly from the sender', {skip:process.platform!=='linux'}, (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); windowsHost(f);

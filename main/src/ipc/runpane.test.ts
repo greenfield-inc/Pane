@@ -6640,8 +6640,8 @@ describe('runpane IPC handlers', () => {
             name: 'refactor',
             associations: [{ paneId: session.id, panelIds: [], attachedAt: '2026-01-01T00:00:00.000Z' }],
           }));
-          // SAFETY: This test fixture supplies the one Sessions manager method the bulk archive calls.
-          const bulkServices: AppServices = { ...services, orchestrationSessionManager: { get } as never };
+          // SAFETY: This test fixture supplies the Sessions manager method and the PR lookup (no PR) the bulk archive calls.
+          const bulkServices: AppServices = { ...services, orchestrationSessionManager: { get } as never, gitStatusManager: { lookupPrForPane: vi.fn(async () => ({ ok: true })), invalidatePrCache: vi.fn() } as never };
           const bulkRegistry = createRegistry(bulkServices);
           registerSessionsDeleteStub(bulkRegistry, bulkServices);
           await expect(bulkRegistry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, dryRun: true }])).resolves.toMatchObject({
@@ -6840,7 +6840,7 @@ describe('runpane IPC handlers', () => {
     });
 
     describe('--session --merged', () => {
-      function createBulkServices(panes: Session[], associations: string[]) {
+      function createBulkServices(panes: Session[], associations: string[], lookupPr: AppServices['gitStatusManager']['lookupPrForPane'] = vi.fn(async () => ({ ok: true as const }))) {
         const byId = new Map(panes.map(pane => [pane.id, pane]));
         const get = vi.fn(async () => ({
           id: 'orchestration-1',
@@ -6857,6 +6857,8 @@ describe('runpane IPC handlers', () => {
           } as never,
           // SAFETY: This test fixture intentionally supplies the minimal Sessions manager surface exercised by archive.
           orchestrationSessionManager: { get } as never,
+          // SAFETY: This test fixture supplies the PR lookup the bulk archive consults; by default no Pane has a PR.
+          gitStatusManager: { lookupPrForPane: lookupPr, invalidatePrCache: vi.fn() } as never,
           archiveProgressManager: new ArchiveProgressManager(),
         } as never);
         return { services, get };
@@ -6907,20 +6909,26 @@ describe('runpane IPC handlers', () => {
 
       it('keeps a clean Pane whose PR is still open, since its review, fix and QA tabs need the worktree', async () => {
         const panes = createBulkPanes();
-        const { services } = createBulkServices(panes, ['pane-clean']);
-        // SAFETY: This test fixture supplies the one PR lookup the bulk archive calls.
-        const withOpenPr = { ...services, gitStatusManager: { ...services.gitStatusManager, lookupPrForPane: vi.fn(async () => ({ ok: true, pr: { prNumber: 51, prState: 'OPEN' } })) } } as never as AppServices;
-        const registry = createRegistry(withOpenPr);
-        const sessionsDelete = registerSessionsDeleteStub(registry, withOpenPr);
+        const { services } = createBulkServices(panes, ['pane-clean'], vi.fn(async () => ({ ok: true, pr: { prNumber: 51, prState: 'OPEN' } })));
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
 
         const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
 
         expect(sessionsDelete).not.toHaveBeenCalled();
-        expect(result).toMatchObject({
-          archived: 0,
-          skipped: 1,
-          items: [{ paneId: 'pane-clean', outcome: 'skipped', skipped: { code: 'pr-open' } }],
-        });
+        expect(result).toMatchObject({ archived: 0, skipped: 1, items: [{ paneId: 'pane-clean', outcome: 'skipped', skipped: { code: 'pr-open' } }] });
+      });
+
+      it('keeps a clean Pane when its PR state cannot be read, rather than treating that as no PR', async () => {
+        const panes = createBulkPanes();
+        const { services } = createBulkServices(panes, ['pane-clean'], vi.fn(async () => ({ ok: false, error: new Error('gh auth') })));
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ archived: 0, skipped: 1, items: [{ paneId: 'pane-clean', outcome: 'skipped', skipped: { code: 'pr-status-unknown' } }] });
       });
 
       it('archives only the safe Panes of the Session', async () => {

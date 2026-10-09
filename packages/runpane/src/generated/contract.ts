@@ -9824,7 +9824,8 @@ export const RUNPANE_CONTRACT = {
                       "missing-pane",
                       "already-archived",
                       "main-repo",
-                      "pr-open"
+                      "pr-open",
+                      "pr-status-unknown"
                     ]
                   },
                   "message": {
@@ -13819,7 +13820,7 @@ export const RUNPANE_CONTRACT = {
           "A successful handoff requires initialInput.verifiedSubmitted and delivery taken or queued without blocked/error evidence. Unverified delivery exits nonzero with the created Pane, panel and a panels screen inspection command; inspect before retrying.",
           "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
           "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
-          "Run it from the checkout being handed off. The receiver works in a new Pane on the destination and pushes back to your branch, so stop changing that branch yourself."
+          "Run it from the checkout being handed off. On another machine the receiver works in a new Pane; on this machine, from the Pane that owns this checkout, it works in a new tab of that Pane (the result's receiver.route and receiver.reason say which). Either way it pushes back to your branch, so stop changing that branch yourself."
         ]
       },
       "sessions unpin": {

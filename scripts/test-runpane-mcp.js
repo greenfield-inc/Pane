@@ -361,6 +361,23 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
 });
 
+test('agents start refuses --pane together with --repo or --name before changing anything, and says which form to use', () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-agents-start-'));
+  try {
+    const run = (args) => require('node:child_process').spawnSync(process.execPath, [dist('cli.js'), 'agents', 'start', ...args, '--prompt', 'Review it', '--agent', 'codex', '--yes', '--json', '--pane-dir', paneDir], {
+      encoding: 'utf8', input: '', env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' },
+    });
+    const mixed = run(['--pane', 'pane-1', '--repo', 'active', '--name', 'other']);
+    assert.notEqual(mixed.status, 0);
+    assert.match(mixed.stderr + mixed.stdout, /either --pane <id> \(a new tab in existing work\) or --repo and --name \(a new Pane for new work\), not both/);
+    const neither = run([]);
+    assert.notEqual(neither.status, 0);
+    assert.match(neither.stderr + neither.stdout, /needs --pane <id> to add a tab to existing work, or --repo and --name/);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('an unknown toolset stops the server with the valid names', () => {
   const result = require('node:child_process').spawnSync(process.execPath, [dist('cli.js'), 'mcp', '--toolsets', 'everything'], {
     encoding: 'utf8', input: '', env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' },
