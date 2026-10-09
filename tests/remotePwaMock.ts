@@ -19,6 +19,8 @@ export interface RemotePwaMockOptions {
   activePanelIndex?: number;
   /** Orchestration Sessions the mock host reports. */
   orchestrationSessionNames?: string[];
+  /** Agent statuses the host already reports when the PWA connects. */
+  agentStatuses?: RemotePwaMockHost['agentStatuses'];
 }
 
 /**
@@ -29,6 +31,8 @@ export interface RemotePwaMockHost {
   panes: MockPane[];
   archivedPanes: MockPane[];
   sessions: OrchestrationSessionRecord[];
+  /** The `panels:agent-statuses` baseline: what the host's agents are doing now. */
+  agentStatuses: Array<{ sessionId: string; panelId: string; state: 'blocked' | 'working' | 'idle' | 'unknown' }>;
 }
 
 const PROFILE = {
@@ -144,6 +148,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     panes: sessions,
     archivedPanes: [],
     sessions: (options.orchestrationSessionNames ?? []).map(buildOrchestrationSession),
+    agentStatuses: options.agentStatuses ?? [],
   };
 
   return { project, panels, affordances, host, activePanel: panels[options.activePanelIndex ?? 0] };
@@ -226,6 +231,7 @@ export async function openConnectedRemotePwa(
     class MockEventSource {
       onopen: ((event: Event) => void) | null = null;
       onerror: ((event: Event) => void) | null = null;
+      readonly listeners = new Map<string, (event: MessageEvent) => void>();
       constructor(readonly url: string) {
         // Handed to the registrar rather than aliased into a local, so the
         // newest stream is reachable without keeping a `self` around.
@@ -237,7 +243,9 @@ export async function openConnectedRemotePwa(
           window.setTimeout(() => this.onopen?.(new Event('open')), 0);
         }
       }
-      addEventListener(): void {}
+      addEventListener(name: string, listener: (event: MessageEvent) => void): void {
+        this.listeners.set(name, listener);
+      }
       removeEventListener(): void {}
       close(): void {}
     }
@@ -256,6 +264,15 @@ export async function openConnectedRemotePwa(
       value: () => {
         held = true;
         live?.onerror?.(new Event('error'));
+      },
+    });
+
+    // Pushes one host event down the live stream, as the daemon's SSE does.
+    Object.defineProperty(window, '__paneRemoteEmit', {
+      configurable: true,
+      value: (channel: string, payload: unknown) => {
+        const data = JSON.stringify({ channel, args: [payload], timestamp: new Date().toISOString() });
+        live?.listeners.get('daemon-event')?.(new MessageEvent('daemon-event', { data }));
       },
     });
 
@@ -303,8 +320,19 @@ export async function restoreRemoteConnection(page: Page): Promise<void> {
   });
 }
 
+/** Sends a host event, such as `panel:agentStatus`, to the connected PWA. */
+export async function emitRemoteEvent(page: Page, channel: string, payload: JsonValue): Promise<void> {
+  await page.evaluate(([eventChannel, eventPayload]) => {
+    const emit = window.__paneRemoteEmit;
+    if (!emit) throw new Error('Remote PWA mock is not installed on this page.');
+    emit(eventChannel, eventPayload);
+  }, [channel, payload] as const);
+}
+
 declare global {
   interface Window {
+    /** Installed by `openConnectedRemotePwa`; see `emitRemoteEvent`. */
+    __paneRemoteEmit?: (channel: string, payload: JsonValue) => void;
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */
     __paneRemoteDropConnection?: () => void;
     /** Installed by `openConnectedRemotePwa`; see `restoreRemoteConnection`. */
@@ -355,6 +383,9 @@ async function installRemoteHostRoute(
       case 'sessions:restore':
         host.panes.push(...host.archivedPanes.filter(pane => pane.id === args[0]));
         host.archivedPanes = host.archivedPanes.filter(pane => pane.id !== args[0]);
+        break;
+      case 'panels:agent-statuses':
+        result = { success: true, data: host.agentStatuses };
         break;
       case 'panels:list':
         result = ownerSession ? [orchestrationSessionView(ownerSession).panel] : fixtures.panels;
