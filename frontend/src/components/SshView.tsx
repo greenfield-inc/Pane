@@ -42,13 +42,22 @@ function SshViewForHost() {
   useEffect(() => {
     void refreshHosts();
     let cancelled = false;
+    // Tabs opened or closed while the saved list is in flight are newer than it.
+    let loading = true;
+    const createdWhileLoading = new Map<string, ToolPanel>();
+    const deletedWhileLoading = new Set<string>();
     void panelApi.loadPanelsForSession(SSH_HOSTS_SESSION_ID).then(saved => {
       if (cancelled) return;
+      loading = false;
+      const panels = [
+        ...saved,
+        ...[...createdWhileLoading.values()].filter(panel => !saved.some(known => known.id === panel.id)),
+      ].filter(panel => !deletedWhileLoading.has(panel.id));
       const store = usePanelStore.getState();
-      store.setPanels(SSH_HOSTS_SESSION_ID, saved);
+      store.setPanels(SSH_HOSTS_SESSION_ID, panels);
       const active = store.activePanels[SSH_HOSTS_SESSION_ID];
-      if (!active || !saved.some(panel => panel.id === active)) {
-        const remembered = saved.find(panel => panel.state.isActive) ?? saved[0];
+      if (!active || !panels.some(panel => panel.id === active)) {
+        const remembered = panels.find(panel => panel.state.isActive) ?? panels[0];
         if (remembered) store.setActivePanel(SSH_HOSTS_SESSION_ID, remembered.id);
       }
       setLoaded(true);
@@ -57,13 +66,17 @@ function SshViewForHost() {
     });
     const events = window.electronAPI.events;
     const created = events.onPanelCreated(panel => {
-      if (panel.sessionId === SSH_HOSTS_SESSION_ID) usePanelStore.getState().addPanel(panel);
+      if (panel.sessionId !== SSH_HOSTS_SESSION_ID) return;
+      if (loading) createdWhileLoading.set(panel.id, panel);
+      usePanelStore.getState().addPanel(panel);
     });
     const updated = events.onPanelUpdated(panel => {
       if (panel.sessionId === SSH_HOSTS_SESSION_ID) usePanelStore.getState().updatePanelState(panel);
     });
     const deleted = events.onPanelDeleted(event => {
-      if (event.sessionId === SSH_HOSTS_SESSION_ID) usePanelStore.getState().removePanel(SSH_HOSTS_SESSION_ID, event.panelId);
+      if (event.sessionId !== SSH_HOSTS_SESSION_ID) return;
+      if (loading) deletedWhileLoading.add(event.panelId);
+      usePanelStore.getState().removePanel(SSH_HOSTS_SESSION_ID, event.panelId);
     });
     return () => {
       cancelled = true;
@@ -76,15 +89,21 @@ function SshViewForHost() {
   const tabs = useMemo(() => panels.filter(panel => panel.type === 'terminal'), [panels]);
   // The Session exists once a host has been opened; its terminals read it from context.
   const [session, setSession] = useState<Session | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   const hasTabs = tabs.length > 0;
   useEffect(() => {
     if (!hasTabs || session) return;
     let cancelled = false;
-    void API.sessions.get(SSH_HOSTS_SESSION_ID).then(response => {
-      if (!cancelled && response.success && response.data) setSession(response.data);
-    });
+    setSessionError(null);
+    const fail = () => { if (!cancelled) setSessionError('Could not load the SSH view.'); };
+    API.sessions.get(SSH_HOSTS_SESSION_ID).then(response => {
+      if (cancelled) return;
+      if (response.success && response.data) setSession(response.data);
+      else fail();
+    }).catch(fail);
     return () => { cancelled = true; };
-  }, [hasTabs, session]);
+  }, [hasTabs, session, sessionAttempt]);
   const activePanelId = tabs.some(panel => panel.id === storedActiveId) ? storedActiveId ?? null : tabs[0]?.id ?? null;
   const layout = useMemo<SessionPanelLayout>(() => ({
     version: 1,
@@ -122,6 +141,11 @@ function SshViewForHost() {
         <div className="relative min-h-0 flex-1">
           {/* Over the stage, so showing it never resizes a terminal. */}
           {alert && <p role="alert" className="absolute left-1/2 top-2 z-40 -translate-x-1/2 rounded border border-border-primary bg-surface-primary px-2 py-1 text-xs text-status-error shadow-sm">{alert}</p>}
+          {sessionError && <div role="alert" className="flex items-center gap-3 p-6 text-sm text-text-secondary">
+            {sessionError}
+            <button type="button" onClick={() => setSessionAttempt(value => value + 1)}
+              className="rounded bg-surface-secondary px-3 py-1.5 text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Retry</button>
+          </div>}
           {session && <SessionProvider session={session}>
             <SplitLayout layout={layout} panels={tabs} focusedGroupId={GROUP_ID} isMainRepo={false}
               onSizesChange={noop} onPanelSelect={selectGroupPanel} onPanelClose={closePanel} onFocusGroup={noop}

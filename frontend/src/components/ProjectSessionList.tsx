@@ -762,7 +762,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
             aria-label={`New terminal on ${alias}`}
             title={`New terminal on ${alias}`}
             onClick={() => open(alias, true)}
-            className="invisible absolute right-3 top-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary peer focus:outline-none focus-visible:visible focus-visible:ring-2 focus-visible:ring-interactive group-hover/ssh-host:visible"
+            className="peer absolute right-3 top-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-tertiary opacity-0 hover:bg-surface-hover hover:text-text-primary focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-interactive group-hover/ssh-host:opacity-100"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>}

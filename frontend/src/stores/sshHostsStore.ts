@@ -23,6 +23,12 @@ interface SshHostsState {
 
 let refreshGeneration = 0;
 
+/** The Pane this window controls: undefined before config loads, null for this computer. */
+function controlledHostId(): string | null | undefined {
+  const config = useConfigStore.getState().config;
+  return config ? getActiveRemoteHostId(config.remoteDaemon) : undefined;
+}
+
 export const useSshHostsStore = create<SshHostsState>((set, get) => ({
   hosts: [],
   openHosts: new Set(),
@@ -43,8 +49,11 @@ export const useSshHostsStore = create<SshHostsState>((set, get) => ({
   },
 
   open: async (alias, newTab = false) => {
+    const hostId = controlledHostId();
     set({ error: null });
     const response = await window.electronAPI.sshHosts.open(alias, newTab).catch(() => null);
+    // The answer belongs to the Pane the click went to; after a switch it would move the new one.
+    if (controlledHostId() !== hostId) return;
     if (response?.success && response.data) {
       usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, response.data.panelId);
     } else {

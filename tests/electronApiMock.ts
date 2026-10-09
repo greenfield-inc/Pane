@@ -87,6 +87,10 @@ export type ElectronApiMockOptions = {
   paneChatAgentChangeDelayMs?: number;
   /** Host aliases the mocked SSH config lists. */
   sshHosts?: string[];
+  /** Hold each SSH tab-list read, as it was when asked, until releaseSshPanelReads(). */
+  holdSshPanelReads?: boolean;
+  /** How many SSH Session reads fail before the Session loads. */
+  sshSessionReadFailures?: number;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
 };
@@ -258,6 +262,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
+    const heldSshPanelReads: Array<() => void> = [];
+    let sshSessionReadFailures = mockOptions.sshSessionReadFailures ?? 0;
     const sshHostOf = (panel: { sessionId?: string; state?: unknown }) => {
       if (panel.sessionId !== '__ssh_hosts_session__') return undefined;
       // SAFETY: SSH view tabs are terminal panels whose custom state is TerminalPanelState.
@@ -806,9 +812,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }),
       }),
       panels: namespace({
-        getSessionPanels: (sessionId: string) => success(
-          clone(mockPanels.filter((panel) => panel.sessionId === sessionId)),
-        ),
+        getSessionPanels: (sessionId: string) => {
+          const read = success(clone(mockPanels.filter((panel) => panel.sessionId === sessionId)));
+          if (sessionId !== '__ssh_hosts_session__' || !mockOptions.holdSshPanelReads) return read;
+          return new Promise(resolve => { heldSshPanelReads.push(() => resolve(read)); });
+        },
         deletePanel: (panelId: string) => {
           const deleted = mockPanels.find(panel => panel.id === panelId);
           mockPanels = mockPanels.filter(panel => panel.id !== panelId);
@@ -905,6 +913,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         stopActive: () => success(),
       }),
       sessions: namespace({
+        // The SSH view's hidden Session; other ids keep the generic empty answer.
+        get: (sessionId: string) => {
+          if (sessionId !== '__ssh_hosts_session__') return success();
+          if (sshSessionReadFailures-- > 0) return Promise.resolve({ success: false, error: 'Remote Pane did not answer' });
+          return success({ ...clone(paneChatSession), id: sessionId, name: 'SSH' });
+        },
         getOrCreateMainRepoSession: async (projectId: number) => {
           const delayMs = mockOptions.mainRepoSessionDelayByProjectId?.[projectId] ?? 0;
           if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -1323,6 +1337,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setPanels(panels: JsonObject[]) {
           mockPanels = clone(panels);
+        },
+        releaseSshPanelReads() {
+          for (const release of heldSshPanelReads.splice(0)) release();
         },
         emitPanelCreated(panel: JsonObject) {
           if (!mockPanels.some(existing => existing.id === panel.id)) {
