@@ -25,6 +25,7 @@ describe('panel activation', () => {
     .map(([, payload]) => payload);
   const lastUsed = async () => {
     const active = await registry.invoke('panels:getActive', [sessionId]);
+    // SAFETY: panels:getActive returns the session's active ToolPanel row, or null.
     return (active as { id: string } | null)?.id ?? null;
   };
   const tab = async (title: string) => (await panelManager.createPanel({ sessionId, type: 'logs', title, activate: false })).id;

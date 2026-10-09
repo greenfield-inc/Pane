@@ -168,8 +168,7 @@ class PanelManager {
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:created', panel);
       if (shouldActivate && request.announceActivation) {
-        const placement = panel.metadata.openPlacement;
-        this.announceActivation({ sessionId: request.sessionId, panelId, ...(placement ? { placement } : {}) });
+        this.announceActivation({ sessionId: request.sessionId, panelId, placement: panel.metadata.openPlacement });
       }
 
       // Track terminal panel creation analytics (only for new panels, not restoration)
@@ -331,7 +330,7 @@ class PanelManager {
    */
   async setActivePanel(sessionId: string, panelId: string, placement?: PanelOpenPlacement): Promise<void> {
     await this.rememberActivePanel(sessionId, panelId);
-    this.announceActivation({ sessionId, panelId, ...(placement ? { placement } : {}) });
+    this.announceActivation({ sessionId, panelId, placement });
   }
 
   /** A client's own tab choice: updates the host's last-used tab and moves no client. */
