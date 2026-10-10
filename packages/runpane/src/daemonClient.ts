@@ -121,6 +121,19 @@ function decodeResult<T>(channel: string, result: JsonValue | undefined, resultS
   }
 }
 
+/** Failures that happen before a connection exists, so no request was sent. */
+const CONNECT_ERROR_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+
+function errorCodeOf(cause: unknown): string {
+  return cause instanceof Error && 'code' in cause ? String(cause.code) : '';
+}
+
+/** The doctor command for the Pane this call used, so it checks the same instance. */
+function doctorCommand(paneDir: string | undefined): string {
+  if (!paneDir) return '`runpane doctor`';
+  return `\`runpane doctor --pane-dir ${/^[\w./:@\\-]+$/.test(paneDir) ? paneDir : `'${paneDir.replace(/'/g, `'\\''`)}'`}\``;
+}
+
 export function resolvePaneDirectory(paneDir?: string): string {
   return paneDir ?? process.env.PANE_DIR ?? process.env.FOOZOL_DIR ?? path.join(os.homedir(), '.pane');
 }
@@ -166,11 +179,16 @@ export async function invokeRemoteDaemon<T>(
   resultSchema: BoundarySchema<T>,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
-  const unreachable = (detail: string) => new PaneDaemonClientError(
-    `Could not reach Pane on ${target.machine} (${target.baseUrl}): ${detail}. Pane must be running there with workspaces on. Nothing was changed.`,
+  // Only a failure before the request reached the machine proves nothing changed there.
+  const unreachable = (detail: string, sent: boolean) => new PaneDaemonClientError(
+    sent
+      ? `Lost the reply from Pane on ${target.machine} (${target.baseUrl}): ${detail}. The request was sent, so Pane there may have finished ${channel}.`
+      : `Could not reach Pane on ${target.machine} (${target.baseUrl}): ${detail}. Pane must be running there with workspaces on. Nothing was changed.`,
     'ERR_WORKSPACE_UNREACHABLE',
     false,
-    'Check the machine with `runpane workspace list`.',
+    sent
+      ? 'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.'
+      : 'Check the machine with `runpane workspace list`.',
   );
   let response: Response;
   try {
@@ -189,15 +207,16 @@ export async function invokeRemoteDaemon<T>(
         'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.',
       );
     }
-    const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : String(error);
-    throw unreachable(cause);
+    const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+    throw unreachable(cause instanceof Error ? cause.message : String(cause), !CONNECT_ERROR_CODES.has(errorCodeOf(cause)));
   }
   const text = await response.text();
   let payload: ReturnType<typeof remoteInvokeResponseSchema.decode>;
   try {
     payload = decodeBoundary(JSON.parse(text), remoteInvokeResponseSchema);
   } catch {
-    throw unreachable(response.status === 502 ? 'Pane is not running there' : `HTTP ${response.status}`);
+    // tailscale serve answers 502 itself when nothing listens behind it.
+    throw unreachable(response.status === 502 ? 'Pane is not running there' : `HTTP ${response.status} with a reply this runpane cannot read`, response.status !== 502);
   }
   if (!payload.ok) {
     // The machine's own visibility setting refused this login; only its owner can change that.
@@ -260,11 +279,13 @@ export async function invokeDaemon<T>(
         `Timed out waiting for Pane daemon response on ${endpoint.path}. Pane may be busy, and it may still finish ${channel}.`,
         'ERR_RUNPANE_DAEMON_TIMEOUT',
         false,
-        'Check whether the command took effect before running it again; if Pane stays unresponsive, run `runpane doctor`.',
+        `Check whether the command took effect before running it again; if Pane stays unresponsive, run ${doctorCommand(options.paneDir)}.`,
       ) });
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
+    let sent = false;
     socket.once('connect', () => {
+      sent = true;
       socket.write(encodePaneDaemonFrame(eventFilterRequest));
       socket.write(encodePaneDaemonFrame(request));
     });
@@ -290,21 +311,28 @@ export async function invokeDaemon<T>(
 
     socket.once('error', (error: NodeJS.ErrnoException) => {
       const code = error.code ?? 'ERR_RUNPANE_DAEMON_CONNECT_FAILED';
-      settle({ error: new PaneDaemonClientError(
-        `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
-        code,
-        true,
-        'Open Pane on this machine, then check the connection with `runpane doctor`.',
-      ) });
+      settle({ error: sent
+        ? new PaneDaemonClientError(
+          `Lost the connection to Pane daemon at ${endpoint.path} after ${channel} was sent (${error.code ?? error.message}). Pane may have finished it.`,
+          code,
+          false,
+          `Check whether the command took effect before running it again; then check the connection with ${doctorCommand(options.paneDir)}.`,
+        )
+        : new PaneDaemonClientError(
+          `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
+          code,
+          true,
+          `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`,
+        ) });
     });
 
     socket.once('close', () => {
       if (!settled) {
         settle({ error: new PaneDaemonClientError(
-          `Pane daemon closed the connection before responding at ${endpoint.path}, so it is unknown whether ${channel} ran.`,
+          `Pane daemon at ${endpoint.path} closed the connection after ${channel} was sent and before it answered. Pane may have finished it.`,
           'ERR_RUNPANE_DAEMON_CLOSED',
           false,
-          'Check whether the command took effect before running it again; if Pane quit, open it and run `runpane doctor`.',
+          `Check whether the command took effect before running it again; if Pane quit, open it and run ${doctorCommand(options.paneDir)}.`,
         ) });
       }
     });

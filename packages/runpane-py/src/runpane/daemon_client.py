@@ -5,6 +5,7 @@ import json
 import ntpath
 import os
 import posixpath
+import re
 import socket
 import sys
 import time
@@ -16,7 +17,12 @@ DAEMON_SOCKET_FILENAME = "daemon.sock"
 DEFAULT_TIMEOUT_MS = 130_000
 
 
-CONNECT_NEXT = "Open Pane on this machine, then check the connection with `runpane doctor`."
+def connect_next(pane_dir: Optional[str]) -> str:
+    """Point `runpane doctor` at the Pane this call used."""
+    doctor = "runpane doctor"
+    if pane_dir:
+        doctor += " --pane-dir " + (pane_dir if re.fullmatch(r"[\w./:@\\-]+", pane_dir) else "'" + pane_dir.replace("'", "'\\''") + "'")
+    return f"Open Pane on this machine, then check the connection with `{doctor}`."
 
 
 class PaneDaemonClientError(RuntimeError):
@@ -69,11 +75,11 @@ def invoke_daemon(
     encoded += encode_frame(request)
 
     if endpoint["transport"] == "pipe":
-        return invoke_windows_pipe(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS)
-    return invoke_unix_socket(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS)
+        return invoke_windows_pipe(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS, channel, connect_next(pane_dir))
+    return invoke_unix_socket(endpoint["path"], encoded, timeout_ms or DEFAULT_TIMEOUT_MS, connect_next(pane_dir))
 
 
-def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: float) -> Any:
+def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: float, next_step: str) -> Any:
     decoder = PaneDaemonFrameDecoder()
     deadline = time.monotonic() + timeout_ms / 1000
     try:
@@ -87,7 +93,7 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
                 raise PaneDaemonClientError(
                     f"Could not connect to Pane daemon at {socket_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
-                    CONNECT_NEXT,
+                    next_step,
                 ) from error
 
             client.sendall(encoded_request)
@@ -112,15 +118,17 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
         ) from error
 
 
-def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: float) -> Any:
+def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: float, channel: str, next_step: str) -> Any:
     import _winapi
     import msvcrt
 
     decoder = PaneDaemonFrameDecoder()
     deadline = time.monotonic() + timeout_ms / 1000
+    sent = False
     try:
         with open(pipe_path, "r+b", buffering=0) as pipe:
             pipe.write(encoded_request)
+            sent = True
             handle = msvcrt.get_osfhandle(pipe.fileno())
             while True:
                 remaining = deadline - time.monotonic()
@@ -144,10 +152,17 @@ def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: floa
                 if response is not None:
                     return response
     except OSError as error:
+        # The code stays the same either way: watch retries on it.
+        if sent:
+            raise PaneDaemonClientError(
+                f"Lost the connection to Pane daemon at {pipe_path} after {channel} was sent: {error}. Pane may have finished it.",
+                "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+                "Check whether the command took effect before running it again; " + next_step[0].lower() + next_step[1:],
+            ) from error
         raise PaneDaemonClientError(
             f"Could not connect to Pane daemon at {pipe_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
             "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
-            CONNECT_NEXT,
+            next_step,
         ) from error
 
 

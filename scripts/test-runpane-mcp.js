@@ -118,7 +118,8 @@ async function withStubDaemon(paneDir, results, action) {
         }
         requests.push({ channel: frame.channel, args: frame.args, socket });
         if (answer === HOLD) continue;
-        const result = answer instanceof Function ? answer(frame.args) : answer;
+        const result = answer instanceof Function ? answer(frame.args, socket) : answer;
+        if (result === HOLD) continue;
         const response = result?.[FAILED] ? { ok: false, error: result[FAILED] } : { ok: true, result };
         socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ...response })}\n`);
       }
@@ -367,7 +368,53 @@ test('when Pane is not running, the CLI keeps the connection error and says what
     assert.equal(ok, false);
     assert.equal(error.code, 'ENOENT');
     assert.match(error.message, /Could not connect to Pane daemon at .*ENOENT.*Pane is not running for .* Nothing was changed\./s);
-    assert.match(error.next, /Open Pane.*`runpane doctor`/);
+    assert.match(error.next, /Open Pane.*`runpane doctor --pane-dir /);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('a connection lost after the request was sent says the command may have run, never that nothing changed', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-errors-'));
+  try {
+    await withStubDaemon(paneDir, { 'runpane:repos:list': (args, socket) => { socket.destroy(); return HOLD; } }, async () => {
+      const result = await runCli(['repos', 'list', '--pane-dir', paneDir, '--json']);
+      assert.equal(result.status, 1);
+      const { error } = JSON.parse(result.stdout);
+      assert.doesNotMatch(error.message, /Nothing was changed/);
+      assert.equal(error.code, 'ERR_RUNPANE_DAEMON_CLOSED');
+      assert.match(error.message, /after runpane:repos:list was sent.*Pane may have finished it/s);
+      assert.match(error.next, /before running it again/);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('a remote machine that drops the reply after the request arrived does not claim nothing changed', async () => {
+  const { invokeRemoteDaemon } = require(dist('daemonClient.js'));
+  const { boundary } = require(dist('boundaryDecoder.js'));
+  const http = require('node:http');
+  let received = 0;
+  const server = http.createServer((request) => { received += 1; request.socket.destroy(); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const target = { machine: 'qa-box', baseUrl: `http://127.0.0.1:${server.address().port}` };
+    const error = await invokeRemoteDaemon(target, 'runpane:panes:create', [], boundary.json, 5_000).then(() => null, (cause) => cause);
+    assert.equal(received, 1);
+    assert.doesNotMatch(error.message, /Nothing was changed/);
+    assert.match(error.message, /may have finished runpane:panes:create/);
+    assert.match(error.next, /before running it again/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('the doctor hint checks the Pane the command used', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane errors-'));
+  try {
+    const result = await runCli(['repos', 'list', '--pane-dir', paneDir, '--json']);
+    assert.equal(JSON.parse(result.stdout).error.next, `Open Pane on this machine, then check the connection with \`runpane doctor --pane-dir '${paneDir}'\`.`);
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
