@@ -72,6 +72,8 @@ import type {
   RunpanePaneArchiveBlockCode,
   RunpanePaneArchiveBlockedResult,
   RunpanePaneArchiveBulkItem,
+  RunpanePaneArchiveBulkSkipCode,
+  RunpanePaneArchivePrStatus,
   RunpanePaneArchiveBulkRequest,
   RunpanePaneArchiveBulkResult,
   RunpanePaneArchiveMergedPr,
@@ -4099,8 +4101,10 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
 
   try {
     // Deliberately bypass gitStatusManager's cache (up to CACHE_TTL_MS stale)
-    // and read git plumbing directly — a safety gate must see the current
-    // state, not a snapshot from moments-ago that predates a recent commit.
+    // and read git plumbing directly: a safety gate must see the current state.
+    // The commit checks run first because they may wait on the network; the
+    // working-directory check runs last, closest to the removal it guards.
+    const commits = await computeUnpublishedCommits(services, pane, ctx);
     const workingDirectory = await fastCheckWorkingDirectory(pane.worktreePath, ctx.commandRunner.wslContext);
     const hasUncommittedChanges = workingDirectory.hasModified || workingDirectory.hasStaged || workingDirectory.hasConflicts;
     let hasUntrackedFiles = workingDirectory.hasUntracked;
@@ -4112,66 +4116,73 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
       ], pane.worktreePath, { silent: true, timeout: 10_000 });
       hasUntrackedFiles = stdout.length > 0;
     }
-
-    const upstream = await services.worktreeManager.getUpstream(pane.worktreePath, ctx.commandRunner);
-    let upstreamGone = false;
-    if (upstream) {
-      const remote = await resolveUpstreamRemote(pane.worktreePath, upstream, ctx.commandRunner);
-      await ctx.commandRunner.execAsync(
-        `git fetch --no-tags --prune ${escapeShellArg(remote)}`,
-        pane.worktreePath,
-        { timeout: 30000 },
-      );
-      // `--prune` deletes the tracking ref when the remote branch was deleted,
-      // which GitHub does after merging a PR. Fall through to the no-upstream path.
-      upstreamGone = !await refExists(pane.worktreePath, upstream, ctx.commandRunner);
-      if (!upstreamGone) {
-        const unpushedCommitDetails = await listCommitsAhead(
-          pane.worktreePath,
-          upstream,
-          ctx.commandRunner.wslContext,
-        );
-        return {
-          performed: true,
-          hasUncommittedChanges,
-          hasUntrackedFiles,
-          hasUpstream: true,
-          upstream,
-          upstreamRefreshed: true,
-          unpushedCommits: unpushedCommitDetails.length,
-          unpushedCommitDetails,
-        };
-      }
-    }
-
-    // No upstream (never pushed, detached HEAD, or the remote branch is gone):
-    // the branch's own commits ahead of its base/comparison branch are the
-    // closest proxy for "unpushed work".
-    const comparisonBranch = await services.worktreeManager.getSessionComparisonBranch(pane, ctx);
-    const unpushedCommitDetails = await listCommitsAhead(
-      pane.worktreePath,
-      comparisonBranch,
-      ctx.commandRunner.wslContext,
-    );
-    // A squash or rebase merge leaves those commits outside the base branch.
-    // A merged PR whose head is exactly HEAD proves they reached the remote.
-    const mergedViaPr = unpushedCommitDetails.length > 0
-      ? await findMergedPullRequestForHead(pane.worktreePath, ctx.commandRunner)
-      : undefined;
-    return {
-      performed: true,
-      hasUncommittedChanges,
-      hasUntrackedFiles,
-      hasUpstream: Boolean(upstream),
-      upstream: upstream ?? undefined,
-      upstreamRefreshed: Boolean(upstream),
-      upstreamGone: upstreamGone || undefined,
-      unpushedCommits: mergedViaPr ? 0 : unpushedCommitDetails.length,
-      unpushedCommitDetails: mergedViaPr ? [] : unpushedCommitDetails,
-      mergedViaPr,
-    };
+    return { performed: true, hasUncommittedChanges, hasUntrackedFiles, ...commits };
   } catch {
     return { performed: false, reason: 'git-error' };
+  }
+}
+
+type ArchiveCommitEvidence = Omit<RunpanePaneArchiveSafetyCheck, 'performed' | 'hasUncommittedChanges' | 'hasUntrackedFiles'>;
+
+async function computeUnpublishedCommits(
+  services: AppServices,
+  pane: Session,
+  ctx: NonNullable<ReturnType<AppServices['sessionManager']['getProjectContext']>>,
+): Promise<ArchiveCommitEvidence> {
+  const upstream = await services.worktreeManager.getUpstream(pane.worktreePath, ctx.commandRunner);
+  let upstreamGone = false;
+  if (upstream) {
+    const remote = await resolveUpstreamRemote(pane.worktreePath, upstream, ctx.commandRunner);
+    await ctx.commandRunner.execAsync(
+      `git fetch --no-tags --prune ${escapeShellArg(remote)}`,
+      pane.worktreePath,
+      { timeout: 30000 },
+    );
+    // `--prune` deletes the tracking ref when the remote branch was deleted,
+    // which GitHub does after merging a PR. Fall through to the no-upstream path.
+    upstreamGone = !await refExists(pane.worktreePath, upstream, ctx.commandRunner);
+    if (!upstreamGone) {
+      const unpushedCommitDetails = await listCommitsAhead(pane.worktreePath, [upstream], ctx.commandRunner.wslContext);
+      return {
+        hasUpstream: true,
+        upstream,
+        upstreamRefreshed: true,
+        unpushedCommits: unpushedCommitDetails.length,
+        unpushedCommitDetails,
+      };
+    }
+  }
+
+  // No upstream (never pushed, detached HEAD, or the remote branch is gone):
+  // a commit is saved only when a remote-tracking branch or the local base
+  // branch contains it. A stored base that is a commit or revision expression
+  // (`HEAD^0`, a SHA) names no branch, so it proves nothing.
+  const baseBranch = `refs/heads/${await services.worktreeManager.getSessionLocalBaseBranch(pane, ctx)}`;
+  const savedRefs = await isBranchRef(pane.worktreePath, baseBranch, ctx.commandRunner) ? ['--remotes', baseBranch] : ['--remotes'];
+  const unpushedCommitDetails = await listCommitsAhead(pane.worktreePath, savedRefs, ctx.commandRunner.wslContext);
+  // A squash or rebase merge leaves those commits outside the base branch.
+  // A merged PR whose head is exactly HEAD proves they reached the remote.
+  const mergedViaPr = unpushedCommitDetails.length > 0
+    ? await findMergedPullRequestForHead(pane.worktreePath, ctx.commandRunner)
+    : undefined;
+  return {
+    hasUpstream: Boolean(upstream),
+    upstream: upstream ?? undefined,
+    upstreamRefreshed: Boolean(upstream),
+    upstreamGone: upstreamGone || undefined,
+    unpushedCommits: mergedViaPr ? 0 : unpushedCommitDetails.length,
+    unpushedCommitDetails: mergedViaPr ? [] : unpushedCommitDetails,
+    mergedViaPr,
+  };
+}
+
+/** Whether `ref` is exactly an existing ref, not a revision expression that resolves to a commit. */
+async function isBranchRef(worktreePath: string, ref: string, commandRunner: CommandRunner): Promise<boolean> {
+  try {
+    await commandRunner.execFile('git', ['show-ref', '--verify', '--quiet', ref], worktreePath, { silent: true, timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -4287,12 +4298,11 @@ function isArchiveCleanupOk(worktreeCleanup: RunpaneWorktreeCleanupState): boole
 
 /**
  * `runpane panes archive --session <id|name> --merged`: archives every Pane
- * associated with the Session whose work is already safe on the remote (clean
- * and pushed, or merged via a PR whose head is HEAD) and whose PR is not still
- * open. A Pane with an open PR is skipped as `pr-open`: 1 feature = 1 worktree
- * = 1 branch = 1 Pane, and its later review, fix and QA tabs still need the
- * worktree. Everything else is skipped with the same block code a single
- * archive would report.
+ * associated with the Session whose PR is confirmed merged and whose worktree
+ * holds no unsaved work. Any other PR state is skipped with its reason, which
+ * also protects a worker that pushed but has not opened its PR yet. The PR is
+ * looked up first, so the local safety check runs last, right before removal;
+ * anything it blocks is skipped with the same block code a single archive uses.
  */
 async function archiveSessionPanes(
   services: AppServices,
@@ -4323,6 +4333,12 @@ async function archiveSessionPanes(
     try {
       await assertRemovableWorktree(services, pane, removeWorktree);
       const removesWorktree = removesPaneWorktree(pane, removeWorktree);
+      const pr = await findPrStatusForPane(services, paneId);
+      const prSkip = describeUnmergedPr(pr, paneId, Boolean(request.dryRun));
+      if (prSkip) {
+        items.push({ ...base, outcome: 'skipped', skipped: prSkip, pr });
+        continue;
+      }
       // Evaluate every Pane, including adopted ones that keep their worktree:
       // --merged selects by evidence, not by what archiving deletes.
       const safetyCheck = await computeArchiveSafety(services, pane);
@@ -4332,25 +4348,14 @@ async function archiveSessionPanes(
         items.push({
           ...base,
           outcome: 'skipped',
-          skipped: { code: blockCode, message: describeArchiveBlock(blockCode, safetyCheck) },
-          safetyCheck,
-        });
-        continue;
-      }
-      const prStatus = await findPrStatusForPane(services, paneId);
-      if (prStatus.state !== 'none') {
-        items.push({
-          ...base,
-          outcome: 'skipped',
-          skipped: prStatus.state === 'open'
-            ? { code: 'pr-open', message: `PR #${prStatus.number} is still open; keep the Pane for its review, fix and QA tabs until it merges or closes.` }
-            : { code: 'pr-status-unknown', message: `${prStatus.reason} Kept the Pane; check its PR and archive it by --pane once the PR has merged or closed.` },
+          skipped: { code: blockCode, message: describeBulkArchiveBlock(blockCode, safetyCheck, paneId, Boolean(request.dryRun)) },
+          pr,
           safetyCheck,
         });
         continue;
       }
       if (request.dryRun) {
-        items.push({ ...base, outcome: 'would-archive', safetyCheck });
+        items.push({ ...base, outcome: 'would-archive', pr, safetyCheck });
         continue;
       }
       const cleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, removesWorktree);
@@ -4359,6 +4364,7 @@ async function archiveSessionPanes(
         ...base,
         outcome: cleanupOk ? 'archived' : 'failed',
         error: cleanupOk ? undefined : 'Pane was archived but its worktree could not be removed.',
+        pr,
         safetyCheck,
         ...cleanup,
       });
@@ -4401,16 +4407,11 @@ async function resolveUpstreamRemote(
 
 const PR_STATUS_TIMEOUT_MS = 20_000;
 
-type PanePrStatus =
-  | { state: 'open'; number: number }
-  | { state: 'none' }
-  | { state: 'unknown'; reason: string };
-
 /**
- * The Pane's PR state, read fresh from GitHub by its branch. Archive is destructive, so a
- * failed, unavailable or slow lookup is `unknown`, never "no open PR".
+ * The Pane's PR state by its branch, after dropping cached PR results. A failed,
+ * unavailable or slow lookup is `unknown`, which a `--merged` sweep skips.
  */
-async function findPrStatusForPane(services: AppServices, paneId: string): Promise<PanePrStatus> {
+async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
   const gitStatus = services.gitStatusManager;
   try {
     const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
@@ -4418,13 +4419,40 @@ async function findPrStatusForPane(services: AppServices, paneId: string): Promi
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), PR_STATUS_TIMEOUT_MS); });
     const lookup = await Promise.race([gitStatus.lookupPrForPane(paneId), timeout]).finally(() => clearTimeout(timer));
-    if (lookup === 'timeout') return { state: 'unknown', reason: 'GitHub did not answer in time.' };
-    if (!lookup) return { state: 'none' };
-    if (!lookup.ok) return { state: 'unknown', reason: 'GitHub could not be reached.' };
-    if (lookup.pr?.prState === 'OPEN' && lookup.pr.prNumber !== undefined) return { state: 'open', number: lookup.pr.prNumber };
-    return { state: 'none' };
+    if (lookup === 'timeout') return { state: 'unknown', reason: 'GitHub did not answer within 20 seconds.' };
+    if (!lookup) return { state: 'unknown', reason: 'The Pane\'s branch could not be read.' };
+    if (!lookup.ok) {
+      const detail = lookup.error instanceof Error ? ` (${lookup.error.message})` : '';
+      return { state: 'unknown', reason: `GitHub could not be reached${detail}.` };
+    }
+    const { prNumber, prState } = lookup.pr ?? {};
+    if (prNumber === undefined) return { state: 'none' };
+    if (prState === 'MERGED') return { state: 'merged', number: prNumber };
+    if (prState === 'CLOSED') return { state: 'closed', number: prNumber };
+    return { state: 'open', number: prNumber };
   } catch {
     return { state: 'unknown', reason: 'The PR lookup failed.' };
+  }
+}
+
+/** Why a `--merged` sweep keeps this Pane, or undefined when its PR merged. */
+function describeUnmergedPr(
+  pr: RunpanePaneArchivePrStatus,
+  paneId: string,
+  dryRun: boolean,
+): { code: RunpanePaneArchiveBulkSkipCode; message: string } | undefined {
+  const kept = dryRun ? 'Would keep the Pane' : 'Kept the Pane';
+  switch (pr.state) {
+    case 'merged':
+      return undefined;
+    case 'open':
+      return { code: 'pr-open', message: `PR #${pr.number} is still open. ${kept} for its review, fix and QA tabs; rerun the sweep after the PR merges.` };
+    case 'closed':
+      return { code: 'pr-not-merged', message: `PR #${pr.number} was closed without merging. ${kept}; if the work is abandoned, archive it with \`runpane panes archive --pane ${paneId}\`.` };
+    case 'none':
+      return { code: 'pr-not-merged', message: `The Pane's branch has no PR yet. ${kept}; rerun the sweep after its PR merges, or archive it with \`runpane panes archive --pane ${paneId}\` if it needs no PR.` };
+    case 'unknown':
+      return { code: 'pr-status-unknown', message: `The PR state is unknown: ${pr.reason} ${kept}; rerun the sweep once GitHub answers, or check the PR and archive it with \`runpane panes archive --pane ${paneId}\`.` };
   }
 }
 
@@ -4442,6 +4470,25 @@ function classifyArchiveBlock(check: RunpanePaneArchiveSafetyCheck, applicable: 
   if (dirty) return 'uncommitted-changes';
   if (unpushed) return 'unpushed-commits';
   return undefined;
+}
+
+/** A sweep cannot take --force, so its next step is to save the work or archive the Pane by itself. */
+function describeBulkArchiveBlock(code: RunpanePaneArchiveBlockCode, check: RunpanePaneArchiveSafetyCheck, paneId: string, dryRun: boolean): string {
+  const kept = dryRun ? 'Would keep the Pane' : 'Kept the Pane';
+  const discard = `\`runpane panes archive --pane ${paneId} --force\``;
+  const unpushedCount = check.unpushedCommits ?? 0;
+  const unpushedPhrase = unpushedCount === 1 ? '1 commit' : `${unpushedCount} commits`;
+  switch (code) {
+    case 'uncommitted-and-unpushed':
+      return `The worktree has uncommitted or untracked changes and ${unpushedPhrase} on no remote or base branch. ${kept}, since removing the worktree would lose that work. Commit and push it, then rerun the sweep; to discard it instead, run ${discard}.`;
+    case 'uncommitted-changes':
+      return `The worktree has uncommitted or untracked changes. ${kept}, since removing the worktree would lose them. Commit and push them, then rerun the sweep; to discard them instead, run ${discard}.`;
+    case 'unpushed-commits':
+      return `The worktree has ${unpushedPhrase} on no remote or base branch. ${kept}, since removing the worktree would lose them. Push them, then rerun the sweep; to discard them instead, run ${discard}.`;
+    case 'status-unknown':
+    default:
+      return `Git could not confirm the worktree's work is saved (${check.reason ?? 'unknown error'}; for example the fetch failed or the worktree is unreadable). ${kept}. Fix the git check, for example by restoring network access, then rerun the sweep.`;
+  }
 }
 
 function describeArchiveBlock(code: RunpanePaneArchiveBlockCode, check: RunpanePaneArchiveSafetyCheck): string {

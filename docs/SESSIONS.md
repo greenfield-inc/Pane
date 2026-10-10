@@ -282,14 +282,24 @@ create`, check the item's `association.ok` right away. Keep a Pane attached thro
 completion. Archiving preserves the association.
 
 To close out finished work, `runpane panes archive --session <id|name> --merged
-[--remove-worktree] [--dry-run] --yes --json` archives every associated Pane
-whose work is clean and pushed, or whose branch was merged through a pull
-request whose head is the Pane's `HEAD`, and whose PR is not still open. A
-Pane whose PR is open is skipped as `pr-open`, because its review, fix and QA
-tabs still need the worktree; when GitHub can't confirm the PR state, the Pane
-is kept as `pr-status-unknown`. Every other Pane is skipped with a reason
-(`skipped.code`). `--remove-worktree` also removes adopted worktrees;
-local branches are always kept. Run it with `--dry-run` first.
+[--remove-worktree] [--dry-run] --yes --json` archives each associated Pane
+when both hold:
+
+- **Its PR is merged.** Pane looks the PR up by the Pane's branch on GitHub
+  (`pr`). An open PR is skipped as `pr-open`, because its review, fix and QA
+  tabs still need the worktree. No PR or a PR closed without merging is
+  skipped as `pr-not-merged`, so a worker that has pushed but not opened its
+  PR keeps its Pane. A PR state GitHub can't confirm is skipped as
+  `pr-status-unknown`.
+- **Its worktree holds no unsaved work.** It has no uncommitted or untracked
+  changes, and every commit is on its upstream after a fresh `git fetch`, or,
+  without an upstream, on a remote-tracking branch or the base branch. A
+  failed fetch or unreadable worktree is skipped as `status-unknown`. This
+  check runs after the PR lookup, right before the worktree is removed.
+
+Every skipped Pane has a `skipped.code` and a message with the next step.
+`--remove-worktree` also removes adopted worktrees; local branches are always
+kept. Run it with `--dry-run` first.
 
 Before mutating, use `runpane agent-context --command 'sessions associate'
 --json` to confirm the wrapper supports the command. If an older global CLI
