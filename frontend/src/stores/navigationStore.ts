@@ -42,6 +42,12 @@ interface NavigationState {
   expandProject: (projectId: number) => number[] | null;
   registerProjectIds: (projectIds: number[]) => number[] | null;
 
+  // Sessions whose Pane rows the sidebar hides. Kept here so the choice
+  // outlives the sidebar remounting between its full and compact layouts.
+  collapsedSessions: Set<string>;
+  hydrateCollapsedSessions: (sessionIds: string[]) => void;
+  toggleSessionCollapsed: (sessionId: string) => string[];
+
   // Last sidebar section used to enter the active pane. Cmd/Ctrl+Arrow uses
   // this to keep cycling within Pinned after a pinned-row click.
   sidebarNavigationScope: SidebarNavigationScope;
@@ -116,6 +122,18 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     newIds.forEach(id => next.add(id));
     set({ expandedProjects: next });
     return toProjectIdArray(next);
+  },
+
+  collapsedSessions: new Set<string>(),
+  hydrateCollapsedSessions: (sessionIds) => {
+    set({ collapsedSessions: new Set(sessionIds) });
+  },
+  toggleSessionCollapsed: (sessionId) => {
+    const next = new Set(get().collapsedSessions);
+    if (next.has(sessionId)) next.delete(sessionId);
+    else next.add(sessionId);
+    set({ collapsedSessions: next });
+    return Array.from(next);
   },
 
   setActiveView: (view) => set({ activeView: view }),

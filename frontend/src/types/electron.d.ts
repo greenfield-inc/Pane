@@ -421,12 +421,15 @@ interface ElectronAPI {
       pinnedSectionExpanded: boolean;
       repositoriesSectionExpanded: boolean;
       sshHostsSectionExpanded: boolean;
+      sessionsSectionExpanded: boolean;
+      collapsedSessions: string[];
     }>>;
     saveExpanded: (projectIds: number[], folderIds: string[]) => Promise<IPCResponse>;
     saveExpandedProjects: (projectIds: number[]) => Promise<IPCResponse>;
     saveExpandedFolders: (folderIds: string[]) => Promise<IPCResponse>;
     saveSessionSortAscending: (ascending: boolean) => Promise<IPCResponse>;
-    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean) => Promise<IPCResponse>;
+    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions', expanded: boolean) => Promise<IPCResponse>;
+    saveCollapsedSessions: (sessionIds: string[]) => Promise<IPCResponse>;
     getNavigationMemory: (hostId: string | null) => Promise<IPCResponse<HostNavigationMemory | null>>;
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
     getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;

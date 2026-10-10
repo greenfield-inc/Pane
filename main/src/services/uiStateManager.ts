@@ -7,12 +7,13 @@ import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorksp
 import { decodeSessionPanelLayout } from '../../../shared/types/panels';
 import type { SessionPanelLayout } from '../../../shared/types/panels';
 
-type SidebarSection = 'pinned' | 'repositories' | 'sshHosts';
+type SidebarSection = 'pinned' | 'repositories' | 'sshHosts' | 'sessions';
 
 const SIDEBAR_SECTION_KEYS = {
   pinned: 'treeView.pinnedSectionExpanded',
   repositories: 'treeView.repositoriesSectionExpanded',
-  sshHosts: 'treeView.sshHostsSectionExpanded'
+  sshHosts: 'treeView.sshHostsSectionExpanded',
+  sessions: 'treeView.sessionsSectionExpanded'
 } satisfies Record<SidebarSection, string>;
 
 interface ExpandedUiState {
@@ -22,6 +23,8 @@ interface ExpandedUiState {
   pinnedSectionExpanded: boolean;
   repositoriesSectionExpanded: boolean;
   sshHostsSectionExpanded: boolean;
+  sessionsSectionExpanded: boolean;
+  collapsedSessions: string[];
 }
 
 type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteUIState'>;
@@ -48,6 +51,26 @@ class UIStateManager {
     } catch {
       return [];
     }
+  }
+
+  // Session ids are per host too, so each host keeps the Sessions whose Panes are hidden.
+  private collapsedSessionsKey(): string {
+    const hostId = this.getRemoteHostId();
+    return hostId ? `treeView.collapsedSessions@${hostId}` : 'treeView.collapsedSessions';
+  }
+
+  getCollapsedSessions(): string[] {
+    const value = this.db.getUIState(this.collapsedSessionsKey());
+    if (!value) return [];
+    try {
+      return decodeBoundary(JSON.parse(value), boundary.array(boundary.string));
+    } catch {
+      return [];
+    }
+  }
+
+  saveCollapsedSessions(sessionIds: string[]): void {
+    this.db.setUIState(this.collapsedSessionsKey(), JSON.stringify(sessionIds));
   }
 
   getExpandedFolders(): string[] {
@@ -185,7 +208,9 @@ class UIStateManager {
       sessionSortAscending: this.getSessionSortAscending(),
       pinnedSectionExpanded: this.getSidebarSectionExpanded('pinned'),
       repositoriesSectionExpanded: this.getSidebarSectionExpanded('repositories'),
-      sshHostsSectionExpanded: this.getSidebarSectionExpanded('sshHosts')
+      sshHostsSectionExpanded: this.getSidebarSectionExpanded('sshHosts'),
+      sessionsSectionExpanded: this.getSidebarSectionExpanded('sessions'),
+      collapsedSessions: this.getCollapsedSessions()
     };
   }
 
@@ -196,6 +221,8 @@ class UIStateManager {
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.pinned);
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.repositories);
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sshHosts);
+    this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sessions);
+    this.db.deleteUIState('treeView.collapsedSessions');
   }
 }
 

@@ -27,6 +27,23 @@ describe('UIStateManager expanded repositories', () => {
   });
 });
 
+describe('UIStateManager collapsed Sessions', () => {
+  it('keeps each host’s collapsed Sessions separate from this computer’s', () => {
+    let remoteHostId: string | null = null;
+    const manager = new UIStateManager(createUiStateDb(), () => remoteHostId);
+
+    manager.saveCollapsedSessions(['local-session']);
+    remoteHostId = 'host-b';
+    expect(manager.getExpandedState().collapsedSessions).toEqual([]);
+    manager.saveCollapsedSessions(['remote-session']);
+
+    remoteHostId = null;
+    expect(manager.getExpandedState().collapsedSessions).toEqual(['local-session']);
+    remoteHostId = 'host-b';
+    expect(manager.getExpandedState().collapsedSessions).toEqual(['remote-session']);
+  });
+});
+
 describe('UIStateManager host navigation memory', () => {
   it('keeps each host’s remembered location separate from this computer’s', () => {
     const manager = new UIStateManager(createUiStateDb());

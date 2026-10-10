@@ -59,6 +59,8 @@ interface ProjectSessionListProps {
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
   sshHostsSectionExpanded: boolean;
   onSshHostsSectionExpandedChange: (expanded: boolean) => void;
+  sessionsSectionExpanded: boolean;
+  onSessionsSectionExpandedChange: (expanded: boolean) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -75,6 +77,8 @@ export function ProjectSessionList({
   onRepositoriesSectionExpandedChange,
   sshHostsSectionExpanded,
   onSshHostsSectionExpandedChange,
+  sessionsSectionExpanded,
+  onSessionsSectionExpandedChange,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -487,6 +491,8 @@ export function ProjectSessionList({
           pinnedPaneRows={pinnedPaneRows}
           pinnedSectionExpanded={pinnedSectionExpanded}
           onPinnedSectionExpandedChange={onPinnedSectionExpandedChange}
+          sessionsSectionExpanded={sessionsSectionExpanded}
+          onSessionsSectionExpandedChange={onSessionsSectionExpandedChange}
         />
 
         <SshHostsSection expanded={sshHostsSectionExpanded} onExpandedChange={onSshHostsSectionExpandedChange} />

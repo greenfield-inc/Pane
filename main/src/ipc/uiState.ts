@@ -90,9 +90,24 @@ export function registerUIStateHandlers(services: AppServices) {
     }
   });
 
-  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean) => {
+  ipcMain.handle('ui-state:save-collapsed-sessions', async (_, sessionIds: string[]) => {
     try {
-      if (section !== 'pinned' && section !== 'repositories' && section !== 'sshHosts') {
+      uiStateManager.saveCollapsedSessions(sessionIds);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving collapsed Sessions:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions', expanded: boolean) => {
+    try {
+      if (section !== 'pinned' && section !== 'repositories' && section !== 'sshHosts' && section !== 'sessions') {
         throw new Error(`Invalid sidebar section: ${section}`);
       }
 

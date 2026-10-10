@@ -112,7 +112,7 @@ interface SidebarProps {
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
 const REMOTE_DESKTOP_TOOLTIP = 'Use Remote Desktop to access the host device for Electron apps, native windows, and UI running on the remote machine.';
-type SidebarSection = 'pinned' | 'repositories' | 'sshHosts';
+type SidebarSection = 'pinned' | 'repositories' | 'sshHosts' | 'sessions';
 const COMPACT_RAIL_BUTTON = 'relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-2 focus:ring-interactive';
 const COMPACT_RAIL_IDLE = 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary';
 const COMPACT_RAIL_ACTIVE = 'bg-surface-selected text-text-primary';
@@ -138,9 +138,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     pinned: true,
     repositories: true,
     sshHosts: true,
+    sessions: true,
   });
   const { connectionState: remoteConnectionState, hostState: remoteHostState } = useRemoteRuntimeState();
   const hydrateExpandedProjects = useNavigationStore(s => s.hydrateExpandedProjects);
+  const hydrateCollapsedSessions = useNavigationStore(s => s.hydrateCollapsedSessions);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,10 +154,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         if (result.success && result.data) {
           setSessionSortAscending(result.data.sessionSortAscending ?? true);
           hydrateExpandedProjects(result.data.expandedProjects ?? []);
+          hydrateCollapsedSessions(result.data.collapsedSessions ?? []);
           setSidebarSectionExpansion({
             pinned: result.data.pinnedSectionExpanded ?? true,
             repositories: result.data.repositoriesSectionExpanded ?? true,
             sshHosts: result.data.sshHostsSectionExpanded ?? true,
+            sessions: result.data.sessionsSectionExpanded ?? true,
           });
         }
       } catch (error) {
@@ -168,7 +172,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     return () => {
       cancelled = true;
     };
-  }, [hydrateExpandedProjects]);
+  }, [hydrateCollapsedSessions, hydrateExpandedProjects]);
 
   const toggleSessionSortOrder = async () => {
     const newValue = !sessionSortAscending;
@@ -204,6 +208,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
   const handleSshHostsSectionExpandedChange = useCallback((expanded: boolean) => {
     handleSidebarSectionExpandedChange('sshHosts', expanded);
+  }, [handleSidebarSectionExpandedChange]);
+
+  const handleSessionsSectionExpandedChange = useCallback((expanded: boolean) => {
+    handleSidebarSectionExpandedChange('sessions', expanded);
   }, [handleSidebarSectionExpandedChange]);
 
 
@@ -794,6 +802,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             onRepositoriesSectionExpandedChange={handleRepositoriesSectionExpandedChange}
             sshHostsSectionExpanded={sidebarSectionExpansion.sshHosts}
             onSshHostsSectionExpandedChange={handleSshHostsSectionExpandedChange}
+            sessionsSectionExpanded={sidebarSectionExpansion.sessions}
+            onSessionsSectionExpandedChange={handleSessionsSectionExpandedChange}
             showRemoteDesktopLink={showRemoteDesktopLink}
             onRemoteDesktopClick={handleOpenRemoteDesktop}
             remoteDesktopTooltip={REMOTE_DESKTOP_TOOLTIP}

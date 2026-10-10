@@ -32,6 +32,8 @@ interface OrchestrationSessionNavProps {
   pinnedPaneRows?: ReactNode;
   pinnedSectionExpanded?: boolean;
   onPinnedSectionExpandedChange?: (expanded: boolean) => void;
+  sessionsSectionExpanded?: boolean;
+  onSessionsSectionExpandedChange?: (expanded: boolean) => void;
 }
 
 interface SessionContextMenuState {
@@ -76,6 +78,8 @@ export function OrchestrationSessionNav({
   pinnedPaneRows = null,
   pinnedSectionExpanded,
   onPinnedSectionExpandedChange,
+  sessionsSectionExpanded,
+  onSessionsSectionExpandedChange,
 }: OrchestrationSessionNavProps) {
   const sessions = useOrchestrationSessionStore(state => state.sessions);
   const activeSessions = useMemo(
@@ -101,8 +105,9 @@ export function OrchestrationSessionNav({
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const [showCreate, setShowCreate] = useState(false);
-  const [sessionExpansionOverrides, setSessionExpansionOverrides] = useState<Map<string, boolean>>(new Map());
-  const [sectionExpanded, setSectionExpanded] = useState(true);
+  const collapsedSessions = useNavigationStore(state => state.collapsedSessions);
+  const toggleSessionCollapsed = useNavigationStore(state => state.toggleSessionCollapsed);
+  const [localSectionExpanded, setLocalSectionExpanded] = useState(true);
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -112,6 +117,8 @@ export function OrchestrationSessionNav({
   const compactError = actionError ?? sessionError;
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
+  const sectionExpanded = sessionsSectionExpanded ?? localSectionExpanded;
+  const setSectionExpanded = onSessionsSectionExpandedChange ?? setLocalSectionExpanded;
 
   const createSession = useCallback(async ({ name: requestedName, ...input }: SessionCreateRequest) => {
     await load();
@@ -163,13 +170,12 @@ export function OrchestrationSessionNav({
     }
   }, [navigateToPaneChat, select, setActiveSession]);
 
-  const toggleSessionExpanded = useCallback((sessionId: string, expanded: boolean) => {
-    setSessionExpansionOverrides(current => {
-      const next = new Map(current);
-      next.set(sessionId, !expanded);
-      return next;
+  const toggleSessionExpanded = useCallback((sessionId: string) => {
+    const collapsedSessionIds = toggleSessionCollapsed(sessionId);
+    void window.electronAPI.uiState.saveCollapsedSessions(collapsedSessionIds).catch(error => {
+      console.error('Failed to save collapsed Sessions:', error);
     });
-  }, []);
+  }, [toggleSessionCollapsed]);
 
   const openSessionMenu = useCallback((session: OrchestrationSessionRecord, x: number, y: number, trigger?: HTMLElement) => {
     setSessionMenu({
@@ -278,7 +284,7 @@ export function OrchestrationSessionNav({
       : [];
     // Rows the attention inbox hides still count toward the Session's activity.
     const visiblePaneIds = renderPane ? visibleAssociations.map(association => association.paneId) : [];
-    const expanded = sessionExpansionOverrides.get(session.id) ?? paneRows.length > 0;
+    const expanded = paneRows.length > 0 && !collapsedSessions.has(session.id);
     const isLegacy = session.id === LEGACY_ORCHESTRATION_SESSION_ID;
     const label = session.name || 'Pane Chat';
     const rowId = isLegacy
@@ -296,7 +302,7 @@ export function OrchestrationSessionNav({
           {paneRows.length > 0 ? (
             <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} Panes`}
               aria-expanded={expanded} aria-controls={panesId}
-              onClick={() => toggleSessionExpanded(session.id, expanded)}
+              onClick={() => toggleSessionExpanded(session.id)}
               className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
               {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
@@ -463,7 +469,7 @@ export function OrchestrationSessionNav({
             type="button"
             aria-expanded={sectionExpanded}
             aria-controls="orchestration-sessions-list"
-            onClick={() => setSectionExpanded(current => !current)}
+            onClick={() => setSectionExpanded(!sectionExpanded)}
             className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary"
           >
             <span className="flex min-w-0 items-center gap-1.5">
