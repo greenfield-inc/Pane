@@ -24,6 +24,7 @@ import { panelManager as terminalPanelStore } from '../test/setup';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
+import { WorktreeManager } from '../services/worktreeManager';
 import { removeWorktreeViaTrash, waitForPendingWorktreeTrash } from '../services/worktreeTrash';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
@@ -225,9 +226,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
         timestamp: new Date('2026-01-01T00:02:00.000Z'),
       }]),
       getProjectContext: vi.fn(() => ({
-        commandRunner: {
-          wslContext: null,
-        },
+        commandRunner: new CommandRunner({ path: os.tmpdir() }),
       })),
       getProjectContextByProjectId: vi.fn(() => ({
         commandRunner: {
@@ -252,7 +251,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     spotlightManager: {},
     worktreeManager: {
       getUpstream: vi.fn(async () => null),
-      getSessionComparisonBranch: vi.fn(async () => 'main'),
+      getSessionLocalBaseBranch: vi.fn(async () => 'main'),
     },
     gitStatusManager: {
       getGitStatus: vi.fn(async () => ({
@@ -6616,7 +6615,7 @@ describe('runpane IPC handlers', () => {
           // SAFETY: This test fixture intentionally supplies the minimal worktree manager surface exercised by archive.
           worktreeManager: {
             getUpstream: vi.fn(async () => null),
-            getSessionComparisonBranch: vi.fn(async () => 'main'),
+            getSessionLocalBaseBranch: vi.fn(async () => 'main'),
           } as never,
           archiveProgressManager,
         } as never);
@@ -6720,8 +6719,8 @@ describe('runpane IPC handlers', () => {
             name: 'refactor',
             associations: [{ paneId: session.id, panelIds: [], attachedAt: '2026-01-01T00:00:00.000Z' }],
           }));
-          // SAFETY: This test fixture supplies the Sessions manager method and the PR lookup (no PR) the bulk archive calls.
-          const bulkServices: AppServices = { ...services, orchestrationSessionManager: { get } as never, gitStatusManager: { lookupPrForPane: vi.fn(async () => ({ ok: true })), invalidatePrCache: vi.fn() } as never };
+          // SAFETY: This test fixture supplies the Sessions manager method and the PR lookup (merged) the bulk archive calls.
+          const bulkServices: AppServices = { ...services, orchestrationSessionManager: { get } as never, gitStatusManager: { lookupPrForPane: vi.fn(async () => ({ ok: true, pr: { prNumber: 42, prState: 'MERGED' } })), invalidatePrCache: vi.fn() } as never };
           const bulkRegistry = createRegistry(bulkServices);
           registerSessionsDeleteStub(bulkRegistry, bulkServices);
           await expect(bulkRegistry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, dryRun: true }])).resolves.toMatchObject({
@@ -6731,6 +6730,7 @@ describe('runpane IPC handlers', () => {
             items: [{
               paneId: session.id,
               outcome: 'would-archive',
+              pr: { state: 'merged', number: 42 },
               safetyCheck: { performed: true, mergedViaPr: { number: 42, headOid: head }, worktreeWillRemain: true },
             }],
           });
@@ -6792,7 +6792,7 @@ describe('runpane IPC handlers', () => {
           // SAFETY: This test fixture intentionally supplies the minimal worktree manager surface exercised by archive.
           worktreeManager: {
             getUpstream: vi.fn(async () => upstream),
-            getSessionComparisonBranch: vi.fn(async () => 'main'),
+            getSessionLocalBaseBranch: vi.fn(async () => 'main'),
           } as never,
           archiveProgressManager: new ArchiveProgressManager(),
         } as never);
@@ -6920,7 +6920,10 @@ describe('runpane IPC handlers', () => {
     });
 
     describe('--session --merged', () => {
-      function createBulkServices(panes: Session[], associations: string[], lookupPr: AppServices['gitStatusManager']['lookupPrForPane'] = vi.fn(async () => ({ ok: true as const }))) {
+      type PrLookup = Awaited<ReturnType<AppServices['gitStatusManager']['lookupPrForPane']>>;
+      const merged: PrLookup = { ok: true, pr: { prNumber: 7, prState: 'MERGED' } };
+
+      function createBulkServices(panes: Session[], associations: string[], lookupPr: (paneId: string) => Promise<PrLookup> = async () => merged) {
         const byId = new Map(panes.map(pane => [pane.id, pane]));
         const get = vi.fn(async () => ({
           id: 'orchestration-1',
@@ -6933,34 +6936,98 @@ describe('runpane IPC handlers', () => {
           sessionManager: {
             ...createServices().sessionManager,
             getSession: vi.fn((paneId: string) => byId.get(paneId)),
-            getProjectContext: vi.fn(() => ({ commandRunner: new CommandRunner({ path: os.tmpdir() }) })),
+          } as never,
+          // SAFETY: This test fixture reads each worktree's real upstream; the base branch is main.
+          worktreeManager: {
+            getUpstream: vi.fn(async (worktreePath: string) => {
+              try {
+                return execFileSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: worktreePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+              } catch {
+                return null;
+              }
+            }),
+            getSessionLocalBaseBranch: vi.fn(async () => 'main'),
           } as never,
           // SAFETY: This test fixture intentionally supplies the minimal Sessions manager surface exercised by archive.
           orchestrationSessionManager: { get } as never,
-          // SAFETY: This test fixture supplies the PR lookup the bulk archive consults; by default no Pane has a PR.
-          gitStatusManager: { lookupPrForPane: lookupPr, invalidatePrCache: vi.fn() } as never,
+          // SAFETY: This test fixture supplies the PR lookup the bulk archive consults; by default every PR merged.
+          gitStatusManager: { lookupPrForPane: vi.fn(lookupPr), invalidatePrCache: vi.fn() } as never,
           archiveProgressManager: new ArchiveProgressManager(),
         } as never);
         return { services, get };
       }
 
-      function createBulkPanes(): Session[] {
-        const cleanRepo = createTempGitRepo('bulk-clean');
-        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: cleanRepo, stdio: 'ignore' });
-        const dirtyRepo = createTempGitRepo('bulk-dirty');
-        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: dirtyRepo, stdio: 'ignore' });
-        fs.writeFileSync(path.join(dirtyRepo, 'draft.txt'), 'unsaved work');
-        return [
-          { ...session, id: 'pane-clean', name: 'clean', worktreePath: cleanRepo },
-          { ...session, id: 'pane-dirty', name: 'dirty', worktreePath: dirtyRepo },
+      /** A repository whose main is on a bare remote, with one linked worktree per Pane. */
+      function createRemoteRepo() {
+        const repoPath = createTempGitRepo('bulk-repo');
+        const remotePath = path.join(path.dirname(repoPath), 'bulk-remote.git');
+        execFileSync('git', ['init', '--bare', '-q', remotePath], { stdio: 'ignore' });
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+        execFileSync('git', ['remote', 'add', 'origin', remotePath], { cwd: repoPath, stdio: 'ignore' });
+        execFileSync('git', ['push', '-q', '-u', 'origin', 'main'], { cwd: repoPath, stdio: 'ignore' });
+        const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+        const pane = (id: string, setup: (worktreePath: string) => void = () => {}): Session => {
+          const worktreePath = path.join(path.dirname(repoPath), id);
+          git(repoPath, 'worktree', 'add', '-q', '-b', id, worktreePath);
+          git(worktreePath, 'commit', '--allow-empty', '-m', `${id} work`);
+          git(worktreePath, 'push', '-q', '-u', 'origin', id);
+          setup(worktreePath);
+          return { ...session, id, name: id, worktreePath };
+        };
+        return { repoPath, git, pane };
+      }
+
+      it('archives a Pane only when its PR merged and its pushed worktree is clean', async () => {
+        const { git, pane } = createRemoteRepo();
+        const panes = [
+          pane('pane-merged'),
+          pane('pane-open'),
+          pane('pane-no-pr'),
+          pane('pane-closed'),
+          pane('pane-unknown'),
+          pane('pane-dirty', worktreePath => fs.writeFileSync(path.join(worktreePath, 'draft.txt'), 'unsaved work')),
+          pane('pane-unpushed', worktreePath => git(worktreePath, 'commit', '--allow-empty', '-m', 'local only')),
+        ];
+        const lookups = new Map<string, PrLookup>([
+          ['pane-open', { ok: true, pr: { prNumber: 2, prState: 'OPEN' } }],
+          ['pane-no-pr', { ok: true }],
+          ['pane-closed', { ok: true, pr: { prNumber: 4, prState: 'CLOSED' } }],
+          ['pane-unknown', { ok: false, error: new Error('gh auth') }],
+        ]);
+        const { services } = createBulkServices(panes, panes.map(p => p.id), async paneId => lookups.get(paneId) ?? merged);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+
+        expect(sessionsDelete).toHaveBeenCalledTimes(1);
+        expect(sessionsDelete).toHaveBeenCalledWith('pane-merged');
+        expect(result).toMatchObject({
+          ok: true,
+          archived: 1,
+          skipped: 6,
+          items: [
+            { paneId: 'pane-merged', outcome: 'archived', pr: { state: 'merged', number: 7 }, safetyCheck: { hasUpstream: true, unpushedCommits: 0 } },
+            { paneId: 'pane-open', outcome: 'skipped', pr: { state: 'open', number: 2 }, skipped: { code: 'pr-open', message: 'PR #2 is still open. Kept the Pane for its review, fix and QA tabs; rerun the sweep after the PR merges.' } },
+            { paneId: 'pane-no-pr', outcome: 'skipped', pr: { state: 'none' }, skipped: { code: 'pr-not-merged' } },
+            { paneId: 'pane-closed', outcome: 'skipped', pr: { state: 'closed', number: 4 }, skipped: { code: 'pr-not-merged' } },
+            { paneId: 'pane-unknown', outcome: 'skipped', pr: { state: 'unknown' }, skipped: { code: 'pr-status-unknown', message: expect.stringContaining('gh auth') } },
+            { paneId: 'pane-dirty', outcome: 'skipped', skipped: { code: 'uncommitted-changes', message: expect.stringContaining('runpane panes archive --pane pane-dirty --force') } },
+            { paneId: 'pane-unpushed', outcome: 'skipped', skipped: { code: 'unpushed-commits' }, safetyCheck: { unpushedCommits: 1 } },
+          ],
+        });
+        expect(JSON.stringify(result)).not.toContain('Rerun with --force');
+      });
+
+      it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
+        const { pane } = createRemoteRepo();
+        const panes = [
+          pane('pane-merged'),
+          pane('pane-no-pr'),
           { ...session, id: 'pane-archived', name: 'archived', archived: true },
           { ...session, id: 'pane-main', name: 'main', isMainRepo: true },
         ];
-      }
-
-      it('dry-runs the Session archive and reports a reason for every skipped Pane', async () => {
-        const panes = createBulkPanes();
-        const { services, get } = createBulkServices(panes, ['pane-clean', 'pane-dirty', 'pane-archived', 'pane-main', 'pane-missing', 'pane-clean']);
+        const { services, get } = createBulkServices(panes, ['pane-merged', 'pane-no-pr', 'pane-archived', 'pane-main', 'pane-missing', 'pane-merged'], async paneId => paneId === 'pane-no-pr' ? { ok: true } : merged);
         const registry = createRegistry(services);
         const sessionsDelete = registerSessionsDeleteStub(registry, services);
 
@@ -6978,8 +7045,8 @@ describe('runpane IPC handlers', () => {
           skipped: 4,
           failed: 0,
           items: [
-            { paneId: 'pane-clean', name: 'clean', outcome: 'would-archive', safetyCheck: { performed: true, unpushedCommits: 0 } },
-            { paneId: 'pane-dirty', outcome: 'skipped', skipped: { code: 'uncommitted-changes' }, safetyCheck: { hasUntrackedFiles: true } },
+            { paneId: 'pane-merged', name: 'pane-merged', outcome: 'would-archive', pr: { state: 'merged', number: 7 } },
+            { paneId: 'pane-no-pr', outcome: 'skipped', skipped: { code: 'pr-not-merged', message: expect.stringMatching(/^The Pane's branch has no PR yet\. Would keep the Pane;/) } },
             { paneId: 'pane-archived', outcome: 'skipped', skipped: { code: 'already-archived' } },
             { paneId: 'pane-main', outcome: 'skipped', skipped: { code: 'main-repo' } },
             { paneId: 'pane-missing', outcome: 'skipped', skipped: { code: 'missing-pane' } },
@@ -6987,48 +7054,75 @@ describe('runpane IPC handlers', () => {
         });
       });
 
-      it('keeps a clean Pane whose PR is still open, since its review, fix and QA tabs need the worktree', async () => {
-        const panes = createBulkPanes();
-        const { services } = createBulkServices(panes, ['pane-clean'], vi.fn(async () => ({ ok: true, pr: { prNumber: 51, prState: 'OPEN' } })));
+      it('keeps work written while the PR lookup is in flight', async () => {
+        const { pane } = createRemoteRepo();
+        const racing = pane('pane-racing');
+        const draft = path.join(racing.worktreePath, 'draft.txt');
+        const { services } = createBulkServices([racing], [racing.id], async () => {
+          fs.writeFileSync(draft, 'written during the lookup');
+          return merged;
+        });
         const registry = createRegistry(services);
         const sessionsDelete = registerSessionsDeleteStub(registry, services);
 
         const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
 
         expect(sessionsDelete).not.toHaveBeenCalled();
-        expect(result).toMatchObject({ archived: 0, skipped: 1, items: [{ paneId: 'pane-clean', outcome: 'skipped', skipped: { code: 'pr-open' } }] });
+        expect(fs.existsSync(draft)).toBe(true);
+        expect(result).toMatchObject({ archived: 0, items: [{ paneId: 'pane-racing', outcome: 'skipped', skipped: { code: 'uncommitted-changes' }, safetyCheck: { hasUntrackedFiles: true } }] });
       });
 
-      it('keeps a clean Pane when its PR state cannot be read, rather than treating that as no PR', async () => {
-        const panes = createBulkPanes();
-        const { services } = createBulkServices(panes, ['pane-clean'], vi.fn(async () => ({ ok: false, error: new Error('gh auth') })));
+      it('keeps a detached worktree whose HEAD is the stored start commit but on no remote or base branch', async () => {
+        const { git, pane } = createRemoteRepo();
+        const detached = pane('pane-detached', worktreePath => {
+          git(worktreePath, 'commit', '--allow-empty', '-m', 'unpublished');
+          git(worktreePath, 'checkout', '-q', '--detach');
+        });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: detached.worktreePath, encoding: 'utf8' }).trim();
+        const { services } = createBulkServices([{ ...detached, baseCommit: head }], [detached.id]);
         const registry = createRegistry(services);
         const sessionsDelete = registerSessionsDeleteStub(registry, services);
 
-        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: detached.id }]);
 
         expect(sessionsDelete).not.toHaveBeenCalled();
-        expect(result).toMatchObject({ archived: 0, skipped: 1, items: [{ paneId: 'pane-clean', outcome: 'skipped', skipped: { code: 'pr-status-unknown' } }] });
-      });
-
-      it('archives only the safe Panes of the Session', async () => {
-        const panes = createBulkPanes();
-        const { services } = createBulkServices(panes, ['pane-clean', 'pane-dirty']);
-        const registry = createRegistry(services);
-        const sessionsDelete = registerSessionsDeleteStub(registry, services);
-
-        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
-
-        expect(sessionsDelete).toHaveBeenCalledTimes(1);
-        expect(sessionsDelete).toHaveBeenCalledWith('pane-clean');
         expect(result).toMatchObject({
-          ok: true,
-          archived: 1,
-          skipped: 1,
-          items: [
-            { paneId: 'pane-clean', outcome: 'archived', worktreeCleanup: 'completed' },
-            { paneId: 'pane-dirty', outcome: 'skipped', skipped: { code: 'uncommitted-changes' } },
-          ],
+          ok: false,
+          blocked: { code: 'unpushed-commits', safetyCheck: { hasUpstream: false, unpushedCommits: 1, unpushedCommitDetails: [{ sha: head, subject: 'unpublished' }] } },
+        });
+      });
+
+      it.each([
+        ['its own commit', (head: string) => head],
+        ['a revision expression', () => 'HEAD^0'],
+      ])('keeps a detached worktree whose stored base is %s rather than a branch', async (_label, storedBase) => {
+        const { repoPath, git, pane } = createRemoteRepo();
+        const detached = pane('pane-detached', worktreePath => {
+          git(worktreePath, 'commit', '--allow-empty', '-m', 'unpublished');
+          git(worktreePath, 'checkout', '-q', '--detach');
+        });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: detached.worktreePath, encoding: 'utf8' }).trim();
+        const stored: Session = { ...detached, baseBranch: storedBase(head), baseCommit: head };
+        const commandRunner = new CommandRunner({ path: repoPath });
+        // SAFETY: This test fixture supplies the session surface archive reads; the worktree manager is the real one.
+        const services = createServices({
+          sessionManager: {
+            ...createServices().sessionManager,
+            getSession: vi.fn(() => stored),
+            getProjectContext: vi.fn(() => ({ project: { ...project, path: repoPath }, commandRunner })),
+          } as never,
+          worktreeManager: new WorktreeManager(),
+          archiveProgressManager: new ArchiveProgressManager(),
+        } as never);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: stored.id }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          ok: false,
+          blocked: { code: 'unpushed-commits', safetyCheck: { hasUpstream: false, unpushedCommits: 1, unpushedCommitDetails: [{ sha: head, subject: 'unpublished' }] } },
         });
       });
 

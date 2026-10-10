@@ -142,9 +142,10 @@ export async function fastGetAheadBehind(cwd: string, baseBranch: string, wslCon
   }
 }
 
+/** Commits reachable from HEAD but from none of `excludeRefs` (refs or rev-list options such as `--remotes`). */
 export async function listCommitsAhead(
   cwd: string,
-  baseBranch: string,
+  excludeRefs: string[],
   wslContext?: WSLContext | null,
 ): Promise<GitCommitSummary[]> {
   if (!await directoryExists(cwd, wslContext)) {
@@ -152,7 +153,7 @@ export async function listCommitsAhead(
   }
 
   const output = (await commandExecutor.execFileAsync(
-    'git', ['log', '--format=%H%x00%s', '-z', `${baseBranch}..HEAD`, '--'],
+    'git', ['log', '--format=%H%x00%s', '-z', 'HEAD', '--not', ...excludeRefs, '--'],
     { cwd, silent: true },
     wslContext,
   )).stdout;
@@ -163,7 +164,7 @@ export async function listCommitsAhead(
     const sha = fields[index];
     const subject = fields[index + 1];
     if (!sha || subject === undefined) {
-      throw new Error(`Could not parse commit evidence for ${baseBranch}`);
+      throw new Error(`Could not parse commit evidence against ${excludeRefs.join(' ')}`);
     }
     commits.push({ sha, subject });
   }

@@ -1846,7 +1846,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--merged",
-        "description": "With panes archive --session, archive only Panes that are clean and pushed, or merged via a pull request, and whose PR is not still open (skipped as pr-open)."
+        "description": "With panes archive --session, archive only Panes whose PR is confirmed merged and whose worktree has no uncommitted, untracked or unpushed work. Other Panes are skipped with a reason (pr-open, pr-not-merged, pr-status-unknown, or a local safety code)."
       },
       {
         "name": "--launch",
@@ -9843,6 +9843,7 @@ export const RUNPANE_CONTRACT = {
                       "already-archived",
                       "main-repo",
                       "pr-open",
+                      "pr-not-merged",
                       "pr-status-unknown"
                     ]
                   },
@@ -9854,6 +9855,30 @@ export const RUNPANE_CONTRACT = {
               },
               "error": {
                 "type": "string"
+              },
+              "pr": {
+                "type": "object",
+                "required": [
+                  "state"
+                ],
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "open",
+                      "merged",
+                      "closed",
+                      "none",
+                      "unknown"
+                    ]
+                  },
+                  "number": {
+                    "type": "number"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               },
               "safetyCheck": {
                 "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/safetyCheck"
@@ -11002,7 +11027,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--merged",
             "required": false,
-            "description": "With --session, archive only Panes that are clean and pushed, or merged via a pull request, and whose PR is not still open; skip the rest with a reason (pr-open keeps a Pane whose review, fix and QA tabs still need its worktree)."
+            "description": "With --session, archive only Panes whose PR is confirmed merged and whose worktree has no uncommitted, untracked or unpushed work; skip the rest with a reason and next step. An open PR is skipped as pr-open, no PR or a closed unmerged PR as pr-not-merged, and a PR state GitHub cannot confirm as pr-status-unknown."
           },
           {
             "name": "--yes",
