@@ -4154,11 +4154,11 @@ async function computeUnpublishedCommits(
   }
 
   // No upstream (never pushed, detached HEAD, or the remote branch is gone):
-  // a commit is saved only when a remote-tracking ref or the local base branch
-  // contains it. The Pane's stored start commit proves nothing, since no ref
-  // has to keep it.
-  const baseBranch = await services.worktreeManager.getSessionLocalBaseBranch(pane, ctx);
-  const savedRefs = await refExists(pane.worktreePath, baseBranch, ctx.commandRunner) ? ['--remotes', baseBranch] : ['--remotes'];
+  // a commit is saved only when a remote-tracking branch or the local base
+  // branch contains it. A stored base that is a commit or revision expression
+  // (`HEAD^0`, a SHA) names no branch, so it proves nothing.
+  const baseBranch = `refs/heads/${await services.worktreeManager.getSessionLocalBaseBranch(pane, ctx)}`;
+  const savedRefs = await isBranchRef(pane.worktreePath, baseBranch, ctx.commandRunner) ? ['--remotes', baseBranch] : ['--remotes'];
   const unpushedCommitDetails = await listCommitsAhead(pane.worktreePath, savedRefs, ctx.commandRunner.wslContext);
   // A squash or rebase merge leaves those commits outside the base branch.
   // A merged PR whose head is exactly HEAD proves they reached the remote.
@@ -4174,6 +4174,16 @@ async function computeUnpublishedCommits(
     unpushedCommitDetails: mergedViaPr ? [] : unpushedCommitDetails,
     mergedViaPr,
   };
+}
+
+/** Whether `ref` is exactly an existing ref, not a revision expression that resolves to a commit. */
+async function isBranchRef(worktreePath: string, ref: string, commandRunner: CommandRunner): Promise<boolean> {
+  try {
+    await commandRunner.execFile('git', ['show-ref', '--verify', '--quiet', ref], worktreePath, { silent: true, timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function refExists(worktreePath: string, ref: string, commandRunner: CommandRunner): Promise<boolean> {

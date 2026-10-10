@@ -24,6 +24,7 @@ import { panelManager as terminalPanelStore } from '../test/setup';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
+import { WorktreeManager } from '../services/worktreeManager';
 import { removeWorktreeViaTrash, waitForPendingWorktreeTrash } from '../services/worktreeTrash';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
@@ -6893,7 +6894,7 @@ describe('runpane IPC handlers', () => {
           setup(worktreePath);
           return { ...session, id, name: id, worktreePath };
         };
-        return { git, pane };
+        return { repoPath, git, pane };
       }
 
       it('archives a Pane only when its PR merged and its pushed worktree is clean', async () => {
@@ -7003,6 +7004,40 @@ describe('runpane IPC handlers', () => {
         const sessionsDelete = registerSessionsDeleteStub(registry, services);
 
         const result = await registry.invoke('runpane:panes:archive', [{ paneId: detached.id }]);
+
+        expect(sessionsDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          ok: false,
+          blocked: { code: 'unpushed-commits', safetyCheck: { hasUpstream: false, unpushedCommits: 1, unpushedCommitDetails: [{ sha: head, subject: 'unpublished' }] } },
+        });
+      });
+
+      it.each([
+        ['its own commit', (head: string) => head],
+        ['a revision expression', () => 'HEAD^0'],
+      ])('keeps a detached worktree whose stored base is %s rather than a branch', async (_label, storedBase) => {
+        const { repoPath, git, pane } = createRemoteRepo();
+        const detached = pane('pane-detached', worktreePath => {
+          git(worktreePath, 'commit', '--allow-empty', '-m', 'unpublished');
+          git(worktreePath, 'checkout', '-q', '--detach');
+        });
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: detached.worktreePath, encoding: 'utf8' }).trim();
+        const stored: Session = { ...detached, baseBranch: storedBase(head), baseCommit: head };
+        const commandRunner = new CommandRunner({ path: repoPath });
+        // SAFETY: This test fixture supplies the session surface archive reads; the worktree manager is the real one.
+        const services = createServices({
+          sessionManager: {
+            ...createServices().sessionManager,
+            getSession: vi.fn(() => stored),
+            getProjectContext: vi.fn(() => ({ project: { ...project, path: repoPath }, commandRunner })),
+          } as never,
+          worktreeManager: new WorktreeManager(),
+          archiveProgressManager: new ArchiveProgressManager(),
+        } as never);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ paneId: stored.id }]);
 
         expect(sessionsDelete).not.toHaveBeenCalled();
         expect(result).toMatchObject({
