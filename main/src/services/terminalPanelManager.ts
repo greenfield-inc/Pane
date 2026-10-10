@@ -1924,6 +1924,18 @@ export class TerminalPanelManager extends EventEmitter {
     return this.terminals.get(panelId)?.bracketedPasteMode === true;
   }
   
+  /** Shows a line from Pane itself in the terminal without sending it to the shell. */
+  showNotice(panelId: string, text: string): void {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal || terminal.destroying) return;
+    const data = `\r\n\x1b[36m[Pane]\x1b[0m ${text}\r\n`;
+    // Same three sinks as PTY output: the screen agents read, scrollback, and live viewers.
+    terminal.screenEmulator?.write(data);
+    this.addToScrollback(terminal, data);
+    terminal.outputBuffer += data;
+    this.flushOutputBuffer(terminal);
+  }
+
   writeToTerminal(panelId: string, data: string): void {
     const terminal = this.terminals.get(panelId);
     if (!terminal) {

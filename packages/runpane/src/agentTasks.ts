@@ -71,6 +71,19 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
     timeoutMs: (parsed.timeoutMs ?? 120_000) + (parsed.readyTimeoutMs ?? 30_000) + 10_000,
   });
   const item = created.items[0];
+  if (item?.ok && item.sessionId && item.setupQueue) {
+    const queued = {
+      ok: true,
+      paneId: item.sessionId,
+      name: item.name,
+      worktreePath: item.worktreePath,
+      link: buildPaneLink({ kind: 'pane', id: item.sessionId }),
+      setupQueue: item.setupQueue,
+      next: `Check on it after setup with \`runpane agents status --pane ${item.sessionId}\`.`,
+    };
+    print(parsed, queued, `Created ${queued.name ?? queued.paneId}: ${queued.link}\n${item.setupQueue.message}\n${queued.next}`);
+    return 0;
+  }
   if (!item || !item.ok || !item.sessionId || !item.panelId) {
     const reason = item && 'error' in item ? item.error.message : 'Pane did not report a created panel.';
     throw new Error(`Could not start the agent: ${reason}`);
