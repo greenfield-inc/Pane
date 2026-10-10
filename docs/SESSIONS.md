@@ -239,6 +239,10 @@ expensive, and creating several at once can freeze the machine. An
 orchestrator creates a Pane with `runpane panes create` only when the work's
 branch has no Pane yet: new work, or an existing PR with no Pane.
 
+Pane enforces both: `panes create --branch` refuses a branch another Pane has
+checked out (code `ERR_RUNPANE_BRANCH_HAS_PANE`, naming that Pane), and at most
+2 Panes run setup at once while the rest wait in line.
+
 Every later agent for that feature runs inside its Pane as a new agent tab:
 implementer, reviewer, follow-up reviewer, auditor, fix implementer and QA. Each tab is a
 fresh agent with its own context, sharing the Pane's worktree and branch:

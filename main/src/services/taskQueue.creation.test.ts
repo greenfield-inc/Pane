@@ -196,14 +196,47 @@ describe('pane creation name reuse', () => {
     expect(send).not.toHaveBeenCalledWith('session:creation-failed', expect.anything());
   });
 
-  it('does not re-announce a pane when initialization fails after its creation event', async () => {
+  it('records a setup failure on the announced Pane without re-announcing it', async () => {
     vi.spyOn(queueOptions.sessionManager, 'updateSession').mockImplementationOnce(() => { throw new Error('Status update failed'); });
-    await expect(createPane()).rejects.toThrow('Status update failed');
-    expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledOnce();
-    expect(queueOptions.sessionManager.updateSession).toHaveBeenLastCalledWith(expect.any(String), {
+    const created = await createPane();
+    await expect(queue.waitForSetup(created.id)).rejects.toThrow('Status update failed');
+    await vi.waitFor(() => expect(queueOptions.sessionManager.updateSession).toHaveBeenLastCalledWith(created.id, {
       status: 'error', error: 'Status update failed', statusMessage: 'Failed to initialize pane: Status update failed',
-    });
+    }));
+    expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalledWith('session:creation-failed', expect.anything());
+  });
+
+  it('runs two setups at once and starts a queued one when a slot frees, even after a failure', async () => {
+    const started: string[] = [];
+    const settle: Array<(failure?: Error) => void> = [];
+    vi.spyOn(worktreeFileSyncService, 'syncWorktree').mockImplementation((_source, worktreePath) => {
+      started.push(worktreePath);
+      return new Promise((resolve, reject) => {
+        settle.push(failure => (failure ? reject(failure) : resolve({ failures: [], installCommand: null })));
+      });
+    });
+    Object.assign(queueOptions.sessionManager, { updateSessionStatus: vi.fn() });
+
+    // Each create returns once its Pane exists, without waiting for setup.
+    const first = await createPane('First');
+    await createPane('Second');
+    const third = await createPane('Third');
+
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    expect(queue.setupQueuePosition(third.id)).toBe(1);
+    expect(queueOptions.sessionManager.updateSessionStatus).toHaveBeenCalledWith(
+      third.id, 'initializing', 'Queued for setup: 1st in line; setup starts when an earlier Pane finishes',
+    );
+
+    settle[0](new Error('Install exploded'));
+
+    await expect(queue.waitForSetup(first.id)).rejects.toThrow('Install exploded');
+    await vi.waitFor(() => expect(started).toEqual([first.worktree_path, expect.any(String), third.worktree_path]));
+    expect(queue.setupQueuePosition(third.id)).toBeUndefined();
+    settle[1]();
+    settle[2]();
+    await queue.waitForSetup(third.id);
   });
 
   it('reports the created session id while setup is still running', async () => {

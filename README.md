@@ -137,6 +137,12 @@ Each of these is a small thing. Together they compound fast.
 
 ---
 
+## SSH hosts
+
+Pane lists every host in your SSH config (`~/.ssh/config`, or `C:\Users\<you>\.ssh\config` on Windows, plus the files it `Include`s) under **SSH hosts** in the sidebar. Click one and a terminal tab opens with `ssh <host>`, using your own `ssh`, keys and agent. It needs no project, and Pane never reads or copies your keys. Edit the config and the list follows. See [SSH hosts](docs/SSH_HOSTS.md).
+
+---
+
 ## Remote Pane
 
 Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute; the client just connects with a `pane-remote://...` code.

@@ -10,6 +10,7 @@ import { SelectionLoading } from './ui/SelectionLoading';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
+import { SshView } from './SshView';
 import { LiveRegion } from './ui/LiveRegion';
 import '@xterm/xterm/css/xterm.css';
 import { useSessionView } from '../hooks/useSessionView';
@@ -1902,6 +1903,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'pane-chat') {
     return <PaneChatView />;
+  }
+
+  if (activeView === 'ssh') {
+    return <SshView />;
   }
 
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);

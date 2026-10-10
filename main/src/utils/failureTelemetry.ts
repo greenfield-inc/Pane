@@ -1,7 +1,7 @@
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const ERROR_TYPES = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'URIError', 'EvalError', 'AggregateError']);
-const ERROR_CODES = new Set(['EACCES', 'EPERM', 'ENOENT', 'EIO', 'ENOSPC', 'EMFILE', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'ERR_RUNPANE_PANE_CREATE_FAILED']);
+const ERROR_CODES = new Set(['EACCES', 'EPERM', 'ENOENT', 'EIO', 'ENOSPC', 'EMFILE', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'ERR_RUNPANE_PANE_CREATE_FAILED', 'ERR_RUNPANE_BRANCH_HAS_PANE']);
 
 export function failureDetails(cause: unknown) {
   const name = cause instanceof Error ? cause.name : undefined;

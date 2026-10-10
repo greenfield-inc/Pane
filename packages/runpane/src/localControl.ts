@@ -311,6 +311,8 @@ interface PaneCreateSuccessItem {
   association?: { sessionId: string; ok: boolean; error?: string };
   promptFile?: string;
   warnings?: PromptWarning[];
+  /** Set when setup waits for a slot; the agent starts after setup, so there is no panel yet. */
+  setupQueue?: { position: number; message: string };
 }
 
 interface PaneCreateFailureItem {
@@ -1391,6 +1393,10 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       })),
       promptFile: boundary.optional(boundary.string),
       warnings: promptWarningsSchema,
+      setupQueue: boundary.optional(boundary.object({
+        position: boundary.number,
+        message: boundary.string,
+      })),
     }),
     boundary.object({
       ok: boundary.literal(false),
@@ -3460,6 +3466,9 @@ function printPaneCreateResult(result: PaneCreateResult, dryRun = false, action:
           : `  Not associated with Session ${item.association.sessionId}: ${item.association.error ?? 'unknown error'}`);
       }
       printPromptNotes(item, '  ');
+      if (item.setupQueue) {
+        console.log(`  ${item.setupQueue.message}`);
+      }
       if (item.nextCommand) {
         console.log(`  Next: ${item.nextCommand}`);
       }

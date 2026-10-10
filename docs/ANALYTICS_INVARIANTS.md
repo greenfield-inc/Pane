@@ -104,6 +104,10 @@ autocapture for Remote Pane connection-code, token, host, or command surfaces.
 Any UI that renders or accepts `pane-remote://` codes, remote access tokens, or
 remote setup commands must include `ph-no-capture`.
 
+SSH host aliases from the user's SSH config never go into events or logs sent
+off the machine. The SSH hosts sidebar section and the SSH view carry
+`ph-no-capture`.
+
 Remote Pane events must never include:
 
 - connection codes

@@ -78,19 +78,41 @@ interface ContinueSessionJob {
   prompt: string;
 }
 
-/**
- * Builds a single shell-safe `echo` line summarizing worktree file sync
- * failures, or null when nothing failed. Kept to one line even when many
- * entries fail.
- */
-function buildFileSyncWarningCommand(failures: WorktreeFileSyncFailure[]): string | null {
+/** Setup slots across the app; each runs file sync, a dependency install, and a build script. */
+const MAX_CONCURRENT_SETUPS = 2;
+/** A hung install must not hold a setup slot forever. */
+const INSTALL_TIMEOUT_MS = 20 * 60_000;
+
+type ProjectContext = NonNullable<ReturnType<SessionManager['getProjectContextByProjectId']>>;
+
+/** One line summarizing worktree file sync failures, or null when nothing failed. */
+function describeFileSyncFailures(failures: WorktreeFileSyncFailure[]): string | null {
   if (failures.length === 0) return null;
-  const sanitize = (text: string): string =>
-    text.split('\n')[0].replace(/["`$\\]/g, '').trim();
   const first = failures[0];
-  const reason = sanitize(first.reason).slice(0, 120);
+  const reason = firstLine(first.reason).slice(0, 120);
   const rest = failures.length > 1 ? `; ${failures.length - 1} more failed` : '';
-  return `echo "[Pane] file sync: failed to copy ${sanitize(first.path)} (${reason})${rest}"`;
+  return `file sync: failed to copy ${firstLine(first.path)} (${reason})${rest}`;
+}
+
+function firstLine(text: string): string {
+  return text.split('\n')[0].trim();
+}
+
+/** The line of install output that names the failure, without tree-drawing characters. */
+function installFailureLine(output: string): string | undefined {
+  const lines = output.split('\n').map(line => line.replace(/^[^A-Za-z0-9]+/, '').trim()).filter(Boolean);
+  return lines.find(line => /ERR_|error|failed|not found/i.test(line)) ?? lines.at(-1);
+}
+
+export function queuedSetupMessage(position: number): string {
+  return `Queued for setup: ${ordinal(position)} in line; setup starts when an earlier Pane finishes`;
+}
+
+function ordinal(position: number): string {
+  const lastTwo = position % 100;
+  const last = position % 10;
+  const suffix = (lastTwo >= 11 && lastTwo <= 13) || last > 3 ? 'th' : ['th', 'st', 'nd', 'rd'][last];
+  return `${position}${suffix}`;
 }
 
 interface SendInputJob {
@@ -110,6 +132,10 @@ export class TaskQueue {
   // Lets a waiter learn the session id as soon as the session exists, so a
   // setup timeout can still report the created session.
   private readonly sessionCreatedListeners = new Map<string, (sessionId: string) => void>();
+  private activeSetups = 0;
+  private readonly setupWaiters: Array<{ sessionId: string; start: () => void }> = [];
+  private readonly setupRuns = new Map<string, Promise<void>>();
+  private readonly setupLineWrites = new Map<string, Promise<void>>();
 
   constructor(private options: TaskQueueOptions) {
     console.log('[TaskQueue] Initializing task queue...');
@@ -194,7 +220,7 @@ export class TaskQueue {
     
     this.sessionQueue.process(sessionConcurrency, async (job) => {
       const { prompt, worktreeTemplate, index, permissionMode, projectId, baseBranch, toolType, startPinned } = job.data;
-      const { sessionManager, worktreeManager, claudeCodeManager } = this.options;
+      const { sessionManager, worktreeManager } = this.options;
 
       let createdSession: Session | undefined;
       let sessionCreatedEmitted = false;
@@ -335,58 +361,6 @@ export class TaskQueue {
         sessionCreatedEmitted = true;
         this.sessionCreatedListeners.get(String(job.id))?.(session.id);
 
-        // Worktree file sync — copy gitignored files in background, then run install
-        // Fire-and-forget: copies first, then writes install command to the terminal
-        // after the copy is complete (no race between copy and install)
-        const capturedSessionId = session.id;
-        worktreeFileSyncService.syncWorktree(
-          targetProject.path,
-          worktreePath,
-          ctx.commandRunner,
-          ctx.pathResolver.environment,
-          getRuntimeConfigManager().getWorktreeFileSyncEntries()
-        ).then(async (syncResult) => {
-          const installCommand = syncResult.installCommand;
-          const warningCommand = buildFileSyncWarningCommand(syncResult.failures);
-          if (!installCommand && !warningCommand) return;
-          const commandsToWrite = [warningCommand, installCommand]
-            .filter((c): c is string => !!c)
-            .map(c => c + '\r')
-            .join('');
-          // Find the default terminal panel — may not exist yet if sync finished before
-          // the session-created event handler in events.ts created it. Retry briefly.
-          let terminalPanel = panelManager.getPanelsForSession(capturedSessionId).find(p => p.type === 'terminal');
-          if (!terminalPanel) {
-            // Wait up to 3 seconds for the panel to be created
-            for (let i = 0; i < 6; i++) {
-              await new Promise(resolve => setTimeout(resolve, 500));
-              terminalPanel = panelManager.getPanelsForSession(capturedSessionId).find(p => p.type === 'terminal');
-              if (terminalPanel) break;
-            }
-            if (!terminalPanel) {
-              console.warn(`[TaskQueue] No terminal panel found for session ${capturedSessionId}, skipping sync warning/install command`);
-              return;
-            }
-          }
-
-          if (terminalPanelManager.isTerminalInitialized(terminalPanel.id)) {
-            // Terminal already running — write directly
-            terminalPanelManager.writeToTerminal(terminalPanel.id, commandsToWrite);
-            console.log(`[TaskQueue] Wrote to terminal: ${[warningCommand, installCommand].filter(Boolean).join(' | ')}`);
-          } else {
-            // Terminal not yet initialized — eagerly init it, then write the command
-            // We don't store as initialCommand to avoid polluting panel state
-            const wslContext = ctx.commandRunner.wslContext ?? null;
-            await terminalPanelManager.initializeTerminal(terminalPanel, worktreePath, wslContext);
-            // Small delay for shell prompt to appear before writing
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            terminalPanelManager.writeToTerminal(terminalPanel.id, commandsToWrite);
-            console.log(`[TaskQueue] Eagerly initialized terminal and wrote: ${[warningCommand, installCommand].filter(Boolean).join(' | ')}`);
-          }
-        }).catch((err) => {
-          console.error('[TaskQueue] Worktree file sync failed (non-fatal):', err);
-        });
-
         // Fire-and-forget AI name generation (only when user didn't provide a name and this is
         // a single session — multi-session paths have index set)
         const originalTemplate = job.data.worktreeTemplate;
@@ -421,90 +395,15 @@ export class TaskQueue {
           }
         }
 
-        // Run build script after session is visible in UI.
-        //
-        // Resolution chain (first match wins):
-        //   1. DB `project.build_script` — set explicitly by the user in Project Settings.
-        //   2. `detectProjectConfig(worktreePath)` → `setup` field — read from the
-        //      session's worktree path (not the project root) so that branch-local
-        //      config changes in pane.json / conductor.json are picked up immediately,
-        //      even before they are merged to main.
-        //   3. Skip — no build script runs.
-        //
-        // The `ctx` null-guard is required because `getProjectContextByProjectId` returns
-        // null when the project has no active runtime context (e.g. not yet initialised
-        // or running on a WSL path before the first session). Skipping config detection
-        // when ctx is absent is safe — the user can always set build_script explicitly.
-        let buildScript = targetProject.build_script;
-        if (!buildScript && ctx) {
-          const detected = await detectProjectConfig(
-            worktreePath || targetProject.path,
-            ctx.pathResolver.environment,
-            ctx.commandRunner
-          );
-          if (detected?.setup) {
-            buildScript = detected.setup;
-          }
-        }
-
-        if (buildScript) {
-          console.log(`[TaskQueue] Running build script for session ${session.id}`);
-
-          // Update status message
-          sessionManager.updateSessionStatus(session.id, 'initializing', 'Running build script...');
-
-          // Add a "waiting for build" message to output
-          const buildWaitingMessage = `\x1b[36m[${formatForDisplay(new Date())}]\x1b[0m \x1b[1m\x1b[33m⏳ Waiting for build script to complete...\x1b[0m\r\n\r\n`;
-          await sessionManager.addSessionOutput(session.id, {
-            type: 'stdout',
-            data: buildWaitingMessage,
-            timestamp: new Date()
-          });
-
-          const buildCommands = buildScript.split('\n').filter(cmd => cmd.trim());
-          const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath, ctx.commandRunner);
-          console.log(`[TaskQueue] Build script completed. Success: ${buildResult.success}`);
-        }
-
-        // Only start Claude if there's a prompt
-        if (prompt && prompt.trim().length > 0) {
-          const resolvedToolType: 'claude' | 'none' = toolType || 'claude';
-
-          if (resolvedToolType === 'claude') {
-            // Update status message
-            sessionManager.updateSessionStatus(session.id, 'initializing', 'Starting Claude Code...');
-
-            // Use claudeCodeManager to start session directly (session-based, not panel-based)
-            try {
-              await claudeCodeManager.startSession(session.id, session.worktreePath, prompt, permissionMode);
-            } catch (error) {
-              console.error(`[TaskQueue] Failed to start Claude Code session:`, error);
-              throw new Error(`Failed to start Claude session: ${error}`);
-            }
-          } else if (resolvedToolType === 'none') {
-            // No AI tool selected - update session status to stopped
-            console.log(`[TaskQueue] Session ${session.id} has no AI tool configured, marking as stopped`);
-            await sessionManager.updateSession(session.id, { status: 'stopped', statusMessage: undefined });
-
-            // Add an informational message to the output
-            const timestamp = formatForDisplay(new Date());
-            const noToolMessage = `\r\n\x1b[36m[${timestamp}]\x1b[0m \x1b[1m\x1b[90m ℹ️  NO AI TOOL CONFIGURED \x1b[0m\r\n` +
-                                  `\x1b[90mThis session was created without an AI tool.\x1b[0m\r\n` +
-                                  `\x1b[90mYou can use the terminal and other features without AI assistance.\x1b[0m\r\n\r\n`;
-            await sessionManager.addSessionOutput(session.id, {
-              type: 'stdout',
-              data: noToolMessage,
-              timestamp: new Date()
-            });
-          }
-        } else {
-          // No prompt provided - update session status to stopped if toolType is 'none'
-          const resolvedToolType: 'claude' | 'none' = toolType || 'claude';
-          if (resolvedToolType === 'none') {
-            console.log(`[TaskQueue] Session ${session.id} has no prompt and no AI tool, marking as stopped`);
-            await sessionManager.updateSession(session.id, { status: 'stopped', statusMessage: undefined });
-          }
-        }
+        // Setup is the heavy part of a new Pane, so it waits for one of a few
+        // slots; the Pane itself already exists and shows its place in line.
+        const setup = this.withSetupSlot(
+          session.id,
+          position => this.announceQueuedSetup(session.id, worktreePath, ctx, position),
+          () => this.runSetup(job.data, session, targetProject, worktreePath, ctx),
+        );
+        this.setupRuns.set(session.id, setup);
+        void this.settleSetup(setup, session.id, worktreePath, ctx);
 
         return { sessionId: session.id };
       } catch (error) {
@@ -561,6 +460,235 @@ export class TaskQueue {
     });
   }
 
+  /** Runs `run` in one of MAX_CONCURRENT_SETUPS slots, first come first served. */
+  private async withSetupSlot<T>(sessionId: string, onQueued: (position: number) => void, run: () => Promise<T>): Promise<T> {
+    if (this.activeSetups < MAX_CONCURRENT_SETUPS) {
+      this.activeSetups++;
+    } else {
+      await new Promise<void>(start => {
+        this.setupWaiters.push({ sessionId, start });
+        onQueued(this.setupWaiters.length);
+      });
+    }
+    try {
+      return await run();
+    } finally {
+      // A finished or failed setup hands its slot straight to the next in line.
+      const next = this.setupWaiters.shift();
+      if (next) next.start();
+      else this.activeSetups--;
+    }
+  }
+
+  /** The Pane's 1-based place in line while its setup waits for a slot; undefined once it runs. */
+  setupQueuePosition(sessionId: string): number | undefined {
+    const index = this.setupWaiters.findIndex(waiter => waiter.sessionId === sessionId);
+    return index === -1 ? undefined : index + 1;
+  }
+
+  /** Settles when the Pane's setup finishes, and rejects with its error if setup failed or timed out. */
+  waitForSetup(sessionId: string, timeoutMs?: number): Promise<void> {
+    const setup = this.setupRuns.get(sessionId);
+    if (!setup) return Promise.resolve();
+    if (timeoutMs === undefined) return setup;
+    return this.withTimeout(setup, timeoutMs, `Timed out waiting for Pane ${sessionId} setup`);
+  }
+
+  private announceQueuedSetup(sessionId: string, worktreePath: string, ctx: ProjectContext, position: number): void {
+    const message = queuedSetupMessage(position);
+    this.options.sessionManager.updateSessionStatus(sessionId, 'initializing', message);
+    void this.writeSetupLines(sessionId, worktreePath, ctx, [message]);
+  }
+
+  /** A failed setup stays in setupRuns so a later waitForSetup still sees the failure. */
+  private async settleSetup(setup: Promise<void>, sessionId: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    try {
+      await setup;
+      this.setupRuns.delete(sessionId);
+    } catch (error) {
+      console.error(`[TaskQueue] Failed to set up session ${sessionId}:`, error);
+      await this.reportSetupFailure(sessionId, worktreePath, ctx, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async reportSetupFailure(sessionId: string, worktreePath: string, ctx: ProjectContext, message: string): Promise<void> {
+    try {
+      await this.options.sessionManager.updateSession(sessionId, {
+        status: 'error', error: message, statusMessage: `Failed to initialize pane: ${message}`,
+      });
+    } catch (updateError) {
+      console.error(`[TaskQueue] Failed to record setup failure for session ${sessionId}:`, updateError);
+    }
+    await this.writeSetupLines(sessionId, worktreePath, ctx, [`Setup failed: ${message}`]);
+  }
+
+  /** File sync, dependency install, build script, then the session's own tool. */
+  private async runSetup(data: CreateSessionJob, session: Session, targetProject: Project, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    const { prompt, permissionMode, toolType } = data;
+    const { sessionManager, claudeCodeManager } = this.options;
+
+    // Copy gitignored files (node_modules, .env, ...) before installing over them.
+    const syncResult = await worktreeFileSyncService.syncWorktree(
+      targetProject.path,
+      worktreePath,
+      ctx.commandRunner,
+      ctx.pathResolver.environment,
+      getRuntimeConfigManager().getWorktreeFileSyncEntries()
+    );
+    const syncWarning = describeFileSyncFailures(syncResult.failures);
+    if (syncWarning) await this.writeSetupLines(session.id, worktreePath, ctx, [syncWarning]);
+    if (syncResult.installCommand) {
+      await this.installDependencies(session.id, syncResult.installCommand, worktreePath, ctx);
+    }
+
+    // Run build script after session is visible in UI.
+    //
+    // Resolution chain (first match wins):
+    //   1. DB `project.build_script` — set explicitly by the user in Project Settings.
+    //   2. `detectProjectConfig(worktreePath)` → `setup` field — read from the
+    //      session's worktree path (not the project root) so that branch-local
+    //      config changes in pane.json / conductor.json are picked up immediately,
+    //      even before they are merged to main.
+    //   3. Skip — no build script runs.
+    //
+    // The `ctx` null-guard is required because `getProjectContextByProjectId` returns
+    // null when the project has no active runtime context (e.g. not yet initialised
+    // or running on a WSL path before the first session). Skipping config detection
+    // when ctx is absent is safe — the user can always set build_script explicitly.
+    let buildScript = targetProject.build_script;
+    if (!buildScript && ctx) {
+      const detected = await detectProjectConfig(
+        worktreePath || targetProject.path,
+        ctx.pathResolver.environment,
+        ctx.commandRunner
+      );
+      if (detected?.setup) {
+        buildScript = detected.setup;
+      }
+    }
+
+    if (buildScript) {
+      console.log(`[TaskQueue] Running build script for session ${session.id}`);
+
+      // Update status message
+      sessionManager.updateSessionStatus(session.id, 'initializing', 'Running build script...');
+
+      // Add a "waiting for build" message to output
+      const buildWaitingMessage = `\x1b[36m[${formatForDisplay(new Date())}]\x1b[0m \x1b[1m\x1b[33m⏳ Waiting for build script to complete...\x1b[0m\r\n\r\n`;
+      await sessionManager.addSessionOutput(session.id, {
+        type: 'stdout',
+        data: buildWaitingMessage,
+        timestamp: new Date()
+      });
+
+      const buildCommands = buildScript.split('\n').filter(cmd => cmd.trim());
+      const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath, ctx.commandRunner);
+      console.log(`[TaskQueue] Build script completed. Success: ${buildResult.success}`);
+    }
+
+    // Only start Claude if there's a prompt
+    if (prompt && prompt.trim().length > 0) {
+      const resolvedToolType: 'claude' | 'none' = toolType || 'claude';
+
+      if (resolvedToolType === 'claude') {
+        // Update status message
+        sessionManager.updateSessionStatus(session.id, 'initializing', 'Starting Claude Code...');
+
+        // Use claudeCodeManager to start session directly (session-based, not panel-based)
+        try {
+          await claudeCodeManager.startSession(session.id, session.worktreePath, prompt, permissionMode);
+        } catch (error) {
+          console.error(`[TaskQueue] Failed to start Claude Code session:`, error);
+          throw new Error(`Failed to start Claude session: ${error}`);
+        }
+      } else if (resolvedToolType === 'none') {
+        // No AI tool selected - update session status to stopped
+        console.log(`[TaskQueue] Session ${session.id} has no AI tool configured, marking as stopped`);
+        await sessionManager.updateSession(session.id, { status: 'stopped', statusMessage: undefined });
+
+        // Add an informational message to the output
+        const timestamp = formatForDisplay(new Date());
+        const noToolMessage = `\r\n\x1b[36m[${timestamp}]\x1b[0m \x1b[1m\x1b[90m ℹ️  NO AI TOOL CONFIGURED \x1b[0m\r\n` +
+                              `\x1b[90mThis session was created without an AI tool.\x1b[0m\r\n` +
+                              `\x1b[90mYou can use the terminal and other features without AI assistance.\x1b[0m\r\n\r\n`;
+        await sessionManager.addSessionOutput(session.id, {
+          type: 'stdout',
+          data: noToolMessage,
+          timestamp: new Date()
+        });
+      }
+    } else {
+      // No prompt provided - update session status to stopped if toolType is 'none'
+      const resolvedToolType: 'claude' | 'none' = toolType || 'claude';
+      if (resolvedToolType === 'none') {
+        console.log(`[TaskQueue] Session ${session.id} has no prompt and no AI tool, marking as stopped`);
+        await sessionManager.updateSession(session.id, { status: 'stopped', statusMessage: undefined });
+      }
+    }
+  }
+
+  /** Awaited so the install holds its setup slot; the terminal shows how it went. */
+  private async installDependencies(sessionId: string, installCommand: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    this.options.sessionManager.updateSessionStatus(sessionId, 'initializing', `Installing dependencies: ${installCommand}`);
+    await this.writeSetupLines(sessionId, worktreePath, ctx, [`Installing dependencies: ${installCommand}`]);
+    const startedAt = Date.now();
+    try {
+      await ctx.commandRunner.execAsync(installCommand, worktreePath, { timeout: INSTALL_TIMEOUT_MS });
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      await this.writeSetupLines(sessionId, worktreePath, ctx, [`Dependencies installed (${seconds} s)`]);
+    } catch (installError) {
+      // Best effort, as before: the Pane stays usable and the person can rerun the install.
+      console.error(`[TaskQueue] Dependency install failed for session ${sessionId}:`, installError);
+      let reason = 'unknown error';
+      try {
+        const failure = decodeBoundary(installError, boundary.object({
+          stderr: boundary.optional(boundary.string),
+          stdout: boundary.optional(boundary.string),
+          message: boundary.optional(boundary.string),
+        }));
+        reason = installFailureLine(`${failure.stderr ?? ''}\n${failure.stdout ?? ''}`) ?? firstLine(failure.message ?? reason);
+      } catch { /* "unknown error" still reports the failure. */ }
+      await this.writeSetupLines(sessionId, worktreePath, ctx, [`Dependency install failed: ${reason.slice(0, 200)}. Run ${installCommand} to retry.`]);
+    }
+  }
+
+  /**
+   * Shows `[Pane] ...` lines in the Pane's default terminal so a person sees setup progress.
+   * The terminal may not exist yet right after the Pane is announced, so this waits briefly.
+   */
+  private writeSetupLines(sessionId: string, worktreePath: string, ctx: ProjectContext, lines: string[]): Promise<void> {
+    // Each Pane's lines print in the order setup reports them, even while its terminal starts.
+    const previous = this.setupLineWrites.get(sessionId) ?? Promise.resolve();
+    const written = previous.then(() => this.showSetupLines(sessionId, worktreePath, ctx, lines));
+    this.setupLineWrites.set(sessionId, written);
+    void written.then(() => {
+      if (this.setupLineWrites.get(sessionId) === written) this.setupLineWrites.delete(sessionId);
+    });
+    return written;
+  }
+
+  private async showSetupLines(sessionId: string, worktreePath: string, ctx: ProjectContext, lines: string[]): Promise<void> {
+    try {
+      let terminalPanel = panelManager.getPanelsForSession(sessionId).find(p => p.type === 'terminal');
+      for (let attempt = 0; !terminalPanel && attempt < 6; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        terminalPanel = panelManager.getPanelsForSession(sessionId).find(p => p.type === 'terminal');
+      }
+      if (!terminalPanel) {
+        console.warn(`[TaskQueue] No terminal panel found for session ${sessionId}, skipping setup lines`);
+        return;
+      }
+      if (!terminalPanelManager.isTerminalInitialized(terminalPanel.id)) {
+        await terminalPanelManager.initializeTerminal(terminalPanel, worktreePath, ctx.commandRunner.wslContext ?? null);
+        // Small delay so the notice lands after the shell's first prompt.
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      for (const line of lines) terminalPanelManager.showNotice(terminalPanel.id, firstLine(line));
+    } catch (error) {
+      console.error(`[TaskQueue] Failed to write setup progress for session ${sessionId}:`, error);
+    }
+  }
+
   async createSession(data: CreateSessionJob): Promise<SessionCreationJob> {
     const job = await this.sessionQueue.add(data);
     return job;
@@ -599,10 +727,10 @@ export class TaskQueue {
     timeoutMs = 120_000,
   ): Promise<CreateSessionQueueResult> {
     if (job.finished) {
-      return this.withSessionCreationTimeout(
+      return this.withTimeout(
         job.finished().then(result => this.parseSessionCreationResult(result, job.id)),
         timeoutMs,
-        job.id,
+        `Timed out waiting for session creation job ${job.id}`,
       );
     }
 
@@ -615,7 +743,7 @@ export class TaskQueue {
     }
 
     let cleanup: () => void = () => {};
-    return this.withSessionCreationTimeout(new Promise<CreateSessionQueueResult>((resolve, reject) => {
+    return this.withTimeout(new Promise<CreateSessionQueueResult>((resolve, reject) => {
       const handleCompleted = (completedJob: SessionCreationJob, result: CreateSessionQueueResult) => {
         const completedJobId = this.getQueueJobId(completedJob);
         if (completedJobId !== String(simpleJob.id)) {
@@ -645,7 +773,7 @@ export class TaskQueue {
 
       this.sessionQueue.on('completed', handleCompleted);
       this.sessionQueue.on('failed', handleFailed);
-    }), timeoutMs, simpleJob.id, cleanup);
+    }), timeoutMs, `Timed out waiting for session creation job ${simpleJob.id}`, cleanup);
   }
 
   private parseSessionCreationResult(result: CreateSessionQueueResult | undefined, jobId: string | number): CreateSessionQueueResult {
@@ -656,10 +784,10 @@ export class TaskQueue {
     }
   }
 
-  private withSessionCreationTimeout<T>(
+  private withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
-    jobId: string | number,
+    message: string,
     onTimeout?: () => void,
   ): Promise<T> {
     let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -667,7 +795,7 @@ export class TaskQueue {
       timeout = setTimeout(() => {
         onTimeout?.();
         // The job keeps running; only this wait ends.
-        reject(new PaneError('ERR_PANE_CREATE_TIMEOUT', `Timed out waiting for session creation job ${jobId}`));
+        reject(new PaneError('ERR_PANE_CREATE_TIMEOUT', message));
       }, timeoutMs);
     });
 

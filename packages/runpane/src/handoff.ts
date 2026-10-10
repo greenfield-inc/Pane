@@ -431,7 +431,7 @@ interface HandoffResult {
   warnings: string[];
   repo?: { id: number; name: string; path: string; environment: string };
   notePath?: string;
-  pane?: { id: string; panelId: string; name?: string; worktreePath?: string };
+  pane?: { id: string; panelId?: string; name?: string; worktreePath?: string };
   /** Where the receiver runs and why: a tab in the sender's Pane (same checkout) or its own new Pane. */
   receiver?: { route: 'tab' | 'new-pane'; reason: string };
   reportBack?: string;
@@ -601,6 +601,16 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
     }
     const item = created.items[0];
+    if (item?.ok && item.sessionId && item.setupQueue) {
+      // The receiver's prompt rides on the launch after setup, so delivery is not verified yet.
+      result.ok = false;
+      result.notePath = notePath;
+      result.pane = { id: item.sessionId, name: item.name, worktreePath: item.worktreePath };
+      warnings.push(`Pane ${item.sessionId} was created and is queued for setup (${item.setupQueue.message}). The receiver starts after setup with the note; its prompt is not verified yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
+      for (const warning of warnings) say(`  ! ${warning}`);
+      if (parsed.json) console.log(JSON.stringify(result, null, 2));
+      return 1;
+    }
     if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
     receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: item.initialInput, newTab: false };
   }
