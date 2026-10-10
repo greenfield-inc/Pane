@@ -97,6 +97,12 @@ function firstLine(text: string): string {
   return text.split('\n')[0].trim();
 }
 
+/** The line of install output that names the failure, without tree-drawing characters. */
+function installFailureLine(output: string): string | undefined {
+  const lines = output.split('\n').map(line => line.replace(/^[^A-Za-z0-9]+/, '').trim()).filter(Boolean);
+  return lines.find(line => /ERR_|error|failed|not found/i.test(line)) ?? lines.at(-1);
+}
+
 export function queuedSetupMessage(position: number): string {
   return `Queued for setup: ${ordinal(position)} in line; setup starts when an earlier Pane finishes`;
 }
@@ -636,9 +642,10 @@ export class TaskQueue {
       try {
         const failure = decodeBoundary(installError, boundary.object({
           stderr: boundary.optional(boundary.string),
+          stdout: boundary.optional(boundary.string),
           message: boundary.optional(boundary.string),
         }));
-        reason = failure.stderr?.trim().split('\n').at(-1) || firstLine(failure.message ?? reason);
+        reason = installFailureLine(`${failure.stderr ?? ''}\n${failure.stdout ?? ''}`) ?? firstLine(failure.message ?? reason);
       } catch { /* "unknown error" still reports the failure. */ }
       await this.writeSetupLines(sessionId, worktreePath, ctx, [`Dependency install failed: ${reason.slice(0, 200)}. Run ${installCommand} to retry.`]);
     }
