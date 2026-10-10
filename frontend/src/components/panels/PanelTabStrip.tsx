@@ -14,6 +14,7 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Tooltip } from '../ui/Tooltip';
 import { Kbd } from '../ui/Kbd';
 import { usePanelStore } from '../../stores/panelStore';
+import { showActionError } from '../../stores/errorStore';
 import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
@@ -124,15 +125,18 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   const handleRenameSubmit = useCallback(async () => {
     if (editingPanelId && editingTitle.trim()) {
       try {
-        await window.electron?.invoke('panels:update', editingPanelId, {
+        const response: { success?: boolean; error?: string } | undefined = await window.electron?.invoke('panels:update', editingPanelId, {
           title: editingTitle.trim()
         });
         const panel = panels.find(p => p.id === editingPanelId);
-        if (panel) {
+        if (response?.success === false) {
+          showActionError('Could not rename the tab', response.error);
+        } else if (panel) {
           usePanelStore.getState().updatePanelState({ ...panel, title: editingTitle.trim() });
         }
       } catch (error) {
         console.error('Failed to rename panel:', error);
+        showActionError('Could not rename the tab', error);
       }
     }
     setEditingPanelId(null);

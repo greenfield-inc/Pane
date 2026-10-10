@@ -31,6 +31,7 @@ import { getRemotePwaAssetResponse } from './pwaStaticAssets';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
+import { toPaneDaemonError } from '../../../shared/paneError';
 import { streamWorktreePreview } from '../services/mediaStream';
 
 interface RemoteHttpAddress {
@@ -86,6 +87,7 @@ interface RemoteInvokeErrorPayload {
   error: {
     message: string;
     code: string;
+    next?: string;
   };
 }
 
@@ -724,18 +726,10 @@ export class PaneRemoteHttpApiServer {
         } satisfies RemoteInvokeErrorPayload);
         return;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      const code = message.includes('No Pane daemon command registered')
-        ? 'ERR_UNKNOWN_CHANNEL'
-        : 'ERR_REMOTE_DAEMON_REQUEST_FAILED';
-      const statusCode = code === 'ERR_UNKNOWN_CHANNEL' ? 404 : 500;
-
-      this.writeJson(response, statusCode, {
+      const failure = toPaneDaemonError(error, 'ERR_REMOTE_DAEMON_REQUEST_FAILED');
+      this.writeJson(response, failure.code === 'ERR_UNKNOWN_CHANNEL' ? 404 : 500, {
         ok: false,
-        error: {
-          message,
-          code,
-        },
+        error: failure,
       } satisfies RemoteInvokeErrorPayload);
     }
   }

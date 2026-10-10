@@ -4,6 +4,7 @@ import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserFallback } from './components/BrowserFallback';
+import { stripIpcWrapper } from './utils/ipcErrorMessage';
 import './index.css';
 import './styles/markdown-preview.css';
 import './styles/notebook-preview.css';
@@ -63,7 +64,7 @@ export function mountDesktopRenderer(): void {
       url: window.location.href,
     });
     event.preventDefault();
-    alert('An unexpected error occurred. The application may need to be restarted.\n\nError: ' + (event.reason?.message || String(event.reason)));
+    alert(`Something went wrong: ${stripIpcWrapper(getErrorMessage(event.reason))}\n\nPane is still running. If something looks wrong, restart Pane.`);
   });
 
   window.addEventListener('error', (event) => {

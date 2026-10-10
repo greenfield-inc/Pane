@@ -12,6 +12,7 @@ import type {
 } from '../../../shared/types/daemon';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
+import { toPaneDaemonError } from '../../../shared/paneError';
 
 const DAEMON_EVENT_PREFIXES = [
   'archive:',
@@ -373,20 +374,7 @@ export class PaneDaemonServer {
         result: result === undefined ? undefined : serializeJsonTransport(result, boundary.json),
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const code = message.includes('No Pane daemon command registered')
-        ? 'ERR_UNKNOWN_CHANNEL'
-        : 'ERR_DAEMON_REQUEST_FAILED';
-
-      return {
-        type: 'response',
-        id: frame.id,
-        ok: false,
-        error: {
-          message,
-          code,
-        },
-      };
+      return { type: 'response', id: frame.id, ok: false, error: toPaneDaemonError(error, 'ERR_DAEMON_REQUEST_FAILED') };
     }
   }
 }

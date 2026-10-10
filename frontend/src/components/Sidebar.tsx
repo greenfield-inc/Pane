@@ -18,6 +18,7 @@ import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
 import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
+import { showActionError } from '../stores/errorStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkeys';
@@ -352,9 +353,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     const { id } = compactSessionMenu.session;
     setCompactSessionMenu(null);
     try {
-      await API.sessions.delete(id);
+      const response = await API.sessions.delete(id);
+      if (!response.success) showActionError('Could not archive the Pane', response.error);
     } catch (error) {
       console.error('Failed to archive session:', error);
+      showActionError('Could not archive the Pane', error);
     }
   }, [compactSessionMenu]);
 
@@ -363,9 +366,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     const { id } = compactSessionMenu.session;
     setCompactSessionMenu(null);
     try {
-      await API.sessions.toggleFavorite(id);
+      const response = await API.sessions.toggleFavorite(id);
+      if (!response.success) showActionError('Could not pin or unpin the Pane', response.error);
     } catch (error) {
       console.error('Failed to toggle pinned session:', error);
+      showActionError('Could not pin or unpin the Pane', error);
     }
   }, [compactSessionMenu]);
 

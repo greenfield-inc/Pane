@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -644,7 +645,7 @@ export function registerRunpaneHandlers(
           panes = [pane];
         } else {
           const session = databaseService.getSession(normalized.paneId);
-          if (!session) throw new Error(`No Pane pane found with id ${normalized.paneId}. Run \`runpane panes list\` to see Pane ids.`);
+          if (!session) throw paneNotFound(normalized.paneId);
           panes = [{
             paneId: session.id,
             paneName: session.name,
@@ -934,9 +935,11 @@ export function registerRunpaneHandlers(
           if (normalized.focus === true) requestHostDesktopFocus({ paneId: session.id, panelId: panel.id });
         } catch (error) {
           let failureSessionId = createdSessionId;
+          let archived = false;
           if (createdSessionId) {
             try {
               await sessionManager.archiveSession(createdSessionId);
+              archived = true;
               if (databaseService.deleteArchivedSessionPermanently(createdSessionId)) {
                 failureSessionId = undefined;
               }
@@ -944,7 +947,7 @@ export function registerRunpaneHandlers(
               console.error(`[Runpane] Failed to roll back adopted pane ${createdSessionId}:`, rollbackError);
             }
           }
-          items.push(createFailureItem(index, item, error, failureSessionId, storedWorktreePath));
+          items.push(createFailureItem(index, item, error, failureSessionId, storedWorktreePath, archived));
         }
       }
 
@@ -1833,8 +1836,8 @@ async function readPanelLastMessage(
   let message: string | undefined;
   try {
     message = locator ? await agentTranscripts.lastAssistantMessage(locator) : undefined;
-  } catch {
-    message = undefined;
+  } catch (error) {
+    return unavailable(`Could not read the ${agentType} transcript for panel ${panel.id}: ${reasonOf(error)}. Use \`runpane panels screen --panel ${panel.id}\`.`);
   }
   if (message === undefined) {
     return unavailable(`No ${agentType} transcript reply found for panel ${panel.id}. Use \`runpane panels screen --panel ${panel.id}\`.`);
@@ -3381,11 +3384,11 @@ async function resolveLockOwner(
   allowAnonymous = false,
 ): Promise<{ owner: RunpaneLockOwner; sessionId?: string }> {
   const panel = input.panelId ? panelManager.getPanel(input.panelId) : undefined;
-  if (input.panelId && !panel) throw new Error(`No Pane panel found with id ${input.panelId}. Run \`runpane panels list --pane <pane-id>\` to see panel ids.`);
+  if (input.panelId && !panel) throw panelNotFound(input.panelId);
   const paneId = input.paneId ?? panel?.sessionId;
   if (paneId) {
     const pane = services.sessionManager.getSession(paneId);
-    if (!pane) throw new Error(`No Pane pane found with id ${paneId}. Run \`runpane panes list\` to see Pane ids.`);
+    if (!pane) throw paneNotFound(paneId);
     if (pane.archived) throw new Error(`Pane ${paneId} is archived and cannot hold locks.`);
     if (panel && panel.sessionId !== paneId) throw new Error(`Panel ${input.panelId} does not belong to Pane ${paneId}.`);
     const owner: RunpaneLockOwner = { kind: 'pane', paneId };
@@ -3704,7 +3707,17 @@ async function associateCreatedPane(
     await requireOrchestrationSessionManager(services).associate({ sessionId }, { paneId });
     return { sessionId, ok: true };
   } catch (error) {
-    return { sessionId, ok: false, error: error instanceof Error ? error.message : String(error) };
+    // Repeating the same associate fails again when the Session is wrong or the Pane belongs elsewhere.
+    const next = error instanceof PaneError && (error.code === 'ERR_SESSION_NOT_FOUND' || error.code === 'ERR_SESSION_AMBIGUOUS')
+      ? `Pick the Session's id from \`runpane sessions list --json\`, then run \`runpane sessions associate --session <id> --pane ${paneId}\`.`
+      : error instanceof PaneError && error.next
+        ? error.next
+        : `Add it with \`runpane sessions associate --session ${sessionId} --pane ${paneId}\`.`;
+    return {
+      sessionId,
+      ok: false,
+      error: `Could not add Pane ${paneId} to Session ${sessionId}: ${reasonOf(error)}. The Pane was created and kept. ${next}`,
+    };
   }
 }
 
@@ -4159,7 +4172,7 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
 function resolvePane(sessionManager: AppServices['sessionManager'], paneId: string): Session {
   const session = sessionManager.getSession(paneId);
   if (!session) {
-    throw new Error(`No Pane pane found with id ${paneId}. Run \`runpane panes list\` to see Pane ids.`);
+    throw paneNotFound(paneId);
   }
   return session;
 }
@@ -4748,7 +4761,7 @@ function parsePaneFocusRequest(value: PaneCommandValue): RunpanePaneFocusRequest
 function resolvePanel(panelId: string): ToolPanel {
   const panel = panelManager.getPanel(panelId);
   if (!panel) {
-    throw new Error(`No Pane panel found with id ${panelId}. Run \`runpane panels list --pane <pane-id>\` to see panel ids.`);
+    throw panelNotFound(panelId);
   }
   return panel;
 }
@@ -4862,7 +4875,7 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   if (selectorObject.id !== undefined) {
     const project = projects.find(candidate => candidate.id === selectorObject.id);
     if (!project) {
-      throw new Error(`No Pane repo found with id ${selectorObject.id}. Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
+      throw repoNotFound(`with id ${selectorObject.id}`);
     }
     return project;
   }
@@ -4870,7 +4883,7 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   if (selectorObject.path !== undefined) {
     const project = resolveProjectByPath(projects, selectorObject.path);
     if (!project) {
-      throw new Error(`No Pane repo found at path ${selectorObject.path}. Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
+      throw repoNotFound(`at path ${selectorObject.path}`);
     }
     return project;
   }
@@ -4882,10 +4895,24 @@ function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector)
   return resolveActiveProject(projects);
 }
 
+const REPO_NEXT = 'Pick a saved repo from `runpane repos list`, or add one with `runpane repos add --path <absolute path> --yes`.';
+
+function paneNotFound(paneId: string): PaneError {
+  return new PaneError('ERR_RUNPANE_PANE_NOT_FOUND', `No Pane found with id ${paneId}. Nothing was changed.`, 'See Pane ids with `runpane panes list`.');
+}
+
+function panelNotFound(panelId: string): PaneError {
+  return new PaneError('ERR_RUNPANE_PANEL_NOT_FOUND', `No Pane panel found with id ${panelId}. Nothing was changed.`, 'See panel ids with `runpane panels list --pane <pane-id>`.');
+}
+
+function repoNotFound(selector: string): PaneError {
+  return new PaneError('ERR_RUNPANE_REPO_NOT_FOUND', `No Pane repo found ${selector}. Nothing was changed.`, REPO_NEXT);
+}
+
 function resolveActiveProject(projects: Project[]): Project {
   const active = projects.find(project => Boolean(project.active));
   if (!active) {
-    throw new Error('No active Pane repo found');
+    throw new PaneError('ERR_RUNPANE_REPO_NOT_FOUND', 'No Pane repo is active, so there is no default repo for this command. Nothing was changed.', REPO_NEXT);
   }
   return active;
 }
@@ -4898,7 +4925,7 @@ function resolveProjectByPath(projects: Project[], selectorPath: string): Projec
 function resolveProjectByName(projects: Project[], selectorName: string): Project {
   const matches = projects.filter(project => project.name.toLowerCase() === selectorName.toLowerCase());
   if (matches.length === 0) {
-    throw new Error(`No Pane repo found named "${selectorName}". Run \`runpane repos list\` to see saved repos, or \`runpane repos add --path <absolute path> --yes\` to add one.`);
+    throw repoNotFound(`named "${selectorName}"`);
   }
   if (matches.length > 1) {
     throw new Error(`Multiple Pane repos are named "${selectorName}". Use --repo-id or an exact path.`);
@@ -4977,7 +5004,18 @@ function createFailureItem(
   cause: unknown,
   sessionId?: string,
   worktreePath?: string,
+  keptArchived = false,
 ): RunpanePaneCreateFailureItem {
+  const label = item.name ? `Pane "${item.name}"` : `pane ${index}`;
+  const reason = reasonOf(cause);
+  // Claim "no Pane" only when that is established: a timed-out wait does not cancel the queued job.
+  const message = sessionId
+    ? keptArchived
+      ? `Could not create ${label}: ${reason}. Pane ${sessionId} was created, then archived to roll back, but could not be deleted, so it still holds this worktree. Open it under Archived Panes in Pane to restore or delete it before retrying.`
+      : `Could not create ${label}: ${reason}. Pane ${sessionId} was created before the failure and was kept. Check it with \`runpane panes list --json\` before retrying, so you do not create a duplicate.`
+    : cause instanceof PaneError && cause.code === 'ERR_PANE_CREATE_TIMEOUT'
+      ? `Could not confirm that ${label} was created: ${reason}. Creation may still finish in the background. Check \`runpane panes list --json\` for it before retrying, so you do not create a duplicate.`
+      : `Could not create ${label}: ${reason}. No Pane was created.`;
   return {
     ok: false,
     index,
@@ -4985,10 +5023,7 @@ function createFailureItem(
     sessionId,
     paneId: sessionId,
     worktreePath,
-    error: {
-      message: cause instanceof Error ? cause.message : String(cause),
-      code: cause instanceof RunpaneCodedError ? cause.code : 'ERR_RUNPANE_PANE_CREATE_FAILED',
-    },
+    error: { message, code: cause instanceof RunpaneCodedError ? cause.code : 'ERR_RUNPANE_PANE_CREATE_FAILED' },
   };
 }
 

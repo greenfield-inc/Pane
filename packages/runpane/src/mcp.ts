@@ -5,6 +5,7 @@ import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
 import { ProtocolError, ProtocolErrorCode, Server, serveStdio } from './mcpSdk';
 import { getWrapperVersion } from './version';
+import type { RunpaneFailure } from './errors';
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
@@ -162,7 +163,10 @@ async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, r
   const { code, stdout, stderr } = await runCli(argv, signal);
   // Docs come back as written; everything else speaks in tool names.
   const translate = tool.toolsets.includes('docs') ? (text: string) => text : rewrite;
-  const text = translate(stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
+  const failure = code !== 0 ? decodeFailure(stdout) : undefined;
+  const text = translate(failure
+    ? [failure.message, ...(failure.next ? [`Next: ${failure.next}`] : []), `Code: ${failure.code}`].join('\n')
+    : stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
   if (code !== 0) {
     const unconfirmed = !argv.includes(CONFIRM_FLAG) && tool.parameters.some((parameter) => parameter.flag === CONFIRM_FLAG);
     return errorResult(unconfirmed ? `${text}\nIf Pane refused the change, pass \`yes: true\` to confirm it.` : text);
@@ -170,6 +174,20 @@ async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, r
   const structuredContent = parseJsonObject(text);
   if (!structuredContent) return errorResult(`runpane ${tool.command} did not print JSON:\n${text}`);
   return { content: [{ type: 'text', text }], structuredContent };
+}
+
+const failureSchema = boundary.object({
+  ok: boundary.literal(false),
+  error: boundary.object({ code: boundary.string, message: boundary.string, next: boundary.optional(boundary.string) }),
+});
+
+/** The CLI's `--json` failure (see errors.ts); other `ok: false` results stay JSON. */
+function decodeFailure(stdout: string): RunpaneFailure | undefined {
+  try {
+    return decodeBoundary(JSON.parse(stdout), failureSchema).error;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseJsonObject(text: string): JsonObject | undefined {

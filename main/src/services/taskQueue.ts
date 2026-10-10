@@ -21,6 +21,7 @@ import { detectProjectConfig } from './projectConfigDetector';
 import { emitFolderCreatedEvent } from './folderEvents';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { withLock } from '../utils/mutex';
+import { PaneError } from '../../../shared/paneError';
 
 const loadQueueDependency = createRequire(__filename);
 
@@ -793,7 +794,8 @@ export class TaskQueue {
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         onTimeout?.();
-        reject(new Error(message));
+        // The job keeps running; only this wait ends.
+        reject(new PaneError('ERR_PANE_CREATE_TIMEOUT', message));
       }, timeoutMs);
     });
 

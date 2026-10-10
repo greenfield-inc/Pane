@@ -246,8 +246,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(line, flush=True)
             print(line, file=sys.stderr, flush=True)
             return 2
-        print(str(error), file=sys.stderr)
+        own_args = effective_argv[: effective_argv.index("--")] if "--" in effective_argv else effective_argv
+        print_failure(error, "--json" in own_args)
         return 1
+
+
+def print_failure(error: Exception, as_json: bool) -> None:
+    """People read stderr; with --json, stdout also carries {ok: false, error: {code, message, next}}."""
+    code = getattr(error, "code", None)
+    next_step = getattr(error, "next", None)
+    failure: Dict[str, str] = {"code": code if isinstance(code, str) else "ERR_RUNPANE_FAILED", "message": str(error)}
+    if isinstance(next_step, str):
+        failure["next"] = next_step
+    if as_json:
+        print(json.dumps({"ok": False, "error": failure}, indent=2))
+    print(f"{failure['message']}\nNext: {next_step}" if "next" in failure else failure["message"], file=sys.stderr)
 
 
 def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTelemetryContext) -> int:

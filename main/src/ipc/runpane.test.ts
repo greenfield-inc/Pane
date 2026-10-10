@@ -38,6 +38,7 @@ import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
 import { registerRunpaneHandlers } from './runpane';
 import type { TaskQueue } from '../services/taskQueue';
+import { PaneError } from '../../../shared/paneError';
 
 // Transcript reads are real file I/O; these tests script what the transcript says.
 const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
@@ -784,8 +785,33 @@ describe('runpane IPC handlers', () => {
       const failed = await createRegistry(services).invoke('runpane:panes:adopt', [request]);
       expect(failed).toMatchObject({
         ok: true,
-        items: [{ ok: true, association: { ok: false, error: 'Pane is already associated with Session Other' } }],
+        items: [{ ok: true, association: {
+          ok: false,
+          error: `Could not add Pane ${session.id} to Session orchestrator-1: Pane is already associated with Session Other. The Pane was created and kept. Add it with \`runpane sessions associate --session orchestrator-1 --pane ${session.id}\`.`,
+        } }],
       });
+    });
+
+    it('points a missing Session at the Session list instead of repeating it', async () => {
+      const repoPath = createTempGitRepo('associate-missing-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'associate-missing-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'associate-missing', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      const associate = vi.fn(async () => { throw new PaneError('ERR_SESSION_NOT_FOUND', 'Session typo not found'); });
+      // SAFETY: The handler only calls associate on the Sessions manager.
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' } }],
+        associateSession: 'typo',
+      }]);
+
+      expect(result).toMatchObject({ items: [{ ok: true, association: {
+        ok: false,
+        error: `Could not add Pane ${session.id} to Session typo: Session typo not found. The Pane was created and kept. Pick the Session's id from \`runpane sessions list --json\`, then run \`runpane sessions associate --session <id> --pane ${session.id}\`.`,
+      } }] });
     });
 
     it('does not associate panes when no Session is given', async () => {
@@ -1059,6 +1085,26 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: false, items: [{ ok: false, sessionId: undefined }] });
       expect(services.sessionManager.archiveSession).toHaveBeenCalledWith(session.id);
       expect(services.databaseService.deleteArchivedSessionPermanently).toHaveBeenCalledWith(session.id);
+    });
+
+    it('names the archived Pane a failed rollback leaves behind', async () => {
+      const repoPath = createTempGitRepo('rollback-kept-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'rollback-kept-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'rollback-kept', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      const services = adoptionServices(repoPath, worktreePath);
+      vi.mocked(services.databaseService.deleteArchivedSessionPermanently).mockReturnValue(false);
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockRejectedValue(new Error('PTY failed'));
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' } }],
+      }]);
+
+      expect(result).toMatchObject({ ok: false, items: [{ ok: false, sessionId: session.id, error: {
+        message: `Could not create Pane "Adopted": PTY failed. Pane ${session.id} was created, then archived to roll back, but could not be deleted, so it still holds this worktree. Open it under Archived Panes in Pane to restore or delete it before retrying.`,
+      } }] });
     });
   });
 
@@ -2164,8 +2210,11 @@ describe('runpane IPC handlers', () => {
       } as AppServices['databaseService'],
     });
 
-    await expect(createRegistry(services).invoke('runpane:panes:cost', [{ paneId: 'missing' }]))
-      .rejects.toThrow('No Pane pane found with id missing');
+    await expect(createRegistry(services).invoke('runpane:panes:cost', [{ paneId: 'missing' }])).rejects.toMatchObject({
+      code: 'ERR_RUNPANE_PANE_NOT_FOUND',
+      message: 'No Pane found with id missing. Nothing was changed.',
+      next: 'See Pane ids with `runpane panes list`.',
+    });
   });
 
   it('scopes pane costs to a repository and omits workspace totals', async () => {
@@ -4146,8 +4195,8 @@ describe('runpane IPC handlers', () => {
           ok: false,
           error: {
             code: 'ERR_RUNPANE_BRANCH_HAS_PANE',
-            message: "Branch 'agents/owned' already has Pane \"Owner feature\" (pane-owner-1). Add this work to it as a new tab: "
-              + 'runpane panels create --pane pane-owner-1 --tool-command "<cmd>" --source agent --no-focus',
+            message: "Could not create Pane \"second\": Branch 'agents/owned' already has Pane \"Owner feature\" (pane-owner-1). Add this work to it as a new tab: "
+              + 'runpane panels create --pane pane-owner-1 --tool-command "<cmd>" --source agent --no-focus. No Pane was created.',
           },
         }],
       });
@@ -4342,7 +4391,38 @@ describe('runpane IPC handlers', () => {
         ok: false,
         paneId: 'session-created-early',
         sessionId: 'session-created-early',
-        error: { code: 'ERR_RUNPANE_PANE_CREATE_FAILED' },
+        error: {
+          code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
+          message: 'Could not create Pane "slow-setup-pane": Timed out waiting for session creation job 7. Pane session-created-early was created before the failure and was kept. Check it with `runpane panes list --json` before retrying, so you do not create a duplicate.',
+        },
+      }],
+    });
+  });
+
+  it('says creation may still finish when the wait times out before the Pane exists', async () => {
+    const services = createServices({
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => {
+          throw new PaneError('ERR_PANE_CREATE_TIMEOUT', 'Timed out waiting for session creation job 8');
+        }),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: 'active',
+      panes: [{ name: 'queued-pane', tool: { agent: 'claude' } }],
+    }]);
+
+    expect(result).toMatchObject({
+      ok: false,
+      items: [{
+        ok: false,
+        sessionId: undefined,
+        error: {
+          code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
+          message: 'Could not confirm that Pane "queued-pane" was created: Timed out waiting for session creation job 8. Creation may still finish in the background. Check `runpane panes list --json` for it before retrying, so you do not create a duplicate.',
+        },
       }],
     });
   });
@@ -4615,7 +4695,7 @@ describe('runpane IPC handlers', () => {
     const registry = createRegistry(services);
 
     await expect(registry.invoke('runpane:panes:rename', [{ paneId: 'missing-pane', name: 'new name' }]))
-      .rejects.toThrow('No Pane pane found with id missing-pane');
+      .rejects.toThrow('No Pane found with id missing-pane');
   });
 
   it('serializes multi-pane session creation before enqueueing the next pane', async () => {
@@ -6125,7 +6205,7 @@ describe('runpane IPC handlers', () => {
 
       await expect(registry.invoke('runpane:panes:archive', [{
         paneId: 'no-such-pane',
-      }])).rejects.toThrow(/No Pane pane found/);
+      }])).rejects.toThrow(/No Pane found/);
     });
 
     it('refuses to archive a dirty pane without --force', async () => {
@@ -7305,7 +7385,7 @@ describe('runpane IPC handlers', () => {
 
       await expect(registry.invoke('runpane:panes:focus', [{
         paneId: 'no-such-pane',
-      }])).rejects.toThrow(/No Pane pane found/);
+      }])).rejects.toThrow(/No Pane found/);
 
       expect(window.show).not.toHaveBeenCalled();
       expect(sentEvents).not.toHaveBeenCalled();
@@ -7442,7 +7522,7 @@ describe('runpane IPC handlers', () => {
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: {} }]))
         .rejects.toThrow(/pass --note/);
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: { paneId: 'missing' } }]))
-        .rejects.toThrow(/No Pane pane found/);
+        .rejects.toThrow(/No Pane found/);
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'x', ttlMs: 60_000, owner: { paneId: session.id, panelId: otherPanel.id } }]))
         .rejects.toThrow(/does not belong to Pane/);
       await expect(registry.invoke('runpane:locks:acquire', [{ name: 'bad name', ttlMs: 60_000, owner: { label: 'me' } }]))
