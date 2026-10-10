@@ -931,9 +931,11 @@ export function registerRunpaneHandlers(
           if (normalized.focus === true) requestHostDesktopFocus({ paneId: session.id, panelId: panel.id });
         } catch (error) {
           let failureSessionId = createdSessionId;
+          let archived = false;
           if (createdSessionId) {
             try {
               await sessionManager.archiveSession(createdSessionId);
+              archived = true;
               if (databaseService.deleteArchivedSessionPermanently(createdSessionId)) {
                 failureSessionId = undefined;
               }
@@ -941,7 +943,7 @@ export function registerRunpaneHandlers(
               console.error(`[Runpane] Failed to roll back adopted pane ${createdSessionId}:`, rollbackError);
             }
           }
-          items.push(createFailureItem(index, item, error, failureSessionId, storedWorktreePath));
+          items.push(createFailureItem(index, item, error, failureSessionId, storedWorktreePath, archived));
         }
       }
 
@@ -3624,10 +3626,16 @@ async function associateCreatedPane(
     await requireOrchestrationSessionManager(services).associate({ sessionId }, { paneId });
     return { sessionId, ok: true };
   } catch (error) {
+    // Repeating the same associate fails again when the Session is wrong or the Pane belongs elsewhere.
+    const next = error instanceof PaneError && (error.code === 'ERR_SESSION_NOT_FOUND' || error.code === 'ERR_SESSION_AMBIGUOUS')
+      ? `Pick the Session's id from \`runpane sessions list --json\`, then run \`runpane sessions associate --session <id> --pane ${paneId}\`.`
+      : error instanceof PaneError && error.next
+        ? error.next
+        : `Add it with \`runpane sessions associate --session ${sessionId} --pane ${paneId}\`.`;
     return {
       sessionId,
       ok: false,
-      error: `Could not add Pane ${paneId} to Session ${sessionId}: ${reasonOf(error)}. The Pane was created and kept. Add it with \`runpane sessions associate --session ${sessionId} --pane ${paneId}\`.`,
+      error: `Could not add Pane ${paneId} to Session ${sessionId}: ${reasonOf(error)}. The Pane was created and kept. ${next}`,
     };
   }
 }
@@ -4870,7 +4878,18 @@ function createFailureItem(
   cause: unknown,
   sessionId?: string,
   worktreePath?: string,
+  keptArchived = false,
 ): RunpanePaneCreateFailureItem {
+  const label = item.name ? `Pane "${item.name}"` : `pane ${index}`;
+  const reason = reasonOf(cause);
+  // Claim "no Pane" only when that is established: a timed-out wait does not cancel the queued job.
+  const message = sessionId
+    ? keptArchived
+      ? `Could not create ${label}: ${reason}. Pane ${sessionId} was created, then archived to roll back, but could not be deleted, so it still holds this worktree. Open it under Archived Panes in Pane to restore or delete it before retrying.`
+      : `Could not create ${label}: ${reason}. Pane ${sessionId} was created before the failure and was kept. Check it with \`runpane panes list --json\` before retrying, so you do not create a duplicate.`
+    : cause instanceof PaneError && cause.code === 'ERR_PANE_CREATE_TIMEOUT'
+      ? `Could not confirm that ${label} was created: ${reason}. Creation may still finish in the background. Check \`runpane panes list --json\` for it before retrying, so you do not create a duplicate.`
+      : `Could not create ${label}: ${reason}. No Pane was created.`;
   return {
     ok: false,
     index,
@@ -4878,12 +4897,7 @@ function createFailureItem(
     sessionId,
     paneId: sessionId,
     worktreePath,
-    error: {
-      message: `Could not create ${item.name ? `Pane "${item.name}"` : `pane ${index}`}: ${reasonOf(cause)}. ${sessionId
-        ? `Pane ${sessionId} was created before the failure and was kept. Check it with \`runpane panes list --json\` before retrying, so you do not create a duplicate.`
-        : 'No Pane was created.'}`,
-      code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
-    },
+    error: { message, code: 'ERR_RUNPANE_PANE_CREATE_FAILED' },
   };
 }
 

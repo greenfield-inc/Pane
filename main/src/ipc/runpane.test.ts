@@ -37,6 +37,7 @@ import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
 import { registerRunpaneHandlers } from './runpane';
 import type { TaskQueue } from '../services/taskQueue';
+import { PaneError } from '../../../shared/paneError';
 
 // Transcript reads are real file I/O; these tests script what the transcript says.
 const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
@@ -785,6 +786,28 @@ describe('runpane IPC handlers', () => {
       });
     });
 
+    it('points a missing Session at the Session list instead of repeating it', async () => {
+      const repoPath = createTempGitRepo('associate-missing-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'associate-missing-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'associate-missing', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      const associate = vi.fn(async () => { throw new PaneError('ERR_SESSION_NOT_FOUND', 'Session typo not found'); });
+      // SAFETY: The handler only calls associate on the Sessions manager.
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' } }],
+        associateSession: 'typo',
+      }]);
+
+      expect(result).toMatchObject({ items: [{ ok: true, association: {
+        ok: false,
+        error: `Could not add Pane ${session.id} to Session typo: Session typo not found. The Pane was created and kept. Pick the Session's id from \`runpane sessions list --json\`, then run \`runpane sessions associate --session <id> --pane ${session.id}\`.`,
+      } }] });
+    });
+
     it('does not associate panes when no Session is given', async () => {
       const repoPath = createTempGitRepo('no-associate-adopt-repo');
       execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -1056,6 +1079,26 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: false, items: [{ ok: false, sessionId: undefined }] });
       expect(services.sessionManager.archiveSession).toHaveBeenCalledWith(session.id);
       expect(services.databaseService.deleteArchivedSessionPermanently).toHaveBeenCalledWith(session.id);
+    });
+
+    it('names the archived Pane a failed rollback leaves behind', async () => {
+      const repoPath = createTempGitRepo('rollback-kept-repo');
+      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
+      const worktreePath = path.join(path.dirname(repoPath), 'rollback-kept-worktree');
+      execFileSync('git', ['worktree', 'add', '-b', 'rollback-kept', worktreePath], { cwd: repoPath, stdio: 'ignore' });
+      const services = adoptionServices(repoPath, worktreePath);
+      vi.mocked(services.databaseService.deleteArchivedSessionPermanently).mockReturnValue(false);
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockRejectedValue(new Error('PTY failed'));
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' } }],
+      }]);
+
+      expect(result).toMatchObject({ ok: false, items: [{ ok: false, sessionId: session.id, error: {
+        message: `Could not create Pane "Adopted": PTY failed. Pane ${session.id} was created, then archived to roll back, but could not be deleted, so it still holds this worktree. Open it under Archived Panes in Pane to restore or delete it before retrying.`,
+      } }] });
     });
   });
 
@@ -4257,6 +4300,34 @@ describe('runpane IPC handlers', () => {
         error: {
           code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
           message: 'Could not create Pane "slow-setup-pane": Timed out waiting for session creation job 7. Pane session-created-early was created before the failure and was kept. Check it with `runpane panes list --json` before retrying, so you do not create a duplicate.',
+        },
+      }],
+    });
+  });
+
+  it('says creation may still finish when the wait times out before the Pane exists', async () => {
+    const services = createServices({
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => {
+          throw new PaneError('ERR_PANE_CREATE_TIMEOUT', 'Timed out waiting for session creation job 8');
+        }),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: 'active',
+      panes: [{ name: 'queued-pane', tool: { agent: 'claude' } }],
+    }]);
+
+    expect(result).toMatchObject({
+      ok: false,
+      items: [{
+        ok: false,
+        sessionId: undefined,
+        error: {
+          code: 'ERR_RUNPANE_PANE_CREATE_FAILED',
+          message: 'Could not confirm that Pane "queued-pane" was created: Timed out waiting for session creation job 8. Creation may still finish in the background. Check `runpane panes list --json` for it before retrying, so you do not create a duplicate.',
         },
       }],
     });

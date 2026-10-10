@@ -58,6 +58,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
 import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
+import { PaneError } from '../../../shared/paneError';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
@@ -397,7 +398,11 @@ export class OrchestrationSessionManager extends EventEmitter {
       for (const other of data.sessions) {
         if (other.id === current.id) continue;
         if (other.associations.some(association => association.paneId === input.paneId)) {
-          throw new Error(`Pane ${pane.name} is already associated with Session ${other.name}`);
+          throw new PaneError(
+            'ERR_PANE_ALREADY_ASSOCIATED',
+            `Pane ${pane.name} is already associated with Session ${other.name}`,
+            `It stays with ${other.name}. To move it, detach it there first with \`runpane sessions detach --session ${other.id} --pane ${pane.id}\`, then associate it.`,
+          );
         }
       }
       const joined = !current.associations.some(item => item.paneId === input.paneId);
@@ -1069,8 +1074,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       matches = data.sessions.filter(session => session.name === selector.sessionId);
     }
     const selectorLabel = selector.name ?? selector.sessionId;
-    if (matches.length === 0) throw new Error(`Session ${selectorLabel} not found`);
-    if (matches.length > 1) throw new Error(`Session selector ${selectorLabel} is ambiguous`);
+    if (matches.length === 0) throw new PaneError('ERR_SESSION_NOT_FOUND', `Session ${selectorLabel} not found`, 'Pick a Session from `runpane sessions list --json`.');
+    if (matches.length > 1) throw new PaneError('ERR_SESSION_AMBIGUOUS', `Session selector ${selectorLabel} is ambiguous`, 'Use the Session id from `runpane sessions list --json`.');
     return matches[0];
   }
 
