@@ -4199,6 +4199,29 @@ describe('runpane IPC handlers', () => {
       expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
     });
 
+    it('names the winning Pane when a concurrent create takes the branch first', async () => {
+      const ownerPath = path.join(createTempGitRepo('race-parent'), '..', 'race-worktree');
+      const paneRows: Array<{ id: string; name: string; worktree_path: string }> = [];
+      const services = branchServices([], paneRows);
+      const repoPath = services.databaseService.getAllProjects()[0].path;
+      services.taskQueue!.createSessionAndWait = vi.fn(async () => {
+        // The other request created its Pane on the branch while this one waited in the queue.
+        execFileSync('git', ['worktree', 'add', '-b', 'agents/raced', ownerPath], { cwd: repoPath, stdio: 'ignore' });
+        paneRows.push({ id: 'pane-winner', name: 'Winner', worktree_path: ownerPath });
+        throw new Error("Branch 'agents/raced' already exists.");
+      });
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'loser', branch: 'agents/raced', tool: { agent: 'codex' } }],
+      }]);
+
+      expect(result).toMatchObject({
+        ok: false,
+        items: [{ ok: false, error: { code: 'ERR_RUNPANE_BRANCH_HAS_PANE', message: expect.stringContaining('"Winner" (pane-winner)') } }],
+      });
+    });
+
     it('refuses the same branch twice in one request', async () => {
       await expect(createRegistry(branchServices()).invoke('runpane:panes:create', [{
         repo: { id: project.id },

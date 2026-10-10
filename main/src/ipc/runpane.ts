@@ -2367,8 +2367,23 @@ async function createPaneItem(
       warnings,
     };
   } catch (error) {
-    return createFailureItem(index, item, error, createdSessionId, createdWorktreePath);
+    // Two creates for one branch can both pass the early check; name the Pane that won.
+    const ownerError = item.branch !== undefined && createdSessionId === undefined
+      ? await branchOwnerError(services, repo, item.branch)
+      : undefined;
+    return createFailureItem(index, item, ownerError ?? error, createdSessionId, createdWorktreePath);
   }
+}
+
+async function branchOwnerError(services: AppServices, repo: Project, branch: string): Promise<RunpaneCodedError | undefined> {
+  const context = services.sessionManager.getProjectContextByProjectId(repo.id);
+  if (!context) return undefined;
+  try {
+    await assertBranchHasNoPane(services, repo, branch, context.pathResolver, context.commandRunner);
+  } catch (error) {
+    if (error instanceof RunpaneCodedError) return error;
+  }
+  return undefined;
 }
 
 async function validateRequestedBranch(services: AppServices, repo: Project, branch: string | undefined): Promise<void> {

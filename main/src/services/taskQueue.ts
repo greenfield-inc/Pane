@@ -97,11 +97,6 @@ function firstLine(text: string): string {
   return text.split('\n')[0].trim();
 }
 
-/** Strips what a shell would expand inside double quotes, so the line echoes as written. */
-function shellSafeLine(text: string): string {
-  return firstLine(text).replace(/["`$\\]/g, '');
-}
-
 export function queuedSetupMessage(position: number): string {
   return `Queued for setup: ${ordinal(position)} in line; setup starts when an earlier Pane finishes`;
 }
@@ -649,7 +644,7 @@ export class TaskQueue {
   }
 
   /**
-   * Echoes `[Pane] ...` lines in the Pane's default terminal so a person sees setup progress.
+   * Shows `[Pane] ...` lines in the Pane's default terminal so a person sees setup progress.
    * The terminal may not exist yet right after the Pane is announced, so this waits briefly.
    */
   private async writeSetupLines(sessionId: string, worktreePath: string, ctx: ProjectContext, lines: string[]): Promise<void> {
@@ -665,10 +660,10 @@ export class TaskQueue {
       }
       if (!terminalPanelManager.isTerminalInitialized(terminalPanel.id)) {
         await terminalPanelManager.initializeTerminal(terminalPanel, worktreePath, ctx.commandRunner.wslContext ?? null);
-        // Small delay for the shell prompt to appear before writing.
+        // Small delay so the notice lands after the shell's first prompt.
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      terminalPanelManager.writeToTerminal(terminalPanel.id, lines.map(line => `echo "[Pane] ${shellSafeLine(line)}"\r`).join(''));
+      for (const line of lines) terminalPanelManager.showNotice(terminalPanel.id, firstLine(line));
     } catch (error) {
       console.error(`[TaskQueue] Failed to write setup progress for session ${sessionId}:`, error);
     }

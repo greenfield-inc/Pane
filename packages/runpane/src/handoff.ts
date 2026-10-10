@@ -602,13 +602,14 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     }
     const item = created.items[0];
     if (item?.ok && item.sessionId && item.setupQueue) {
-      // The receiver's prompt rides on the launch, which waits for this Pane's setup.
-      say(step('queued', `Pane ${item.sessionId}: ${item.setupQueue.message} The receiver reads the note when it starts.`));
-      say(`Check on it after setup: ${receiverStatus(item.sessionId)}`);
+      // The receiver's prompt rides on the launch after setup, so delivery is not verified yet.
+      result.ok = false;
       result.notePath = notePath;
       result.pane = { id: item.sessionId, name: item.name, worktreePath: item.worktreePath };
+      warnings.push(`Pane ${item.sessionId} was created and is queued for setup (${item.setupQueue.message}). The receiver starts after setup with the note; its prompt is not verified yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
+      for (const warning of warnings) say(`  ! ${warning}`);
       if (parsed.json) console.log(JSON.stringify(result, null, 2));
-      return 0;
+      return 1;
     }
     if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
     receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: item.initialInput, newTab: false };
