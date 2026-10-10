@@ -7171,13 +7171,16 @@ describe('runpane IPC handlers', () => {
       });
 
       it('keeps a detached worktree whose HEAD is the stored start commit but on no remote or base branch', async () => {
-        const { git, pane } = createRemoteRepo();
+        const { repoPath, git, pane } = createRemoteRepo();
         const detached = pane('pane-detached', worktreePath => {
           git(worktreePath, 'commit', '--allow-empty', '-m', 'unpublished');
           git(worktreePath, 'checkout', '-q', '--detach');
         });
         const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: detached.worktreePath, encoding: 'utf8' }).trim();
         const { services } = createBulkServices([{ ...detached, baseCommit: head }], [detached.id]);
+        // The real repo, so the merged-PR lookup runs the real `gh` and cleanup proves it left the worktree free.
+        // SAFETY: This test fixture supplies the project context archive reads.
+        vi.mocked(services.sessionManager.getProjectContext).mockReturnValue({ project: { ...project, path: repoPath }, commandRunner: new CommandRunner({ path: repoPath }) } as never);
         const registry = createRegistry(services);
         const sessionsDelete = registerSessionsDeleteStub(registry, services);
 
