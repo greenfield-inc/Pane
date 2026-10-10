@@ -116,6 +116,8 @@ export interface TerminalPanelState {
   preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;
   customResumeStarted?: boolean;
+  /** The SSH config alias this terminal connects to, for tabs opened from the SSH view. */
+  sshHost?: string;
 
   // CLI tool init state
   isCliPanel?: boolean;              // True if this terminal runs a CLI tool (claude/codex)

@@ -54,6 +54,7 @@ interface NavigationState {
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
   navigateToMissionControl: () => void;
+  navigateToSsh: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -139,6 +140,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   // Mission Control spans every project, so it clears the project scope.
   navigateToMissionControl: () => set({
     activeView: 'mission-control',
+    activeProjectId: null
+  }),
+
+  navigateToSsh: () => set({
+    activeView: 'ssh',
     activeProjectId: null
   }),
 }));

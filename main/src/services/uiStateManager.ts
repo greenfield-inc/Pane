@@ -7,11 +7,12 @@ import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorksp
 import { decodeSessionPanelLayout } from '../../../shared/types/panels';
 import type { SessionPanelLayout } from '../../../shared/types/panels';
 
-type SidebarSection = 'pinned' | 'repositories';
+type SidebarSection = 'pinned' | 'repositories' | 'sshHosts';
 
 const SIDEBAR_SECTION_KEYS = {
   pinned: 'treeView.pinnedSectionExpanded',
-  repositories: 'treeView.repositoriesSectionExpanded'
+  repositories: 'treeView.repositoriesSectionExpanded',
+  sshHosts: 'treeView.sshHostsSectionExpanded'
 } satisfies Record<SidebarSection, string>;
 
 interface ExpandedUiState {
@@ -20,6 +21,7 @@ interface ExpandedUiState {
   sessionSortAscending: boolean;
   pinnedSectionExpanded: boolean;
   repositoriesSectionExpanded: boolean;
+  sshHostsSectionExpanded: boolean;
 }
 
 type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteUIState'>;
@@ -182,7 +184,8 @@ class UIStateManager {
       expandedFolders: this.getExpandedFolders(),
       sessionSortAscending: this.getSessionSortAscending(),
       pinnedSectionExpanded: this.getSidebarSectionExpanded('pinned'),
-      repositoriesSectionExpanded: this.getSidebarSectionExpanded('repositories')
+      repositoriesSectionExpanded: this.getSidebarSectionExpanded('repositories'),
+      sshHostsSectionExpanded: this.getSidebarSectionExpanded('sshHosts')
     };
   }
 
@@ -192,6 +195,7 @@ class UIStateManager {
     this.db.deleteUIState('treeView.sessionSortAscending');
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.pinned);
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.repositories);
+    this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sshHosts);
   }
 }
 

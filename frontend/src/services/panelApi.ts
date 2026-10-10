@@ -9,8 +9,14 @@ import { JsonValue } from '../../../shared/validation/boundaryDecoder';
 let hostGeneration = 0;
 
 export const panelApi = {
+  /** Called synchronously when the window switches to another host, before any of its reads. */
   invalidateHostLoads(): void {
     hostGeneration += 1;
+  },
+
+  /** Work started under an older value belongs to a host this window has switched away from. */
+  hostGeneration(): number {
+    return hostGeneration;
   },
 
   async createPanel(request: CreatePanelRequest): Promise<ToolPanel> {
