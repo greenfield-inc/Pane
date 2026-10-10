@@ -226,6 +226,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
         timestamp: new Date('2026-01-01T00:02:00.000Z'),
       }]),
       getProjectContext: vi.fn(() => ({
+        project,
         commandRunner: new CommandRunner({ path: os.tmpdir() }),
       })),
       getProjectContextByProjectId: vi.fn(() => ({
@@ -6707,7 +6708,7 @@ describe('runpane IPC handlers', () => {
             ...createServices().sessionManager,
             getSession: vi.fn(() => adopted),
             getProjectForSession: vi.fn(() => ({ ...project, path: repoPath })),
-            getProjectContext: vi.fn(() => ({ commandRunner })),
+            getProjectContext: vi.fn(() => ({ project: { ...project, path: repoPath }, commandRunner })),
           } as never,
           // SAFETY: This test fixture intentionally supplies the minimal worktree manager surface exercised by archive.
           worktreeManager: {
@@ -6884,7 +6885,7 @@ describe('runpane IPC handlers', () => {
           sessionManager: {
             ...createServices().sessionManager,
             getSession: vi.fn(() => featureSession),
-            getProjectContext: vi.fn(() => ({ commandRunner })),
+            getProjectContext: vi.fn(() => ({ project: { ...project, path: featureSession.worktreePath }, commandRunner })),
           } as never,
           // SAFETY: This test fixture intentionally supplies the minimal worktree manager surface exercised by archive.
           worktreeManager: {
