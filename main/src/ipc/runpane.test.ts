@@ -33,7 +33,6 @@ import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
 import { CommandRunner } from '../utils/commandRunner';
-import { WorktreeManager } from '../services/worktreeManager';
 import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
