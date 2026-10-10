@@ -1393,6 +1393,10 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       })),
       promptFile: boundary.optional(boundary.string),
       warnings: promptWarningsSchema,
+      setupQueue: boundary.optional(boundary.object({
+        position: boundary.number,
+        message: boundary.string,
+      })),
     }),
     boundary.object({
       ok: boundary.literal(false),

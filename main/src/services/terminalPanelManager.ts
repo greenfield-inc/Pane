@@ -1929,6 +1929,8 @@ export class TerminalPanelManager extends EventEmitter {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return;
     const data = `\r\n\x1b[36m[Pane]\x1b[0m ${text}\r\n`;
+    // Same three sinks as PTY output: the screen agents read, scrollback, and live viewers.
+    terminal.screenEmulator?.write(data);
     this.addToScrollback(terminal, data);
     terminal.outputBuffer += data;
     this.flushOutputBuffer(terminal);
