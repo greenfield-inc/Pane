@@ -4255,7 +4255,7 @@ async function computeUnpublishedCommits(
   // A squash or rebase merge leaves those commits outside the base branch.
   // A merged PR whose head is exactly HEAD proves they reached the remote.
   const mergedViaPr = unpushedCommitDetails.length > 0
-    ? await findMergedPullRequestForHead(pane.worktreePath, ctx.commandRunner)
+    ? await findMergedPullRequestForHead(pane.worktreePath, ctx.project.path, ctx.commandRunner)
     : undefined;
   return {
     hasUpstream: Boolean(upstream),
@@ -4295,9 +4295,14 @@ const mergedPullRequestListSchema = boundary.array(boundary.object({
 /**
  * The merged pull request whose head commit is this worktree's HEAD, if any.
  * Missing, unauthenticated, or offline `gh` means no evidence, never an error.
+ *
+ * `gh` runs in the repository root, which has the same remotes as the
+ * worktree. On Windows a `gh.exe` can hold its working directory briefly after
+ * the call returns, which would block removing the worktree.
  */
 async function findMergedPullRequestForHead(
   worktreePath: string,
+  repoPath: string,
   commandRunner: CommandRunner,
 ): Promise<RunpanePaneArchiveMergedPr | undefined> {
   try {
@@ -4307,7 +4312,7 @@ async function findMergedPullRequestForHead(
     const { stdout } = await commandRunner.execFile(
       'gh',
       ['pr', 'list', '--search', head, '--state', 'merged', '--json', 'number,headRefOid', '--limit', '20'],
-      worktreePath,
+      repoPath,
       { silent: true, timeout: GH_PR_LOOKUP_TIMEOUT_MS },
     );
     const pullRequests = decodeBoundary(JSON.parse(stdout.trim() || '[]'), mergedPullRequestListSchema);
