@@ -7,11 +7,6 @@ function deferred<T>() {
   return { resolve, promise };
 }
 
-const profile = (id: string) => ({ id, label: id, baseUrl: `https://${id}.test`, token: 'token', transport: 'http+sse' });
-const driving = (hostId: string) => ({
-  remoteDaemon: { client: { mode: 'remote', activeProfileId: hostId, profiles: [profile('a'), profile('b')] } },
-});
-
 type OpenReply = { success: boolean; data?: { sessionId: string; panelId: string }; error?: string };
 
 /** The Electron calls opening a host makes: the open itself and clearing the active Pane. */
@@ -27,13 +22,11 @@ async function setup(open: () => Promise<OpenReply>) {
   const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
   vi.stubGlobal('localStorage', storage);
   vi.stubGlobal('window', { electronAPI: electronApi(open), localStorage: storage });
-  const [{ useSshHostsStore }, { useConfigStore }, { useNavigationStore }, { usePanelStore }] = await Promise.all([
-    import('./sshHostsStore'), import('./configStore'), import('./navigationStore'), import('./panelStore'),
+  const [{ useSshHostsStore }, { useNavigationStore }, { usePanelStore }] = await Promise.all([
+    import('./sshHostsStore'), import('./navigationStore'), import('./panelStore'),
   ]);
-  // SAFETY: The store reads only remoteDaemon from config.
-  useConfigStore.setState({ config: driving('a') as never });
   useNavigationStore.setState({ activeView: 'project', activeProjectId: 7 });
-  return { useSshHostsStore, useConfigStore, useNavigationStore, usePanelStore };
+  return { useSshHostsStore, useNavigationStore, usePanelStore };
 }
 
 describe('opening an SSH host', () => {
@@ -51,19 +44,18 @@ describe('opening an SSH host', () => {
     ['failure', { success: false, error: 'old-error' }],
   ];
 
+  // The resync for a host change calls invalidateHostLoads() before any read, once per switch.
   it.each(late.flatMap(([kind, reply]) => [
-    [kind, 'to another Pane', ['b'], reply] as const,
-    [kind, 'away and back', ['b', 'a'], reply] as const,
-  ]))('ignores a %s reply that arrives after the window switched %s', async (_kind, _route, route, reply) => {
+    [kind, 'to another Pane', 1, reply] as const,
+    [kind, 'away and back', 2, reply] as const,
+  ]))('ignores a %s reply that arrives after the window switched %s', async (_kind, _route, switches, reply) => {
     const pending = deferred<OpenReply>();
     const stores = await setup(() => pending.promise);
     const { useSessionStore } = await import('./sessionStore');
 
     const opening = stores.useSshHostsStore.getState().open('mini');
-    for (const hostId of route) {
-      // SAFETY: The store reads only remoteDaemon from config.
-      stores.useConfigStore.setState({ config: driving(hostId) as never });
-    }
+    const { panelApi } = await import('../services/panelApi');
+    for (let i = 0; i < switches; i += 1) panelApi.invalidateHostLoads();
     // What the user did on the Pane they ended on, before the old reply arrives.
     useSessionStore.setState({ activeSessionId: 'incoming-session' });
     stores.usePanelStore.getState().setActivePanel(SSH_HOSTS_SESSION_ID, 'incoming-tab');

@@ -91,6 +91,8 @@ export type ElectronApiMockOptions = {
   holdSshPanelReads?: boolean;
   /** How many SSH Session reads fail before the Session loads. */
   sshSessionReadFailures?: number;
+  /** Hold each SSH open until releaseSshOpens() answers it. */
+  holdSshOpens?: boolean;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
 };
@@ -263,6 +265,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
     const heldSshPanelReads: Array<() => void> = [];
+    const openSshHost = (alias: string, newTab: boolean) => {
+      const sessionId = '__ssh_hosts_session__';
+      const existing = newTab ? undefined : mockPanels.find(panel => sshHostOf(panel) === alias);
+      if (existing) {
+        setActiveMockPanel(sessionId, existing.id);
+        return success({ sessionId, panelId: existing.id });
+      }
+      const now = new Date().toISOString();
+      const panel = {
+        id: `mock-panel-${nextPanelId++}`,
+        sessionId,
+        type: 'terminal',
+        title: alias,
+        state: { isActive: false, customState: { initialCommand: `ssh ${alias}`, sshHost: alias } },
+        metadata: { createdAt: now, lastActiveAt: now, position: mockPanels.length },
+      };
+      mockPanels.push(panel);
+      setActiveMockPanel(sessionId, panel.id);
+      emit('panel:created', clone(panel));
+      return success({ sessionId, panelId: panel.id });
+    };
+    const heldSshOpens: Array<(error?: string) => void> = [];
+    const heldExpandedReads: Array<() => void> = [];
+    let holdNextExpandedRead = false;
     let sshSessionReadFailures = mockOptions.sshSessionReadFailures ?? 0;
     const sshHostOf = (panel: { sessionId?: string; state?: unknown }) => {
       if (panel.sessionId !== '__ssh_hosts_session__') return undefined;
@@ -776,25 +802,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success({ hosts, openHosts: [...open].filter((alias): alias is string => !!alias) });
         },
         open: (alias: string, newTab: boolean) => {
-          const sessionId = '__ssh_hosts_session__';
-          const existing = newTab ? undefined : mockPanels.find(panel => sshHostOf(panel) === alias);
-          if (existing) {
-            setActiveMockPanel(sessionId, existing.id);
-            return success({ sessionId, panelId: existing.id });
-          }
-          const now = new Date().toISOString();
-          const panel = {
-            id: `mock-panel-${nextPanelId++}`,
-            sessionId,
-            type: 'terminal',
-            title: alias,
-            state: { isActive: false, customState: { initialCommand: `ssh ${alias}`, sshHost: alias } },
-            metadata: { createdAt: now, lastActiveAt: now, position: mockPanels.length },
-          };
-          mockPanels.push(panel);
-          setActiveMockPanel(sessionId, panel.id);
-          emit('panel:created', clone(panel));
-          return success({ sessionId, panelId: panel.id });
+          if (!mockOptions.holdSshOpens) return openSshHost(alias, newTab);
+          return new Promise(resolve => {
+            heldSshOpens.push(error => resolve(error ? { success: false, error } : openSshHost(alias, newTab)));
+          });
         },
       }),
       missionControl: namespace({
@@ -1201,7 +1212,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:host-state-changed', callback),
       }),
       uiState: namespace({
-        getExpanded: () => success(clone(uiState)),
+        getExpanded: () => {
+          const read = success(clone(uiState));
+          if (!holdNextExpandedRead) return read;
+          holdNextExpandedRead = false;
+          return new Promise(resolve => { heldExpandedReads.push(() => resolve(read)); });
+        },
         saveExpanded: () => success(),
         saveExpandedProjects: (projectIds: number[]) => {
           uiState.expandedProjects = clone(projectIds);
@@ -1337,6 +1353,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setPanels(panels: JsonObject[]) {
           mockPanels = clone(panels);
+        },
+        /** Answers every held SSH open: with the open's result, or with this error. */
+        releaseSshOpens(error?: string) {
+          for (const release of heldSshOpens.splice(0)) release(error);
+        },
+        /** Holds the next expanded-state read, the first read of a host-change resync. */
+        holdNextExpandedRead() {
+          holdNextExpandedRead = true;
+        },
+        releaseExpandedReads() {
+          for (const release of heldExpandedReads.splice(0)) release();
         },
         releaseSshPanelReads() {
           for (const release of heldSshPanelReads.splice(0)) release();
