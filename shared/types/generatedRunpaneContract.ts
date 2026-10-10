@@ -1846,7 +1846,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--merged",
-        "description": "With panes archive --session, archive only Panes that are clean and pushed, or merged via a pull request. A Pane whose PR is still open is skipped as pr-open; an unknown PR state archives with a warning."
+        "description": "With panes archive --session, archive only Panes whose PR is confirmed merged and whose worktree has no uncommitted, untracked or unpushed work. Other Panes are skipped with a reason (pr-open, pr-not-merged, pr-status-unknown, or a local safety code)."
       },
       {
         "name": "--launch",
@@ -9834,7 +9834,9 @@ export const RUNPANE_CONTRACT = {
                       "missing-pane",
                       "already-archived",
                       "main-repo",
-                      "pr-open"
+                      "pr-open",
+                      "pr-not-merged",
+                      "pr-status-unknown"
                     ]
                   },
                   "message": {
@@ -9855,6 +9857,8 @@ export const RUNPANE_CONTRACT = {
                   "state": {
                     "enum": [
                       "open",
+                      "merged",
+                      "closed",
                       "none",
                       "unknown"
                     ]
@@ -9867,9 +9871,6 @@ export const RUNPANE_CONTRACT = {
                   }
                 },
                 "additionalProperties": false
-              },
-              "warning": {
-                "type": "string"
               },
               "safetyCheck": {
                 "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/safetyCheck"
@@ -11018,7 +11019,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--merged",
             "required": false,
-            "description": "With --session, archive only Panes that are clean and pushed, or merged via a pull request; skip the rest with a reason. Local git decides safety. A Pane whose PR is still open is skipped as pr-open, since its review, fix and QA tabs still need the worktree; an unknown PR state archives with a warning."
+            "description": "With --session, archive only Panes whose PR is confirmed merged and whose worktree has no uncommitted, untracked or unpushed work; skip the rest with a reason and next step. An open PR is skipped as pr-open, no PR or a closed unmerged PR as pr-not-merged, and a PR state GitHub cannot confirm as pr-status-unknown."
           },
           {
             "name": "--yes",

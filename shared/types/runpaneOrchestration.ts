@@ -639,7 +639,7 @@ export interface RunpanePaneArchiveRequest {
 /** Archives every Pane associated with a named Session whose work is safe to discard locally. */
 export interface RunpanePaneArchiveBulkRequest {
   sessionId: string;
-  /** The only bulk filter today: Panes that are clean and pushed, or merged via a pull request. */
+  /** The only bulk filter today: Panes whose PR merged and whose worktree has no unsaved work. */
   merged: true;
   source?: RunpanePanelCreateSource;
   dryRun?: boolean;
@@ -749,11 +749,13 @@ export type RunpanePaneArchiveBulkSkipCode =
   | 'missing-pane'
   | 'already-archived'
   | 'main-repo'
-  | 'pr-open';
+  | 'pr-open'
+  | 'pr-not-merged'
+  | 'pr-status-unknown';
 
-/** Advisory: archive safety comes from local git, so `unknown` never blocks. */
+/** The Pane's PR by its branch; a `--merged` sweep archives only `merged`. */
 export type RunpanePaneArchivePrStatus =
-  | { state: 'open'; number: number }
+  | { state: 'open' | 'merged' | 'closed'; number: number }
   | { state: 'none' }
   | { state: 'unknown'; reason: string };
 
@@ -763,10 +765,7 @@ export interface RunpanePaneArchiveBulkItem {
   outcome: 'archived' | 'would-archive' | 'skipped' | 'failed';
   skipped?: { code: RunpanePaneArchiveBulkSkipCode; message: string };
   error?: string;
-  /** Set once local safety passed and the PR was looked up. */
   pr?: RunpanePaneArchivePrStatus;
-  /** What the archive could not confirm, why, and the next step. */
-  warning?: string;
   safetyCheck?: RunpanePaneArchiveSafetyCheck;
   worktreeCleanup?: RunpaneWorktreeCleanupState;
   trashDeletion?: RunpaneWorktreeTrashDeletion;
