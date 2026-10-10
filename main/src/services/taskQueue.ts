@@ -128,6 +128,7 @@ export class TaskQueue {
   private activeSetups = 0;
   private readonly setupWaiters: Array<{ sessionId: string; start: () => void }> = [];
   private readonly setupRuns = new Map<string, Promise<void>>();
+  private readonly setupLineWrites = new Map<string, Promise<void>>();
 
   constructor(private options: TaskQueueOptions) {
     console.log('[TaskQueue] Initializing task queue...');
@@ -647,7 +648,18 @@ export class TaskQueue {
    * Shows `[Pane] ...` lines in the Pane's default terminal so a person sees setup progress.
    * The terminal may not exist yet right after the Pane is announced, so this waits briefly.
    */
-  private async writeSetupLines(sessionId: string, worktreePath: string, ctx: ProjectContext, lines: string[]): Promise<void> {
+  private writeSetupLines(sessionId: string, worktreePath: string, ctx: ProjectContext, lines: string[]): Promise<void> {
+    // Each Pane's lines print in the order setup reports them, even while its terminal starts.
+    const previous = this.setupLineWrites.get(sessionId) ?? Promise.resolve();
+    const written = previous.then(() => this.showSetupLines(sessionId, worktreePath, ctx, lines));
+    this.setupLineWrites.set(sessionId, written);
+    void written.then(() => {
+      if (this.setupLineWrites.get(sessionId) === written) this.setupLineWrites.delete(sessionId);
+    });
+    return written;
+  }
+
+  private async showSetupLines(sessionId: string, worktreePath: string, ctx: ProjectContext, lines: string[]): Promise<void> {
     try {
       let terminalPanel = panelManager.getPanelsForSession(sessionId).find(p => p.type === 'terminal');
       for (let attempt = 0; !terminalPanel && attempt < 6; attempt++) {
