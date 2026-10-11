@@ -67,7 +67,7 @@ Password protection is off by default. When it is on, every client must send the
 - Under "Only me", a device signed in as another Tailscale user, including a teammate's Mac shared into your tailnet, is refused.
 - A tagged device is refused: Serve sends no identity for it.
 - Pane answers only requests that arrive through Serve: Serve's target path carries a secret that changes every launch, and requests straight to the loopback port are refused. Another OS user on the same machine who can read `tailscale serve status` could learn it, so give other accounts on a joined machine only the trust you would give the owner.
-- Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login.
+- Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login. The one `Origin` let in is a WebSocket naming the machine's own address, which the Pane phone app's dictation socket sends and a page served from elsewhere cannot.
 - Any device signed in as you, your phone included, is trusted. `runpane workspace list` shows only Macs, Windows PCs, and Linux machines, but that is a listing choice, not a block.
 - Removing a device from Tailscale revokes it everywhere.
 - The same setting decides who opens the host's dev servers and HTML pages in the Remote Pane app's browser tabs, at their `https://<host>.ts.net:<n>` addresses. A page in a frame cannot send the password, so those pages are off while password protection is on. See [Browser tabs on the phone](SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone).
@@ -112,7 +112,7 @@ Workspaces and the [self-hosted remote daemon](SELF_HOSTED_REMOTE_DAEMON.md) bot
 
 | | Workspaces | Pairing codes (remote daemon) |
 |---|---|---|
-| For | Your own machines (runpane CLI and desktop remote mode), or your tailnet when you choose | Browsers, phones, and devices on another Tailscale account |
+| For | Your own machines (runpane CLI, desktop remote mode and the Pane phone app), or your tailnet when you choose | Browsers, and devices on another Tailscale account |
 | Trust | Tailscale login, by visibility, plus an optional password | A `pane-remote://` code per device |
 | Serves | The desktop Pane's `~/.pane` | The remote daemon's data directory, usually `~/.pane_remote` |
 | Port | 8443 | 443 |

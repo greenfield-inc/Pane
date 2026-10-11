@@ -1018,6 +1018,12 @@ describe('workspace identity mode', () => {
     });
     expect(fromPage.statusCode).toBe(403);
     expect(JSON.stringify(fromPage.body)).toContain('ERR_WORKSPACE_BROWSER_REFUSED');
+
+    const fromSameOrigin = await requestJson(server, 'POST', invokePath, invoke, undefined, {
+      'Tailscale-User-Login': 'owner@example.com',
+      Origin: `https://127.0.0.1:${server.getAddress()?.port}`,
+    });
+    expect(fromSameOrigin.statusCode).toBe(403);
   });
 
   it('keeps machine commands off the pairing-token transport', async () => {
