@@ -59,6 +59,8 @@ interface ProjectSessionListProps {
   onRepositoriesSectionExpandedChange: (expanded: boolean) => void;
   sshHostsSectionExpanded: boolean;
   onSshHostsSectionExpandedChange: (expanded: boolean) => void;
+  sessionsSectionExpanded: boolean;
+  onSessionsSectionExpandedChange: (expanded: boolean) => void;
   showRemoteDesktopLink?: boolean;
   onRemoteDesktopClick?: () => void;
   remoteDesktopTooltip?: string;
@@ -75,6 +77,8 @@ export function ProjectSessionList({
   onRepositoriesSectionExpandedChange,
   sshHostsSectionExpanded,
   onSshHostsSectionExpandedChange,
+  sessionsSectionExpanded,
+  onSessionsSectionExpandedChange,
   showRemoteDesktopLink = false,
   onRemoteDesktopClick,
   remoteDesktopTooltip,
@@ -487,6 +491,8 @@ export function ProjectSessionList({
           pinnedPaneRows={pinnedPaneRows}
           pinnedSectionExpanded={pinnedSectionExpanded}
           onPinnedSectionExpandedChange={onPinnedSectionExpandedChange}
+          sessionsSectionExpanded={sessionsSectionExpanded}
+          onSessionsSectionExpandedChange={onSessionsSectionExpandedChange}
         />
 
         <SshHostsSection expanded={sshHostsSectionExpanded} onExpandedChange={onSshHostsSectionExpandedChange} />
@@ -1108,11 +1114,11 @@ function SessionRow({
 
 // --- Archived Sessions panel (pinned to sidebar bottom) ---
 
-export function ArchivedSessions() {
+export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: { expanded: boolean; onExpandedChange: (expanded: boolean) => void }) {
   const archivedContentId = useId();
-  const [showArchived, setShowArchived] = useState(false);
   const [archivedProjects, setArchivedProjects] = useState<Array<Project & { sessions: Session[] }>>([]);
-  const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<number>>(new Set());
+  const expandedArchivedProjects = useNavigationStore(s => s.expandedArchivedProjects);
+  const toggleArchivedProjectExpanded = useNavigationStore(s => s.toggleArchivedProjectExpanded);
   const [isLoadingArchived, setIsLoadingArchived] = useState(false);
   const [hasLoadedArchived, setHasLoadedArchived] = useState(false);
   const [orchestrationRestoreError, setOrchestrationRestoreError] = useState<string | null>(null);
@@ -1160,23 +1166,21 @@ export function ArchivedSessions() {
     return window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(() => { void loadArchivedSessions(); });
   }, [hasLoadedArchived, loadArchivedSessions]);
 
-  const toggleArchived = useCallback(() => {
-    const next = !showArchived;
-    if (next) {
-      void loadArchivedSessions();
-    }
-    if (next && orchestrationAvailability !== 'unavailable') {
+  // Opening the list, including a list restored open, loads what it shows.
+  useEffect(() => {
+    if (!showArchived) return;
+    void loadArchivedSessions();
+    if (useOrchestrationSessionStore.getState().availability !== 'unavailable') {
       void refreshOrchestrationSessions();
     }
-    setShowArchived(next);
-  }, [loadArchivedSessions, orchestrationAvailability, refreshOrchestrationSessions, showArchived]);
+  }, [loadArchivedSessions, refreshOrchestrationSessions, showArchived]);
+
+  const toggleArchived = () => onExpandedChange(!showArchived);
 
   const toggleArchivedProject = (id: number) => {
-    setExpandedArchivedProjects(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+    const projectIds = toggleArchivedProjectExpanded(id);
+    void window.electronAPI.uiState.saveExpandedArchivedProjects(projectIds).catch(error => {
+      console.error('Failed to save expanded archived projects:', error);
     });
   };
 

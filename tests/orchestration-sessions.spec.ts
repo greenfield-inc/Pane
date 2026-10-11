@@ -974,6 +974,17 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(childrenToggle).toHaveAttribute('aria-expanded', 'true');
   await page.getByRole('button', { name: 'Collapse Doozy fixes Panes' }).click();
 
+  // Expansion choices survive the sidebar switching to the compact rail and back.
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Expand Doozy fixes Panes' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(childrenToggle).toHaveAttribute('aria-expanded', 'true');
+  await sessionsToggle.click();
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
+  await expect(sessionsToggle).toHaveAttribute('aria-expanded', 'false');
+  await sessionsToggle.click();
+
   await expect(page.getByRole('heading', { name: 'Pane evolution', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
   const evolutionOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
@@ -1319,6 +1330,11 @@ test('Session rows archive and restore without losing selection or associated Pa
 
   await page.getByRole('button', { name: 'Archived', exact: true }).click();
   const archivedAlpha = page.getByTestId('archived-orchestration-session-alpha');
+  await expect(archivedAlpha).toBeVisible();
+  // The open Archived list survives the sidebar switching to the compact rail and back.
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Archived', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(archivedAlpha).toBeVisible();
   const archivedList = page.getByTestId('archived-orchestration-sessions').locator('..');
   await expect(archivedList.getByText('Panes', { exact: true })).toBeVisible();

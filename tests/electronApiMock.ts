@@ -330,6 +330,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       sessionSortAscending: true,
       pinnedSectionExpanded: true,
       repositoriesSectionExpanded: true,
+      sessionsSectionExpanded: true,
+      collapsedSessions: [] satisfies string[],
+      archivedSectionExpanded: false,
+      expandedArchivedProjects: [] satisfies number[],
       ...clone(mockOptions.initialUiState ?? {}),
     };
     let mockActiveProjectId = mockOptions.activeProjectId === undefined
@@ -1228,9 +1232,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           uiState.sessionSortAscending = ascending;
           return success();
         },
-        saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean) => {
+        saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions' | 'archived', expanded: boolean) => {
           if (section === 'pinned') uiState.pinnedSectionExpanded = expanded;
           else if (section === 'repositories') uiState.repositoriesSectionExpanded = expanded;
+          else if (section === 'sessions') uiState.sessionsSectionExpanded = expanded;
+          else if (section === 'archived') uiState.archivedSectionExpanded = expanded;
+          return success();
+        },
+        saveCollapsedSessions: (sessionIds: string[]) => {
+          uiState.collapsedSessions = clone(sessionIds);
+          return success();
+        },
+        saveExpandedArchivedProjects: (projectIds: number[]) => {
+          uiState.expandedArchivedProjects = clone(projectIds);
           return success();
         },
         getSessionWorkspaceLayout: (hostId: string | null) =>

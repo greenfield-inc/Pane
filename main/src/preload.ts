@@ -733,7 +733,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveExpandedProjects: (projectIds: number[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-projects', projectIds),
     saveExpandedFolders: (folderIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-folders', folderIds),
     saveSessionSortAscending: (ascending: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-session-sort-ascending', ascending),
-    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts', expanded: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-sidebar-section-expanded', section, expanded),
+    saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions' | 'archived', expanded: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-sidebar-section-expanded', section, expanded),
+    saveCollapsedSessions: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-collapsed-sessions', sessionIds),
+    saveExpandedArchivedProjects: (projectIds: number[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-archived-projects', projectIds),
     // Per-host navigation memory. The caller names the host because the renderer
     // can still be showing the outgoing host while main has switched runtimes.
     getNavigationMemory: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-navigation-memory', hostId),
