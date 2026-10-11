@@ -44,6 +44,22 @@ describe('UIStateManager collapsed Sessions', () => {
   });
 });
 
+describe('UIStateManager Archived list', () => {
+  it('starts closed, and keeps each host’s open Archived repositories separate', () => {
+    let remoteHostId: string | null = null;
+    const manager = new UIStateManager(createUiStateDb(), () => remoteHostId);
+    expect(manager.getExpandedState().archivedSectionExpanded).toBe(false);
+
+    manager.saveExpandedArchivedProjects([3]);
+    remoteHostId = 'host-b';
+    expect(manager.getExpandedState().expandedArchivedProjects).toEqual([]);
+    manager.saveExpandedArchivedProjects([7]);
+
+    remoteHostId = null;
+    expect(manager.getExpandedState().expandedArchivedProjects).toEqual([3]);
+  });
+});
+
 describe('UIStateManager host navigation memory', () => {
   it('keeps each host’s remembered location separate from this computer’s', () => {
     const manager = new UIStateManager(createUiStateDb());

@@ -7,13 +7,14 @@ import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorksp
 import { decodeSessionPanelLayout } from '../../../shared/types/panels';
 import type { SessionPanelLayout } from '../../../shared/types/panels';
 
-type SidebarSection = 'pinned' | 'repositories' | 'sshHosts' | 'sessions';
+type SidebarSection = 'pinned' | 'repositories' | 'sshHosts' | 'sessions' | 'archived';
 
 const SIDEBAR_SECTION_KEYS = {
   pinned: 'treeView.pinnedSectionExpanded',
   repositories: 'treeView.repositoriesSectionExpanded',
   sshHosts: 'treeView.sshHostsSectionExpanded',
-  sessions: 'treeView.sessionsSectionExpanded'
+  sessions: 'treeView.sessionsSectionExpanded',
+  archived: 'treeView.archivedSectionExpanded'
 } satisfies Record<SidebarSection, string>;
 
 interface ExpandedUiState {
@@ -25,6 +26,8 @@ interface ExpandedUiState {
   sshHostsSectionExpanded: boolean;
   sessionsSectionExpanded: boolean;
   collapsedSessions: string[];
+  archivedSectionExpanded: boolean;
+  expandedArchivedProjects: number[];
 }
 
 type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteUIState'>;
@@ -73,6 +76,26 @@ class UIStateManager {
     this.db.setUIState(this.collapsedSessionsKey(), JSON.stringify(sessionIds));
   }
 
+  // Archived groups are keyed by repository id, so they are per host like expanded repositories.
+  private expandedArchivedProjectsKey(): string {
+    const hostId = this.getRemoteHostId();
+    return hostId ? `treeView.expandedArchivedProjects@${hostId}` : 'treeView.expandedArchivedProjects';
+  }
+
+  getExpandedArchivedProjects(): number[] {
+    const value = this.db.getUIState(this.expandedArchivedProjectsKey());
+    if (!value) return [];
+    try {
+      return decodeBoundary(JSON.parse(value), boundary.array(boundary.number));
+    } catch {
+      return [];
+    }
+  }
+
+  saveExpandedArchivedProjects(projectIds: number[]): void {
+    this.db.setUIState(this.expandedArchivedProjectsKey(), JSON.stringify(projectIds));
+  }
+
   getExpandedFolders(): string[] {
     const value = this.db.getUIState('treeView.expandedFolders');
     if (!value) return [];
@@ -93,13 +116,15 @@ class UIStateManager {
     }
   }
 
+  // Sections start open, except Archived.
   getSidebarSectionExpanded(section: SidebarSection): boolean {
+    const fallback = section !== 'archived';
     const value = this.db.getUIState(SIDEBAR_SECTION_KEYS[section]);
-    if (!value) return true;
+    if (!value) return fallback;
     try {
       return decodeBoundary(JSON.parse(value), boundary.boolean);
     } catch {
-      return true;
+      return fallback;
     }
   }
 
@@ -210,7 +235,9 @@ class UIStateManager {
       repositoriesSectionExpanded: this.getSidebarSectionExpanded('repositories'),
       sshHostsSectionExpanded: this.getSidebarSectionExpanded('sshHosts'),
       sessionsSectionExpanded: this.getSidebarSectionExpanded('sessions'),
-      collapsedSessions: this.getCollapsedSessions()
+      collapsedSessions: this.getCollapsedSessions(),
+      archivedSectionExpanded: this.getSidebarSectionExpanded('archived'),
+      expandedArchivedProjects: this.getExpandedArchivedProjects()
     };
   }
 
@@ -223,6 +250,8 @@ class UIStateManager {
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sshHosts);
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sessions);
     this.db.deleteUIState('treeView.collapsedSessions');
+    this.db.deleteUIState(SIDEBAR_SECTION_KEYS.archived);
+    this.db.deleteUIState('treeView.expandedArchivedProjects');
   }
 }
 

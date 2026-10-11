@@ -48,6 +48,11 @@ interface NavigationState {
   hydrateCollapsedSessions: (sessionIds: string[]) => void;
   toggleSessionCollapsed: (sessionId: string) => string[];
 
+  // Repositories open inside the sidebar's Archived list, kept here for the same reason.
+  expandedArchivedProjects: Set<number>;
+  hydrateExpandedArchivedProjects: (projectIds: number[]) => void;
+  toggleArchivedProjectExpanded: (projectId: number) => number[];
+
   // Last sidebar section used to enter the active pane. Cmd/Ctrl+Arrow uses
   // this to keep cycling within Pinned after a pinned-row click.
   sidebarNavigationScope: SidebarNavigationScope;
@@ -134,6 +139,18 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     else next.add(sessionId);
     set({ collapsedSessions: next });
     return Array.from(next);
+  },
+
+  expandedArchivedProjects: new Set<number>(),
+  hydrateExpandedArchivedProjects: (projectIds) => {
+    set({ expandedArchivedProjects: new Set(projectIds) });
+  },
+  toggleArchivedProjectExpanded: (projectId) => {
+    const next = new Set(get().expandedArchivedProjects);
+    if (next.has(projectId)) next.delete(projectId);
+    else next.add(projectId);
+    set({ expandedArchivedProjects: next });
+    return toProjectIdArray(next);
   },
 
   setActiveView: (view) => set({ activeView: view }),

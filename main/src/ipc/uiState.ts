@@ -105,9 +105,24 @@ export function registerUIStateHandlers(services: AppServices) {
     }
   });
 
-  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions', expanded: boolean) => {
+  ipcMain.handle('ui-state:save-expanded-archived-projects', async (_, projectIds: number[]) => {
     try {
-      if (section !== 'pinned' && section !== 'repositories' && section !== 'sshHosts' && section !== 'sessions') {
+      uiStateManager.saveExpandedArchivedProjects(projectIds);
+      return {
+        success: true
+      };
+    } catch (error) {
+      console.error('Error saving expanded archived projects:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
+  ipcMain.handle('ui-state:save-sidebar-section-expanded', async (_, section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions' | 'archived', expanded: boolean) => {
+    try {
+      if (section !== 'pinned' && section !== 'repositories' && section !== 'sshHosts' && section !== 'sessions' && section !== 'archived') {
         throw new Error(`Invalid sidebar section: ${section}`);
       }
 

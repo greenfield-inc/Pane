@@ -36,11 +36,12 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {}, activationRequests: {},
       agentStatus: {}, agentStatusSession: {}, agentStatusReason: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
     useSessionWorkspaceLayoutStore.getState().reset();
-    // Main keeps expanded repositories and collapsed Sessions per host; load them before the new host's lists arrive.
+    // Main keeps expanded repositories, collapsed Sessions and open Archived groups per host; load them before the new host's lists arrive.
     const uiState = await window.electronAPI.uiState.getExpanded();
     if (!ownsRuntime()) return;
     useNavigationStore.getState().resetExpandedProjectsForHost(uiState.success ? uiState.data?.expandedProjects ?? [] : []);
     useNavigationStore.getState().hydrateCollapsedSessions(uiState.success ? uiState.data?.collapsedSessions ?? [] : []);
+    useNavigationStore.getState().hydrateExpandedArchivedProjects(uiState.success ? uiState.data?.expandedArchivedProjects ?? [] : []);
   }
   // Repository ids are per host, so another host's repository view is meaningless.
   if (hostChanged && useNavigationStore.getState().activeView === 'project') {

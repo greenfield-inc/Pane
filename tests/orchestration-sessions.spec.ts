@@ -1331,6 +1331,11 @@ test('Session rows archive and restore without losing selection or associated Pa
   await page.getByRole('button', { name: 'Archived', exact: true }).click();
   const archivedAlpha = page.getByTestId('archived-orchestration-session-alpha');
   await expect(archivedAlpha).toBeVisible();
+  // The open Archived list survives the sidebar switching to the compact rail and back.
+  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Archived', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(archivedAlpha).toBeVisible();
   const archivedList = page.getByTestId('archived-orchestration-sessions').locator('..');
   await expect(archivedList.getByText('Panes', { exact: true })).toBeVisible();
   await expect(page.getByText('No archived Panes', { exact: true })).toBeVisible();
