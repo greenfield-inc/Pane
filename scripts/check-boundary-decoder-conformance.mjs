@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,15 @@ const primitives = [
   join(root, "shared", "validation", "boundaryDecoder.ts"),
   join(root, "packages", "runpane", "src", "boundaryDecoder.ts"),
 ];
+
+if (readFileSync(primitives[0], "utf8") !== readFileSync(primitives[1], "utf8")) {
+  throw new Error("Boundary decoder copies differ. Copy shared/validation/boundaryDecoder.ts to packages/runpane/src/boundaryDecoder.ts after editing the shared source.");
+}
+
+execFileSync(process.execPath, ["--test", join(root, "scripts", "test-boundary-decoder.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
 
 execFileSync(process.execPath, [...oxlintArgs, "--config", config, "--deny-warnings", ...primitives], {
   cwd: root,
