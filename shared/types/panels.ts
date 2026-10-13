@@ -341,6 +341,7 @@ export interface PanelEvent {
 export type PanelEventType = 
   // Terminal panel events (✅ IMPLEMENTED IN PHASE 1-2)
   | 'terminal:command_executed'  // When a command is run in terminal
+  | 'terminal:started'           // When a new terminal process starts
   | 'terminal:exit'              // When terminal process exits
   | 'files:changed'              // When terminal detects file system changes
   | 'diff:refreshed'             // When diff panel refreshes its content
@@ -388,7 +389,7 @@ interface PanelCapabilityRegistry {
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
   terminal: {
-    canEmit: ['terminal:command_executed', 'terminal:exit', 'files:changed'],
+    canEmit: ['terminal:started', 'terminal:command_executed', 'terminal:exit', 'files:changed'],
     canConsume: [], // Terminal doesn't consume events in Phase 1-2
     requiresProcess: true,
     singleton: false,
