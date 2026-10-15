@@ -7020,6 +7020,12 @@ describe('runpane IPC handlers', () => {
     describe('--session --merged', () => {
       type PrLookup = Awaited<ReturnType<AppServices['gitStatusManager']['lookupPrForPane']>>;
       const merged: PrLookup = { ok: true, pr: { prNumber: 7, prState: 'MERGED' } };
+      /**
+       * For archives that reach the real `gh pr list`: that lookup alone may use
+       * its whole 10 s budget, and a cold `gh.exe` on a Windows runner has taken
+       * the test past vitest's 5 s default.
+       */
+      const REAL_GH_TIMEOUT_MS = 30_000;
 
       function createBulkServices(panes: Session[], associations: string[], lookupPr: (paneId: string) => Promise<PrLookup> = async () => merged) {
         const byId = new Map(panes.map(pane => [pane.id, pane]));
@@ -7191,7 +7197,7 @@ describe('runpane IPC handlers', () => {
           ok: false,
           blocked: { code: 'unpushed-commits', safetyCheck: { hasUpstream: false, unpushedCommits: 1, unpushedCommitDetails: [{ sha: head, subject: 'unpublished' }] } },
         });
-      });
+      }, REAL_GH_TIMEOUT_MS);
 
       it.each([
         ['its own commit', (head: string) => head],
@@ -7225,7 +7231,7 @@ describe('runpane IPC handlers', () => {
           ok: false,
           blocked: { code: 'unpushed-commits', safetyCheck: { hasUpstream: false, unpushedCommits: 1, unpushedCommitDetails: [{ sha: head, subject: 'unpublished' }] } },
         });
-      });
+      }, REAL_GH_TIMEOUT_MS);
 
       it('rejects a Session archive without --merged or with --force', async () => {
         const { services } = createBulkServices([], []);
