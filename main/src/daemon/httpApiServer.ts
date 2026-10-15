@@ -444,7 +444,7 @@ export class PaneRemoteHttpApiServer {
       this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url);
       return;
     }
-    if (this.workspace || url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
+    if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
       socket.destroy();
       return;
     }
@@ -867,7 +867,12 @@ export class PaneRemoteHttpApiServer {
     }
     // Serve signs every request from the owner's devices, including ones a web page sends from
     // the owner's browser; only Pane and the runpane CLI, which send no Origin, may use workspaces.
-    if (request.headers.origin !== undefined || request.method === 'OPTIONS') {
+    // The phone app's WebSockets always send this machine's own address as Origin; a page served
+    // from any other address, such as a dev-server preview port, cannot.
+    const origin = request.headers.origin;
+    const fromOwnWebSocket = request.headers.upgrade?.toLowerCase() === 'websocket'
+      && origin?.toLowerCase() === `https://${request.headers.host?.toLowerCase()}`;
+    if ((origin !== undefined && !fromOwnWebSocket) || request.method === 'OPTIONS') {
       return {
         statusCode: 403,
         error: { message: 'Workspaces answer the runpane CLI, not browsers.', code: 'ERR_WORKSPACE_BROWSER_REFUSED' },

@@ -73,8 +73,9 @@ const ownerOnly: WorkspaceAccessPolicy = {
 async function startWorkspaceServer(
   forwarded: () => readonly number[],
   access: () => WorkspaceAccessPolicy | null = () => ownerOnly,
+  config: { deepgramApiKey?: string } = {},
 ): Promise<PaneRemoteHttpApiServer> {
-  const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), { getConfig: () => ({}) }, {
+  const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), { getConfig: () => config }, {
     workspace: { listenPort: 0, pathSecret: 'serve-secret', access },
     isForwardedPort: port => forwarded().includes(port),
     heartbeatIntervalMs: HEARTBEAT_MS,
@@ -227,5 +228,31 @@ describe('port stream through the Tailscale login door', () => {
       Origin: 'https://attacker.example',
     });
     expect(fromPage).toEqual({ statusCode: 403 });
+  });
+});
+
+describe('voice stream through the Tailscale login door', () => {
+  const voicePath = '/serve-secret/voice/deepgram-stream';
+  // The phone's WebSocket sends its target's own origin, which Serve's https address makes https.
+  const phoneHeaders = (server: PaneRemoteHttpApiServer, login: string) => ({
+    'Tailscale-User-Login': login,
+    Origin: `https://127.0.0.1:${server.getAddress()?.port}`,
+  });
+
+  it('opens dictation for a codeless phone on the owner\'s login', async () => {
+    const server = await startWorkspaceServer(() => [], () => ownerOnly, { deepgramApiKey: 'dg-test-key' });
+    const result = await openStream(server, voicePath, phoneHeaders(server, owner));
+    expect('opened' in result).toBe(true);
+  });
+
+  it('refuses a login that "Who can connect" does not admit', async () => {
+    const server = await startWorkspaceServer(() => [], () => ownerOnly, { deepgramApiKey: 'dg-test-key' });
+    expect(await openStream(server, voicePath, phoneHeaders(server, teammate))).toEqual({ statusCode: 403 });
+  });
+
+  it('refuses a page from a preview port on the same host name', async () => {
+    const server = await startWorkspaceServer(() => [], () => ownerOnly, { deepgramApiKey: 'dg-test-key' });
+    const fromPreview = await openStream(server, voicePath, { 'Tailscale-User-Login': owner, Origin: 'https://127.0.0.1:5173' });
+    expect(fromPreview).toEqual({ statusCode: 403 });
   });
 });
