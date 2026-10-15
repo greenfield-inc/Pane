@@ -53,6 +53,8 @@ Runs when you click the **Play** button in the panel tab bar (or press `Ctrl+Shi
 
 Pane sets `PANE_PORT` to the first of a block of 10 ports picked from the pane's id (range 3000–8999), so dev servers in parallel panes rarely collide.
 
+Setup, run and archive scripts also get the project's environment variables, including keychain-backed secrets: see [PROJECT_ENV_VARS.md](PROJECT_ENV_VARS.md).
+
 **Examples:**
 ```json
 "run": "pnpm dev"

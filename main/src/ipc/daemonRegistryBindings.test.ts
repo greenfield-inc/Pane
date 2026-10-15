@@ -47,6 +47,8 @@ const PROJECT_CHANNELS = [
   'projects:detect-config',
   'projects:resolve-run-script',
   'projects:run-script',
+  'projects:get-env-vars',
+  'projects:set-env-vars',
 ] as const;
 
 const CONFIG_CHANNELS = [

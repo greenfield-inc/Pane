@@ -30,6 +30,7 @@ import {
   decodeOptionalBoundary,
   type JsonObject,
 } from "../../../shared/validation/boundaryDecoder";
+import type { ProjectEnvVar } from "../../../shared/types/projectEnvVars";
 import { JOURNEYS, type Journey, type JourneyTimingSummary } from "../../../shared/types/journeyTimings";
 import { PanelBufferStore, splitPanelBufferState, type PanelBuffers } from "./panelBuffers";
 import { ensureUsageRollup } from "../services/usage/usageRollup";
@@ -845,6 +846,26 @@ export class DatabaseService {
         }
       }
     }
+
+    // Per-project environment variables. A keychain row stores only the item's
+    // service and account; the secret itself never reaches this database.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS project_env_vars (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        source TEXT NOT NULL CHECK(source IN ('plain', 'keychain')),
+        value TEXT,
+        keychain_service TEXT,
+        keychain_account TEXT,
+        -- 1 when Pane created the item from a typed secret and may delete it.
+        keychain_managed INTEGER NOT NULL DEFAULT 0,
+        order_index INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, key),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `);
 
     // Check if display_order columns exist
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
@@ -2761,8 +2782,55 @@ export class DatabaseService {
   }
 
   deleteProject(id: number): boolean {
+    // Foreign keys are not enforced on this connection, so cascade by hand.
+    this.db.prepare("DELETE FROM project_env_vars WHERE project_id = ?").run(id);
     const result = this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
     return result.changes > 0;
+  }
+
+  // Project environment variables
+  getProjectEnvVars(projectId: number): ProjectEnvVar[] {
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    const rows = this.db
+      .prepare(
+        "SELECT key, source, value, keychain_service, keychain_account, keychain_managed FROM project_env_vars WHERE project_id = ? ORDER BY order_index ASC, id ASC",
+      )
+      .all(projectId) as Array<{
+      key: string;
+      source: 'plain' | 'keychain';
+      value: string | null;
+      keychain_service: string | null;
+      keychain_account: string | null;
+      keychain_managed: number;
+    }>;
+    return rows.map((row): ProjectEnvVar => {
+      if (row.source === 'plain') return { key: row.key, source: 'plain', value: row.value ?? '' };
+      return {
+        key: row.key,
+        source: 'keychain',
+        service: row.keychain_service ?? '',
+        account: row.keychain_account ?? '',
+        managed: row.keychain_managed === 1,
+      };
+    });
+  }
+
+  /** Replace a project's variables with `variables`, in that order. */
+  replaceProjectEnvVars(projectId: number, variables: readonly ProjectEnvVar[]): void {
+    const insert = this.db.prepare(`
+      INSERT INTO project_env_vars (project_id, key, source, value, keychain_service, keychain_account, keychain_managed, order_index)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM project_env_vars WHERE project_id = ?").run(projectId);
+      variables.forEach((variable, index) => {
+        if (variable.source === 'plain') {
+          insert.run(projectId, variable.key, 'plain', variable.value, null, null, 0, index);
+        } else {
+          insert.run(projectId, variable.key, 'keychain', null, variable.service, variable.account, variable.managed ? 1 : 0, index);
+        }
+      });
+    })();
   }
 
   // Folder operations

@@ -57,6 +57,7 @@ import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } 
 import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
+import type { ProjectEnvVar, ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
@@ -322,6 +323,10 @@ interface ElectronAPI {
     detectConfig: (projectId: string) => Promise<IPCResponse<DetectedProjectConfig | null>>;
     /** Resolve which run script to execute for a session (DB > config files > scripts/pane-run-script.js). Used by PanelTabBar Play button. */
     resolveRunScript: (sessionId: string) => Promise<IPCResponse<{ command: string; source: string } | null>>;
+    /** The project's environment variables. Keychain variables carry only their item reference, never the value. */
+    getEnvVars: (projectId: number) => Promise<IPCResponse<ProjectEnvVar[]>>;
+    /** Replace the project's environment variables. A typed secret is stored in the keychain and dropped. */
+    setEnvVars: (projectId: number, variables: ProjectEnvVarInput[]) => Promise<IPCResponse<ProjectEnvVar[]>>;
   };
 
   // Git operations

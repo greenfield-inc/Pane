@@ -134,22 +134,25 @@ type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 // Interface for panel state with custom state that can hold any AI-specific data
 import { addSessionLog } from '../ipc/logs';
 import { PathResolver } from '../utils/pathResolver';
-import { CommandRunner } from '../utils/commandRunner';
+import { CommandRunner, type CommandRunOptions } from '../utils/commandRunner';
 import { withLock } from '../utils/mutex';
 import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
+import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import type { AnalyticsManager } from './analyticsManager';
 
 export class SessionManager extends EventEmitter {
   private activeSessions: Map<string, Session> = new Map();
   private activeProject: Project | null = null;
   private terminalSessionManager: TerminalSessionManager;
+  private readonly projectEnv: ProjectEnvService;
   private autoContextBuffers: Map<string, SessionOutput[]> = new Map();
   private analyticsManager: AnalyticsManager | null = null;
   private projectContextCache = new Map<number, { pathResolver: PathResolver; commandRunner: CommandRunner }>();
 
   constructor(public db: DatabaseService, analyticsManager?: AnalyticsManager) {
     super();
+    this.projectEnv = new ProjectEnvService(db);
     // Increase max listeners to prevent warnings when many components listen to events
     // This is expected since multiple SessionListItem components and project tree views listen to events
     this.setMaxListeners(100);
@@ -1221,6 +1224,11 @@ export class SessionManager extends EventEmitter {
     return null;
   }
 
+  /** The environment variables of the project that owns this Pane, for any process Pane starts in it. */
+  resolveProjectEnv(sessionId: string): Promise<ResolvedProjectEnv> {
+    return this.projectEnv.resolveForSession(sessionId);
+  }
+
   /** Run project cleanup commands in the same environment as setup commands. */
   runArchiveScript(sessionId: string, commands: string[], cwd: string, commandRunner: CommandRunner): Promise<{ success: boolean; output: string }> {
     return this.runScriptCommands('Archive', sessionId, commands, cwd, commandRunner);
@@ -1237,13 +1245,19 @@ export class SessionManager extends EventEmitter {
     let allOutput = '';
     let overallSuccess = true;
 
+    const projectEnv = await this.resolveProjectEnv(sessionId);
+    for (const warning of projectEnv.warnings) addSessionLog(sessionId, 'warn', warning, label);
+    const options: CommandRunOptions = {};
+    if (label === 'Build') options.timeout = 0;
+    if (Object.keys(projectEnv.env).length > 0) options.env = projectEnv.env;
+
     for (const command of commands) {
       if (command.trim()) {
         console.log(`[SessionManager] Executing ${label.toLowerCase()} command: ${command}`);
         addSessionLog(sessionId, 'info', `$ ${command}`, label);
 
         try {
-          const { stdout, stderr } = await commandRunner.execAsync(command, worktreePath, label === 'Build' ? { timeout: 0 } : undefined);
+          const { stdout, stderr } = await commandRunner.execAsync(command, worktreePath, options);
 
           if (stdout) {
             allOutput += stdout;

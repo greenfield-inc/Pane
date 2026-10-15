@@ -39,6 +39,7 @@ import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
+import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type {
@@ -578,6 +579,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * Used by `PanelTabBar` to start/stop the dev server for a session.
      */
     resolveRunScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('projects:resolve-run-script', sessionId),
+    /** The project's environment variables. Keychain variables carry only their item reference, never the value. */
+    getEnvVars: (projectId: number): Promise<IPCResponse> => invokeIpc('projects:get-env-vars', projectId),
+    /** Replace the project's environment variables. A typed secret is stored in the keychain and dropped. */
+    setEnvVars: (projectId: number, variables: ProjectEnvVarInput[]): Promise<IPCResponse> => invokeIpc('projects:set-env-vars', projectId, variables),
   },
 
   // Git operations

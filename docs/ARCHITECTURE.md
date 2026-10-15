@@ -135,6 +135,9 @@ Preview components never enter the editable auto-save path, even on errors.
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
+- Per-project environment variables (`main/src/services/projectEnvVars.ts`) are
+  read at spawn time by the terminal, script and legacy CLI spawners; keychain
+  values stay in the macOS keychain: [PROJECT_ENV_VARS.md](PROJECT_ENV_VARS.md).
 
 ## Notes
 
