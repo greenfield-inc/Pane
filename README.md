@@ -284,12 +284,13 @@ The top-right toggle switches Pane Chat between Claude, Codex, and Cursor and pe
 
 Pane is not just a place where agents run. It exposes a stable `runpane` CLI contract that agents can use to manage the workspace for you.
 
-For example, you can ask an agent to create panes for a set of GitHub issues and start Codex, Claude Code, Cursor, or any terminal command in each one. The agent can inspect the available Pane commands, register the current repository if needed, and create panes with initial instructions:
+For example, you can ask an agent to create panes for a set of GitHub issues and start Codex, Claude Code, Cursor, or any terminal command in each one. The agent can inspect the available Pane commands, register the current repository and set its Project Settings if needed, and create panes with initial instructions:
 
 ```bash
 runpane agent-context
 runpane repos list --json
 runpane repos add --path /path/to/repo --yes --json
+runpane repos update --repo active --build-script "pnpm install" --run-script "pnpm dev" --yes --json
 runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick off the discussion skill for issue 252" --yes
 ```
 

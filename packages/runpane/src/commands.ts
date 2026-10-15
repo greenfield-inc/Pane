@@ -49,6 +49,14 @@ export interface ParsedArgs {
   panelInput?: string;
   panelInputFile?: string;
   fromJson?: string;
+  /** `repos update`: Project Settings values, and the settings to clear. */
+  buildScript?: string;
+  runScript?: string;
+  archiveScript?: string;
+  worktreeFolder?: string;
+  openIdeCommand?: string;
+  systemPrompt?: string;
+  clear?: string[];
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -689,6 +697,34 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--from-json') {
     parsed.fromJson = value;
+    return;
+  }
+  if (flag === '--build-script') {
+    parsed.buildScript = value;
+    return;
+  }
+  if (flag === '--run-script') {
+    parsed.runScript = value;
+    return;
+  }
+  if (flag === '--archive-script') {
+    parsed.archiveScript = value;
+    return;
+  }
+  if (flag === '--worktree-folder') {
+    parsed.worktreeFolder = value;
+    return;
+  }
+  if (flag === '--open-ide-command') {
+    parsed.openIdeCommand = value;
+    return;
+  }
+  if (flag === '--system-prompt') {
+    parsed.systemPrompt = value;
+    return;
+  }
+  if (flag === '--clear') {
+    (parsed.clear ??= []).push(...value.split(',').map((setting) => setting.trim()).filter(Boolean));
     return;
   }
   if (flag === '--timeout-ms') {

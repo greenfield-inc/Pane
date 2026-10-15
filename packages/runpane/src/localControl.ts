@@ -5,9 +5,11 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { confirmMutation } from './daemonActions';
+import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
-import type { BoundarySchema, JsonValue } from './boundaryDecoder';
+import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
 import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
 
 interface OrchestrationLink {
@@ -236,6 +238,53 @@ interface RepoAddResult {
   dryRun?: boolean;
   repo?: RepoSummary;
   preview?: RepoAddPreview;
+}
+
+interface RepoScriptSource {
+  command: string;
+  source: string;
+}
+
+interface RepoScriptSetting {
+  value: string | null;
+  fallback: RepoScriptSource | null;
+  effective: RepoScriptSource | null;
+}
+
+interface RepoSettings {
+  name: string;
+  path: string;
+  currentBranch: string | null;
+  worktreeFolder: string | null;
+  openIdeCommand: string | null;
+  systemPrompt: string | null;
+  configFile: string | null;
+  buildScript: RepoScriptSetting;
+  runScript: RepoScriptSetting;
+  archiveScript: RepoScriptSetting;
+}
+
+interface RepoGetResult {
+  ok: true;
+  repo: RepoSummary;
+  settings: RepoSettings;
+}
+
+/** Settings keyed as in `--from-json`; the daemon validates each value. */
+type RepoSettingsUpdate = JsonObject;
+
+interface RepoUpdateRequest {
+  repo: string;
+  settings: RepoSettingsUpdate;
+  dryRun?: boolean;
+}
+
+interface RepoUpdateResult {
+  ok: true;
+  dryRun?: true;
+  changed: string[];
+  repo: RepoSummary;
+  settings: RepoSettings;
 }
 
 interface PaneCreateRequest {
@@ -1110,6 +1159,41 @@ const repoAddResultSchema: BoundarySchema<RepoAddResult> = boundary.object({
   repo: boundary.optional(repoSummarySchema),
   preview: boundary.optional(repoAddPreviewSchema),
 });
+const nullableString = boundary.union(boundary.string, boundary.literal(null));
+const repoScriptSourceSchema: BoundarySchema<RepoScriptSource> = boundary.object({
+  command: boundary.string,
+  source: boundary.string,
+});
+const nullableScriptSource = boundary.union(repoScriptSourceSchema, boundary.literal(null));
+const repoScriptSettingSchema: BoundarySchema<RepoScriptSetting> = boundary.object({
+  value: nullableString,
+  fallback: nullableScriptSource,
+  effective: nullableScriptSource,
+});
+const repoSettingsSchema: BoundarySchema<RepoSettings> = boundary.object({
+  name: boundary.string,
+  path: boundary.string,
+  currentBranch: nullableString,
+  worktreeFolder: nullableString,
+  openIdeCommand: nullableString,
+  systemPrompt: nullableString,
+  configFile: nullableString,
+  buildScript: repoScriptSettingSchema,
+  runScript: repoScriptSettingSchema,
+  archiveScript: repoScriptSettingSchema,
+});
+const repoGetResultSchema: BoundarySchema<RepoGetResult> = boundary.object({
+  ok: boundary.literal(true),
+  repo: repoSummarySchema,
+  settings: repoSettingsSchema,
+});
+const repoUpdateResultSchema: BoundarySchema<RepoUpdateResult> = boundary.object({
+  ok: boundary.literal(true),
+  dryRun: boundary.optional(boundary.literal(true)),
+  changed: boundary.array(boundary.string),
+  repo: repoSummarySchema,
+  settings: repoSettingsSchema,
+});
 export const paneListResultSchema: BoundarySchema<PaneListResult> = boundary.object({
   ok: boundary.literal(true),
   repo: boundary.optional(repoSummarySchema),
@@ -1822,6 +1906,113 @@ export async function runReposAdd(parsed: ParsedArgs): Promise<number> {
   }
 
   return 0;
+}
+
+// Each `repos update` setting: its key in the request and --from-json, its flag, and where the parser stores it.
+const REPO_SETTINGS = [
+  { key: 'name', flag: '--name', value: (parsed: ParsedArgs) => parsed.name?.trim() },
+  { key: 'buildScript', flag: '--build-script', value: (parsed: ParsedArgs) => parsed.buildScript },
+  { key: 'runScript', flag: '--run-script', value: (parsed: ParsedArgs) => parsed.runScript },
+  { key: 'archiveScript', flag: '--archive-script', value: (parsed: ParsedArgs) => parsed.archiveScript },
+  { key: 'worktreeFolder', flag: '--worktree-folder', value: (parsed: ParsedArgs) => parsed.worktreeFolder },
+  { key: 'openIdeCommand', flag: '--open-ide-command', value: (parsed: ParsedArgs) => parsed.openIdeCommand },
+  { key: 'systemPrompt', flag: '--system-prompt', value: (parsed: ParsedArgs) => parsed.systemPrompt },
+] as const;
+const CLEARABLE_REPO_SETTINGS = REPO_SETTINGS.filter((setting) => setting.key !== 'name').map((setting) => setting.flag.slice(2));
+const REPO_SETTINGS_NEXT = 'See the settings with `runpane repos get --repo <selector> --json`, and the flags with `runpane help repos update`.';
+
+function invalidRepoSettings(message: string): RunpaneError {
+  return new RunpaneError('ERR_RUNPANE_REPO_SETTINGS_INVALID', `${message} Nothing was changed.`, REPO_SETTINGS_NEXT);
+}
+
+export async function runReposGet(parsed: ParsedArgs): Promise<number> {
+  const result = await invokeDaemon('runpane:repos:get', [parsed.repo === undefined ? {} : { repo: parsed.repo }], repoGetResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    printRepoSettings(result.repo, result.settings);
+  }
+  return 0;
+}
+
+export async function runReposUpdate(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.repo) {
+    throw new RunpaneError('ERR_RUNPANE_REPO_REQUIRED', 'runpane repos update requires --repo <selector>. Nothing was changed.', 'Find the repo with `runpane repos list`.');
+  }
+  const request: RepoUpdateRequest = { repo: parsed.repo, settings: buildRepoSettingsUpdate(parsed) };
+  if (parsed.dryRun) {
+    request.dryRun = true;
+  } else {
+    await confirmMutation(parsed);
+  }
+
+  const result = await invokeDaemon('runpane:repos:update', [request], repoUpdateResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  const changed = result.changed.length > 0 ? `: ${result.changed.join(', ')}` : '; no setting changed';
+  console.log(`${result.dryRun ? 'Would update' : 'Updated'} ${result.repo.name}${changed}`);
+  printRepoSettings(result.repo, result.settings);
+  return 0;
+}
+
+/** The settings object from --from-json, overridden by setting flags, with --clear settings set to null. */
+function buildRepoSettingsUpdate(parsed: ParsedArgs): RepoSettingsUpdate {
+  const settings: RepoSettingsUpdate = {};
+  if (parsed.fromJson) {
+    const text = stripUtf8Bom(readInputSource(parsed.fromJson));
+    try {
+      Object.assign(settings, decodeBoundary(JSON.parse(text), boundary.jsonObject));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw error;
+      throw invalidRepoSettings('--from-json must hold a JSON object of settings, such as {"runScript": "pnpm dev"}.');
+    }
+  }
+  const cleared = new Set(parsed.clear ?? []);
+  for (const setting of cleared) {
+    if (!CLEARABLE_REPO_SETTINGS.includes(setting)) {
+      throw invalidRepoSettings(`Unknown setting "${setting}" for --clear. Clearable settings: ${CLEARABLE_REPO_SETTINGS.join(', ')}.`);
+    }
+  }
+  for (const setting of REPO_SETTINGS) {
+    const value = setting.value(parsed);
+    const clear = cleared.has(setting.flag.slice(2));
+    if (value !== undefined && clear) {
+      throw invalidRepoSettings(`runpane repos update both sets and clears ${setting.flag.slice(2)}; pass one.`);
+    }
+    if (value !== undefined) settings[setting.key] = value;
+    if (clear) settings[setting.key] = null;
+  }
+  if (Object.keys(settings).length === 0) {
+    throw invalidRepoSettings(`runpane repos update needs at least one setting: ${REPO_SETTINGS.map((setting) => setting.flag).join(', ')}, --clear <setting,...>, or --from-json <path|->.`);
+  }
+  return settings;
+}
+
+function printRepoSettings(repo: RepoSummary, settings: RepoSettings): void {
+  console.log(`${repo.id}\t${settings.name}\t${settings.path}`);
+  console.log(`Current branch: ${settings.currentBranch ?? 'unknown'}`);
+  console.log(`Worktree folder: ${settings.worktreeFolder ?? 'not set (worktrees/ in the repository)'}`);
+  console.log(`Open IDE command: ${settings.openIdeCommand ?? 'not set'}`);
+  console.log(`System prompt: ${settings.systemPrompt ?? 'not set'}`);
+  const scripts = [['Build script', settings.buildScript], ['Run script', settings.runScript], ['Archive script', settings.archiveScript]] as const;
+  for (const [label, script] of scripts) {
+    const effective = script.effective;
+    if (!effective) {
+      console.log(`${label}: not set`);
+      continue;
+    }
+    const from = script.value
+      ? `Project Settings${script.fallback ? `, overrides ${script.fallback.source}` : ''}`
+      : `from ${effective.source}`;
+    const command = effective.command.includes('\n') ? `\n    ${effective.command.split('\n').join('\n    ')}` : ` ${effective.command}`;
+    console.log(`${label} (${from}):${command}`);
+  }
 }
 
 export async function runPanesList(parsed: ParsedArgs): Promise<number> {

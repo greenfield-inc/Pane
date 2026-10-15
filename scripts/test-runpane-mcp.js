@@ -258,6 +258,62 @@ test('a mutating call without yes is refused before reaching the daemon', async 
   }
 });
 
+test('repos_get and repos_update read and change Project Settings, and an update needs yes', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const script = (value, fallback) => ({
+    value,
+    fallback: fallback ? { command: fallback, source: 'conductor.json' } : null,
+    effective: value ? { command: value, source: 'Project Settings' } : fallback ? { command: fallback, source: 'conductor.json' } : null,
+  });
+  const settings = {
+    name: 'cura', path: '/work/cura', currentBranch: 'main', worktreeFolder: '../cura-worktrees', openIdeCommand: null, systemPrompt: null,
+    configFile: 'conductor.json', buildScript: script('pnpm install', 'conductor setup'), runScript: script(null, 'pnpm dev'), archiveScript: script(null, null),
+  };
+  const repo = { id: 2, name: 'cura', path: '/work/cura', active: false, environment: 'linux', sessionCount: 1 };
+  const updated = { ok: true, changed: ['buildScript', 'runScript'], repo, settings };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:repos:get': { ok: true, repo, settings },
+      'runpane:repos:update': updated,
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tools = (await client.listTools()).tools;
+        const get = tools.find((tool) => tool.name === 'repos_get');
+        const update = tools.find((tool) => tool.name === 'repos_update');
+        assert.equal(get.annotations.readOnlyHint, true);
+        assert.equal(update.annotations.readOnlyHint, false);
+        assert.deepEqual(update.inputSchema.required, ['repo']);
+        for (const input of ['buildScript', 'runScript', 'archiveScript', 'worktreeFolder', 'clear', 'fromJson', 'dryRun', 'yes']) {
+          assert.ok(input in update.inputSchema.properties, `repos_update is missing ${input}`);
+        }
+
+        const read = await client.callTool({ name: 'repos_get', arguments: { repo: 'cura', paneDir } });
+        assert.notEqual(read.isError, true, read.content[0].text);
+        assert.deepEqual(read.structuredContent, { ok: true, repo, settings });
+        assertMatchesAdvertisedSchema(get, read.structuredContent);
+
+        const refused = await client.callTool({ name: 'repos_update', arguments: { repo: 'cura', buildScript: 'pnpm install', paneDir } });
+        assert.equal(refused.isError, true);
+        assert.match(refused.content[0].text, /--yes/);
+
+        const changed = await client.callTool({
+          name: 'repos_update',
+          arguments: { repo: 'cura', buildScript: 'pnpm install', runScript: 'pnpm dev', clear: 'archive-script', yes: true, paneDir },
+        });
+        assert.notEqual(changed.isError, true, changed.content[0].text);
+        assert.deepEqual(changed.structuredContent, updated);
+        assertMatchesAdvertisedSchema(update, changed.structuredContent);
+      });
+      assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
+        { channel: 'runpane:repos:get', args: [{ repo: 'cura' }] },
+        { channel: 'runpane:repos:update', args: [{ repo: 'cura', settings: { buildScript: 'pnpm install', runScript: 'pnpm dev', archiveScript: null } }] },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, only JSON-RPC on stdout, clean exit', async () => {
   const { lines, responses, code } = await exchangeRaw([
     { id: 1, method: 'server/discover', params: { _meta: MODERN_META } },
@@ -488,7 +544,8 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
-    'panels_create', 'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
+    'panels_create', 'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_get', 'repos_list',
+    'repos_update', 'workspace_state',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [

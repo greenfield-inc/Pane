@@ -72,6 +72,79 @@ async function stopProjectScriptInternal(projectId?: number): Promise<{ success:
   }
 }
 
+/**
+ * Saves Project Settings: the one write path for the settings dialog (`projects:update`)
+ * and `runpane repos update`. It drops the cached project context, rebuilds the run
+ * commands, and emits `project:updated` so every open window reloads the project.
+ */
+export function saveProjectSettings(
+  services: Pick<AppServices, 'databaseService' | 'sessionManager' | 'analyticsManager'>,
+  projectId: number,
+  updates: UpdateProjectRequest,
+): Project | undefined {
+  const { databaseService, sessionManager, analyticsManager } = services;
+  // Invalidate cached PathResolver/CommandRunner in case WSL settings changed
+  sessionManager.invalidateProjectContext(projectId);
+
+  // A \\wsl.localhost\<distro>\... path is stored the way projects:create stores
+  // it: the Linux path plus the distro. Saved raw, every git call ran
+  // `cd '\\wsl.localhost\...'` inside WSL and failed. Any other path is kept as
+  // typed, so editing a WSL project to a plain Linux path doesn't drop its distro.
+  const location = updates.path !== undefined ? resolveProjectRegistration(updates.path) : null;
+  const normalizedUpdates = location?.wsl_enabled
+    ? { ...updates, path: location.path, wsl_enabled: true, wsl_distribution: location.wsl_distribution }
+    : updates;
+
+  // Update the project
+  const project = databaseService.updateProject(projectId, normalizedUpdates);
+
+  // If run_script was updated, also update the run commands table
+  if (updates.run_script !== undefined) {
+    // Delete existing run commands
+    databaseService.deleteProjectRunCommands(projectId);
+
+    // Add new run commands from the multiline script
+    // Treat empty string and null the same - both mean no commands
+    if (updates.run_script && updates.run_script.trim()) {
+      const commands = updates.run_script.split('\n').filter((cmd: string) => cmd.trim());
+      commands.forEach((command: string, index: number) => {
+        databaseService.createRunCommand(
+          projectId,
+          command.trim(),
+          `Command ${index + 1}`,
+          index
+        );
+      });
+    }
+  }
+
+  // Emit event to notify frontend about project update
+  if (project) {
+    sessionManager.emit('project:updated', project);
+  }
+
+  // Track project settings update
+  if (analyticsManager && project) {
+    // Determine which category of setting was updated
+    let settingCategory = 'other';
+    if (updates.system_prompt !== undefined) {
+      settingCategory = 'system_prompt';
+    } else if (updates.run_script !== undefined || updates.build_script !== undefined) {
+      settingCategory = 'scripts';
+    } else if (updates.open_ide_command !== undefined) {
+      settingCategory = 'ide';
+    } else if (updates.name !== undefined) {
+      settingCategory = 'name';
+    }
+
+    analyticsManager.track('project_settings_updated', {
+      setting_category: settingCategory
+    });
+  }
+
+  return project;
+}
+
 const DAEMON_PROJECT_CHANNELS = [
   'projects:get-all',
   'projects:get-active',
@@ -297,67 +370,7 @@ export function registerProjectHandlers(
 
   commandRegistry.register('projects:update', async (projectId: string, updates: UpdateProjectRequest) => {
     try {
-      const projectIdNum = parseInt(projectId);
-
-      // Invalidate cached PathResolver/CommandRunner in case WSL settings changed
-      sessionManager.invalidateProjectContext(projectIdNum);
-
-      // A \\wsl.localhost\<distro>\... path is stored the way projects:create stores
-      // it: the Linux path plus the distro. Saved raw, every git call ran
-      // `cd '\\wsl.localhost\...'` inside WSL and failed. Any other path is kept as
-      // typed, so editing a WSL project to a plain Linux path doesn't drop its distro.
-      const location = updates.path !== undefined ? resolveProjectRegistration(updates.path) : null;
-      const normalizedUpdates = location?.wsl_enabled
-        ? { ...updates, path: location.path, wsl_enabled: true, wsl_distribution: location.wsl_distribution }
-        : updates;
-
-      // Update the project
-      const project = databaseService.updateProject(projectIdNum, normalizedUpdates);
-
-      // If run_script was updated, also update the run commands table
-      if (updates.run_script !== undefined) {
-        // Delete existing run commands
-        databaseService.deleteProjectRunCommands(projectIdNum);
-
-        // Add new run commands from the multiline script
-        // Treat empty string and null the same - both mean no commands
-        if (updates.run_script && updates.run_script.trim()) {
-          const commands = updates.run_script.split('\n').filter((cmd: string) => cmd.trim());
-          commands.forEach((command: string, index: number) => {
-            databaseService.createRunCommand(
-              projectIdNum,
-              command.trim(),
-              `Command ${index + 1}`,
-              index
-            );
-          });
-        }
-      }
-
-      // Emit event to notify frontend about project update
-      if (project) {
-        sessionManager.emit('project:updated', project);
-      }
-
-      // Track project settings update
-      if (analyticsManager && project) {
-        // Determine which category of setting was updated
-        let settingCategory = 'other';
-        if (updates.system_prompt !== undefined) {
-          settingCategory = 'system_prompt';
-        } else if (updates.run_script !== undefined || updates.build_script !== undefined) {
-          settingCategory = 'scripts';
-        } else if (updates.open_ide_command !== undefined) {
-          settingCategory = 'ide';
-        } else if (updates.name !== undefined) {
-          settingCategory = 'name';
-        }
-
-        analyticsManager.track('project_settings_updated', {
-          setting_category: settingCategory
-        });
-      }
-
+      const project = saveProjectSettings(services, parseInt(projectId), updates);
       return { success: true, data: project };
     } catch (error) {
       console.error('Failed to update project:', error);

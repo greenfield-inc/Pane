@@ -2,6 +2,10 @@ import { paneCommandSignal } from '../daemon/commandRegistry';
 import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
+import { detectProjectConfig } from '../services/projectConfigDetector';
+import { saveProjectSettings } from './project';
+import type { UpdateProjectRequest } from '../../../frontend/src/types/project';
+import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -54,7 +58,7 @@ import {
 import type { ArchiveProgressManager } from '../services/archiveProgressManager';
 import type { ArchiveProgressTask } from '../../../shared/types/archiveProgress';
 import { classifyWorktree } from '../services/worktreeTrash';
-import type { CommandRunner } from '../utils/commandRunner';
+import { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
 import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
@@ -137,6 +141,13 @@ import type {
   RunpanePanelWaitResult,
   RunpaneRepoAddRequest,
   RunpaneRepoAddResult,
+  RunpaneRepoGetResult,
+  RunpaneRepoScriptSetting,
+  RunpaneRepoSettingField,
+  RunpaneRepoSettings,
+  RunpaneRepoSettingsUpdate,
+  RunpaneRepoUpdateRequest,
+  RunpaneRepoUpdateResult,
   RunpaneRepoListResult,
   RunpaneRepoSelector,
   RunpaneRepoSummary,
@@ -196,6 +207,8 @@ const RUNPANE_CHANNELS = [
   'runpane:doctor',
   'runpane:repos:list',
   'runpane:repos:add',
+  'runpane:repos:get',
+  'runpane:repos:update',
   'runpane:sessions:list',
   'runpane:sessions:create',
   'runpane:sessions:get',
@@ -501,6 +514,37 @@ export function registerRunpaneHandlers(
         repo: projectToRepoSummary(project, 0),
       };
     }, result => ({ repoId: result.repo?.id, resultCount: result.created ? 1 : 0 }));
+  });
+
+  commandRegistry.register('runpane:repos:get', async (request: PaneCommandValue): Promise<RunpaneRepoGetResult> => {
+    return withRunpaneAction(services, 'repos:get', {}, async () => {
+      const selector = isRecord(request) && request.repo !== undefined ? parseRepoSelector(request.repo) : 'active';
+      const project = resolveRepoSelector(databaseService.getAllProjects(), selector);
+      return {
+        ok: true,
+        repo: projectToRepoSummary(project, sessionManager.getSessionsForProject(project.id).length),
+        settings: await readRepoSettings(services, project),
+      };
+    }, result => ({ repoId: result.repo.id }));
+  });
+
+  commandRegistry.register('runpane:repos:update', async (request: PaneCommandValue): Promise<RunpaneRepoUpdateResult> => {
+    return withRunpaneAction(services, 'repos:update', {}, async () => {
+      const normalized = parseRepoUpdateRequest(request);
+      const project = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
+      const updates = toProjectSettingsUpdate(normalized.settings);
+      const changed = changedRepoSettings(project, updates);
+      const saved = normalized.dryRun ? { ...project, ...updates } : saveProjectSettings(services, project.id, updates);
+      if (!saved) throw repoNotFound(`with id ${project.id}`);
+      const result: RunpaneRepoUpdateResult = {
+        ok: true,
+        changed,
+        repo: projectToRepoSummary(saved, sessionManager.getSessionsForProject(saved.id).length),
+        settings: await readRepoSettings(services, saved),
+      };
+      if (normalized.dryRun) result.dryRun = true;
+      return result;
+    }, result => ({ repoId: result.repo.id, resultCount: result.changed.length }));
   });
 
   commandRegistry.register('runpane:sessions:list', async (): Promise<RunpaneSessionListResult> => {
@@ -4166,6 +4210,121 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
     path: repoPath,
     name: providedName && providedName.length > 0 ? providedName : defaultName,
     dryRun: optionalBoolean(value.dryRun),
+  };
+}
+
+/** Project Settings columns, by the name `repos get` and `repos update` use for them. */
+const REPO_SETTING_COLUMNS = {
+  name: 'name',
+  buildScript: 'build_script',
+  runScript: 'run_script',
+  archiveScript: 'archive_script',
+  worktreeFolder: 'worktree_folder',
+  openIdeCommand: 'open_ide_command',
+  systemPrompt: 'system_prompt',
+} as const satisfies Record<RunpaneRepoSettingField, keyof UpdateProjectRequest & keyof Project>;
+
+const REPO_SETTING_FIELDS: readonly RunpaneRepoSettingField[] = [
+  'name', 'buildScript', 'runScript', 'archiveScript', 'worktreeFolder', 'openIdeCommand', 'systemPrompt',
+];
+
+const repoSettingValueSchema = boundary.nullable(boundary.string);
+
+function isRepoSettingField(key: string): key is RunpaneRepoSettingField {
+  return REPO_SETTING_FIELDS.some(field => field === key);
+}
+
+function parseRepoSettingValue(field: RunpaneRepoSettingField, value: PaneCommandValue): string | null {
+  try {
+    return decodeBoundary(value, repoSettingValueSchema);
+  } catch {
+    throw invalidRepoSettings(`${field} must be a string or null.`);
+  }
+}
+
+function invalidRepoSettings(message: string): PaneError {
+  return new PaneError(
+    'ERR_RUNPANE_REPO_SETTINGS_INVALID',
+    `${message} Nothing was changed.`,
+    `Settings are ${REPO_SETTING_FIELDS.join(', ')}. See the current values with \`runpane repos get --repo <selector> --json\`.`,
+  );
+}
+
+function parseRepoUpdateRequest(value: PaneCommandValue): RunpaneRepoUpdateRequest {
+  if (!isRecord(value)) throw invalidRepoSettings('The repo update request must be an object.');
+  if (value.repo === undefined) throw invalidRepoSettings('The repo update request must name a repo.');
+  const raw = value.settings;
+  if (!isRecord(raw)) throw invalidRepoSettings('The repo update request must include a settings object.');
+  const unknown = Object.keys(raw).filter(key => !isRepoSettingField(key));
+  if (unknown.length > 0) throw invalidRepoSettings(`Unknown repo setting(s): ${unknown.join(', ')}.`);
+  const settings: RunpaneRepoSettingsUpdate = {};
+  for (const field of REPO_SETTING_FIELDS) {
+    if (raw[field] === undefined) continue;
+    const setting = parseRepoSettingValue(field, raw[field]);
+    if (field === 'name') {
+      const name = setting?.trim();
+      if (!name) throw invalidRepoSettings('name cannot be empty; a repo always has a name.');
+      settings.name = name;
+      continue;
+    }
+    // The settings dialog saves an emptied field as null, which brings back the config-file fallback.
+    const trimmed = field === 'worktreeFolder' ? setting?.trim() : setting;
+    settings[field] = trimmed && trimmed.trim() ? trimmed : null;
+  }
+  if (Object.keys(settings).length === 0) throw invalidRepoSettings('The repo update request changes no settings.');
+  return { repo: parseRepoSelector(value.repo), settings, dryRun: optionalBoolean(value.dryRun) === true };
+}
+
+function toProjectSettingsUpdate(settings: RunpaneRepoSettingsUpdate): UpdateProjectRequest {
+  const updates: UpdateProjectRequest = {};
+  for (const field of REPO_SETTING_FIELDS) {
+    const setting = settings[field];
+    if (setting === undefined) continue;
+    if (field === 'name') {
+      if (setting !== null) updates.name = setting;
+    } else {
+      updates[REPO_SETTING_COLUMNS[field]] = setting;
+    }
+  }
+  return updates;
+}
+
+function changedRepoSettings(project: Project, updates: UpdateProjectRequest): RunpaneRepoSettingField[] {
+  return REPO_SETTING_FIELDS.filter(field => {
+    const column = REPO_SETTING_COLUMNS[field];
+    return updates[column] !== undefined && (updates[column] ?? null) !== (project[column] ?? null);
+  });
+}
+
+/** The settings dialog's view of a repo: saved values, plus the config-file fallback for each script. */
+async function readRepoSettings(services: AppServices, project: Project): Promise<RunpaneRepoSettings> {
+  const commandRunner = services.sessionManager.getProjectContextByProjectId(project.id)?.commandRunner ?? new CommandRunner(project);
+  const environment = new PathResolver(project).environment;
+  const [detected, currentBranch] = await Promise.all([
+    detectProjectConfig(project.path, environment, commandRunner).catch(() => null),
+    services.worktreeManager.getProjectMainBranch(project.path, commandRunner).catch(() => null),
+  ]);
+  return {
+    name: project.name,
+    path: project.path,
+    currentBranch,
+    worktreeFolder: project.worktree_folder ?? null,
+    openIdeCommand: project.open_ide_command ?? null,
+    systemPrompt: project.system_prompt ?? null,
+    configFile: detected?.source ?? null,
+    buildScript: repoScriptSetting(project.build_script, detected?.setup, detected),
+    runScript: repoScriptSetting(project.run_script, detected?.run, detected),
+    archiveScript: repoScriptSetting(project.archive_script, detected?.archive, detected),
+  };
+}
+
+function repoScriptSetting(saved: string | null | undefined, detectedCommand: string | undefined, detected: DetectedProjectConfig | null): RunpaneRepoScriptSetting {
+  const value = saved || null;
+  const fallback = detectedCommand && detected ? { command: detectedCommand, source: detected.source } : null;
+  return {
+    value,
+    fallback,
+    effective: value ? { command: value, source: 'Project Settings' } : fallback,
   };
 }
 

@@ -337,6 +337,76 @@ export interface RunpaneRepoAddResult {
   preview?: RunpaneRepoAddPreview;
 }
 
+/** A script Pane runs, and where it comes from. */
+export interface RunpaneRepoScriptSource {
+  command: string;
+  /** `Project Settings`, or the config file it was read from (`pane.json`, `conductor.json`, ...). */
+  source: string;
+}
+
+export interface RunpaneRepoScriptSetting {
+  /** Saved in Project Settings; null when unset. */
+  value: string | null;
+  /** What the repo's config file supplies when no value is saved. */
+  fallback: RunpaneRepoScriptSource | null;
+  /** What Pane runs: the saved value when set, otherwise the fallback. */
+  effective: RunpaneRepoScriptSource | null;
+}
+
+/** A saved repo's Project Settings, as the settings dialog shows them. */
+export interface RunpaneRepoSettings {
+  name: string;
+  path: string;
+  /** The branch checked out in the repo; detected, not a setting. */
+  currentBranch: string | null;
+  worktreeFolder: string | null;
+  openIdeCommand: string | null;
+  systemPrompt: string | null;
+  /** The config file the script fallbacks come from, read at the repo root. */
+  configFile: string | null;
+  buildScript: RunpaneRepoScriptSetting;
+  runScript: RunpaneRepoScriptSetting;
+  archiveScript: RunpaneRepoScriptSetting;
+}
+
+/** The settings `repos update` changes. A null or empty value clears the setting; `name` cannot be cleared. */
+export interface RunpaneRepoSettingsUpdate {
+  name?: string;
+  buildScript?: string | null;
+  runScript?: string | null;
+  archiveScript?: string | null;
+  worktreeFolder?: string | null;
+  openIdeCommand?: string | null;
+  systemPrompt?: string | null;
+}
+
+export type RunpaneRepoSettingField = keyof RunpaneRepoSettingsUpdate;
+
+export interface RunpaneRepoGetRequest {
+  repo?: RunpaneRepoSelector;
+}
+
+export interface RunpaneRepoGetResult {
+  ok: true;
+  repo: RunpaneRepoSummary;
+  settings: RunpaneRepoSettings;
+}
+
+export interface RunpaneRepoUpdateRequest {
+  repo: RunpaneRepoSelector;
+  settings: RunpaneRepoSettingsUpdate;
+  dryRun?: boolean;
+}
+
+export interface RunpaneRepoUpdateResult {
+  ok: true;
+  dryRun?: true;
+  /** The settings whose saved value differs from before. */
+  changed: RunpaneRepoSettingField[];
+  repo: RunpaneRepoSummary;
+  settings: RunpaneRepoSettings;
+}
+
 export interface RunpaneAgentToolSpec {
   agent: RunpaneAgentId;
   title?: string;

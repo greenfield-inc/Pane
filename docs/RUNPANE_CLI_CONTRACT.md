@@ -105,6 +105,9 @@ runpane agent-context --command "panes create" --json
 runpane mcp
 runpane repos list --json
 runpane repos add --path /path/to/repo --name Pane --yes --json
+runpane repos get --repo Pane --json
+runpane repos update --repo Pane --build-script "pnpm install" --run-script "pnpm dev" --worktree-folder ../pane-worktrees --yes --json
+runpane repos update --repo Pane --clear run-script --yes --json
 runpane panes list --repo active --json
 runpane panes cost --pane <pane-id> --json
 runpane panes create --repo active --name issue-252 --agent <agent> --prompt "Kick off the discussion skill for issue 252" --source agent --no-focus --wait-ready --yes --json
@@ -171,6 +174,10 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 `runpane repos list` connects to the running local Pane daemon and prints saved repository records.
 
 `runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.
+
+`runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.
+
+`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, and clears settings with `--clear`.
 
 `runpane panes list` lists Pane sessions, optionally scoped to one saved repository.
 
@@ -258,6 +265,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `mcp`: Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
+- `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
+- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
@@ -340,6 +349,8 @@ runpane agent-context --command <command> [--json]
 runpane mcp [--toolsets <name,...>] [--read-only]
 runpane repos list [--json] [--pane-dir <path>]
 runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <path>]
+runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]
+runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane panes list [--repo <selector>] [--json] [--pane-dir <path>]
 runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane workspace state [--repo <selector>] [--json] [--pane-dir <path>]
@@ -445,6 +456,8 @@ Brief tools:
 - `agents doctor`: Check whether Codex or Claude is available in the repo environment Pane will use.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
+- `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
+- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `panes create`: 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
@@ -562,6 +575,13 @@ These flags are consumed by local daemon-control commands:
 --machine <name>
 --model <model>
 --effort <level>
+--build-script <script>
+--run-script <script>
+--archive-script <script>
+--worktree-folder <path>
+--open-ide-command <command>
+--system-prompt <text>
+--clear <setting,...>
 --json
 --wait-ready
 --no-focus

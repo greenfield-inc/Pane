@@ -415,6 +415,14 @@ export function useIPCEvents() {
     });
     if (unsubscribeProjectListChanged) unsubscribeFunctions.push(unsubscribeProjectListChanged);
 
+    // A Project Settings save from any client (this window's dialog, another window, runpane CLI, MCP)
+    // reloads the project everywhere it is shown and re-resolves its run script.
+    const unsubscribeProjectUpdated = window.electronAPI.events.onProjectUpdated(() => {
+      window.dispatchEvent(new Event('project-changed'));
+      window.dispatchEvent(new Event('project-settings-updated'));
+    });
+    unsubscribeFunctions.push(unsubscribeProjectUpdated);
+
     const unsubscribeOrchestrationOverview = window.electronAPI.events.onOrchestrationSessionsOverviewUpdated?.((change) => {
       window.dispatchEvent(new CustomEvent('orchestration-sessions-overview-updated', { detail: change }));
     });

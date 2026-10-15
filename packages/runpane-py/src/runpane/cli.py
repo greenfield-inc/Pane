@@ -49,7 +49,9 @@ from .local_control import (
     run_panes_pin,
     run_panes_rename,
     run_repos_add,
+    run_repos_get,
     run_repos_list,
+    run_repos_update,
     run_report,
     run_sessions_associate,
     run_sessions_create,
@@ -150,6 +152,13 @@ class ParsedArgs:
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
+    build_script: Optional[str] = None
+    run_script: Optional[str] = None
+    archive_script: Optional[str] = None
+    worktree_folder: Optional[str] = None
+    open_ide_command: Optional[str] = None
+    system_prompt: Optional[str] = None
+    clear: Optional[List[str]] = None
     timeout_ms: Optional[float] = None
     wait_ready: bool = False
     ready_timeout_ms: Optional[float] = None
@@ -762,6 +771,27 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--from-json":
         parsed.from_json = value
         return
+    if flag == "--build-script":
+        parsed.build_script = value
+        return
+    if flag == "--run-script":
+        parsed.run_script = value
+        return
+    if flag == "--archive-script":
+        parsed.archive_script = value
+        return
+    if flag == "--worktree-folder":
+        parsed.worktree_folder = value
+        return
+    if flag == "--open-ide-command":
+        parsed.open_ide_command = value
+        return
+    if flag == "--system-prompt":
+        parsed.system_prompt = value
+        return
+    if flag == "--clear":
+        parsed.clear = [*(parsed.clear or []), *(setting.strip() for setting in value.split(",") if setting.strip())]
+        return
     if flag == "--timeout-ms":
         try:
             timeout_ms = float(value)
@@ -1163,6 +1193,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "links create": lambda parsed, context: run_links_create(parsed),
     "repos list": lambda parsed, context: run_repos_list(parsed),
     "repos add": lambda parsed, context: run_repos_add(parsed),
+    "repos get": lambda parsed, context: run_repos_get(parsed),
+    "repos update": lambda parsed, context: run_repos_update(parsed),
     "sessions list": lambda parsed, context: run_sessions_list(parsed),
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),

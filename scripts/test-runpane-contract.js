@@ -2904,6 +2904,135 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.emptyRejected, true);
 }
 
+async function checkRepoSettingsParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runReposGet, runReposUpdate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const settingsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-repo-settings-')), 'settings.json');
+  fs.writeFileSync(settingsFile, JSON.stringify({ runScript: 'from file', worktreeFolder: '../wt', systemPrompt: null }));
+  const script = (command, source) => ({ command, source });
+  const settings = {
+    name: 'Cura',
+    path: '/repo/cura',
+    currentBranch: 'main',
+    worktreeFolder: null,
+    openIdeCommand: 'cursor .',
+    systemPrompt: null,
+    configFile: 'conductor.json',
+    buildScript: { value: 'pnpm install', fallback: script('conductor setup', 'conductor.json'), effective: script('pnpm install', 'Project Settings') },
+    runScript: { value: null, fallback: script('pnpm dev\npnpm worker', 'conductor.json'), effective: script('pnpm dev\npnpm worker', 'conductor.json') },
+    archiveScript: { value: null, fallback: null, effective: null },
+  };
+  const repo = { id: 7, name: 'Cura', path: '/repo/cura', active: false, sessionCount: 0 };
+  const respond = (channel, request) => {
+    if (channel === 'runpane:repos:get') return { ok: true, repo, settings };
+    const result = { ok: true, changed: Object.keys(request.settings), repo, settings };
+    if (request.dryRun) result.dryRun = true;
+    return result;
+  };
+  const runs = [
+    ['repos', 'get', '--repo', 'Cura', '--json'],
+    ['repos', 'get'],
+    ['repos', 'update', '--repo', 'Cura', '--build-script', 'pnpm install', '--run-script', 'pnpm dev\npnpm worker', '--clear', 'archive-script,system-prompt', '--yes', '--json'],
+    ['repos', 'update', '--repo', '7', '--from-json', settingsFile, '--run-script', 'from flag', '--name', '  Cura Monorepo ', '--dry-run'],
+  ];
+  const failures = [
+    [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev'], /Rerun with --yes in non-interactive shells/],
+    [['repos', 'update', '--repo', 'Cura', '--yes'], /at least one setting/],
+    [['repos', 'update', '--build-script', 'pnpm install', '--yes'], /requires --repo/],
+    [['repos', 'update', '--repo', 'Cura', '--clear', 'env-vars', '--yes'], /Unknown setting "env-vars" for --clear/],
+    [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev', '--clear', 'run-script', '--yes'], /both sets and clears run-script/],
+  ];
+
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const calls = [];
+  const stdout = [];
+  const errors = [];
+  daemonClient.invokeDaemon = async (channel, args) => {
+    calls.push({ channel, request: args[0] });
+    return respond(channel, args[0]);
+  };
+  console.log = (line) => stdout.push(String(line));
+  try {
+    for (const argv of runs) {
+      const parsed = parseRunpaneArgs(argv);
+      await (parsed.command === 'repos get' ? runReposGet(parsed) : runReposUpdate(parsed));
+    }
+    for (const [argv] of failures) {
+      try {
+        await runReposUpdate(parseRunpaneArgs(argv));
+        errors.push('');
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepStrictEqual(calls, [
+    { channel: 'runpane:repos:get', request: { repo: 'Cura' } },
+    { channel: 'runpane:repos:get', request: {} },
+    {
+      channel: 'runpane:repos:update',
+      request: { repo: 'Cura', settings: { buildScript: 'pnpm install', runScript: 'pnpm dev\npnpm worker', archiveScript: null, systemPrompt: null } },
+    },
+    {
+      channel: 'runpane:repos:update',
+      request: { repo: '7', settings: { runScript: 'from flag', worktreeFolder: '../wt', systemPrompt: null, name: 'Cura Monorepo' }, dryRun: true },
+    },
+  ]);
+  failures.forEach(([argv, pattern], index) => assert.match(errors[index], pattern, argv.join(' ')));
+  const human = stdout.slice(stdout.findIndex((line) => line.startsWith('7\tCura')));
+  assertIncludes(human.join('\n'), 'Build script (Project Settings, overrides conductor.json): pnpm install');
+  assertIncludes(human.join('\n'), 'Run script (from conductor.json):\n    pnpm dev\n    pnpm worker');
+  assertIncludes(human.join('\n'), 'Archive script: not set');
+  assertIncludes(stdout.join('\n'), 'Would update Cura: runScript, worktreeFolder, systemPrompt, name');
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+settings = json.loads(${JSON.stringify(JSON.stringify(settings))})
+repo = json.loads(${JSON.stringify(JSON.stringify(repo))})
+runs = json.loads(${JSON.stringify(JSON.stringify(runs))})
+failures = json.loads(${JSON.stringify(JSON.stringify(failures.map(([argv]) => argv)))})
+calls = []
+def fake_invoke(channel, args, **kwargs):
+    request = args[0]
+    calls.append({"channel": channel, "request": request})
+    if channel == "runpane:repos:get":
+        return {"ok": True, "repo": repo, "settings": settings}
+    result = {"ok": True, "changed": list(request["settings"].keys()), "repo": repo, "settings": settings}
+    if request.get("dryRun"):
+        result["dryRun"] = True
+    return result
+
+local_control.invoke_daemon = fake_invoke
+stdout = io.StringIO()
+errors = []
+with contextlib.redirect_stdout(stdout):
+    for argv in runs:
+        parsed = parse_args(argv)
+        (local_control.run_repos_get if parsed.command == "repos get" else local_control.run_repos_update)(parsed)
+    for argv in failures:
+        try:
+            local_control.run_repos_update(parse_args(argv))
+            errors.append("")
+        except ValueError as error:
+            errors.append(str(error))
+print(json.dumps({"calls": calls, "stdout": stdout.getvalue(), "errors": errors}))
+`));
+  assert.deepStrictEqual(python.calls, calls);
+  assert.strictEqual(python.stdout, `${stdout.join('\n')}\n`);
+  failures.forEach(([argv, pattern], index) => assert.match(python.errors[index], pattern, `python ${argv.join(' ')}`));
+}
+
 async function checkLockParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -4069,6 +4198,7 @@ async function runChecks() {
   await checkSessionChildPinDefaults();
   await checkPanesCostParity();
   await checkPaneRenameParity();
+  await checkRepoSettingsParity();
   await checkLockParity();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();

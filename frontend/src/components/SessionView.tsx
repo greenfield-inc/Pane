@@ -1472,6 +1472,22 @@ export const SessionView = memo(() => {
     }
   }, [activeView, activeProjectId]);
 
+  // Project Settings saved anywhere (this window, another window, runpane, MCP) replace the
+  // loaded project in place, without the loading state a first load shows.
+  useEffect(() => {
+    const reload = () => {
+      void API.projects.getAll().then(response => {
+        if (!response.success || !response.data) return;
+        const projects: Project[] = response.data;
+        const fresh = (current: Project | null) => (current ? projects.find(project => project.id === current.id) ?? current : current);
+        setSessionProject(fresh);
+        setProjectData(fresh);
+      });
+    };
+    window.addEventListener('project-changed', reload);
+    return () => window.removeEventListener('project-changed', reload);
+  }, []);
+
   const hook = useSessionView(activeSession);
 
   // Handler to open set tracking dialog

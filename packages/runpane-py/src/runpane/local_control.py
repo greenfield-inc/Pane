@@ -45,6 +45,131 @@ def run_repos_add(parsed: Any) -> int:
     return 0
 
 
+# Each `repos update` setting: its key in the request and --from-json, its flag, and the parsed attribute.
+REPO_SETTINGS = [
+    ("name", "--name", "name"),
+    ("buildScript", "--build-script", "build_script"),
+    ("runScript", "--run-script", "run_script"),
+    ("archiveScript", "--archive-script", "archive_script"),
+    ("worktreeFolder", "--worktree-folder", "worktree_folder"),
+    ("openIdeCommand", "--open-ide-command", "open_ide_command"),
+    ("systemPrompt", "--system-prompt", "system_prompt"),
+]
+CLEARABLE_REPO_SETTINGS = [flag[2:] for key, flag, _ in REPO_SETTINGS if key != "name"]
+REPO_SETTINGS_NEXT = "See the settings with `runpane repos get --repo <selector> --json`, and the flags with `runpane help repos update`."
+
+
+class RunpaneError(ValueError):
+    """A failure with a stable code and the next step, as the npm CLI's RunpaneError reports it."""
+
+    def __init__(self, code: str, message: str, next_step: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.next = next_step
+
+
+def invalid_repo_settings(message: str) -> RunpaneError:
+    return RunpaneError("ERR_RUNPANE_REPO_SETTINGS_INVALID", f"{message} Nothing was changed.", REPO_SETTINGS_NEXT)
+
+
+def run_repos_get(parsed: Any) -> int:
+    request = {} if parsed.repo is None else {"repo": parsed.repo}
+    result = invoke_daemon("runpane:repos:get", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        print_repo_settings(result["repo"], result["settings"])
+    return 0
+
+
+def run_repos_update(parsed: Any) -> int:
+    if not parsed.repo:
+        raise RunpaneError(
+            "ERR_RUNPANE_REPO_REQUIRED",
+            "runpane repos update requires --repo <selector>. Nothing was changed.",
+            "Find the repo with `runpane repos list`.",
+        )
+    request: Dict[str, Any] = {"repo": parsed.repo, "settings": build_repo_settings_update(parsed)}
+    if parsed.dry_run:
+        request["dryRun"] = True
+    else:
+        confirm_repo_update(parsed)
+
+    result = invoke_daemon("runpane:repos:update", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+        return 0
+    changed = f": {', '.join(result['changed'])}" if result.get("changed") else "; no setting changed"
+    print(f"{'Would update' if result.get('dryRun') else 'Updated'} {result['repo']['name']}{changed}")
+    print_repo_settings(result["repo"], result["settings"])
+    return 0
+
+
+def confirm_repo_update(parsed: Any) -> None:
+    if parsed.yes:
+        return
+    if parsed.json or not is_interactive_shell():
+        raise ValueError("runpane repos update mutates Pane state. Rerun with --yes in non-interactive shells.")
+    answer = input("Run repos update? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def build_repo_settings_update(parsed: Any) -> Dict[str, Any]:
+    """The settings object from --from-json, overridden by setting flags, with --clear settings set to None."""
+    settings: Dict[str, Any] = {}
+    if parsed.from_json:
+        payload = json.loads(strip_utf8_bom(read_input_source(parsed.from_json)))
+        if not isinstance(payload, dict):
+            raise invalid_repo_settings('--from-json must hold a JSON object of settings, such as {"runScript": "pnpm dev"}.')
+        settings.update(payload)
+    cleared = list(dict.fromkeys(parsed.clear or []))
+    for setting in cleared:
+        if setting not in CLEARABLE_REPO_SETTINGS:
+            raise invalid_repo_settings(
+                f'Unknown setting "{setting}" for --clear. Clearable settings: {", ".join(CLEARABLE_REPO_SETTINGS)}.'
+            )
+    for key, flag, attribute in REPO_SETTINGS:
+        value = getattr(parsed, attribute)
+        if key == "name" and value is not None:
+            value = value.strip()
+        clear = flag[2:] in cleared
+        if value is not None and clear:
+            raise invalid_repo_settings(f"runpane repos update both sets and clears {flag[2:]}; pass one.")
+        if value is not None:
+            settings[key] = value
+        if clear:
+            settings[key] = None
+    if not settings:
+        flags = ", ".join(flag for _, flag, _ in REPO_SETTINGS)
+        raise invalid_repo_settings(
+            f"runpane repos update needs at least one setting: {flags}, --clear <setting,...>, or --from-json <path|->."
+        )
+    return settings
+
+
+def print_repo_settings(repo: Dict[str, Any], settings: Dict[str, Any]) -> None:
+    print(f"{repo['id']}\t{settings['name']}\t{settings['path']}")
+    print(f"Current branch: {settings.get('currentBranch') or 'unknown'}")
+    print(f"Worktree folder: {settings.get('worktreeFolder') or 'not set (worktrees/ in the repository)'}")
+    print(f"Open IDE command: {settings.get('openIdeCommand') or 'not set'}")
+    print(f"System prompt: {settings.get('systemPrompt') or 'not set'}")
+    for label, key in (("Build script", "buildScript"), ("Run script", "runScript"), ("Archive script", "archiveScript")):
+        script = settings[key]
+        effective = script.get("effective")
+        if not effective:
+            print(f"{label}: not set")
+            continue
+        fallback = script.get("fallback")
+        if script.get("value"):
+            origin = f"Project Settings, overrides {fallback['source']}" if fallback else "Project Settings"
+        else:
+            origin = f"from {effective['source']}"
+        command = effective["command"]
+        shown = "\n    " + "\n    ".join(command.split("\n")) if "\n" in command else f" {command}"
+        print(f"{label} ({origin}):{shown}")
+
+
 def run_sessions_list(parsed: Any) -> int:
     result = invoke_daemon("runpane:sessions:list", [], pane_dir=parsed.pane_dir)
     if parsed.json:

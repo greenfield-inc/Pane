@@ -2057,6 +2057,165 @@ describe('runpane IPC handlers', () => {
     }])).rejects.toThrow('Repo path must be an existing git repository');
   });
 
+  describe('repo settings', () => {
+    /** A saved repo whose settings live in an in-memory projects table, so reads see each write. */
+    function createSettingsServices(saved: Partial<Project> = {}) {
+      const repoPath = createTempGitRepo('settings-repo');
+      const projects: Project[] = [{ ...project, id: 7, name: 'Cura', path: repoPath, active: false, ...saved }];
+      const runCommands: string[] = [];
+      const base = createServices();
+      const databaseService = {
+        getAllProjects: vi.fn(() => projects),
+        getProject: vi.fn((id: number) => projects.find(candidate => candidate.id === id)),
+        updateProject: vi.fn((id: number, updates: Partial<Project>) => {
+          const index = projects.findIndex(candidate => candidate.id === id);
+          projects[index] = { ...projects[index], ...updates };
+          return projects[index];
+        }),
+        deleteProjectRunCommands: vi.fn(() => { runCommands.length = 0; }),
+        createRunCommand: vi.fn((_projectId: number, command: string) => { runCommands.push(command); }),
+      };
+      const services = createServices({
+        // SAFETY: The settings handlers read and write projects and run commands only.
+        databaseService: databaseService as never,
+        // SAFETY: The settings handlers use only these session-manager methods.
+        sessionManager: {
+          ...base.sessionManager,
+          getSessionsForProject: vi.fn(() => []),
+          getProjectContextByProjectId: vi.fn(() => undefined),
+          invalidateProjectContext: vi.fn(),
+          emit: vi.fn(() => true),
+        } as never,
+        // SAFETY: Branch detection is the only worktree call the settings handlers make.
+        worktreeManager: { getProjectMainBranch: vi.fn(async () => 'main') } as never,
+      });
+      return { services, repoPath, projects, runCommands };
+    }
+
+    it('reports each script as saved, as a config-file fallback, and as what will run', async () => {
+      const { services, repoPath } = createSettingsServices({ build_script: 'pnpm install', worktree_folder: '../cura-worktrees' });
+      fs.writeFileSync(path.join(repoPath, 'conductor.json'), JSON.stringify({
+        scripts: { setup: 'conductor setup', run: 'conductor run' },
+      }));
+
+      const result = await createRegistry(services).invoke('runpane:repos:get', [{ repo: '7' }]);
+
+      expect(result).toEqual({
+        ok: true,
+        repo: { id: 7, name: 'Cura', path: repoPath, active: false, environment: expect.any(String), sessionCount: 0 },
+        settings: {
+          name: 'Cura',
+          path: repoPath,
+          currentBranch: 'main',
+          worktreeFolder: '../cura-worktrees',
+          openIdeCommand: null,
+          systemPrompt: null,
+          configFile: 'conductor.json',
+          buildScript: {
+            value: 'pnpm install',
+            fallback: { command: 'conductor setup', source: 'conductor.json' },
+            effective: { command: 'pnpm install', source: 'Project Settings' },
+          },
+          runScript: {
+            value: null,
+            fallback: { command: 'conductor run', source: 'conductor.json' },
+            effective: { command: 'conductor run', source: 'conductor.json' },
+          },
+          archiveScript: { value: null, fallback: null, effective: null },
+        },
+      });
+    });
+
+    it('saves settings through the Project Settings save path and returns them', async () => {
+      const { services, runCommands } = createSettingsServices({ archive_script: 'old cleanup' });
+
+      const result = await createRegistry(services).invoke('runpane:repos:update', [{
+        repo: 'Cura',
+        settings: {
+          name: 'Cura Monorepo',
+          buildScript: 'pnpm install',
+          runScript: 'pnpm dev\npnpm worker',
+          archiveScript: null,
+          worktreeFolder: '../cura-worktrees',
+          openIdeCommand: 'cursor .',
+          systemPrompt: 'Use pnpm.',
+        },
+      }]);
+
+      expect(result).toMatchObject({
+        ok: true,
+        changed: ['name', 'buildScript', 'runScript', 'archiveScript', 'worktreeFolder', 'openIdeCommand', 'systemPrompt'],
+        repo: { id: 7, name: 'Cura Monorepo' },
+        settings: {
+          name: 'Cura Monorepo',
+          worktreeFolder: '../cura-worktrees',
+          openIdeCommand: 'cursor .',
+          systemPrompt: 'Use pnpm.',
+          buildScript: { value: 'pnpm install' },
+          runScript: { value: 'pnpm dev\npnpm worker' },
+          archiveScript: { value: null },
+        },
+      });
+      expect(services.databaseService.updateProject).toHaveBeenCalledWith(7, {
+        name: 'Cura Monorepo',
+        build_script: 'pnpm install',
+        run_script: 'pnpm dev\npnpm worker',
+        archive_script: null,
+        worktree_folder: '../cura-worktrees',
+        open_ide_command: 'cursor .',
+        system_prompt: 'Use pnpm.',
+      });
+      // The UI's save path: run commands rebuilt, cached project context dropped, the app told.
+      expect(runCommands).toEqual(['pnpm dev', 'pnpm worker']);
+      expect(services.sessionManager.invalidateProjectContext).toHaveBeenCalledWith(7);
+      expect(services.sessionManager.emit).toHaveBeenCalledWith('project:updated', expect.objectContaining({ id: 7, name: 'Cura Monorepo' }));
+    });
+
+    it('clears a script so the config-file fallback runs again', async () => {
+      const { services, repoPath } = createSettingsServices({ run_script: 'pnpm dev' });
+      fs.writeFileSync(path.join(repoPath, 'pane.json'), JSON.stringify({ scripts: { run: 'pnpm start' } }));
+
+      const result = await createRegistry(services).invoke('runpane:repos:update', [{ repo: '7', settings: { runScript: '' } }]);
+
+      expect(result).toMatchObject({
+        changed: ['runScript'],
+        settings: {
+          runScript: {
+            value: null,
+            fallback: { command: 'pnpm start', source: 'pane.json' },
+            effective: { command: 'pnpm start', source: 'pane.json' },
+          },
+        },
+      });
+      expect(services.databaseService.updateProject).toHaveBeenCalledWith(7, { run_script: null });
+    });
+
+    it('previews an update without saving it', async () => {
+      const { services } = createSettingsServices();
+
+      const result = await createRegistry(services).invoke('runpane:repos:update', [{
+        repo: '7', settings: { buildScript: 'pnpm install' }, dryRun: true,
+      }]);
+
+      expect(result).toMatchObject({ ok: true, dryRun: true, changed: ['buildScript'], settings: { buildScript: { value: 'pnpm install' } } });
+      expect(services.databaseService.updateProject).not.toHaveBeenCalled();
+      expect(services.sessionManager.emit).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty name and unknown settings without saving', async () => {
+      const { services } = createSettingsServices();
+      const registry = createRegistry(services);
+
+      await expect(registry.invoke('runpane:repos:update', [{ repo: '7', settings: { name: '  ' } }]))
+        .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPO_SETTINGS_INVALID' });
+      await expect(registry.invoke('runpane:repos:update', [{ repo: '7', settings: { envVars: {} } }]))
+        .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPO_SETTINGS_INVALID', message: expect.stringContaining('envVars') });
+      await expect(registry.invoke('runpane:repos:update', [{ repo: '7', settings: {} }]))
+        .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPO_SETTINGS_INVALID' });
+      expect(services.databaseService.updateProject).not.toHaveBeenCalled();
+    });
+  });
+
   it('dry-runs pane creation with contract-backed agent templates', async () => {
     const services = createServices();
     const registry = createRegistry(services);

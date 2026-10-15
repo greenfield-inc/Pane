@@ -33,7 +33,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 
 | Toolset | Tools |
 |---|---|
-| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor` |
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `repos_list`, `repos_add`, `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder), `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor` |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
 | `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
 | `panels` | create, list, output, screen, input, submit, submit-composer, wait |

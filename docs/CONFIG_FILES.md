@@ -115,6 +115,31 @@ Run Commands:  "npm run dev:custom" → overrides pane.json
 Archive Script: empty → uses pane.json scripts.archive
 ```
 
+### From the CLI or MCP
+
+Agents read and change Project Settings with `runpane repos get` and `runpane repos update` (MCP tools `repos_get` and `repos_update`). `repos get` shows each script's saved value, the config-file fallback, and which one Pane will run:
+
+```bash
+runpane repos get --repo my-app --json
+```
+
+```json
+"runScript": {
+  "value": null,
+  "fallback": { "command": "pnpm dev", "source": "pane.json" },
+  "effective": { "command": "pnpm dev", "source": "pane.json" }
+}
+```
+
+`repos update` saves through the same path as the Project Settings dialog, so open Pane windows show the new values. `--clear` empties a field, and a cleared script falls back to the config file again:
+
+```bash
+runpane repos update --repo my-app --run-script "pnpm dev:custom" --yes
+runpane repos update --repo my-app --clear run-script --yes
+```
+
+`repos get` reads the config file at the repository root. At run time Pane reads it from each Pane's worktree, as the next section explains.
+
 ## Branch-Local Config
 
 Config files are read from the **session's worktree**, not the project root. This means:
