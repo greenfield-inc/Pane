@@ -714,3 +714,97 @@ test('--note-only starts a fresh agent even when the session could be carried', 
   assert.deepEqual(claude.calls(), []);
   assert.equal(calls().find(c => c.channel === 'runpane:panels:create').args[0].resume, undefined);
 });
+
+// ---------------------------------------------------------------- carrying a session to another machine
+
+/**
+ * A stand-in for Pane on another machine (test-remote), reached over HTTP like a real workspace,
+ * with its own home folder and a clone of the fixture's remote. The CLI's tailnet lookup is
+ * pointed at it.
+ */
+function remoteMachine(f, options = {}) {
+  const { spawn } = require('node:child_process');
+  const home = path.join(f.root, 'remote-home');
+  const repoPath = path.join(home, 'repo');
+  fs.mkdirSync(home, { recursive: true });
+  execFileSync('git', ['clone', '-q', path.join(f.root, 'remote.git'), repoPath], { env: f.env });
+  const log = path.join(f.root, 'remote-calls.jsonl');
+  const ready = path.join(f.root, 'remote-ready.json');
+  const config = path.join(f.root, 'remote.json');
+  fs.writeFileSync(config, JSON.stringify({ home, repoPath, log, ready, agent: options.agent ?? 'claude', screenText: options.screenText }));
+  const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-remote.cjs'), config], { env: f.env, stdio: 'ignore' });
+  f.t.after(async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise(resolve => child.once('exit', resolve));
+    child.kill();
+    await exited;
+  });
+  const deadline = Date.now() + 10000;
+  while (!fs.existsSync(ready) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  const { port } = JSON.parse(fs.readFileSync(ready, 'utf8'));
+  fs.appendFileSync(path.join(f.root, '.git', 'info', 'exclude'), 'remote-home/\nremote-calls.jsonl\nremote-ready.json\nremote.json\n');
+  const self = { name: 'workstation', dnsName: 'workstation.tail.invalid', os: process.platform === 'win32' ? 'Windows' : 'Linux', online: true, ips: [], self: true, owner: 'test@github', mine: true };
+  const remote = { ...self, name: 'test-remote', dnsName: 'test-remote.tail.invalid', os: process.platform === 'win32' ? 'Windows' : 'Linux', self: false };
+  fs.appendFileSync(path.join(f.root, '.git', 'isolated-tailnet.cjs'), [
+    `const workspace = require(${JSON.stringify(path.join(dist, 'workspace.js'))});`,
+    `workspace.readTailnet = async () => ({ ok: true, self: ${JSON.stringify(self)}, machines: [${JSON.stringify(remote)}] });`,
+    `workspace.workspaceTarget = (machine) => ({ machine: machine.name, baseUrl: 'http://127.0.0.1:${port}' });`,
+    '',
+  ].join('\n'));
+  const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  return { home, calls };
+}
+const runToRemote = (f, ...args) => spawnSync(process.execPath, [cli, 'handoff', 'claude on test-remote', '--note-file', 'note.md', '--json', ...args], { cwd: f.root, encoding: 'utf8', env: f.env });
+
+test('a handoff to another machine copies the sender\'s session into its store and resumes the same id there', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const remote = remoteMachine(f, { screenText: `● Done.\n  ${LAST} now.` });
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.fork, false);
+  assert.equal(out.continuity.resumedId, SENDER);
+  const copy = path.join(remote.home, '.claude', 'projects', 'C--work-app', `${SENDER}.jsonl`);
+  assert.deepEqual(fs.readFileSync(copy), fs.readFileSync(claude.transcript));
+  assert.deepEqual(claude.calls(), [], 'nothing is forked when the session moves to another machine');
+  const create = remote.calls().find(c => c.channel === 'runpane:panes:create').args[0].panes[0];
+  assert.equal(create.resume, SENDER);
+  assert.equal(create.tool.initialInput, undefined);
+  const moved = remote.calls().find(c => c.channel === 'runpane:panels:submit').args[0];
+  assert.match(moved.input, /^This session moved to .* on test-remote\. Continue from where you were\. The sender's handoff note is at /);
+});
+
+test('a session already in the other machine\'s store is replaced in place, never copied twice', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const remote = remoteMachine(f, { screenText: `${LAST} now.` });
+  const earlier = path.join(remote.home, '.claude', 'projects', 'C--Users-me-old-checkout', `${SENDER}.jsonl`);
+  fs.mkdirSync(path.dirname(earlier), { recursive: true });
+  fs.writeFileSync(earlier, 'an older copy from an earlier handoff\n');
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.deepEqual(fs.readFileSync(earlier), fs.readFileSync(claude.transcript));
+  assert.equal(fs.existsSync(path.join(remote.home, '.claude', 'projects', 'C--work-app', `${SENDER}.jsonl`)), false);
+});
+
+test('a session larger than one machine write is sent in parts and joined unchanged', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  // 9 MB of earlier conversation before the last message, so the file needs two writes.
+  const filler = JSON.stringify({ type: 'user', sessionId: SENDER, message: { role: 'user', content: 'x'.repeat(1024) } }) + '\n';
+  const original = fs.readFileSync(claude.transcript, 'utf8');
+  fs.writeFileSync(claude.transcript, filler.repeat(9 * 1024) + original);
+  const remote = remoteMachine(f, { screenText: `${LAST} now.` });
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const copyDir = path.join(remote.home, '.claude', 'projects', 'C--work-app');
+  assert.deepEqual(fs.readFileSync(path.join(copyDir, `${SENDER}.jsonl`)), fs.readFileSync(claude.transcript));
+  assert.deepEqual(fs.readdirSync(copyDir), [`${SENDER}.jsonl`], 'the parts are removed once joined');
+  const writes = remote.calls().filter(c => c.channel === 'runpane:machine:write' && c.args[0].path.includes(SENDER));
+  assert.equal(writes.length, 2);
+});
