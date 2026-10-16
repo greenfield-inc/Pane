@@ -14,7 +14,7 @@ import { Input, Textarea } from './ui/Input';
 import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
+const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor', 'opencode'] as const)
   .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 function availableSessionAgents(wsl = false): ReadonlyArray<{ id: PaneChatAgent; label: string }> {

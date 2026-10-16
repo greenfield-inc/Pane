@@ -22,6 +22,7 @@ import { sessionWorkspacePath } from './sessionWorkspace';
 import { windowsPathToWSLMount } from '../utils/wslUtils';
 import * as shellPathUtils from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
+import * as openCodeLaunch from './agents/opencodeLaunch';
 import * as processTree from '../utils/processTree';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
@@ -284,6 +285,117 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     });
     expect(panel.state.customState?.agentSessionId).toBe(stateAtSpawn?.customState?.agentSessionId);
   });
+
+  it.each([true, false].flatMap(usePtyHost => [true, false].map(saved => ({ usePtyHost, saved }))))(
+    'hard-persists preserved native OpenCode Session state before spawn (host=$usePtyHost, saved=$saved)', async ({ usePtyHost, saved }) => {
+      const panel = makeOpenCodePanel(`opencode-session-spawn-${usePtyHost}-${saved}`, {
+        orchestrationSessionId: 'named-session', preserveLaunchCommand: true,
+        agentSessionId: saved ? 'ses_SessionSaved123' : undefined,
+      });
+      createPanelFixture(panel);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+      vi.spyOn(configManager, 'getUsePtyHost').mockReturnValue(usePtyHost);
+      let observedId: string | undefined;
+      const observeSpawn = () => {
+        observedId = lastPersisted?.customState?.agentSessionId;
+        expect(observedId).toMatch(/^ses_[A-Za-z0-9]+$/);
+        if (saved) expect(observedId).toBe('ses_SessionSaved123');
+        expect(databaseService.getPanel(panel.id)?.state.customState).toMatchObject({
+          agentSessionId: observedId, orchestrationSessionId: 'named-session', preserveLaunchCommand: false,
+        });
+        expect(panel.state.customState?.agentSessionId).toBe(observedId);
+      };
+      ptyHost.onSpawn = observeSpawn;
+      const legacySpawn = vi.spyOn(pty, 'spawn').mockImplementation(() => {
+        observeSpawn();
+        // SAFETY: FakeLegacyPty implements the IPty methods this initialization fixture exercises.
+        return new FakeLegacyPty() as pty.IPty;
+      });
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      try {
+        await manager.initializeTerminal(panel, tempDir);
+        expect(observedId).toBe(panel.state.customState?.agentSessionId);
+        expect(ptyHost.spawnOptions).toHaveLength(usePtyHost ? 1 : 0);
+        expect(legacySpawn).toHaveBeenCalledTimes(usePtyHost ? 0 : 1);
+      } finally {
+        legacySpawn.mockRestore();
+      }
+    },
+  );
+
+  it.each([true, false].flatMap(usePtyHost => [true, false].map(throws => ({ usePtyHost, throws }))))(
+    'does not spawn a preserved OpenCode Session after failed hard persistence (host=$usePtyHost, throws=$throws)', async ({ usePtyHost, throws }) => {
+      const panel = makeOpenCodePanel(`opencode-session-persist-failure-${usePtyHost}-${throws}`, {
+        orchestrationSessionId: 'named-session', preserveLaunchCommand: true, agentSessionId: 'ses_DurableSession123',
+      });
+      createPanelFixture(panel);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+      vi.spyOn(configManager, 'getUsePtyHost').mockReturnValue(usePtyHost);
+      const durableWrite = vi.spyOn(databaseService, 'updatePanel');
+      if (throws) durableWrite.mockImplementation(() => { throw new Error('Session database unavailable'); });
+      else durableWrite.mockReturnValue(false);
+      // SAFETY: FakeLegacyPty implements the IPty methods this initialization fixture exercises.
+      const legacySpawn = vi.spyOn(pty, 'spawn').mockImplementation(() => new FakeLegacyPty() as pty.IPty);
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      try {
+        await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow(
+          throws ? 'Session database unavailable' : 'OpenCode session persistence was not acknowledged',
+        );
+        expect(durableWrite).toHaveBeenCalled();
+        expect(databaseService.getPanel(panel.id)?.state.customState?.agentSessionId).toBe('ses_DurableSession123');
+        expect(ptyHost.spawnOptions).toHaveLength(0);
+        expect(legacySpawn).not.toHaveBeenCalled();
+        expect(manager.getActiveTerminals()).toEqual([]);
+      } finally {
+        durableWrite.mockRestore();
+        legacySpawn.mockRestore();
+      }
+    },
+  );
+
+  it.each([true, false].flatMap(usePtyHost => [
+    { initialCommand: 'bash -lc "opencode --auto"' },
+    { launchMode: 'wrapped' as const },
+    ...(['generated', 'claude', 'reported'] as const).map(mode => ({
+      customResume: { mode, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' },
+    })),
+  ].map((customState, index) => ({ usePtyHost, customState, index }))))(
+    'rejects incompatible OpenCode Session metadata before spawn/allocation (host=$usePtyHost): $customState', async ({ usePtyHost, customState, index }) => {
+      const panel = makeOpenCodePanel(`opencode-session-invalid-metadata-${usePtyHost}-${index}`, {
+        orchestrationSessionId: 'named-session', preserveLaunchCommand: true,
+        agentSessionId: 'ses_KeepSaved123', customResumeStarted: true, wasInterrupted: true,
+        initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Retain saved delivery error',
+        scrollbackBuffer: 'Retain saved history', serializedBuffer: 'Retain saved screen', ...customState,
+      });
+      createPanelFixture(panel);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+      const savedPanel = structuredClone(panel);
+      const savedRow = structuredClone(databaseService.getPanel(panel.id));
+      const savedBuffers = structuredClone(databaseService.getPanelBuffers(panel.id));
+      vi.spyOn(configManager, 'getUsePtyHost').mockReturnValue(usePtyHost);
+      const nativeResolver = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
+      // SAFETY: FakeLegacyPty implements the IPty methods this initialization fixture exercises.
+      const legacySpawn = vi.spyOn(pty, 'spawn').mockImplementation(() => new FakeLegacyPty() as pty.IPty);
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      try {
+        await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow(/OpenCode.*(?:wrapper|wrapped|custom resume)/i);
+        expect(nativeResolver).not.toHaveBeenCalled();
+        expect(panelManagerMock.updatePanel).not.toHaveBeenCalled();
+        expect(panel).toEqual(savedPanel);
+        expect(databaseService.getPanel(panel.id)).toEqual(savedRow);
+        expect(databaseService.getPanelBuffers(panel.id)).toEqual(savedBuffers);
+        expect(ptyHost.spawnOptions).toHaveLength(0);
+        expect(legacySpawn).not.toHaveBeenCalled();
+        expect(manager.getActiveTerminals()).toEqual([]);
+      } finally {
+        nativeResolver.mockRestore();
+        legacySpawn.mockRestore();
+      }
+    },
+  );
 
   it('uses the selected Windows shell when validating an absolute OpenCode path', async () => {
     vi.useFakeTimers();
@@ -894,7 +1006,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     const store = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'));
     store.write({ version: 1, sessions: [{
       id: 'wsl-session', name: 'WSL Session', runtime: 'wsl', wslDistribution: 'Ubuntu', agent: 'codex',
-      internalSessionId: panel.sessionId, panelIds: { codex: panel.id, claude: 'claude', cursor: 'cursor' },
+      internalSessionId: panel.sessionId, panelIds: { codex: panel.id, claude: 'claude', cursor: 'cursor', opencode: 'opencode' },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
       associations: [], activity: [], revision: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01',
     }] });

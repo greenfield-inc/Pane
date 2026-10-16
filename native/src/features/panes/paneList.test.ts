@@ -32,7 +32,7 @@ function session(id: string, name: string, extra: Partial<OrchestrationSessionRe
     name,
     agent: 'claude',
     internalSessionId: `__orchestration_session_${id}__`,
-    panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor` },
+    panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor`, opencode: `${id}-opencode` },
     goal: '',
     context: '',
     decisions: [],

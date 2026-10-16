@@ -12,6 +12,7 @@ interface InputRequest {
 
 const clients: Array<RemotePaneClient | RemoteDaemonBrowserClient> = [];
 const servers: http.Server[] = [];
+const fixtures: Array<{ handlers: Promise<void>[]; errors: unknown[] }> = [];
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -27,12 +28,18 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await Promise.all(clients.splice(0).map(client => client.disconnect()));
-  await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => {
-    server.close(() => resolve());
-    server.closeAllConnections();
-  })));
-  vi.unstubAllGlobals();
+  try {
+    await Promise.all(clients.splice(0).map(client => client.disconnect()));
+    await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    })));
+    const owned = fixtures.splice(0);
+    await Promise.all(owned.flatMap(fixture => fixture.handlers));
+    expect(owned.flatMap(fixture => fixture.errors)).toEqual([]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe.each([
@@ -41,38 +48,124 @@ describe.each([
 ] as const)('%s remote terminal input', (_name, Client) => {
   async function setup() {
     const requests: InputRequest[] = [];
+    const handlers: Promise<void>[] = [];
+    const errors: unknown[] = [];
     let eventResponse: ServerResponse | undefined;
-    const server = http.createServer(async (request, response) => {
-      if (request.url?.startsWith('/health')) {
-        response.end(JSON.stringify({ ok: true }));
-        return;
-      }
-      if (request.url?.startsWith('/events')) {
-        eventResponse = response;
-        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        response.write(`event: ready\ndata: ${JSON.stringify({
-          replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString(),
-        })}\n\n`);
-        return;
-      }
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const parsed = decodeBoundary(JSON.parse(Buffer.concat(chunks).toString()), boundary.object({
-        channel: boundary.string,
-        args: boundary.array(boundary.json),
-      }));
-      requests.push({ ...parsed, response });
+    const server = http.createServer((request, response) => {
+      const route = request.url?.split('?')[0];
+      const isInvoke = request.method === 'POST' && route === '/invoke';
+      const handler = (async () => {
+        if (request.method === 'GET' && route === '/health') {
+          response.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        if (request.method === 'GET' && route === '/events') {
+          eventResponse = response;
+          response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          response.write(`event: ready\ndata: ${JSON.stringify({
+            replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString(),
+          })}\n\n`);
+          return;
+        }
+        if (!isInvoke) throw new Error(`Unexpected fixture request: ${request.method} ${route}`);
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        if (request.aborted || !request.complete) return;
+        const parsed = decodeBoundary(JSON.parse(Buffer.concat(chunks).toString()), boundary.object({
+          channel: boundary.string,
+          args: boundary.array(boundary.json),
+        }));
+        requests.push({ ...parsed, response });
+      })().catch(error => {
+        if (isInvoke && (request.aborted || !request.complete)) return;
+        errors.push(error);
+        if (!response.destroyed) {
+          response.statusCode = isInvoke ? 400 : 404;
+          response.end();
+        }
+      });
+      handlers.push(handler);
     });
+    fixtures.push({ handlers, errors });
     servers.push(server);
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+    const baseUrl = `http://127.0.0.1:${address.port}`;
     const client = new Client({
       id: 'input-test', label: 'Input test', token: 'test-token', transport: 'http+sse',
-      baseUrl: `http://127.0.0.1:${address.port}`,
+      baseUrl,
     });
     clients.push(client);
-    return { client, requests, getEventResponse: () => eventResponse };
+    return { client, requests, handlers, errors, server, baseUrl, getEventResponse: () => eventResponse };
   }
+
+  it('owns completed malformed invokes as fixture failures without enqueueing them', async () => {
+    const { server, baseUrl, handlers, errors, requests } = await setup();
+    for (const body of ['', '{', JSON.stringify({ channel: 1, args: [] })]) {
+      const received = new Promise<http.IncomingMessage>(resolve => server.once('request', request => request.once('close', () => resolve(request))));
+      const controller = new AbortController();
+      const pending = fetch(`${baseUrl}/invoke`, { method: 'POST', body, signal: controller.signal });
+      void pending.catch(() => {});
+      try {
+        const request = await received;
+        await Promise.all(handlers);
+        expect(request.complete).toBe(true);
+        expect(request.aborted).toBe(false);
+        expect(errors).toHaveLength(1);
+        const [error] = errors.splice(0);
+        expect(error).toBeInstanceOf(body === '' || body === '{' ? SyntaxError : Error);
+        expect(requests).toEqual([]);
+        expect((await pending).status).toBe(400);
+      } finally {
+        controller.abort();
+        await Promise.allSettled([pending]);
+      }
+    }
+  });
+
+  it('rejects unexpected routes as fixture failures rather than invoke bodies', async () => {
+    const { baseUrl, handlers, errors, requests } = await setup();
+    for (const [method, route] of [['GET', '/invoke'], ['POST', '/health-extra']]) {
+      const controller = new AbortController();
+      const pending = fetch(`${baseUrl}${route}`, { method, signal: controller.signal });
+      void pending.catch(() => {});
+      try {
+        await vi.waitFor(() => expect(errors).toHaveLength(1));
+        await Promise.all(handlers);
+        const [error] = errors.splice(0);
+        expect(error).toEqual(new Error(`Unexpected fixture request: ${method} ${route}`));
+        expect(requests).toEqual([]);
+        expect((await pending).status).toBe(404);
+      } finally {
+        controller.abort();
+        await Promise.allSettled([pending]);
+      }
+    }
+  });
+
+  it('owns a canceled incomplete invoke without enqueueing it or reporting a parse failure', async () => {
+    const { server, baseUrl, handlers, errors, requests } = await setup();
+    const received = new Promise<http.IncomingMessage>(resolve => server.once('request', resolve));
+    const bodyClosed = new Promise<void>(resolve => server.once('request', request => request.once('close', resolve)));
+    const request = http.request(`${baseUrl}/invoke`, { method: 'POST', headers: { 'Content-Length': 1000 } });
+    const transportErrors: NodeJS.ErrnoException[] = [];
+    request.on('error', error => transportErrors.push(error));
+    const closed = new Promise<void>(resolve => request.once('close', resolve));
+    try {
+      request.write('{');
+      const incoming = await received;
+      request.destroy();
+      await Promise.all([bodyClosed, closed]);
+      await Promise.all(handlers);
+      expect(incoming.aborted || !incoming.complete).toBe(true);
+      expect(errors).toEqual([]);
+      expect(requests).toEqual([]);
+      expect(transportErrors.every(error => error.code === 'ECONNRESET')).toBe(true);
+    } finally {
+      request.destroy();
+      await closed;
+    }
+  });
 
   it('keeps fast typing ordered and combines pending keys into the next request', async () => {
     const { client, requests } = await setup();

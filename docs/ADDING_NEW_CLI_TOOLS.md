@@ -102,12 +102,24 @@ If the CLI reads a config directory (like `.cursor/`), add it to
 `DEFAULT_WORKTREE_FILE_SYNC_ENTRIES` in `shared/types/worktreeFileSync.ts` so it is
 copied into new worktrees.
 
-## 9. Pane Chat (optional)
+## 9. Pane Chat and named Sessions (optional)
 
-To offer the agent as a Pane Chat orchestrator: widen `PaneChatAgent` and the panel-id
-maps in `shared/types/paneChat.ts`, extend `paneChatManager` (title, session-id
-strategy, bootstrap prompt), and teach `skillCacheManager` to emit the orchestrator
-guide in a format the CLI actually reads (Cursor: `.cursor/rules/*.mdc`).
+To offer the agent as an orchestrator, widen `PaneChatAgent` and the fixed panel-id
+maps in `shared/types/paneChat.ts`, complete older persisted Session maps without
+rewriting them on read, and extend the existing manager registrations, IPC/RunPane
+validators, preload types, remote agent filter, create-dialog options, and settings.
+Configuration update/reload already uses the shared agent normalizer.
+
+Reuse the terminal's native conversation identity and launch/resume support; do not
+allocate a second orchestrator identity or replay a bootstrap prompt. Sessions emit
+generated `AGENTS.md` instructions. OpenCode uses that existing context without new
+OpenCode skill/MCP installation and retains its default `opencode --auto` behavior:
+non-denied operations are auto-approved, not sandboxed.
+
+OpenCode Session launches must be supported direct commands; wrappers and custom
+resume templates are rejected. Saved IDs restore history when it exists, but an
+allocated ID does not establish history. Closing, archiving, switching, or PTY exit
+does not add a guarantee that shared-service work has stopped.
 
 ## 10. Tests are the spec
 
@@ -203,8 +215,9 @@ forms fail before native identity allocation; explicitly wrapped launches remain
 Native commands reject both `--continue` and `-c`, and reject OpenCode's
 `--prompt` argument because it would replay on every restore. Supply initial
 input through Pane (or RunPane's `--prompt`) instead.
-Wrapped OpenCode launches run unchanged; the wrapper owns session selection and
-resume, just as it does for the other supported agents.
+Outside Pane Chat and named Sessions, wrapped OpenCode launches run unchanged;
+the wrapper owns session selection and resume, just as it does for the other
+supported agents. OpenCode Session launches reject wrappers and custom resume.
 
 A new built-in agent works with wrappers once its executable name is in
 `AGENT_EXECUTABLES`. Add a screen signature only if the agent's UI has a stable,

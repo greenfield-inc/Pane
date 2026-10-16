@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GitStatusManager } from './gitStatusManager';
 import { GitDiffManager } from './gitDiffManager';
 import type { SessionManager } from './sessionManager';
@@ -139,6 +139,7 @@ it('rejects option-like checkout input without changing the checked-out branch',
 });
 
 
+// Real-Git claim and replenishment security checks use the integration budget, not a latency contract.
 it('claims a reserve with literal shell-sensitive refs and paths and no upstream', async () => {
   const base = 'base%PATH%$PANE_AUDIT_LITERAL;branch&literal';
   const target = 'claim%PATH%$PANE_AUDIT_LITERAL;path&literal';
@@ -149,20 +150,42 @@ it('claims a reserve with literal shell-sensitive refs and paths and no upstream
   const project = { path: directory };
   const runner = new CommandRunner(project);
   const resolver = new PathResolver(project);
-  await worktreePoolManager.createReserve(directory, base, undefined, resolver, runner);
-  expect(worktreePoolManager.hasReserve(directory, base)).toBe(true);
-  const claimed = await worktreePoolManager.claimReserve(directory, base, target, target, undefined, resolver, runner);
-  if (!claimed) throw new Error('Expected a claimed reserve');
-  expect(claimed.worktreePath).toBe(join(directory, 'worktrees', target));
-  expect(execFileSync('git', ['show', 'HEAD:fixture.txt'], { cwd: claimed.worktreePath, encoding: 'utf8' }))
-    .toBe('reserve content\n');
-  expect(execFileSync('git', ['branch', '--show-current'], { cwd: claimed.worktreePath, encoding: 'utf8' }).trim()).toBe(target);
-  expect(git('for-each-ref', '--format=%(upstream)', `refs/heads/${target}`)).toBe('');
-  // Replenishment is asynchronous; finish it before the temporary repository is removed.
-  await expect.poll(() => worktreePoolManager.hasReserve(directory, base)).toBe(true);
-  await forceRemoveWorktree(claimed.worktreePath, directory, runner);
-  expect(existsSync(claimed.worktreePath)).toBe(false);
-});
+  const commands: Array<ReturnType<CommandRunner['execFile']>> = [];
+  const execFile = runner.execFile.bind(runner);
+  const runnerCalls = vi.spyOn(runner, 'execFile').mockImplementation((...args) => {
+    const command = execFile(...args);
+    commands.push(command);
+    return command;
+  });
+  try {
+    await worktreePoolManager.createReserve(directory, base, undefined, resolver, runner);
+    expect(worktreePoolManager.hasReserve(directory, base)).toBe(true);
+    const replenishment = vi.spyOn(worktreePoolManager, 'createReserve');
+    try {
+      const claimed = await worktreePoolManager.claimReserve(directory, base, target, target, undefined, resolver, runner);
+      if (!claimed) throw new Error('Expected a claimed reserve');
+      expect(claimed.worktreePath).toBe(join(directory, 'worktrees', target));
+      expect(execFileSync('git', ['show', 'HEAD:fixture.txt'], { cwd: claimed.worktreePath, encoding: 'utf8' }))
+        .toBe('reserve content\n');
+      expect(execFileSync('git', ['branch', '--show-current'], { cwd: claimed.worktreePath, encoding: 'utf8' }).trim()).toBe(target);
+      expect(git('for-each-ref', '--format=%(upstream)', `refs/heads/${target}`)).toBe('');
+      expect(replenishment).toHaveBeenCalledOnce();
+      expect(replenishment).toHaveBeenCalledWith(directory, base, undefined, resolver, runner);
+      const result = replenishment.mock.results[0];
+      if (result.type !== 'return') throw result.value;
+      await result.value;
+      expect(worktreePoolManager.hasReserve(directory, base)).toBe(true);
+      await forceRemoveWorktree(claimed.worktreePath, directory, runner);
+      expect(existsSync(claimed.worktreePath)).toBe(false);
+    } finally {
+      await Promise.allSettled(replenishment.mock.results.filter(result => result.type === 'return').map(result => result.value));
+      replenishment.mockRestore();
+    }
+  } finally {
+    await Promise.allSettled(commands);
+    runnerCalls.mockRestore();
+  }
+}, 15000);
 
 
 it('tracks literal remote defaults and soft resets only commits ahead of that base', async () => {

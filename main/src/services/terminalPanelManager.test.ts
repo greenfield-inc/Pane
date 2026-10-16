@@ -8,6 +8,7 @@ import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
+import * as openCodeLaunch from './agents/opencodeLaunch';
 
 import { TerminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
@@ -1256,6 +1257,109 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
     expect(result.commandToRun).toBe(command);
     expect(result.customState.agentSessionId).toBeUndefined();
+  });
+
+  it.each([
+    'opencode --auto', '"/opt/agent tools/opencode" --auto',
+    'PANE_TEST_FLAG=value opencode --auto', 'env PANE_TEST_FLAG=value opencode --auto',
+  ])('routes direct OpenCode Session commands before preservation: %s', command => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true,
+      agentSessionId: 'ses_Saved123', initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved delivery error',
+      scrollbackBuffer: 'Saved history', serializedBuffer: 'Saved screen',
+    };
+    const result = manager.resolveCliLaunchCommand('panel', command, state);
+    expect(result.commandToRun).toBe(`${command} --session "ses_Saved123"`);
+    expect(result.customState).toMatchObject({ ...state, preserveLaunchCommand: false, isCliPanel: true, isCliReady: false });
+    expect(state.preserveLaunchCommand).toBe(true);
+  });
+
+  it.each(['claude', 'generated', 'reported'] as const)('rejects OpenCode custom resume before template allocation: %s', mode => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'claude', orchestrationSessionId: 'session', preserveLaunchCommand: true,
+      customResume: { mode, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' },
+    };
+    expect(() => manager.resolveCliLaunchCommand('panel', 'env FLAG=value opencode --auto', state)).toThrow(/OpenCode.*custom resume/i);
+    expect(state.agentSessionId).toBeUndefined();
+    expect(() => manager.resolveCliLaunchCommand('panel', 'my-launcher run', { ...state, agentType: 'opencode' })).toThrow(/OpenCode.*custom resume/i);
+    expect(() => manager.resolveCliLaunchCommand('panel', 'env FLAG=value opencode --auto', state)).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH', next: expect.stringContaining('opencode --auto'),
+    }));
+  });
+
+  it('reports the OpenCode Session parser cause without changing state or allocating identity', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', orchestrationSessionId: 'session', agentSessionId: 'ses_Saved123',
+      scrollbackBuffer: 'Saved history', initialInputSentAt: '2026-10-06T12:00:00.000Z',
+    };
+    const before = structuredClone(state);
+    const allocate = vi.spyOn(openCodeLaunch, 'allocateOpenCodeSessionId');
+    const resolve = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode "unterminated', state)).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH',
+      message: expect.stringContaining('"OpenCode launch command has an unmatched quote"'),
+      next: expect.stringContaining('opencode --auto'),
+    }));
+    expect(state).toEqual(before);
+    expect(allocate).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it.each(['my-launcher run', 'bash -lc "opencode --auto"', 'env -i opencode --auto', 'command opencode --auto'])(
+    'rejects unsupported OpenCode Session wrappers despite preservation: %s', command => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      expect(() => manager.resolveCliLaunchCommand('panel', command, {
+        agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true,
+      })).toThrow(/OpenCode.*wrapper/i);
+    });
+
+  it('rejects explicit wrapped OpenCode Sessions but keeps other-agent Session wrappers opaque', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode --auto', {
+      agentType: 'opencode', orchestrationSessionId: 'session', launchMode: 'wrapped',
+    })).toThrow(/OpenCode.*wrapped/i);
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode --auto', {
+      agentType: 'opencode', orchestrationSessionId: 'session', launchMode: 'wrapped',
+    })).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH', next: expect.stringContaining('opencode --auto'),
+    }));
+    const result = manager.resolveCliLaunchCommand('other-panel', 'my-launcher run', {
+      agentType: 'claude', orchestrationSessionId: 'other-session', launchMode: 'wrapped', agentSessionId: 'saved-wrapper-id',
+    });
+    expect(result.commandToRun).toBe('my-launcher run');
+    expect(result.customState.agentSessionId).toBe('saved-wrapper-id');
+  });
+
+  it.each([
+    ['opencode --session ses_Other123', 'ids differ'],
+    ['opencode --session ses_Saved123 -s ses_Other123', 'multiple session selectors'],
+    ['opencode --continue', 'cannot use --continue'],
+    ['opencode --prompt replay', 'avoid replaying'],
+    ['opencode --session', 'selector is missing its operand'],
+    ['opencode --session invalid', 'Invalid OpenCode session id from --session'],
+  ])('rejects incompatible Session selectors before native allocation despite preservation: %s', (command, error) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const allocate = vi.fn(() => 'ses_New123');
+    const original = openCodeLaunch.resolveOpenCodeLaunchCommand;
+    const resolver = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand').mockImplementation(options => original({ ...options, allocateSessionId: allocate }));
+    try {
+      const state: TerminalPanelState = {
+        agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true, agentSessionId: 'ses_Saved123',
+      };
+      const before = structuredClone(state);
+      expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrow(error);
+      expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrowError(expect.objectContaining({
+        code: 'ERR_SESSION_OPENCODE_LAUNCH',
+        message: expect.stringContaining(error), next: expect.stringContaining('opencode --auto'),
+      }));
+      expect(state).toEqual(before);
+      expect(allocate).not.toHaveBeenCalled();
+    } finally {
+      resolver.mockRestore();
+    }
   });
 
   it('escapes shell-sensitive startup prompt arguments without changing ordinary prompts', () => {

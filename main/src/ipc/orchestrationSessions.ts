@@ -28,7 +28,7 @@ const createSchema = boundary.object({
   name: boundary.nonEmptyString,
   nameFromFirstMessage: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   profile: boundary.optional(orchestrationTextSchema),
@@ -44,7 +44,7 @@ const updateSchema = boundary.object({
   name: boundary.optional(orchestrationTextSchema),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   profile: boundary.optional(orchestrationTextSchema),
@@ -61,7 +61,7 @@ const updateSchema = boundary.object({
 });
 const agentSchema = boundary.object({
   ...selectorSchemaFields(),
-  agent: boundary.enumeration('claude', 'codex', 'cursor'),
+  agent: boundary.enumeration('claude', 'codex', 'cursor', 'opencode'),
 });
 const associationSchema = boundary.object({
   ...selectorSchemaFields(),
@@ -136,7 +136,7 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.register('orchestration-sessions:set-agent', async (value: PaneCommandValue, agent?: PaneCommandValue) => {
     const decoded = agent === undefined
       ? decodeBoundary(value, agentSchema)
-      : { ...decodeSelector(value), agent: decodeBoundary(agent, boundary.enumeration('claude', 'codex', 'cursor')) };
+      : { ...decodeSelector(value), agent: decodeBoundary(agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode')) };
     return invokeSafely(() => requireManager().setAgent(
       { sessionId: decoded.sessionId, name: decoded.name },
       decoded.agent,

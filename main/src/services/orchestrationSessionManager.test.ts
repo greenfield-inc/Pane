@@ -4,11 +4,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { ConfigManager } from './configManager';
-import type { PaneChatManager } from './paneChatManager';
+import { PaneChatManager } from './paneChatManager';
 import type { SessionManager } from './sessionManager';
-import type { SkillCacheManager } from './skillCacheManager';
+import { SkillCacheManager } from './skillCacheManager';
 import type { Session } from '../types/session';
-import type { ToolPanel } from '../../../shared/types/panels';
+import type { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { databaseService } from './database';
 import { panelManager } from './panelManager';
@@ -23,10 +23,11 @@ import type {
 import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
 import { getPaneChatPanelId, PANE_CHAT_SESSION_ID, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
-import { terminalPanelManager } from './terminalPanelManager';
+import { terminalPanelManager, TerminalPanelManager } from './terminalPanelManager';
 import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspace';
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
 import * as wslUtils from '../utils/wslUtils';
+import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
 
 const liveStates = new Map<string, AgentState>();
 
@@ -166,7 +167,7 @@ function createFixture(
   });
   const skillCacheManager = serviceStub<SkillCacheManager>({
     ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'),
-    launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command),
+    launchCommand: vi.fn((agent: PaneChatAgent) => RUNPANE_CONTRACT.agentTemplates[agent].command),
   });
   const store = createStore();
   if (initialData) store.write(initialData);
@@ -237,6 +238,7 @@ function orchestrationRecord(id: string, name: string): OrchestrationSessionReco
       claude: `${id}-claude`,
       codex: `${id}-codex`,
       cursor: `${id}-cursor`,
+      opencode: `${id}-opencode`,
     },
     goal: 'Existing goal',
     context: 'Existing context',
@@ -269,6 +271,7 @@ function orchestrationRecord(id: string, name: string): OrchestrationSessionReco
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   liveStates.clear();
   for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
@@ -499,22 +502,101 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow('The launch command runs claude, but the Session agent is codex');
   });
 
-  it('rejects OpenCode from named Session command and default boundaries', async () => {
+  it.each([
+    'opencode --auto', '"/opt/agent tools/opencode" --auto',
+    'PANE_TEST_FLAG=value opencode --auto', 'env PANE_TEST_FLAG=value opencode --auto',
+  ])('routes direct OpenCode Session commands: %s', async launchCommand => {
     const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Native OpenCode', launchCommand });
+    expect(created.session.agent).toBe('opencode');
+    expect(created.panel.state.customState).toMatchObject({
+      agentType: 'opencode', initialCommand: launchCommand, preserveLaunchCommand: false,
+      orchestrationSessionId: created.session.id,
+    });
+    expect(created.panel.state.customState?.initialInput).toBeUndefined();
+    expect(created.panel.state.customState?.agentSessionId).toBeUndefined();
+    expect(created.panel.id).toBe(`__orchestration_panel_${created.session.id}_opencode`);
+  });
 
-    await expect(fixture.manager.create({ name: 'OpenCode command', launchCommand: 'opencode --auto' }))
-      .rejects.toThrow(/OpenCode.*named Session/i);
-
+  it('accepts native OpenCode through default commands, default agents and updates', async () => {
+    const fixture = createFixture();
     Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'opencode --auto' });
-    await expect(fixture.manager.create({ name: 'OpenCode default' }))
-      .rejects.toThrow(/OpenCode.*named Session/i);
+    expect((await fixture.manager.create({ name: 'OpenCode default command' })).agent).toBe('opencode');
 
-    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: '' });
-    const created = await fixture.manager.create({ name: 'OpenCode update baseline' });
-    await expect(fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'opencode --auto' }))
-      .rejects.toThrow(/OpenCode.*named Session/i);
-    expect((await fixture.manager.getView({ sessionId: created.session.id })).panel.state.customState?.agentType)
-      .not.toBe('opencode');
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: '', defaultOrchestratorAgent: 'opencode' });
+    const created = await fixture.manager.create({ name: 'OpenCode default agent' });
+    expect(created.panel.state.customState).toMatchObject({ agentType: 'opencode', preserveLaunchCommand: false });
+    const changed = await fixture.manager.create({ name: 'OpenCode update', agent: 'claude' });
+    await fixture.manager.update({ sessionId: changed.session.id }, { launchCommand: 'opencode --auto' });
+    expect((await fixture.manager.getView({ sessionId: changed.session.id })).panel.state.customState)
+      .toMatchObject({ agentType: 'opencode', preserveLaunchCommand: false });
+  });
+
+  it.each([
+    { agent: 'opencode' as const, launchCommand: 'opencode "unterminated', reason: 'OpenCode launch command has an unmatched quote' },
+    { agent: 'opencode' as const, launchCommand: 'opencode --auto', customResume: { mode: 'generated' as const, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' }, reason: 'OpenCode Sessions cannot use custom resume settings' },
+    { agent: 'claude' as const, launchCommand: 'opencode --auto', reason: 'The launch command runs opencode, but the Session agent is claude; change one to match' },
+  ])('reports actionable OpenCode Session refusals before provisioning: $reason', async ({ agent, launchCommand, customResume, reason }) => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Safe baseline', agent: 'claude' });
+    const before = fixture.store.read();
+    const createPanelSpy = vi.spyOn(panelManager, 'createPanel');
+    const updatePanelSpy = vi.spyOn(panelManager, 'updatePanel');
+    const initializeTerminal = vi.spyOn(terminalPanelManager, 'initializeTerminal');
+    for (const operation of [
+      () => fixture.manager.create({ name: 'Refused OpenCode', agent, launchCommand, customResume }),
+      () => fixture.manager.update({ sessionId: created.session.id }, { agent, launchCommand, customResume }),
+    ]) {
+      const failure = await operation().catch(error => error);
+      expect(failure).toBeInstanceOf(PaneError);
+      expect(toPaneDaemonError(failure, 'ERR_INTERNAL')).toMatchObject({
+        code: 'ERR_SESSION_OPENCODE_LAUNCH',
+        message: expect.stringContaining(reason),
+        next: expect.stringContaining('opencode --auto'),
+      });
+      expect(failure.message).toContain('No OpenCode terminal launch was started');
+    }
+    expect(fixture.store.read()).toEqual(before);
+    expect(createPanelSpy).not.toHaveBeenCalled();
+    expect(updatePanelSpy).not.toHaveBeenCalled();
+    expect(initializeTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each(['my-launcher run', 'bash -lc "opencode --auto"', 'env -i opencode --auto', 'command opencode --auto'])(
+    'rejects incompatible OpenCode Session wrappers before provisioning: %s', async launchCommand => {
+      const fixture = createFixture();
+      const created = await fixture.manager.create({ name: 'Safe baseline', agent: 'claude' });
+      const before = fixture.store.read();
+      const createPanelSpy = vi.spyOn(panelManager, 'createPanel');
+      await expect(fixture.manager.create({ name: 'Unsafe OpenCode', agent: 'opencode', launchCommand })).rejects.toThrow(/OpenCode.*wrapper/i);
+      await expect(fixture.manager.update({ sessionId: created.session.id }, { agent: 'opencode', launchCommand })).rejects.toThrow(/OpenCode.*wrapper/i);
+      expect(fixture.store.read()).toEqual(before);
+      expect(createPanelSpy).not.toHaveBeenCalled();
+    });
+
+  it.each(['claude', 'generated', 'reported'] as const)('rejects effective inherited and explicit OpenCode resume settings: %s', async mode => {
+    const fixture = createFixture();
+    const customResume = { mode, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' };
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'opencode --auto', defaultSessionResume: customResume });
+    await expect(fixture.manager.create({ name: 'Inherited resume' })).rejects.toThrow(/OpenCode.*custom resume/i);
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: '', defaultOrchestratorAgent: 'opencode' });
+    await expect(fixture.manager.create({ name: 'Inherited default-agent resume' })).rejects.toThrow(/OpenCode.*custom resume/i);
+    await expect(fixture.manager.create({ name: 'Explicit resume', agent: 'opencode', customResume })).rejects.toThrow(/OpenCode.*custom resume/i);
+    Object.assign(fixture.configManager.getConfig(), { defaultSessionResume: null });
+    const created = await fixture.manager.create({ name: 'Native without resume', agent: 'opencode' });
+    const before = fixture.store.read();
+    await expect(fixture.manager.update({ sessionId: created.session.id }, { customResume })).rejects.toThrow(/OpenCode.*custom resume/i);
+    expect(fixture.store.read()).toEqual(before);
+  });
+
+  it('does not let a custom resume agent mask an existing OpenCode default command on update', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'OpenCode implicit command', agent: 'opencode' });
+    const before = fixture.store.read();
+    await expect(fixture.manager.update({ sessionId: created.session.id }, {
+      customResume: { mode: 'claude', initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' },
+    })).rejects.toThrow(/OpenCode.*custom resume/i);
+    expect(fixture.store.read()).toEqual(before);
   });
 
   it('rejects OpenCode launch commands even when custom resume identifies another agent', async () => {
@@ -529,7 +611,7 @@ describe('OrchestrationSessionManager', () => {
       name: 'OpenCode with resume',
       launchCommand: 'opencode --auto',
       customResume,
-    })).rejects.toThrow(/OpenCode.*named Session/i);
+    })).rejects.toThrow(/OpenCode.*custom resume/i);
 
     const created = await fixture.manager.create({
       name: 'Update OpenCode with resume',
@@ -538,7 +620,303 @@ describe('OrchestrationSessionManager', () => {
     });
     await expect(fixture.manager.update({ sessionId: created.session.id }, {
       launchCommand: 'opencode --auto',
-    })).rejects.toThrow(/OpenCode.*named Session/i);
+    })).rejects.toThrow(/OpenCode.*custom resume/i);
+  });
+
+  it.each(['bash -lc "opencode --auto"', 'opencode --auto'])('guards persisted OpenCode restoration without creating an unused panel: %s', async launchCommand => {
+    const record = orchestrationRecord('invalid-opencode-restoration', 'Invalid saved OpenCode');
+    record.agent = 'opencode';
+    record.launchCommand = launchCommand;
+    if (launchCommand === 'opencode --auto') {
+      record.customResume = { mode: 'generated', initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' };
+    }
+    const fixture = createFixture('claude', { version: 1, sessions: [record] });
+    await fixture.manager.initialize();
+    expect(fixture.store.read().sessions.find(item => item.id === record.id)?.activity.at(-1)?.message)
+      .toMatch(/Session could not be restored:.*OpenCode/i);
+    expect(panelManager.getPanel(record.panelIds.opencode)).toBeUndefined();
+    await expect(fixture.manager.getView({ sessionId: record.id })).rejects.toThrow(/OpenCode/i);
+  });
+
+  it.each([undefined, '2026-10-06T12:00:00.000Z'])('preserves inactive OpenCode across agent switches and restart with delivery marker %s', async initialInputSentAt => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Inactive OpenCode', agent: 'opencode' });
+    const saved = {
+      ...created.panel.state.customState, agentSessionId: 'ses_Unconfirmed123',
+      initialInputSentAt, initialInputError: 'Saved delivery failure',
+      scrollbackBuffer: 'OpenCode historical output', serializedBuffer: 'OpenCode serialized screen',
+    };
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: saved } });
+    liveStates.set(created.panel.id, 'blocked');
+    await fixture.manager.setAgent({ sessionId: created.session.id }, 'claude');
+    // Force stale inactive launch metadata so restart must refresh it.
+    const inactive = panelManager.getPanel(created.panel.id);
+    if (!inactive) throw new Error('Inactive OpenCode panel is missing');
+    await panelManager.updatePanel(inactive.id, { state: { ...inactive.state, customState: {
+      ...inactive.state.customState, preserveLaunchCommand: true, initialInput: 'Do not replay this bootstrap', initialInputDeliveryVersion: 1,
+    } } });
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await restarted.initialize();
+    const refreshed = panelManager.getPanel(created.panel.id);
+    expect(refreshed?.state.customState).toMatchObject({
+      agentType: 'opencode', agentSessionId: saved.agentSessionId, initialInputError: saved.initialInputError,
+      preserveLaunchCommand: false, initialInputDeliveryVersion: 2,
+    });
+    expect(refreshed?.state.customState?.initialInputSentAt).toBe(initialInputSentAt);
+    expect(refreshed?.state.customState?.initialInput).toBeUndefined();
+    const restored = await restarted.setAgent({ sessionId: created.session.id }, 'opencode');
+    expect(restored.panel.id).toBe(created.panel.id);
+    expect(restored.panel.state.customState?.agentSessionId).toBe(saved.agentSessionId);
+    expect(restored.panel.state.customState?.initialInputError).toBe(saved.initialInputError);
+    expect(restored.panel.state.customState?.initialInputSentAt).toBe(initialInputSentAt);
+    expect(databaseService.getPanelBuffers(restored.panel.id)).toMatchObject({
+      scrollback: saved.scrollbackBuffer, serialized: saved.serializedBuffer,
+    });
+    expect(terminalPanelManager.getAgentStatus(restored.panel.id)).toBe('blocked');
+  });
+
+  it('guards incompatible inactive OpenCode restoration without changing its saved identity or buffers', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Claude with incompatible inactive OpenCode', agent: 'claude' });
+    const inactive = createPanel(created.session.panelIds.opencode, created.session.internalSessionId, 'Inactive OpenCode');
+    inactive.state.customState = {
+      agentType: 'opencode', initialCommand: 'opencode --auto', agentSessionId: 'ses_Inactive123', preserveLaunchCommand: true,
+      customResume: { mode: 'claude', initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' },
+      initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved input failure', scrollbackBuffer: 'Retain incompatible history',
+    };
+    await seedPanel(inactive);
+    const before = panelManager.getPanel(inactive.id)?.state.customState;
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    await restarted.initialize();
+    expect(fixture.store.read().sessions.find(record => record.id === created.session.id)?.activity.at(-1)?.message)
+      .toMatch(/Session could not be restored:.*OpenCode.*custom resume/i);
+    expect(panelManager.getPanel(inactive.id)?.state.customState).toEqual(before);
+    expect(databaseService.getPanelBuffers(inactive.id)?.scrollback).toBe('Retain incompatible history');
+    expect((await restarted.getView({ sessionId: created.session.id })).agent).toBe('claude');
+  });
+
+  it.each((['generated', 'claude', 'reported'] as const).flatMap(mode =>
+    [true, false].flatMap(selected => [true, false].map(hasAgentType => ({ mode, selected, hasAgentType }))),
+  ))('rejects panel-only OpenCode resume without sanitizing saved state: $mode, selected=$selected, agentType=$hasAgentType', async ({ mode, selected, hasAgentType }) => {
+    const record = orchestrationRecord(`panel-resume-${mode}-${selected}-${hasAgentType}`, 'Saved OpenCode resume');
+    record.agent = selected ? 'opencode' : 'claude';
+    record.launchCommand = selected ? 'opencode --auto' : 'claude';
+    const fixture = createFixture('claude', { version: 1, sessions: [record] });
+    paneFixture(fixture, record.internalSessionId);
+    const panel = createPanel(record.panelIds.opencode, record.internalSessionId, 'Saved OpenCode title');
+    panel.state.customState = {
+      agentType: hasAgentType ? 'opencode' : undefined,
+      initialCommand: 'opencode --auto', agentSessionId: 'ses_Saved123',
+      customResume: { mode, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' },
+      customResumeStarted: true, wasInterrupted: true, preserveLaunchCommand: true,
+      initialInput: 'Retain rejected pending input', initialInputDeliveryVersion: 1,
+      initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved input failure',
+      scrollbackBuffer: 'Retain saved OpenCode history', serializedBuffer: 'Retain saved OpenCode screen',
+    };
+    await seedPanel(panel);
+    const savedPanel = structuredClone(panelManager.getPanel(panel.id));
+    const savedRow = structuredClone(databaseService.getPanel(panel.id));
+    const savedBuffers = structuredClone(databaseService.getPanelBuffers(panel.id));
+    const updatePanel = vi.spyOn(panelManager, 'updatePanel');
+    const createPanelSpy = vi.spyOn(panelManager, 'createPanel');
+    const assertUnchanged = () => {
+      expect(panelManager.getPanel(panel.id)).toEqual(savedPanel);
+      expect(databaseService.getPanel(panel.id)).toEqual(savedRow);
+      expect(databaseService.getPanelBuffers(panel.id)).toEqual(savedBuffers);
+      expect(updatePanel.mock.calls.some(([id]) => id === panel.id)).toBe(false);
+      expect(createPanelSpy).not.toHaveBeenCalled();
+    };
+
+    await fixture.manager.initialize();
+    expect(fixture.store.read().sessions.find(item => item.id === record.id)?.activity.at(-1)?.message)
+      .toMatch(/Session could not be restored:.*OpenCode.*custom resume/i);
+    assertUnchanged();
+    const failedRecord = fixture.store.read();
+    if (selected) {
+      await expect(fixture.manager.getView({ sessionId: record.id })).rejects.toThrow(/OpenCode.*custom resume/i);
+      assertUnchanged();
+    }
+    await expect(fixture.manager.setAgent({ sessionId: record.id }, 'opencode')).rejects.toThrow(/OpenCode.*custom resume/i);
+    assertUnchanged();
+    await expect(fixture.manager.update({ sessionId: record.id }, { agent: 'opencode', launchCommand: 'opencode --auto', customResume: null }))
+      .rejects.toThrow(/OpenCode.*custom resume/i);
+    await expect(fixture.manager.setAgent({ sessionId: record.id }, 'opencode')).rejects.toMatchObject({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH', next: expect.stringContaining('opencode --auto'),
+    });
+    assertUnchanged();
+    expect(fixture.store.read()).toEqual(failedRecord);
+  });
+
+  it.each([
+    { initialCommand: 'bash -lc "opencode --auto"', launchMode: undefined },
+    { initialCommand: 'my-launcher run', launchMode: undefined },
+    { initialCommand: 'opencode --auto', launchMode: 'wrapped' as const },
+  ].flatMap((command, index) => [true, false].flatMap(selected => [true, false].map(hasAgentType => ({ ...command, index, selected, hasAgentType })))))(
+    'rejects saved OpenCode wrapper metadata before overlays: $initialCommand, mode=$launchMode, selected=$selected, agentType=$hasAgentType',
+    async ({ initialCommand, launchMode, index, selected, hasAgentType }) => {
+      const record = orchestrationRecord(`saved-wrapper-${index}-${selected}-${hasAgentType}`, 'Saved OpenCode wrapper');
+      record.agent = selected ? 'opencode' : 'claude';
+      record.launchCommand = selected ? 'opencode --auto' : 'claude';
+      const fixture = createFixture('claude', { version: 1, sessions: [record], selectedSessionId: record.id });
+      paneFixture(fixture, record.internalSessionId);
+      if (!selected) await seedPanel(createPanel(record.panelIds.claude, record.internalSessionId));
+      const panel = createPanel(record.panelIds.opencode, record.internalSessionId, 'Saved wrapper title');
+      panel.state.customState = {
+        agentType: hasAgentType ? 'opencode' : undefined, initialCommand, launchMode,
+        agentSessionId: 'ses_SavedWrapper123', preserveLaunchCommand: true, wasInterrupted: true,
+        initialInput: 'Retain rejected pending input', initialInputDeliveryVersion: 1,
+        initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved delivery error',
+        scrollbackBuffer: 'Saved wrapper history', serializedBuffer: 'Saved wrapper screen',
+      };
+      await seedPanel(panel);
+      const savedPanel = structuredClone(panelManager.getPanel(panel.id));
+      const savedRow = structuredClone(databaseService.getPanel(panel.id));
+      const savedBuffers = structuredClone(databaseService.getPanelBuffers(panel.id));
+      const updatePanel = vi.spyOn(panelManager, 'updatePanel');
+      const createPanelSpy = vi.spyOn(panelManager, 'createPanel');
+      const initializeTerminal = vi.spyOn(terminalPanelManager, 'initializeTerminal');
+      const assertUnchanged = () => {
+        expect(panelManager.getPanel(panel.id)).toEqual(savedPanel);
+        expect(databaseService.getPanel(panel.id)).toEqual(savedRow);
+        expect(databaseService.getPanelBuffers(panel.id)).toEqual(savedBuffers);
+        expect(updatePanel.mock.calls.some(([id]) => id === panel.id)).toBe(false);
+        expect(createPanelSpy).not.toHaveBeenCalled();
+        expect(initializeTerminal).not.toHaveBeenCalled();
+      };
+
+      await fixture.manager.initialize();
+      expect(fixture.store.read().sessions.find(item => item.id === record.id)?.activity.at(-1)?.message)
+        .toMatch(/Session could not be restored:.*OpenCode.*wrap/i);
+      assertUnchanged();
+      const failedRecord = fixture.store.read();
+      if (selected) {
+        await expect(fixture.manager.getView({ sessionId: record.id })).rejects.toThrow(/OpenCode.*wrap/i);
+      }
+      assertUnchanged();
+      await expect(fixture.manager.setAgent({ sessionId: record.id }, 'opencode')).rejects.toThrow(/OpenCode.*wrap/i);
+      assertUnchanged();
+      await expect(fixture.manager.update({ sessionId: record.id }, { agent: 'opencode', launchCommand: 'opencode --auto' }))
+        .rejects.toThrow(/OpenCode.*wrap/i);
+      await expect(fixture.manager.setAgent({ sessionId: record.id }, 'opencode')).rejects.toMatchObject({
+        code: 'ERR_SESSION_OPENCODE_LAUNCH', next: expect.stringContaining('opencode --auto'),
+      });
+      assertUnchanged();
+      expect(fixture.store.read()).toEqual(failedRecord);
+    },
+  );
+
+  it.each([
+    'opencode --auto', '"/opt/agent tools/opencode" --auto',
+    'PANE_TEST_FLAG=value opencode --auto', 'env PANE_TEST_FLAG=value opencode --auto',
+  ].flatMap((initialCommand, index) => [true, false].map(selected => ({ initialCommand, index, selected }))))(
+    'keeps valid saved OpenCode native metadata: $initialCommand, selected=$selected', async ({ initialCommand, index, selected }) => {
+      const record = orchestrationRecord(`saved-native-${index}-${selected}`, 'Saved native OpenCode');
+      record.agent = selected ? 'opencode' : 'claude';
+      record.launchCommand = selected ? initialCommand : 'claude';
+      const fixture = createFixture('claude', { version: 1, sessions: [record] });
+      paneFixture(fixture, record.internalSessionId);
+      if (!selected) await seedPanel(createPanel(record.panelIds.claude, record.internalSessionId));
+      const panel = createPanel(record.panelIds.opencode, record.internalSessionId);
+      const saved = {
+        agentType: selected ? 'opencode' as const : undefined, initialCommand,
+        agentSessionId: 'ses_ValidSaved123', preserveLaunchCommand: true,
+        initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved delivery error',
+        scrollbackBuffer: 'Native saved history', serializedBuffer: 'Native saved screen',
+      };
+      panel.state.customState = saved;
+      await seedPanel(panel);
+      const createPanelSpy = vi.spyOn(panelManager, 'createPanel');
+      await fixture.manager.initialize();
+      expect(panelManager.getPanel(panel.id)?.state.customState).toMatchObject({
+        initialCommand, agentType: 'opencode', preserveLaunchCommand: false, agentSessionId: saved.agentSessionId,
+        initialInputSentAt: saved.initialInputSentAt, initialInputError: saved.initialInputError,
+      });
+      const reopened = await fixture.manager.setAgent({ sessionId: record.id }, 'opencode');
+      expect(reopened.panel.state.customState).toMatchObject({
+        agentType: 'opencode', agentSessionId: saved.agentSessionId,
+        initialInputSentAt: saved.initialInputSentAt, initialInputError: saved.initialInputError,
+      });
+      expect(reopened.panel.state.customState?.initialInput).toBeUndefined();
+      expect(databaseService.getPanelBuffers(panel.id)).toMatchObject({
+        scrollback: saved.scrollbackBuffer, serialized: saved.serializedBuffer,
+      });
+      expect(createPanelSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('restores default Codex natively with generated helper config paths containing quoted ampersands', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-codex-quoted-'));
+    temporaryDirectories.push(directory);
+    vi.stubEnv('PANE_DIR', path.join(directory, 'Pane & work'));
+    try {
+      const skills = new SkillCacheManager();
+      await skills.ensurePaneChatGuide();
+      const fixture = createFixture('claude', undefined, 'codex');
+      vi.mocked(fixture.skillCacheManager.launchCommand).mockImplementation(agent => skills.launchCommand(agent));
+      const command = skills.launchCommand('codex');
+      expect(command).toContain(`agents.explorer.config_file=${JSON.stringify(path.join(skills.codexProjectAgentsRoot, 'explorer.toml'))}`);
+      expect(command).toContain('Pane & work');
+      const created = await fixture.manager.create({ name: 'Default Codex quoted helper' });
+      expect(created.session).toMatchObject({ agent: 'codex', launchCommand: '' });
+      expect(created.panel.state.customState).toMatchObject({ agentType: 'codex', initialCommand: command, preserveLaunchCommand: false });
+      await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+        ...created.panel.state.customState, agentSessionId: 'saved-codex-thread',
+      } } });
+      const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+        fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+      const reopened = await restarted.getView({ sessionId: created.session.id });
+      expect(reopened.panel.state.customState).toMatchObject({
+        agentType: 'codex', initialCommand: command, preserveLaunchCommand: false, agentSessionId: 'saved-codex-thread',
+      });
+      type LaunchCommandAccess = {
+        resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState, shellType?: string): {
+          commandToRun: string;
+          customState: TerminalPanelState;
+          isCliCommand: boolean;
+        };
+      };
+      const testAccess = <Access,>(manager: TerminalPanelManager): Access => {
+        // SAFETY: LaunchCommandAccess mirrors the private resolver, following terminalPanelManager.test.ts; no PTY is started.
+        return manager as Access;
+      };
+      const terminal = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      const resumed = terminal.resolveCliLaunchCommand(reopened.panel.id, command, reopened.panel.state.customState ?? {});
+      expect(resumed.commandToRun).toContain(' resume "saved-codex-thread"');
+      expect(resumed.commandToRun).toContain(`agents.explorer.config_file=${JSON.stringify(path.join(skills.codexProjectAgentsRoot, 'explorer.toml'))}`);
+      expect(resumed.customState.agentSessionId).toBe('saved-codex-thread');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each(['opencode', undefined] as const)('repairs Pane Chat OpenCode without clearing unconfirmed conversation and delivery state with prior agent %s', async agentType => {
+    const fixture = createFixture('opencode', undefined, 'opencode');
+    const existing = await seedLegacyPanel('opencode', 'ses_PaneChat123');
+    try {
+      await panelManager.updatePanel(existing.id, { state: { ...existing.state, customState: {
+        ...existing.state.customState, agentType, initialInput: 'Do not replay bootstrap', initialInputDeliveryVersion: 1,
+        initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved input error',
+        serializedBuffer: 'Saved Pane Chat screen', preserveLaunchCommand: true,
+      } } });
+      const paneChat = new PaneChatManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager);
+      const repaired = await paneChat.getOrCreate();
+      expect(repaired.panel.id).toBe('__pane_chat_terminal_opencode__');
+      expect(repaired.panel.state.customState).toMatchObject({
+        agentType: 'opencode', agentSessionId: 'ses_PaneChat123', initialInputDeliveryVersion: 10,
+        initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved input error', preserveLaunchCommand: false,
+      });
+      expect(repaired.panel.state.customState?.initialInput).toBeUndefined();
+      await paneChat.setAgent('claude');
+      const restored = await new PaneChatManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager).setAgent('opencode');
+      expect(restored.panel.state.customState?.agentSessionId).toBe('ses_PaneChat123');
+      expect(restored.panel.state.customState?.initialInputError).toBe('Saved input error');
+      expect(databaseService.getPanelBuffers(existing.id)).toMatchObject({ scrollback: 'opencode historical terminal output', serialized: 'Saved Pane Chat screen' });
+    } finally {
+      await panelManager.deletePanel(existing.id);
+    }
   });
 
   it('titles phone alerts by Session and groups workers under their Session', async () => {
@@ -587,6 +965,21 @@ describe('OrchestrationSessionManager', () => {
     expect(reopened.panel.state.customState).toMatchObject({ customResume });
     await reloaded.update({ sessionId: created.session.id }, { customResume: null });
     expect((await reloaded.getView({ sessionId: created.session.id })).panel.state.customState).toMatchObject({ customResume: null });
+  });
+
+  it('still clears other-agent conversation identity when custom resume mode changes', async () => {
+    const fixture = createFixture();
+    const customResume = { mode: 'generated', initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' } as const;
+    const created = await fixture.manager.create({ name: 'Claude resume reset', agent: 'claude', customResume });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState, agentSessionId: 'saved-claude-resume', customResumeStarted: true, wasInterrupted: true,
+    } } });
+    await fixture.manager.update({ sessionId: created.session.id }, { customResume: null });
+    const refreshed = panelManager.getPanel(created.panel.id)?.state.customState;
+    expect(refreshed?.customResume).toBeNull();
+    expect(refreshed?.agentSessionId).toBeUndefined();
+    expect(refreshed?.customResumeStarted).toBeUndefined();
+    expect(refreshed?.wasInterrupted).toBeUndefined();
   });
 
   it('starts idle in distinct persistent workspaces with profile context and literal launch arguments', async () => {
@@ -685,6 +1078,7 @@ describe('OrchestrationSessionManager', () => {
       claude: '__pane_chat_terminal__',
       codex: '__pane_chat_terminal_codex__',
       cursor: '__pane_chat_terminal_cursor__',
+      opencode: '__pane_chat_terminal_opencode__',
     });
     expect(first.paneChatManager.getOrCreate).toHaveBeenCalledTimes(1);
 
@@ -699,7 +1093,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       first.configManager,
       first.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: 'claude' | 'codex' | 'cursor') => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: PaneChatAgent) => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('legacy migration must run once'); }) }),
       undefined,
       secondStore,
@@ -751,6 +1145,7 @@ describe('OrchestrationSessionManager', () => {
         claude: getPaneChatPanelId('claude'),
         codex: getPaneChatPanelId('codex'),
         cursor: getPaneChatPanelId('cursor'),
+        opencode: getPaneChatPanelId('opencode'),
       },
     } satisfies OrchestrationSessionRecord;
     const persisted = orchestrationRecord('windows-session', 'Windows Session');
@@ -812,17 +1207,44 @@ describe('OrchestrationSessionManager', () => {
     const primary: OrchestrationSessionRecord = {
       ...orchestrationRecord(LEGACY_ORCHESTRATION_SESSION_ID, 'Pane Chat'),
       internalSessionId: PANE_CHAT_SESSION_ID, agent: 'claude', archived: false, isPinned: false,
-      panelIds: { claude: getPaneChatPanelId('claude'), codex: 'primary-new-codex', cursor: getPaneChatPanelId('cursor') },
+      panelIds: { claude: getPaneChatPanelId('claude'), codex: 'primary-new-codex', cursor: getPaneChatPanelId('cursor'), opencode: getPaneChatPanelId('opencode') },
     };
     const supplemental: OrchestrationSessionRecord = {
       ...orchestrationRecord(`${LEGACY_ORCHESTRATION_SESSION_ID}-codex`, 'Pane Chat · Codex'),
       internalSessionId: PANE_CHAT_SESSION_ID, agent: 'codex', archived: false, isPinned: false,
-      panelIds: { claude: 'supplemental-new-claude', codex: getPaneChatPanelId('codex'), cursor: 'supplemental-new-cursor' },
+      panelIds: { claude: 'supplemental-new-claude', codex: getPaneChatPanelId('codex'), cursor: 'supplemental-new-cursor', opencode: `__orchestration_panel_${LEGACY_ORCHESTRATION_SESSION_ID}-codex_opencode` },
       revision: 1, goal: '', context: '', nextAction: '', decisions: [], blockers: [], evidence: [], outputs: [],
       report: undefined, reportActivityId: undefined, reportAcceptedAt: undefined,
     };
     return [primary, supplemental];
   }
+
+  it('isolates supplemental OpenCode namespaces without allocating unused panels or conversations', async () => {
+    const [primary, supplemental] = splitLegacyRecords();
+    supplemental.context = 'Independent supplemental Session';
+    const fixture = createFixture('claude', { version: 1, sessions: [primary, supplemental] });
+    const legacyPanel = await seedLegacyPanel('claude', 'existing-legacy-conversation');
+    const createPanelSpy = vi.spyOn(panelManager, 'createPanel');
+
+    await fixture.manager.initialize();
+    const listed = await fixture.manager.list();
+    const original = listed.sessions.find(record => record.id === primary.id);
+    const independent = listed.sessions.find(record => record.id === supplemental.id);
+    expect(original?.panelIds.opencode).toBe('__pane_chat_terminal_opencode__');
+    expect(independent?.panelIds.opencode).toBe('__orchestration_panel_legacy-pane-chat-codex_opencode');
+    expect(independent?.internalSessionId).not.toBe(PANE_CHAT_SESSION_ID);
+    expect(createPanelSpy).not.toHaveBeenCalled();
+    for (const record of listed.sessions) {
+      expect(panelManager.getPanel(record.panelIds.opencode)).toBeUndefined();
+      expect(databaseService.getPanel(record.panelIds.opencode)).toBeNull();
+    }
+    expect(panelManager.getPanel(legacyPanel.id)?.state.customState?.agentSessionId).toBe('existing-legacy-conversation');
+
+    const created = await fixture.manager.create({ name: 'New scoped Session', agent: 'claude' });
+    expect(created.session.panelIds.opencode).toBe(`__orchestration_panel_${created.session.id}_opencode`);
+    expect(panelManager.getPanel(created.session.panelIds.opencode)).toBeUndefined();
+    expect(created.panel.state.customState?.agentType).toBe('claude');
+  });
 
   it('reunites untouched supplemental imports and redirects their selection without replacing history', async () => {
     const [primary, supplemental] = splitLegacyRecords();
@@ -990,6 +1412,7 @@ describe('OrchestrationSessionManager', () => {
         claude: getPaneChatPanelId('claude'),
         codex: getPaneChatPanelId('codex'),
         cursor: getPaneChatPanelId('cursor'),
+        opencode: getPaneChatPanelId('opencode'),
       },
     } satisfies OrchestrationSessionRecord;
     const orphan = orchestrationRecord('orphan-session', 'Recovered Session');
@@ -1022,7 +1445,7 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.sessionManager.createSessionWithId).toHaveBeenCalledTimes(1);
   });
 
-  it('includes an associated OpenCode terminal without offering it as a Session orchestrator', async () => {
+  it('includes an associated OpenCode terminal while allowing native Session orchestration', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'opencode-worker-pane');
     const worker = createPanel('opencode-worker-panel', pane.id, 'OpenCode worker');
@@ -1037,11 +1460,10 @@ describe('OrchestrationSessionManager', () => {
     expect(overview.session.agent).toBe('claude');
     expect(overview.panes).toHaveLength(1);
     expect(overview.panes[0].panels).toEqual(expect.arrayContaining([
-      expect.objectContaining({ panelId: worker.id, initialized: true, agentType: undefined }),
+      expect.objectContaining({ panelId: worker.id, initialized: true, agentType: 'opencode' }),
       expect.objectContaining({ panelId: 'claude-worker-panel', agentType: 'claude' }),
     ]));
-    await expect(fixture.manager.update({ sessionId: named.session.id }, { launchCommand: 'opencode --auto' }))
-      .rejects.toThrow(/OpenCode.*named Session/i);
+    expect((await fixture.manager.update({ sessionId: named.session.id }, { launchCommand: 'opencode --auto' })).agent).toBe('opencode');
   });
 
   it('enforces exclusive Pane ownership, validates tab membership, and permits reassignment after detach', async () => {
@@ -1161,6 +1583,8 @@ describe('OrchestrationSessionManager', () => {
   });
 
   it('records a worker report as Session activity and shows the newest one under its Pane in the overview', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-27T18:00:00.000Z'));
     const fixture = createFixture();
     const named = await fixture.manager.create({ name: 'Reports' });
     const other = await fixture.manager.create({ name: 'Unrelated' });
@@ -1177,6 +1601,7 @@ describe('OrchestrationSessionManager', () => {
     const changed: Array<{ sessionId: string; kind: string }> = [];
     fixture.manager.on('changed', event => changed.push(event));
 
+    vi.setSystemTime(new Date('2026-09-27T18:00:01.000Z'));
     await expect(fixture.manager.recordAgentReport(worker.id, newer)).resolves.toEqual([named.session.id]);
 
     expect(changed).toEqual([{ sessionId: named.session.id, kind: 'report' }]);
@@ -1306,6 +1731,7 @@ describe('OrchestrationSessionManager', () => {
         claude: getPaneChatPanelId('claude'),
         codex: getPaneChatPanelId('codex'),
         cursor: getPaneChatPanelId('cursor'),
+        opencode: getPaneChatPanelId('opencode'),
       },
     } satisfies OrchestrationSessionRecord;
     const fixture = createFixture('codex', {

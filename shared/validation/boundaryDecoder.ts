@@ -162,13 +162,13 @@ function decodeJsonValue(current: BoundaryCursor): JsonValue {
   if (typeof current.value === "object") {
     // SAFETY: The null and array branches above leave only indexable JSON objects.
     const source = current.value as ObjectValue;
-    const decoded: { [key: string]: JsonValue } = {};
+    const decoded: Array<[string, JsonValue]> = [];
     for (const [key, value] of Object.entries(source)) {
       // Match JSON.stringify: an undefined property is an absent key, not an invalid value.
       if (value === undefined) continue;
-      decoded[key] = decodeJsonValue(current.child(key, value));
+      decoded.push([key, decodeJsonValue(current.child(key, value))]);
     }
-    return decoded;
+    return Object.fromEntries(decoded);
   }
   return current.fail("expected JSON value");
 }
@@ -251,7 +251,7 @@ export const boundary = {
         for (const key of Object.keys(fields)) {
           const schema = fields[key];
           if (schema === undefined) current.fail(`missing schema for ${key}`);
-          decoded.push([key, decodeChild(current, key, source[key], schema)]);
+          decoded.push([key, decodeChild(current, key, Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined, schema)]);
         }
         return materializeObject<Fields>(decoded);
       },

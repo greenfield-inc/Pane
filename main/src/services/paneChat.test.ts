@@ -13,6 +13,7 @@ describe('normalizePaneChatAgent', () => {
     expect(normalizePaneChatAgent('claude')).toBe('claude');
     expect(normalizePaneChatAgent('codex')).toBe('codex');
     expect(normalizePaneChatAgent('cursor')).toBe('cursor');
+    expect(normalizePaneChatAgent('opencode')).toBe('opencode');
     expect(normalizePaneChatAgent('aider')).toBe(DEFAULT_PANE_CHAT_AGENT);
     expect(normalizePaneChatAgent('constructor')).toBe(DEFAULT_PANE_CHAT_AGENT);
     expect(normalizePaneChatAgent('toString')).toBe(DEFAULT_PANE_CHAT_AGENT);
@@ -26,7 +27,8 @@ describe('getPaneChatPanelId', () => {
     expect(getPaneChatPanelId('claude')).toBe(PANE_CHAT_PANEL_ID);
     expect(getPaneChatPanelId('codex')).toBe(PANE_CHAT_CODEX_PANEL_ID);
     expect(getPaneChatPanelId('cursor')).toBe(PANE_CHAT_CURSOR_PANEL_ID);
-    const ids = [PANE_CHAT_PANEL_ID, PANE_CHAT_CODEX_PANEL_ID, PANE_CHAT_CURSOR_PANEL_ID];
+    expect(getPaneChatPanelId('opencode')).toBe('__pane_chat_terminal_opencode__');
+    const ids = [PANE_CHAT_PANEL_ID, PANE_CHAT_CODEX_PANEL_ID, PANE_CHAT_CURSOR_PANEL_ID, getPaneChatPanelId('opencode')];
     expect(new Set(ids).size).toBe(ids.length);
   });
 });

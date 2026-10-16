@@ -119,7 +119,7 @@ Each of these is a small thing. Together they compound fast.
 
 | Feature | | |
 |---|---|---|
-| **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, loads local Pane orchestration skills, and can coordinate Claude, Codex, or Cursor across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
+| **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, or OpenCode across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task to a fresh agent with its branch and a written note. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
 | **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (1 feature = 1 worktree = 1 branch = 1 Pane). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
@@ -267,7 +267,7 @@ Use it for the work that spans panes:
 Add this repo, create three worktree panes for the next features, start Codex in each one, and keep a separate review tab ready for every PR.
 ```
 
-Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, or Cursor agents in Panes through RunPane.
+Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, or OpenCode agents in Panes through RunPane.
 
 The prompt stays small because Pane ships its skills and installs them into the Pane data directory at startup, whenever the bundled copy has changed:
 
@@ -278,7 +278,7 @@ The prompt stays small because Pane ships its skills and installs them into the 
 
 The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and two Pane-specific skills, `runpane` and `pane-work`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
 
-The top-right toggle switches Pane Chat between Claude, Codex, and Cursor and persists the default orchestrator agent in Pane settings. All three use the same Pane-specific contract and the same bundled skills.
+Pane Chat and named Sessions support Claude, Codex, Cursor, and OpenCode. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`; this does not install OpenCode skills or MCP configuration.
 
 ---
 
@@ -401,7 +401,9 @@ The shell installers and the other one-shot commands are at the top of this READ
 5. **Review diffs** — see what changed with the built-in diff viewer
 6. **Ship** — commit, rebase, and merge from keyboard shortcuts
 
-OpenCode's native terminal preset preserves its exact conversation ID when you reopen a project. OpenCode is not yet available as a Pane Chat or named Session agent.
+OpenCode's native terminal integration reuses its exact saved conversation ID in project tabs, Pane Chat, and named Sessions. An allocated ID is not proof of existing history. OpenCode Sessions require supported direct commands, not wrappers or custom-resume templates.
+
+The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
 
 You can reuse an archived or deleted pane's name. Pane keeps any old worktree
 identity and Git branches separate, choosing a free worktree name for the new

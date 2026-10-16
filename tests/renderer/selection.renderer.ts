@@ -1,9 +1,10 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { DEFAULT_SESSION_PROFILE } from '../../shared/types/sessionProfile';
 
 declare global {
-  interface Window { selectionTest: { commits: () => Array<{ selected?: string; contents: Array<string | null>; focused: string | null }>; resetCommits: () => void; runtimeRefreshes: () => number; emit: (kind: 'host' | 'pane' | 'resync') => void; resolve: (kind: string, id: string, error?: string) => void; state: () => { route: string; session?: string; pane: string | null }; pending: () => Array<{ kind: string; id: string }> } }
+  interface Window { selectionTest: { transportCalls: () => Array<{ method: string; payload?: unknown; data?: unknown }>; commits: () => Array<{ selected?: string; contents: Array<string | null>; focused: string | null }>; resetCommits: () => void; runtimeRefreshes: () => number; emit: (kind: 'host' | 'pane' | 'resync') => void; resolve: (kind: string, id: string, error?: string) => void; state: () => { route: string; session?: string; pane: string | null }; pending: () => Array<{ kind: string; id: string }> } }
 }
 
 async function resolve(page: import('@playwright/test').Page, kind: string, id: string, error?: string) {
@@ -19,6 +20,61 @@ async function state(page: import('@playwright/test').Page) {
 }
 
 test.beforeEach(async ({ page }) => { await page.goto('/renderer-tests/selection.html'); });
+
+test('OpenCode creation sends the API payload and keeps the named Session agent after switching away and back', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?compact');
+  await page.getByRole('button', { name: 'New Session', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await dialog.getByLabel('Session name (optional)').fill('  OpenCode review  ');
+  await dialog.getByTestId('create-session-agent-opencode').click();
+  await expect(dialog.getByRole('radio', { name: 'OpenCode', exact: true })).toBeChecked();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const creation = await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'orchestrationSessions.create'));
+  expect(creation).toEqual([{ method: 'orchestrationSessions.create', payload: { name: 'OpenCode review', agent: 'opencode', goal: undefined, launchCommand: '', profile: DEFAULT_SESSION_PROFILE, customResume: null, runtime: undefined, wslDistribution: undefined, isPinned: false, nameFromFirstMessage: false }, data: expect.objectContaining({ session: expect.objectContaining({ id: 'created', name: 'OpenCode review', agent: 'opencode' }), agent: 'opencode', panel: expect.objectContaining({ id: 'opencode-created' }) }) }]);
+  await resolve(page, 'get', 'created');
+  await expect(page.locator('[data-session-content-id="created"]')).toBeVisible();
+  await resolve(page, 'panels', 'internal-created');
+  await resolve(page, 'layout', 'internal-created');
+  await expect(page.getByRole('tab', { name: 'Agent created', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Agent created', exact: true })).toHaveAttribute('id', /opencode-created/);
+  await expect(page).toHaveTitle(/OpenCode review/);
+  expect(await state(page)).toMatchObject({ route: 'pane-chat', session: 'created', pane: null });
+
+  await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
+  await resolve(page, 'select', 'b');
+  await resolve(page, 'get', 'b');
+  await resolve(page, 'panels', 'internal-b');
+  await resolve(page, 'layout', 'internal-b');
+  await expect(page.getByRole('tab', { name: 'Agent b', exact: true })).toHaveAttribute('id', /codex-b/);
+  await page.getByRole('button', { name: 'Open Session OpenCode review', exact: true }).click();
+  await expect(page.locator('[data-session-content-id="b"]')).toHaveCount(0);
+  await resolve(page, 'select', 'created');
+  await resolve(page, 'get', 'created');
+  await resolve(page, 'panels', 'internal-created');
+  await resolve(page, 'layout', 'internal-created');
+  await expect(page.getByRole('tab', { name: 'Agent created', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Agent created', exact: true })).toHaveAttribute('id', /opencode-created/);
+  await expect(page.locator('[data-session-content-id="created"]')).toBeVisible();
+  await expect(page).toHaveTitle(/OpenCode review/);
+  expect(await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'orchestrationSessions.select').map(call => call.payload))).toEqual([{ sessionId: 'b' }, { sessionId: 'created' }]);
+});
+
+test('OpenCode default saves through the production settings persistence and reloads from mock config', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?settings');
+  const agents = page.getByRole('radiogroup', { name: 'Default Pane Chat agent', exact: true });
+  await expect(agents.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
+  await agents.getByRole('radio', { name: 'OpenCode', exact: true }).click();
+  await expect(agents.getByRole('radio', { name: 'OpenCode', exact: true })).toBeChecked();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'config.update'))).toEqual([{ method: 'config.update', payload: { defaultOrchestratorAgent: 'opencode' }, data: expect.objectContaining({ defaultOrchestratorAgent: 'opencode' }) }]);
+  await page.reload();
+  await expect(agents.getByRole('radio', { name: 'OpenCode', exact: true })).toBeChecked();
+  expect(await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'config.get'))).toEqual([{ method: 'config.get', data: expect.objectContaining({ defaultOrchestratorAgent: 'opencode' }) }]);
+  await page.goto('/renderer-tests/selection.html?compact');
+  await page.getByRole('button', { name: 'New Session', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Create Session', exact: true }).getByRole('radio', { name: 'OpenCode', exact: true })).toBeChecked();
+});
 
 test('Session click immediately owns title, highlight, route and loading content; late A cannot replace B', async ({ page }) => {
   await page.getByRole('button', { name: 'Open Session Session A', exact: true }).click();
