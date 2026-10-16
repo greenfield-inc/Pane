@@ -24,7 +24,7 @@ regressions in the root lint command.
 | `no-module-mocking` | 31/13 | blocking | Tests use explicit seams or real modules. |
 | `no-runtime-typeof` | 417/94 | blocking | Runtime boundaries use parsers, feature checks, or domain guards. |
 | `no-shape-in-symbol-names` | 18/1 | blocking | Symbols describe domain intent rather than structural shape. |
-| `no-unknown-parameters` | 250/64 | blocking | Uncertain input is parsed at its boundary. |
+| `no-unknown-parameters` | 250/64 | blocking | Uncertain input is parsed at its boundary, including unconstrained parser-only generic parameters. |
 | `no-unknown-returns` | 37/21 | blocking | Adapters return parsed domain values. |
 | `no-unsafe-dictionary-type` | 192/51 | blocking | Dictionary contracts use bounded keys or validated JSON objects. |
 | `require-safety-comment-for-type-assertion` | 1,249/177 | blocking | Remaining necessary assertions document their checked invariant. |
@@ -50,3 +50,5 @@ The root development toolchain requires Node 22.18 or newer because Oxlint's
 TypeScript plugin runs under the developer Node process. This does not change
 Electron 41's bundled Node 24 runtime, and the published `runpane` wrapper keeps
 its Node 20 runtime floor.
+
+`no-unknown-parameters` also reports an unconstrained function type parameter used directly as an input when an explicit return type and every other parameter omit it. Generic identities, callback relationships, relationships expressed by other generic constraints, constrained inputs, and inferred return contracts remain valid. Boundary parsers and output serializers should use `unknown` with a local explanation of the schema or transport contract, rather than a generic that hides an unvalidated input.

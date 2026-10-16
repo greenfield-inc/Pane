@@ -49,6 +49,31 @@ try {
   if (result.status === 0 || expectedRules.some((rule) => !output.includes(rule))) {
     throw new Error(`Boundary decoder conformance probe did not report all expected rules:\n${output}`);
   }
+  // Generic parsers must not hide an unparsed input behind an unconstrained type parameter.
+  // Real generic contracts retain their input type in the result or constrain it.
+  writeFileSync(fixture, [
+    "export function parse<Value>(value: Value): string { return String(value); }",
+    "export const parseArrow = <Value>(value: Value): number => Number(value);",
+    "export type Parser = <Value>(value: Value) => boolean;",
+    "export function identity<Value>(value: Value): Value { return value; }",
+    "export function constrained<Value extends { id: string }>(value: Value): string { return value.id; }",
+    "export function inferred<Value>(value: Value) { return value; }",
+    "export function apply<Value>(value: Value, fn: (input: Value) => string): string { return fn(value); }",
+    "export function same<T, U extends T>(left: T, right: U): boolean { return left === right; }",
+    "type Box<Value> = { value: Value };",
+    "export function boxed<Value>(value: Value): Box<Value> { return { value }; }",
+  ].join("\n"));
+  const genericResult = spawnSync(process.execPath, [...oxlintArgs, "--config", config, "--format", "json", fixture], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const genericDiagnostics = JSON.parse(genericResult.stdout).diagnostics.filter(
+    (diagnostic) => diagnostic.code === "anti-slop(no-unknown-parameters)",
+  );
+  const reportedLines = genericDiagnostics.map((diagnostic) => diagnostic.labels[0].span.line).sort();
+  if (JSON.stringify(reportedLines) !== "[1,2,3]") {
+    throw new Error(`Generic parser contract probe expected lines 1,2,3, got ${JSON.stringify(reportedLines)}:\n${genericResult.stdout}`);
+  }
 } finally {
   rmSync(fixtureDirectory, { recursive: true, force: true });
 }
