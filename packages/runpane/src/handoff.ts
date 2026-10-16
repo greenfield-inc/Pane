@@ -2,10 +2,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { boundary, decodeBoundary } from './boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemoteDaemon } from './daemonClient';
-import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, repoListResultSchema, runpaneSessionListResultSchema, runpaneSessionResultSchema } from './localControl';
+import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, panelListResultSchema, panelScreenResultSchema, panelSubmitResultSchema, repoListResultSchema, runpaneSessionListResultSchema, runpaneSessionResultSchema } from './localControl';
+import { changedFiles, forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, screenShows, stampFiles, type FileStamp, type NativeSession } from './nativeSession';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
@@ -300,9 +301,11 @@ interface Destination {
   shell: string;
   os: 'macOS' | 'Windows' | 'Linux';
   run(command: string[], timeoutMs?: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }>;
-  write(target: string, content: string): Promise<string>;
+  write(target: string, content: string, encoding?: 'utf8' | 'base64'): Promise<string>;
   repos(): Promise<ReturnType<typeof repoListResultSchema.decode>>;
   create(request: PaneCreateRequest): Promise<ReturnType<typeof paneCreateResultSchema.decode>>;
+  /** Pane's own control commands on the destination, for checking the receiver. */
+  invoke<T>(channel: string, args: unknown[], schema: BoundarySchema<T>): Promise<T>;
 }
 
 async function remoteDestination(machine: TailnetMachine): Promise<Destination> {
@@ -323,8 +326,9 @@ async function remoteDestination(machine: TailnetMachine): Promise<Destination> 
     create: (request) => invokeRemoteDaemon(target, 'runpane:panes:create', [request], paneCreateResultSchema, REPORT_TIMEOUT_MS),
     run: (argv, timeoutMs = 120_000) =>
       invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command: argv.map((arg) => quote(arg, shell)).join(' '), timeoutMs }], execResultSchema, timeoutMs + 30_000),
-    write: async (file, content) =>
-      (await invokeRemoteDaemon(target, 'runpane:machine:write', [{ path: file, content, encoding: 'utf8' }], writeResultSchema)).path,
+    write: async (file, content, encoding = 'utf8') =>
+      (await invokeRemoteDaemon(target, 'runpane:machine:write', [{ path: file, content, encoding }], writeResultSchema, REPORT_TIMEOUT_MS)).path,
+    invoke: (channel, args, schema) => invokeRemoteDaemon(target, channel, args, schema, REPORT_TIMEOUT_MS),
   };
 }
 
@@ -344,12 +348,13 @@ function localDestination(name: string, paneDir?: string): Destination {
       child.on('error', (error) => resolve({ exitCode: 1, stdout, stderr: stderr + error.message }));
       child.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }));
     }),
-    write: async (file, content) => {
+    write: async (file, content, encoding = 'utf8') => {
       const resolved = file.replace(/^~(?=[\\/])/, process.env.HOME ?? process.env.USERPROFILE ?? '~');
       fs.mkdirSync(path.dirname(resolved), { recursive: true });
-      fs.writeFileSync(resolved, content, { mode: 0o600 });
+      fs.writeFileSync(resolved, Buffer.from(content, encoding), { mode: 0o600 });
       return resolved;
     },
+    invoke: (channel, args, schema) => invokeDaemon(channel, args, schema, { paneDir, timeoutMs: REPORT_TIMEOUT_MS }),
   };
 }
 
@@ -421,6 +426,191 @@ function receiverInstructions(origin: NoteOrigin, state: GitState, remote: strin
   ].join('\n');
 }
 
+// ---------------------------------------------------------------- carrying the sender's session
+
+/**
+ * The sender's own agent session, carried to the receiver and resumed there by its id, so a
+ * same-agent handoff continues the conversation instead of starting a fresh agent with a note.
+ * The receiver is checked as references/continuity.md in the migrate-to-pane skill describes.
+ */
+interface Carry {
+  session: NativeSession;
+  /** A phrase from the last complete message, which the receiver's screen must show. */
+  snippet?: string;
+}
+
+/** What happened to the sender's session, in the command's output and JSON. */
+export interface ContinuityReport {
+  /** True when the sender's session is (or, on a dry run, would be) carried and resumed. */
+  carried: boolean;
+  /** Absent on a dry run. `fresh-agent` is the note route: a new agent, not the same session. */
+  result?: 'continued' | 'inconclusive' | 'not-continued' | 'fresh-agent';
+  agent?: string;
+  /** The sender's native session id. */
+  sessionId?: string;
+  /** The id the receiver resumes: the sender's, or its fork's on this machine. */
+  resumedId?: string;
+  fork?: boolean;
+  files?: number;
+  bytes?: number;
+  checks?: {
+    /** Pane launched the agent's own resume for resumedId. */
+    resumedById: boolean;
+    /** Pane recorded resumedId as the receiver's id, so a restart resumes it. */
+    restartResumes: boolean;
+    /** The receiver's screen showed the copy's last message; null when there was nothing to compare. */
+    historyLoaded: boolean | null;
+    /** Forks only: the sender's session files did not change. */
+    originalUntouched?: boolean;
+  };
+  reason: string;
+  next?: string;
+}
+
+type CarryPlan = { carry: Carry } | { fresh: string };
+
+/**
+ * The sender's session when the receiver can continue it: this terminal is a Pane tab whose agent
+ * Pane knows, the receiver is the same agent, and the session's files are on this machine.
+ */
+async function planCarry(parsed: ParsedArgs, destination: HandoffDestination): Promise<CarryPlan> {
+  if (parsed.handoffNoteOnly) return { fresh: 'You passed --note-only.' };
+  const paneId = process.env.PANE_SESSION_ID;
+  const panelId = process.env.PANE_PANEL_ID;
+  if (!paneId || !panelId) return { fresh: 'This terminal is not a Pane tab, so there is no agent session to carry.' };
+  let sender: { agentType?: string; resumeId?: string } | undefined;
+  try {
+    const listed = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema, { paneDir: parsed.paneDir });
+    sender = listed.panels.find(panel => panel.id === panelId || panel.panelId === panelId);
+  } catch (error) {
+    return { fresh: `Pane could not say which agent session this tab runs (${error instanceof Error ? error.message : String(error)}).` };
+  }
+  const agent = sender?.agentType;
+  if (!isNativeAgent(agent) || !sender?.resumeId) {
+    return { fresh: 'This tab runs no Claude, Codex or Cursor session that Pane has an id for.' };
+  }
+  if (agent !== destination.agent) {
+    return { fresh: `Your session is ${agent} and the receiver is ${destination.agent}; a session can't move between agents.` };
+  }
+  const session = locateNativeSession(agent, sender.resumeId);
+  if (!session) return { fresh: `${agent} session ${sender.resumeId} has no files in this machine's ${agent} store.` };
+  const carry: Carry = { session };
+  const snippet = lastMessageSnippet(session);
+  if (snippet) carry.snippet = snippet;
+  return { carry };
+}
+
+function describeCarry(carry: Carry, fork: boolean): ContinuityReport {
+  return {
+    carried: true,
+    agent: carry.session.agent,
+    sessionId: carry.session.id,
+    fork,
+    files: carry.session.files.length,
+    bytes: carry.session.files.reduce((total, file) => total + file.bytes, 0),
+    reason: fork
+      ? `The receiver resumes a fork of your ${carry.session.agent} session ${carry.session.id}: two agents never resume one session on one machine.`
+      : `The receiver resumes your own ${carry.session.agent} session ${carry.session.id}, copied to the destination.`,
+  };
+}
+
+/** Machine writes go through one request each; larger files go in parts joined on the destination. */
+const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Where the session's main file already is in the destination's store, as a path under home,
+ * so a session handed back and forth is replaced in place and its id never has two copies.
+ */
+async function existingCopy(destination: Destination, session: NativeSession): Promise<string | undefined> {
+  const name = path.posix.basename(session.files[0].home);
+  const store = session.files[0].home.split('/').slice(0, 2).join('/');
+  const result = destination.os === 'Windows'
+    ? await destination.run(['powershell', '-NoProfile', '-Command',
+      `Get-ChildItem -Recurse -File -Path '${store}' -Filter '${name}' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }`], 60_000)
+    : await destination.run(['find', store, '-name', name, '-type', 'f'], 60_000);
+  const found = result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (found.length !== 1) return undefined;
+  const normalized = found[0].replace(/\\/g, '/').replace(/^\.\//, '');
+  if (normalized.startsWith(`${store}/`)) return normalized;
+  const index = normalized.indexOf(`/${store}/`);
+  return index >= 0 ? normalized.slice(index + 1) : undefined;
+}
+
+function quoted(value: string, windows: boolean): string {
+  return windows ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Copies the session's files into the destination agent's store; returns the main file's path there. */
+async function placeSession(destination: Destination, session: NativeSession): Promise<string> {
+  const existing = await existingCopy(destination, session);
+  const mainDir = path.posix.dirname(session.files[0].home);
+  const targetDir = existing ? path.posix.dirname(existing) : mainDir;
+  const windows = destination.os === 'Windows';
+  let mainPath = '';
+  for (const file of session.files) {
+    const home = targetDir + file.home.slice(mainDir.length);
+    const bytes = fs.readFileSync(file.absolute);
+    let written: string;
+    if (bytes.length <= WRITE_CHUNK_BYTES) {
+      written = await destination.write(`~/${home}`, bytes.toString('base64'), 'base64');
+    } else {
+      const parts: string[] = [];
+      for (let offset = 0, index = 0; offset < bytes.length; offset += WRITE_CHUNK_BYTES, index += 1) {
+        parts.push(await destination.write(`~/${home}.part${index}`, bytes.subarray(offset, offset + WRITE_CHUNK_BYTES).toString('base64'), 'base64'));
+      }
+      written = parts[0].replace(/\.part0$/, '');
+      const list = parts.map(part => quoted(part, windows));
+      const join = windows
+        ? ['powershell', '-NoProfile', '-Command', `$out = [IO.File]::Create(${quoted(written, true)}); foreach ($p in @(${list.join(',')})) { $b = [IO.File]::ReadAllBytes($p); $out.Write($b, 0, $b.Length) }; $out.Close(); Remove-Item ${list.join(',')}`]
+        : ['sh', '-c', `cat ${list.join(' ')} > ${quoted(written, false)} && rm ${list.join(' ')}`];
+      await mustRun(destination, join, `Joining ${path.posix.basename(home)}`, 300_000);
+    }
+    if (file === session.files[0]) mainPath = written;
+  }
+  return mainPath;
+}
+
+const PROBE = 'What were you last working on? Answer in one or two sentences.';
+
+/** Checks 1 to 4 of the continuity check on the receiver, then says what was found. */
+async function checkReceiver(options: {
+  destination: Destination;
+  carry: Carry;
+  resumedId: string;
+  paneId: string;
+  panelId: string;
+  ready: boolean;
+  stamps?: FileStamp[];
+}): Promise<Pick<ContinuityReport, 'checks' | 'result'> & { why: string }> {
+  const { destination, carry, resumedId, paneId, panelId, ready, stamps } = options;
+  const listed = await destination.invoke('runpane:panels:list', [{ paneId }], panelListResultSchema);
+  const panel = listed.panels.find(candidate => candidate.id === panelId || candidate.panelId === panelId);
+  const restartResumes = panel?.resumeId === resumedId;
+  const resumedById = restartResumes && (panel?.resumeSource ?? 'agent') === 'agent';
+  let historyLoaded: boolean | null = null;
+  if (ready && carry.snippet) {
+    const screen = await destination.invoke('runpane:panels:screen', [{ panelId, limit: 400 }], panelScreenResultSchema);
+    historyLoaded = screenShows(screen.text, carry.snippet);
+  }
+  const checks: NonNullable<ContinuityReport['checks']> = { resumedById, restartResumes, historyLoaded };
+  if (stamps) checks.originalUntouched = changedFiles(stamps).length === 0;
+  if (!resumedById || !restartResumes) {
+    return { checks, result: 'not-continued', why: `Pane recorded ${panel?.resumeId ?? 'no id'} for the receiver, not ${resumedId}, so it is not resuming that session.` };
+  }
+  if (checks.originalUntouched === false) {
+    return { checks, result: 'not-continued', why: `Your session's files changed while it was forked (${changedFiles(stamps ?? []).join(', ')}).` };
+  }
+  if (!ready) return { checks, result: 'not-continued', why: 'The receiver did not reach its input box, so its history could not be checked.' };
+  if (historyLoaded === true) return { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` };
+  return {
+    checks,
+    result: 'inconclusive',
+    why: carry.snippet
+      ? `The receiver is ready but its screen does not show the session's last message ("${carry.snippet}"); it may be scrolled or compacted.`
+      : 'The receiver is ready, but this session\'s store is not text runpane can read, so its last message could not be compared.',
+  };
+}
+
 // ---------------------------------------------------------------- command
 
 interface HandoffResult {
@@ -441,6 +631,8 @@ interface HandoffResult {
    * or, from a Session's folder, a new Session on another machine.
    */
   receiver?: { route: 'tab' | 'new-pane' | 'session'; reason: string };
+  /** Whether the receiver continues the sender's own session, and what the continuity check found. */
+  continuity?: ContinuityReport;
   reportBack?: string;
 }
 
@@ -539,6 +731,15 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   if (!state.pushed) warnings.push(`${state.branch} at ${state.head.slice(0, 7)} is not on ${state.remote}. Push it, or pass --push.`);
   say(step('git', `${state.branch} @ ${state.head.slice(0, 7)}, ${state.pushed ? `pushed to ${state.remote}` : 'NOT pushed'}${state.dirty.length ? `, ${state.dirty.length} uncommitted` : ''}`, state.pushed && !state.dirty.length));
 
+  // A same-agent handoff carries the sender's own session; anything else is a fresh agent with the note.
+  const plan = await planCarry(parsed, destination);
+  const carry = 'carry' in plan ? plan.carry : undefined;
+  const continuity: ContinuityReport = carry ? describeCarry(carry, !target) : { carried: false, reason: 'fresh' in plan ? plan.fresh : '' };
+  const noteOnlyCommand = `runpane handoff ${quote(text || describeDestination(destination, machineLabel), senderShell)} --note-file ${quote(parsed.handoffNoteFile ?? '<note>', senderShell)} --note-only`;
+  say(carry
+    ? step('session', continuity.reason)
+    : step('session', `A fresh ${destination.agent} with your note, not the same session. ${continuity.reason}`, false));
+
   const result: HandoffResult = {
     ok: true,
     dryRun: parsed.dryRun,
@@ -547,6 +748,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     note: noteInfo,
     git: { repository: state.repository, branch: state.branch, head: state.head, remote: state.remote, pushed: state.pushed, dirty: state.dirty.length },
     warnings,
+    continuity,
   };
   if (parsed.dryRun) {
     for (const warning of warnings) say(`  ! ${warning}`);
@@ -554,6 +756,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     if (parsed.json) console.log(JSON.stringify(result, null, 2));
     return 0;
   }
+  if (!carry) continuity.result = 'fresh-agent';
   if (!state.pushed) throw new Error(`${warnings.join(' ')}\nThe receiver would start without your work, so nothing was sent.`);
   for (const warning of warnings) say(`  ! ${warning}`);
 
@@ -566,10 +769,39 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const noteOrigin = origin(state);
   const stamped = stampNote(noteText ?? '', noteOrigin, receiverInstructions(noteOrigin, state, repoRemote, 'runpane'));
   const notePath = await remote.write(`~/.pane/handoffs/${stamp}-${name}-${randomUUID()}.md`, stamped);
+  result.notePath = notePath;
   say(step('note sent', notePath));
 
+  // Same machine: the receiver resumes a fork, so two agents never share one session file.
+  // Another machine: the session is copied into that machine's store and resumed by its own id.
+  let stamps: FileStamp[] | undefined;
+  if (carry) {
+    try {
+      if (target) {
+        const placed = await placeSession(remote, carry.session);
+        continuity.resumedId = carry.session.id;
+        say(step('copied', `${continuity.files} file${continuity.files === 1 ? '' : 's'} of ${carry.session.agent} session ${carry.session.id} to ${placed}`));
+      } else {
+        stamps = stampFiles(carry.session);
+        continuity.resumedId = await forkNativeSession(carry.session, state.root);
+        say(step('forked', `${carry.session.agent} session ${carry.session.id} as ${continuity.resumedId}`));
+      }
+    } catch (error) {
+      continuity.result = 'not-continued';
+      continuity.reason = `Could not ${target ? 'copy' : 'fork'} your ${carry.session.agent} session ${carry.session.id}: ${error instanceof Error ? error.message : String(error)}. No receiver was started.`;
+      continuity.next = `Fix that and run the handoff again, or ask the person before starting a fresh agent with the note instead: ${noteOnlyCommand}`;
+      result.ok = false;
+      say(step('session', continuity.reason, false));
+      say(`Next: ${continuity.next}`);
+      if (parsed.json) console.log(JSON.stringify(result, null, 2));
+      return 1;
+    }
+  }
+  const resumedId = continuity.resumedId;
+
   const toolCommand = agentCommand(destination, remote.shell);
-  const prompt = `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
+  // A resumed session already knows its work; it gets the note with the "moved" message after the check.
+  const prompt = resumedId ? undefined : `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
   // 1 feature = 1 worktree = 1 branch = 1 Pane: on this machine, from inside the
   // Pane that owns this checkout, the receiver opens as a new tab in that Pane.
   // Otherwise (another machine, or a checkout the sender's Pane does not own) it
@@ -591,12 +823,13 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       ...parsed, paneId: senderPane, agent: destination.agent, toolCommand, initialInput: prompt,
       source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true,
     });
+    if (resumedId) panelRequest.resume = resumedId;
     try {
       const panel = await invokeDaemon('runpane:panels:create', [panelRequest], panelCreateResultSchema, {
         paneDir: parsed.paneDir,
         timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
       });
-      receiver = { ok: panel.ok, paneId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput, newTab: true };
+      receiver = { ok: panel.ok, paneId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput, ready: panel.readiness?.ok === true, newTab: true };
     } catch (error) {
       throw new Error(`runpane panels create failed in Pane ${senderPane}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}.`);
     }
@@ -606,6 +839,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       toolCommand, initialInput: prompt, source: 'agent', noFocus: true, focus: false,
       waitReady: true, yes: true, noAssociate: true, fromJson: undefined,
     });
+    if (resumedId) request.panes = request.panes.map(item => ({ ...item, resume: resumedId }));
     let created: ReturnType<typeof paneCreateResultSchema.decode>;
     try {
       // Workspace control carries JSON directly to the reached daemon, without
@@ -618,21 +852,34 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     if (item?.ok && item.sessionId && item.setupQueue) {
       // The receiver's prompt rides on the launch after setup, so delivery is not verified yet.
       result.ok = false;
-      result.notePath = notePath;
       result.pane = { id: item.sessionId, name: item.name, worktreePath: item.worktreePath };
-      warnings.push(`Pane ${item.sessionId} was created and is queued for setup (${item.setupQueue.message}). The receiver starts after setup with the note; its prompt is not verified yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
+      if (resumedId) {
+        continuity.result = 'inconclusive';
+        continuity.reason = `Pane ${item.sessionId} is queued for setup; its agent resumes ${resumedId} after setup, so the continuity check has not run.`;
+        continuity.next = `After setup, check the receiver with ${receiverStatus(item.sessionId)} and, if its history is unclear, ask it: "${PROBE}"`;
+      }
+      warnings.push(`Pane ${item.sessionId} was created and is queued for setup (${item.setupQueue.message}). The receiver starts after setup${resumedId ? ', resuming the session' : ' with the note'}; ${resumedId ? 'it is not checked' : 'its prompt is not verified'} yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
       for (const warning of warnings) say(`  ! ${warning}`);
       if (parsed.json) console.log(JSON.stringify(result, null, 2));
       return 1;
     }
-    if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
-    receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: item.initialInput, newTab: false };
+    if (!item?.ok && !(resumedId && item?.sessionId && item.panelId)) {
+      throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
+    }
+    if (!item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} reported no panel for the receiver. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying.`);
+    const started = 'error' in item ? undefined : item;
+    receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: started?.initialInput, ready: started?.readiness?.ok === true, newTab: false };
   }
 
-  result.notePath = notePath;
   result.pane = { id: receiver.paneId, panelId: receiver.panelId, name: receiver.name, worktreePath: receiver.worktreePath };
   result.reportBack = noteOrigin.originPanel ? `${self} panel ${noteOrigin.originPanel}` : undefined;
   const inspect = recovery('panels', 'screen', '--panel', receiver.panelId);
+  const check = receiverStatus(receiver.paneId, receiver.panelId);
+  if (carry && resumedId) {
+    return reportCarried({ parsed, result, continuity, carry, resumedId, receiver, destination: remote, stamps, say,
+      target: Boolean(target), notePath, noteOnlyCommand, inspect, check, branch: state.branch,
+      submit: (panelId: string) => recovery('panels', 'submit', '--panel', panelId, '--text', '<message>', '--yes') });
+  }
   const input = receiver.initialInput;
   const verified = input?.verifiedSubmitted === true
     && (input.delivery?.state === 'taken' || input.delivery?.state === 'queued')
@@ -645,11 +892,69 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     return 1;
   }
   say(step('started', receiver.newTab ? `${receiver.name ?? name} as a new tab in Pane ${receiver.paneId}` : `${receiver.name ?? name} on ${remote.name}${receiver.worktreePath ? ` (${receiver.worktreePath})` : ''}`));
-  const check = receiverStatus(receiver.paneId, receiver.panelId);
+  say(`It is a fresh ${destination.agent} with your note, not the same session.`);
   say(result.reportBack ? `The receiver reports back to ${result.reportBack}.` : 'No sender panel to report to; the receiver reports on the branch.');
   say(`Check on it: ${check}`);
   if (parsed.json) console.log(JSON.stringify(result, null, 2));
   return 0;
+}
+
+interface CarriedReport {
+  parsed: ParsedArgs;
+  result: HandoffResult;
+  continuity: ContinuityReport;
+  carry: Carry;
+  resumedId: string;
+  receiver: Receiver;
+  destination: Destination;
+  stamps?: FileStamp[];
+  target: boolean;
+  notePath: string;
+  noteOnlyCommand: string;
+  inspect: string;
+  check: string;
+  branch: string;
+  submit(panelId: string): string;
+  say(line: string): void;
+}
+
+/**
+ * Runs the continuity check on a receiver that resumed the sender's session, sends the "moved"
+ * message when it passed and the folder or machine changed, and reports. A receiver that fails
+ * is kept and never replaced: the next step names the note route for the person to choose.
+ */
+async function reportCarried(report: CarriedReport): Promise<number> {
+  const { parsed, result, continuity, carry, resumedId, receiver, destination, stamps, target, say } = report;
+  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, stamps });
+  continuity.checks = checked.checks;
+  continuity.result = checked.result;
+  continuity.reason = checked.why;
+  const where = receiver.newTab ? `a new tab in Pane ${receiver.paneId}` : `Pane ${receiver.paneId} on ${destination.name}${receiver.worktreePath ? ` (${receiver.worktreePath})` : ''}`;
+  const moved = target || !receiver.newTab;
+  const movedMessage = `This session moved to ${receiver.worktreePath ?? 'a new worktree'} on ${destination.name}. Continue from where you were. The sender's handoff note is at ${report.notePath}; follow its "Receiver instructions" to report back.`;
+  if (checked.result === 'continued') {
+    if (moved) {
+      const sent = await destination.invoke('runpane:panels:submit', [{ panelId: receiver.panelId, input: movedMessage, source: 'agent' }], panelSubmitResultSchema);
+      if (!sent.ok) result.warnings.push(`The "moved" message was not verified on panel ${receiver.panelId}. Send it yourself: ${report.submit(receiver.panelId)} with: ${movedMessage}`);
+    }
+    say(step('continued', `${carry.session.agent} session ${resumedId}${continuity.fork ? ` (a fork of ${carry.session.id})` : ''} in ${where}. ${checked.why}`));
+  } else if (checked.result === 'inconclusive') {
+    continuity.next = `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work. If it matches, ${moved ? `send it: ${movedMessage}` : 'it continues your session'}; if not, tell the person it is not continued.`;
+    say(step('unclear', `${where}. ${checked.why}`, false));
+    say(`Next: ${continuity.next}`);
+  } else {
+    result.ok = false;
+    continuity.next = `The receiver is kept in ${where}; inspect it with ${report.inspect}. Ask the person before starting a fresh agent with the note instead: ${report.noteOnlyCommand}`;
+    say(step('not continued', checked.why, false));
+    say(`Next: ${continuity.next}`);
+  }
+  for (const warning of result.warnings) say(`  ! ${warning}`);
+  if (checked.result !== 'not-continued') {
+    say(`Your session now continues in ${where}. End your turn now and make no more changes on ${report.branch}; the person can close this tab.`);
+    say(`Check on it: ${report.check}`);
+  }
+  if (parsed.json) console.log(JSON.stringify(result, null, 2));
+  return checked.result === 'not-continued' ? 1 : 0;
 }
 
 interface SessionHandoff {
@@ -694,7 +999,15 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
     receiver: { route: 'session', reason: `A Session's folder has no branch to move, so the receiver is a new Session on ${target.name}.` },
     session: { name, machine: target.name },
   };
+  // A same-agent move carries the Session agent's own conversation; the new Session resumes it when opened.
+  const plan = await planCarry(parsed, destination);
+  const carry = 'carry' in plan ? plan.carry : undefined;
+  const continuity: ContinuityReport = carry ? describeCarry(carry, false) : { carried: false, reason: 'fresh' in plan ? plan.fresh : '' };
+  result.continuity = continuity;
   say(step('session', `"${source.name}" becomes "${name}" on ${target.name}`));
+  say(carry
+    ? step('session', continuity.reason)
+    : step('session', `A fresh ${destination.agent} with your note, not the same conversation. ${continuity.reason}`, false));
   for (const warning of warnings) say(`  ! ${warning}`);
   if (parsed.dryRun) {
     say('Dry run: nothing was sent.');
@@ -704,11 +1017,29 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
 
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
   const slug = `handoff-${source.name}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
-  const stamped = stampNote(noteText ?? '', origin, sessionReceiverInstructions(origin, source.name, target.name));
+  const stamped = stampNote(noteText ?? '', origin, sessionReceiverInstructions(origin, source.name, target.name, carry !== undefined));
   const written = await invokeRemoteDaemon(remote, 'runpane:machine:write', [{ path: `~/.pane/handoffs/${stamp}-${slug}-${randomUUID()}.md`, content: stamped, encoding: 'utf8' }], writeResultSchema);
   const notePath = written.path;
   result.notePath = notePath;
   say(step('note sent', notePath));
+  if (carry) {
+    try {
+      const placed = await placeSession(await remoteDestination(target), carry.session);
+      continuity.resumedId = carry.session.id;
+      say(step('copied', `${carry.session.agent} session ${carry.session.id} to ${placed}`));
+    } catch (error) {
+      continuity.result = 'not-continued';
+      continuity.reason = `Could not copy your ${carry.session.agent} session ${carry.session.id}: ${error instanceof Error ? error.message : String(error)}. No Session was created.`;
+      continuity.next = `Fix that and run the handoff again, or ask the person before moving the Session with only the note: runpane handoff ${quote(parsed.handoffDestination ?? `${destination.agent} on ${target.name}`, 'sh')} --note-file <note> --note-only`;
+      result.ok = false;
+      say(step('session', continuity.reason, false));
+      say(`Next: ${continuity.next}`);
+      if (parsed.json) console.log(JSON.stringify(result, null, 2));
+      return 1;
+    }
+  } else {
+    continuity.result = 'fresh-agent';
+  }
 
   const launchCommand = agentCommand(destination, 'sh');
   let created: ReturnType<typeof runpaneSessionResultSchema.decode>;
@@ -717,9 +1048,12 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
       name,
       agent: destination.agent,
       goal: source.goal,
-      context: `Handed off from Session "${source.name}" on ${self}, which stays there. The sending agent's handoff note is at ${notePath} on this machine: read it first, including its "Receiver instructions".`,
+      context: carry
+        ? `Handed off from Session "${source.name}" on ${self}, which stays there. This Session resumes that Session's own ${carry.session.agent} conversation; the sending agent's handoff note is at ${notePath} on this machine.`
+        : `Handed off from Session "${source.name}" on ${self}, which stays there. The sending agent's handoff note is at ${notePath} on this machine: read it first, including its "Receiver instructions".`,
       nextAction: `Read the handoff note at ${notePath} and continue from it.`,
       launchCommand,
+      resume: continuity.resumedId,
     }], runpaneSessionResultSchema, REPORT_TIMEOUT_MS);
   } catch (error) {
     throw new RunpaneError(
@@ -731,7 +1065,17 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
   result.session = { id: created.session.id, name: created.session.name, machine: target.name };
   result.reportBack = origin.originPanel ? `${self} panel ${origin.originPanel}` : undefined;
   say(step('created', `Session "${created.session.name}" on ${target.name}`));
-  say(`It waits for your first message: switch Pane to ${target.name}, open "${created.session.name}", and send "continue".`);
+  if (carry) {
+    // A Session's agent launches when the person opens it, so the history check runs then.
+    continuity.result = 'inconclusive';
+    continuity.reason = `"${created.session.name}" resumes ${carry.session.agent} session ${carry.session.id} when it is first opened; its history can only be checked then.`;
+    continuity.next = `Open "${created.session.name}" on ${target.name} and check it shows your last message${carry.snippet ? ` ("${carry.snippet}")` : ''}; if that is unclear, ask it "${PROBE}". Then send it: This session moved to ${target.name}. Continue from where you were. The handoff note is at ${notePath}.`;
+    say(step('resumes', continuity.reason));
+    say(`Next: ${continuity.next}`);
+    say('Your conversation now continues on that machine. End your turn now; the person can archive this Session when they are done with it.');
+  } else {
+    say(`It waits for your first message: switch Pane to ${target.name}, open "${created.session.name}", and send "continue".`);
+  }
   if (parsed.json) console.log(JSON.stringify(result, null, 2));
   return 0;
 }
@@ -745,7 +1089,7 @@ function nextFreeName(name: string, taken: readonly string[]): string {
   return candidate;
 }
 
-function sessionReceiverInstructions(origin: NoteOrigin, sender: string, receiverMachine: string): string {
+function sessionReceiverInstructions(origin: NoteOrigin, sender: string, receiverMachine: string, carried: boolean): string {
   const reportTarget = origin.originPanel
     ? `runpane workspace ${origin.originMachine} panels submit --panel ${origin.originPanel} --text "<one line: what you finished, and anything blocked>" --yes`
     : 'tell the person here, since the sender left no panel to report to';
@@ -753,7 +1097,9 @@ function sessionReceiverInstructions(origin: NoteOrigin, sender: string, receive
     '## Receiver instructions',
     '',
     '<!-- Added by runpane handoff. -->',
-    `1. You are a new Session on ${receiverMachine}, continuing Session "${sender}" from ${origin.originMachine}. Only this note was sent: the sender's conversation, Session folder and Panes stay on ${origin.originMachine}.`,
+    carried
+      ? `1. You are a new Session on ${receiverMachine}, continuing Session "${sender}" from ${origin.originMachine} in its own conversation, which was copied here. Its Session folder and Panes stay on ${origin.originMachine}.`
+      : `1. You are a new Session on ${receiverMachine}, continuing Session "${sender}" from ${origin.originMachine}. Only this note was sent: the sender's conversation, Session folder and Panes stay on ${origin.originMachine}.`,
     `2. Read this whole note. To read a file it names from the sender's machine, run \`runpane workspace ${origin.originMachine} read <path>\`.`,
     '3. Continue from "Next steps".',
     `4. When you finish or get blocked, report back to the sender: ${reportTarget}`,
@@ -767,6 +1113,8 @@ interface Receiver {
   name?: string;
   worktreePath?: string;
   initialInput?: ReturnType<typeof panelCreateResultSchema.decode>['initialInput'];
+  /** The receiver's agent reached its input box when it was created. */
+  ready: boolean;
   newTab: boolean;
 }
 
