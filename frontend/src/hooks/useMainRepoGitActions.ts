@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ArchiveRestore, Download, GitCommitHorizontal, RefreshCw, Undo2, Upload } from 'lucide-react';
 import { API } from '../utils/api';
 import type { GitCommands, Session } from '../types/session';
@@ -11,6 +11,8 @@ interface GitOperationResponse {
 }
 
 export function useMainRepoGitActions(sessionId: string | null, session: Session | null) {
+  const currentSessionId = useRef(sessionId);
+  currentSessionId.current = sessionId;
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gitCommands, setGitCommands] = useState<GitCommands | null>(null);
@@ -87,8 +89,17 @@ export function useMainRepoGitActions(sessionId: string | null, session: Session
     void runOperation(API.sessions.gitPull, 'Failed to pull from remote');
   }, [runOperation]);
   const handlePush = useCallback(() => {
-    void runOperation(API.sessions.gitPush, 'Failed to push to remote');
-  }, [runOperation]);
+    void runOperation(API.sessions.gitPush, 'Failed to push to remote').then(async (success) => {
+      if (!success || !sessionId) return;
+      const response = await API.sessions.getUpstream(sessionId);
+      if (currentSessionId.current === sessionId && response.success) {
+        setCurrentUpstream(response.data);
+        setIsUpstreamLoaded(true);
+      }
+    }).catch((refreshError) => {
+      console.error('Failed to refresh upstream after push:', refreshError);
+    });
+  }, [runOperation, sessionId]);
   const handleStash = useCallback(() => {
     void runOperation(API.sessions.gitStash, 'Failed to stash changes').then((success) => {
       if (success) void refreshStashState();
