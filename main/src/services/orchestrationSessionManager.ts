@@ -241,6 +241,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         : input.launchCommand ?? (fits(defaultCommand) ? defaultCommand : '');
       const customResume = sourcePanel ? sourceState?.customResume
         : input.customResume !== undefined ? input.customResume
+          // A resumed native conversation is the agent's own; no custom resume command applies.
+          : input.resume ? null
           : fits('', config.defaultSessionResume) ? config.defaultSessionResume : null;
       const agent = resolveSessionAgent(explicitAgent, launchCommand, customResume)
         ?? normalizePaneChatAgent(config.defaultOrchestratorAgent);
@@ -303,7 +305,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         // Persist the durable record before creating/publishing its hidden
         // terminal owner so a process exit can be repaired during startup.
         this.createInternalSession(record);
-        const panel = await this.ensurePanelForAgent(record);
+        let panel = await this.ensurePanelForAgent(record);
+        if (input.resume) panel = await this.resumeOnFirstOpen(panel, record.agent, input.resume);
         const view = await this.viewFromRecord(record, panel);
         this.emitChanged(record, 'created');
         return view;
@@ -996,6 +999,16 @@ export class OrchestrationSessionManager extends EventEmitter {
     };
   }
 
+  /** A new Session's tab resumes an existing conversation of its agent when it first launches. */
+  private async resumeOnFirstOpen(panel: ToolPanel, agent: PaneChatAgent, resume: string): Promise<ToolPanel> {
+    // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
+    const current = panel.state.customState as TerminalPanelState | undefined;
+    const customState: TerminalPanelState = { ...current, agentSessionId: resume, initialInput: undefined };
+    if (agent === 'claude') customState.hasClaudeSessionId = true;
+    await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState } });
+    return panelManager.getPanel(panel.id) ?? panel;
+  }
+
   /** Only the built-in Pane Chat ever speaks first; see paneChatMigrateOffer. */
   private firstPrompt(record: OrchestrationSessionRecord): string | undefined {
     if (record.id !== LEGACY_ORCHESTRATION_SESSION_ID || record.customResume) return undefined;
@@ -1159,6 +1172,10 @@ function validateCreateInput(input: OrchestrationSessionCreateInput): void {
   if (!input.name || input.name.trim().length === 0) throw new Error('Session name is required');
   if (input.name.length > MAX_ORCHESTRATION_TEXT_LENGTH) throw new Error('Session name is too long');
   if (input.customResume) validateCustomCommandResume(input.customResume);
+  if (input.resume !== undefined) {
+    if (!/^[A-Za-z0-9._:-]{1,200}$/.test(input.resume)) throw new Error('Session resume must be a native session id');
+    if (input.customResume) throw new Error('A Session resumes either a native session id or a custom resume command, not both');
+  }
   validateOptionalText(input.launchCommand, 'launch command');
   validateOptionalText(input.profile, 'profile');
   validateOptionalText(input.goal, 'goal');

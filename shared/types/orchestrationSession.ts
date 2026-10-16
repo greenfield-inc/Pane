@@ -197,6 +197,11 @@ export interface OrchestrationSessionCreateInput {
   agent?: PaneChatAgent;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * A native session id of `agent` to resume: the Session's agent tab resumes that conversation
+   * when it first opens, instead of starting a new one. `runpane handoff` uses it to move a Session.
+   */
+  resume?: string;
   profile?: string;
   goal?: string;
   context?: string;

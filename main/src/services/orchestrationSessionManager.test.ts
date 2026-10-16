@@ -288,6 +288,16 @@ describe('OrchestrationSessionManager', () => {
     setPaneRuntime(partialRuntime({ eventSink: { send: () => undefined } }));
   });
 
+  it('creates a Session whose agent tab resumes a native conversation when it opens', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Moved here', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+    expect(created.panel.state.customState).toMatchObject({
+      agentType: 'claude', agentSessionId: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35', hasClaudeSessionId: true,
+    });
+    await expect(fixture.manager.create({ name: 'Bad id', agent: 'codex', resume: 'not an id; rm -rf' }))
+      .rejects.toThrow('Session resume must be a native session id');
+  });
+
   it('creates a pinned Session and persists declarative pin updates', async () => {
     const fixture = createFixture();
     const input = { name: 'Pinned coordinator', isPinned: true };
