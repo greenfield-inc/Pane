@@ -474,9 +474,7 @@ export class WorktreeManager {
       const result = await this.createWorktree(projectPath, worktreeName, requestedBranch, effectiveBase, worktreeFolder, pathResolver, commandRunner);
 
       // Trigger background replenishment after successful creation
-      worktreePoolManager.createReserve(projectPath, effectiveBase, worktreeFolder, pathResolver, commandRunner).catch(err => {
-        console.warn('[WorktreeManager] Background reserve creation failed:', err);
-      });
+      worktreePoolManager.replenishInBackground(projectPath, effectiveBase, worktreeFolder, pathResolver, commandRunner);
 
       return { ...result, base: describeWorktreeBase(refresh, result.baseCommit) };
     }

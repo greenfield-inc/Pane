@@ -20,7 +20,10 @@ beforeAll(() => {
   process.env.PANE_DIR = temporaryDirectory();
 });
 
-afterAll(() => {
+afterAll(async () => {
+  // A create replenishes the reserve after it returns. Its git commands run in the
+  // fixture's project, and on Windows a folder a process runs in cannot be deleted.
+  await worktreePoolManager.idle();
   if (previousPaneDir === undefined) delete process.env.PANE_DIR;
   else process.env.PANE_DIR = previousPaneDir;
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -239,5 +242,9 @@ describe('the reserve worktree pool', () => {
     );
     expect(claimedFromReserve(fixture.project, 'seeded')).toBe(true);
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(fixture.tipA);
+    // The claim's replacement reserve is still being made after the create returned.
+    expect(worktreePoolManager.hasReserve(fixture.project, 'origin/main')).toBe(false);
+    await worktreePoolManager.idle();
+    expect(worktreePoolManager.hasReserve(fixture.project, 'origin/main')).toBe(true);
   });
 });

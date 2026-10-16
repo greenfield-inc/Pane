@@ -28,6 +28,8 @@ interface ReserveWorktree {
 class WorktreePoolManager {
   /** Map key: "<projectPath>::<baseRef>" */
   private reserves = new Map<string, ReserveWorktree>();
+  /** Replenishments still running after the create that started them returned. */
+  private replenishing = new Set<Promise<void>>();
 
   private static readonly STALE_MS = 1_800_000; // 30 minutes
 
@@ -52,6 +54,32 @@ class WorktreePoolManager {
 
   hasReserve(projectPath: string, baseRef: string): boolean {
     return this.reserves.has(this.reserveKey(projectPath, baseRef));
+  }
+
+  /**
+   * Makes a reserve without the caller waiting for it. Its git commands keep
+   * running in the project after the create returns; `idle()` waits for them.
+   */
+  replenishInBackground(
+    projectPath: string,
+    baseRef: string,
+    worktreeFolder: string | undefined,
+    pathResolver: PathResolver,
+    commandRunner: CommandRunner
+  ): void {
+    const work = this.createReserve(projectPath, baseRef, worktreeFolder, pathResolver, commandRunner).catch(err => {
+      console.warn('[WorktreePool] Background reserve replenishment failed:', err);
+    });
+    this.replenishing.add(work);
+    void work.finally(() => this.replenishing.delete(work));
+  }
+
+  /**
+   * Resolves once no background replenishment is running. A process still
+   * running git inside a project keeps Windows from deleting that folder.
+   */
+  async idle(): Promise<void> {
+    while (this.replenishing.size > 0) await Promise.all(this.replenishing);
   }
 
   /**
@@ -207,9 +235,7 @@ class WorktreePoolManager {
     console.log(`[WorktreePool] Reserve ${reserve.reserveName} claimed as ${targetName}`);
 
     // Replenish the pool in the background
-    this.createReserve(projectPath, baseRef, worktreeFolder, pathResolver, commandRunner).catch(err => {
-      console.warn('[WorktreePool] Background reserve replenishment failed:', err);
-    });
+    this.replenishInBackground(projectPath, baseRef, worktreeFolder, pathResolver, commandRunner);
 
     return { worktreePath: targetPath };
   }
