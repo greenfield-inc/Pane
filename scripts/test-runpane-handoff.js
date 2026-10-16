@@ -138,7 +138,8 @@ function receiver(f, options = {}) {
   const config = path.join(bin, 'daemon.json');
   const paneDir = options.paneDir ?? f.env.PANE_DIR;
   fs.writeFileSync(config, JSON.stringify({ paneDir, log, ready, repoPath: options.repoPath ?? f.root,
-    createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
+    createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane,
+    sender: options.sender, screenText: options.screenText, receiverResumeId: options.receiverResumeId, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-daemon.cjs'),
     path.join(dist, 'daemonClient.js'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
@@ -594,4 +595,122 @@ test('a git checkout keeps the Pane route even inside a Session terminal', (t) =
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.notEqual(output.receiver?.route, 'session'); assert.equal(output.git.branch, 'task');
+});
+
+// ---------------------------------------------------------------- carrying the sender's own session
+
+const SENDER = '6f1d2c3b-4a59-4e7d-8c21-90ab12cd34ef';
+const LAST = 'Renamed the login handler and the tests are green';
+
+/** A Claude store in the fixture's home with one session, and a stand-in `claude` that forks it. */
+function claudeSession(f) {
+  const store = path.join(f.env.HOME, '.claude', 'projects', 'C--work-app');
+  fs.mkdirSync(store, { recursive: true });
+  const transcript = path.join(store, `${SENDER}.jsonl`);
+  fs.writeFileSync(transcript, [
+    { type: 'user', sessionId: SENDER, message: { role: 'user', content: 'the codeword is heron' } },
+    { type: 'assistant', sessionId: SENDER, message: { role: 'assistant', content: [{ type: 'text', text: `Done.\n${LAST} now.` }] } },
+  ].map(line => JSON.stringify(line)).join('\n') + '\n');
+  f.env.CLAUDE_CONFIG_DIR = path.join(f.env.HOME, '.claude');
+  const bin = path.join(f.root, 'fake-bin');
+  const calls = path.join(bin, 'claude-calls.jsonl');
+  fs.writeFileSync(path.join(bin, 'claude.js'), [
+    "const fs = require('node:fs'); const path = require('node:path');",
+    'const args = process.argv.slice(2);',
+    `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + '\\n');`,
+    "const from = args[args.indexOf('--resume') + 1]; const to = args[args.indexOf('--session-id') + 1];",
+    `const dir = ${JSON.stringify(store)};`,
+    "const lines = fs.readFileSync(path.join(dir, from + '.jsonl'), 'utf8').split(from).join(to);",
+    "fs.writeFileSync(path.join(dir, to + '.jsonl'), lines + JSON.stringify({ type: 'assistant', sessionId: to, message: { role: 'assistant', content: 'forked' } }) + '\\n');",
+  ].join('\n'));
+  fs.writeFileSync(path.join(bin, 'claude.cmd'), `@"${process.execPath}" "%~dp0claude.js" %*\r\n`);
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\nexec "${process.execPath.split(path.sep).join('/')}" "$(dirname "$0")/claude.js" "$@"\n`, { mode: 0o755 });
+  const inherited = f.env.PATH ?? f.env.Path ?? '';
+  delete f.env.Path;
+  f.env.PATH = `${bin}${path.delimiter}${inherited}`;
+  f.env.PANE_SESSION_ID = 'sender-pane';
+  f.env.PANE_PANEL_ID = 'sender-panel';
+  return { transcript, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : []) };
+}
+const runClaude = (f, ...args) => spawnSync(process.execPath, [cli, 'handoff', 'claude here', '--note-file', 'note.md', '--json', ...args], { cwd: f.root, encoding: 'utf8', env: f.env });
+
+test('a same-machine handoff to the same agent resumes a fork of the sender\'s session and checks it', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, screenText: `> the codeword is heron\n● Done.\n  ${LAST} now.\n● forked` });
+  const claude = claudeSession(f);
+  const before = fs.readFileSync(claude.transcript);
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  const fork = claude.calls()[0];
+  assert.deepEqual(fork.slice(0, 5), ['-p', '--resume', SENDER, '--fork-session', '--session-id']);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.fork, true);
+  assert.equal(out.continuity.resumedId, fork[5]);
+  assert.deepEqual(out.continuity.checks, { resumedById: true, restartResumes: true, historyLoaded: true, originalUntouched: true });
+  const tab = calls().find(c => c.channel === 'runpane:panels:create').args[0];
+  assert.equal(tab.resume, fork[5]);
+  assert.equal(tab.tool.initialInput, undefined);
+  assert.deepEqual(fs.readFileSync(claude.transcript), before);
+  // Same Pane, same folder: no "moved" message.
+  assert.equal(calls().some(c => c.channel === 'runpane:panels:submit'), false);
+});
+
+test('a dry run says which session would be carried, and forks nothing', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const result = runClaude(f, '--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, true);
+  assert.equal(out.continuity.sessionId, SENDER);
+  assert.equal(out.continuity.fork, true);
+  assert.equal(out.continuity.files, 1);
+  assert.equal(out.continuity.result, undefined);
+  assert.deepEqual(claude.calls(), []);
+});
+
+for (const [name, sender, destination, reason] of [
+  ['a different agent', { agentType: 'claude', resumeId: SENDER }, 'codex here', /session is claude and the receiver is codex/],
+  ['a shell tab with no agent session', {}, 'claude here', /runs no Claude, Codex or Cursor session/],
+]) test(`a handoff from ${name} starts a fresh agent with the note and says so`, (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender });
+  claudeSession(f);
+  const result = spawnSync(process.execPath, [cli, 'handoff', destination, '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, false);
+  assert.equal(out.continuity.result, 'fresh-agent');
+  assert.match(out.continuity.reason, reason);
+  const tab = calls().find(c => c.channel === 'runpane:panels:create').args[0];
+  assert.equal(tab.resume, undefined);
+  assert.match(tab.tool.initialInput, /^Read the handoff note at/);
+  const human = spawnSync(process.execPath, [cli, 'handoff', destination, '--note-file', 'note.md', '--dry-run'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.match(human.stdout, /fresh (codex|claude) with your note, not the same session/);
+});
+
+test('a receiver whose check fails is kept, exits non-zero, and names the note route', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, receiverResumeId: 'some-other-session' });
+  claudeSession(f);
+  const result = runClaude(f);
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'not-continued');
+  assert.equal(out.continuity.checks.restartResumes, false);
+  assert.match(out.continuity.next, /--note-only/);
+  assert.equal(out.pane.panelId, 'test-tab');
+});
+
+test('--note-only starts a fresh agent even when the session could be carried', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const result = runClaude(f, '--note-only');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).continuity.result, 'fresh-agent');
+  assert.deepEqual(claude.calls(), []);
+  assert.equal(calls().find(c => c.channel === 'runpane:panels:create').args[0].resume, undefined);
 });
