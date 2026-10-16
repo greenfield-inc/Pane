@@ -59,6 +59,30 @@ one entry per session you placed:
 Read it at the start of every run. A session whose `tool` and `id` are already
 in it is "already in Pane", forks included, so a rerun creates nothing twice.
 
+## Keep it fast
+
+A run should feel like a few minutes, not half an hour. Almost all of the time
+is waiting on agents to start, so never wait on one session at a time:
+
+- **Discover in one pass.** One metadata script per tool (ids, folders,
+  branches, times, titles, running or not), not a command per session. Read a
+  tool's `--help` once, only for what you don't already know.
+- **Start everything, then wait once.** Register all repositories, then start
+  every adopt, tab and fork Pane without `--wait-ready`, back to back. Run
+  independent commands concurrently in the shell (`cmd & cmd & wait`), and
+  create several fork Panes in one `runpane panes create --from-json`.
+- **Fork in parallel.** Start all forks at the same time; each one is a short
+  agent turn.
+- **Check all tabs together.** Wait for every tab at once (one background
+  `runpane panels wait --panel <id> --for ready` per tab, then `wait`), read
+  every screen in one pass, and probe only the tabs whose history is unclear,
+  all probes at once. When a wait reports a first-run dialog (a trust prompt,
+  for example), answer it with the command it suggests and keep going.
+
+Pane sets up each new worktree Pane through its setup queue, two at a time, so
+a repository with a slow setup script bounds how fast fork Panes can start.
+Adopted checkouts need no setup.
+
 ## 1. Find the sessions
 
 The person said yes, so start; don't ask for permission to read other tools'
