@@ -7,6 +7,7 @@ const config = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const endpoint = getPaneDaemonEndpoint(config.paneDir);
 if (endpoint.transport === 'unix') fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
 const repo = { id: 7, name: 'receiver', path: config.repoPath, active: true, sessionCount: 0 };
+let receiverResume;
 const server = net.createServer(socket => {
   let pending = '';
   socket.on('error', () => {});
@@ -45,8 +46,27 @@ const server = net.createServer(socket => {
       }
       else if (frame.channel === 'runpane:panels:create') {
         const request = frame.args[0];
+        if (request.resume) receiverResume = request.resume;
         result = { ok: true, paneId: request.paneId, panelId: 'test-tab', title: 'Codex', active: false, focused: false,
-          tool: { title: 'Codex', command: 'codex' }, initialInput: config.item.initialInput, warnings: [] };
+          tool: { title: 'Codex', command: 'codex' }, initialInput: request.resume ? undefined : config.item.initialInput, warnings: [],
+          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 1, state: { initialized: true } } };
+      }
+      else if (frame.channel === 'runpane:panels:list') {
+        // The sender's own tab (config.sender), and the receiver tab with the id it resumes.
+        const panels = [];
+        const base = { paneId: frame.args[0].paneId, type: 'terminal', active: false };
+        if (config.sender) panels.push({ ...base, id: 'sender-panel', panelId: 'sender-panel', title: 'sender', ...config.sender });
+        panels.push({ ...base, id: 'test-tab', panelId: 'test-tab', title: 'receiver', agentType: config.sender?.agentType,
+          resumeId: config.receiverResumeId ?? receiverResume, resumeSource: 'agent' });
+        result = { ok: true, paneId: frame.args[0].paneId, panels };
+      }
+      else if (frame.channel === 'runpane:panels:screen') {
+        result = { ok: true, panelId: frame.args[0].panelId, source: 'scrollback', limit: 400, returnedLineCount: 1, hasMore: false,
+          text: config.screenText ?? '', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false } };
+      }
+      else if (frame.channel === 'runpane:panels:submit') {
+        result = { ok: true, panelId: frame.args[0].panelId, inputBytes: frame.args[0].input.length, enter: 'cr', sequenceName: 'enter-cr',
+          verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'transcript' }, sentAt: new Date().toISOString() };
       } else {
         socket.write(JSON.stringify({ type: 'response', id: frame.id, ok: false, error: { message: `Unexpected fixture channel: ${frame.channel}` } }) + '\n');
         continue;
