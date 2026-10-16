@@ -291,6 +291,31 @@ conversation, the Session folder and its Panes stay where they are, and the
 original Session is not archived; archive it from the same menu when you are
 done with it.
 
+## Bring your existing sessions into Pane
+
+Say "migrate to Pane" in any Session, or "yes" to the first-run offer above, and
+the `migrate-to-pane` skill brings the conversations you already have in other
+agent tools (Claude Code, Codex, OpenCode, the Cursor agent, Conductor, or
+anything similar) into Pane tabs:
+
+- It reads session metadata on this machine, including WSL distros and agents
+  running in other terminals or editors, and shows one list grouped by
+  repository. Running sessions and those active in the last 7 days are
+  preselected; older ones can be added. Nothing is created until you confirm.
+- An idle session's checkout is adopted in place (`runpane panes adopt
+  --resume`); several sessions in one checkout become tabs in one Pane. A
+  session still running elsewhere is forked with its own tool into a new Pane
+  on a new branch, with your uncommitted and untracked files copied, and the
+  original keeps running untouched.
+- Each tab is resumed by its agent's own resume-by-id and must pass the
+  continuity check in the skill's `references/continuity.md` (same native
+  session, a restart comes back to it, history loaded, original untouched)
+  before it is reported as continued. A session that fails is reported as not
+  continued with the reason and next step, never replaced by a fresh agent.
+- It keeps a record in `<PANE_DIR>/migrate-to-pane/record.json`, so running it
+  again lists what is already in Pane and creates nothing twice. Archiving an
+  adopted Pane keeps your checkout.
+
 ## Session startup
 
 Creating, opening, restoring, restarting, or switching the agent in a Session
@@ -299,6 +324,16 @@ its role, profile, and Pane capability instructions available. There is no
 automatic greeting, diagnostic sweep, watcher setup, or continuation of a
 saved next action. Reopening an already-running Session reconnects without
 interrupting work the user has already authorized.
+
+There is one exception, and it happens at most once per Pane data directory.
+The first time the built-in Pane Chat Session launches while Pane has no Panes
+and no repositories (the sample repository the onboarding dialog clones doesn't
+count), Pane sends it one prompt, which says that Pane sent it and why. The
+agent then asks whether to bring your existing agent sessions into Pane, and
+starts only when you say yes. Pane records the offer in the
+`pane_chat_migrate_offer_sent` user preference once a launch has sent it, so a
+restart or an agent switch never sends it again. See
+[Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
 
 Pane may prepare instruction files and terminal infrastructure at startup;
 that preparation does not require an agent turn. Unattended work and watchers
