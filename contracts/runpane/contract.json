@@ -405,10 +405,10 @@
     },
     {
       "name": "handoff",
-      "summary": "Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. From a Session's terminal, create the Session on another machine instead.",
+      "summary": "Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.",
       "usage": [
         "runpane handoff --template",
-        "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]"
+        "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -2003,6 +2003,10 @@
         "description": "Before a handoff, commit uncommitted work as WIP and push the branch (never forces)."
       },
       {
+        "name": "--note-only",
+        "description": "Hand off to a fresh agent with the note, instead of carrying and resuming your own session."
+      },
+      {
         "name": "--interrupt",
         "description": "Stop the current agent turn, wait for an empty idle composer, then submit and verify the replacement."
       }
@@ -3258,12 +3262,16 @@
       "handoff": [
         "Usage:",
         "  runpane handoff --template",
-        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]",
+        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
         "",
-        "Hand your task to a fresh agent. You write the note (runpane handoff --template); the CLI checks it,",
+        "Hand your task to another agent. You write the note (runpane handoff --template); the CLI checks it,",
         "makes sure your branch is pushed, sends the note to the destination, and starts the agent there.",
-        "From a Session's terminal it skips git and creates the Session on the other machine, with the note as",
-        "its next action; the new Session waits for your first message. The sender Session stays.",
+        "From a Pane tab, a handoff to the same agent (Claude, Codex or Cursor) carries your own session:",
+        "another machine resumes a copy of it, this machine resumes a fork. The CLI then checks the receiver",
+        "continued it (continued, inconclusive, or not-continued, which exits 1 and keeps the receiver).",
+        "--note-only, another agent, or no session to carry starts a fresh agent with the note instead.",
+        "From a Session's terminal it skips git and creates the Session on the other machine; a same-agent",
+        "Session resumes your conversation when first opened, otherwise it reads the note. The sender Session stays.",
         "",
         "Options:",
         "  <destination>                   Freeform: agent, model, effort, and machine, such as \"codex gpt-5 high on parsas-macbook-pro\".",
@@ -3275,6 +3283,7 @@
         "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
         "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
         "  --push                          Commit uncommitted work (not the note) as WIP and push the branch first (never forces).",
+        "  --note-only                     Start a fresh agent with the note instead of carrying your own session.",
         "  --dry-run                       Check destination reachability, saved repo and OS; print note and git state; send nothing. From a Session: the name it would get.",
         "  --json                          Print machine-readable output.",
         "",
@@ -4481,7 +4490,7 @@
       "handoff": [
         "Usage:",
         "  runpane handoff --template",
-        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]",
+        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
         "",
         "`runpane handoff` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest handoff"
@@ -4677,7 +4686,7 @@
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
-      "`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead. The receiver reports back to the sender's panel.",
+      "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex or Cursor session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. Carrying a Cursor chat is best effort, since Cursor's store is undocumented, and a destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session resumes the sender's conversation when first opened. The receiver reports back to the sender's panel.",
       "`runpane pr watch`: Register durable GitHub PR monitoring for a Pane.",
       "`runpane pr unwatch`: Remove a Pane’s explicit PR registration.",
       "`runpane pr list`: List PR registrations and stopped watches."
@@ -14918,8 +14927,8 @@
       },
       "handoff": {
         "name": "handoff",
-        "summary": "Hand your task to a fresh agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. From a Session's terminal, create the Session on another machine instead.",
-        "details": "Two steps. The agent writes the note, because only it has the context: run `runpane handoff --template > ~/handoff.md` (outside the checkout) and fill in every section (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state), writing \"None\" where one does not apply. Then `runpane handoff \"<destination>\" --note-file ~/handoff.md` moves it: it rejects a note with a missing or empty section, refuses an unpushed branch unless --push, finds the destination's saved repository with the same remote, fetches the branch there, writes the note to `~/.pane/handoffs/` on that machine with its origin in the front matter and receiver instructions appended, and starts the agent in a new Pane branched from your branch. The receiver verifies the head commit, continues from Next steps, pushes to your branch, and reports back to your panel with `runpane workspace <your machine> panels submit`. Run from a Session's terminal (its folder is outside git), handoff moves the Session instead: it skips git, writes the note to the other machine the same way, and creates a Session there with the same name, goal and agent (numbered \"<name> 2\" if the name is taken), whose context and next action point at the note. The sender Session stays as it is; the new one waits for your first message. A Session cannot be handed off to the machine it is on.",
+        "summary": "Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.",
+        "details": "Two steps. The agent writes the note, because only it has the context: run `runpane handoff --template > ~/handoff.md` (outside the checkout) and fill in every section (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state), writing \"None\" where one does not apply. Then `runpane handoff \"<destination>\" --note-file ~/handoff.md` moves it: it rejects a note with a missing or empty section, refuses an unpushed branch unless --push, finds the destination's saved repository with the same remote, fetches the branch there, writes the note to `~/.pane/handoffs/` on that machine with its origin in the front matter and receiver instructions appended, and starts the agent in a new Pane branched from your branch. When you run in a Pane tab and the receiver is your own agent, it carries your session instead of starting fresh: another machine gets a copy of the session's files in its agent store and resumes the same id; this machine resumes a fork. The receiver starts with no prompt, and the CLI checks it resumed and shows the session's last message, then tells it where the session moved. The receiver verifies the head commit, continues from Next steps, pushes to your branch, and reports back to your panel with `runpane workspace <your machine> panels submit`. Run from a Session's terminal (its folder is outside git), handoff moves the Session instead: it skips git, writes the note to the other machine the same way, and creates a Session there with the same name, goal and agent (numbered \"<name> 2\" if the name is taken), whose context and next action point at the note; a same-agent Session also gets your conversation's files and resumes it when first opened. The sender Session stays as it is; the new one waits for your first message. A Session cannot be handed off to the machine it is on.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -14975,6 +14984,11 @@
             "description": "Commit uncommitted work (except the note) as WIP and push the branch before sending; never forces. Without it, an unpushed branch stops the handoff."
           },
           {
+            "name": "--note-only",
+            "required": false,
+            "description": "Start a fresh agent with the note instead of carrying your own session. Without it, a handoff to the same agent carries and resumes your session."
+          },
+          {
             "name": "--dry-run",
             "required": false,
             "description": "Check destination daemon reachability and resolve its saved repository name, path, environment and OS; print the note check and git state without committing, pushing, fetching, writing notes or creating a Pane."
@@ -14998,7 +15012,8 @@
           "From a Session's terminal (PANE_ORCHESTRATION_SESSION_ID set, folder outside git) the receiver is a Session, not a Pane: it needs only runpane:sessions:create and runpane:machine:write on the destination, pushes nothing, and refuses this machine before sending. JSON output then has receiver.route \"session\", session {id, name, machine} and no git field; a dry run reports the name the Session would get.",
           "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
           "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
-          "Run it from the checkout being handed off. On another machine the receiver works in a new Pane; on this machine, from the Pane that owns this checkout, it works in a new tab of that Pane (the result's receiver.route and receiver.reason say which). Either way it pushes back to your branch, so stop changing that branch yourself."
+          "Run it from the checkout being handed off. On another machine the receiver works in a new Pane; on this machine, from the Pane that owns this checkout, it works in a new tab of that Pane (the result's receiver.route and receiver.reason say which). Either way it pushes back to your branch, so stop changing that branch yourself.",
+          "JSON continuity: { carried, result: continued | inconclusive | not-continued | fresh-agent, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched? }, reason, next }; a dry run sets carried, sessionId, fork, files and bytes and no result. inconclusive exits 0 and next says to ask the receiver \"What were you last working on? Answer in one or two sentences.\"; not-continued exits 1, keeps the receiver and gives the --note-only command for the person to choose. After continued or inconclusive, the sender ends its turn and makes no more changes on the branch. From a Session the result is inconclusive until the new Session is opened. Cursor's store is undocumented, so carrying a Cursor chat is best effort; the destination's agent store is assumed at its default location (~/.claude, ~/.codex, ~/.cursor)."
         ]
       },
       "sessions unpin": {
