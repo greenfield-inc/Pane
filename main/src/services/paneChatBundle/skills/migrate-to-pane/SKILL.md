@@ -23,6 +23,11 @@ start. A session is reported as continued only when it passes.
   to an original session that is running elsewhere. Never delete, archive or
   close anything in another tool's store. Writing new files into a tool's store
   (a fork, or a session moved for a new folder) is allowed.
+- **Learn on throwaways, never on the person's sessions.** To find out how a
+  tool resumes or forks, read its docs and `--help`. If you must try a command,
+  try it on a throwaway session you create for that purpose and then remove.
+  Never resume, fork, prompt or open one of the person's sessions to see what
+  happens, and never touch a session before the person has confirmed the list.
 - **Two agents never edit one folder.** A session still running elsewhere is
   forked into a worktree of its own. When you can't tell whether a session is
   still running, treat it as running: a wrong guess then costs a worktree, never
@@ -85,7 +90,8 @@ were active in the last 7 days. List older ones unselected, so the person can
 add them. Show "already in Pane" ones without a way to select them, and list
 sessions with no folder or outside any git repository so they can be reported.
 
-Create nothing until the person confirms the selection.
+Create nothing until the person confirms the selection: no repos, Panes,
+tabs, forks or trial runs, and no change of any kind to a session's files.
 
 ## 3. Place each chosen session
 
@@ -123,6 +129,11 @@ Register each repository once with `runpane repos add --path <repo root>`
   exactly what the check finds. When a tool has no fork that leaves the
   original untouched, don't fork: report the session as not continued
   ("still running elsewhere; close it there and say 'migrate to Pane' again").
+  Record each original's size and modification time before you fork it, and
+  compare them once the fork's tab is open: check 4 of the continuity check.
+  A fork with no turn of its own can lead its tool back to the original when
+  it is opened (an empty Codex fork, for example, made the tool write to the
+  original's file), so prefer a fork that carries one short turn of its own.
 - **Several sessions in one checkout** become tabs in one Pane, each resumed by
   its own id.
 - **No folder, or outside any git repository**: create nothing for it; report it
