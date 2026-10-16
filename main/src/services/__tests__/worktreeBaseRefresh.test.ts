@@ -7,10 +7,12 @@ import { CommandRunner } from '../../utils/commandRunner';
 import { PathResolver } from '../../utils/pathResolver';
 import { withArchiveRepositoryLock } from '../archiveRepositoryLock';
 import { BASE_REFRESH_REUSE_MS } from '../worktreeBaseRefresh';
+import { stopFsmonitorDaemon } from '../gitPerformanceConfig';
 import { WorktreeManager } from '../worktreeManager';
 import { worktreePoolManager } from '../worktreePoolManager';
 
 const directories: string[] = [];
+const projects: string[] = [];
 const previousPaneDir = process.env.PANE_DIR;
 
 const git = (cwd: string, ...args: string[]): string =>
@@ -24,6 +26,14 @@ afterAll(async () => {
   // A create replenishes the reserve after it returns. Its git commands run in the
   // fixture's project, and on Windows a folder a process runs in cannot be deleted.
   await worktreePoolManager.idle();
+  // Pane turns on core.fsmonitor for its projects, and Git then keeps a watcher
+  // daemon in each worktree. Stop them as Pane does before removing a worktree.
+  for (const project of projects.splice(0)) {
+    const worktrees = git(project, 'worktree', 'list', '--porcelain').split('\n')
+      .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
+    const runner = new CommandRunner({ path: project });
+    for (const worktree of worktrees) await stopFsmonitorDaemon(worktree, runner);
+  }
   if (previousPaneDir === undefined) delete process.env.PANE_DIR;
   else process.env.PANE_DIR = previousPaneDir;
   for (const directory of directories.splice(0)) {
@@ -69,6 +79,7 @@ function remoteFixture() {
   git(other, 'push', '-q', 'origin', 'main');
   const project = join(root, 'project');
   git(root, 'clone', '-q', remote, project);
+  projects.push(project);
   mkdirSync(join(project, 'worktrees'));
   const runner = new CommandRunner({ path: project });
   const resolver = new PathResolver({ path: project });
