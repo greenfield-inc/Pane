@@ -7,6 +7,7 @@ import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHandleLike, type PtyH
 import type { PaneEventArgument } from '../core/eventSink';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
 import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { DatabaseService, PANEL_STATE_CEILING_BYTES } from '../database/database';
 import { splitPanelBufferState } from '../database/panelBuffers';
@@ -913,6 +914,29 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     } finally {
       vi.restoreAllMocks();
       store.write({ version: 1, sessions: [] });
+    }
+  });
+
+  it.each([
+    { input: `${PANE_CHAT_MIGRATE_OFFER_OPENING} Ask whether to bring existing sessions in.`, delivered: true },
+    { input: 'Read the guide and initialize Pane Chat.', delivered: false },
+  ])('launches the built-in Pane Chat with its one-time migrate offer, and no other saved Session input (delivered: $delivered)', async ({ input, delivered }) => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel(`pane-chat-offer-${String(delivered)}`);
+      panel.state.customState = {
+        agentType: 'codex', initialCommand: 'codex --yolo', orchestrationSessionId: 'legacy-pane-chat',
+        initialInputMode: 'argument', initialInput: input,
+      };
+      const { handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      const launch = handle.written.find(line => line.startsWith('codex --yolo'));
+      expect(launch).toBeDefined();
+      if (delivered) expect(launch).toContain(PANE_CHAT_MIGRATE_OFFER_OPENING);
+      else expect(launch).toBe(['codex --yolo', ''].join(String.fromCharCode(13)));
+    } finally {
+      vi.useRealTimers();
     }
   });
 

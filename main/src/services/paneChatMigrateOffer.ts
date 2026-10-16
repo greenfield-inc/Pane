@@ -2,7 +2,7 @@ import path from 'path';
 import { getAppDirectory } from '../utils/appDirectory';
 import { databaseService } from './database';
 import { panelManager } from './panelManager';
-import { getPaneChatPanelId, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { getPaneChatPanelId, PANE_CHAT_MIGRATE_OFFER_OPENING, type PaneChatAgent } from '../../../shared/types/paneChat';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
 /**
@@ -58,7 +58,7 @@ function migrateOfferText(skillsRoot: string | undefined): string {
   const root = skillsRoot ?? path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills');
   const skillPath = path.join(root, 'migrate-to-pane', 'SKILL.md');
   return [
-    'Pane sent this once, the first time Pane Chat started with this Pane data folder: there are no repositories or Panes yet.',
+    `${PANE_CHAT_MIGRATE_OFFER_OPENING} there are no repositories or Panes yet.`,
     'Ask the user, briefly, whether they want to bring their existing agent sessions into Pane.',
     `The Migrate to Pane skill (${skillPath}) finds sessions from Claude Code, Codex, OpenCode, Cursor, Conductor or anything similar, opens each in a Pane tab, and resumes it exactly where it was.`,
     'Don\'t start until they say yes. If they say no, tell them they can say "migrate to Pane" any time.',

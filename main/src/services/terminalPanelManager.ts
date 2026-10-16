@@ -122,6 +122,7 @@ import {
   promptFileShellWord,
   stripTrailingNewlines,
 } from './agents/promptDelivery';
+import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -1547,9 +1548,12 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     const sessionState = terminalCustomState(panel.state);
-    if (sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) {
+    const unsentMigrateOffer = !sessionState.initialInputSentAt
+      && sessionState.initialInput?.startsWith(PANE_CHAT_MIGRATE_OFFER_OPENING) === true;
+    if ((sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) && !unsentMigrateOffer) {
       // Also cover supervisor restoration before the Session manager refreshes
       // old launch records. Never deliver historical bootstrap input again.
+      // Pane Chat's one-time migrate offer is the one first prompt a Session sends.
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
