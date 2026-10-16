@@ -36,20 +36,7 @@ afterAll(async () => {
   }
   if (previousPaneDir === undefined) delete process.env.PANE_DIR;
   else process.env.PANE_DIR = previousPaneDir;
-  for (const directory of directories.splice(0)) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-    } catch (error) {
-      // TEMPORARY DIAGNOSTIC (remove before merge): which process still holds the fixture?
-      if (process.platform === 'win32' && error instanceof Error) {
-        const processes = execFileSync('powershell', ['-NoProfile', '-Command',
-          'Get-CimInstance Win32_Process | Where-Object { $_.Name -match "git|sh|ssh|sleep|bash" } | '
-          + 'Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine | Format-List | Out-String -Width 400'], { encoding: 'utf8' });
-        throw new Error(`${error.message}\nat ${new Date().toISOString()}; live processes:\n${processes}`, { cause: error });
-      }
-      throw error;
-    }
-  }
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
 afterEach(() => {
