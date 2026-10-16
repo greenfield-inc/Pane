@@ -131,6 +131,8 @@ export interface ParsedArgs {
   handoffModel?: string;
   handoffEffort?: string;
   handoffPush?: boolean;
+  /** Start a fresh agent with the note instead of carrying the sender's own session. */
+  handoffNoteOnly?: boolean;
   remoteSetupArgs: string[];
 }
 
@@ -666,6 +668,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--push') {
     parsed.handoffPush = true;
+    return;
+  }
+  if (flag === '--note-only') {
+    parsed.handoffNoteOnly = true;
     return;
   }
 
