@@ -7,6 +7,39 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 const nodeExecAsync = promisify(exec);
 const nodeExecFileAsync = promisify(execFile);
 
+type FileExecutor = (file: string, args: readonly string[], options: ExecFileOptions) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
+
+/**
+ * `execFile` whose timeout stops the whole process tree. Node's own timeout
+ * stops only the direct child, and on Windows that is often a launcher (Git for
+ * Windows' cmd\git.exe runs the real git as its child): the real program kept
+ * running in its folder, which Windows then could not delete (EBUSY).
+ */
+const execFileStoppingTree: FileExecutor = (file, args, options) => {
+  if (process.platform !== 'win32' || !options.timeout) return nodeExecFileAsync(file, args, options);
+  const { timeout, ...rest } = options;
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const child = execFile(file, args, rest, (error, stdout, stderr) => {
+      clearTimeout(timer);
+      if (!error) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      // Match Node's timeout failure, which callers read as `killed`.
+      reject(Object.assign(error, { stdout, stderr }, timedOut ? { killed: true, signal: 'SIGTERM' } : {}));
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      if (child.pid === undefined) {
+        child.kill();
+        return;
+      }
+      execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => child.kill());
+    }, timeout);
+  });
+};
+
 function decodeStringCwd(cwd: string | URL): string | undefined {
   try {
     return decodeBoundary(cwd, boundary.string);
@@ -55,7 +88,7 @@ interface ExecFileFailure extends Error {
 }
 
 export class CommandExecutor {
-  constructor(private readonly fileExecutor: typeof nodeExecFileAsync = nodeExecFileAsync) {}
+  constructor(private readonly fileExecutor: FileExecutor = execFileStoppingTree) {}
 
   async execAsync(command: string, options?: ExtendedExecAsyncOptions, wslContext?: WSLContext | null): Promise<{ stdout: string; stderr: string }> {
     const cwd = options?.cwd || process.cwd();
