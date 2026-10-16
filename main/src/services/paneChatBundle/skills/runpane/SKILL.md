@@ -289,6 +289,8 @@ run it again. The named cursor means nothing is missed between runs:
 runpane watch --pane <pane-id> --as <your-name> --until-event --json --kinds agent.report,agent.blocked,panel.exited,pane.gone
 ```
 
+Run `--follow` through a monitor that delivers each output line to the agent; merely backgrounding it is insufficient when the harness only notifies on process exit.
+
 Never pipe `runpane watch --follow` into `grep -m1` or `head` to wait:
 `--follow` streams until quiet expiry; `--until-event` ends on news. The worker's `runpane report` output says
 whether anyone received it (`Delivered to 1 waiting watcher.`).
