@@ -1,0 +1,145 @@
+---
+name: migrate-to-pane
+description: Bring the agent sessions a person already has (Claude Code, Codex, OpenCode, Cursor, Conductor, or any similar tool) into Pane, each opened in a Pane tab with its own agent's resume, verified, and reported. Use for "migrate to Pane", "bring my sessions into Pane", "import my Claude/Codex/Cursor chats", or after the person says yes to Pane's first-run offer.
+---
+
+# Migrate to Pane
+
+The person wants their work, exactly as it was: every conversation they have
+going in other agent tools, opened in Pane, picking up where it left off. The
+same native session, resumed by its own agent, in the same checkout when
+possible. Not a summary, not a fresh agent told what happened.
+
+It works with any agent tool that keeps resumable sessions. Claude Code, Codex,
+OpenCode, the Cursor agent and Conductor are the common ones; if you find
+another, treat it the same way.
+
+The bar is the [continuity check](references/continuity.md). Read it before you
+start. A session is reported as continued only when it passes.
+
+## Ground rules
+
+- **Never disturb live work.** Never write to, append to, stop, or send input
+  to an original session that is running elsewhere. Never delete, archive or
+  close anything in another tool's store. Writing new files into a tool's store
+  (a fork, or a session moved for a new folder) is allowed.
+- **Two agents never edit one folder.** A session still running elsewhere is
+  forked into a worktree of its own. When you can't tell whether a session is
+  still running, treat it as running: a wrong guess then costs a worktree, never
+  two agents in one checkout.
+- **One copy of each id per store.** Never leave two copies of one session id in
+  one tool's store on one machine; some agents then can't find it.
+- **The person's checkout stays theirs.** Adopted checkouts are never removed:
+  never pass `--remove-worktree` when archiving a Pane this skill created.
+- **Prefer each tool's own features.** Resume and fork with the tool's own
+  commands. Edit store files only when the tool has no command for it.
+- **Report failures; don't paper over them.** A session that can't be continued
+  is reported as not continued with the reason and the next step, never
+  replaced by a fresh agent.
+
+## What you already know
+
+The Pane data directory is in your runtime context (`runtime-context.md`). Pass
+it as `--pane-dir` to every `runpane` command, as the runtime context says.
+
+Keep a migration record at `<Pane data directory>/migrate-to-pane/record.json`,
+one entry per session you placed:
+
+```json
+{ "sessions": [ { "tool": "codex", "id": "<source id>", "folder": "<source checkout>",
+  "paneId": "<pane>", "panelId": "<tab>", "forkId": "<fork id, or null>",
+  "result": "continued | continued as a fork | not continued", "at": "<ISO time>" } ] }
+```
+
+Read it at the start of every run. A session whose `tool` and `id` are already
+in it is "already in Pane", forks included, so a rerun creates nothing twice.
+
+## 1. Find the sessions
+
+The person said yes, so start; don't ask for permission to read other tools'
+files.
+
+- Find every agent tool in use on this machine: the tools' own stores in the
+  home folder, tools inside each WSL distro Pane knows (on Windows), Conductor
+  workspaces, and agents running right now in other terminals, VS Code, or any
+  editor (the process list, and each tool's own live-session records). Work out
+  where each tool keeps its sessions, and how it resumes and forks them, from
+  that tool's own docs, `--help` and files. These formats are internal and
+  change, so look rather than remember.
+- **Read metadata first**: ids, folders, branches, times, titles. Don't read
+  whole transcripts to build the list; open a transcript only to verify a
+  session the person chose.
+- For each session, work out whether it is running now, its git checkout
+  (repository root, branch, whether it is a linked worktree), and when it was
+  last active.
+- Leave out your own session (this Pane Chat). Mark as **already in Pane** every
+  session a Pane tab already runs (`resumeId` in `runpane panels list --pane
+  <id> --json` for each Pane in `runpane panes list --json`, or a launch command
+  naming its id) and every session in the migration record.
+
+## 2. Show the list and confirm
+
+Show one list, grouped by repository. For each session: tool, title, branch,
+last active, and "running" when it is. Preselect sessions that are running or
+were active in the last 7 days. List older ones unselected, so the person can
+add them. Show "already in Pane" ones without a way to select them, and list
+sessions with no folder or outside any git repository so they can be reported.
+
+Create nothing until the person confirms the selection.
+
+## 3. Place each chosen session
+
+Register each repository once with `runpane repos add --path <repo root>`
+(skip it when `runpane repos list --json` already has it). Then, per checkout:
+
+- **Idle session, checkout is the repository's main checkout or one of its
+  worktrees**: adopt the checkout in place. The first session in a checkout
+  opens with `runpane panes adopt --repo <repo> --path <checkout> --name <name>
+  --agent <agent> --resume <id> --launch` (OpenCode: `--tool-command "opencode"`
+  with `--resume <ses_ id>`). Each later session in the same checkout becomes
+  another tab in that same Pane: `runpane panels create --pane <id>
+  --tool-command "<the agent's own resume-by-id command>" --agent <agent>
+  --yes`. Pane runs that command unchanged and runs it again after a restart.
+  Same folder, so nothing in the session needs rewriting.
+- **Idle session in a clone that isn't a worktree of a registered repository**:
+  register that clone as its own repository, then adopt it in place.
+- **Idle session that can't be adopted in place** (for example a detached copy of
+  a repository already registered from elsewhere): move the session so its
+  agent finds it from the new folder, leaving one copy of its id in the store,
+  then create a new Pane on the session's branch the same way as a fork below,
+  resuming the session's own id, and carry the uncommitted and untracked files
+  across. It gets the "moved" message.
+- **Running session** (or not sure): fork it first, with the tool's own fork, so
+  the fork has its own id and the original is untouched. Some forks append to
+  the original (a fork command run inside the original chat, for example), so
+  pick one that doesn't. Then create a new Pane on a new branch from the
+  session's current commit, with the fork's resume as its tab: `runpane panes
+  create --repo <repo> --name <name> --branch <new branch> --base <commit>
+  --tool-command "<the agent's own resume-by-id command for the fork>"`. The
+  resumed agent waits for input, so next copy the checkout's uncommitted and
+  untracked files into the new worktree until `git status` and the file
+  contents match the source. The original keeps running in its own
+  checkout. Fork the Cursor agent's chats the same way, best effort, and report
+  exactly what the check finds. When a tool has no fork that leaves the
+  original untouched, don't fork: report the session as not continued
+  ("still running elsewhere; close it there and say 'migrate to Pane' again").
+- **Several sessions in one checkout** become tabs in one Pane, each resumed by
+  its own id.
+- **No folder, or outside any git repository**: create nothing for it; report it
+  as not continued, with why and what the person can do.
+
+Run the fork command first and read the fork's id from its output or store; only
+then run the command that opens the fork's Pane, so the tab resumes that id.
+Write each session to the migration record as soon as its tab exists.
+
+## 4. Check, then report
+
+Run the [continuity check](references/continuity.md) on every tab you opened,
+send any "moved" messages after it passes, and keep going when one session
+fails: the rest of the run still completes.
+
+Finish with one report, grouped by repository: each session as **continued**,
+**continued as a fork**, or **not continued**, with its Pane and tab, and for
+anything not continued, what happened, why, and the next step. Mention the
+sessions you left unselected and how to bring them in later: say "migrate to
+Pane" again.

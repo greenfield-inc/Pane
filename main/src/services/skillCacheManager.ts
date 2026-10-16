@@ -595,6 +595,7 @@ activity makes an older report stale. Keep findings in this conversation.
 | Hand work to another agent or machine | \`handoff\` (\`runpane handoff\`) |
 | Share how a session went | \`session-trace\` |
 | The user's own work | \`pane-work\` |
+| Bring existing sessions into Pane | \`migrate-to-pane\` |
 
 The rows from \`quick-verify\` through \`refactor\` are implementation work:
 they run in the implementation Pane, so name them in its prompt rather than
