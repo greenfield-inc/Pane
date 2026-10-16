@@ -12,7 +12,7 @@ import type {
   LeaderboardResponse,
   LeaderboardStatus,
 } from '../../../shared/types/leaderboard';
-import type { UsageReport, UsageReportRequest } from '../../../shared/types/usage';
+import { USAGE_PROVIDER_IDS, type UsageReport, type UsageReportRequest } from '../../../shared/types/usage';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 const LEADERBOARD_API_BASE =
@@ -37,7 +37,7 @@ const usageReportSchema = boundary.object({
   byModel: boundary.array(boundary.object({
     ...usageTotalsFields,
     model: boundary.string,
-    provider: boundary.enumeration('claude', 'codex'),
+    provider: boundary.enumeration(...USAGE_PROVIDER_IDS),
   })),
 });
 const usageStatusSchema = boundary.object({ scanning: boundary.boolean });

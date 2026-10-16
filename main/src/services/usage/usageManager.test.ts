@@ -158,6 +158,7 @@ describe('usage polling', () => {
   it('discovers provider parents and transcript roots created after startup', async () => {
     await manager.start();
     await manager.rescan();
+    expect(manager.getStatus()).toMatchObject({ rootsChecked: 2 });
     expect(manager.getStatus().missingRoots).toHaveLength(2);
     await transcript('.claude/projects/project/session/subagents/new.jsonl', 'claude');
     await transcript('.codex/sessions/2026/09/09/new.jsonl', 'codex');

@@ -152,7 +152,7 @@ const usageReport = {
   }],
   index: {
     lastScanStartedMs: Date.now(), lastScanFinishedMs: Date.now(),
-    filesTracked: 1, eventsIndexed: 5, missingRoots: [],
+    filesTracked: 1, eventsIndexed: 5, rootsChecked: 2, missingRoots: [],
     scanning: false, filesScanned: 1, filesTotal: 1, lastError: null,
   },
   pricingAsOf: '2026-08-10',

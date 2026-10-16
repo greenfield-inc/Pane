@@ -209,6 +209,7 @@ const report = {
     lastScanFinishedMs: Date.now(),
     filesTracked: 3,
     eventsIndexed: 42,
+    rootsChecked: 2,
     missingRoots: [],
     scanning: false,
     filesScanned: 3,
@@ -246,6 +247,14 @@ test('opens Usage & Limits from Settings with the sidebar expanded and compact',
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
   await openUsageAndLimits(page);
+  const providerFilters = page.getByRole('group', { name: 'Provider', exact: true });
+  for (const label of ['All', 'Claude', 'Codex']) {
+    await expect(providerFilters.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  const limits = page.getByRole('region', { name: 'Provider limits' });
+  await expect(limits).toContainText('OpenAI');
+  await expect(limits.getByText('58% left', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Token usage split between Anthropic and OpenAI', { exact: true })).toBeVisible();
   await expect(page.getByText('6.1M', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('gpt-5.6-sol', { exact: true })).toBeVisible();
   await expect(page.getByTestId('settings-content').getByText('Usage fixture', { exact: true }).last()).toBeVisible();
@@ -420,6 +429,26 @@ test('empty pane history shows unavailable averages', async ({ page }) => {
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary.getByText('—', { exact: true })).toHaveCount(3);
   await expect(summary).toContainText('No pane-attributed usage');
+});
+
+test('missing transcript roots name every provider and the paths that were checked', async ({ page }) => {
+  const missingRoots = ['/home/test/.claude/projects', '/home/test/.codex/sessions'];
+  await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, index: { ...report.index, missingRoots } }, activeProjectId: project.id });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+  await expect(page.getByRole('heading', { name: 'No agent transcripts found' })).toBeVisible();
+  await expect(page.getByText(/Usage is read from the Claude Code and Codex transcript files/)).toBeVisible();
+  for (const root of missingRoots) await expect(page.getByText(root, { exact: true })).toBeVisible();
+});
+
+test('one missing transcript root still shows the dashboard', async ({ page }) => {
+  const missingRoots = ['/home/test/.codex/sessions'];
+  await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, index: { ...report.index, missingRoots } }, activeProjectId: project.id });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+  await expect(page.getByRole('region', { name: 'Provider limits' })).toBeVisible();
+  await expect(page.getByText(`Not found: ${missingRoots[0]}`)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No agent transcripts found' })).toHaveCount(0);
 });
 
 test('rescan completion keeps the latest filter and late requests cannot replace it', async ({ page }) => {
