@@ -17,6 +17,7 @@ import {
 } from '../../../shared/types/paneChat';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
+import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 
 const PANE_CHAT_TITLE = 'Pane Chat';
 const PANE_CHAT_BOOTSTRAP_VERSION = 10;
@@ -157,6 +158,10 @@ export class PaneChatManager {
       initialInputError: wasInitialized ? previousCustomState?.initialInputError : undefined,
     };
 
+    if (wasInitialized) {
+      // A running terminal already passed (or skipped) its first prompt.
+      nextCustomState.initialInput = previousCustomState?.initialInput;
+    }
     if (shouldResetClaudeLaunch && !wasInitialized) {
       nextCustomState.hasClaudeSessionId = undefined;
     }
@@ -178,7 +183,7 @@ export class PaneChatManager {
 
     const panelState: TerminalPanelState = {
       initialCommand: this.skillCacheManager?.launchCommand(agent) ?? RUNPANE_CONTRACT.agentTemplates[agent].command,
-      initialInput: undefined,
+      initialInput: paneChatFirstPrompt(agent, previousState, this.skillCacheManager?.paneChatSkillsRoot),
       orchestrationSessionId: 'legacy-pane-chat',
       orchestrationWorkspace: sessionWorkspacePath('legacy-pane-chat'),
       orchestrationProfile: this.configManager.getConfig().defaultSessionProfile,
